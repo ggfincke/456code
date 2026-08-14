@@ -3,13 +3,18 @@
 
 import {
   EventId,
+  normalizeCollaborationMode,
+  type OrchestrateRunExecution,
+  type OrchestrateRunExecutionJob,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
   type ThreadOrchestratePlanResponseRequestedPayload,
-  ThreadImportContinuationActivityPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
+  ThreadImportContinuationActivityPayload,
+  WORKER_VERDICT_ACTIVITY_KIND,
+  WORKER_VERDICT_MAX_LENGTH,
 } from '@t3tools/contracts'
 import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
 import * as DateTime from 'effect/DateTime'
@@ -41,9 +46,118 @@ import { projectEvent } from './projector.ts'
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
+function sameRunExecutionJob(
+  left: OrchestrateRunExecutionJob,
+  right: OrchestrateRunExecutionJob,
+): boolean
+{
+  return (
+    left.jobId === right.jobId &&
+    left.status === right.status &&
+    left.requestRunId === right.requestRunId &&
+    left.requestRepositoryRoot === right.requestRepositoryRoot &&
+    left.resultRepositoryRoot === right.resultRepositoryRoot &&
+    left.repositoryCommonDir === right.repositoryCommonDir &&
+    left.baseOid === right.baseOid &&
+    left.headOid === right.headOid &&
+    left.worktreeRoot === right.worktreeRoot &&
+    left.branch === right.branch &&
+    left.boundAt === right.boundAt
+  )
+}
+
+function canonicalRunExecutionJobs(
+  jobs: ReadonlyArray<OrchestrateRunExecutionJob>,
+): Array<OrchestrateRunExecutionJob>
+{
+  return [...jobs].toSorted((left, right) =>
+    left.jobId < right.jobId ? -1 : left.jobId > right.jobId ? 1 : 0,
+  )
+}
+
+function sameRunExecutionJobs(
+  left: ReadonlyArray<OrchestrateRunExecutionJob>,
+  right: ReadonlyArray<OrchestrateRunExecutionJob>,
+): boolean
+{
+  if (left.length !== right.length)
+  {
+    return false
+  }
+  const canonicalLeft = canonicalRunExecutionJobs(left)
+  const canonicalRight = canonicalRunExecutionJobs(right)
+  return canonicalLeft.every((job, index) =>
+  {
+    const candidate = canonicalRight[index]
+    return candidate !== undefined && sameRunExecutionJob(job, candidate)
+  })
+}
+
+function isTerminalAvailabilityTransition(
+  current: OrchestrateRunExecution,
+  next: OrchestrateRunExecution,
+  updatedAt: string,
+): boolean
+{
+  return (
+    current.lifecycle !== 'active' &&
+    ((current.availability === 'available' && next.availability === 'unavailable') ||
+      (current.availability === 'unavailable' && next.availability === 'available')) &&
+    next.threadId === current.threadId &&
+    next.runId === current.runId &&
+    next.planRevision === current.planRevision &&
+    next.sourceTurnId === current.sourceTurnId &&
+    next.sourceSequence === current.sourceSequence &&
+    next.repositoryRoot === current.repositoryRoot &&
+    next.repositoryCommonDir === current.repositoryCommonDir &&
+    next.baseOid === current.baseOid &&
+    next.lifecycle === current.lifecycle &&
+    next.integrationRoot === current.integrationRoot &&
+    next.integrationCommonDir === current.integrationCommonDir &&
+    next.integrationBranch === current.integrationBranch &&
+    next.integrationOid === current.integrationOid &&
+    next.observedHeadOid === current.observedHeadOid &&
+    next.finalHeadOid === current.finalHeadOid &&
+    next.closeReason === current.closeReason &&
+    next.current === current.current &&
+    next.admittedAt === current.admittedAt &&
+    next.updatedAt === updatedAt &&
+    next.terminalAt === current.terminalAt &&
+    sameRunExecutionJobs(next.jobs, current.jobs)
+  )
+}
+
+function hasSerializedExecutionAuthority(
+  thread: OrchestrationThread,
+  execution: Pick<OrchestrateRunExecution, 'sourceTurnId'>,
+  expectedProviderInstanceId: OrchestrationThread['modelSelection']['instanceId'] | null,
+): boolean
+{
+  return (
+    expectedProviderInstanceId !== null &&
+    thread.deletedAt === null &&
+    thread.archivedAt === null &&
+    thread.session?.status === 'running' &&
+    thread.session.providerInstanceId === expectedProviderInstanceId &&
+    thread.session.providerInstanceId === thread.modelSelection.instanceId &&
+    thread.session.activeTurnId === execution.sourceTurnId &&
+    thread.latestTurn?.state === 'running' &&
+    thread.latestTurn.turnId === execution.sourceTurnId &&
+    normalizeCollaborationMode(thread.interactionMode, thread.orchestrate).orchestrate
+  )
+}
+
 export type ThreadOrchestratePlanUpsertCommand = Extract<
   OrchestrationCommand,
   { readonly type: 'thread.orchestrate-plan.upsert' }
+>
+export type ThreadOrchestrateRunExecutionAdmitCommand = Extract<
+  OrchestrationCommand,
+  { readonly type: 'thread.orchestrate-run-execution.admit' }
+>
+export type ThreadOrchestrateRunExecutionUpdateCommand = Extract<
+  OrchestrationCommand,
+  { readonly type: 'thread.orchestrate-run-execution.update' }
 >
 
 // session adoption takes seconds; a user message still unadopted after this
@@ -267,6 +381,52 @@ function withEventBase(
   )
 }
 
+const terminalizeActiveExecutions = Effect.fn('terminalizeActiveOrchestrateExecutions')(
+  function* (input: {
+    readonly readModel: OrchestrationReadModel
+    readonly command: Pick<OrchestrationCommand, 'commandId'>
+    readonly threadId: OrchestrationThread['id']
+    readonly occurredAt: string
+    readonly reason: string
+    readonly shouldClose?: (execution: OrchestrateRunExecution) => boolean
+  })
+  {
+    const executions = (input.readModel.orchestrateRunExecutions ?? []).filter(
+      (execution) =>
+        execution.threadId === input.threadId &&
+        execution.lifecycle === 'active' &&
+        (input.shouldClose?.(execution) ?? true),
+    )
+    return yield* Effect.forEach(
+      executions,
+      (execution) =>
+        withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: input.threadId,
+          occurredAt: input.occurredAt,
+          commandId: input.command.commandId,
+        }).pipe(
+          Effect.map((base) => ({
+            ...base,
+            type: 'thread.orchestrate-run-execution-updated' as const,
+            payload: {
+              execution: {
+                ...execution,
+                lifecycle: 'cancelled' as const,
+                finalHeadOid: execution.observedHeadOid,
+                closeReason: input.reason,
+                updatedAt: input.occurredAt,
+                terminalAt: input.occurredAt,
+                jobs: canonicalRunExecutionJobs(execution.jobs),
+              },
+            },
+          })),
+        ),
+      { concurrency: 1 },
+    )
+  },
+)
+
 type PlannedOrchestrationEvent = Omit<OrchestrationEvent, 'sequence'>
 
 type DecideOrchestrationCommandResult =
@@ -476,6 +636,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
+          ...(command.orchestrate !== undefined ? { orchestrate: command.orchestrate } : {}),
           branch: command.branch,
           worktreePath: command.worktreePath,
           origin: command.origin ?? null,
@@ -493,7 +654,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         threadId: command.threadId,
       })
       const occurredAt = yield* nowIso
-      return {
+      const deletedEvent = {
         ...(yield* withEventBase({
           aggregateKind: 'thread',
           aggregateId: command.threadId,
@@ -505,18 +666,26 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           threadId: command.threadId,
           deletedAt: occurredAt,
         },
-      }
+      } satisfies PlannedOrchestrationEvent
+      const executionEvents = yield* terminalizeActiveExecutions({
+        readModel,
+        command,
+        threadId: command.threadId,
+        occurredAt,
+        reason: 'The owning thread was deleted.',
+      })
+      return [...executionEvents, deletedEvent]
     }
 
     case 'thread.archive':
     {
-      yield* requireThreadNotArchived({
+      const thread = yield* requireThreadNotArchived({
         readModel,
         command,
         threadId: command.threadId,
       })
       const occurredAt = yield* nowIso
-      return {
+      const archivedEvent = {
         ...(yield* withEventBase({
           aggregateKind: 'thread',
           aggregateId: command.threadId,
@@ -527,9 +696,18 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         payload: {
           threadId: command.threadId,
           archivedAt: occurredAt,
+          archiveGeneration: (thread.archiveGeneration ?? 0) + 1,
           updatedAt: occurredAt,
         },
-      }
+      } satisfies PlannedOrchestrationEvent
+      const executionEvents = yield* terminalizeActiveExecutions({
+        readModel,
+        command,
+        threadId: command.threadId,
+        occurredAt,
+        reason: 'The owning thread was archived.',
+      })
+      return [...executionEvents, archivedEvent]
     }
 
     case 'thread.unarchive':
@@ -801,6 +979,354 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
     }
 
+    case 'thread.orchestrate-run-integration.set':
+    {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: yield* nowIso,
+          commandId: command.commandId,
+        })),
+        type: 'thread.orchestrate-run-integration-set',
+        payload: {
+          threadId: command.threadId,
+          worktreePath: command.worktreePath,
+          branch: command.branch,
+        },
+      }
+    }
+
+    case 'thread.orchestrate-run-execution.admit':
+    {
+      const execution = command.execution
+      if (command.threadId !== execution.threadId)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-plan-mismatch',
+          detail: 'The command thread does not match the captured execution identity.',
+        })
+      }
+      const thread = yield* requireActiveThread({
+        readModel,
+        command,
+        threadId: execution.threadId,
+      })
+      if (!hasSerializedExecutionAuthority(thread, execution, command.expectedProviderInstanceId))
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-authority-expired',
+          detail:
+            `Execution '${execution.runId}/${execution.planRevision}' no longer has the exact ` +
+            `live provider and turn authority for '${execution.sourceTurnId}'.`,
+        })
+      }
+      const plan = thread.orchestratePlans.find(
+        (entry) => entry.runId === execution.runId && entry.revision === execution.planRevision,
+      )
+      if (
+        plan === undefined ||
+        plan.status !== 'approved' ||
+        plan.turnId === null ||
+        plan.turnId !== execution.sourceTurnId ||
+        plan.sourceSequence === undefined ||
+        plan.sourceSequence !== execution.sourceSequence
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-plan-mismatch',
+          detail:
+            `Execution '${execution.runId}/${execution.planRevision}' does not name the exact ` +
+            `approved plan event owned by turn '${execution.sourceTurnId}'.`,
+        })
+      }
+      const existingRunExecutions = (readModel.orchestrateRunExecutions ?? []).filter(
+        (entry) => entry.threadId === execution.threadId && entry.runId === execution.runId,
+      )
+      if (existingRunExecutions.some((entry) => entry.planRevision === execution.planRevision))
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-duplicate',
+          detail:
+            `Execution '${execution.runId}/${execution.planRevision}' already exists; ` +
+            'retry requires a new approved plan revision.',
+        })
+      }
+      if (existingRunExecutions.some((entry) => entry.planRevision > execution.planRevision))
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-stale-revision',
+          detail:
+            `Execution '${execution.runId}/${execution.planRevision}' is older than an existing ` +
+            'authoritative execution; retry requires a newly approved higher revision.',
+        })
+      }
+      if (
+        execution.lifecycle !== 'active' ||
+        execution.availability !== 'unavailable' ||
+        execution.integrationRoot !== null ||
+        execution.integrationCommonDir !== null ||
+        execution.integrationBranch !== null ||
+        execution.integrationOid !== null ||
+        execution.observedHeadOid !== null ||
+        execution.finalHeadOid !== null ||
+        execution.closeReason !== null ||
+        execution.terminalAt !== null ||
+        !execution.current ||
+        execution.jobs.length !== 0
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-invalid-admission',
+          detail:
+            'A new execution must be active, current, unavailable, and contain no result evidence.',
+        })
+      }
+
+      const events: PlannedOrchestrationEvent[] = []
+      const currentExecution = (readModel.orchestrateRunExecutions ?? []).find(
+        (entry) => entry.threadId === execution.threadId && entry.current,
+      )
+      if (currentExecution !== undefined)
+      {
+        const retired =
+          currentExecution.lifecycle === 'active'
+            ? {
+                ...currentExecution,
+                lifecycle: 'superseded' as const,
+                current: false,
+                finalHeadOid: currentExecution.observedHeadOid,
+                closeReason: `Superseded by ${execution.runId}/${execution.planRevision}.`,
+                updatedAt: command.createdAt,
+                terminalAt: command.createdAt,
+                jobs: canonicalRunExecutionJobs(currentExecution.jobs),
+              }
+            : {
+                ...currentExecution,
+                current: false,
+                updatedAt: command.createdAt,
+                jobs: canonicalRunExecutionJobs(currentExecution.jobs),
+              }
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: 'thread',
+            aggregateId: execution.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: 'thread.orchestrate-run-execution-updated',
+          payload: { execution: retired },
+        })
+      }
+      events.push({
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: execution.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.orchestrate-run-execution-admitted',
+        payload: { execution },
+      })
+      return events
+    }
+
+    case 'thread.orchestrate-run-execution.update':
+    {
+      const nextExecution = {
+        ...command.execution,
+        jobs: canonicalRunExecutionJobs(command.execution.jobs),
+      }
+      if (command.threadId !== nextExecution.threadId)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-identity-mutation',
+          detail: 'The command thread does not match the captured execution identity.',
+        })
+      }
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: nextExecution.threadId,
+      })
+      const currentExecution = (readModel.orchestrateRunExecutions ?? []).find(
+        (entry) =>
+          entry.threadId === nextExecution.threadId &&
+          entry.runId === nextExecution.runId &&
+          entry.planRevision === nextExecution.planRevision,
+      )
+      if (currentExecution === undefined)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-not-current',
+          detail: `Execution '${nextExecution.runId}/${nextExecution.planRevision}' is not current.`,
+        })
+      }
+      const terminalAvailabilityTransition = isTerminalAvailabilityTransition(
+        currentExecution,
+        nextExecution,
+        command.createdAt,
+      )
+      if (!currentExecution.current && !terminalAvailabilityTransition)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-not-current',
+          detail: `Execution '${nextExecution.runId}/${nextExecution.planRevision}' is not current.`,
+        })
+      }
+      if (currentExecution.lifecycle !== 'active')
+      {
+        if (!terminalAvailabilityTransition)
+        {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            code: 'orchestrate-execution-terminal',
+            detail: `Execution '${nextExecution.runId}/${nextExecution.planRevision}' is already terminal.`,
+          })
+        }
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: 'thread',
+            aggregateId: nextExecution.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: 'thread.orchestrate-run-execution-updated',
+          payload: { execution: nextExecution },
+        }
+      }
+      if (
+        !hasSerializedExecutionAuthority(
+          thread,
+          currentExecution,
+          command.expectedProviderInstanceId,
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-authority-expired',
+          detail:
+            `Execution '${nextExecution.runId}/${nextExecution.planRevision}' no longer has the ` +
+            `exact live provider and turn authority for '${currentExecution.sourceTurnId}'.`,
+        })
+      }
+      if (
+        nextExecution.threadId !== currentExecution.threadId ||
+        nextExecution.runId !== currentExecution.runId ||
+        nextExecution.planRevision !== currentExecution.planRevision ||
+        nextExecution.sourceTurnId !== currentExecution.sourceTurnId ||
+        nextExecution.sourceSequence !== currentExecution.sourceSequence ||
+        nextExecution.repositoryRoot !== currentExecution.repositoryRoot ||
+        nextExecution.repositoryCommonDir !== currentExecution.repositoryCommonDir ||
+        nextExecution.baseOid !== currentExecution.baseOid ||
+        nextExecution.admittedAt !== currentExecution.admittedAt ||
+        !nextExecution.current
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-identity-mutation',
+          detail: 'An execution update cannot rewrite captured source or repository identity.',
+        })
+      }
+      const terminal = nextExecution.lifecycle !== 'active'
+      if (
+        (terminal && nextExecution.terminalAt === null) ||
+        (!terminal && (nextExecution.terminalAt !== null || nextExecution.finalHeadOid !== null)) ||
+        (terminal && nextExecution.finalHeadOid !== nextExecution.observedHeadOid) ||
+        (nextExecution.lifecycle === 'completed' && nextExecution.finalHeadOid === null) ||
+        (nextExecution.availability === 'available' &&
+          (nextExecution.integrationRoot === null ||
+            nextExecution.integrationCommonDir !== currentExecution.repositoryCommonDir ||
+            nextExecution.integrationOid === null ||
+            nextExecution.integrationOid !== nextExecution.observedHeadOid))
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-invalid-transition',
+          detail: 'Execution lifecycle, availability, integration target, and final OID disagree.',
+        })
+      }
+
+      const existingJobs = new Map(currentExecution.jobs.map((job) => [job.jobId, job]))
+      if (new Set(nextExecution.jobs.map((job) => job.jobId)).size !== nextExecution.jobs.length)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-job-mutation',
+          detail: 'An execution cannot contain duplicate broker job evidence.',
+        })
+      }
+      for (const job of nextExecution.jobs)
+      {
+        const previous = existingJobs.get(job.jobId)
+        if (previous !== undefined && !sameRunExecutionJob(previous, job))
+        {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            code: 'orchestrate-execution-job-mutation',
+            detail: `Broker job '${job.jobId}' evidence cannot be rewritten.`,
+          })
+        }
+        const conflictingExecution = (readModel.orchestrateRunExecutions ?? []).find(
+          (entry) =>
+            (entry.threadId !== nextExecution.threadId ||
+              entry.runId !== nextExecution.runId ||
+              entry.planRevision !== nextExecution.planRevision) &&
+            entry.jobs.some((bound) => bound.jobId === job.jobId),
+        )
+        if (conflictingExecution !== undefined)
+        {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            code: 'orchestrate-execution-job-already-bound',
+            detail:
+              `Broker job '${job.jobId}' is already bound to ` +
+              `'${conflictingExecution.runId}/${conflictingExecution.planRevision}'.`,
+          })
+        }
+      }
+      if (
+        [...existingJobs.keys()].some(
+          (jobId) => !nextExecution.jobs.some((job) => job.jobId === jobId),
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'orchestrate-execution-job-removal',
+          detail: 'An execution update cannot remove immutable broker job evidence.',
+        })
+      }
+
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: nextExecution.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.orchestrate-run-execution-updated',
+        payload: { execution: nextExecution },
+      }
+    }
+
     case 'thread.runtime-mode.set':
     {
       yield* requireThread({
@@ -844,7 +1370,61 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         payload: {
           threadId: command.threadId,
           interactionMode: command.interactionMode,
+          ...(command.orchestrate !== undefined ? { orchestrate: command.orchestrate } : {}),
           updatedAt: occurredAt,
+        },
+      }
+    }
+
+    case 'thread.worker-verdict.set':
+    {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      const runId = command.runId.trim()
+      const jobId = command.jobId.trim()
+      const verdict = command.verdict.trim()
+      if (runId.length === 0 || jobId.length === 0)
+      {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: 'Worker verdict run and job ids must be non-empty.',
+          }),
+        )
+      }
+      if (verdict.length > WORKER_VERDICT_MAX_LENGTH)
+      {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Worker verdict must be at most ${WORKER_VERDICT_MAX_LENGTH} characters.`,
+          }),
+        )
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.activity-appended',
+        payload: {
+          threadId: command.threadId,
+          activity: {
+            id: EventId.make(
+              `worker-verdict:${encodeURIComponent(runId)}:${encodeURIComponent(jobId)}`,
+            ),
+            tone: 'info',
+            kind: WORKER_VERDICT_ACTIVITY_KIND,
+            summary: 'Worker verdict',
+            payload: { runId, jobId, verdict },
+            turnId: null,
+            createdAt: command.createdAt,
+          },
         },
       }
     }
@@ -1021,6 +1601,9 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
+          ...(command.orchestrate !== undefined || targetThread.orchestrate !== undefined
+            ? { orchestrate: command.orchestrate ?? targetThread.orchestrate }
+            : {}),
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
           ...(requiresImportContinuationConsent && command.importContinuationConsent !== undefined
             ? {
@@ -1244,11 +1827,60 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
 
     case 'thread.checkpoint.revert':
     {
-      yield* requireThread({
+      const thread = yield* requireActiveThread({
         readModel,
         command,
         threadId: command.threadId,
       })
+      if (thread.providerSwitch !== null)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'checkpoint-revert-provider-switch-in-progress',
+          detail: `Thread '${command.threadId}' has a provider switch in progress.`,
+        })
+      }
+      if (
+        thread.session?.status === 'starting' ||
+        (thread.session !== null && thread.session.activeTurnId !== null) ||
+        thread.latestTurn?.state === 'running'
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'checkpoint-revert-turn-in-progress',
+          detail: `Thread '${command.threadId}' has an active provider lifecycle or turn.`,
+        })
+      }
+      if (threadHasQueuedTurnStart(thread, command.createdAt))
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'checkpoint-revert-turn-in-progress',
+          detail: `Thread '${command.threadId}' has a queued turn start.`,
+        })
+      }
+      if (thread.pendingHandoff !== undefined && thread.pendingHandoff !== null)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'checkpoint-revert-handoff-in-progress',
+          detail: `Thread '${command.threadId}' has a pending provider handoff.`,
+        })
+      }
+      const activeExecution = (readModel.orchestrateRunExecutions ?? []).find(
+        (execution) => execution.threadId === command.threadId && execution.lifecycle === 'active',
+      )
+      if (activeExecution !== undefined)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'checkpoint-revert-orchestrate-execution-active',
+          detail:
+            `Thread '${command.threadId}' has active orchestrate execution ` +
+            `'${activeExecution.runId}/${activeExecution.planRevision}'.`,
+        })
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: 'thread',
@@ -1394,6 +2026,19 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           session: command.session,
         },
       }
+      const executionEvents = yield* terminalizeActiveExecutions({
+        readModel,
+        command,
+        threadId: command.threadId,
+        occurredAt: command.createdAt,
+        reason: 'The owning provider turn or session ended.',
+        shouldClose: (execution) =>
+          command.session.status !== 'running' ||
+          command.session.activeTurnId !== execution.sourceTurnId ||
+          command.session.providerInstanceId !== thread.session?.providerInstanceId ||
+          command.session.providerInstanceId !== thread.modelSelection.instanceId ||
+          !normalizeCollaborationMode(thread.interactionMode, thread.orchestrate).orchestrate,
+      })
       // only a session coming alive is activity worth waking a settled thread
       // for — status writes like ready/stopped/error arrive after the fact and
       // must not fight a user's explicit settle. Snooze is deliberately NOT
@@ -1407,7 +2052,9 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       // real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !isSessionActivity)
       {
-        return sessionSetEvent
+        return executionEvents.length === 0
+          ? sessionSetEvent
+          : [...executionEvents, sessionSetEvent]
       }
       const unsettledEvent: Omit<OrchestrationEvent, 'sequence'> = {
         ...(yield* withEventBase({
@@ -1423,7 +2070,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           updatedAt: command.createdAt,
         },
       }
-      return [unsettledEvent, sessionSetEvent]
+      return [...executionEvents, unsettledEvent, sessionSetEvent]
     }
 
     case 'thread.provider.switch.progress':
@@ -1717,10 +2364,24 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       const maxExistingRevision = thread.orchestratePlans
         .filter((existing) => existing.runId === command.plan.runId)
         .reduce((max, existing) => Math.max(max, existing.revision), 0)
-      const plan =
-        command.plan.revision > maxExistingRevision
-          ? command.plan
-          : { ...command.plan, revision: maxExistingRevision + 1 }
+      // the lead's binding is server truth, not something the agent reports:
+      // stamp it over whatever arrived, on every revision, so a plan can never
+      // hide that a stage is bound to the model the lead is already burning.
+      // the pendingHandoff precedence mirrors the composer's own rule so the
+      // stamped row agrees with the card during a compaction handoff
+      const leadSessionInstanceId = thread.session?.providerInstanceId
+      const handoffPending = thread.pendingHandoff !== undefined && thread.pendingHandoff !== null
+      const leadModelSelection =
+        handoffPending || leadSessionInstanceId === undefined
+          ? thread.modelSelection
+          : { ...thread.modelSelection, instanceId: leadSessionInstanceId }
+      const plan = {
+        ...command.plan,
+        leadModelSelection,
+        ...(command.plan.revision > maxExistingRevision
+          ? {}
+          : { revision: maxExistingRevision + 1 }),
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: 'thread',
@@ -1733,6 +2394,33 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           threadId: command.threadId,
           plan,
           createdAt: command.createdAt,
+        },
+      }
+    }
+
+    case 'thread.checkpoint.baseline.record':
+    {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.checkpoint-baseline-recorded',
+        payload: {
+          threadId: command.threadId,
+          checkpointTurnCount: command.checkpointTurnCount,
+          checkpointRef: command.checkpointRef,
+          checkpointCaptureRoot: command.checkpointCaptureRoot,
+          checkpointRepositoryCommonDir: command.checkpointRepositoryCommonDir,
+          checkpointCommitOid: command.checkpointCommitOid,
+          capturedAt: command.capturedAt,
         },
       }
     }
@@ -1761,6 +2449,9 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           files: command.files,
           assistantMessageId: command.assistantMessageId ?? null,
           completedAt: command.completedAt,
+          checkpointCaptureRoot: command.checkpointCaptureRoot ?? null,
+          checkpointRepositoryCommonDir: command.checkpointRepositoryCommonDir ?? null,
+          checkpointCommitOid: command.checkpointCommitOid ?? null,
         },
       }
     }

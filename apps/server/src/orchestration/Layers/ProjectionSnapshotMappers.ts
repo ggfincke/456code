@@ -11,6 +11,11 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestratePlanRevision,
+  OrchestratePlanRunId,
+  OrchestrateRunExecution,
+  OrchestrateRunExecutionAvailability,
+  OrchestrateRunExecutionJob,
+  OrchestrateRunExecutionLifecycle,
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationPendingHandoff,
@@ -65,7 +70,10 @@ export const ProjectionThreadOrchestratePlanDbRowSchema = Schema.Struct({
   totalWorkers: OrchestratePlanRevision.fields.totalWorkers,
   maxWorkers: OrchestratePlanRevision.fields.maxWorkers,
   source: OrchestratePlanRevision.fields.source,
+  // NULL on every revision persisted before migration 054
+  leadModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
   status: OrchestratePlanRevision.fields.status,
+  sourceSequence: Schema.NullOr(NonNegativeInt),
   createdAt: OrchestratePlanRevision.fields.createdAt,
   updatedAt: OrchestratePlanRevision.fields.updatedAt,
 })
@@ -154,13 +162,70 @@ export const FullThreadDiffContextLookupInput = Schema.Struct({
   threadId: ThreadId,
   checkpointTurnCount: NonNegativeInt,
 })
+export const CheckpointIdentityLookupInput = FullThreadDiffContextLookupInput
+export const ProjectionCheckpointIdentityDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  checkpointTurnCount: NonNegativeInt,
+  checkpointRef: CheckpointRef,
+  checkpointCaptureRoot: Schema.NullOr(Schema.String),
+  checkpointRepositoryCommonDir: Schema.NullOr(Schema.String),
+  checkpointCommitOid: Schema.NullOr(Schema.String),
+})
 export const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   workspaceRoot: Schema.String,
   worktreePath: Schema.NullOr(Schema.String),
   latestCheckpointTurnCount: Schema.NullOr(NonNegativeInt),
-  toCheckpointRef: Schema.NullOr(CheckpointRef),
+})
+
+export const ProjectionOrchestrateRunDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  currentPlanRevision: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+})
+
+export const ProjectionOrchestrateRunExecutionDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  planRevision: NonNegativeInt,
+  sourceTurnId: TurnId,
+  sourceSequence: NonNegativeInt,
+  repositoryRoot: Schema.String,
+  repositoryCommonDir: Schema.String,
+  baseOid: Schema.String,
+  lifecycle: OrchestrateRunExecutionLifecycle,
+  availability: OrchestrateRunExecutionAvailability,
+  integrationRoot: Schema.NullOr(Schema.String),
+  integrationCommonDir: Schema.NullOr(Schema.String),
+  integrationBranch: Schema.NullOr(Schema.String),
+  integrationOid: Schema.NullOr(Schema.String),
+  observedHeadOid: Schema.NullOr(Schema.String),
+  finalHeadOid: Schema.NullOr(Schema.String),
+  closeReason: Schema.NullOr(Schema.String),
+  current: Schema.Number,
+  admittedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  terminalAt: Schema.NullOr(IsoDateTime),
+})
+
+export const ProjectionOrchestrateExecutionJobDbRowSchema = Schema.Struct({
+  jobId: Schema.String,
+  threadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  planRevision: NonNegativeInt,
+  status: OrchestrateRunExecutionJob.fields.status,
+  requestRunId: OrchestratePlanRunId,
+  requestRepositoryRoot: Schema.String,
+  resultRepositoryRoot: Schema.NullOr(Schema.String),
+  repositoryCommonDir: Schema.String,
+  baseOid: Schema.String,
+  headOid: Schema.NullOr(Schema.String),
+  worktreeRoot: Schema.NullOr(Schema.String),
+  branch: Schema.NullOr(Schema.String),
+  boundAt: IsoDateTime,
 })
 
 export function maxIso(left: string | null, right: string): string
@@ -279,8 +344,53 @@ export function mapOrchestratePlanRow(
     totalWorkers: row.totalWorkers,
     maxWorkers: row.maxWorkers,
     source: row.source,
+    leadModelSelection: row.leadModelSelection,
     status: row.status,
+    ...(row.sourceSequence === null ? {} : { sourceSequence: row.sourceSequence }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  }
+}
+
+export function mapOrchestrateRunExecutionRow(
+  row: Schema.Schema.Type<typeof ProjectionOrchestrateRunExecutionDbRowSchema>,
+  jobs: ReadonlyArray<Schema.Schema.Type<typeof ProjectionOrchestrateExecutionJobDbRowSchema>>,
+): OrchestrateRunExecution
+{
+  return {
+    threadId: row.threadId,
+    runId: row.runId,
+    planRevision: row.planRevision,
+    sourceTurnId: row.sourceTurnId,
+    sourceSequence: row.sourceSequence,
+    repositoryRoot: row.repositoryRoot,
+    repositoryCommonDir: row.repositoryCommonDir,
+    baseOid: row.baseOid,
+    lifecycle: row.lifecycle,
+    availability: row.availability,
+    integrationRoot: row.integrationRoot,
+    integrationCommonDir: row.integrationCommonDir,
+    integrationBranch: row.integrationBranch,
+    integrationOid: row.integrationOid,
+    observedHeadOid: row.observedHeadOid,
+    finalHeadOid: row.finalHeadOid,
+    closeReason: row.closeReason,
+    current: row.current === 1,
+    admittedAt: row.admittedAt,
+    updatedAt: row.updatedAt,
+    terminalAt: row.terminalAt,
+    jobs: jobs.map((job) => ({
+      jobId: job.jobId,
+      status: job.status,
+      requestRunId: job.requestRunId,
+      requestRepositoryRoot: job.requestRepositoryRoot,
+      resultRepositoryRoot: job.resultRepositoryRoot,
+      repositoryCommonDir: job.repositoryCommonDir,
+      baseOid: job.baseOid,
+      headOid: job.headOid,
+      worktreeRoot: job.worktreeRoot,
+      branch: job.branch,
+      boundAt: job.boundAt,
+    })),
   }
 }

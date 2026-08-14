@@ -13,9 +13,12 @@ import { McpSchema, McpServer, Tool } from 'effect/unstable/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 
 import packageJson from '../../package.json' with { type: 'json' }
+import * as ArchitectureQueryService from '../cartographer/ArchitectureQueryService.ts'
 import * as McpInvocationContext from './McpInvocationContext.ts'
 import * as McpSessionRegistry from './McpSessionRegistry.ts'
 import * as PreviewAutomationBroker from './PreviewAutomationBroker.ts'
+import { ArchitectureToolkitHandlersLive } from './toolkits/architecture/handlers.ts'
+import { ArchitectureToolkit } from './toolkits/architecture/tools.ts'
 import { OrchestrateToolkitHandlersLive } from './toolkits/orchestrate/handlers.ts'
 import { OrchestrateToolkit } from './toolkits/orchestrate/tools.ts'
 import {
@@ -249,6 +252,111 @@ export const OrchestrateToolkitRegistrationLive = McpServer.toolkit(OrchestrateT
   Layer.provide(OrchestrateToolkitHandlersLive),
 )
 
+export const ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT =
+  'Architecture tool failed unexpectedly. Retry, or ask the operator to check the server log.'
+
+// only defects reach this path; typed tool errors keep their structured envelope in
+// architectureToolCallResult. the detailed cause stays server-side so handler internals
+// (stack traces, absolute workspace paths, persistence detail) never reach the model
+export const architectureToolCallFailure =
+  (toolName: string) =>
+  (cause: Cause.Cause<unknown>): Effect.Effect<McpSchema.CallToolResult> =>
+    Cause.hasInterruptsOnly(cause)
+      ? Effect.failCause(cause as Cause.Cause<never>)
+      : Effect.logError('architecture tool call failed', {
+          tool: toolName,
+          cause: Cause.pretty(cause),
+        }).pipe(
+          Effect.as(
+            new McpSchema.CallToolResult({
+              isError: true,
+              content: [{ type: 'text', text: ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT }],
+            }),
+          ),
+        )
+
+const architectureToolCallResult = (result: {
+  readonly encodedResult: unknown
+  readonly isFailure: boolean
+}): McpSchema.CallToolResult =>
+{
+  if (result.isFailure)
+  {
+    return new McpSchema.CallToolResult({
+      isError: true,
+      structuredContent: { error: result.encodedResult },
+      content: [
+        {
+          type: 'text',
+          text: 'Architecture tool failed. See structuredContent.error for details.',
+        },
+      ],
+    })
+  }
+  return new McpSchema.CallToolResult({
+    isError: false,
+    structuredContent: typeof result.encodedResult === 'object' ? result.encodedResult : undefined,
+    content: [{ type: 'text', text: JSON.stringify(result.encodedResult) }],
+  })
+}
+
+const registerArchitectureToolkit = Effect.fn('McpHttpServer.registerArchitectureToolkit')(
+  function* ()
+  {
+    const server = yield* McpServer.McpServer
+    const queryService = yield* ArchitectureQueryService.ArchitectureQueryService
+    const built = yield* ArchitectureToolkit
+    for (const tool of Object.values(built.tools))
+    {
+      yield* server.addTool({
+        tool: new McpSchema.Tool({
+          name: tool.name,
+          description: Tool.getDescription(tool),
+          inputSchema: Tool.getJsonSchema(tool),
+          annotations: {
+            ...Context.getOption(tool.annotations, Tool.Title).pipe(
+              Option.map((title) => ({ title })),
+              Option.getOrUndefined,
+            ),
+            readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
+            destructiveHint: Context.get(tool.annotations, Tool.Destructive),
+            idempotentHint: Context.get(tool.annotations, Tool.Idempotent),
+            openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
+          },
+          _meta: Context.getOrUndefined(tool.annotations, Tool.Meta),
+        }),
+        annotations: tool.annotations,
+        handle: (payload) =>
+          Effect.withFiber((fiber) =>
+          {
+            const invocation = Context.getUnsafe(
+              fiber.context,
+              McpInvocationContext.McpInvocationContext,
+            )
+            return built.handle(tool.name, payload).pipe(
+              Stream.unwrap,
+              Stream.run(Sink.last()),
+              Effect.flatMap(Effect.fromOption),
+              Effect.provideService(
+                ArchitectureQueryService.ArchitectureQueryService,
+                queryService,
+              ),
+              Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+              Effect.matchCauseEffect({
+                onFailure: architectureToolCallFailure(tool.name),
+                onSuccess: (result) => Effect.succeed(architectureToolCallResult(result)),
+              }),
+            )
+          }),
+      })
+    }
+  },
+)
+
+export const ArchitectureToolkitRegistrationLive = Layer.effectDiscard(
+  registerArchitectureToolkit(),
+).pipe(Layer.provide(ArchitectureToolkitHandlersLive))
+
 const McpTransportLive = McpServer.layerHttp({
   name: '456code',
   version: packageJson.version,
@@ -259,4 +367,5 @@ export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   ProposalToolkitRegistrationLive,
   OrchestrateToolkitRegistrationLive,
+  ArchitectureToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive))

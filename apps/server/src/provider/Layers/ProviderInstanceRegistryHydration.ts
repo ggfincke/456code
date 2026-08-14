@@ -33,10 +33,11 @@
 //      subscribes to `ServerSettingsService.streamChanges` and calls
 //      `ProviderInstanceRegistryMutator.reconcile` on every emission.
 //
-// failures inside the watcher are logged and swallowed so a single bad
-// settings emission cannot kill the registry. Unknown drivers and invalid
-// configs already round-trip through the registry's own "unavailable"
-// shadow bucket.
+// failures inside the watcher are logged and swallowed so a failed
+// lifecycle retirement cannot kill the watcher. The last live route stays
+// authoritative when ProviderService cannot durably close it. Unknown
+// drivers and invalid configs still round-trip through the registry's
+// "unavailable" shadow bucket.
 //
 // @module provider/Layers/ProviderInstanceRegistryHydration
 import {
@@ -108,10 +109,9 @@ export const deriveProviderInstanceConfigMap = (
 // layer scope (process lifetime in production), so it is interrupted on
 // shutdown without leaking.
 //
-// errors inside the watcher are logged and swallowed — the registry's own
-// "unavailable" bucket already absorbs unknown drivers and invalid
-// configs, so the only way the watcher could fail is a settings stream
-// tear-down, which logs and exits cleanly.
+// errors inside the watcher are logged and swallowed. A failed retirement
+// leaves the prior live route intact; a later full settings snapshot can
+// retry it after the lifecycle problem is resolved.
 const SettingsWatcherLive = Layer.effectDiscard(
   Effect.gen(function* ()
   {
@@ -146,27 +146,37 @@ const SettingsWatcherLive = Layer.effectDiscard(
 // from the mutable layer while still surfacing the registry as an output.
 // the mutator tag is technically also exposed; only this module imports
 // it, so the visibility leak is harmless in practice.
-export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
-  ProviderInstanceRegistry,
+export const makeProviderInstanceRegistryHydrationLayer = (options?: {
+  readonly requireLifecycleOwnerForRetirement?: boolean
+}): Layer.Layer<
+  ProviderInstanceRegistry | ProviderInstanceRegistryMutator,
   never,
   BuiltInDriversEnv | ServerSettingsService
-> = Layer.unwrap(
-  Effect.gen(function* ()
-  {
-    const serverSettings = yield* ServerSettingsService
-    const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
-      Effect.orElseSucceed(() => undefined),
-    )
-    const initialConfigMap =
-      initialSettings === undefined
-        ? ({} as ProviderInstanceConfigMap)
-        : deriveProviderInstanceConfigMap(initialSettings)
+> =>
+  Layer.unwrap(
+    Effect.gen(function* ()
+    {
+      const serverSettings = yield* ServerSettingsService
+      const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
+        Effect.orElseSucceed(() => undefined),
+      )
+      const initialConfigMap =
+        initialSettings === undefined
+          ? ({} as ProviderInstanceConfigMap)
+          : deriveProviderInstanceConfigMap(initialSettings)
 
-    const mutableLayer = ProviderInstanceRegistryMutableLayer({
-      drivers: BUILT_IN_DRIVERS,
-      configMap: initialConfigMap,
-    })
+      const mutableLayer = ProviderInstanceRegistryMutableLayer({
+        drivers: BUILT_IN_DRIVERS,
+        configMap: initialConfigMap,
+        requireLifecycleOwnerForRetirement: options?.requireLifecycleOwnerForRetirement ?? true,
+      })
 
-    return SettingsWatcherLive.pipe(Layer.provideMerge(mutableLayer))
-  }),
-) as Layer.Layer<ProviderInstanceRegistry, never, BuiltInDriversEnv | ServerSettingsService>
+      return SettingsWatcherLive.pipe(Layer.provideMerge(mutableLayer))
+    }),
+  ) as Layer.Layer<
+    ProviderInstanceRegistry | ProviderInstanceRegistryMutator,
+    never,
+    BuiltInDriversEnv | ServerSettingsService
+  >
+
+export const ProviderInstanceRegistryHydrationLive = makeProviderInstanceRegistryHydrationLayer()

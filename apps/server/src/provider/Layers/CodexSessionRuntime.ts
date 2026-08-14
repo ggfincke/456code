@@ -11,6 +11,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderInteractionMode,
+  normalizeCollaborationMode,
   type ProviderRequestKind,
   type ProviderSession,
   type ProviderTurnStartResult,
@@ -133,6 +134,7 @@ export interface CodexSessionRuntimeSendTurnInput
   readonly serviceTier?: CodexServiceTier | undefined
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined
   readonly interactionMode?: ProviderInteractionMode
+  readonly orchestrate?: boolean
 }
 
 export interface CodexThreadTurnSnapshot
@@ -384,27 +386,36 @@ function runtimeModeToTurnSandboxPolicy(
 
 function buildCodexCollaborationMode(input: {
   readonly interactionMode?: ProviderInteractionMode
+  readonly orchestrate?: boolean
   readonly model?: string
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined
 {
-  if (input.interactionMode === undefined)
+  if (input.interactionMode === undefined && input.orchestrate === undefined)
   {
     return undefined
   }
+  const collaborationMode = normalizeCollaborationMode(
+    input.interactionMode ?? 'default',
+    input.orchestrate,
+  )
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL
   const reasoningEffort = input.effort ?? 'medium'
   return {
     // app-server currently exposes only default and plan as protocol modes;
     // orchestrate is enforced by its developer instructions on the default tool surface
-    mode: input.interactionMode === 'plan' ? 'plan' : 'default',
+    mode: collaborationMode.baseMode,
     settings: {
       model,
       reasoning_effort: reasoningEffort,
-      developer_instructions: buildCodexDeveloperInstructions(input.interactionMode, {
-        model,
-        reasoningEffort,
-      }),
+      developer_instructions: buildCodexDeveloperInstructions(
+        input.interactionMode ?? 'default',
+        {
+          model,
+          reasoningEffort,
+        },
+        input.orchestrate,
+      ),
     },
   }
 }
@@ -421,6 +432,7 @@ export function buildTurnStartParams(input: {
   readonly serviceTier?: CodexServiceTier
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort
   readonly interactionMode?: ProviderInteractionMode
+  readonly orchestrate?: boolean
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -442,6 +454,7 @@ export function buildTurnStartParams(input: {
   const config = runtimeModeToThreadConfig(input.runtimeMode)
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+    ...(input.orchestrate !== undefined ? { orchestrate: input.orchestrate } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
   })
@@ -770,7 +783,7 @@ function currentProviderThreadId(session: ProviderSession): string | undefined
 
 function updateSession(
   sessionRef: Ref.Ref<ProviderSession>,
-  updates: Partial<ProviderSession>,
+  updates: Partial<ProviderSession> | ((session: ProviderSession) => Partial<ProviderSession>),
 ): Effect.Effect<void>
 {
   return Effect.gen(function* ()
@@ -778,7 +791,7 @@ function updateSession(
     const updatedAt = DateTime.formatIso(yield* DateTime.now)
     yield* Ref.update(sessionRef, (session) => ({
       ...session,
-      ...updates,
+      ...(typeof updates === 'function' ? updates(session) : updates),
       updatedAt,
     }))
   })
@@ -1485,6 +1498,7 @@ export const makeCodexSessionRuntime = (
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+            ...(input.orchestrate !== undefined ? { orchestrate: input.orchestrate } : {}),
           })
           const rawResponse = yield* client.raw.request('turn/start', params).pipe(
             Effect.timeoutOrElse({
@@ -1507,11 +1521,12 @@ export const makeCodexSessionRuntime = (
             ),
           )
           const turnId = TurnId.make(response.turn.id)
-          yield* updateSession(sessionRef, {
+          yield* updateSession(sessionRef, (session) => ({
             status: 'running',
-            activeTurnId: turnId,
+            // queued follow-ups return their future id, but Stop must target the turn active now
+            activeTurnId: session.activeTurnId ?? turnId,
             ...(normalizedModel ? { model: normalizedModel } : {}),
-          })
+          }))
           const resumedProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef))
           return {
             threadId: options.threadId,

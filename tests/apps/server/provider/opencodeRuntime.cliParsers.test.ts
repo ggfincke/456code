@@ -12,59 +12,102 @@ import {
 
 describe('parseModelsCliOutput', () =>
 {
-  it('parses a single model from a single provider', () =>
+  it.each([
+    {
+      name: '1-provider',
+      stdout: [
+        'anthropic/claude-sonnet-4-5',
+        JSON.stringify({
+          id: 'claude-sonnet-4-5',
+          providerID: 'anthropic',
+          name: 'Claude Sonnet 4.5',
+          capabilities: { temperature: true, reasoning: true, toolcall: true },
+          cost: { input: 3, output: 15 },
+          limit: { context: 200000, output: 8192 },
+          status: 'active',
+          options: {},
+          headers: {},
+          release_date: '2025-01-01',
+          variants: { none: {}, low: {}, medium: {}, high: {} },
+        }),
+      ].join('\n'),
+      expectedProviders: 1,
+      expectedConnected: ['anthropic'],
+      expectedModelCounts: { anthropic: 1 },
+      expectedModel: {
+        providerId: 'anthropic',
+        modelId: 'claude-sonnet-4-5',
+        name: 'Claude Sonnet 4.5',
+        expectVariants: true,
+      },
+    },
+    {
+      name: 'N-provider',
+      stdout: [
+        'anthropic/claude-sonnet-4-5',
+        JSON.stringify({ id: 'claude-sonnet-4-5', providerID: 'anthropic', name: 'Sonnet 4.5' }),
+        'anthropic/claude-haiku-4-5',
+        JSON.stringify({ id: 'claude-haiku-4-5', providerID: 'anthropic', name: 'Haiku 4.5' }),
+        'openai/gpt-4o',
+        JSON.stringify({ id: 'gpt-4o', providerID: 'openai', name: 'GPT-4o' }),
+      ].join('\n'),
+      expectedProviders: 2,
+      expectedConnected: ['anthropic', 'openai'],
+      expectedModelCounts: { anthropic: 2, openai: 1 },
+    },
+  ])(
+    'parses models for $name',
+    ({ stdout, expectedProviders, expectedConnected, expectedModelCounts, expectedModel }) =>
+    {
+      const result = parseModelsCliOutput(stdout)
+      NodeAssert.equal(result.providers.size, expectedProviders)
+      NodeAssert.equal(result.connected.length, expectedConnected.length)
+      NodeAssert.equal([...result.connected].sort().join(','), expectedConnected.join(','))
+
+      for (const [providerId, modelCount] of Object.entries(expectedModelCounts))
+      {
+        const provider = result.providers.get(providerId)!
+        NodeAssert.ok(provider)
+        NodeAssert.equal(provider.id, providerId)
+        NodeAssert.equal(provider.name, providerId)
+        NodeAssert.equal(Object.keys(provider.models).length, modelCount)
+      }
+
+      if (expectedModel)
+      {
+        const model = result.providers.get(expectedModel.providerId)!.models[expectedModel.modelId]!
+        NodeAssert.ok(model)
+        NodeAssert.equal(model.id, expectedModel.modelId)
+        NodeAssert.equal(model.providerID, expectedModel.providerId)
+        NodeAssert.equal(model.name, expectedModel.name)
+        if (expectedModel.expectVariants)
+        {
+          NodeAssert.ok(model.variants)
+          NodeAssert.equal(model.variants!['medium'] !== undefined, true)
+          NodeAssert.equal(model.capabilities?.reasoning, true)
+        }
+      }
+    },
+  )
+
+  it('keeps a model whose compact JSON body contains a slash', () =>
   {
     const stdout = [
-      'anthropic/claude-sonnet-4-5',
+      'openrouter/qwen/qwen3-coder',
       JSON.stringify({
-        id: 'claude-sonnet-4-5',
-        providerID: 'anthropic',
-        name: 'Claude Sonnet 4.5',
-        capabilities: { temperature: true, reasoning: true, toolcall: true },
-        cost: { input: 3, output: 15 },
-        limit: { context: 200000, output: 8192 },
+        id: 'qwen/qwen3-coder',
+        providerID: 'openrouter',
+        name: 'qwen3-coder',
         status: 'active',
-        options: {},
-        headers: {},
-        release_date: '2025-01-01',
       }),
     ].join('\n')
 
     const result = parseModelsCliOutput(stdout)
-    NodeAssert.equal(result.providers.size, 1)
-    NodeAssert.equal(result.connected.length, 1)
-    NodeAssert.equal(result.connected[0], 'anthropic')
-
-    const provider = result.providers.get('anthropic')!
-    NodeAssert.ok(provider)
-    NodeAssert.equal(provider.id, 'anthropic')
-    NodeAssert.equal(provider.name, 'anthropic')
-    NodeAssert.equal(Object.keys(provider.models).length, 1)
-
-    const model = provider.models['claude-sonnet-4-5']!
-    NodeAssert.ok(model)
-    NodeAssert.equal(model.id, 'claude-sonnet-4-5')
-    NodeAssert.equal(model.providerID, 'anthropic')
-    NodeAssert.equal(model.name, 'Claude Sonnet 4.5')
-  })
-
-  it('parses multiple models from multiple providers', () =>
-  {
-    const stdout = [
-      'anthropic/claude-sonnet-4-5',
-      JSON.stringify({ id: 'claude-sonnet-4-5', providerID: 'anthropic', name: 'Sonnet 4.5' }),
-      'anthropic/claude-haiku-4-5',
-      JSON.stringify({ id: 'claude-haiku-4-5', providerID: 'anthropic', name: 'Haiku 4.5' }),
-      'openai/gpt-4o',
-      JSON.stringify({ id: 'gpt-4o', providerID: 'openai', name: 'GPT-4o' }),
-    ].join('\n')
-
-    const result = parseModelsCliOutput(stdout)
-    NodeAssert.equal(result.providers.size, 2)
-    NodeAssert.equal(result.connected.length, 2)
-    NodeAssert.equal([...result.connected].sort().join(','), 'anthropic,openai')
-    NodeAssert.equal(Object.keys(result.providers.get('anthropic')!.models).length, 2)
-    NodeAssert.equal(Object.keys(result.providers.get('openai')!.models).length, 1)
+    NodeAssert.deepEqual(result.connected, ['openrouter'])
+    NodeAssert.equal(
+      result.providers.get('openrouter')?.models['qwen/qwen3-coder']?.id,
+      'qwen/qwen3-coder',
+    )
   })
 
   it('handles empty input', () =>
@@ -101,66 +144,24 @@ describe('parseModelsCliOutput', () =>
     NodeAssert.equal(result.providers.size, 1)
     NodeAssert.ok(result.providers.get('anthropic')!.models['claude-sonnet-4-5'])
   })
-
-  it('handles model JSON with variants and nested fields', () =>
-  {
-    const stdout = [
-      'opencode/gpt-5.4',
-      JSON.stringify({
-        id: 'gpt-5.4',
-        providerID: 'opencode',
-        name: 'GPT-5.4',
-        family: 'gpt',
-        capabilities: {
-          temperature: true,
-          reasoning: true,
-          attachment: false,
-          toolcall: true,
-          input: { text: true, audio: false, image: false, video: false, pdf: false },
-          output: { text: true, audio: false, image: false, video: false, pdf: false },
-          interleaved: false,
-        },
-        cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-        limit: { context: 200000, input: 160000, output: 32000 },
-        status: 'active',
-        options: {},
-        headers: {},
-        release_date: '2025-01-01',
-        variants: { none: {}, low: {}, medium: {}, high: {} },
-      }),
-    ].join('\n')
-
-    const result = parseModelsCliOutput(stdout)
-    const model = result.providers.get('opencode')!.models['gpt-5.4']!
-    NodeAssert.ok(model)
-    NodeAssert.ok(model.capabilities)
-    NodeAssert.equal(model.capabilities!.reasoning, true)
-    NodeAssert.ok(model.variants)
-    NodeAssert.equal(model.variants!['medium'] !== undefined, true)
-  })
 })
 
 describe('parseAgentListCliOutput', () =>
 {
-  it('parses a single agent', () =>
+  it('parses multiple agents with permissions', () =>
   {
+    const nestedPermissions = [
+      { permission: '*', action: 'allow', pattern: '*' },
+      {
+        permission: 'external_directory',
+        pattern: 'C:\\Users\\test\\.local\\*',
+        action: 'allow',
+      },
+      { permission: 'read', pattern: '*.env', action: 'ask' },
+    ]
     const stdout = [
       'build (primary)',
-      '  ' + JSON.stringify([{ permission: '*', action: 'allow', pattern: '*' }]),
-    ].join('\n')
-
-    const result = parseAgentListCliOutput(stdout)
-    NodeAssert.equal(result.length, 1)
-    NodeAssert.equal(result[0]!.name, 'build')
-    NodeAssert.equal(result[0]!.mode, 'primary')
-    NodeAssert.equal(result[0]!.permission.length, 1)
-  })
-
-  it('parses multiple agents', () =>
-  {
-    const stdout = [
-      'build (primary)',
-      '  ' + JSON.stringify([{ permission: '*', action: 'allow', pattern: '*' }]),
+      '  ' + JSON.stringify(nestedPermissions),
       'explore (subagent)',
       '  ' + JSON.stringify([{ permission: 'read', action: 'allow', pattern: '*' }]),
       'plan (primary)',
@@ -171,6 +172,8 @@ describe('parseAgentListCliOutput', () =>
     NodeAssert.equal(result.length, 3)
     NodeAssert.equal(result[0]!.name, 'build')
     NodeAssert.equal(result[0]!.mode, 'primary')
+    NodeAssert.equal(result[0]!.permission.length, 3)
+    NodeAssert.equal(result[0]!.permission[2]!.action, 'ask')
     NodeAssert.equal(result[1]!.name, 'explore')
     NodeAssert.equal(result[1]!.mode, 'subagent')
     NodeAssert.equal(result[2]!.name, 'plan')
@@ -195,26 +198,6 @@ describe('parseAgentListCliOutput', () =>
     const result = parseAgentListCliOutput(stdout)
     NodeAssert.equal(result.length, 1)
     NodeAssert.equal(result[0]!.name, 'explore')
-  })
-
-  it('handles real-world permission blocks with nested paths', () =>
-  {
-    const permissions = [
-      { permission: '*', action: 'allow', pattern: '*' },
-      {
-        permission: 'external_directory',
-        pattern: 'C:\\Users\\test\\.local\\*',
-        action: 'allow',
-      },
-      { permission: 'read', pattern: '*.env', action: 'ask' },
-    ]
-    const stdout = ['build (primary)', '  ' + JSON.stringify(permissions)].join('\n')
-
-    const result = parseAgentListCliOutput(stdout)
-    NodeAssert.equal(result.length, 1)
-    NodeAssert.equal(result[0]!.permission.length, 3)
-    NodeAssert.equal(result[0]!.permission[0]!.action, 'allow')
-    NodeAssert.equal(result[0]!.permission[2]!.action, 'ask')
   })
 
   it('handles agent names with spaces', () =>

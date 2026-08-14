@@ -23,7 +23,7 @@ const dependencies = [
 
 export const ProposalPreviewUpsertTool = Tool.make('proposal_preview_upsert', {
   description:
-    "Create an immutable exact proposal revision for the authenticated active turn's persisted plan from bounded typed file operations without changing the user's worktree. The authenticated MCP session supplies the environment, project, source thread, provider identity, worktree root, and plan identity; do not pass those values. An optional narrative is compiled through the closed SafeDocument MDX policy.",
+    "Create an immutable exact proposal revision for the authenticated active plan or orchestrate turn from bounded typed file operations without changing the user's worktree. In orchestrate mode, pass the exact committed orchestratePlan runId and revision. The authenticated MCP session supplies and verifies the environment, project, source thread, provider identity, active turn, worktree root, and plan scope; do not pass those values. An optional narrative is compiled through the closed SafeDocument MDX policy.",
   parameters: ProposalPreviewUpsertInput,
   success: ProposalRevision,
   failure: Schema.Union([

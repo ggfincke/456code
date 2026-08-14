@@ -4,13 +4,18 @@
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Result from 'effect/Result'
 import { Command, GlobalFlag } from 'effect/unstable/cli'
 
 import packageJson from '../../package.json' with { type: 'json' }
 import * as BootService from '../service/bootService.ts'
 import type * as ServerConfig from '../config.ts'
 import * as ProcessRunner from '../process/processRunner.ts'
-import { projectLocationFlags, resolveCliAuthConfig } from './config.ts'
+import {
+  projectLocationFlags,
+  resolveCliAuthConfig,
+  resolveProjectCliProbeConfig,
+} from './config.ts'
 
 export const bootServiceLayer = (config: ServerConfig.ServerConfig['Service']) =>
   BootService.layer({
@@ -29,6 +34,11 @@ export type ServiceReconcileResult =
       readonly previouslyInstalled: boolean
       readonly plan: BootService.BootServicePlan
     }
+
+interface ServiceLocationFlags
+{
+  readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]['baseDir']
+}
 
 // install, update, or repair the service using the CLI version running this command.
 export const reconcileService = Effect.fn('cli.service.reconcile')(function* ()
@@ -69,36 +79,109 @@ export function formatServiceStatus(
   ].join('\n')
 }
 
-const runServiceCommand = Effect.fn('cli.service.run')(function* <A, E>(
-  flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]['baseDir'] },
+const runServiceCommandUnscoped = Effect.fn('cli.service.run')(function* <A, E>(
+  flags: ServiceLocationFlags,
   run: Effect.Effect<A, E, BootService.BootService>,
 )
 {
   const logLevel = yield* GlobalFlag.LogLevel
-  const config = yield* resolveCliAuthConfig(flags, logLevel)
+  const config = yield* resolveProjectCliProbeConfig(flags, logLevel)
   return yield* run.pipe(Effect.provide(bootServiceLayer(config)))
 })
+
+const runServiceCommand = <A, E>(
+  flags: ServiceLocationFlags,
+  run: Effect.Effect<A, E, BootService.BootService>,
+) => Effect.scoped(runServiceCommandUnscoped(flags, run))
+
+export const prepareServiceStorageMutation = Effect.fn('cli.service.prepare_storage_mutation')(
+  function* ()
+  {
+    const service = yield* BootService.BootService
+    const status = yield* service.status
+    if (status.installed && status.active && !status.current)
+    {
+      yield* service.stop
+    }
+    return status
+  },
+)
+
+const reconcileServiceWithStorageOwnership = Effect.fn(
+  'cli.service.reconcile_with_storage_ownership',
+)(function* (flags: ServiceLocationFlags)
+{
+  const logLevel = yield* GlobalFlag.LogLevel
+  const probeConfig = yield* resolveProjectCliProbeConfig(flags, logLevel)
+  const status = yield* prepareServiceStorageMutation().pipe(
+    Effect.provide(bootServiceLayer(probeConfig)),
+  )
+
+  if (status.installed && status.current)
+  {
+    return { changed: false, status } satisfies ServiceReconcileResult
+  }
+
+  // this nested scope releases the CLI storage lease before systemd starts
+  // the server process that must acquire the same lease.
+  const preparation = yield* Effect.scoped(
+    Effect.gen(function* ()
+    {
+      const { config } = yield* resolveCliAuthConfig(flags, logLevel)
+      const prepared = yield* Effect.gen(function* ()
+      {
+        const service = yield* BootService.BootService
+        return yield* service.prepareInstall
+      }).pipe(Effect.provide(bootServiceLayer(config)))
+      return { config, prepared }
+    }).pipe(Effect.result),
+  )
+
+  if (Result.isFailure(preparation))
+  {
+    if (status.active)
+    {
+      yield* Effect.gen(function* ()
+      {
+        const service = yield* BootService.BootService
+        yield* service.restart
+      }).pipe(Effect.provide(bootServiceLayer(probeConfig)), Effect.ignore)
+    }
+    return yield* Effect.fail(preparation.failure)
+  }
+
+  const plan = yield* Effect.gen(function* ()
+  {
+    const service = yield* BootService.BootService
+    return yield* service.activatePrepared(preparation.success.prepared)
+  }).pipe(Effect.provide(bootServiceLayer(preparation.success.config)))
+  return {
+    changed: true,
+    previouslyInstalled: status.installed,
+    plan,
+  } satisfies ServiceReconcileResult
+})
+
+const runServiceReconcile = (flags: ServiceLocationFlags) =>
+  Effect.scoped(reconcileServiceWithStorageOwnership(flags))
 
 const serviceInstallCommand = Command.make('install', projectLocationFlags).pipe(
   Command.withDescription('Install 456code as a background service for this user.'),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
-      Effect.gen(function* ()
+    Effect.gen(function* ()
+    {
+      const result = yield* runServiceReconcile(flags)
+      if (!result.changed)
       {
-        const result = yield* reconcileService()
-        if (!result.changed)
-        {
-          yield* Console.log(
-            `456code service is already installed with 456code@${packageJson.version}.`,
-          )
-          return
-        }
         yield* Console.log(
-          `${result.previouslyInstalled ? 'Updated' : 'Installed'} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `456code service is already installed with 456code@${packageJson.version}.`,
         )
-      }),
-    ),
+        return
+      }
+      yield* Console.log(
+        `${result.previouslyInstalled ? 'Updated' : 'Installed'} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+      )
+    }),
   ),
 )
 
@@ -107,21 +190,18 @@ const serviceUpdateCommand = Command.make('update', projectLocationFlags).pipe(
     'Update or repair the background service using this CLI version. Use `npx 456code@latest service update` for the latest release.',
   ),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
-      Effect.gen(function* ()
+    Effect.gen(function* ()
+    {
+      const result = yield* runServiceReconcile(flags)
+      if (!result.changed)
       {
-        const result = yield* reconcileService()
-        if (!result.changed)
-        {
-          yield* Console.log(`456code service is already using 456code@${packageJson.version}.`)
-          return
-        }
-        yield* Console.log(
-          `${result.previouslyInstalled ? 'Updated' : 'Installed'} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
-        )
-      }),
-    ),
+        yield* Console.log(`456code service is already using 456code@${packageJson.version}.`)
+        return
+      }
+      yield* Console.log(
+        `${result.previouslyInstalled ? 'Updated' : 'Installed'} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+      )
+    }),
   ),
 )
 

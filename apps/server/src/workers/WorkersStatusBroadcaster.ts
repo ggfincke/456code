@@ -34,6 +34,21 @@ export class WorkersStatusBroadcaster extends Context.Service<
 >()('456code/workers/WorkersStatusBroadcaster')
 {}
 
+// everything the dashboard renders, minus the readAt stamps that move on every
+// poll; without excluding them no two snapshots would ever compare equal and
+// the full job payload would keep being pushed to idle subscribers
+function snapshotFingerprint(snapshot: WorkersStatusSnapshot): string
+{
+  return JSON.stringify([
+    snapshot.list.state,
+    snapshot.list.stateDir,
+    snapshot.list.jobs,
+    snapshot.list.skippedJobCount,
+    snapshot.list.error,
+    snapshot.runs.runs,
+  ])
+}
+
 export const make = Effect.gen(function* ()
 {
   const store = yield* WorkerBrokerStore.WorkerBrokerStore
@@ -83,9 +98,15 @@ export const make = Effect.gen(function* ()
           fs.watch(watchedDirectory).pipe(Stream.catchCause(() => Stream.empty)),
           Stream.tick(REFRESH_INTERVAL),
         ).pipe(Stream.debounce(WATCH_DEBOUNCE))
+        // fingerprint once per emission rather than inside the comparator,
+        // which runs per pair and would stringify the whole job list twice
         return Stream.concat(
           Stream.fromEffect(loadSnapshot(input)),
           triggers.pipe(Stream.mapEffect(() => loadSnapshot(input))),
+        ).pipe(
+          Stream.map((snapshot) => ({ snapshot, fingerprint: snapshotFingerprint(snapshot) })),
+          Stream.changesWith((left, right) => left.fingerprint === right.fingerprint),
+          Stream.map((entry) => entry.snapshot),
         )
       }),
     )

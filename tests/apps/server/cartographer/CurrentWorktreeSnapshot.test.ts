@@ -283,8 +283,8 @@ describe('captureCurrentWorktree', () =>
       const error = yield* Fiber.join(captureFiber).pipe(Effect.flip)
       const artifacts = yield* Effect.promise(() => NodeFSP.readdir(artifactRoot))
       expect(error).toMatchObject({
-        _tag: 'CartographerEmbedError',
-        failure: 'start_failed',
+        _tag: 'CartographerError',
+        failure: 'snapshot_failed',
         message: 'Cartographer current-worktree capture was cancelled.',
       })
       expect(artifacts).toEqual([])

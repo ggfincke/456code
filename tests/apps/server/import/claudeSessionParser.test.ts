@@ -100,6 +100,34 @@ describe('parseClaudeSession', () =>
       firstActivityAt: '2026-02-03T04:05:06.000Z',
       lastActivityAt: '2026-02-03T04:05:09.000Z',
     })
+
+    const serialized = JSON.stringify(session.records)
+    expect(serialized).not.toContain('ignored attachment')
+    expect(serialized).not.toContain('private-claude-image')
+    expect(serialized).not.toContain('/private/claude-notes.txt')
+    expect(serialized).not.toContain('private claude notes')
+    expect(serialized).not.toContain('private-tool-result-image')
+    expect(serialized).not.toContain('ignored queue item')
+    expect(serialized).not.toContain('ignored sidechain')
+    expect(session.records.filter((record) => record.kind === 'message')).toHaveLength(2)
+    expect(
+      session.records.filter(
+        (record) =>
+          record.kind === 'activity' && typeof record.payload.omittedAttachmentCount === 'number',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'activity',
+        tone: 'info',
+        activityKind: 'task.completed',
+        summary: 'Omitted 4 attachments from imported transcript',
+        payload: {
+          omittedAttachmentCount: 4,
+          summary: 'Omitted 4 attachments from imported transcript',
+          detail: 'Attachment payloads are not included in imported transcripts.',
+        },
+      }),
+    ])
   })
 
   it('keeps text blocks on both sides of reasoning in semantic order', () =>
@@ -132,43 +160,6 @@ describe('parseClaudeSession', () =>
       '2026-02-03T04:05:07.000Z',
       '2026-02-03T04:05:07.001Z',
       '2026-02-03T04:05:07.002Z',
-    ])
-  })
-
-  it('reports omitted attachments without retaining their paths or payloads', () =>
-  {
-    const session = parseClaudeSession({
-      content: fixture('claude-session-basic.jsonl'),
-      sourcePath: '/session.jsonl',
-      contentHash: 'claude-hash',
-    })
-    const serialized = JSON.stringify(session.records)
-
-    expect(serialized).not.toContain('ignored attachment')
-    expect(serialized).not.toContain('private-claude-image')
-    expect(serialized).not.toContain('/private/claude-notes.txt')
-    expect(serialized).not.toContain('private claude notes')
-    expect(serialized).not.toContain('private-tool-result-image')
-    expect(serialized).not.toContain('ignored queue item')
-    expect(serialized).not.toContain('ignored sidechain')
-    expect(session.records.filter((record) => record.kind === 'message')).toHaveLength(2)
-    expect(
-      session.records.filter(
-        (record) =>
-          record.kind === 'activity' && typeof record.payload.omittedAttachmentCount === 'number',
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        kind: 'activity',
-        tone: 'info',
-        activityKind: 'task.completed',
-        summary: 'Omitted 4 attachments from imported transcript',
-        payload: {
-          omittedAttachmentCount: 4,
-          summary: 'Omitted 4 attachments from imported transcript',
-          detail: 'Attachment payloads are not included in imported transcripts.',
-        },
-      }),
     ])
   })
 

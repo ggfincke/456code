@@ -51,6 +51,14 @@ const OptionalBearerHeaders = Schema.Struct({
   dpop: Schema.optionalKey(Schema.String),
 })
 
+export const EnvironmentStorageOwnerTokenHeaderName = 'x-456code-storage-owner-token'
+
+const OptionalStorageOwnerAuthenticatedHeaders = Schema.Struct({
+  authorization: Schema.optionalKey(Schema.String),
+  dpop: Schema.optionalKey(Schema.String),
+  [EnvironmentStorageOwnerTokenHeaderName]: Schema.optionalKey(Schema.String),
+})
+
 const OptionalDpopProofHeaders = Schema.Struct({
   dpop: Schema.optionalKey(Schema.String),
 })
@@ -190,6 +198,24 @@ export class EnvironmentResourceNotFoundError extends Schema.TaggedErrorClass<En
   }
 }
 
+export class EnvironmentOrchestrationCommandUnsupportedError extends Schema.TaggedErrorClass<EnvironmentOrchestrationCommandUnsupportedError>()(
+  'EnvironmentOrchestrationCommandUnsupportedError',
+  {
+    code: Schema.Literal('unsupported_command'),
+    commandType: TrimmedNonEmptyString,
+    traceId: TrimmedNonEmptyString,
+  },
+  { httpApiStatus: 400 },
+)
+{
+  [HttpServerRespondable.symbol]()
+  {
+    return HttpServerResponse.schemaJson(EnvironmentOrchestrationCommandUnsupportedError)(this, {
+      status: 400,
+    })
+  }
+}
+
 export const EnvironmentHttpCommonError = Schema.Union([
   EnvironmentRequestInvalidError,
   EnvironmentAuthInvalidError,
@@ -322,10 +348,15 @@ const EnvironmentOrchestrationThreadSnapshotErrors = [
   EnvironmentResourceNotFoundError,
   EnvironmentInternalError,
 ] as const
-const EnvironmentOrchestrationDispatchErrors = [
+const EnvironmentProjectCommandDispatchErrors = [
   EnvironmentRequestInvalidError,
   EnvironmentScopeRequiredError,
   EnvironmentInternalError,
+] as const
+
+const EnvironmentLegacyOrchestrationDispatchErrors = [
+  EnvironmentOrchestrationCommandUnsupportedError,
+  ...EnvironmentProjectCommandDispatchErrors,
 ] as const
 
 export interface EnvironmentSessionPrincipalShape
@@ -489,6 +520,17 @@ const EnvironmentOrchestrationThreadSnapshotParams = Schema.Struct({
   threadId: ThreadId,
 })
 
+const ClientOrchestrationCommandByType = ClientOrchestrationCommand.pipe(
+  Schema.toTaggedUnion('type'),
+)
+
+export const EnvironmentProjectCommandV1 = Schema.Union([
+  ClientOrchestrationCommandByType.cases['project.create'],
+  ClientOrchestrationCommandByType.cases['project.meta.update'],
+  ClientOrchestrationCommandByType.cases['project.delete'],
+])
+export type EnvironmentProjectCommandV1 = typeof EnvironmentProjectCommandV1.Type
+
 export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make('orchestration')
   .add(
     HttpApiEndpoint.get('snapshot', '/api/orchestration/snapshot', {
@@ -499,7 +541,7 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make('orchestr
   )
   .add(
     HttpApiEndpoint.get('shellSnapshot', '/api/orchestration/shell', {
-      headers: OptionalBearerHeaders,
+      headers: OptionalStorageOwnerAuthenticatedHeaders,
       success: OrchestrationShellSnapshot,
       error: EnvironmentOrchestrationSnapshotErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
@@ -513,11 +555,19 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make('orchestr
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
+    HttpApiEndpoint.post('dispatchProjectV1', '/api/orchestration/project-commands/v1', {
+      headers: OptionalStorageOwnerAuthenticatedHeaders,
+      payload: EnvironmentProjectCommandV1,
+      success: DispatchResult,
+      error: EnvironmentProjectCommandDispatchErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
     HttpApiEndpoint.post('dispatch', '/api/orchestration/dispatch', {
       headers: OptionalBearerHeaders,
       payload: ClientOrchestrationCommand,
       success: DispatchResult,
-      error: EnvironmentOrchestrationDispatchErrors,
+      error: EnvironmentLegacyOrchestrationDispatchErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   {}

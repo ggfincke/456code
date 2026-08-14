@@ -6,6 +6,7 @@ import {
   EventId,
   MessageId,
   type OrchestrationProposedPlanId,
+  type OrchestrationThreadActivity,
   type ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -23,9 +24,10 @@ import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
-import { makeDrainableWorker } from '@t3tools/shared/DrainableWorker'
+import { collectToolMutationTargets } from '@t3tools/shared/toolMutationTargets'
 
 import { parseTurnDiffFilesFromUnifiedDiff } from '../../checkpointing/Diffs.ts'
+import { CheckpointIdentityResolver } from '../../checkpointing/CheckpointIdentity.ts'
 import type { CheckpointStoreError } from '../../checkpointing/Errors.ts'
 import { checkpointRefForThreadTurn, resolveThreadWorkspaceCwd } from '../../checkpointing/Utils.ts'
 import * as CheckpointStore from '../../checkpointing/CheckpointStore.ts'
@@ -34,7 +36,10 @@ import {
   CheckpointRevertOperations,
   type CheckpointRevertOperation,
 } from '../../persistence/Services/CheckpointRevertOperations.ts'
-import type { ProviderAdapterCapabilities } from '../../provider/Services/ProviderAdapter.ts'
+import {
+  ProviderRuntimeInbox,
+  type ProviderRuntimeSessionIdentity,
+} from '../../persistence/Services/ProviderRuntimeInbox.ts'
 import { ProviderService } from '../../provider/Services/ProviderService.ts'
 import { CheckpointReactor, type CheckpointReactorShape } from '../Services/CheckpointReactor.ts'
 import {
@@ -44,6 +49,13 @@ import {
 import { OrchestrationEngineService } from '../Services/OrchestrationEngine.ts'
 import { ProjectionSnapshotQuery } from '../Services/ProjectionSnapshotQuery.ts'
 import { RuntimeReceiptBus } from '../Services/RuntimeReceiptBus.ts'
+import {
+  PROVIDER_RUNTIME_CHECKPOINT_REACTOR_ID,
+  PROVIDER_RUNTIME_INGESTION_REACTOR_ID,
+  PROVIDER_RUNTIME_INBOX_OPERATION_VERSION,
+  ProviderRuntimeInboxRunner,
+  type ProviderRuntimeInboxConsumerDefinition,
+} from '../Services/ProviderRuntimeInboxRunner.ts'
 import { ProposalImplementationAttemptService } from '../../proposal/ProposalImplementationAttemptService.ts'
 import { VcsStatusBroadcaster } from '../../vcs/VcsStatusBroadcaster.ts'
 import * as VcsDriverRegistry from '../../vcs/VcsDriverRegistry.ts'
@@ -52,10 +64,7 @@ import { isHiddenTurnRuntimeEvent } from '../../provider/HiddenTurnRegistry.ts'
 import { ReactorDeliveryError } from '../../persistence/Errors.ts'
 import { OrchestrationReactorDelivery } from '../../persistence/Services/OrchestrationReactorDelivery.ts'
 import { DurableReactorInfrastructureLive } from './OrchestrationReactor.ts'
-import {
-  matchesProviderInstanceFence,
-  runtimeEventMatchesThreadProviderInstance,
-} from './ProviderRuntimeEventMapping.ts'
+import { runtimeEventMatchesThreadProviderInstance } from './ProviderRuntimeEventMapping.ts'
 import {
   checkpointRevertOperationId,
   decodeProviderRollbackJournalDetail,
@@ -78,6 +87,11 @@ const DomainActionPayload = Schema.fromJsonString(
 )
 const encodeDomainActionPayload = Schema.encodeEffect(DomainActionPayload)
 const decodeDomainActionPayload = Schema.decodeUnknownEffect(DomainActionPayload)
+const RuntimeCheckpointBufferState = Schema.fromJsonString(
+  Schema.Struct({ version: Schema.Literal(1) }),
+)
+const decodeRuntimeCheckpointBufferState = Schema.decodeUnknownEffect(RuntimeCheckpointBufferState)
+const RUNTIME_CHECKPOINT_BUFFER_JSON = '{"version":1}'
 
 class CheckpointDomainPayloadError extends Schema.TaggedErrorClass<CheckpointDomainPayloadError>()(
   'CheckpointDomainPayloadError',
@@ -98,7 +112,19 @@ class CheckpointOperationError extends Schema.TaggedErrorClass<CheckpointOperati
   }
 }
 
+class CheckpointRuntimeConsumerError extends Schema.TaggedErrorClass<CheckpointRuntimeConsumerError>()(
+  'CheckpointRuntimeConsumerError',
+  { detail: Schema.String, cause: Schema.optional(Schema.Defect()) },
+)
+{
+  override get message(): string
+  {
+    return this.detail
+  }
+}
+
 const isCheckpointDomainPayloadErrorInstance = Schema.is(CheckpointDomainPayloadError)
+const isCheckpointRuntimeConsumerError = Schema.is(CheckpointRuntimeConsumerError)
 
 function isCheckpointDomainPayloadError(cause: unknown): boolean
 {
@@ -194,6 +220,211 @@ function checkpointStatusFromRuntime(status: string | undefined): 'ready' | 'mis
   }
 }
 
+// a turn diff entry as this reactor builds it, plus whether the diff could be
+// computed at all
+interface TurnDiffFile
+{
+  readonly path: string
+  readonly kind: 'modified'
+  readonly additions: number
+  readonly deletions: number
+}
+
+interface TurnDiffOutcome
+{
+  readonly derived: boolean
+  readonly files: ReadonlyArray<TurnDiffFile>
+}
+
+interface DivergenceCheckInput
+{
+  readonly threadId: ThreadId
+  readonly turnId: TurnId
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>
+  readonly watchedCwd: string | undefined
+  readonly createdAt: string
+  readonly actionId?: string | undefined
+}
+
+// a tree that a turn wrote to, paired with the git common directory that
+// identifies the repository owning it. every worktree of one repository reports
+// the main checkout's common dir, and that is the only signal separating a
+// sibling worktree the thread may adopt from an unrelated repository it must not
+interface MutationRepository
+{
+  readonly rootPath: string
+  readonly commonDir: string | null
+}
+
+// scratch trees the app deliberately does not watch. a write here is never the
+// work the user was waiting to see, and suppressing them is what takes the
+// alarm from 50% precision to no measured false positives.
+// both the logical and the resolved form of each macOS temp root are listed:
+// /tmp and /var are symlinks into /private, and a path that reached the payload
+// through realpath arrives in the /private form
+const EPHEMERAL_MUTATION_PREFIXES = [
+  '/tmp/',
+  '/private/tmp/',
+  '/var/folders/',
+  '/private/var/folders/',
+] as const
+
+// matched anywhere in the path so no home directory lookup is needed
+const EPHEMERAL_MUTATION_SEGMENTS = ['/.claude/', '/.codex/'] as const
+
+function isEphemeralMutationPath(value: string): boolean
+{
+  return (
+    EPHEMERAL_MUTATION_PREFIXES.some((prefix) => value.startsWith(prefix)) ||
+    EPHEMERAL_MUTATION_SEGMENTS.some((segment) => value.includes(segment))
+  )
+}
+
+// only the completed row counts. a tool.started row carries no data at all, and
+// a tool.updated row is emitted while the arguments are still streaming, so both
+// describe an edit that has not run yet: an edit the user then denies would
+// otherwise be indistinguishable from one that landed
+const MUTATION_EVIDENCE_ACTIVITY_KINDS: ReadonlySet<string> = new Set(['tool.completed'])
+
+// what a turn demonstrably wrote, read back off its own activity rows
+interface TurnMutationEvidence
+{
+  readonly mutatedPaths: ReadonlyArray<string>
+  readonly editWorkerRepos: ReadonlyArray<string>
+}
+
+// activity payloads are Schema.Unknown, so every property read below has to be
+// guarded; an unguarded read would throw inside the reactor's runtime fiber,
+// where it is swallowed into a log warning and the capture tail silently stops
+function asPayloadRecord(value: unknown): Record<string, unknown> | null
+{
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+// the two adapters shape an mcp tool call differently: the claude adapter puts
+// the tool name at data.toolName with the arguments at data.input, while the
+// codex adapter forwards the raw item, so the same fields sit under data.item.
+// probing both is the only way the alarm sees an edit worker on either provider
+function mcpToolCallNames(data: Record<string, unknown>): ReadonlyArray<string>
+{
+  const item = asPayloadRecord(data.item)
+  return [data.toolName, data.tool, item?.tool].filter(
+    (value): value is string => typeof value === 'string',
+  )
+}
+
+function mcpToolCallArguments(
+  data: Record<string, unknown>,
+): ReadonlyArray<Record<string, unknown>>
+{
+  const item = asPayloadRecord(data.item)
+  return [
+    asPayloadRecord(data.input),
+    asPayloadRecord(data.arguments),
+    item === null ? null : asPayloadRecord(item.input),
+    item === null ? null : asPayloadRecord(item.arguments),
+  ].filter((record): record is Record<string, unknown> => record !== null)
+}
+
+// an edit-mode broker worker is handed a repo it may rewrite, so the repo is
+// mutation evidence even when the worker's own edits never reach this thread
+function editWorkerRepoFrom(data: Record<string, unknown>): string | null
+{
+  if (!mcpToolCallNames(data).some((name) => name.endsWith('start_worker')))
+  {
+    return null
+  }
+  for (const record of mcpToolCallArguments(data))
+  {
+    if (record.mode !== 'edit' || typeof record.repo !== 'string')
+    {
+      continue
+    }
+    const repo = record.repo.trim()
+    if (repo.length > 0)
+    {
+      return repo
+    }
+  }
+  return null
+}
+
+// a relative path cannot be attributed to a tree, so it is not evidence of
+// anything and would only add noise
+function isAttributableMutationPath(value: string): boolean
+{
+  return value.startsWith('/') && !isEphemeralMutationPath(value)
+}
+
+// whether a tree is the watched tree itself or sits inside it
+function isWithinRoot(candidate: string, root: string): boolean
+{
+  return candidate === root || candidate.startsWith(root.endsWith('/') ? root : `${root}/`)
+}
+
+// a tool that failed, or whose permission the user denied, still reports the
+// arguments it was going to use, so the path it names is a write that never
+// happened. the completed row drops the item status on its way through the
+// runtime mapping, but the provider's own error flag survives inside data.result
+function isFailedToolActivity(payload: Record<string, unknown>): boolean
+{
+  if (payload.status === 'failed')
+  {
+    return true
+  }
+  const data = asPayloadRecord(payload.data)
+  const result = data === null ? null : asPayloadRecord(data.result)
+  return result?.is_error === true
+}
+
+function turnMutationEvidence(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  turnId: TurnId,
+): TurnMutationEvidence
+{
+  const mutatedPaths = new Set<string>()
+  const editWorkerRepos = new Set<string>()
+
+  for (const activity of activities)
+  {
+    if (activity.turnId !== turnId || !MUTATION_EVIDENCE_ACTIVITY_KINDS.has(activity.kind))
+    {
+      continue
+    }
+    const payload = asPayloadRecord(activity.payload)
+    if (payload === null || isFailedToolActivity(payload))
+    {
+      continue
+    }
+    if (payload.itemType === 'file_change')
+    {
+      const targets = collectToolMutationTargets(payload.data, { includeSnakeCaseKeys: true })
+      for (const target of targets)
+      {
+        if (isAttributableMutationPath(target))
+        {
+          mutatedPaths.add(target)
+        }
+      }
+      continue
+    }
+    if (payload.itemType !== 'mcp_tool_call')
+    {
+      continue
+    }
+    const data = asPayloadRecord(payload.data)
+    const repo = data === null ? null : editWorkerRepoFrom(data)
+    if (repo !== null && isAttributableMutationPath(repo))
+    {
+      editWorkerRepos.add(repo)
+    }
+  }
+
+  return { mutatedPaths: [...mutatedPaths], editWorkerRepos: [...editWorkerRepos] }
+}
+
 const make = Effect.gen(function* ()
 {
   const crypto = yield* Crypto.Crypto
@@ -205,12 +436,19 @@ const make = Effect.gen(function* ()
     CommandId.make(`server:${tag}:reactor-action:${actionId}`)
   const commandIdFor = (tag: string, actionId?: string) =>
     actionId === undefined ? serverCommandId(tag) : Effect.succeed(reactorCommandId(actionId, tag))
+  const eventIdFor = (tag: string, actionId?: string) =>
+    actionId === undefined
+      ? serverEventId
+      : Effect.succeed(EventId.make(`server:${tag}:reactor-action:${actionId}`))
   const delivery = yield* OrchestrationReactorDelivery
   const durableRunner = yield* DurableReactorRunner
+  const runtimeInboxRunner = yield* ProviderRuntimeInboxRunner
+  const providerRuntimeInbox = yield* ProviderRuntimeInbox
   const orchestrationEngine = yield* OrchestrationEngineService
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
   const providerService = yield* ProviderService
   const checkpointStore = yield* CheckpointStore.CheckpointStore
+  const checkpointIdentity = yield* CheckpointIdentityResolver
   const checkpointRevertOperations = yield* CheckpointRevertOperations
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry
   const fileSystem = yield* FileSystem.FileSystem
@@ -233,7 +471,7 @@ const make = Effect.gen(function* ()
   }) =>
     Effect.all({
       commandId: commandIdFor('checkpoint-revert-failure', input.actionId),
-      activityId: serverEventId,
+      activityId: eventIdFor('checkpoint-revert-failure', input.actionId),
     }).pipe(
       Effect.flatMap(({ commandId, activityId }) =>
         orchestrationEngine.dispatch({
@@ -266,7 +504,7 @@ const make = Effect.gen(function* ()
   }) =>
     Effect.all({
       commandId: commandIdFor('checkpoint-capture-failure', input.actionId),
-      activityId: serverEventId,
+      activityId: eventIdFor('checkpoint-capture-failure', input.actionId),
     }).pipe(
       Effect.flatMap(({ commandId, activityId }) =>
         orchestrationEngine.dispatch({
@@ -286,6 +524,150 @@ const make = Effect.gen(function* ()
           },
           createdAt: input.createdAt,
         }),
+      ),
+    )
+
+  // one namespace for every path this reactor compares. git reports a tree's
+  // root physically, with symlinks resolved, while the cwd handed to it keeps
+  // whatever form the caller used; a lexical fallback covers a path that no
+  // longer exists, which is exactly the case the comparison has to survive
+  const canonicalPath = (value: string): Effect.Effect<string> =>
+    fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => path.normalize(value)))
+
+  // resolves the git root that owns a directory, falling back to the directory
+  // itself when it is not in a repository at all (a plain /Users/... scratch dir).
+  // git reports the common dir relative to the directory it was asked about, so
+  // a bare `.git` has to be resolved against that same cwd before two trees can
+  // be compared at all, and then canonicalized: resolved against a cwd reached
+  // through a symlink it would otherwise name the same directory differently
+  // from every sibling worktree, and no genuine sibling would ever compare equal
+  const resolveMutationRepository = (cwd: string): Effect.Effect<MutationRepository> =>
+    vcsRegistry.detect({ cwd, requestedKind: 'git' }).pipe(
+      Effect.orElseSucceed(() => null),
+      Effect.flatMap((handle) =>
+      {
+        const metadataPath = handle?.repository.metadataPath ?? null
+        const resolvedCommonDir =
+          metadataPath === null
+            ? null
+            : path.isAbsolute(metadataPath)
+              ? metadataPath
+              : path.resolve(cwd, metadataPath)
+        const commonDir: Effect.Effect<string | null> =
+          resolvedCommonDir === null ? Effect.succeed(null) : canonicalPath(resolvedCommonDir)
+        return Effect.all({
+          rootPath: canonicalPath(handle?.repository.rootPath ?? cwd),
+          commonDir,
+        })
+      }),
+    )
+
+  // pairs an empty (or never computed) turn diff with the turn's own mutation
+  // evidence and names the tree the work actually went into. duration is
+  // deliberately not part of the signal: measured over the historical corpus it
+  // ran at 50% precision and only delayed the alarm, while mutation evidence
+  // alone kept every true case and silenced every false one
+  const checkWorkspaceDivergence = Effect.fn('checkWorkspaceDivergence')(function* (
+    input: DivergenceCheckInput,
+  )
+  {
+    const evidence = turnMutationEvidence(input.activities, input.turnId)
+    if (evidence.mutatedPaths.length === 0 && evidence.editWorkerRepos.length === 0)
+    {
+      return
+    }
+
+    const watched =
+      input.watchedCwd === undefined ? null : yield* resolveMutationRepository(input.watchedCwd)
+    const watchedRoot = watched?.rootPath ?? null
+
+    // one detection per distinct directory rather than per path; detection is
+    // cached, but a turn can carry hundreds of file_change rows
+    const candidateCwds = new Set<string>([
+      ...evidence.mutatedPaths.map((value) => path.dirname(value)),
+      ...evidence.editWorkerRepos,
+    ])
+    // keyed by root so repeated mutation paths collapse into one alarm target;
+    // repository identity remains diagnostic only and grants no redirect authority
+    const divergentRepositories = new Map<string, string | null>()
+    for (const candidateCwd of candidateCwds)
+    {
+      const repository = yield* resolveMutationRepository(candidateCwd)
+      if (repository.rootPath === watchedRoot)
+      {
+        continue
+      }
+      // a workspace that is not a git repository is a supported project here, and
+      // it has no root but its own directory, so every subdirectory it writes to
+      // resolves as a separate "root". those writes landed inside the watched
+      // workspace and nothing about them is divergent; only a tree that is its
+      // own repository can be
+      if (
+        watchedRoot !== null &&
+        repository.commonDir === null &&
+        isWithinRoot(repository.rootPath, watchedRoot)
+      )
+      {
+        continue
+      }
+      divergentRepositories.set(repository.rootPath, repository.commonDir)
+    }
+    if (divergentRepositories.size === 0)
+    {
+      return
+    }
+
+    const roots = [...divergentRepositories.keys()]
+    // the sentence goes in payload.detail because that is the one payload field
+    // every surface already renders on an error-toned row, so the alarm reads
+    // correctly on web and mobile without a single client change
+    const detail =
+      watchedRoot === null
+        ? `This thread has no watched git workspace, so nothing this turn changed can be shown here. It wrote to ${roots.join(', ')}.`
+        : `No changes were recorded in ${watchedRoot}. This turn changed files in ${roots.join(', ')}, which this thread is not watching.`
+
+    yield* Effect.all({
+      commandId: commandIdFor('checkpoint-workspace-divergence', input.actionId),
+      activityId: serverEventId,
+    }).pipe(
+      Effect.flatMap(({ commandId, activityId }) =>
+        orchestrationEngine.dispatch({
+          type: 'thread.activity.append',
+          commandId,
+          threadId: input.threadId,
+          activity: {
+            id: activityId,
+            tone: 'error',
+            kind: 'workspace.divergence.detected',
+            summary: 'Changes landed outside the tracked workspace',
+            payload: {
+              detail,
+              watchedRoot,
+              divergentRoots: roots,
+              mutatedPathCount: evidence.mutatedPaths.length,
+              editWorkerRepoCount: evidence.editWorkerRepos.length,
+            },
+            turnId: input.turnId,
+            createdAt: input.createdAt,
+          },
+          createdAt: input.createdAt,
+        }),
+      ),
+    )
+  })
+
+  // generic mutation/sibling evidence is alarm-only. only the authenticated
+  // exact execution toolkit may write authoritative current-run identity
+  const detectAndAnnounceDivergence = (input: DivergenceCheckInput) =>
+    checkWorkspaceDivergence(input).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning('workspace divergence detection failed', {
+              threadId: input.threadId,
+              turnId: input.turnId,
+              cause: Cause.pretty(cause),
+            }),
       ),
     )
 
@@ -363,6 +745,36 @@ const make = Effect.gen(function* ()
     return project ? [project] : []
   })
 
+  // the directory the thread works in, whatever it turns out to be. checkpoint
+  // work needs a git repository and stops here, but the divergence alarm needs
+  // the directory itself: a project that is not a repository is a supported
+  // workspace, and telling its owner every turn that the work went somewhere
+  // else is the alarm firing on the one population it can never help
+  const resolveWorkspaceCwd = Effect.fn('resolveWorkspaceCwd')(function* (input: {
+    readonly threadId: ThreadId
+    readonly thread: { readonly projectId: ProjectId; readonly worktreePath: string | null }
+    readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly workspaceRoot: string }>
+    readonly preferSessionRuntime: boolean
+  }): Effect.fn.Return<string | undefined>
+  {
+    const fromSession = yield* resolveSessionRuntimeForThread(input.threadId)
+    const fromThread = resolveThreadWorkspaceCwd({
+      thread: input.thread,
+      projects: input.projects,
+    })
+
+    return input.preferSessionRuntime
+      ? (Option.match(fromSession, {
+          onNone: () => undefined,
+          onSome: (runtime) => runtime.cwd,
+        }) ?? fromThread)
+      : (fromThread ??
+          Option.match(fromSession, {
+            onNone: () => undefined,
+            onSome: (runtime) => runtime.cwd,
+          }))
+  })
+
   // resolves the workspace CWD for checkpoint operations, preferring the
   // active provider session CWD and falling back to the thread/project config.
   // returns undefined when no CWD can be determined or the workspace is not
@@ -374,23 +786,7 @@ const make = Effect.gen(function* ()
     readonly preferSessionRuntime: boolean
   }): Effect.fn.Return<string | undefined, CheckpointStoreError>
   {
-    const fromSession = yield* resolveSessionRuntimeForThread(input.threadId)
-    const fromThread = resolveThreadWorkspaceCwd({
-      thread: input.thread,
-      projects: input.projects,
-    })
-
-    const cwd = input.preferSessionRuntime
-      ? (Option.match(fromSession, {
-          onNone: () => undefined,
-          onSome: (runtime) => runtime.cwd,
-        }) ?? fromThread)
-      : (fromThread ??
-        Option.match(fromSession, {
-          onNone: () => undefined,
-          onSome: (runtime) => runtime.cwd,
-        }))
-
+    const cwd = yield* resolveWorkspaceCwd(input)
     if (!cwd)
     {
       return undefined
@@ -414,6 +810,12 @@ const make = Effect.gen(function* ()
         readonly role: string
         readonly turnId: TurnId | null
       }>
+      // both call sites already hand over a whole OrchestrationThread; the
+      // divergence check reads this turn's own tool rows out of it, and the
+      // adoption that follows reads the target it has already recorded
+      readonly activities: ReadonlyArray<OrchestrationThreadActivity>
+      readonly orchestrateRunWorktreePath?: string | null | undefined
+      readonly orchestrateRunBranch?: string | null | undefined
     }
     readonly cwd: string
     readonly turnCount: number
@@ -447,6 +849,7 @@ const make = Effect.gen(function* ()
       cwd: input.cwd,
       checkpointRef: targetCheckpointRef,
     })
+    let publishedCommitOid: string | undefined
     if (!targetCheckpointExists)
     {
       const publication = yield* checkpointStore.captureCheckpoint({
@@ -463,13 +866,27 @@ const make = Effect.gen(function* ()
           checkpointRef: targetCheckpointRef,
         })
       }
+      else
+      {
+        publishedCommitOid = publication.commitOid
+      }
     }
+    const targetIdentity = yield* checkpointIdentity.resolveCapture({
+      cwd: input.cwd,
+      checkpointRef: targetCheckpointRef,
+      checkpointTurnCount: input.turnCount,
+      ...(publishedCommitOid === undefined ? {} : { expectedCommitOid: publishedCommitOid }),
+    })
 
     // refresh the workspace entry index so the @-mention file picker
     // reflects files created or deleted during this turn.
     yield* workspaceEntries.refresh(input.cwd)
 
-    const files = yield* checkpointStore
+    // `derived` keeps a genuinely empty diff apart from a diff that could not be
+    // computed at all (a missing pre-turn baseline lands in the catch below).
+    // both produce zero files, but only the first says anything about where the
+    // turn's work went, and the second is already reported as a capture failure
+    const turnDiff: TurnDiffOutcome = yield* checkpointStore
       .diffCheckpoints({
         cwd: input.cwd,
         fromCheckpointRef,
@@ -478,20 +895,22 @@ const make = Effect.gen(function* ()
         ignoreWhitespace: false,
       })
       .pipe(
-        Effect.map((diff) =>
-          parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
+        Effect.map((diff): TurnDiffOutcome => ({
+          derived: true,
+          files: parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
             path: file.path,
             kind: 'modified' as const,
             additions: file.additions,
             deletions: file.deletions,
           })),
-        ),
+        })),
         Effect.tapError((error) =>
           appendCaptureFailureActivity({
             threadId: input.threadId,
             turnId: input.turnId,
             detail: `Checkpoint captured, but turn diff summary is unavailable: ${error.message}`,
             createdAt: input.createdAt,
+            ...(input.actionId === undefined ? {} : { actionId: input.actionId }),
           }),
         ),
         Effect.catch((error) =>
@@ -500,9 +919,26 @@ const make = Effect.gen(function* ()
             turnId: input.turnId,
             turnCount: input.turnCount,
             detail: error.message,
-          }).pipe(Effect.as([])),
+          }).pipe(Effect.as<TurnDiffOutcome>({ derived: false, files: [] })),
         ),
       )
+    const files = turnDiff.files
+
+    // an empty diff paired with real mutation evidence means the work landed in
+    // a tree this thread does not watch. that is the failure the app used to be
+    // silent about: the user opened the diff, saw nothing, and concluded the run
+    // had done nothing
+    if (turnDiff.derived && files.length === 0)
+    {
+      yield* detectAndAnnounceDivergence({
+        threadId: input.threadId,
+        turnId: input.turnId,
+        activities: input.thread.activities,
+        watchedCwd: input.cwd,
+        createdAt: input.createdAt,
+        ...(input.actionId === undefined ? {} : { actionId: input.actionId }),
+      })
+    }
 
     const assistantMessageId =
       input.assistantMessageId ??
@@ -522,6 +958,13 @@ const make = Effect.gen(function* ()
       files,
       assistantMessageId,
       checkpointTurnCount: input.turnCount,
+      // record the tree the capture actually ran in rather than re-deriving it
+      // later: resolveCheckpointCwd's choice is not reproducible after the
+      // session moves, and a diff or revert bound to the wrong tree is how a
+      // whole run became invisible
+      checkpointCaptureRoot: targetIdentity.checkpointCaptureRoot,
+      checkpointRepositoryCommonDir: targetIdentity.checkpointRepositoryCommonDir,
+      checkpointCommitOid: targetIdentity.checkpointCommitOid,
       createdAt: input.createdAt,
     })
     yield* receiptBus.publish({
@@ -546,7 +989,7 @@ const make = Effect.gen(function* ()
       commandId: yield* commandIdFor('checkpoint-captured-activity', input.actionId),
       threadId: input.threadId,
       activity: {
-        id: EventId.make(yield* randomUUID),
+        id: yield* eventIdFor('checkpoint-captured-activity', input.actionId),
         tone: 'info',
         kind: 'checkpoint.captured',
         summary: 'Checkpoint captured',
@@ -562,37 +1005,28 @@ const make = Effect.gen(function* ()
   })
 
   // captures a real git checkpoint when a turn completes via a runtime event.
+  // the outcome tells the caller which early return it took, because only
+  // 'no-workspace' means the app never looked at a tree for this turn
   const captureCheckpointFromTurnCompletion = Effect.fn('captureCheckpointFromTurnCompletion')(
-    function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' }>)
+    function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' }>, actionId: string)
     {
       const turnId = toTurnId(event.turnId)
       if (!turnId)
       {
-        return
+        return 'skipped' as const
       }
 
       const thread = yield* resolveThreadDetail(event.threadId)
       if (!thread)
       {
-        return
+        return 'skipped' as const
       }
 
       // when a primary turn is active, only that turn may produce completion checkpoints.
+      // this is an auxiliary turn, not an unwatched one, so it must never alarm
       if (thread.session?.activeTurnId && !sameId(thread.session.activeTurnId, turnId))
       {
-        return
-      }
-
-      // only skip if a real (non-placeholder) checkpoint already exists for this turn.
-      // ProviderRuntimeIngestion may insert placeholder entries with status "missing"
-      // before this reactor runs; those must not prevent real git capture.
-      if (
-        thread.checkpoints.some(
-          (checkpoint) => checkpoint.turnId === turnId && checkpoint.status !== 'missing',
-        )
-      )
-      {
-        return
+        return 'skipped' as const
       }
 
       const projects = yield* resolveThreadProjects(thread.projectId)
@@ -602,9 +1036,11 @@ const make = Effect.gen(function* ()
         projects,
         preferSessionRuntime: true,
       })
+      // no session cwd, or the workspace is not a git repository: nothing this
+      // turn did was ever going to appear in a checkpoint diff
       if (!checkpointCwd)
       {
-        return
+        return 'no-workspace' as const
       }
 
       // if a placeholder checkpoint exists for this turn, reuse its turn count
@@ -629,7 +1065,9 @@ const make = Effect.gen(function* ()
         status: checkpointStatusFromRuntime(event.payload.state),
         assistantMessageId: undefined,
         createdAt: event.createdAt,
+        actionId,
       })
+      return 'captured' as const
     },
   )
 
@@ -703,7 +1141,7 @@ const make = Effect.gen(function* ()
   })
 
   const ensurePreTurnBaselineFromTurnStart = Effect.fn('ensurePreTurnBaselineFromTurnStart')(
-    function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.started' }>)
+    function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.started' }>, actionId: string)
     {
       const turnId = toTurnId(event.turnId)
       if (!turnId)
@@ -738,22 +1176,33 @@ const make = Effect.gen(function* ()
         cwd: checkpointCwd,
         checkpointRef: baselineCheckpointRef,
       })
-      if (baselineExists)
-      {
-        return
-      }
-
-      const publication = yield* checkpointStore.captureCheckpoint({
+      const publication = baselineExists
+        ? undefined
+        : yield* checkpointStore.captureCheckpoint({
+            cwd: checkpointCwd,
+            checkpointRef: baselineCheckpointRef,
+            expected: { kind: 'absent' },
+          })
+      const baselineIdentity = yield* checkpointIdentity.resolveCapture({
         cwd: checkpointCwd,
         checkpointRef: baselineCheckpointRef,
-        expected: { kind: 'absent' },
+        checkpointTurnCount: currentTurnCount,
+        ...(publication?.outcome === 'published'
+          ? { expectedCommitOid: publication.commitOid }
+          : {}),
       })
-      // another lane published this baseline first; its snapshot stands and
-      // this one is dropped, exactly as if the ref had existed up front
-      if (publication.outcome === 'lost-race')
-      {
-        return
-      }
+      yield* orchestrationEngine.dispatch({
+        type: 'thread.checkpoint.baseline.record',
+        commandId: yield* commandIdFor('checkpoint-baseline-record', actionId),
+        threadId: thread.id,
+        checkpointTurnCount: currentTurnCount,
+        checkpointRef: baselineCheckpointRef,
+        checkpointCaptureRoot: baselineIdentity.checkpointCaptureRoot,
+        checkpointRepositoryCommonDir: baselineIdentity.checkpointRepositoryCommonDir,
+        checkpointCommitOid: baselineIdentity.checkpointCommitOid,
+        capturedAt: event.createdAt,
+        createdAt: event.createdAt,
+      })
       yield* receiptBus.publish({
         type: 'checkpoint.baseline.captured',
         threadId: thread.id,
@@ -910,6 +1359,7 @@ const make = Effect.gen(function* ()
       { type: 'thread.turn-start-requested' | 'thread.message-sent' }
     >,
     targetCheckpointRef?: CheckpointRef,
+    actionId?: string,
   )
   {
     if (event.type === 'thread.message-sent' && !isCheckpointBaselineMessage(event))
@@ -950,20 +1400,31 @@ const make = Effect.gen(function* ()
       cwd: checkpointCwd,
       checkpointRef: baselineCheckpointRef,
     })
-    if (baselineExists)
-    {
-      return
-    }
-
-    const publication = yield* checkpointStore.captureCheckpoint({
+    const publication = baselineExists
+      ? undefined
+      : yield* checkpointStore.captureCheckpoint({
+          cwd: checkpointCwd,
+          checkpointRef: baselineCheckpointRef,
+          expected: { kind: 'absent' },
+        })
+    const baselineIdentity = yield* checkpointIdentity.resolveCapture({
       cwd: checkpointCwd,
       checkpointRef: baselineCheckpointRef,
-      expected: { kind: 'absent' },
+      checkpointTurnCount: currentTurnCount,
+      ...(publication?.outcome === 'published' ? { expectedCommitOid: publication.commitOid } : {}),
     })
-    if (publication.outcome === 'lost-race')
-    {
-      return
-    }
+    yield* orchestrationEngine.dispatch({
+      type: 'thread.checkpoint.baseline.record',
+      commandId: yield* commandIdFor('checkpoint-baseline-record', actionId),
+      threadId,
+      checkpointTurnCount: currentTurnCount,
+      checkpointRef: baselineCheckpointRef,
+      checkpointCaptureRoot: baselineIdentity.checkpointCaptureRoot,
+      checkpointRepositoryCommonDir: baselineIdentity.checkpointRepositoryCommonDir,
+      checkpointCommitOid: baselineIdentity.checkpointCommitOid,
+      capturedAt: event.occurredAt,
+      createdAt: event.occurredAt,
+    })
     yield* receiptBus.publish({
       type: 'checkpoint.baseline.captured',
       threadId,
@@ -1028,6 +1489,136 @@ const make = Effect.gen(function* ()
     effect: Effect.Effect<A, E, R>,
   ) => effect.pipe(Effect.tapError((cause) => recordPhaseFailure(operation, cause)))
 
+  const verifyJournalCheckpointIdentity = Effect.fn('verifyJournalCheckpointIdentity')(function* (
+    operation: CheckpointRevertOperation,
+  )
+  {
+    if (
+      operation.cwd === null ||
+      operation.checkpointCaptureRoot === null ||
+      operation.repositoryCommonDir === null ||
+      operation.checkpointCommitOid === null
+    )
+    {
+      return yield* new CheckpointOperationError({
+        detail:
+          `Checkpoint revert '${operation.operationId}' predates exact capture identity; ` +
+          'automatic destructive recovery is refused.',
+      })
+    }
+    return yield* checkpointIdentity.resolveDestructive({
+      record: {
+        checkpointRef: CheckpointRef.make(operation.targetRef),
+        checkpointTurnCount: operation.targetTurnCount,
+        checkpointCaptureRoot: operation.checkpointCaptureRoot,
+        checkpointRepositoryCommonDir: operation.repositoryCommonDir,
+        checkpointCommitOid: operation.checkpointCommitOid,
+      },
+      restoreRoot: operation.cwd,
+    })
+  })
+
+  const journalProviderIdentity = (
+    operation: CheckpointRevertOperation,
+  ): ProviderRuntimeSessionIdentity | null =>
+  {
+    if (
+      operation.provider === null ||
+      operation.providerInstanceId === null ||
+      operation.providerThreadId === null ||
+      operation.providerSessionGeneration === null ||
+      operation.providerThreadId !== operation.threadId
+    )
+    {
+      return null
+    }
+    return {
+      provider: operation.provider,
+      providerInstanceId: operation.providerInstanceId,
+      threadId: operation.providerThreadId,
+      sessionGeneration: operation.providerSessionGeneration,
+    }
+  }
+
+  const drainProviderRuntimeThrough = Effect.fn('drainProviderRuntimeThrough')(function* (
+    sequence: number,
+  )
+  {
+    yield* runtimeInboxRunner.drainThrough(PROVIDER_RUNTIME_INGESTION_REACTOR_ID, sequence)
+    yield* runtimeInboxRunner.drainThrough(PROVIDER_RUNTIME_CHECKPOINT_REACTOR_ID, sequence)
+  })
+
+  const synchronizeRevertInputs = Effect.fn('synchronizeRevertInputs')(function* (
+    operation: CheckpointRevertOperation,
+  )
+  {
+    if (operation.requestSourceSequence <= 0)
+    {
+      return yield* new CheckpointOperationError({
+        detail:
+          `Checkpoint revert '${operation.operationId}' predates the transactional source ` +
+          'barrier; automatic destructive recovery is refused.',
+      })
+    }
+    yield* durableRunner.drainThrough(
+      'provider-command',
+      Math.max(0, operation.requestSourceSequence - 1),
+    )
+    yield* drainProviderRuntimeThrough(operation.providerInboxHighWater)
+
+    const providerIdentity = journalProviderIdentity(operation)
+    if (providerIdentity === null) return
+    const state = yield* providerService.getSessionIdentityState(providerIdentity)
+    if (
+      Option.isSome(state) &&
+      state.value.status === 'closed' &&
+      state.value.closedSequence !== null
+    )
+    {
+      yield* drainProviderRuntimeThrough(state.value.closedSequence)
+    }
+  })
+
+  const stopExactProviderAndDrain = Effect.fn('stopExactProviderAndDrain')(function* (
+    identity: ProviderRuntimeSessionIdentity,
+  )
+  {
+    let state = yield* providerService.getSessionIdentityState(identity)
+    if (Option.isNone(state))
+    {
+      return {
+        mismatch: 'The captured provider generation is no longer present in durable state.',
+      }
+    }
+    if (state.value.status === 'open')
+    {
+      const stopped = yield* providerService.stopSessionIfExact(identity)
+      state = yield* providerService.getSessionIdentityState(identity)
+      if (!stopped && (Option.isNone(state) || state.value.status !== 'closed'))
+      {
+        return {
+          mismatch: 'The captured provider generation changed before exact stop completed.',
+        }
+      }
+    }
+    if (
+      Option.isNone(state) ||
+      state.value.provider !== identity.provider ||
+      state.value.providerInstanceId !== identity.providerInstanceId ||
+      state.value.threadId !== identity.threadId ||
+      state.value.sessionGeneration !== identity.sessionGeneration ||
+      state.value.status !== 'closed' ||
+      state.value.closedSequence === null
+    )
+    {
+      return {
+        mismatch: 'The captured provider generation has no exact durable terminal sequence.',
+      }
+    }
+    yield* drainProviderRuntimeThrough(state.value.closedSequence)
+    return { closedSequence: state.value.closedSequence }
+  })
+
   const driveCheckpointRevertPhase = Effect.fn('driveCheckpointRevertPhase')(function* (
     operation: CheckpointRevertOperation,
   )
@@ -1053,19 +1644,14 @@ const make = Effect.gen(function* ()
           operation,
           Effect.gen(function* ()
           {
-            const repository = yield* vcsRegistry.resolve({
-              cwd: operation.cwd,
-              requestedKind: 'git',
-            })
-            if (repository.repository.metadataPath === null)
+            const cwd = operation.cwd
+            if (cwd === null)
             {
               return yield* new CheckpointOperationError({
-                detail: `Checkpoint revert '${operation.operationId}' could not resolve the Git common directory.`,
+                detail: `Checkpoint revert '${operation.operationId}' is missing its restore root.`,
               })
             }
-            const repositoryCommonDir = path.isAbsolute(repository.repository.metadataPath)
-              ? path.normalize(repository.repository.metadataPath)
-              : path.resolve(operation.cwd, repository.repository.metadataPath)
+            const identity = yield* verifyJournalCheckpointIdentity(operation)
             const stagePath = path.join(
               serverConfig.stateDir,
               REVERT_STAGE_DIRECTORY,
@@ -1076,13 +1662,13 @@ const make = Effect.gen(function* ()
             yield* fileSystem.remove(stagePath, { recursive: true, force: true })
             yield* fileSystem.makeDirectory(stagePath, { recursive: true })
             const verification = yield* checkpointStore.stageCheckpointTree({
-              cwd: operation.cwd,
+              cwd,
               ref: CheckpointRef.make(operation.targetRef),
+              commitOid: identity.checkpointCommitOid,
               stagePath,
             })
             return yield* transition('target-staged', {
               targetTree: verification.treeOid,
-              repositoryCommonDir,
               stagePath,
               lastError: null,
             })
@@ -1094,6 +1680,14 @@ const make = Effect.gen(function* ()
           operation,
           Effect.gen(function* ()
           {
+            const cwd = operation.cwd
+            if (cwd === null)
+            {
+              return yield* new CheckpointOperationError({
+                detail: `Checkpoint revert '${operation.operationId}' is missing its restore root.`,
+              })
+            }
+            const identity = yield* verifyJournalCheckpointIdentity(operation)
             if (operation.targetTree === null || operation.stagePath === null)
             {
               return yield* new CheckpointOperationError({
@@ -1101,8 +1695,9 @@ const make = Effect.gen(function* ()
               })
             }
             const preflight = yield* checkpointStore.verifyRestorePreconditions({
-              cwd: operation.cwd,
+              cwd,
               ref: CheckpointRef.make(operation.targetRef),
+              commitOid: identity.checkpointCommitOid,
             })
             if (preflight.treeOid !== operation.targetTree)
             {
@@ -1115,13 +1710,80 @@ const make = Effect.gen(function* ()
         )
 
       case 'restore-ready':
-        return yield* transition('restore-started', { lastError: null })
+        return yield* withJournalRetry(
+          operation,
+          Effect.gen(function* ()
+          {
+            const providerIdentity = journalProviderIdentity(operation)
+            if (providerIdentity === null)
+            {
+              return yield* new CheckpointOperationError({
+                detail: `Checkpoint revert '${operation.operationId}' lacks exact provider generation identity.`,
+              })
+            }
+            const providerTurnCount =
+              yield* providerService.getConversationTurnCountIfExact(providerIdentity)
+            if (Option.isNone(providerTurnCount))
+            {
+              const detail: ProviderRollbackJournalDetail = {
+                version: 1,
+                capability: 'legacy-unreported',
+                state: 'identity-unavailable',
+                rolledBackTurns: 0,
+                staleRefs: [],
+                detail: `Checkpoint revert '${operation.operationId}' provider generation changed before its native turn count could be frozen.`,
+              }
+              return yield* transition('provider-pending', {
+                providerOutcomeJson: encodeProviderRollbackJournalDetail(detail),
+                lastError: null,
+              })
+            }
+            if (providerTurnCount.value < operation.targetTurnCount)
+            {
+              const detail: ProviderRollbackJournalDetail = {
+                version: 1,
+                capability: 'legacy-unreported',
+                state: 'identity-unavailable',
+                rolledBackTurns: 0,
+                staleRefs: [],
+                detail: `Checkpoint revert '${operation.operationId}' provider history is already shorter than the requested target.`,
+              }
+              return yield* transition('provider-pending', {
+                providerOutcomeJson: encodeProviderRollbackJournalDetail(detail),
+                lastError: null,
+              })
+            }
+            const capabilities = yield* providerService.getCapabilities(
+              providerIdentity.providerInstanceId,
+            )
+            const detail: ProviderRollbackJournalDetail = {
+              version: 1,
+              capability: rollbackCapabilityFrom(capabilities),
+              state: 'pending',
+              rolledBackTurns: providerTurnCount.value - operation.targetTurnCount,
+              staleRefs: [],
+              detail: null,
+            }
+            return yield* transition('provider-pending', {
+              providerOutcomeJson: encodeProviderRollbackJournalDetail(detail),
+              lastError: null,
+            })
+          }),
+        )
 
       case 'restore-started':
         return yield* withJournalRetry(
           operation,
           Effect.gen(function* ()
           {
+            const cwd = operation.cwd
+            if (cwd === null)
+            {
+              return yield* new CheckpointOperationError({
+                detail: `Checkpoint revert '${operation.operationId}' is missing its restore root.`,
+              })
+            }
+            const identity = yield* verifyJournalCheckpointIdentity(operation)
             if (operation.targetTree === null || operation.stagePath === null)
             {
               return yield* new CheckpointOperationError({
@@ -1129,8 +1791,9 @@ const make = Effect.gen(function* ()
               })
             }
             const restored = yield* checkpointStore.applyStagedRestore({
-              cwd: operation.cwd,
+              cwd,
               ref: CheckpointRef.make(operation.targetRef),
+              commitOid: identity.checkpointCommitOid,
               stagePath: operation.stagePath,
             })
             if (restored.treeOid !== operation.targetTree)
@@ -1140,8 +1803,9 @@ const make = Effect.gen(function* ()
               })
             }
             const verification = yield* checkpointStore.postVerifyRestore({
-              cwd: operation.cwd,
+              cwd,
               ref: CheckpointRef.make(operation.targetRef),
+              commitOid: identity.checkpointCommitOid,
             })
             if (verification.treeOid !== operation.targetTree)
             {
@@ -1158,47 +1822,24 @@ const make = Effect.gen(function* ()
           operation,
           Effect.gen(function* ()
           {
-            yield* workspaceEntries.refresh(operation.cwd)
-            const threadId = ThreadId.make(operation.threadId)
-            const thread = yield* resolveThreadDetail(threadId)
-            if (!thread)
+            const cwd = operation.cwd
+            if (cwd === null)
             {
               return yield* new CheckpointOperationError({
-                detail: `Checkpoint revert '${operation.operationId}' thread is unavailable during provider preparation.`,
+                detail: `Checkpoint revert '${operation.operationId}' is missing its restore root.`,
               })
             }
-            const sessionRuntime = yield* resolveSessionRuntimeForThread(threadId)
-            if (Option.isNone(sessionRuntime))
-            {
-              return yield* new CheckpointOperationError({
-                detail: `Checkpoint revert '${operation.operationId}' provider session is unavailable.`,
-              })
-            }
-            const providerInstanceId =
-              sessionRuntime.value.providerInstanceId ??
-              thread.session?.providerInstanceId ??
-              thread.modelSelection.instanceId
-            const capabilities = yield* providerService.getCapabilities(providerInstanceId)
-            const currentTurnCount = thread.checkpoints.reduce(
-              (maximum, checkpoint) => Math.max(maximum, checkpoint.checkpointTurnCount),
-              0,
-            )
-            const staleRefs = thread.checkpoints
-              .filter((checkpoint) => checkpoint.checkpointTurnCount > operation.targetTurnCount)
-              .map((checkpoint) => String(checkpoint.checkpointRef))
-            const detail: ProviderRollbackJournalDetail = {
-              version: 1,
-              capability: rollbackCapabilityFrom(capabilities),
-              state: 'pending',
-              rolledBackTurns: Math.max(0, currentTurnCount - operation.targetTurnCount),
-              staleRefs,
-              detail: null,
-            }
-            return yield* transition('provider-pending', {
-              providerInstanceId,
-              providerSessionId: sessionRuntime.value.providerSessionId ?? null,
-              providerThreadId: sessionRuntime.value.threadId,
-              providerOutcomeJson: encodeProviderRollbackJournalDetail(detail),
+            yield* workspaceEntries.refresh(cwd)
+            const createdAt = yield* nowIso
+            yield* orchestrationEngine.dispatch({
+              type: 'thread.revert.complete',
+              commandId: yield* commandIdFor('checkpoint-revert-complete', operation.operationId),
+              threadId: ThreadId.make(operation.threadId),
+              turnCount: operation.targetTurnCount,
+              createdAt,
+            })
+            return yield* transition('projection-finalized', {
+              projectionStatus: 'finalized',
               lastError: null,
             })
           }),
@@ -1210,101 +1851,129 @@ const make = Effect.gen(function* ()
           Effect.gen(function* ()
           {
             const detail = yield* decodeProviderRollbackJournalDetailEffect(operation)
+            const providerIdentity = journalProviderIdentity(operation)
+            if (providerIdentity === null)
+            {
+              return yield* new CheckpointOperationError({
+                detail: `Checkpoint revert '${operation.operationId}' lacks exact provider generation identity.`,
+              })
+            }
             const recordOutcome = (
               outcome: 'exact' | 'known-unsupported' | 'manual-unknown',
               outcomeDetail: string | null,
+              journalDetail: ProviderRollbackJournalDetail,
             ) =>
               Effect.flatMap(nowIso, (now) =>
                 checkpointRevertOperations.recordProviderOutcome({
                   operationId: operation.operationId,
                   outcome,
                   outcomeJson: encodeProviderRollbackJournalDetail({
-                    ...detail,
+                    ...journalDetail,
                     state: 'recorded',
                     detail: outcomeDetail,
                   }),
-                  providerInstanceId: operation.providerInstanceId,
                   providerSessionId: operation.providerSessionId,
-                  providerThreadId: operation.providerThreadId,
                   now,
                 }),
               )
 
-            if (detail.capability === 'known-unsupported')
+            let outcome: 'exact' | 'known-unsupported' | 'manual-unknown' = 'exact'
+            let outcomeDetail: string | null = null
+            let journalDetail = detail
+            if (detail.state === 'identity-unavailable')
             {
-              return yield* recordOutcome(
-                'known-unsupported',
-                'The bound provider declares that conversation rollback is unsupported.',
-              )
+              outcome = 'manual-unknown'
+              outcomeDetail =
+                detail.detail ??
+                'The captured provider generation was unavailable before rollback metadata could be frozen.'
             }
-            if (detail.rolledBackTurns === 0)
+            else if (detail.capability === 'known-unsupported')
             {
-              return yield* recordOutcome('exact', null)
+              outcome = 'known-unsupported'
+              outcomeDetail =
+                'The bound provider declares that conversation rollback is unsupported.'
             }
-            if (detail.state === 'attempt-started')
+            else if (detail.rolledBackTurns === 0)
             {
-              return yield* recordOutcome(
-                'manual-unknown',
-                'A previous provider rollback attempt did not record a definitive result.',
+              outcome = 'exact'
+            }
+            else if (detail.state === 'attempt-started')
+            {
+              outcome = 'manual-unknown'
+              outcomeDetail =
+                'A previous provider rollback attempt did not record a definitive result.'
+            }
+            else
+            {
+              const currentThread = yield* resolveThreadDetail(ThreadId.make(operation.threadId))
+              if (
+                currentThread === undefined ||
+                currentThread.providerSwitch !== null ||
+                (currentThread.session !== null && currentThread.session.activeTurnId !== null) ||
+                currentThread.latestTurn?.state === 'running'
               )
+              {
+                outcome = 'manual-unknown'
+                outcomeDetail =
+                  'The provider lifecycle changed before conversation rollback could start.'
+              }
+              else
+              {
+                const attemptStarted = yield* transition('provider-pending', {
+                  providerOutcomeJson: encodeProviderRollbackJournalDetail({
+                    ...detail,
+                    state: 'attempt-started',
+                  }),
+                  lastError: null,
+                })
+                journalDetail = yield* decodeProviderRollbackJournalDetailEffect(attemptStarted)
+                outcomeDetail = yield* providerService
+                  .rollbackConversationIfExact({
+                    identity: providerIdentity,
+                    numTurns: detail.rolledBackTurns,
+                  })
+                  .pipe(
+                    Effect.map((matched) =>
+                      matched
+                        ? null
+                        : 'The captured provider generation changed before conversation rollback could start.',
+                    ),
+                    // the attempt-started marker forbids issuing an indeterminate
+                    // rollback twice after interruption, defect, or typed failure
+                    Effect.catchCause((cause) => Effect.succeed(errorDetail(Cause.squash(cause)))),
+                  )
+                outcome = outcomeDetail === null ? 'exact' : 'manual-unknown'
+              }
             }
 
-            const expectedProviderInstanceId = operation.providerInstanceId
-            const currentThread = yield* resolveThreadDetail(ThreadId.make(operation.threadId))
-            if (
-              expectedProviderInstanceId === null ||
-              currentThread === undefined ||
-              currentThread.providerSwitch !== null ||
-              !matchesProviderInstanceFence(
-                ProviderInstanceId.make(expectedProviderInstanceId),
-                currentThread.session?.providerInstanceId ??
-                  currentThread.modelSelection.instanceId,
-              )
-            )
+            const stopped = yield* stopExactProviderAndDrain(providerIdentity)
+            if ('mismatch' in stopped)
             {
-              return yield* recordOutcome(
-                'manual-unknown',
-                'The provider binding changed before conversation rollback could start.',
-              )
+              outcome = 'manual-unknown'
+              outcomeDetail =
+                outcomeDetail === null ? stopped.mismatch : `${outcomeDetail} ${stopped.mismatch}`
             }
-
-            const attemptStarted = yield* transition('provider-pending', {
-              providerOutcomeJson: encodeProviderRollbackJournalDetail({
-                ...detail,
-                state: 'attempt-started',
-              }),
-              lastError: null,
-            })
-            const attemptDetail = yield* decodeProviderRollbackJournalDetailEffect(attemptStarted)
-            const rollbackError = yield* providerService
-              .rollbackConversation({
-                threadId: ThreadId.make(operation.threadId),
-                numTurns: detail.rolledBackTurns,
-                expectedProviderInstanceId: ProviderInstanceId.make(expectedProviderInstanceId),
-              })
-              .pipe(
-                Effect.as(null),
-                // defects are as indeterminate as typed failures here, and the
-                // attempt-started marker is already written, so catch the whole
-                // cause rather than letting a defect escape into a retry that
-                // would re-issue a rollback that may have already landed
-                Effect.catchCause((cause) => Effect.succeed(errorDetail(Cause.squash(cause)))),
-              )
-            return yield* Effect.flatMap(nowIso, (now) =>
-              checkpointRevertOperations.recordProviderOutcome({
-                operationId: operation.operationId,
-                outcome: rollbackError === null ? 'exact' : 'manual-unknown',
-                outcomeJson: encodeProviderRollbackJournalDetail({
-                  ...attemptDetail,
-                  state: 'recorded',
-                  detail: rollbackError,
-                }),
-                providerInstanceId: operation.providerInstanceId,
-                providerSessionId: operation.providerSessionId,
-                providerThreadId: operation.providerThreadId,
-                now,
-              }),
-            )
+            const settledThread = yield* resolveThreadDetail(ThreadId.make(operation.threadId))
+            if (settledThread === undefined)
+            {
+              outcome = 'manual-unknown'
+              outcomeDetail =
+                outcomeDetail === null
+                  ? 'The thread projection is unavailable after the provider terminal barrier.'
+                  : `${outcomeDetail} The thread projection is unavailable after the provider terminal barrier.`
+            }
+            else
+            {
+              journalDetail = {
+                ...journalDetail,
+                staleRefs: settledThread.checkpoints
+                  .filter(
+                    (checkpoint) => checkpoint.checkpointTurnCount > operation.targetTurnCount,
+                  )
+                  .map((checkpoint) => String(checkpoint.checkpointRef)),
+              }
+            }
+            return yield* recordOutcome(outcome, outcomeDetail, journalDetail)
           }),
         )
 
@@ -1342,22 +2011,11 @@ const make = Effect.gen(function* ()
                 turnCount: operation.targetTurnCount,
                 detail:
                   detail.detail ??
-                  'The filesystem was restored, but this provider cannot roll back its conversation.',
+                  'This provider cannot roll back its conversation; the exact session was stopped before filesystem restore.',
                 createdAt,
               })
             }
-
-            yield* orchestrationEngine.dispatch({
-              type: 'thread.revert.complete',
-              commandId: yield* commandIdFor('checkpoint-revert-complete', operation.operationId),
-              threadId: ThreadId.make(operation.threadId),
-              turnCount: operation.targetTurnCount,
-              createdAt,
-            })
-            return yield* transition('projection-finalized', {
-              projectionStatus: 'finalized',
-              lastError: null,
-            })
+            return yield* transition('restore-started', { lastError: null })
           }),
         )
 
@@ -1381,6 +2039,14 @@ const make = Effect.gen(function* ()
           operation,
           Effect.gen(function* ()
           {
+            const cwd = operation.cwd
+            if (cwd === null)
+            {
+              return yield* new CheckpointOperationError({
+                detail: `Checkpoint revert '${operation.operationId}' is missing its restore root.`,
+              })
+            }
+            yield* verifyJournalCheckpointIdentity(operation)
             const staleRefs =
               operation.staleRefsJson === null
                 ? []
@@ -1397,7 +2063,7 @@ const make = Effect.gen(function* ()
             if (staleRefs.length > 0)
             {
               yield* checkpointStore.deleteCheckpointRefs({
-                cwd: operation.cwd,
+                cwd,
                 checkpointRefs: staleRefs.map((ref) => CheckpointRef.make(ref)),
               })
             }
@@ -1415,6 +2081,7 @@ const make = Effect.gen(function* ()
       case 'completed':
       case 'aborted':
       case 'manual-required':
+      case 'requested':
         return operation
     }
   })
@@ -1424,10 +2091,52 @@ const make = Effect.gen(function* ()
   )
   {
     let operation = initialOperation
-    while (
+    if (operation.phase === 'requested') return operation
+    if (
       operation.phase !== 'completed' &&
       operation.phase !== 'aborted' &&
       operation.phase !== 'manual-required'
+    )
+    {
+      yield* synchronizeRevertInputs(operation)
+    }
+    const lacksCheckpointIdentity =
+      operation.checkpointCaptureRoot === null ||
+      operation.repositoryCommonDir === null ||
+      operation.checkpointCommitOid === null
+    const lacksProviderIdentity = journalProviderIdentity(operation) === null
+    if (
+      operation.phase !== 'completed' &&
+      operation.phase !== 'aborted' &&
+      operation.phase !== 'manual-required' &&
+      (lacksCheckpointIdentity || lacksProviderIdentity)
+    )
+    {
+      const missingIdentity = lacksCheckpointIdentity
+        ? 'checkpoint capture identity'
+        : 'provider generation identity'
+      const detail =
+        `Checkpoint revert '${operation.operationId}' predates exact ${missingIdentity}; ` +
+        'automatic destructive recovery is refused and manual inspection is required.'
+      yield* appendRevertFailureActivity({
+        threadId: ThreadId.make(operation.threadId),
+        turnCount: operation.targetTurnCount,
+        detail,
+        createdAt: yield* nowIso,
+        actionId: operation.operationId,
+      }).pipe(Effect.catch(() => Effect.void))
+      return yield* checkpointRevertOperations.markManual({
+        operationId: operation.operationId,
+        expectedPhase: operation.phase,
+        error: detail,
+        now: yield* nowIso,
+      })
+    }
+    while (
+      operation.phase !== 'completed' &&
+      operation.phase !== 'aborted' &&
+      operation.phase !== 'manual-required' &&
+      operation.phase !== 'requested'
     )
     {
       operation = yield* driveCheckpointRevertPhase(operation)
@@ -1435,86 +2144,202 @@ const make = Effect.gen(function* ()
     return operation
   })
 
+  const abortRequestedOperation = Effect.fn('abortRequestedOperation')(function* (
+    operation: CheckpointRevertOperation,
+    detail: string,
+    actionId = operation.operationId,
+  )
+  {
+    yield* appendRevertFailureActivity({
+      threadId: ThreadId.make(operation.threadId),
+      turnCount: operation.targetTurnCount,
+      detail,
+      createdAt: yield* nowIso,
+      actionId,
+    }).pipe(Effect.catch(() => Effect.void))
+    yield* checkpointRevertOperations.casTransition({
+      operationId: operation.operationId,
+      expectedPhase: 'requested',
+      nextPhase: 'aborted',
+      patch: { lastError: detail },
+      now: yield* nowIso,
+    })
+  })
+
   const handleRevertRequested = Effect.fn('handleRevertRequested')(function* (
     event: Extract<OrchestrationEvent, { type: 'thread.checkpoint-revert-requested' }>,
     actionId?: string,
   )
   {
+    if (event.commandId === null)
+    {
+      return yield* new CheckpointDomainPayloadError({
+        detail: 'Checkpoint revert request is missing its originating command id.',
+      })
+    }
+
     const now = yield* nowIso
-    const failureActionId = actionId ?? String(event.commandId ?? event.eventId)
-    const failVisibly = (detail: string) =>
-      appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail,
-        createdAt: now,
-        actionId: failureActionId,
-      }).pipe(Effect.catch(() => Effect.void))
+    const failureActionId = actionId ?? String(event.commandId)
+    const operationId = checkpointRevertOperationId(event.commandId)
+    let reserved = yield* checkpointRevertOperations.getById(operationId)
+    if (Option.isNone(reserved))
+    {
+      const admissionState = yield* providerRuntimeInbox.getAdmissionState
+      reserved = Option.some(
+        yield* checkpointRevertOperations.reserve({
+          operationId,
+          threadId: event.payload.threadId,
+          targetRef: checkpointRefForThreadTurn(event.payload.threadId, event.payload.turnCount),
+          targetTurnCount: event.payload.turnCount,
+          requestSourceSequence: event.sequence,
+          providerInboxHighWater: Math.max(0, admissionState.nextSequence - 1),
+          now,
+        }),
+      )
+    }
+    const reservedOperation = Option.getOrThrow(reserved)
+    if (reservedOperation.phase !== 'requested')
+    {
+      yield* driveCheckpointRevert(reservedOperation)
+      return
+    }
+    if (
+      reservedOperation.threadId !== event.payload.threadId ||
+      reservedOperation.targetTurnCount !== event.payload.turnCount ||
+      reservedOperation.targetRef !==
+        checkpointRefForThreadTurn(event.payload.threadId, event.payload.turnCount) ||
+      reservedOperation.requestSourceSequence !== event.sequence
+    )
+    {
+      yield* abortRequestedOperation(
+        reservedOperation,
+        `Checkpoint revert '${operationId}' does not match its persisted request fence.`,
+        failureActionId,
+      )
+      return
+    }
+
+    const abortRequested = Effect.fn('abortRequested')(function* (detail: string)
+    {
+      yield* abortRequestedOperation(reservedOperation, detail, failureActionId)
+    })
+
+    // provider commands before the revert request and every provider event
+    // admitted at request time must be fully projected before target/session
+    // identity is selected. These are replayable persisted barriers, not sleeps.
+    yield* synchronizeRevertInputs(reservedOperation)
 
     const thread = yield* resolveThreadDetail(event.payload.threadId)
     if (!thread)
     {
-      yield* failVisibly('Thread was not found in read model.')
+      yield* abortRequested('Thread was not found in read model.')
+      return
+    }
+    if (
+      thread.providerSwitch !== null ||
+      (thread.session !== null && thread.session.activeTurnId !== null) ||
+      thread.latestTurn?.state === 'running' ||
+      (thread.pendingHandoff !== undefined && thread.pendingHandoff !== null) ||
+      thread.orchestrateRunExecution?.lifecycle === 'active'
+    )
+    {
+      yield* abortRequested(
+        'The thread acquired an active provider, handoff, or orchestrate lifecycle before revert admission.',
+      )
       return
     }
     const sessionRuntime = yield* resolveSessionRuntimeForThread(event.payload.threadId)
     if (Option.isNone(sessionRuntime))
     {
-      yield* failVisibly('No active provider session with workspace cwd is bound to this thread.')
-      return
-    }
-    if (!(yield* checkpointStore.isGitRepository(sessionRuntime.value.cwd)))
-    {
-      yield* failVisibly(
-        'Checkpoints are unavailable because this project is not a git repository.',
+      yield* abortRequested(
+        'No active provider session with workspace cwd is bound to this thread.',
       )
       return
     }
-
+    const providerInstanceId =
+      sessionRuntime.value.providerInstanceId ??
+      thread.session?.providerInstanceId ??
+      thread.modelSelection.instanceId
+    const capturedProviderIdentity = yield* providerService.captureSessionIdentity({
+      threadId: event.payload.threadId,
+      expectedProviderInstanceId: providerInstanceId,
+    })
+    if (Option.isNone(capturedProviderIdentity))
+    {
+      yield* abortRequested(
+        'No exact provider generation is available for checkpoint revert admission.',
+      )
+      return
+    }
     const currentTurnCount = thread.checkpoints.reduce(
       (maximum, checkpoint) => Math.max(maximum, checkpoint.checkpointTurnCount),
       0,
     )
     if (event.payload.turnCount > currentTurnCount)
     {
-      yield* failVisibly(
+      yield* abortRequested(
         `Checkpoint turn count ${event.payload.turnCount} exceeds current turn count ${currentTurnCount}.`,
       )
       return
     }
-    const targetCheckpointRef =
+    const targetCheckpoint =
       event.payload.turnCount === 0
-        ? checkpointRefForThreadTurn(event.payload.threadId, 0)
+        ? (Option.getOrNull(
+            yield* projectionSnapshotQuery.getCheckpointIdentity(event.payload.threadId, 0),
+          ) ?? {
+            checkpointTurnCount: 0,
+            checkpointRef: checkpointRefForThreadTurn(event.payload.threadId, 0),
+            checkpointCaptureRoot: null,
+            checkpointRepositoryCommonDir: null,
+            checkpointCommitOid: null,
+          })
         : thread.checkpoints.find(
             (checkpoint) => checkpoint.checkpointTurnCount === event.payload.turnCount,
-          )?.checkpointRef
-    if (!targetCheckpointRef)
+          )
+    if (!targetCheckpoint)
     {
-      yield* failVisibly(
+      yield* abortRequested(
         `Checkpoint ref for turn ${event.payload.turnCount} is unavailable in read model.`,
       )
       return
     }
-    if (event.commandId === null)
-    {
-      yield* failVisibly('Checkpoint revert request is missing its originating command id.')
-      return
-    }
+    const resolvedTarget = yield* checkpointIdentity
+      .resolveDestructive({
+        record: {
+          checkpointRef: targetCheckpoint.checkpointRef,
+          checkpointTurnCount: targetCheckpoint.checkpointTurnCount,
+          checkpointCaptureRoot: targetCheckpoint.checkpointCaptureRoot ?? null,
+          checkpointRepositoryCommonDir: targetCheckpoint.checkpointRepositoryCommonDir ?? null,
+          checkpointCommitOid: targetCheckpoint.checkpointCommitOid ?? null,
+        },
+        restoreRoot: sessionRuntime.value.cwd,
+      })
+      .pipe(
+        Effect.map(Option.some),
+        Effect.catch((error) => abortRequested(error.message).pipe(Effect.as(Option.none()))),
+      )
+    if (Option.isNone(resolvedTarget)) return
 
-    const operationId = checkpointRevertOperationId(event.commandId)
     const admitted = yield* checkpointRevertOperations
       .admit({
         operationId,
         threadId: event.payload.threadId,
-        targetRef: targetCheckpointRef,
+        targetRef: resolvedTarget.value.checkpointRef,
         targetTurnCount: event.payload.turnCount,
-        cwd: sessionRuntime.value.cwd,
+        requestSourceSequence: reservedOperation.requestSourceSequence,
+        providerInboxHighWater: reservedOperation.providerInboxHighWater,
+        cwd: resolvedTarget.value.cwd,
+        checkpointCaptureRoot: resolvedTarget.value.checkpointCaptureRoot,
+        repositoryCommonDir: resolvedTarget.value.checkpointRepositoryCommonDir,
+        checkpointCommitOid: resolvedTarget.value.checkpointCommitOid,
+        providerIdentity: capturedProviderIdentity.value,
+        providerSessionId: sessionRuntime.value.providerSessionId ?? null,
         now,
       })
       .pipe(
         Effect.map(Option.some),
         Effect.catchTag('CheckpointRevertOperationConflictError', (conflict) =>
-          failVisibly(conflict.message).pipe(Effect.as(Option.none())),
+          abortRequested(conflict.message).pipe(Effect.as(Option.none())),
         ),
       )
     if (Option.isNone(admitted))
@@ -1524,8 +2349,45 @@ const make = Effect.gen(function* ()
     yield* driveCheckpointRevert(admitted.value)
   })
 
+  const resumeRequestedRevert = Effect.fn('resumeRequestedRevert')(function* (
+    operation: CheckpointRevertOperation,
+  )
+  {
+    const events = yield* Stream.runCollect(
+      orchestrationEngine.readEvents(Math.max(0, operation.requestSourceSequence - 1), 1),
+    ).pipe(
+      Effect.map((chunk) => Array.from(chunk)),
+      Effect.mapError(
+        (cause) =>
+          new ReactorDeliveryError({
+            operation: 'CheckpointReactor.resumeRequestedRevert:readEvent',
+            cause,
+          }),
+      ),
+    )
+    const event = events[0]
+    if (
+      event === undefined ||
+      event.sequence !== operation.requestSourceSequence ||
+      event.type !== 'thread.checkpoint-revert-requested' ||
+      event.commandId === null ||
+      checkpointRevertOperationId(event.commandId) !== operation.operationId ||
+      event.payload.threadId !== operation.threadId ||
+      event.payload.turnCount !== operation.targetTurnCount
+    )
+    {
+      yield* abortRequestedOperation(
+        operation,
+        `Checkpoint revert '${operation.operationId}' cannot recover its authoritative request event.`,
+      )
+      return
+    }
+    yield* handleRevertRequested(event, operation.operationId)
+  })
+
   const processRuntimeEvent = Effect.fn('processRuntimeEvent')(function* (
     event: ProviderRuntimeEvent,
+    actionId: string,
   )
   {
     if (isHiddenTurnRuntimeEvent(event))
@@ -1543,16 +2405,8 @@ const make = Effect.gen(function* ()
     }
     if (event.type === 'turn.started')
     {
-      yield* ensurePreTurnBaselineFromTurnStart(event)
-      yield* beginImplementationAttemptFromTurnStart(event).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning('proposal implementation attempt start failed', {
-            threadId: event.threadId,
-            turnId: event.turnId ?? null,
-            detail: error.message,
-          }),
-        ),
-      )
+      yield* ensurePreTurnBaselineFromTurnStart(event, actionId)
+      yield* beginImplementationAttemptFromTurnStart(event)
       return
     }
 
@@ -1560,7 +2414,7 @@ const make = Effect.gen(function* ()
     {
       const turnId = toTurnId(event.turnId)
       yield* refreshLocalGitStatusFromTurnCompletion(event)
-      yield* captureCheckpointFromTurnCompletion(event).pipe(
+      const outcome = yield* captureCheckpointFromTurnCompletion(event, actionId).pipe(
         Effect.catch((error) =>
           Effect.flatMap(nowIso, (createdAt) =>
             appendCaptureFailureActivity({
@@ -1568,30 +2422,120 @@ const make = Effect.gen(function* ()
               turnId,
               detail: error.message,
               createdAt,
-            }).pipe(Effect.catch(() => Effect.void)),
+              actionId,
+            }).pipe(
+              Effect.catch(() => Effect.void),
+              Effect.andThen(Effect.fail(error)),
+            ),
           ),
         ),
       )
+
+      // capture never ran, so the empty-diff branch inside
+      // captureAndDispatchCheckpoint is unreachable for exactly the turns that
+      // most need the alarm: no checkpoint could be taken, so anything this turn
+      // wrote could never have been shown.
+      // the thread is re-read rather than reusing the snapshot taken at the top
+      // of this handler, because tool activities are ingested on a separate lane
+      // and the later read gives that lane time to land this turn's last rows
+      if (outcome === 'no-workspace' && turnId !== null)
+      {
+        const completedThread = yield* resolveThreadDetail(event.threadId)
+        if (completedThread)
+        {
+          // the workspace directory is resolved again without the git gate: a
+          // project that is simply not a repository has a tree of its own, and a
+          // write inside it is not divergent even though no checkpoint could be
+          // taken. only a thread with no directory at all reports none here
+          const workspaceCwd = yield* resolveWorkspaceCwd({
+            threadId: completedThread.id,
+            thread: completedThread,
+            projects: yield* resolveThreadProjects(completedThread.projectId),
+            preferSessionRuntime: true,
+          })
+          yield* detectAndAnnounceDivergence({
+            threadId: event.threadId,
+            turnId,
+            activities: completedThread.activities,
+            // no repository was watched, so nothing can be proved the same and
+            // the adoption gate declines; the alarm is all this path can offer
+            watchedCwd: workspaceCwd,
+            createdAt: event.createdAt,
+            actionId,
+          })
+        }
+      }
       return
     }
   })
 
-  const processRuntimeEventSafely = (event: ProviderRuntimeEvent) =>
-    processRuntimeEvent(event).pipe(
-      Effect.catchCause((cause) =>
-      {
-        if (Cause.hasInterruptsOnly(cause))
-        {
-          return Effect.failCause(cause)
-        }
-        return Effect.logWarning('checkpoint reactor failed to process runtime input', {
-          eventType: event.type,
-          cause: Cause.pretty(cause),
-        })
+  const runtimeDefinition: ProviderRuntimeInboxConsumerDefinition = {
+    consumerId: PROVIDER_RUNTIME_CHECKPOINT_REACTOR_ID,
+    operationVersion: PROVIDER_RUNTIME_INBOX_OPERATION_VERSION,
+    restore: (checkpoint) =>
+      Option.match(checkpoint, {
+        onNone: () => Effect.void,
+        onSome: (buffer) =>
+          buffer.stateVersion !== 1
+            ? Effect.fail(
+                new CheckpointRuntimeConsumerError({
+                  detail: `Unsupported checkpoint runtime buffer version ${buffer.stateVersion}.`,
+                }),
+              )
+            : decodeRuntimeCheckpointBufferState(buffer.stateJson).pipe(
+                Effect.asVoid,
+                Effect.mapError(
+                  (cause) =>
+                    new CheckpointRuntimeConsumerError({
+                      detail: 'Unable to decode the checkpoint runtime consumer buffer.',
+                      cause,
+                    }),
+                ),
+              ),
       }),
-    )
-
-  const runtimeWorker = yield* makeDrainableWorker(processRuntimeEventSafely)
+    prerequisite: (record) =>
+      delivery.getProgress(PROVIDER_RUNTIME_INGESTION_REACTOR_ID).pipe(
+        Effect.map(
+          Option.match({
+            onNone: () => false,
+            onSome: (progress) => progress.cursorSequence >= record.sequence,
+          }),
+        ),
+        Effect.mapError(
+          (cause) =>
+            new CheckpointRuntimeConsumerError({
+              detail: `Unable to verify provider runtime ingestion progress before checkpoint event ${record.sequence}.`,
+              cause,
+            }),
+        ),
+      ),
+    process: (record, event) =>
+      processRuntimeEvent(
+        event,
+        JSON.stringify([
+          PROVIDER_RUNTIME_CHECKPOINT_REACTOR_ID,
+          PROVIDER_RUNTIME_INBOX_OPERATION_VERSION,
+          record.sequence,
+          'runtime-event',
+          0,
+        ]),
+      ).pipe(
+        Effect.as({
+          stateVersion: 1,
+          stateJson: RUNTIME_CHECKPOINT_BUFFER_JSON,
+          sessionBufferTerminal: event.type === 'session.exited',
+        }),
+        Effect.mapError((cause) =>
+          isCheckpointRuntimeConsumerError(cause)
+            ? cause
+            : new CheckpointRuntimeConsumerError({
+                detail: `Checkpoint runtime processing failed for event '${event.eventId}'.`,
+                cause,
+              }),
+        ),
+      ),
+    classify: () => 'retryable',
+  }
 
   const definition: DurableReactorDefinition = {
     reactorId: REACTOR_ID,
@@ -1737,7 +2681,11 @@ const make = Effect.gen(function* ()
               break
             }
           }
-          yield* ensurePreTurnBaselineFromDomainTurnStart(event, payload.targetCheckpointRef)
+          yield* ensurePreTurnBaselineFromDomainTurnStart(
+            event,
+            payload.targetCheckpointRef,
+            action.actionId,
+          )
           break
         case 'checkpoint.placeholder.capture':
           if (
@@ -1825,10 +2773,36 @@ const make = Effect.gen(function* ()
       }
       return 'retryable'
     },
+    onBlocked: ({ action, cause, status }) =>
+    {
+      if (action.effectKind !== 'checkpoint.revert') return Effect.void
+      return checkpointRevertOperations.getRequestedBySourceSequence(action.sourceSequence).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (operation) =>
+              abortRequestedOperation(
+                operation,
+                `Checkpoint revert action became ${status} before admission: ${errorDetail(cause)}`,
+                action.actionId,
+              ),
+          }),
+        ),
+        Effect.mapError(
+          (hookCause) =>
+            new ReactorDeliveryError({
+              operation: 'CheckpointReactor.onBlocked:abortRequested',
+              cause: hookCause,
+            }),
+        ),
+      )
+    },
     onLeaseExpiry: 'retryable',
   }
 
-  const start: CheckpointReactorShape['start'] = Effect.fn('CheckpointReactor.start')(function* ()
+  const startRuntimeLane: CheckpointReactorShape['startRuntimeLane'] = Effect.fn(
+    'CheckpointReactor.startRuntimeLane',
+  )(function* ()
   {
     const startedAt = yield* nowIso
     // an install that predates this reactor's journal has no progress row, and
@@ -1864,11 +2838,34 @@ const make = Effect.gen(function* ()
       })
     }
 
+    yield* runtimeInboxRunner.start(runtimeDefinition)
+  })
+
+  const startDomain: CheckpointReactorShape['startDomain'] = Effect.fn(
+    'CheckpointReactor.startDomain',
+  )(function* ()
+  {
+    // the checkpoint inbox lane and provider admission handoff must be ready
+    // before a persisted destructive journal can publish a terminal event.
+    // resume journals before the domain runner to avoid a duplicate action
+    // racing the same row.
     const resumableReverts = yield* checkpointRevertOperations.listResumable()
     yield* Effect.forEach(
       resumableReverts,
       (operation) =>
       {
+        if (operation.phase === 'requested')
+        {
+          return resumeRequestedRevert(operation).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ReactorDeliveryError({
+                  operation: 'CheckpointReactor.startDomain:resumeRequested',
+                  cause,
+                }),
+            ),
+          )
+        }
         if (operation.manualRequired)
         {
           return Effect.void
@@ -1897,22 +2894,21 @@ const make = Effect.gen(function* ()
       { discard: true },
     )
     yield* durableRunner.start(definition)
+  })
 
-    yield* Effect.forkScoped(
-      Stream.runForEach(providerService.streamEvents, (event) =>
-      {
-        if (event.type !== 'turn.started' && event.type !== 'turn.completed')
-        {
-          return Effect.void
-        }
-        return runtimeWorker.enqueue(event)
-      }),
-    )
+  const start: CheckpointReactorShape['start'] = Effect.fn('CheckpointReactor.start')(function* ()
+  {
+    yield* startRuntimeLane()
+    yield* startDomain()
   })
 
   return {
+    startRuntimeLane,
+    startDomain,
     start,
-    drain: runtimeWorker.drain.pipe(Effect.andThen(durableRunner.drain(REACTOR_ID))),
+    drain: runtimeInboxRunner
+      .drain(PROVIDER_RUNTIME_CHECKPOINT_REACTOR_ID)
+      .pipe(Effect.andThen(durableRunner.drain(REACTOR_ID))),
   } satisfies CheckpointReactorShape
 })
 

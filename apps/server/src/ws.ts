@@ -6,6 +6,7 @@ import * as Crypto from 'effect/Crypto'
 import * as DateTime from 'effect/DateTime'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
@@ -18,11 +19,16 @@ import {
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
   CommandId,
+  type DiffAnalysisError,
+  type DiffAnalysisOwner,
+  type DiffAnalysisSource,
   type ClientOrchestrationCommand,
   EventId,
+  GitCommandError,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
-  CartographerEmbedError,
+  type OrchestrateRunExecution,
+  CartographerError,
   RelayClientInstallFailedError,
   type RelayClientStatus,
   ServerSelfUpdateError,
@@ -31,29 +37,39 @@ import {
   type TerminalError,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  type VcsRemoveWorktreeInput,
   WS_METHODS,
   WsRpcGroup,
 } from '@t3tools/contracts'
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from 'effect/unstable/http'
-import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 import { RpcSerialization, RpcServer } from 'effect/unstable/rpc'
 
+import * as CheckpointIdentity from './checkpointing/CheckpointIdentity.ts'
 import * as CheckpointDiffQuery from './orchestration/Services/CheckpointDiffQuery.ts'
 import * as ServerConfig from './config.ts'
 import * as Keybindings from './keybindings.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import * as OrchestrationEngine from './orchestration/Services/OrchestrationEngine.ts'
 import * as ProjectionSnapshotQuery from './orchestration/Services/ProjectionSnapshotQuery.ts'
-import { OrchestrationProjectionPipeline } from './orchestration/Services/ProjectionPipeline.ts'
-import { ImportReplacementIntentRepository } from './persistence/Services/ImportReplacementIntents.ts'
+import {
+  restoreOrchestrateRunWorktreeAvailability,
+  retireOrchestrateRunWorktreeAvailability,
+  verifyOrchestrateRunWorktreePresent,
+} from './orchestration/runExecutionAvailability.ts'
 import { AttachmentLifecycleRepository } from './persistence/Services/AttachmentLifecycle.ts'
 import {
   OrchestrationCommandInvariantError,
   OrchestrationCommandPreviouslyRejectedError,
 } from './orchestration/Errors.ts'
-import * as ImportContinuation from './import/continuation/continuationContract.ts'
+import * as ImportDiscovery from './import/discovery/discovery.ts'
+import * as ImportService from './import/importService.ts'
 import * as WorkspaceMdxDocument from './mdx/WorkspaceMdxDocument.ts'
-import * as CartographerEmbedBroker from './cartographer/CartographerEmbedBroker.ts'
+import * as ArchitectureQueryService from './cartographer/ArchitectureQueryService.ts'
+import * as ArchitectureProjectionService from './cartographer/ArchitectureProjectionService.ts'
+import * as CurrentWorktreeArchitectureService from './cartographer/CurrentWorktreeArchitectureService.ts'
+import * as DiffAnalysisService from './cartographer/DiffAnalysisService.ts'
+import * as ProjectAtlasStatusBroadcaster from './cartographer/ProjectAtlasStatusBroadcaster.ts'
+import * as ProjectArchitectureLifecycleService from './cartographer/ProjectArchitectureLifecycleService.ts'
 import * as ProposalGenerationService from './proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from './proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from './proposal/ProposalService.ts'
@@ -61,7 +77,10 @@ import { dispatchWithAttachmentLifecycle } from './orchestration/dispatchWithAtt
 import { makeProposalRpcHandlers } from './ws/handlers/proposalHandlers.ts'
 import { makePreviewRpcHandlers } from './ws/handlers/previewHandlers.ts'
 import { makeOrchestrationRpcHandlers } from './ws/handlers/orchestrationHandlers.ts'
-import { makeVcsRpcHandlers } from './ws/handlers/vcsHandlers.ts'
+import {
+  makeVcsRpcHandlers,
+  resolveCanonicalRunExecutionWorktreePermitPath,
+} from './ws/handlers/vcsHandlers.ts'
 import { makeWorkspaceRpcHandlers } from './ws/handlers/workspaceHandlers.ts'
 import { makeRpcAuthorization, toAuthAccessStreamEvent } from './ws/rpcAuthorization.ts'
 import * as ProviderRegistry from './provider/Services/ProviderRegistry.ts'
@@ -76,7 +95,6 @@ import { issueAssetUrl } from './assets/AssetAccess.ts'
 import * as PortScanner from './preview/PortScanner.ts'
 import * as WorkspaceEntries from './workspace/WorkspaceEntries.ts'
 import * as WorkspaceFileSystem from './workspace/WorkspaceFileSystem.ts'
-import * as WorkspacePaths from './workspace/WorkspacePaths.ts'
 import * as VcsStatusBroadcaster from './vcs/VcsStatusBroadcaster.ts'
 import * as VcsProvisioningService from './vcs/VcsProvisioningService.ts'
 import * as GitWorkflowService from './git/GitWorkflowService.ts'
@@ -95,28 +113,6 @@ import * as SourceControlRepositoryService from './sourceControl/SourceControlRe
 import * as PairingGrantStore from './auth/PairingGrantStore.ts'
 import * as SessionStore from './auth/SessionStore.ts'
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from './auth/http.ts'
-
-// prefer a continuation implementation provided by the server layer graph
-// (see server.ts providing ImportContinuationLive onto the ws route layer);
-// harness graphs without one fall back to an inert bind so imports still work
-const ImportContinuationFromContext = Layer.effect(
-  ImportContinuation.ImportContinuationDeps,
-  Effect.serviceOption(ImportContinuation.ImportContinuationDeps).pipe(
-    Effect.map(
-      Option.getOrElse(() =>
-        ImportContinuation.ImportContinuationDeps.of({
-          bind: (request) =>
-            Effect.succeed({
-              state: 'history-only',
-              providerInstanceId: request.providerInstanceId,
-              continuationIdentity: null,
-              reason: 'continuation module not wired',
-            }),
-        }),
-      ),
-    ),
-  ),
-)
 
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError)
 const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
@@ -144,6 +140,15 @@ const RELAY_CLIENT_UNAVAILABLE_STATUS = {
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 const EDITOR_DISCOVERY_TIMEOUT = Duration.seconds(5)
+
+const DIFF_ANALYSIS_NOT_FOUND_MASKED_CODES = new Set<DiffAnalysisError['code']>([
+  'invalid-source',
+  'thread-not-found',
+  'repository-out-of-scope',
+])
+
+const isDiffAnalysisNotFoundError = (error: DiffAnalysisError): boolean =>
+  DIFF_ANALYSIS_NOT_FOUND_MASKED_CODES.has(error.code)
 
 export const resolveAvailableEditorsForConfig = <A, E, R>(
   discovery: Effect.Effect<ReadonlyArray<A>, E, R>,
@@ -193,19 +198,18 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker['Service'],
-  cartographerEmbedBroker: CartographerEmbedBroker.CartographerEmbedBroker['Service'],
-  authenticatedOrigin: string | undefined,
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* ()
     {
       const currentSessionId = currentSession.sessionId
       const crypto = yield* Crypto.Crypto
+      const fileSystem = yield* FileSystem.FileSystem
+      const checkpointIdentity = yield* CheckpointIdentity.CheckpointIdentityResolver
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery
-      const projectionPipeline = yield* OrchestrationProjectionPipeline
-      const importReplacementIntents = yield* ImportReplacementIntentRepository
+      const importDiscovery = yield* ImportDiscovery.ImportDiscovery
+      const importService = yield* ImportService.ImportService
       const attachmentLifecycle = yield* AttachmentLifecycleRepository
-      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery
       const keybindings = yield* Keybindings.Keybindings
@@ -223,16 +227,20 @@ const makeWsRpcLayer = (
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents
       const serverSettings = yield* ServerSettings.ServerSettingsService
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup
-      const workspacePaths = yield* WorkspacePaths.WorkspacePaths
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem
       const path = yield* Path.Path
       const proposalService = yield* ProposalService.ProposalService
       const proposalGenerationService = yield* ProposalGenerationService.ProposalGenerationService
+      const diffAnalysisService = yield* DiffAnalysisService.DiffAnalysisService
+      const architectureQueryService = yield* ArchitectureQueryService.ArchitectureQueryService
+      const architectureProjectionService =
+        yield* ArchitectureProjectionService.ArchitectureProjectionService
       const proposalImplementationAttemptService =
         yield* ProposalImplementationAttemptService.ProposalImplementationAttemptService
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment
+      const serverEnvironmentId = yield* serverEnvironment.getEnvironmentId
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth
       const sourceControlDiscovery = yield* SourceControlDiscovery.SourceControlDiscovery
       const automaticGitFetchInterval = serverSettings.getSettings.pipe(
@@ -251,6 +259,46 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor
       const workerBrokerStore = yield* WorkerBrokerStore.WorkerBrokerStore
       const workersStatusBroadcaster = yield* WorkersStatusBroadcaster.WorkersStatusBroadcaster
+      const projectAtlasStatusBroadcaster =
+        yield* ProjectAtlasStatusBroadcaster.ProjectAtlasStatusBroadcaster
+      const projectArchitectureLifecycle =
+        yield* ProjectArchitectureLifecycleService.ProjectArchitectureLifecycleService
+      const currentWorktreeArchitecture =
+        yield* CurrentWorktreeArchitectureService.CurrentWorktreeArchitectureService
+      const diffAnalysisNotFound = () =>
+        new CartographerError({
+          failure: 'diff_analysis_not_found' as const,
+          message: 'A ready diff analysis was not found for this owner.',
+        })
+      const resolveDiffOwnerWorkspace = (owner: DiffAnalysisOwner, source?: DiffAnalysisSource) =>
+        Effect.gen(function* ()
+        {
+          if ('threadId' in owner)
+          {
+            const thread = yield* projectionSnapshotQuery
+              .getThreadShellById(owner.threadId)
+              .pipe(Effect.mapError(diffAnalysisNotFound))
+            if (Option.isNone(thread)) return yield* diffAnalysisNotFound()
+            const project = yield* projectionSnapshotQuery
+              .getProjectShellById(thread.value.projectId)
+              .pipe(Effect.mapError(diffAnalysisNotFound))
+            if (Option.isNone(project)) return yield* diffAnalysisNotFound()
+            if (
+              (source === undefined || source.sourceKind === 'commit-pair') &&
+              thread.value.orchestrateRunExecution !== undefined &&
+              thread.value.orchestrateRunExecution !== null
+            )
+            {
+              return thread.value.orchestrateRunExecution.repositoryRoot
+            }
+            return thread.value.worktreePath ?? project.value.workspaceRoot
+          }
+          const project = yield* projectionSnapshotQuery
+            .getProjectShellById(owner.projectId)
+            .pipe(Effect.mapError(diffAnalysisNotFound))
+          if (Option.isNone(project)) return yield* diffAnalysisNotFound()
+          return project.value.workspaceRoot
+        })
       const { observeRpcEffect, observeRpcStream, observeRpcStreamEffect } =
         makeRpcAuthorization(currentSession)
       const workspaceRpcHandlers = makeWorkspaceRpcHandlers({
@@ -515,6 +563,9 @@ const makeWsRpcLayer = (
                 modelSelection: bootstrap.createThread.modelSelection,
                 runtimeMode: bootstrap.createThread.runtimeMode,
                 interactionMode: bootstrap.createThread.interactionMode,
+                ...(bootstrap.createThread.orchestrate !== undefined
+                  ? { orchestrate: bootstrap.createThread.orchestrate }
+                  : {}),
                 branch: bootstrap.createThread.branch,
                 worktreePath: bootstrap.createThread.worktreePath,
                 createdAt: bootstrap.createThread.createdAt,
@@ -525,7 +576,14 @@ const makeWsRpcLayer = (
             if (bootstrap?.prepareWorktree)
             {
               let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch
-              if (bootstrap.prepareWorktree.startFromOrigin)
+              // startFromOrigin is a stored preference, so local-only repos fall back to the base branch
+              const startFromOrigin =
+                bootstrap.prepareWorktree.startFromOrigin === true &&
+                (yield* gitWorkflow.remoteExists({
+                  cwd: bootstrap.prepareWorktree.projectCwd,
+                  remoteName: 'origin',
+                }))
+              if (startFromOrigin)
               {
                 yield* gitWorkflow.fetchRemote({
                   cwd: bootstrap.prepareWorktree.projectCwd,
@@ -670,32 +728,87 @@ const makeWsRpcLayer = (
         vcsStatusBroadcaster
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid)
+      const runExecutionAvailabilityError = (cwd: string, cause: unknown) =>
+        new GitCommandError({
+          operation: 'vcs.removeWorktree.updateOrchestrateRunAvailability',
+          command: 'orchestration',
+          cwd,
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        })
+      const resolveRunExecutionWorktreePermitPath = (input: VcsRemoveWorktreeInput) =>
+        resolveCanonicalRunExecutionWorktreePermitPath(input, { fileSystem, path }).pipe(
+          Effect.map((canonicalPath) => path.normalize(canonicalPath)),
+          Effect.mapError((cause) => runExecutionAvailabilityError(input.cwd, cause)),
+        )
+      const retireRunExecutionWorktreeAvailability = (input: VcsRemoveWorktreeInput) =>
+        Effect.gen(function* ()
+        {
+          const worktreePath = path.normalize(
+            path.isAbsolute(input.path) ? input.path : path.resolve(input.cwd, input.path),
+          )
+          const createdAt = DateTime.formatIso(yield* DateTime.now)
+          return yield* retireOrchestrateRunWorktreeAvailability({
+            worktreePath,
+            createdAt,
+            checkpointIdentity,
+            orchestrationEngine,
+            projectionSnapshotQuery,
+            makeCommandId: () => serverCommandId('orchestrate-run-worktree-retire'),
+          })
+        }).pipe(Effect.mapError((cause) => runExecutionAvailabilityError(input.cwd, cause)))
+      const restoreRunExecutionWorktreeAvailability = (
+        executions: ReadonlyArray<OrchestrateRunExecution>,
+      ) =>
+        Effect.gen(function* ()
+        {
+          const createdAt = DateTime.formatIso(yield* DateTime.now)
+          yield* restoreOrchestrateRunWorktreeAvailability({
+            executions,
+            createdAt,
+            orchestrationEngine,
+            makeCommandId: () => serverCommandId('orchestrate-run-worktree-restore'),
+          })
+        }).pipe(
+          Effect.mapError((cause) =>
+            runExecutionAvailabilityError(executions[0]?.integrationRoot ?? config.cwd, cause),
+          ),
+        )
+      const verifyRunExecutionWorktreePresent = (
+        input: VcsRemoveWorktreeInput,
+        executions: ReadonlyArray<OrchestrateRunExecution>,
+      ) =>
+        verifyOrchestrateRunWorktreePresent({
+          worktreePath: path.normalize(
+            path.isAbsolute(input.path) ? input.path : path.resolve(input.cwd, input.path),
+          ),
+          executions,
+          checkpointIdentity,
+        })
       const vcsRpcHandlers = makeVcsRpcHandlers({
         gitWorkflow,
         vcsProvisioning,
         vcsStatusBroadcaster,
         automaticGitFetchInterval,
         refreshGitStatus,
+        retireRunExecutionWorktreeAvailability,
+        restoreRunExecutionWorktreeAvailability,
+        verifyRunExecutionWorktreePresent,
+        resolveRunExecutionWorktreePermitPath,
         observeRpcEffect,
         observeRpcStream,
       })
 
       const orchestrationRpcHandlers = makeOrchestrationRpcHandlers({
         checkpointDiffQuery,
-        childProcessSpawner,
         config,
-        importReplacementIntents,
-        importContinuationFromContext: ImportContinuationFromContext,
+        importDiscovery,
+        importService,
         orchestrationEngine,
-        path,
-        projectionPipeline,
         projectionSnapshotQuery,
-        providerRegistry,
         serverSettings,
-        terminalManager,
-        workspacePaths,
+        startup,
         dispatchNormalizedCommand,
-        nowIso,
         prevalidateImportContinuationProvider,
         toDispatchCommandError,
         observeRpcEffect,
@@ -819,9 +932,9 @@ const makeWsRpcLayer = (
         [WS_METHODS.workersReadiness]: (_input) =>
           observeRpcEffect(
             WS_METHODS.workersReadiness,
-            workerBrokerStore
-              .list({})
-              .pipe(Effect.flatMap((snapshot) => readWorkersReadiness(snapshot.stateDir))),
+            // jobsDir is <stateDir>/jobs, so the readiness probe can derive the
+            // state dir instead of rescanning every job record to read a constant
+            readWorkersReadiness(path.dirname(workerBrokerStore.jobsDir)),
             { 'rpc.aggregate': 'workers' },
           ),
         [WS_METHODS.workersListRuns]: (input) =>
@@ -883,85 +996,201 @@ const makeWsRpcLayer = (
           ),
         ...workspaceRpcHandlers,
         ...proposalRpcHandlers,
-        [WS_METHODS.cartographerIssueEmbed]: (input) =>
+        [WS_METHODS.cartographerEnsureProjectArchitecture]: (input) =>
           observeRpcEffect(
-            WS_METHODS.cartographerIssueEmbed,
+            WS_METHODS.cartographerEnsureProjectArchitecture,
             Effect.gen(function* ()
             {
-              if (authenticatedOrigin === undefined || input.parentOrigin !== authenticatedOrigin)
-              {
-                return yield* new CartographerEmbedError({
-                  failure: 'start_failed',
-                  message:
-                    'The Cartographer parent origin does not match the authenticated client.',
-                })
-              }
               const contextNotFound = () =>
-                new CartographerEmbedError({
+                new CartographerError({
                   failure: 'workspace_context_not_found' as const,
-                  message: 'The Cartographer workspace context was not found.',
+                  message: 'The project architecture workspace was not found.',
+                })
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(input.projectId)
+                .pipe(Effect.mapError(contextNotFound))
+              if (Option.isNone(project)) return yield* contextNotFound()
+              const snapshot = yield* projectArchitectureLifecycle.ensureProject({
+                projectId: input.projectId,
+                workspaceRoot: project.value.workspaceRoot,
+              })
+              return {
+                kind: 'standing-project-generation' as const,
+                projectId: input.projectId,
+                generationId: snapshot.generation,
+                side: 'analyzed' as const,
+                graphDigest: snapshot.graphDigest,
+              }
+            }),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerPrepareCurrentWorktreeArchitecture]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerPrepareCurrentWorktreeArchitecture,
+            Effect.gen(function* ()
+            {
+              const contextNotFound = () =>
+                new CartographerError({
+                  failure: 'workspace_context_not_found' as const,
+                  message: 'The current worktree architecture workspace was not found.',
                 })
               const thread = yield* projectionSnapshotQuery
                 .getThreadShellById(input.threadId)
                 .pipe(Effect.mapError(contextNotFound))
-              if (Option.isNone(thread))
-              {
-                return yield* contextNotFound()
-              }
+              if (Option.isNone(thread)) return yield* contextNotFound()
               const project = yield* projectionSnapshotQuery
                 .getProjectShellById(thread.value.projectId)
                 .pipe(Effect.mapError(contextNotFound))
-              if (Option.isNone(project))
-              {
-                return yield* contextNotFound()
-              }
-              const generationTarget =
-                input.generationId === undefined
-                  ? null
-                  : yield* proposalGenerationService.resolveEmbedTarget(
-                      input.threadId,
-                      input.generationId,
-                    )
-              const workspaceRoot =
-                generationTarget === null
-                  ? (thread.value.worktreePath ?? project.value.workspaceRoot)
-                  : generationTarget.proposedRoot
-              return yield* cartographerEmbedBroker.issue({
+              if (Option.isNone(project)) return yield* contextNotFound()
+              yield* currentWorktreeArchitecture.prepare({
                 threadId: input.threadId,
-                ...(generationTarget === null
-                  ? {}
-                  : {
-                      generationId: generationTarget.generation.generationId,
-                      baseGraphPath: generationTarget.baseGraphPath,
-                      proposedGraphPath: generationTarget.proposedGraphPath,
-                      impactPath: generationTarget.impactPath,
-                    }),
-                workspaceRoot,
-                parentOrigin: authenticatedOrigin,
-                theme: input.theme,
+                workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot,
               })
             }),
             { 'rpc.aggregate': 'cartographer' },
           ),
-        [WS_METHODS.cartographerCloseEmbed]: (input) =>
+        [WS_METHODS.cartographerRebuildProjectAtlas]: (input) =>
           observeRpcEffect(
-            WS_METHODS.cartographerCloseEmbed,
+            WS_METHODS.cartographerRebuildProjectAtlas,
             Effect.gen(function* ()
             {
               const contextNotFound = () =>
-                new CartographerEmbedError({
+                new CartographerError({
                   failure: 'workspace_context_not_found' as const,
-                  message: 'The Cartographer workspace context was not found.',
+                  message: 'The Project Atlas workspace context was not found.',
                 })
-              const thread = yield* projectionSnapshotQuery
-                .getThreadShellById(input.threadId)
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(input.projectId)
                 .pipe(Effect.mapError(contextNotFound))
-              if (Option.isNone(thread))
-              {
-                return yield* contextNotFound()
-              }
-              yield* cartographerEmbedBroker.releaseSession(input.threadId, input.sessionId)
+              if (Option.isNone(project)) return yield* contextNotFound()
+              yield* projectArchitectureLifecycle.rebuildProject({
+                projectId: input.projectId,
+                workspaceRoot: project.value.workspaceRoot,
+              })
             }),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerRequestDiffAnalysis]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerRequestDiffAnalysis,
+            Effect.gen(function* ()
+            {
+              const workspaceRoot = yield* resolveDiffOwnerWorkspace(input.owner, input.source)
+              if (
+                input.source.sourceKind === 'checkpoint' &&
+                (!('threadId' in input.owner) || input.owner.threadId !== input.source.threadId)
+              )
+              {
+                return yield* diffAnalysisNotFound()
+              }
+              return yield* diffAnalysisService
+                .request({ source: input.source, workspaceRoot })
+                .pipe(
+                  Effect.catchIf(isDiffAnalysisNotFoundError, () =>
+                    Effect.fail(diffAnalysisNotFound()),
+                  ),
+                )
+            }),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerGetDiffAnalysis]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerGetDiffAnalysis,
+            Effect.gen(function* ()
+            {
+              const workspaceRoot = yield* resolveDiffOwnerWorkspace(input.owner, input.source)
+              if (
+                input.source.sourceKind === 'checkpoint' &&
+                (!('threadId' in input.owner) || input.owner.threadId !== input.source.threadId)
+              )
+              {
+                return yield* diffAnalysisNotFound()
+              }
+              return yield* diffAnalysisService
+                .get({
+                  source: input.source,
+                  workspaceRoot,
+                  ...(input.diffAnalysisId === undefined
+                    ? {}
+                    : { diffAnalysisId: input.diffAnalysisId }),
+                })
+                .pipe(
+                  Effect.catchIf(isDiffAnalysisNotFoundError, () =>
+                    Effect.fail(diffAnalysisNotFound()),
+                  ),
+                )
+            }),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerGetArchitectureImpact]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerGetArchitectureImpact,
+            architectureQueryService.architectureImpact(
+              {
+                environmentId: serverEnvironmentId,
+                threadId: input.threadId,
+              },
+              { comparison: input.comparison },
+            ),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerGetRepositoryMap]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerGetRepositoryMap,
+            architectureProjectionService.repositoryMap(
+              { environmentId: serverEnvironmentId, threadId: input.threadId },
+              input,
+            ),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerGetArchitectureScope]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerGetArchitectureScope,
+            architectureProjectionService.architectureScope(
+              { environmentId: serverEnvironmentId, threadId: input.threadId },
+              input,
+            ),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerGetArchitectureNeighborhood]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerGetArchitectureNeighborhood,
+            architectureProjectionService.architectureNeighborhood(
+              { environmentId: serverEnvironmentId, threadId: input.threadId },
+              input,
+            ),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.cartographerGetArchitectureSource]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerGetArchitectureSource,
+            architectureProjectionService.architectureSource(
+              { environmentId: serverEnvironmentId, threadId: input.threadId },
+              input,
+            ),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
+        [WS_METHODS.subscribeProjectAtlasStatus]: (input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeProjectAtlasStatus,
+            Stream.unwrap(
+              Effect.gen(function* ()
+              {
+                const contextNotFound = () =>
+                  new CartographerError({
+                    failure: 'workspace_context_not_found' as const,
+                    message: 'The Project Atlas workspace context was not found.',
+                  })
+                const project = yield* projectionSnapshotQuery
+                  .getProjectShellById(input.projectId)
+                  .pipe(Effect.mapError(contextNotFound))
+                if (Option.isNone(project)) return yield* contextNotFound()
+                return projectAtlasStatusBroadcaster.streamStatus(input.projectId, {
+                  retain: projectArchitectureLifecycle.retainProjectStatus(input.projectId),
+                  release: projectArchitectureLifecycle.releaseProjectStatus(input.projectId),
+                })
+              }),
+            ),
             { 'rpc.aggregate': 'cartographer' },
           ),
         ...vcsRpcHandlers,
@@ -1160,7 +1389,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* ()
   {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker
-    const cartographerEmbedBroker = yield* CartographerEmbedBroker.CartographerEmbedBroker
     return HttpRouter.add(
       'GET',
       '/ws',
@@ -1181,12 +1409,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(
-              session,
-              previewAutomationBroker,
-              cartographerEmbedBroker,
-              request.headers.origin,
-            ).pipe(
+            makeWsRpcLayer(session, previewAutomationBroker).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
             ),

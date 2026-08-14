@@ -12,7 +12,11 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from './baseSchemas.ts'
-import { OrchestrationProposedPlanId } from './orchestration.ts'
+import {
+  OrchestratePlanRevision,
+  OrchestratePlanRunId,
+  OrchestrationProposedPlanId,
+} from './orchestration.ts'
 import { ProviderInstanceId } from './providerInstance.ts'
 import { ProjectReadMdxDocumentResult } from './mdx.ts'
 
@@ -111,9 +115,16 @@ export const ProposalChangeInput = Schema.Union([
 ])
 export type ProposalChangeInput = typeof ProposalChangeInput.Type
 
+export const ProposalOrchestratePlanTarget = Schema.Struct({
+  runId: OrchestratePlanRunId,
+  revision: OrchestratePlanRevision.fields.revision,
+})
+export type ProposalOrchestratePlanTarget = typeof ProposalOrchestratePlanTarget.Type
+
 export const ProposalPreviewUpsertInput = Schema.Struct({
   proposalId: Schema.optionalKey(ProposalId),
   changes: ProposalTypedChangeInput,
+  orchestratePlan: Schema.optionalKey(ProposalOrchestratePlanTarget),
   narrativeMdx: Schema.optionalKey(
     Schema.String.check(Schema.isMaxLength(PROPOSAL_MAX_NARRATIVE_MDX_BYTES)),
   ),
@@ -307,6 +318,31 @@ export const ProposalPlanLookupResult = Schema.Struct({
   revision: ProposalRevision,
 })
 export type ProposalPlanLookupResult = typeof ProposalPlanLookupResult.Type
+
+export const ProposalOrchestratePlanLink = Schema.Struct({
+  proposalId: ProposalId,
+  proposalRevision: PositiveInt,
+  sourceThreadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  revision: OrchestratePlanRevision.fields.revision,
+  createdAt: IsoDateTime,
+})
+export type ProposalOrchestratePlanLink = typeof ProposalOrchestratePlanLink.Type
+
+export const ProposalOrchestratePlanLookupInput = Schema.Struct({
+  sourceThreadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  revision: OrchestratePlanRevision.fields.revision,
+})
+export type ProposalOrchestratePlanLookupInput = typeof ProposalOrchestratePlanLookupInput.Type
+
+export const ProposalOrchestratePlanLookupResult = Schema.Struct({
+  link: ProposalOrchestratePlanLink,
+  proposal: Proposal,
+  revision: ProposalRevision,
+  orchestratePlan: OrchestratePlanRevision,
+})
+export type ProposalOrchestratePlanLookupResult = typeof ProposalOrchestratePlanLookupResult.Type
 
 export const ProposalFailureCode = Schema.Literals([
   'not-git-repository',

@@ -9,7 +9,11 @@ import * as Fiber from 'effect/Fiber'
 import * as Metric from 'effect/Metric'
 import * as TestClock from 'effect/testing/TestClock'
 
-import { withMetrics } from '../../../../apps/server/src/observability/Metrics.ts'
+import {
+  architectureAutoAnalysisActionDuration,
+  architectureAutoAnalysisActionsTotal,
+  withMetrics,
+} from '../../../../apps/server/src/observability/Metrics.ts'
 
 const hasMetricSnapshot = (
   snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
@@ -106,7 +110,6 @@ describe('withMetrics', () =>
           }),
         }),
       )
-
       const snapshots = yield* Metric.snapshot
       assert.equal(
         hasMetricSnapshot(snapshots, 'with_metrics_lazy_total', {
@@ -156,6 +159,60 @@ describe('withMetrics', () =>
 
       assert.equal(snapshot?.state.count, 1)
       assert.equal(snapshot?.state.sum, 1.5)
+    }),
+  )
+
+  it.effect('records bounded automatic architecture analysis results and generic outcomes', () =>
+    Effect.gen(function* ()
+    {
+      let actionResult = 'failure'
+      yield* Effect.sync(() =>
+      {
+        actionResult = 'checkpoint-ref-missing'
+      }).pipe(
+        withMetrics({
+          counter: architectureAutoAnalysisActionsTotal,
+          timer: architectureAutoAnalysisActionDuration,
+          attributes: () => ({ actionResult }),
+        }),
+      )
+      actionResult = 'failure'
+      yield* Effect.fail('transient').pipe(
+        withMetrics({
+          counter: architectureAutoAnalysisActionsTotal,
+          timer: architectureAutoAnalysisActionDuration,
+          attributes: () => ({ actionResult }),
+        }),
+        Effect.exit,
+      )
+
+      const snapshots = yield* Metric.snapshot
+      assert.equal(
+        hasMetricSnapshot(snapshots, 't3_architecture_auto_analysis_actions_total', {
+          actionResult: 'checkpoint-ref-missing',
+          outcome: 'success',
+        }),
+        true,
+      )
+      assert.equal(
+        hasMetricSnapshot(snapshots, 't3_architecture_auto_analysis_actions_total', {
+          actionResult: 'failure',
+          outcome: 'failure',
+        }),
+        true,
+      )
+      assert.equal(
+        hasMetricSnapshot(snapshots, 't3_architecture_auto_analysis_action_duration', {
+          actionResult: 'checkpoint-ref-missing',
+        }),
+        true,
+      )
+      assert.equal(
+        hasMetricSnapshot(snapshots, 't3_architecture_auto_analysis_action_duration', {
+          actionResult: 'failure',
+        }),
+        true,
+      )
     }),
   )
 })

@@ -47,6 +47,12 @@ export const ProjectionTurn = Schema.Struct({
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
   checkpointFiles: Schema.Array(OrchestrationCheckpointFile),
+  // required-but-nullable so the compiler forces every full row literal to carry
+  // it forward; a turn update that dropped it would erase the only record of
+  // which tree the snapshot came from
+  checkpointCaptureRoot: Schema.NullOr(Schema.String),
+  checkpointRepositoryCommonDir: Schema.NullOr(Schema.String),
+  checkpointCommitOid: Schema.NullOr(Schema.String),
 })
 export type ProjectionTurn = typeof ProjectionTurn.Type
 
@@ -65,6 +71,12 @@ export const ProjectionTurnById = Schema.Struct({
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
   checkpointFiles: Schema.Array(OrchestrationCheckpointFile),
+  // required-but-nullable so the compiler forces every full row literal to carry
+  // it forward; a turn update that dropped it would erase the only record of
+  // which tree the snapshot came from
+  checkpointCaptureRoot: Schema.NullOr(Schema.String),
+  checkpointRepositoryCommonDir: Schema.NullOr(Schema.String),
+  checkpointCommitOid: Schema.NullOr(Schema.String),
 })
 export type ProjectionTurnById = typeof ProjectionTurnById.Type
 

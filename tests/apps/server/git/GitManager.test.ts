@@ -8,6 +8,7 @@ import * as NodeChildProcess from 'node:child_process'
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
+import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -966,6 +967,95 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
       expect(ghCalls.filter((call) => call.startsWith('pr list '))).toHaveLength(1)
     }),
   )
+
+  it.effect('status finds PRs for a branch pushed through a direct remote URL', () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const remoteDir = yield* createBareRemote()
+      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+      yield* runGit(repoDir, ['push', '-u', 'origin', 'main'])
+      yield* runGit(repoDir, ['checkout', '-b', 'feature/direct-url-push'])
+      yield* runGit(repoDir, ['push', remoteDir, 'HEAD:refs/heads/feature/direct-url-push'])
+      const remoteTrackingRefs = yield* runGit(repoDir, [
+        'for-each-ref',
+        '--format=%(refname)',
+        'refs/remotes/origin/feature/direct-url-push',
+      ])
+      expect(remoteTrackingRefs.stdout.trim()).toBe('')
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 215,
+                title: 'Pushed through a direct URL',
+                url: 'https://github.com/pingdotgg/t3code/pull/215',
+                baseRefName: 'main',
+                headRefName: 'feature/direct-url-push',
+                state: 'OPEN',
+                updatedAt: '2026-08-12T22:00:00Z',
+              },
+            ]),
+          ],
+        },
+      })
+
+      const status = yield* manager.status({ cwd: repoDir })
+
+      expect(status.refName).toBe('feature/direct-url-push')
+      expect(status.pr?.number).toBe(215)
+      expect(ghCalls.filter((call) => call.startsWith('pr list ')).length).toBeGreaterThan(0)
+    }),
+  )
+
+  it.effect('status still looks up PRs for a branch pushed without an upstream', () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const remoteDir = yield* createBareRemote()
+      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+      yield* runGit(repoDir, ['push', '-u', 'origin', 'main'])
+      yield* runGit(repoDir, ['checkout', '-b', 'feature/pushed-no-upstream'])
+      yield* runGit(repoDir, ['push', 'origin', 'feature/pushed-no-upstream'])
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 214,
+                title: 'Pushed without upstream',
+                url: 'https://github.com/pingdotgg/t3code/pull/214',
+                baseRefName: 'main',
+                headRefName: 'feature/pushed-no-upstream',
+                state: 'OPEN',
+                updatedAt: '2026-04-01T15:00:00Z',
+              },
+            ]),
+          ],
+        },
+      })
+
+      const status = yield* manager.status({ cwd: repoDir })
+
+      expect(status.pr?.number).toBe(214)
+      expect(ghCalls.filter((call) => call.startsWith('pr list ')).length).toBeGreaterThan(0)
+    }),
+  )
+
+  it('backs off repeated PR lookup failures past the healthy refresh cadence', () =>
+  {
+    expect(Duration.toMillis(GitManager.prLookupFailureTtl(1))).toBe(20_000)
+    expect(Duration.toMillis(GitManager.prLookupFailureTtl(2))).toBe(40_000)
+    expect(Duration.toMillis(GitManager.prLookupFailureTtl(4))).toBeGreaterThan(120_000)
+    expect(Duration.toMillis(GitManager.prLookupFailureTtl(20))).toBe(900_000)
+  })
 
   it.effect(
     'status ignores unrelated fork PRs when the current branch tracks the same repository',

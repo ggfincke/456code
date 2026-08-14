@@ -1,7 +1,8 @@
 // apps/server/src/httpCors.ts
-// expose browser api cors allowed methods
+// defines browser API CORS policy constants
 
 export const browserApiCorsAllowedMethods = ['GET', 'POST', 'OPTIONS'] as const
+export const browserApiDesktopRendererOrigins = ['code456://app', 'code456-dev://app'] as const
 export const browserApiCorsAllowedHeaders = [
   'authorization',
   'b3',

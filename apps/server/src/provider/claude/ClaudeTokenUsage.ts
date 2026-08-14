@@ -4,6 +4,7 @@
 import type {
   ModelSelection,
   TaskUsageSnapshot,
+  ThreadCompactionSummary,
   ThreadTokenUsageSnapshot,
 } from '@t3tools/contracts'
 
@@ -218,6 +219,39 @@ export function compactBoundaryTokenUsageSnapshot(
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
   })
+}
+
+// the same compact_metadata blob, read for the numbers a work-log row can show. kept separate
+// from the usage snapshot above because that one is typed as ThreadTokenUsageSnapshot & feeds
+// the context meter. only scalars are lifted out: the live blob also carries
+// pre_compact_discovered_tools and the preserved_segment / preserved_messages uuid arrays, which
+// must never end up projected into an activity row
+export function compactBoundaryMetadata(
+  message: Readonly<Record<string, unknown>>,
+): ThreadCompactionSummary | undefined
+{
+  const metadata = message.compact_metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))
+  {
+    return undefined
+  }
+
+  const compactMetadata = metadata as Record<string, unknown>
+  const trigger = compactMetadata.trigger
+  if (trigger !== 'manual' && trigger !== 'auto')
+  {
+    return undefined
+  }
+
+  const preTokens = finiteNonNegativeInteger(compactMetadata.pre_tokens)
+  const postTokens = finiteNonNegativeInteger(compactMetadata.post_tokens)
+  const durationMs = finiteNonNegativeInteger(compactMetadata.duration_ms)
+  return {
+    trigger,
+    ...(preTokens !== undefined ? { preTokens } : {}),
+    ...(postTokens !== undefined ? { postTokens } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  }
 }
 
 export function normalizeClaudeTaskProgressTokenUsage(

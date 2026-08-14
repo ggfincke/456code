@@ -1,5 +1,5 @@
 // packages/shared/src/composerTrigger.ts
-// define composer trigger kind
+// defines composer trigger parsing and serialization helpers
 
 export type ComposerTriggerKind = 'path' | 'slash-command' | 'slash-model' | 'skill'
 export type ComposerSlashCommand = 'model' | 'plan' | 'orchestrate' | 'default'
@@ -13,6 +13,32 @@ export interface ComposerTrigger
 }
 
 const SIMPLE_MENTION_PATH_REGEX = /^[^\s@"\\]+$/
+const BARE_PROVIDER_SLASH_COMMAND_REGEX = /^\/([a-z0-9][\w-]*)(?:[ \t]+[^\r\n]*)?$/i
+
+export function parseBareProviderSlashCommand(text: string): string | null
+{
+  const match = BARE_PROVIDER_SLASH_COMMAND_REGEX.exec(text.trim())
+  return match?.[1] ?? null
+}
+
+export function isBareProviderSlashCommand(text: string): boolean
+{
+  return parseBareProviderSlashCommand(text) !== null
+}
+
+export function isBareKnownProviderSlashCommand(
+  text: string,
+  slashCommands: ReadonlyArray<{ readonly name: string }>,
+): boolean
+{
+  const command = parseBareProviderSlashCommand(text)
+  if (command === null)
+  {
+    return false
+  }
+  const normalizedCommand = command.toLowerCase()
+  return slashCommands.some((candidate) => candidate.name.toLowerCase() === normalizedCommand)
+}
 
 export function serializeComposerMentionPath(path: string): string
 {

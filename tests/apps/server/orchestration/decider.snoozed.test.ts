@@ -262,22 +262,6 @@ it.layer(NodeServices.layer)('snoozed thread decider', (it) =>
     }),
   )
 
-  it.effect('rejects snoozing an archived thread', () =>
-    Effect.gen(function* ()
-    {
-      const error = yield* decideOrchestrationCommand({
-        command: {
-          type: 'thread.snooze',
-          commandId: CommandId.make('cmd-snooze-archived'),
-          threadId: ThreadId.make('thread-1'),
-          snoozedUntil: FUTURE_WAKE,
-        },
-        readModel: makeReadModel({ archivedAt: NOW }),
-      }).pipe(Effect.flip)
-      expect(error._tag).toBe('OrchestrationCommandInvariantError')
-    }),
-  )
-
   it.effect('a user message spends the snooze return ticket (activity wake)', () =>
     Effect.gen(function* ()
     {

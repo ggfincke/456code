@@ -671,63 +671,64 @@ describe('ImportDiscovery', () =>
     }),
   )
 
-  it.effect(
-    'shares one process-wide scan gate across service instances and releases on interrupt',
-    () =>
-      Effect.scoped(
-        Effect.gen(function* ()
-        {
-          const homePath = yield* Effect.promise(() => temporaryHome())
-          const cursorId = ProviderInstanceId.make('cursor_overlap')
-          const firstScanStarted = yield* Deferred.make<void>()
-          let scanCallCount = 0
-          const deps = defaultDeps({
-            scanAcpSource: () =>
-              Effect.suspend(() =>
-              {
-                scanCallCount += 1
-                return scanCallCount === 1
-                  ? Deferred.succeed(firstScanStarted, undefined).pipe(Effect.andThen(Effect.never))
-                  : Effect.succeed([])
-              }),
-          })
-          const firstDiscovery = yield* make.pipe(Effect.provideService(ImportDiscoveryDeps, deps))
-          const secondDiscovery = yield* make.pipe(Effect.provideService(ImportDiscoveryDeps, deps))
-          const settings = isolatedImportSettings({
-            [cursorId]: {
-              driver: CURSOR,
-              enabled: true,
-              config: {},
-            },
-          })
-          const scanOptions = {
-            environment: { HOME: homePath, PATH: DISCOVERY_PATH },
-            homePath,
-            cwd: homePath,
-          }
-
-          const firstFiber = yield* firstDiscovery
-            .scan(settings, scanOptions)
-            .pipe(Effect.forkScoped)
-          yield* Deferred.await(firstScanStarted)
-          const overlappingResult = yield* secondDiscovery.scan(settings, scanOptions)
-
-          expect(overlappingResult.candidates).toEqual([])
-          expect(overlappingResult.truncated).toBe(true)
-          expect(overlappingResult.errors).toEqual([
+  it.effect('serializes scans per service scope and isolates independent service scopes', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const homePath = yield* Effect.promise(() => temporaryHome())
+        const cursorId = ProviderInstanceId.make('cursor_overlap')
+        const firstScanStarted = yield* Deferred.make<void>()
+        let scanCallCount = 0
+        const deps = defaultDeps({
+          scanAcpSource: () =>
+            Effect.suspend(() =>
             {
-              sourcePath: null,
-              message: 'scan skipped because another import scan is already in progress',
-            },
-          ])
-          expect(scanCallCount).toBe(1)
+              scanCallCount += 1
+              return scanCallCount === 1
+                ? Deferred.succeed(firstScanStarted, undefined).pipe(Effect.andThen(Effect.never))
+                : Effect.succeed([])
+            }),
+        })
+        const firstDiscovery = yield* make.pipe(Effect.provideService(ImportDiscoveryDeps, deps))
+        const secondDiscovery = yield* make.pipe(Effect.provideService(ImportDiscoveryDeps, deps))
+        const settings = isolatedImportSettings({
+          [cursorId]: {
+            driver: CURSOR,
+            enabled: true,
+            config: {},
+          },
+        })
+        const scanOptions = {
+          environment: { HOME: homePath, PATH: DISCOVERY_PATH },
+          homePath,
+          cwd: homePath,
+        }
 
-          yield* Fiber.interrupt(firstFiber)
-          const resultAfterInterrupt = yield* secondDiscovery.scan(settings, scanOptions)
-          expect(resultAfterInterrupt.truncated).toBe(false)
-          expect(resultAfterInterrupt.errors).toEqual([])
-          expect(scanCallCount).toBe(2)
-        }),
-      ),
+        const firstFiber = yield* firstDiscovery.scan(settings, scanOptions).pipe(Effect.forkScoped)
+        yield* Deferred.await(firstScanStarted)
+        const overlappingResult = yield* firstDiscovery.scan(settings, scanOptions)
+
+        expect(overlappingResult.candidates).toEqual([])
+        expect(overlappingResult.truncated).toBe(true)
+        expect(overlappingResult.errors).toEqual([
+          {
+            sourcePath: null,
+            message: 'scan skipped because another import scan is already in progress',
+          },
+        ])
+        expect(scanCallCount).toBe(1)
+
+        const independentResult = yield* secondDiscovery.scan(settings, scanOptions)
+        expect(independentResult.truncated).toBe(false)
+        expect(independentResult.errors).toEqual([])
+        expect(scanCallCount).toBe(2)
+
+        yield* Fiber.interrupt(firstFiber)
+        const resultAfterInterrupt = yield* firstDiscovery.scan(settings, scanOptions)
+        expect(resultAfterInterrupt.truncated).toBe(false)
+        expect(resultAfterInterrupt.errors).toEqual([])
+        expect(scanCallCount).toBe(3)
+      }),
+    ),
   )
 })

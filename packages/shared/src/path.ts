@@ -30,7 +30,8 @@ export function isExplicitRelativePath(value: string): boolean
 
 function isRootPath(value: string): boolean
 {
-  return value === '/' || value === '\\' || /^[a-zA-Z]:[/\\]?$/.test(value)
+  // let bare drive input flow through canonicalization so C:, C:\\, and C:/ compare equally
+  return value === '/' || value === '\\' || /^[a-zA-Z]:[/\\]$/.test(value)
 }
 
 function trimTrailingPathSeparators(value: string): string

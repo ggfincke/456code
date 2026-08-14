@@ -5,6 +5,8 @@
 // transitions for thread-scoped terminals.
 //
 // @module TerminalManager
+import * as NodeCrypto from 'node:crypto'
+
 import {
   DEFAULT_TERMINAL_ID,
   TerminalCwdError,
@@ -17,6 +19,7 @@ import {
   TerminalResizeError,
   TerminalSessionLookupError,
   TerminalWriteError,
+  ThreadId,
   type TerminalAttachInput,
   type TerminalAttachStreamEvent,
   type TerminalClearInput,
@@ -59,6 +62,8 @@ import {
 import * as ProcessRunner from '../process/processRunner.ts'
 import * as PortScanner from '../preview/PortScanner.ts'
 import * as PtyAdapter from './PtyAdapter.ts'
+import { ProjectionSnapshotQuery } from '../orchestration/Services/ProjectionSnapshotQuery.ts'
+import { ThreadArchiveLifecyclePermit } from '../orchestration/Services/ThreadArchiveLifecyclePermit.ts'
 
 import {
   defaultShellResolver,
@@ -180,6 +185,17 @@ export class TerminalManager extends Context.Service<
     // when `terminalId` is omitted, closes all sessions for the thread.
     readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>
 
+    // capture current immutable terminal lifecycles while holding the thread lock.
+    readonly captureLifecycleIdentities: (input: {
+      readonly threadId: string
+    }) => Effect.Effect<ReadonlyArray<TerminalLifecycleIdentity>>
+
+    // close only when the captured lifecycle is still the current session for
+    // this thread/terminal id. history is retained.
+    readonly closeIfExact: (
+      identity: TerminalLifecycleIdentity,
+    ) => Effect.Effect<boolean, TerminalError>
+
     // subscribe to terminal runtime events with a direct callback.
     //
     // returns an unsubscribe function.
@@ -229,6 +245,14 @@ export interface TerminalStartInput extends TerminalOpenInput
   rows: number
 }
 
+export interface TerminalLifecycleIdentity
+{
+  readonly threadId: string
+  readonly terminalId: string
+  readonly lifecycleId: string
+  readonly startedAt: string
+}
+
 export interface TerminalSessionState
 {
   threadId: string
@@ -247,6 +271,8 @@ export interface TerminalSessionState
   updatedAt: string
   eventSequence: number
   lifecycleGeneration: number
+  lifecycleId: string | null
+  lifecycleStartedAt: string | null
   cols: number
   rows: number
   process: PtyAdapter.PtyProcess | null
@@ -742,6 +768,8 @@ interface TerminalManagerOptions
   subprocessPollIntervalMs?: number
   processKillGraceMs?: number
   maxRetainedInactiveSessions?: number
+  threadArchiveLifecyclePermit: ThreadArchiveLifecyclePermit['Service']
+  isThreadActive: (threadId: ThreadId) => Effect.Effect<boolean>
   registerTerminalProcesses?: (input: {
     readonly threadId: string
     readonly terminalId: string
@@ -758,11 +786,18 @@ export const make = Effect.fn('TerminalManager.make')(function* ()
   const { terminalLogsDir } = yield* ServerConfig.ServerConfig
   const ptyAdapter = yield* PtyAdapter.PtyAdapter
   const portDiscovery = yield* PortScanner.PortDiscovery
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
+  const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
   return yield* makeWithOptions({
     logsDir: terminalLogsDir,
     ptyAdapter,
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
+    threadArchiveLifecyclePermit,
+    isThreadActive: (threadId) =>
+      projectionSnapshotQuery
+        .getThreadShellById(threadId)
+        .pipe(Effect.map(Option.isSome), Effect.orDie),
   })
 })
 
@@ -793,6 +828,15 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
     options.maxRetainedInactiveSessions ?? DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS
   const registerTerminalProcesses = options.registerTerminalProcesses ?? (() => Effect.void)
   const unregisterTerminal = options.unregisterTerminal ?? (() => Effect.void)
+
+  const assertThreadActive = (threadId: string, terminalId: string) =>
+    options.isThreadActive(ThreadId.make(threadId)).pipe(
+      Effect.filterOrFail(
+        (active) => active,
+        () => new TerminalSessionLookupError({ threadId, terminalId }),
+      ),
+      Effect.asVoid,
+    )
 
   yield* fileSystem.makeDirectory(logsDir, { recursive: true }).pipe(Effect.orDie)
 
@@ -1549,6 +1593,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
     })
 
     const startingAt = yield* nowIso
+    const lifecycleId = NodeCrypto.randomUUID()
     yield* modifyManagerState((state) =>
     {
       session.status = 'starting'
@@ -1564,6 +1609,8 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
       session.pendingProcessEventIndex = 0
       session.processEventDrainRunning = false
       session.lifecycleGeneration += 1
+      session.lifecycleId = lifecycleId
+      session.lifecycleStartedAt = startingAt
       session.updatedAt = startingAt
       return [undefined, state] as const
     })
@@ -1893,6 +1940,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
     const existing = yield* getSession(input.threadId, terminalId)
     if (Option.isNone(existing))
     {
+      yield* assertThreadActive(input.threadId, terminalId)
       yield* flushPersist(input.threadId, terminalId)
       const history = yield* readHistory(input.threadId, terminalId)
       const cols = input.cols ?? DEFAULT_OPEN_COLS
@@ -1914,6 +1962,8 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
         updatedAt: yield* nowIso,
         eventSequence: 0,
         lifecycleGeneration: 0,
+        lifecycleId: null,
+        lifecycleStartedAt: null,
         cols,
         rows,
         process: null,
@@ -1989,6 +2039,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
 
     if (!liveSession.process)
     {
+      yield* assertThreadActive(input.threadId, terminalId)
       yield* startSession(
         liveSession,
         {
@@ -2017,61 +2068,67 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
   })
 
   const open: TerminalManager['Service']['open'] = (input) =>
-    withThreadLock(input.threadId, openLocked(input))
+    options.threadArchiveLifecyclePermit.withPermit(
+      ThreadId.make(input.threadId),
+      withThreadLock(input.threadId, openLocked(input)),
+    )
 
   const openOrAttachForStream = (input: TerminalAttachInput) =>
-    withThreadLock(
-      input.threadId,
-      Effect.gen(function* ()
-      {
-        const terminalId = input.terminalId
-        const existing = yield* getSession(input.threadId, terminalId)
-
-        if (Option.isNone(existing))
+    options.threadArchiveLifecyclePermit.withPermit(
+      ThreadId.make(input.threadId),
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* ()
         {
-          if (!input.cwd)
+          const terminalId = input.terminalId
+          const existing = yield* getSession(input.threadId, terminalId)
+
+          if (Option.isNone(existing))
           {
-            return yield* new TerminalSessionLookupError({
-              threadId: input.threadId,
+            if (!input.cwd)
+            {
+              return yield* new TerminalSessionLookupError({
+                threadId: input.threadId,
+                terminalId,
+              })
+            }
+
+            return yield* openLocked({
+              ...input,
               terminalId,
+              cwd: input.cwd,
             })
           }
 
-          return yield* openLocked({
-            ...input,
-            terminalId,
-            cwd: input.cwd,
-          })
-        }
+          const session = existing.value
+          const targetCols = input.cols ?? session.cols
+          const targetRows = input.rows ?? session.rows
 
-        const session = existing.value
-        const targetCols = input.cols ?? session.cols
-        const targetRows = input.rows ?? session.rows
+          if (!session.process && input.cwd && input.restartIfNotRunning === true)
+          {
+            return yield* openLocked({
+              ...input,
+              terminalId,
+              cwd: input.cwd,
+            })
+          }
 
-        if (!session.process && input.cwd && input.restartIfNotRunning === true)
-        {
-          return yield* openLocked({
-            ...input,
-            terminalId,
-            cwd: input.cwd,
-          })
-        }
+          if (
+            session.process &&
+            session.status === 'running' &&
+            (session.cols !== targetCols || session.rows !== targetRows)
+          )
+          {
+            const process = session.process
+            yield* resizePtyProcess(session, process, targetCols, targetRows)
+            session.cols = targetCols
+            session.rows = targetRows
+            session.updatedAt = yield* nowIso
+          }
 
-        if (
-          session.process &&
-          session.status === 'running' &&
-          (session.cols !== targetCols || session.rows !== targetRows)
-        )
-        {
-          const process = session.process
-          yield* resizePtyProcess(session, process, targetCols, targetRows)
-          session.cols = targetCols
-          session.rows = targetRows
-          session.updatedAt = yield* nowIso
-        }
-
-        return snapshot(session)
-      }),
+          return snapshot(session)
+        }),
+      ),
     )
 
   const readAllTerminalMetadata = () =>
@@ -2337,89 +2394,95 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
     )
 
   const restart: TerminalManager['Service']['restart'] = (input) =>
-    withThreadLock(
-      input.threadId,
-      Effect.gen(function* ()
-      {
-        yield* increment(terminalRestartsTotal, { scope: 'thread' })
-        const terminalId = input.terminalId
-        yield* assertValidCwd(input.cwd)
-
-        const sessionKey = toSessionKey(input.threadId, terminalId)
-        const existingSession = yield* getSession(input.threadId, terminalId)
-        let session: TerminalSessionState
-        if (Option.isNone(existingSession))
+    options.threadArchiveLifecyclePermit.withPermit(
+      ThreadId.make(input.threadId),
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* ()
         {
-          const cols = input.cols ?? DEFAULT_OPEN_COLS
-          const rows = input.rows ?? DEFAULT_OPEN_ROWS
-          session = {
-            threadId: input.threadId,
-            terminalId,
-            cwd: input.cwd,
-            worktreePath: input.worktreePath ?? null,
-            status: 'starting',
-            pid: null,
-            history: '',
-            pendingHistoryControlSequence: '',
-            pendingProcessEvents: [],
-            pendingProcessEventIndex: 0,
-            processEventDrainRunning: false,
-            exitCode: null,
-            exitSignal: null,
-            updatedAt: yield* nowIso,
-            eventSequence: 0,
-            lifecycleGeneration: 0,
-            cols,
-            rows,
-            process: null,
-            unsubscribeData: null,
-            unsubscribeExit: null,
-            hasRunningSubprocess: false,
-            childCommandLabel: null,
-            runtimeEnv: normalizedRuntimeEnv(input.env),
+          yield* assertThreadActive(input.threadId, input.terminalId)
+          yield* increment(terminalRestartsTotal, { scope: 'thread' })
+          const terminalId = input.terminalId
+          yield* assertValidCwd(input.cwd)
+
+          const sessionKey = toSessionKey(input.threadId, terminalId)
+          const existingSession = yield* getSession(input.threadId, terminalId)
+          let session: TerminalSessionState
+          if (Option.isNone(existingSession))
+          {
+            const cols = input.cols ?? DEFAULT_OPEN_COLS
+            const rows = input.rows ?? DEFAULT_OPEN_ROWS
+            session = {
+              threadId: input.threadId,
+              terminalId,
+              cwd: input.cwd,
+              worktreePath: input.worktreePath ?? null,
+              status: 'starting',
+              pid: null,
+              history: '',
+              pendingHistoryControlSequence: '',
+              pendingProcessEvents: [],
+              pendingProcessEventIndex: 0,
+              processEventDrainRunning: false,
+              exitCode: null,
+              exitSignal: null,
+              updatedAt: yield* nowIso,
+              eventSequence: 0,
+              lifecycleGeneration: 0,
+              lifecycleId: null,
+              lifecycleStartedAt: null,
+              cols,
+              rows,
+              process: null,
+              unsubscribeData: null,
+              unsubscribeExit: null,
+              hasRunningSubprocess: false,
+              childCommandLabel: null,
+              runtimeEnv: normalizedRuntimeEnv(input.env),
+            }
+            const createdSession = session
+            yield* modifyManagerState((state) =>
+            {
+              const sessions = new Map(state.sessions)
+              sessions.set(sessionKey, createdSession)
+              return [undefined, { ...state, sessions }] as const
+            })
+            yield* evictInactiveSessionsIfNeeded()
           }
-          const createdSession = session
-          yield* modifyManagerState((state) =>
+          else
           {
-            const sessions = new Map(state.sessions)
-            sessions.set(sessionKey, createdSession)
-            return [undefined, { ...state, sessions }] as const
-          })
-          yield* evictInactiveSessionsIfNeeded()
-        }
-        else
-        {
-          session = existingSession.value
-          yield* stopProcess(session)
-          session.cwd = input.cwd
-          session.worktreePath = input.worktreePath ?? null
-          session.runtimeEnv = normalizedRuntimeEnv(input.env)
-        }
+            session = existingSession.value
+            yield* stopProcess(session)
+            session.cwd = input.cwd
+            session.worktreePath = input.worktreePath ?? null
+            session.runtimeEnv = normalizedRuntimeEnv(input.env)
+          }
 
-        const cols = input.cols ?? session.cols
-        const rows = input.rows ?? session.rows
+          const cols = input.cols ?? session.cols
+          const rows = input.rows ?? session.rows
 
-        session.history = ''
-        session.pendingHistoryControlSequence = ''
-        session.pendingProcessEvents = []
-        session.pendingProcessEventIndex = 0
-        session.processEventDrainRunning = false
-        yield* persistHistory(input.threadId, terminalId, session.history)
-        yield* startSession(
-          session,
-          {
-            threadId: input.threadId,
-            terminalId,
-            cwd: input.cwd,
-            ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
-            cols,
-            rows,
-            ...(input.env ? { env: input.env } : {}),
-          },
-          'restarted',
-        )
-        return snapshot(session)
-      }),
+          session.history = ''
+          session.pendingHistoryControlSequence = ''
+          session.pendingProcessEvents = []
+          session.pendingProcessEventIndex = 0
+          session.processEventDrainRunning = false
+          yield* persistHistory(input.threadId, terminalId, session.history)
+          yield* startSession(
+            session,
+            {
+              threadId: input.threadId,
+              terminalId,
+              cwd: input.cwd,
+              ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+              cols,
+              rows,
+              ...(input.env ? { env: input.env } : {}),
+            },
+            'restarted',
+          )
+          return snapshot(session)
+        }),
+      ),
     )
 
   const close: TerminalManager['Service']['close'] = (input) =>
@@ -2447,6 +2510,55 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
       }),
     )
 
+  const captureLifecycleIdentities: TerminalManager['Service']['captureLifecycleIdentities'] = (
+    input,
+  ) =>
+    withThreadLock(
+      input.threadId,
+      sessionsForThread(input.threadId).pipe(
+        Effect.map((sessions) =>
+          sessions
+            .flatMap((session): ReadonlyArray<TerminalLifecycleIdentity> =>
+              session.lifecycleId !== null && session.lifecycleStartedAt !== null
+                ? [
+                    {
+                      threadId: session.threadId,
+                      terminalId: session.terminalId,
+                      lifecycleId: session.lifecycleId,
+                      startedAt: session.lifecycleStartedAt,
+                    },
+                  ]
+                : [],
+            )
+            .toSorted(
+              (left, right) =>
+                left.terminalId.localeCompare(right.terminalId) ||
+                left.lifecycleId.localeCompare(right.lifecycleId),
+            ),
+        ),
+      ),
+    )
+
+  const closeIfExact: TerminalManager['Service']['closeIfExact'] = (identity) =>
+    withThreadLock(
+      identity.threadId,
+      Effect.gen(function* ()
+      {
+        const current = yield* getSession(identity.threadId, identity.terminalId)
+        if (
+          Option.isNone(current) ||
+          current.value.lifecycleId !== identity.lifecycleId ||
+          current.value.lifecycleStartedAt !== identity.startedAt
+        )
+        {
+          return false
+        }
+
+        yield* closeSession(identity.threadId, identity.terminalId, false)
+        return true
+      }),
+    )
+
   return TerminalManager.of({
     open,
     attachStream,
@@ -2455,6 +2567,8 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
     clear,
     restart,
     close,
+    captureLifecycleIdentities,
+    closeIfExact,
     subscribe,
     subscribeMetadata,
   })

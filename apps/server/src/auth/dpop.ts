@@ -13,7 +13,7 @@ import {
   ServerAuthDpopReplayStateRecordError,
   ServerAuthInvalidCredentialError,
   type ServerAuthInternalError,
-} from './EnvironmentAuth.ts'
+} from './EnvironmentAuthErrors.ts'
 import * as ServerSecretStore from './ServerSecretStore.ts'
 
 const DPOP_PROOF_MAX_AGE_SECONDS = 300

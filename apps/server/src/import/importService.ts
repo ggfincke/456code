@@ -90,7 +90,24 @@ export const ACP_IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000
 export const IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000
 const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
 const encodeUnknownJsonStringSync = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
-const importTransactionMutex = Semaphore.makeUnsafe(1)
+
+export interface ImportRequestContext
+{
+  readonly fallbackModelSelection: ModelSelection
+  readonly sourceDescriptors: ReadonlyArray<ImportFileSourceDescriptor>
+  readonly resolveImportTarget: (
+    driver: ProviderDriverKind,
+    requestedInstanceId: ProviderInstanceId | null,
+    compatibleInstanceIds: ReadonlyArray<ProviderInstanceId>,
+  ) => Effect.Effect<ResolvedImportTarget | null, Error>
+  readonly loadAcpSessionsBatch: (input: {
+    readonly source: 'cursor' | 'grok'
+    readonly sourcePaths: ReadonlyArray<string>
+    readonly providerInstanceId: ProviderInstanceId
+    readonly maximumBytes: number
+    readonly wireUsage: AcpImportWireUsage
+  }) => Effect.Effect<ReadonlyArray<AcpImportBatchLoadResult>>
+}
 
 export interface ImportServiceDepsShape
 {
@@ -106,7 +123,7 @@ export interface ImportServiceDepsShape
   ) => Effect.Effect<ProjectIdType | null, Error>
   readonly isImportFinalized: (threadId: ThreadIdType) => Effect.Effect<boolean, Error>
   readonly normalizeWorkspaceRoot: (path: string) => Effect.Effect<string, Error>
-  readonly resolveImportWorkspaceRoot?: (input: {
+  readonly resolveImportWorkspaceRoot: (input: {
     readonly recordedWorkspaceRoot: string | null
     readonly existingWorkspaceRoot?: string
     readonly originalWorkspaceRoot?: string
@@ -117,14 +134,9 @@ export interface ImportServiceDepsShape
     },
     Error
   >
-  readonly resolveImportTarget: (
-    driver: ProviderDriverKind,
-    requestedInstanceId: ProviderInstanceId | null,
-    compatibleInstanceIds: ReadonlyArray<ProviderInstanceId>,
-  ) => Effect.Effect<ResolvedImportTarget | null, Error>
   readonly threadExistsInShell: (threadId: ThreadIdType) => Effect.Effect<boolean, Error>
-  readonly replacementIntents?: ImportReplacementIntentRepositoryShape
-  readonly verifyReplacementThread?: (input: {
+  readonly replacementIntents: ImportReplacementIntentRepositoryShape
+  readonly verifyReplacementThread: (input: {
     readonly replacementThreadId: ThreadIdType
     readonly replacementProjectId: ProjectIdType
     readonly source: ImportSource
@@ -137,14 +149,14 @@ export interface ImportServiceDepsShape
     readonly expectedActivityCount: number
     readonly expectedRecordFingerprint: string
   }) => Effect.Effect<ImportReplacementThreadEvidence | null, Error>
-  readonly verifyReplacementAttachments?: (input: {
+  readonly verifyReplacementAttachments: (input: {
     readonly replacementThreadId: ThreadIdType
     readonly expectedRelativePaths: ReadonlyArray<string>
   }) => Effect.Effect<{ readonly complete: boolean }, Error>
-  readonly cleanupDeletedThreadAttachments?: (
+  readonly cleanupDeletedThreadAttachments: (
     sourceThreadId: ThreadIdType,
   ) => Effect.Effect<{ readonly complete: boolean }, Error>
-  readonly verifyReplacementIndex?: (input: {
+  readonly verifyReplacementIndex: (input: {
     readonly replacementThreadId: ThreadIdType
     readonly sourceThreadId: ThreadIdType
   }) => Effect.Effect<
@@ -154,18 +166,12 @@ export interface ImportServiceDepsShape
     },
     Error
   >
-  readonly fallbackModelSelection: ModelSelection
   readonly maximumRequestBytes?: number
   readonly maximumRequestRecords?: number
   readonly requestDeadlineMs?: number
-  readonly sourceDescriptors: ReadonlyArray<ImportFileSourceDescriptor>
-  readonly loadAcpSessionsBatch: (input: {
-    readonly source: 'cursor' | 'grok'
-    readonly sourcePaths: ReadonlyArray<string>
-    readonly providerInstanceId: ProviderInstanceId
-    readonly maximumBytes: number
-    readonly wireUsage: AcpImportWireUsage
-  }) => Effect.Effect<ReadonlyArray<AcpImportBatchLoadResult>>
+  readonly loadRequestContext: (
+    request: ImportSessionsRequest,
+  ) => Effect.Effect<ImportRequestContext, Error>
 }
 
 export interface ResolvedImportTarget
@@ -206,10 +212,86 @@ export class ImportServiceDeps extends Context.Service<ImportServiceDeps, Import
 export class ImportService extends Context.Service<
   ImportService,
   {
-    readonly importSessions: (request: ImportSessionsRequest) => Effect.Effect<ImportSessionsResult>
+    readonly importSessions: (
+      request: ImportSessionsRequest,
+    ) => Effect.Effect<ImportSessionsResult, Error>
+    readonly inspectOpenReplacementIntents: Effect.Effect<ImportReplacementRecoveryReport, Error>
+    readonly recoverOpenReplacementIntents: Effect.Effect<ImportReplacementRecoveryReport, Error>
   }
 >()('456code/import/importService')
 {}
+
+export type ImportReplacementRecoveryDisposition =
+  'awaiting-source-retry' | 'manual' | 'recovered' | 'blocked'
+
+export interface ImportReplacementRecoveryItem
+{
+  readonly intentKey: string
+  readonly phase: ImportReplacementIntent['phase']
+  readonly disposition: ImportReplacementRecoveryDisposition
+  readonly detail: string
+}
+
+export interface ImportReplacementRecoveryReport
+{
+  readonly openIntentCount: number
+  readonly recoveredCount: number
+  readonly awaitingSourceRetryCount: number
+  readonly manualCount: number
+  readonly blockedCount: number
+  readonly items: ReadonlyArray<ImportReplacementRecoveryItem>
+}
+
+function makeImportReplacementRecoveryReport(
+  items: ReadonlyArray<ImportReplacementRecoveryItem>,
+): ImportReplacementRecoveryReport
+{
+  return {
+    openIntentCount: items.length,
+    recoveredCount: items.filter((item) => item.disposition === 'recovered').length,
+    awaitingSourceRetryCount: items.filter((item) => item.disposition === 'awaiting-source-retry')
+      .length,
+    manualCount: items.filter((item) => item.disposition === 'manual').length,
+    blockedCount: items.filter((item) => item.disposition === 'blocked').length,
+    items,
+  }
+}
+
+function inventoryReplacementIntent(
+  intent: ImportReplacementIntent,
+): ImportReplacementRecoveryItem
+{
+  if (
+    intent.phase === 'manual' ||
+    intent.replacementVersion !== ACTIVE_IMPORT_REPLACEMENT_VERSION
+  )
+  {
+    return {
+      intentKey: intent.intentKey,
+      phase: intent.phase,
+      disposition: 'manual',
+      detail:
+        intent.phase === 'manual'
+          ? (intent.lastError ?? 'manual recovery is required')
+          : `unsupported replacement version '${intent.replacementVersion}'`,
+    }
+  }
+  if (intent.phase === 'intent' || intent.phase === 'creating' || intent.phase === 'importing')
+  {
+    return {
+      intentKey: intent.intentKey,
+      phase: intent.phase,
+      disposition: 'awaiting-source-retry',
+      detail: `phase '${intent.phase}' requires the source transcript and must be resumed explicitly`,
+    }
+  }
+  return {
+    intentKey: intent.intentKey,
+    phase: intent.phase,
+    disposition: 'blocked',
+    detail: `phase '${intent.phase}' is eligible for source-independent startup recovery`,
+  }
+}
 
 function errorMessage(error: unknown): string
 {
@@ -491,58 +573,7 @@ export const make = Effect.gen(function* ()
 {
   const deps = yield* ImportServiceDeps
   const continuation = yield* ImportContinuationDeps
-  const replacementIntents =
-    deps.replacementIntents ??
-    ({
-      getByIntentKey: () => Effect.succeed(Option.none()),
-      findOpenBySourceIdentity: () => Effect.succeed(Option.none()),
-      insertIfAbsent: () =>
-        Effect.die(new Error('Import replacement intent repository is unavailable')),
-      casTransition: () => Effect.succeed(false),
-      listOpen: () => Effect.succeed([]),
-      retire: () => Effect.succeed(false),
-    } satisfies ImportReplacementIntentRepositoryShape)
-  const verifyReplacementThread = deps.verifyReplacementThread ?? (() => Effect.succeed(null))
-  const verifyReplacementAttachments =
-    deps.verifyReplacementAttachments ?? (() => Effect.succeed({ complete: false }))
-  const cleanupDeletedThreadAttachments =
-    deps.cleanupDeletedThreadAttachments ?? (() => Effect.succeed({ complete: false }))
-  const verifyReplacementIndex =
-    deps.verifyReplacementIndex ??
-    (() => Effect.succeed({ replacementVisible: false, sourceVisible: true }))
-  const canResolveUnrecordedWorkspace = deps.resolveImportWorkspaceRoot !== undefined
-  const resolveImportWorkspaceRoot: NonNullable<
-    ImportServiceDepsShape['resolveImportWorkspaceRoot']
-  > =
-    deps.resolveImportWorkspaceRoot ??
-    Effect.fn('ImportService.resolveImportWorkspaceRoot')(function* (input)
-    {
-      if (input.recordedWorkspaceRoot === null)
-      {
-        return yield* new ImportSessionOperationError({
-          operation: 'persist',
-          sourcePath: '<unrecorded-workspace>',
-          cause: 'The imported session has no workspace root to resolve',
-        })
-      }
-      if (input.originalWorkspaceRoot !== undefined && input.existingWorkspaceRoot === undefined)
-      {
-        return yield* new ImportSessionOperationError({
-          operation: 'persist',
-          sourcePath: input.recordedWorkspaceRoot,
-          cause: 'The imported thread is missing its selected workspace root',
-        })
-      }
-      const workspaceRoot = yield* deps.normalizeWorkspaceRoot(
-        input.existingWorkspaceRoot ?? input.recordedWorkspaceRoot,
-      )
-      return {
-        workspaceRoot,
-        ...(input.originalWorkspaceRoot === undefined
-          ? {}
-          : { originalWorkspaceRoot: input.originalWorkspaceRoot }),
-      }
-    })
+  const importTransactionMutex = yield* Semaphore.make(1)
 
   const importSessionsUnlocked = Effect.fn('ImportService.importSessionsUnlocked')(function* (
     request: ImportSessionsRequest,
@@ -553,6 +584,7 @@ export const make = Effect.gen(function* ()
     },
   )
   {
+    const requestContext = yield* deps.loadRequestContext(request)
     const importedThreadsBySourceAndHash = new Map<string, ImportedThreadMatch>()
     const importedThreadsByNativeSession = new Map<string, ImportedThreadMatch>()
     const configuredRequestMaximum = deps.maximumRequestBytes ?? IMPORT_RPC_MAX_BYTES
@@ -723,7 +755,7 @@ export const make = Effect.gen(function* ()
           }
           const wireBytesBeforeLoad = acpWireUsage.consumedBytes
           let wireReservationError: ImportResourceLimitError | null = null
-          const loadedResults = yield* deps
+          const loadedResults = yield* requestContext
             .loadAcpSessionsBatch({
               ...group,
               maximumBytes: remainingBytes,
@@ -885,7 +917,7 @@ export const make = Effect.gen(function* ()
           // the same configured-source catalog powers discovery and import;
           // canonical resolution also rejects symlink escapes and non-files
           const trustedSource = yield* resolveImportSourcePath(
-            deps.sourceDescriptors,
+            requestContext.sourceDescriptors,
             source,
             item.sourcePath,
           )
@@ -936,7 +968,7 @@ export const make = Effect.gen(function* ()
             {
               session.meta.title =
                 codexSessionTitleForSource(
-                  deps.sourceDescriptors,
+                  requestContext.sourceDescriptors,
                   sourceFile.canonicalPath,
                   session.meta.nativeSessionId,
                 ) ?? session.meta.title
@@ -1000,7 +1032,7 @@ export const make = Effect.gen(function* ()
         }
 
         const driver = driverFor(item.source)
-        const proposedTarget = yield* deps.resolveImportTarget(
+        const proposedTarget = yield* requestContext.resolveImportTarget(
           driver,
           item.providerInstanceId,
           loaded.providerInstanceIds,
@@ -1017,7 +1049,7 @@ export const make = Effect.gen(function* ()
         const importSeed = [item.source, session.meta.sourcePath, contentHash].join('\u0000')
         const modelSelection =
           resolvedTarget === null
-            ? deps.fallbackModelSelection
+            ? requestContext.fallbackModelSelection
             : session.meta.model !== null &&
                 resolvedTarget.availableModels.includes(session.meta.model)
               ? {
@@ -1045,12 +1077,14 @@ export const make = Effect.gen(function* ()
             : [item.source, originProviderInstanceId ?? 'none', session.meta.nativeSessionId].join(
                 '\u0000',
               )
-        const openReplacementIntentOption = yield* replacementIntents.findOpenBySourceIdentity({
-          source: item.source,
-          sourcePath: session.meta.sourcePath,
-          nativeSessionId: session.meta.nativeSessionId,
-          providerInstanceId: originProviderInstanceId,
-        })
+        const openReplacementIntentOption = yield* deps.replacementIntents.findOpenBySourceIdentity(
+          {
+            source: item.source,
+            sourcePath: session.meta.sourcePath,
+            nativeSessionId: session.meta.nativeSessionId,
+            providerInstanceId: originProviderInstanceId,
+          },
+        )
         let activeReplacementIntent = Option.getOrNull(openReplacementIntentOption)
         if (
           activeReplacementIntent !== null &&
@@ -1058,7 +1092,7 @@ export const make = Effect.gen(function* ()
         )
         {
           const manualAt = DateTime.formatIso(yield* DateTime.now)
-          yield* replacementIntents.casTransition({
+          yield* deps.replacementIntents.casTransition({
             intentKey: activeReplacementIntent.intentKey,
             expectedPhase: activeReplacementIntent.phase,
             nextPhase: 'manual',
@@ -1181,28 +1215,12 @@ export const make = Effect.gen(function* ()
           return
         }
         const wasAlreadyImported = existingThread !== null
-        if (
-          existingThread === null &&
-          incompleteImportProjectId === null &&
-          session.meta.cwd === null &&
-          originalWorkspaceRoot === undefined &&
-          !canResolveUnrecordedWorkspace
-        )
-        {
-          result.skipped.push({
-            sourcePath: item.sourcePath,
-            reason: 'no cwd recorded',
-            threadId: null,
-          })
-          return
-        }
-
         const now = DateTime.formatIso(yield* DateTime.now)
         let projectId = existingThread?.projectId ?? incompleteImportProjectId
         if (projectId === null || originalWorkspaceRoot !== undefined)
         {
           const recordedWorkspaceRoot = originalWorkspaceRoot ?? session.meta.cwd
-          const resolution = yield* resolveImportWorkspaceRoot({
+          const resolution = yield* deps.resolveImportWorkspaceRoot({
             recordedWorkspaceRoot,
             ...(importWorkspaceRoot === undefined
               ? {}
@@ -1236,6 +1254,7 @@ export const make = Effect.gen(function* ()
           modelSelection,
           runtimeMode: 'approval-required',
           interactionMode: 'default',
+          orchestrate: false,
           branch: session.meta.gitBranch,
           worktreePath: null,
           origin: {
@@ -1258,7 +1277,7 @@ export const make = Effect.gen(function* ()
               hashContent(encodeUnknownJsonStringSync(session.records)))
         )
         {
-          yield* replacementIntents.casTransition({
+          yield* deps.replacementIntents.casTransition({
             intentKey: activeReplacementIntent.intentKey,
             expectedPhase: activeReplacementIntent.phase,
             nextPhase: 'manual',
@@ -1296,7 +1315,7 @@ export const make = Effect.gen(function* ()
             originalWorkspaceRoot: originalWorkspaceRoot ?? null,
             sourceVersion: contentHash,
           })
-          activeReplacementIntent = yield* replacementIntents.insertIfAbsent({
+          activeReplacementIntent = yield* deps.replacementIntents.insertIfAbsent({
             intentKey,
             source: item.source,
             sourcePath: session.meta.sourcePath,
@@ -1342,7 +1361,7 @@ export const make = Effect.gen(function* ()
           {
             if (activeReplacementIntent === null) return null
             const current = activeReplacementIntent
-            const transitioned = yield* replacementIntents.casTransition({
+            const transitioned = yield* deps.replacementIntents.casTransition({
               intentKey: current.intentKey,
               expectedPhase: current.phase,
               nextPhase,
@@ -1369,7 +1388,7 @@ export const make = Effect.gen(function* ()
               }
               return activeReplacementIntent
             }
-            const refreshed = yield* replacementIntents.getByIntentKey(current.intentKey)
+            const refreshed = yield* deps.replacementIntents.getByIntentKey(current.intentKey)
             activeReplacementIntent = Option.getOrNull(refreshed)
             return activeReplacementIntent
           },
@@ -1380,7 +1399,7 @@ export const make = Effect.gen(function* ()
           {
             if (activeReplacementIntent === null) return
             const current = activeReplacementIntent
-            yield* replacementIntents.casTransition({
+            yield* deps.replacementIntents.casTransition({
               intentKey: current.intentKey,
               expectedPhase: current.phase,
               nextPhase: 'manual',
@@ -1826,7 +1845,7 @@ export const make = Effect.gen(function* ()
           for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
           {
             const [threadEvidence, attachmentEvidence] = yield* Effect.all([
-              verifyReplacementThread({
+              deps.verifyReplacementThread({
                 replacementThreadId: activeReplacementIntent.replacementThreadId,
                 replacementProjectId: activeReplacementIntent.replacementProjectId,
                 source: activeReplacementIntent.source,
@@ -1839,7 +1858,7 @@ export const make = Effect.gen(function* ()
                 expectedActivityCount: activeReplacementIntent.expectedActivityCount,
                 expectedRecordFingerprint: activeReplacementIntent.expectedRecordFingerprint,
               }),
-              verifyReplacementAttachments({
+              deps.verifyReplacementAttachments({
                 replacementThreadId: activeReplacementIntent.replacementThreadId,
                 expectedRelativePaths: [],
               }),
@@ -1920,8 +1939,8 @@ export const make = Effect.gen(function* ()
           for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
           {
             const [cleanup, index] = yield* Effect.all([
-              cleanupDeletedThreadAttachments(activeReplacementIntent.sourceThreadId),
-              verifyReplacementIndex({
+              deps.cleanupDeletedThreadAttachments(activeReplacementIntent.sourceThreadId),
+              deps.verifyReplacementIndex({
                 replacementThreadId: activeReplacementIntent.replacementThreadId,
                 sourceThreadId: activeReplacementIntent.sourceThreadId,
               }),
@@ -1968,14 +1987,14 @@ export const make = Effect.gen(function* ()
           const current = activeReplacementIntent
           if (current !== null)
           {
-            const retired = yield* replacementIntents.retire({
+            const retired = yield* deps.replacementIntents.retire({
               intentKey: current.intentKey,
               expectedPhase: 'reconciling',
               retiredAt: now,
             })
             if (!retired)
             {
-              const refreshed = yield* replacementIntents.getByIntentKey(current.intentKey)
+              const refreshed = yield* deps.replacementIntents.getByIntentKey(current.intentKey)
               if (Option.getOrNull(refreshed)?.phase !== 'retired')
               {
                 return yield* new ImportSessionOperationError({
@@ -2136,6 +2155,295 @@ export const make = Effect.gen(function* ()
     return result satisfies ImportSessionsResult
   })
 
+  const inspectOpenReplacementIntents = deps.replacementIntents
+    .listOpen()
+    .pipe(
+      Effect.map((intents) =>
+        makeImportReplacementRecoveryReport(intents.map(inventoryReplacementIntent)),
+      ),
+    )
+
+  const recoverOpenReplacementIntent = Effect.fn('ImportService.recoverOpenReplacementIntent')(
+    function* (initialIntent: ImportReplacementIntent)
+    {
+      const inventory = inventoryReplacementIntent(initialIntent)
+      if (inventory.disposition !== 'blocked')
+      {
+        return inventory
+      }
+
+      let intent = initialIntent
+      if (intent.phase === 'verifying')
+      {
+        const now = DateTime.formatIso(yield* DateTime.now)
+        const [threadEvidence, attachmentEvidence] = yield* Effect.all([
+          deps.verifyReplacementThread({
+            replacementThreadId: intent.replacementThreadId,
+            replacementProjectId: intent.replacementProjectId,
+            source: intent.source,
+            sourcePath: intent.sourcePath,
+            nativeSessionId: intent.nativeSessionId,
+            providerInstanceId: intent.providerInstanceId,
+            originalWorkspaceRoot: intent.originalWorkspaceRoot,
+            sourceVersion: intent.sourceVersion,
+            expectedMessageCount: intent.expectedMessageCount,
+            expectedActivityCount: intent.expectedActivityCount,
+            expectedRecordFingerprint: intent.expectedRecordFingerprint,
+          }),
+          deps.verifyReplacementAttachments({
+            replacementThreadId: intent.replacementThreadId,
+            expectedRelativePaths: [],
+          }),
+        ])
+        if (threadEvidence === null || !attachmentEvidence.complete)
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'blocked',
+            detail: 'replacement transcript or attachment verification is incomplete',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        const verifiedAttachments: ImportReplacementAttachmentEvidence = {
+          replacementThreadId: intent.replacementThreadId,
+          expectedRelativePaths: [],
+          exactSetVerified: true,
+          sourceCleanupComplete: false,
+          verifiedAt: now,
+        }
+        const transitioned = yield* deps.replacementIntents.casTransition({
+          intentKey: intent.intentKey,
+          expectedPhase: 'verifying',
+          nextPhase: 'tombstoning',
+          threadEvidence,
+          attachmentEvidence: verifiedAttachments,
+          indexEvidence: intent.indexEvidence,
+          attemptCount: intent.attemptCount + 1,
+          lastError: null,
+          retryAfter: null,
+          updatedAt: now,
+        })
+        if (!transitioned)
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'blocked',
+            detail: 'replacement verification lost its compare-and-set race',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        intent = {
+          ...intent,
+          phase: 'tombstoning',
+          threadEvidence,
+          attachmentEvidence: verifiedAttachments,
+          attemptCount: intent.attemptCount + 1,
+          lastError: null,
+          retryAfter: null,
+          updatedAt: now,
+        }
+      }
+
+      if (intent.phase === 'tombstoning')
+      {
+        if (
+          intent.threadEvidence === null ||
+          intent.threadEvidence.replacementThreadId !== intent.replacementThreadId ||
+          intent.threadEvidence.projectId !== intent.replacementProjectId ||
+          intent.threadEvidence.sourceVersion !== intent.sourceVersion ||
+          intent.threadEvidence.messageCount !== intent.expectedMessageCount ||
+          intent.threadEvidence.activityCount !== intent.expectedActivityCount ||
+          intent.attachmentEvidence === null ||
+          intent.attachmentEvidence.replacementThreadId !== intent.replacementThreadId ||
+          !intent.attachmentEvidence.exactSetVerified
+        )
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'manual',
+            detail: 'tombstone recovery requires complete durable replacement evidence',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        let sourceStillVisible = true
+        for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
+        {
+          yield* deps.dispatch({
+            type: 'thread.delete',
+            commandId: intent.tombstoneCommandId,
+            threadId: intent.sourceThreadId,
+          })
+          sourceStillVisible = (yield* deps.findThreadById(intent.sourceThreadId)) !== null
+          if (!sourceStillVisible) break
+        }
+        if (sourceStillVisible)
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'blocked',
+            detail: 'source thread remained visible after deterministic tombstone dispatch',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        const now = DateTime.formatIso(yield* DateTime.now)
+        const transitioned = yield* deps.replacementIntents.casTransition({
+          intentKey: intent.intentKey,
+          expectedPhase: 'tombstoning',
+          nextPhase: 'reconciling',
+          threadEvidence: intent.threadEvidence,
+          attachmentEvidence: intent.attachmentEvidence,
+          indexEvidence: intent.indexEvidence,
+          attemptCount: intent.attemptCount + 1,
+          lastError: null,
+          retryAfter: null,
+          updatedAt: now,
+        })
+        if (!transitioned)
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'blocked',
+            detail: 'replacement tombstone lost its compare-and-set race',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        intent = {
+          ...intent,
+          phase: 'reconciling',
+          attemptCount: intent.attemptCount + 1,
+          lastError: null,
+          retryAfter: null,
+          updatedAt: now,
+        }
+      }
+
+      if (intent.phase === 'reconciling')
+      {
+        if (
+          intent.threadEvidence === null ||
+          intent.threadEvidence.replacementThreadId !== intent.replacementThreadId ||
+          intent.threadEvidence.projectId !== intent.replacementProjectId ||
+          intent.threadEvidence.sourceVersion !== intent.sourceVersion ||
+          intent.attachmentEvidence === null ||
+          intent.attachmentEvidence.replacementThreadId !== intent.replacementThreadId ||
+          !intent.attachmentEvidence.exactSetVerified
+        )
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'manual',
+            detail: 'reconciliation recovery requires complete durable replacement evidence',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        let cleanupComplete = false
+        let indexState = { replacementVisible: false, sourceVisible: true }
+        for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
+        {
+          const [cleanup, index] = yield* Effect.all([
+            deps.cleanupDeletedThreadAttachments(intent.sourceThreadId),
+            deps.verifyReplacementIndex({
+              replacementThreadId: intent.replacementThreadId,
+              sourceThreadId: intent.sourceThreadId,
+            }),
+          ])
+          cleanupComplete = cleanup.complete
+          indexState = index
+          if (cleanupComplete && index.replacementVisible && !index.sourceVisible) break
+        }
+        if (!cleanupComplete || !indexState.replacementVisible || indexState.sourceVisible)
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'blocked',
+            detail: 'replacement attachment cleanup or canonical index verification is incomplete',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        const now = DateTime.formatIso(yield* DateTime.now)
+        const attachmentEvidence: ImportReplacementAttachmentEvidence = {
+          replacementThreadId: intent.replacementThreadId,
+          expectedRelativePaths: [],
+          exactSetVerified: true,
+          sourceCleanupComplete: true,
+          verifiedAt: now,
+        }
+        const indexEvidence: ImportReplacementIndexEvidence = {
+          replacementThreadId: intent.replacementThreadId,
+          exactIdVisible: true,
+          sourceThreadVisible: false,
+          verifiedAt: now,
+        }
+        const evidenced = yield* deps.replacementIntents.casTransition({
+          intentKey: intent.intentKey,
+          expectedPhase: 'reconciling',
+          nextPhase: 'reconciling',
+          threadEvidence: intent.threadEvidence,
+          attachmentEvidence,
+          indexEvidence,
+          attemptCount: intent.attemptCount + 1,
+          lastError: null,
+          retryAfter: null,
+          updatedAt: now,
+        })
+        if (!evidenced)
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'blocked',
+            detail: 'replacement reconciliation evidence lost its compare-and-set race',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        const retired = yield* deps.replacementIntents.retire({
+          intentKey: intent.intentKey,
+          expectedPhase: 'reconciling',
+          retiredAt: now,
+        })
+        if (!retired)
+        {
+          return {
+            intentKey: intent.intentKey,
+            phase: initialIntent.phase,
+            disposition: 'blocked',
+            detail: 'replacement retirement lost its compare-and-set race',
+          } satisfies ImportReplacementRecoveryItem
+        }
+        return {
+          intentKey: intent.intentKey,
+          phase: initialIntent.phase,
+          disposition: 'recovered',
+          detail: 'source-independent replacement phases completed and the intent was retired',
+        } satisfies ImportReplacementRecoveryItem
+      }
+
+      return inventoryReplacementIntent(intent)
+    },
+  )
+
+  const recoverOpenReplacementIntents = importTransactionMutex.withPermits(1)(
+    deps.replacementIntents.listOpen().pipe(
+      Effect.flatMap((intents) =>
+        Effect.forEach(
+          intents,
+          (intent) =>
+            recoverOpenReplacementIntent(intent).pipe(
+              Effect.catch((cause) =>
+                Effect.succeed({
+                  intentKey: intent.intentKey,
+                  phase: intent.phase,
+                  disposition: 'blocked',
+                  detail: boundedResultMessage(cause),
+                } satisfies ImportReplacementRecoveryItem),
+              ),
+            ),
+          { concurrency: 1 },
+        ),
+      ),
+      Effect.map(makeImportReplacementRecoveryReport),
+    ),
+  )
+
   const importSessions = Effect.fn('ImportService.importSessions')(
     (request: ImportSessionsRequest) =>
       Effect.suspend(() =>
@@ -2199,7 +2507,11 @@ export const make = Effect.gen(function* ()
       }),
   )
 
-  return ImportService.of({ importSessions })
+  return ImportService.of({
+    importSessions,
+    inspectOpenReplacementIntents,
+    recoverOpenReplacementIntents,
+  })
 })
 
 export const layer = Layer.effect(ImportService, make)

@@ -29,8 +29,13 @@ import type {
 } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
+import type * as Option from 'effect/Option'
 import type * as Stream from 'effect/Stream'
 
+import type {
+  ProviderRuntimeInboxSession,
+  ProviderRuntimeSessionIdentity,
+} from '../../persistence/Services/ProviderRuntimeInbox.ts'
 import type { ProviderServiceError } from '../Errors.ts'
 import type { ProviderAdapterCapabilities, ProviderEffectContext } from './ProviderAdapter.ts'
 import type { ProviderInstanceRoutingInfo } from './ProviderAdapterRegistry.ts'
@@ -45,6 +50,11 @@ export interface ProviderRoutingAuthority
   readonly provider: ProviderDriverKind
   readonly providerInstanceId: ProviderInstanceId
   readonly continuationIdentity: ProviderContinuationIdentity | null
+}
+
+export interface ProviderSessionIdentityCapture extends ProviderRuntimeSessionIdentity
+{
+  readonly createdAt: string
 }
 
 /**
@@ -91,6 +101,42 @@ export interface ProviderServiceShape
     context?: ProviderEffectContext,
   ) => Effect.Effect<void, ProviderServiceError>
 
+  // capture the exact durable provider generation for lifecycle-safe cleanup.
+  readonly captureSessionIdentity: (input: {
+    readonly threadId: ThreadId
+    readonly expectedProviderInstanceId?: ProviderInstanceId
+  }) => Effect.Effect<Option.Option<ProviderSessionIdentityCapture>, ProviderServiceError>
+
+  // capture every durable provider generation still open for a thread.
+  readonly captureSessionIdentities: (input?: {
+    readonly threadId?: ThreadId
+  }) => Effect.Effect<ReadonlyArray<ProviderSessionIdentityCapture>, ProviderServiceError>
+
+  // confirm that an identity still names the currently open provider generation.
+  readonly matchesSessionIdentity: (
+    identity: ProviderRuntimeSessionIdentity,
+  ) => Effect.Effect<boolean, ProviderServiceError>
+
+  // read the persisted state and exact terminal sequence for one generation.
+  readonly getSessionIdentityState: (
+    identity: ProviderRuntimeSessionIdentity,
+  ) => Effect.Effect<Option.Option<ProviderRuntimeInboxSession>, ProviderServiceError>
+
+  // stop only while the captured provider generation remains current.
+  readonly stopSessionIfExact: (
+    identity: ProviderRuntimeSessionIdentity,
+    context?: ProviderEffectContext,
+  ) => Effect.Effect<boolean, ProviderServiceError>
+
+  // return the persisted handoff fence that both durable consumers must drain.
+  readonly getAdmissionHandoffHighWater: Effect.Effect<number | null, ProviderServiceError>
+
+  // reopen canonical admission only after both durable consumers prove the fence.
+  readonly resumeAdmissionAfterHandoff: Effect.Effect<void, ProviderServiceError>
+
+  // stop admission sources and return the last durably admitted sequence.
+  readonly shutdown: Effect.Effect<number, ProviderServiceError>
+
   // list active provider sessions.
   //
   // aggregates runtime session lists from all registered adapters.
@@ -119,6 +165,20 @@ export interface ProviderServiceShape
     },
     context?: ProviderEffectContext,
   ) => Effect.Effect<void, ProviderServiceError>
+
+  // roll back only while the captured provider generation remains current.
+  readonly rollbackConversationIfExact: (
+    input: {
+      readonly identity: ProviderRuntimeSessionIdentity
+      readonly numTurns: number
+    },
+    context?: ProviderEffectContext,
+  ) => Effect.Effect<boolean, ProviderServiceError>
+
+  // read the provider-native turn count while the captured generation is exact.
+  readonly getConversationTurnCountIfExact: (
+    identity: ProviderRuntimeSessionIdentity,
+  ) => Effect.Effect<Option.Option<number>, ProviderServiceError>
 
   // canonical provider runtime event stream.
   //

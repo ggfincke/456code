@@ -146,6 +146,48 @@ it.layer(TestLayer)('ProjectFaviconResolverLive', (it) =>
       }),
     )
 
+    it.effect('resolves later object metadata when an earlier icon has no href', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(
+          cwd,
+          'src/root.tsx',
+          `const links = [
+  { rel: 'icon' },
+  { href: '/brand/logo.svg', rel: 'shortcut icon' },
+]`,
+        )
+        yield* writeTextFile(cwd, 'public/brand/logo.svg', '<svg>brand</svg>')
+
+        const resolved = yield* resolver.resolvePath(cwd)
+
+        expect(resolved).not.toBeNull()
+        expect(resolved).toContain('public/brand/logo.svg')
+      }),
+    )
+
+    it.effect('scans large icon sources without pinning the event loop', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        const filler = `<p>${'pokopia companion guide '.repeat(24)}</p>\n`
+        yield* writeTextFile(
+          cwd,
+          'index.html',
+          `<!doctype html><html><head><title>guide</title></head><body>\n${filler.repeat(1200)}</body></html>`,
+        )
+
+        const startedAt = performance.now()
+        const resolved = yield* resolver.resolvePath(cwd)
+
+        expect(resolved).toBeNull()
+        expect(performance.now() - startedAt).toBeLessThan(5_000)
+      }),
+    )
+
     it.effect('returns null when no icon is present', () =>
       Effect.gen(function* ()
       {

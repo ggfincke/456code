@@ -22,6 +22,7 @@ import {
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderRuntimeEvent,
   ThreadId,
 } from '@t3tools/contracts'
 import { createModelSelection } from '@t3tools/shared/model'
@@ -40,7 +41,13 @@ import {
   isSameOpenCodeDirectory,
   makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
+  toToolLifecycleItemType,
 } from '../../../../../apps/server/src/provider/Layers/OpenCodeAdapter.ts'
+import {
+  makeTestMcpProviderSession,
+  TEST_MCP_AUTHORIZATION,
+  TEST_MCP_ENDPOINT,
+} from './mcpProviderSessionTestHelpers.ts'
 
 // test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
 class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterShape>()(
@@ -49,6 +56,40 @@ class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterSh
 {}
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value)
+
+type OpenCodeTestSessionStartInput = Omit<
+  Parameters<OpenCodeAdapterShape['startSession']>[0],
+  'runtimeSessionBinding'
+> & {
+  readonly runtimeSessionBinding?: Parameters<
+    OpenCodeAdapterShape['startSession']
+  >[0]['runtimeSessionBinding']
+}
+
+function startOpenCodeTestSession(
+  adapter: OpenCodeAdapterShape,
+  input: OpenCodeTestSessionStartInput,
+)
+{
+  return adapter.startSession({
+    ...input,
+    runtimeSessionBinding: input.runtimeSessionBinding ?? {
+      providerInstanceId:
+        input.providerInstanceId ??
+        input.modelSelection?.instanceId ??
+        ProviderInstanceId.make(String(adapter.provider)),
+      threadId: input.threadId,
+      sessionGeneration: 1,
+    },
+  })
+}
+
+function unwrapOpenCodeRuntimeEvents(
+  adapter: OpenCodeAdapterShape,
+): Stream.Stream<ProviderRuntimeEvent>
+{
+  return adapter.streamEvents.pipe(Stream.map(({ event }) => event))
+}
 
 type MessageEntry = {
   info: {
@@ -84,6 +125,7 @@ const runtimeMock = {
     sessionDirectoryById: new Map<string, string>(),
     sessionUpdateCalls: [] as Array<{ sessionID: string; permission: unknown }>,
     forkCalls: [] as Array<{ sessionID: string; directory?: string }>,
+    mcpAddCalls: [] as Array<Record<string, unknown>>,
   },
   reset()
   {
@@ -107,6 +149,7 @@ const runtimeMock = {
     this.state.sessionDirectoryById.clear()
     this.state.sessionUpdateCalls.length = 0
     this.state.forkCalls.length = 0
+    this.state.mcpAddCalls.length = 0
   },
 }
 
@@ -156,6 +199,13 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   runOpenCodeCommand: () => Effect.succeed({ stdout: '', stderr: '', code: 0 }),
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
+      mcp: {
+        add: async (input: Record<string, unknown>) =>
+        {
+          runtimeMock.state.mcpAddCalls.push(input)
+          return { data: true }
+        },
+      },
       session: {
         create: async (input: Record<string, unknown>) =>
         {
@@ -294,6 +344,9 @@ const openCodeAdapterTestSettings = Schema.decodeSync(OpenCodeSettings)({
   serverUrl: 'http://127.0.0.1:9999',
   serverPassword: 'secret-password',
 })
+const openCodeMcpAdapterTestSettings = Schema.decodeSync(OpenCodeSettings)({
+  binaryPath: 'fake-opencode',
+})
 
 const OpenCodeAdapterTestLayer = Layer.effect(
   OpenCodeAdapter,
@@ -326,6 +379,44 @@ const advanceTestClock = (ms: number) =>
 
 it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
 {
+  it.effect('passes the scoped MCP endpoint and bearer header to OpenCode', () =>
+    Effect.gen(function* ()
+    {
+      const threadId = asThreadId('thread-opencode-mcp')
+      const adapter = yield* makeOpenCodeAdapter(openCodeMcpAdapterTestSettings)
+
+      yield* startOpenCodeTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('opencode'),
+        runtimeMode: 'full-access',
+        mcp: makeTestMcpProviderSession(threadId, ProviderInstanceId.make('opencode')),
+      })
+
+      NodeAssert.deepStrictEqual(runtimeMock.state.mcpAddCalls, [
+        {
+          name: 'code456',
+          config: {
+            type: 'remote',
+            url: TEST_MCP_ENDPOINT,
+            headers: { Authorization: TEST_MCP_AUTHORIZATION },
+            oauth: false,
+          },
+        },
+      ])
+      yield* adapter.stopSession(threadId)
+    }),
+  )
+
+  it.effect('classifies MCP patch tools before native file-change names', () =>
+    Effect.sync(() =>
+    {
+      NodeAssert.equal(
+        toToolLifecycleItemType('code456_architecture_propose_patch'),
+        'mcp_tool_call',
+      )
+    }),
+  )
+
   it.effect(
     'reuses a configured OpenCode server URL and returns a durable resume cursor for a fresh session',
     () =>
@@ -334,7 +425,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         const adapter = yield* OpenCodeAdapter
         const threadId = asThreadId('thread-opencode-cursor')
 
-        const session = yield* adapter.startSession({
+        const session = yield* startOpenCodeTestSession(adapter, {
           provider: ProviderDriverKind.make('opencode'),
           threadId,
           runtimeMode: 'full-access',
@@ -363,7 +454,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-resume')
 
-      const session = yield* adapter.startSession({
+      const session = yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -393,7 +484,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-resume-turn')
 
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -430,7 +521,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const threadId = asThreadId('thread-opencode-stale')
       runtimeMock.state.missingSessionIds.add('ses_stale')
 
-      const session = yield* adapter.startSession({
+      const session = yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -457,18 +548,16 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const threadId = asThreadId('thread-opencode-import-missing')
       runtimeMock.state.missingSessionIds.add('ses_imported')
 
-      const result = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('opencode'),
-          threadId,
-          runtimeMode: 'approval-required',
-          resumeCursor: {
-            schemaVersion: 1,
-            sessionId: 'ses_imported',
-            requireExisting: true,
-          },
-        })
-        .pipe(Effect.result)
+      const result = yield* startOpenCodeTestSession(adapter, {
+        provider: ProviderDriverKind.make('opencode'),
+        threadId,
+        runtimeMode: 'approval-required',
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: 'ses_imported',
+          requireExisting: true,
+        },
+      }).pipe(Effect.result)
 
       NodeAssert.equal(result._tag, 'Failure')
       NodeAssert.equal(result.failure._tag, 'ProviderAdapterProcessError')
@@ -485,18 +574,16 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     Effect.gen(function* ()
     {
       const adapter = yield* OpenCodeAdapter
-      const result = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('opencode'),
-          threadId: asThreadId('thread-opencode-import-invalid'),
-          runtimeMode: 'approval-required',
-          resumeCursor: {
-            schemaVersion: 99,
-            sessionId: 'ses_imported',
-            requireExisting: true,
-          },
-        })
-        .pipe(Effect.result)
+      const result = yield* startOpenCodeTestSession(adapter, {
+        provider: ProviderDriverKind.make('opencode'),
+        threadId: asThreadId('thread-opencode-import-invalid'),
+        runtimeMode: 'approval-required',
+        resumeCursor: {
+          schemaVersion: 99,
+          sessionId: 'ses_imported',
+          requireExisting: true,
+        },
+      }).pipe(Effect.result)
 
       NodeAssert.equal(result._tag, 'Failure')
       NodeAssert.equal(result.failure._tag, 'ProviderAdapterValidationError')
@@ -514,24 +601,22 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-import-invalid-marker-active')
-      const active = yield* adapter.startSession({
+      const active = yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'approval-required',
       })
 
-      const result = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('opencode'),
-          threadId,
-          runtimeMode: 'approval-required',
-          resumeCursor: {
-            schemaVersion: 1,
-            sessionId: 'ses_imported',
-            requireExisting: 'true',
-          },
-        })
-        .pipe(Effect.result)
+      const result = yield* startOpenCodeTestSession(adapter, {
+        provider: ProviderDriverKind.make('opencode'),
+        threadId,
+        runtimeMode: 'approval-required',
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: 'ses_imported',
+          requireExisting: 'true',
+        },
+      }).pipe(Effect.result)
 
       NodeAssert.equal(result._tag, 'Failure')
       NodeAssert.equal(result.failure._tag, 'ProviderAdapterValidationError')
@@ -553,7 +638,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-import-resume')
 
-      const session = yield* adapter.startSession({
+      const session = yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'approval-required',
@@ -607,18 +692,16 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       for (const testCase of cases)
       {
         runtimeMock.state.sessionGetPayloadById.set(testCase.sessionId, testCase.payload)
-        const result = yield* adapter
-          .startSession({
-            provider: ProviderDriverKind.make('opencode'),
-            threadId: asThreadId(`thread-${testCase.sessionId}`),
-            runtimeMode: 'approval-required',
-            resumeCursor: {
-              schemaVersion: 1,
-              sessionId: testCase.sessionId,
-              requireExisting: true,
-            },
-          })
-          .pipe(Effect.result)
+        const result = yield* startOpenCodeTestSession(adapter, {
+          provider: ProviderDriverKind.make('opencode'),
+          threadId: asThreadId(`thread-${testCase.sessionId}`),
+          runtimeMode: 'approval-required',
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: testCase.sessionId,
+            requireExisting: true,
+          },
+        }).pipe(Effect.result)
 
         NodeAssert.equal(result._tag, 'Failure')
         NodeAssert.equal(result.failure._tag, 'ProviderAdapterProcessError')
@@ -654,27 +737,23 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         release: getRelease,
       }
 
-      const strictStart = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('opencode'),
-          threadId,
-          runtimeMode: 'approval-required',
-          resumeCursor: {
-            schemaVersion: 1,
-            sessionId: 'ses_strict_lineage',
-            requireExisting: true,
-          },
-        })
-        .pipe(Effect.forkChild)
+      const strictStart = yield* startOpenCodeTestSession(adapter, {
+        provider: ProviderDriverKind.make('opencode'),
+        threadId,
+        runtimeMode: 'approval-required',
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: 'ses_strict_lineage',
+          requireExisting: true,
+        },
+      }).pipe(Effect.forkChild)
       yield* Effect.promise(() => getEntered)
 
-      const freshStart = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('opencode'),
-          threadId,
-          runtimeMode: 'full-access',
-        })
-        .pipe(Effect.result, Effect.forkChild)
+      const freshStart = yield* startOpenCodeTestSession(adapter, {
+        provider: ProviderDriverKind.make('opencode'),
+        threadId,
+        runtimeMode: 'full-access',
+      }).pipe(Effect.result, Effect.forkChild)
       yield* Effect.forEach([0, 1, 2, 3, 4], () => Effect.yieldNow)
 
       NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, [])
@@ -706,7 +785,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
 
       yield* adapter.stopSession(threadId)
 
-      const freshSession = yield* adapter.startSession({
+      const freshSession = yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -742,18 +821,16 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         release: getRelease,
       }
 
-      const strictStart = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('opencode'),
-          threadId,
-          runtimeMode: 'approval-required',
-          resumeCursor: {
-            schemaVersion: 1,
-            sessionId: 'ses_strict_stop',
-            requireExisting: true,
-          },
-        })
-        .pipe(Effect.forkChild)
+      const strictStart = yield* startOpenCodeTestSession(adapter, {
+        provider: ProviderDriverKind.make('opencode'),
+        threadId,
+        runtimeMode: 'approval-required',
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: 'ses_strict_stop',
+          requireExisting: true,
+        },
+      }).pipe(Effect.forkChild)
       yield* Effect.promise(() => getEntered)
 
       const stopResult = yield* adapter.stopSession(threadId).pipe(Effect.result, Effect.forkChild)
@@ -772,7 +849,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-badcursor')
 
-      const session = yield* adapter.startSession({
+      const session = yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -801,7 +878,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       runtimeMock.state.transientErrorSessionIds.add('ses_transient')
 
       const exit = yield* Effect.exit(
-        adapter.startSession({
+        startOpenCodeTestSession(adapter, {
           provider: ProviderDriverKind.make('opencode'),
           threadId,
           runtimeMode: 'full-access',
@@ -828,7 +905,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         // (e.g. the thread moved from the project root into a git worktree).
         runtimeMock.state.sessionDirectoryById.set('ses_otherdir', '/some/other/worktree')
 
-        const session = yield* adapter.startSession({
+        const session = yield* startOpenCodeTestSession(adapter, {
           provider: ProviderDriverKind.make('opencode'),
           threadId,
           runtimeMode: 'full-access',
@@ -869,7 +946,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       // not fork.
       runtimeMock.state.sessionDirectoryById.set('ses_samedir', `${process.cwd()}/`)
 
-      const session = yield* adapter.startSession({
+      const session = yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -926,7 +1003,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     Effect.gen(function* ()
     {
       const adapter = yield* OpenCodeAdapter
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId: asThreadId('thread-opencode'),
         runtimeMode: 'full-access',
@@ -947,14 +1024,14 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-stop-event')
-      const eventsFiber = yield* adapter.streamEvents.pipe(
+      const eventsFiber = yield* unwrapOpenCodeRuntimeEvents(adapter).pipe(
         Stream.filter((event) => event.threadId === threadId),
         Stream.take(3),
         Stream.runCollect,
         Effect.forkChild,
       )
 
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -973,12 +1050,12 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     Effect.gen(function* ()
     {
       const adapter = yield* OpenCodeAdapter
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId: asThreadId('thread-stop-all-a'),
         runtimeMode: 'full-access',
       })
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId: asThreadId('thread-stop-all-b'),
         runtimeMode: 'full-access',
@@ -1021,7 +1098,10 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         )
         const context = yield* Layer.buildWithScope(adapterLayer, scope)
         const adapter = yield* Effect.service(OpenCodeAdapter).pipe(Effect.provide(context))
-        const eventsFiber = yield* adapter.streamEvents.pipe(Stream.runCollect, Effect.forkChild)
+        const eventsFiber = yield* unwrapOpenCodeRuntimeEvents(adapter).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        )
 
         yield* Scope.close(scope, Exit.void)
         scopeClosed = true
@@ -1043,7 +1123,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     Effect.gen(function* ()
     {
       const adapter = yield* OpenCodeAdapter
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId: asThreadId('thread-send-turn-failure'),
         runtimeMode: 'full-access',
@@ -1084,7 +1164,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-steer')
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -1124,7 +1204,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-steer-failure')
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -1177,8 +1257,9 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     return Effect.gen(function* ()
     {
       const adapter = yield* OpenCodeAdapter
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
+        providerInstanceId: instanceId,
         threadId: asThreadId('thread-custom-instance'),
         runtimeMode: 'full-access',
       })
@@ -1227,8 +1308,9 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-custom-instance-fallback-model')
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
+        providerInstanceId: instanceId,
         threadId,
         runtimeMode: 'full-access',
         modelSelection: createModelSelection(
@@ -1271,8 +1353,9 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-custom-instance-wrong-selection')
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
+        providerInstanceId: instanceId,
         threadId,
         runtimeMode: 'full-access',
       })
@@ -1306,7 +1389,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-rollback-all')
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -1486,14 +1569,14 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
           },
         },
       ]
-      const eventsFiber = yield* adapter.streamEvents.pipe(
+      const eventsFiber = yield* unwrapOpenCodeRuntimeEvents(adapter).pipe(
         Stream.filter((event) => event.threadId === threadId),
         Stream.take(5),
         Stream.runCollect,
         Effect.forkChild,
       )
 
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -1531,14 +1614,14 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         },
       ]
 
-      const eventsFiber = yield* adapter.streamEvents.pipe(
+      const eventsFiber = yield* unwrapOpenCodeRuntimeEvents(adapter).pipe(
         Stream.filter((event) => event.threadId === threadId),
         Stream.take(3),
         Stream.runCollect,
         Effect.forkChild,
       )
 
-      yield* adapter.startSession({
+      yield* startOpenCodeTestSession(adapter, {
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
@@ -1638,7 +1721,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const session = yield* Effect.gen(function* ()
       {
         const adapter = yield* OpenCodeAdapter
-        const started = yield* adapter.startSession({
+        const started = yield* startOpenCodeTestSession(adapter, {
           provider: ProviderDriverKind.make('opencode'),
           threadId: asThreadId('thread-native-log'),
           runtimeMode: 'full-access',
@@ -1728,7 +1811,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const { sessions, closeCallsDuringRun } = yield* Effect.gen(function* ()
       {
         const adapter = yield* OpenCodeAdapter
-        yield* adapter.startSession({
+        yield* startOpenCodeTestSession(adapter, {
           provider: ProviderDriverKind.make('opencode'),
           threadId: asThreadId('thread-native-log-failure'),
           runtimeMode: 'full-access',

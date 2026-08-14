@@ -18,6 +18,7 @@ import {
   ImportSessionsRequest,
   ImportSessionsResult,
   ModelSelection,
+  normalizeCollaborationMode,
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationGetTurnDiffInput,
@@ -29,6 +30,7 @@ import {
   OrchestrationThread,
   OrchestrationThreadShell,
   UNKNOWN_ORCHESTRATION_EVENT_TYPE,
+  WORKER_VERDICT_MAX_LENGTH,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
   ThreadMessagesImportCommand,
@@ -37,6 +39,7 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
+  toWireInteractionMode,
 } from '../../../packages/contracts/src/orchestration.ts'
 import {
   ProviderDriverKind,
@@ -59,6 +62,34 @@ const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread
 const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell)
 const encodeThreadCreatedPayload = Schema.encodeEffect(ThreadCreatedPayload)
 
+it('normalizes legacy and modifier collaboration modes', () =>
+{
+  assert.deepStrictEqual(normalizeCollaborationMode('orchestrate'), {
+    baseMode: 'default',
+    orchestrate: true,
+  })
+  assert.deepStrictEqual(normalizeCollaborationMode('plan', true), {
+    baseMode: 'plan',
+    orchestrate: true,
+  })
+  assert.deepStrictEqual(normalizeCollaborationMode('default', true), {
+    baseMode: 'default',
+    orchestrate: true,
+  })
+  assert.deepStrictEqual(normalizeCollaborationMode('plan'), {
+    baseMode: 'plan',
+    orchestrate: false,
+  })
+  assert.deepStrictEqual(toWireInteractionMode({ baseMode: 'default', orchestrate: true }), {
+    interactionMode: 'orchestrate',
+    orchestrate: true,
+  })
+  assert.deepStrictEqual(toWireInteractionMode({ baseMode: 'plan', orchestrate: true }), {
+    interactionMode: 'plan',
+    orchestrate: true,
+  })
+})
+
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
   id: string,
@@ -78,6 +109,38 @@ const decodeImportSessionsResult = Schema.decodeUnknownEffect(ImportSessionsResu
 const decodeImportScanCandidate = Schema.decodeUnknownEffect(ImportScanCandidate)
 const decodeImportScanResult = Schema.decodeUnknownEffect(ImportScanResult)
 const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand)
+
+it.effect('trims and bounds worker verdict commands while allowing clear', () =>
+  Effect.gen(function* ()
+  {
+    const base = {
+      type: 'thread.worker-verdict.set',
+      commandId: 'command-worker-verdict',
+      threadId: 'thread-1',
+      runId: ' run-1 ',
+      jobId: ' job-1 ',
+      createdAt: '2026-08-06T12:00:00.000Z',
+    } as const
+    const decoded = yield* decodeClientOrchestrationCommand({
+      ...base,
+      verdict: '  approved  ',
+    })
+    const cleared = yield* decodeClientOrchestrationCommand({ ...base, verdict: '   ' })
+    const oversized = yield* decodeClientOrchestrationCommand({
+      ...base,
+      verdict: 'x'.repeat(WORKER_VERDICT_MAX_LENGTH + 1),
+    }).pipe(Effect.result)
+
+    assert.deepStrictEqual(decoded, {
+      ...base,
+      runId: 'run-1',
+      jobId: 'job-1',
+      verdict: 'approved',
+    } as typeof decoded)
+    assert.strictEqual(cleared.type === 'thread.worker-verdict.set' ? cleared.verdict : null, '')
+    assert.strictEqual(oversized._tag, 'Failure')
+  }),
+)
 
 it.effect('bounds session import request count and source path length', () =>
   Effect.gen(function* ()

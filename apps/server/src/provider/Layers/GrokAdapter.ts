@@ -34,7 +34,6 @@ import type * as EffectAcpSchema from 'effect-acp/schema'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
-import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -66,6 +65,10 @@ import {
   XAiAskUserQuestionRequest,
 } from '../acp/XAiAcpExtension.ts'
 import { type GrokAdapterShape } from '../Services/GrokAdapter.ts'
+import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
+} from '../Services/ProviderAdapter.ts'
 import { makeAcpAdapterSessionLifecycle } from './AcpAdapterSessionLifecycle.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
 
@@ -106,6 +109,7 @@ interface PendingUserInput
 interface GrokSessionContext
 {
   readonly threadId: ThreadId
+  readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
   readonly acpSessionId: string
   readonly generationId: string
   session: ProviderSession
@@ -268,7 +272,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined
     const makeAcpNativeLoggers = yield* makeAcpNativeLoggerFactory()
 
-    const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>()
+    const runtimeEventPubSub = yield* PubSub.unbounded<ProviderAdapterRuntimeEvent>()
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
@@ -295,8 +299,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         ),
       )
 
-    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
-      PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid)
+    const offerRuntimeEvent = (
+      binding: ProviderAdapterRuntimeSessionBinding,
+      event: ProviderRuntimeEvent,
+    ) => PubSub.publish(runtimeEventPubSub, { binding, event }).pipe(Effect.asVoid)
 
     const sessionLifecycle = yield* makeAcpAdapterSessionLifecycle<
       GrokSessionContext,
@@ -312,7 +318,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       emitSessionExited: (context, classification) =>
         Effect.gen(function* ()
         {
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(context.runtimeSessionBinding, {
             type: 'session.exited',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -336,9 +342,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     } = sessionLifecycle
 
     const settlePromptInFlight = (
-      threadId: ThreadId,
+      expectedContext: GrokSessionContext,
       turnId: TurnId,
-      expectedAcpSessionId: string,
       options?: {
         readonly errorMessage?: string
         readonly completedStopReason?: EffectAcpSchema.StopReason | null
@@ -349,11 +354,22 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     ) =>
       Effect.gen(function* ()
       {
+        const threadId = expectedContext.threadId
         const liveCtx = sessions.get(threadId)
-        if (!liveCtx)
+        if (
+          liveCtx !== expectedContext ||
+          liveCtx.generationId !== expectedContext.generationId ||
+          liveCtx.runtimeSessionBinding.providerInstanceId !==
+            expectedContext.runtimeSessionBinding.providerInstanceId ||
+          liveCtx.runtimeSessionBinding.threadId !==
+            expectedContext.runtimeSessionBinding.threadId ||
+          liveCtx.runtimeSessionBinding.sessionGeneration !==
+            expectedContext.runtimeSessionBinding.sessionGeneration
+        )
         {
           return
         }
+        const expectedAcpSessionId = expectedContext.acpSessionId
         const settlementBelongsToLiveContext = grokPromptSettlementBelongsToContext({
           liveAcpSessionId: liveCtx.acpSessionId,
           expectedAcpSessionId,
@@ -377,7 +393,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           {
             if (options?.errorMessage !== undefined)
             {
-              yield* offerRuntimeEvent({
+              yield* offerRuntimeEvent(expectedContext.runtimeSessionBinding, {
                 type: 'turn.completed',
                 ...(yield* makeEventStamp()),
                 provider: PROVIDER,
@@ -391,7 +407,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             }
             else if (options?.completedStopReason !== undefined)
             {
-              yield* offerRuntimeEvent({
+              yield* offerRuntimeEvent(expectedContext.runtimeSessionBinding, {
                 type: 'turn.completed',
                 ...(yield* makeEventStamp()),
                 provider: PROVIDER,
@@ -464,7 +480,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         }
         if (shouldEmitFailedTurn)
         {
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(expectedContext.runtimeSessionBinding, {
             type: 'turn.completed',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -478,7 +494,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         }
         else if (shouldEmitCompletedTurn)
         {
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(expectedContext.runtimeSessionBinding, {
             type: 'turn.completed',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -545,6 +561,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         }
         ctx.lastPlanFingerprint = fingerprint
         yield* offerRuntimeEvent(
+          ctx.runtimeSessionBinding,
           makeAcpPlanUpdatedEvent({
             stamp,
             provider: PROVIDER,
@@ -633,7 +650,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             threadId: input.threadId,
           })
 
-          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId)
+          const mcpSession = input.mcp
           const acp = yield* makeGrokAcpRuntime({
             grokSettings,
             ...(options?.environment ? { environment: options.environment } : {}),
@@ -688,7 +705,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       const resolution = yield* Deferred.make<PendingUserInputResolution>()
                       const turnId = resolveSessionCallbackTurnId(sessions, input.threadId)
                       pendingUserInputs.set(requestId, { resolution })
-                      yield* offerRuntimeEvent({
+                      yield* offerRuntimeEvent(input.runtimeSessionBinding, {
                         type: 'user-input.requested',
                         ...(yield* makeEventStamp()),
                         provider: PROVIDER,
@@ -705,7 +722,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       const resolved = yield* Deferred.await(resolution)
                       pendingUserInputs.delete(requestId)
                       const resolvedAnswers = resolved._tag === 'answered' ? resolved.answers : {}
-                      yield* offerRuntimeEvent({
+                      yield* offerRuntimeEvent(input.runtimeSessionBinding, {
                         type: 'user-input.resolved',
                         ...(yield* makeEventStamp()),
                         provider: PROVIDER,
@@ -756,6 +773,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   const turnId = resolveSessionCallbackTurnId(sessions, input.threadId)
                   pendingApprovals.set(requestId, { decision })
                   yield* offerRuntimeEvent(
+                    input.runtimeSessionBinding,
                     makeAcpRequestOpenedEvent({
                       stamp: yield* makeEventStamp(),
                       provider: PROVIDER,
@@ -776,6 +794,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   const resolved = yield* Deferred.await(decision)
                   pendingApprovals.delete(requestId)
                   yield* offerRuntimeEvent(
+                    input.runtimeSessionBinding,
                     makeAcpRequestResolvedEvent({
                       stamp: yield* makeEventStamp(),
                       provider: PROVIDER,
@@ -838,6 +857,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
           const ctx: GrokSessionContext = {
             threadId: input.threadId,
+            runtimeSessionBinding: input.runtimeSessionBinding,
             acpSessionId: started.sessionId,
             generationId,
             session,
@@ -893,6 +913,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 {
                   case 'AssistantItemStarted':
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpAssistantItemEvent({
                         stamp,
                         provider: PROVIDER,
@@ -905,6 +926,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return
                   case 'AssistantItemCompleted':
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpAssistantItemEvent({
                         stamp,
                         provider: PROVIDER,
@@ -927,6 +949,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return
                   case 'ToolCallUpdated':
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpToolCallEvent({
                         stamp,
                         provider: PROVIDER,
@@ -939,6 +962,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return
                   case 'ContentDelta':
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpContentDeltaEvent({
                         stamp,
                         provider: PROVIDER,
@@ -968,21 +992,21 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             finalizeSession(ctx, classifyAcpTermination(cause)),
           ).pipe(Effect.forkChild)
 
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'session.started',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { resume: started.initializeResult },
           })
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'session.state.changed',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { state: 'ready', reason: 'Grok ACP session ready' },
           })
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'thread.started',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -1098,7 +1122,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               }
               if (ctx.interruptedTurnIds.has(turnId))
               {
-                yield* settlePromptInFlight(input.threadId, turnId, ctx.acpSessionId, {
+                yield* settlePromptInFlight(ctx, turnId, {
                   completedStopReason: 'cancelled',
                   emitTurnCompletion: false,
                   settleAllPrompts: true,
@@ -1123,7 +1147,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
               if (steeringTurnId === undefined)
               {
-                yield* offerRuntimeEvent({
+                yield* offerRuntimeEvent(ctx.runtimeSessionBinding, {
                   type: 'turn.started',
                   ...(yield* makeEventStamp()),
                   provider: PROVIDER,
@@ -1134,6 +1158,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               }
 
               return {
+                context: ctx,
                 acp: ctx.acp,
                 acpSessionId: ctx.acpSessionId,
                 displayModel,
@@ -1142,17 +1167,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               }
             }).pipe(
               Effect.tapCause(() =>
-                Effect.gen(function* ()
-                {
-                  const liveCtx = sessions.get(input.threadId)
-                  if (!liveCtx)
-                  {
-                    return
-                  }
-                  yield* settlePromptInFlight(input.threadId, turnId, liveCtx.acpSessionId, {
-                    errorMessage: 'Grok prompt preparation failed.',
-                    emitTurnCompletion: false,
-                  })
+                settlePromptInFlight(ctx, turnId, {
+                  errorMessage: 'Grok prompt preparation failed.',
+                  emitTurnCompletion: false,
                 }),
               ),
             )
@@ -1188,7 +1205,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     Effect.suspend(() =>
                     {
                       const liveCtx = sessions.get(input.threadId)
-                      return liveCtx?.acpSessionId === prepared.acpSessionId && !liveCtx.stopped
+                      return liveCtx === prepared.context && !prepared.context.stopped
                         ? prepared.acp.drainEvents
                         : Effect.void
                     }),
@@ -1204,18 +1221,13 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             input.threadId,
             Effect.gen(function* ()
             {
-              const ctx = yield* requireSession(input.threadId)
-              if (ctx.acpSessionId !== prepared.acpSessionId)
+              const ctx = sessions.get(input.threadId)
+              if (ctx !== prepared.context)
               {
-                yield* settlePromptInFlight(
-                  input.threadId,
-                  prepared.turnId,
-                  prepared.acpSessionId,
-                  {
-                    errorMessage: 'Grok session changed before the turn completed.',
-                    settleAllPrompts: true,
-                  },
-                )
+                yield* settlePromptInFlight(prepared.context, prepared.turnId, {
+                  errorMessage: 'Grok session changed before the turn completed.',
+                  settleAllPrompts: true,
+                })
                 yield* Ref.set(promptSettled, true)
                 return yield* new ProviderAdapterRequestError({
                   provider: PROVIDER,
@@ -1294,7 +1306,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   ...(prepared.displayModel ? { model: prepared.displayModel } : {}),
                 }
                 const completedStopReason = completedStopReasonFromPromptResponse(result)
-                yield* offerRuntimeEvent({
+                yield* offerRuntimeEvent(prepared.context.runtimeSessionBinding, {
                   type: 'turn.completed',
                   ...(yield* makeEventStamp()),
                   provider: PROVIDER,
@@ -1340,18 +1352,13 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   input.threadId,
                   Effect.gen(function* ()
                   {
-                    const ctx = yield* requireSession(input.threadId)
-                    if (ctx.acpSessionId !== prepared.acpSessionId)
+                    const ctx = sessions.get(input.threadId)
+                    if (ctx !== prepared.context)
                     {
-                      yield* settlePromptInFlight(
-                        input.threadId,
-                        prepared.turnId,
-                        prepared.acpSessionId,
-                        {
-                          errorMessage: 'Grok session changed before the turn completed.',
-                          settleAllPrompts: true,
-                        },
-                      )
+                      yield* settlePromptInFlight(prepared.context, prepared.turnId, {
+                        errorMessage: 'Grok session changed before the turn completed.',
+                        settleAllPrompts: true,
+                      })
                       return
                     }
                     if (ctx.interruptedTurnIds.has(prepared.turnId))
@@ -1372,14 +1379,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       prepared.promptParts,
                       promptResult,
                     )
-                    yield* settlePromptInFlight(
-                      input.threadId,
-                      prepared.turnId,
-                      prepared.acpSessionId,
-                      {
-                        completedStopReason: completedStopReasonFromPromptResponse(promptResult),
-                      },
-                    )
+                    yield* settlePromptInFlight(prepared.context, prepared.turnId, {
+                      completedStopReason: completedStopReasonFromPromptResponse(promptResult),
+                    })
                   }),
                 )
                 return
@@ -1388,7 +1390,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               const errorMessage = yield* Ref.get(promptFailureMessageRef)
               yield* withThreadLock(
                 input.threadId,
-                settlePromptInFlight(input.threadId, prepared.turnId, prepared.acpSessionId, {
+                settlePromptInFlight(prepared.context, prepared.turnId, {
                   errorMessage: errorMessage ?? 'Grok prompt request failed.',
                 }),
               )
@@ -1468,7 +1470,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             if (interruptedTurnId)
             {
               ctx.interruptedTurnIds.add(interruptedTurnId)
-              yield* settlePromptInFlight(threadId, interruptedTurnId, ctx.acpSessionId, {
+              yield* settlePromptInFlight(ctx, interruptedTurnId, {
                 completedStopReason: 'cancelled',
                 settleAllPrompts: true,
               })
@@ -1564,6 +1566,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     const stopAll: GrokAdapterShape['stopAll'] = () => sessionLifecycle.stopAll(gracefulStop)
 
+    const getSessionRuntimeBinding: GrokAdapterShape['getSessionRuntimeBinding'] = (threadId) =>
+      Effect.sync(() => sessions.get(threadId)?.runtimeSessionBinding)
+
     yield* Effect.addFinalizer(() =>
       Effect.ignore(stopAll()).pipe(
         Effect.tap(() => PubSub.shutdown(runtimeEventPubSub)),
@@ -1586,6 +1591,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       stopSession,
       listSessions,
       hasSession,
+      getSessionRuntimeBinding,
       stopAll,
       streamEvents,
     } satisfies GrokAdapterShape

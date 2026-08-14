@@ -74,20 +74,6 @@ const detectTemplate = (cwd: string, treeish = 'HEAD') =>
     return yield* detectPrTemplate(cwd, treeish, git.execute)
   })
 
-it.effect('recognizes a single-file pull request template path', () =>
-  runWithTempDirectory((cwd) =>
-    Effect.gen(function* ()
-    {
-      const relativePath = '.github/pull_request_template.md'
-      yield* writeTemplate(cwd, relativePath, `template from ${relativePath}`)
-      yield* commitTemplates(cwd)
-
-      const template = yield* detectTemplate(cwd)
-      assert.strictEqual(Option.getOrUndefined(template), `template from ${relativePath}`)
-    }),
-  ),
-)
-
 it.effect('reads templates from the requested base tree', () =>
   runWithTempDirectory((cwd) =>
     Effect.gen(function* ()

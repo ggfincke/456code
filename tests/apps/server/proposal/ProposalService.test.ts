@@ -23,6 +23,7 @@ import {
   ProposalRevisionId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
@@ -352,6 +353,7 @@ it.layer(TestLayer)('ProposalService', (it) =>
               proposalId: ProposalId.make('proposal-interrupted-append'),
             }),
           findLatestByPlan: unsupportedRepositoryCall,
+          findByOrchestrateRevision: unsupportedRepositoryCall,
           readBlob: unsupportedRepositoryCall,
         })
         const service = yield* ProposalService.make.pipe(
@@ -714,6 +716,296 @@ it.layer(TestLayer)('ProposalService', (it) =>
         const corrupted = yield* service.get({ proposalId }).pipe(Effect.flip)
         expect(corrupted.code).toBe('persistence-failed')
         expect(corrupted.detail).toContain('failed its content hash check')
+      }),
+    )
+  })
+
+  describe('orchestrate revision links', () =>
+  {
+    it.effect('revalidates, links, and reads one exact tool-sourced active-turn revision', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* Effect.acquireRelease(
+          Effect.promise(() => initializeRepository('456code-proposal-orchestrate-link-')),
+          (directory) =>
+            Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })).pipe(
+              Effect.ignore,
+            ),
+        )
+        const service = yield* ProposalService.ProposalService
+        const sql = yield* SqlClient.SqlClient
+        const activeTurnId = TurnId.make('turn-proposal-orchestrate-link')
+        const otherTurnId = TurnId.make('turn-proposal-orchestrate-other')
+        const racedProposalId = ProposalId.make('proposal-orchestrate-raced-turn')
+        const upsert = (input: {
+          readonly proposalId: ProposalId
+          readonly runId: string
+          readonly revision: number
+        }) =>
+          service.upsert({
+            ...scope,
+            proposalId: input.proposalId,
+            cwd,
+            changes: {
+              _tag: 'typed',
+              operations: [
+                {
+                  _tag: 'add',
+                  path: 'orchestrate-link.txt',
+                  content: { encoding: 'utf8', data: 'linked\n' },
+                },
+              ],
+            },
+            orchestratePlan: {
+              runId: input.runId,
+              revision: input.revision,
+              turnId: activeTurnId,
+            },
+          })
+
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id,
+            project_id,
+            title,
+            model_selection_json,
+            interaction_mode,
+            latest_turn_id,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${scope.sourceThreadId},
+            ${scope.projectId},
+            'Proposal orchestrate link',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'orchestrate',
+            ${activeTurnId},
+            '2026-08-07T11:59:00.000Z',
+            '2026-08-07T12:00:00.000Z'
+          )
+        `
+        yield* sql`
+          INSERT INTO projection_thread_sessions (
+            thread_id,
+            status,
+            active_turn_id,
+            updated_at
+          )
+          VALUES (
+            ${scope.sourceThreadId},
+            'running',
+            ${activeTurnId},
+            '2026-08-07T12:00:00.000Z'
+          )
+        `
+        yield* sql`
+          INSERT INTO projection_turns (
+            thread_id,
+            turn_id,
+            state,
+            requested_at,
+            started_at,
+            checkpoint_files_json
+          )
+          VALUES
+            (
+              ${scope.sourceThreadId},
+              ${activeTurnId},
+              'running',
+              '2026-08-07T11:59:30.000Z',
+              '2026-08-07T11:59:31.000Z',
+              '[]'
+            ),
+            (
+              ${scope.sourceThreadId},
+              ${otherTurnId},
+              'running',
+              '2026-08-07T12:00:30.000Z',
+              '2026-08-07T12:00:31.000Z',
+              '[]'
+            )
+        `
+
+        for (const plan of [
+          { runId: 'run-orchestrate-exact', revision: 6, turnId: activeTurnId, source: 'tool' },
+          { runId: 'run-orchestrate-wrong-turn', revision: 7, turnId: otherTurnId, source: 'tool' },
+          { runId: 'run-orchestrate-fence', revision: 8, turnId: activeTurnId, source: 'fence' },
+          {
+            runId: 'run-orchestrate-raced-turn',
+            revision: 9,
+            turnId: activeTurnId,
+            source: 'tool',
+          },
+        ] as const)
+        {
+          yield* sql`
+            INSERT INTO projection_thread_orchestrate_plans (
+              thread_id,
+              run_id,
+              revision,
+              turn_id,
+              workflow,
+              task,
+              stages_json,
+              total_workers,
+              max_workers,
+              source,
+              status,
+              created_at,
+              updated_at
+            )
+            VALUES (
+              ${scope.sourceThreadId},
+              ${plan.runId},
+              ${plan.revision},
+              ${plan.turnId},
+              'implementation',
+              'link an exact proposal revision',
+              '[]',
+              0,
+              1,
+              ${plan.source},
+              'superseded',
+              '2026-08-07T12:00:00.000Z',
+              '2026-08-07T12:01:00.000Z'
+            )
+          `
+        }
+
+        const missing = yield* upsert({
+          proposalId: ProposalId.make('proposal-orchestrate-missing'),
+          runId: 'run-orchestrate-missing',
+          revision: 9,
+        }).pipe(Effect.flip)
+        expect(missing.code).toBe('not-found')
+
+        const wrongTurn = yield* upsert({
+          proposalId: ProposalId.make('proposal-orchestrate-wrong-turn'),
+          runId: 'run-orchestrate-wrong-turn',
+          revision: 7,
+        }).pipe(Effect.flip)
+        expect(wrongTurn.code).toBe('identity-mismatch')
+
+        const fence = yield* upsert({
+          proposalId: ProposalId.make('proposal-orchestrate-fence'),
+          runId: 'run-orchestrate-fence',
+          revision: 8,
+        }).pipe(Effect.flip)
+        expect(fence.code).toBe('identity-mismatch')
+
+        // simulate the live turn advancing after the MCP handler's projection check
+        yield* sql`
+          UPDATE projection_thread_sessions
+          SET active_turn_id = ${otherTurnId}
+          WHERE thread_id = ${scope.sourceThreadId}
+        `
+        yield* sql`
+          UPDATE projection_threads
+          SET latest_turn_id = ${otherTurnId}
+          WHERE thread_id = ${scope.sourceThreadId}
+        `
+        const racedTurn = yield* upsert({
+          proposalId: racedProposalId,
+          runId: 'run-orchestrate-raced-turn',
+          revision: 9,
+        }).pipe(Effect.flip)
+        expect(racedTurn.code).toBe('identity-mismatch')
+        const racedRows = yield* sql<{
+          readonly proposals: number
+          readonly revisions: number
+          readonly links: number
+        }>`
+          SELECT
+            (SELECT COUNT(*) FROM proposals WHERE proposal_id = ${racedProposalId}) AS proposals,
+            (
+              SELECT COUNT(*)
+              FROM proposal_revisions
+              WHERE proposal_id = ${racedProposalId}
+            ) AS revisions,
+            (
+              SELECT COUNT(*)
+              FROM proposal_orchestrate_plan_links
+              WHERE proposal_id = ${racedProposalId}
+            ) AS links
+        `
+        expect(racedRows[0]).toEqual({ proposals: 0, revisions: 0, links: 0 })
+
+        yield* sql`
+          UPDATE projection_thread_sessions
+          SET active_turn_id = ${activeTurnId}
+          WHERE thread_id = ${scope.sourceThreadId}
+        `
+        yield* sql`
+          UPDATE projection_threads
+          SET latest_turn_id = ${activeTurnId}
+          WHERE thread_id = ${scope.sourceThreadId}
+        `
+
+        const proposalId = ProposalId.make('proposal-orchestrate-exact')
+        const revision = yield* upsert({
+          proposalId,
+          runId: 'run-orchestrate-exact',
+          revision: 6,
+        })
+        const linked = yield* service.findByOrchestrateRevision({
+          sourceThreadId: scope.sourceThreadId,
+          runId: 'run-orchestrate-exact',
+          revision: 6,
+        })
+        expect(linked).toMatchObject({
+          link: {
+            proposalId,
+            proposalRevision: revision.revision,
+            sourceThreadId: scope.sourceThreadId,
+            runId: 'run-orchestrate-exact',
+            revision: 6,
+          },
+          proposal: { proposalId },
+          revision: { proposalId, revision: 1 },
+          orchestratePlan: {
+            runId: 'run-orchestrate-exact',
+            revision: 6,
+            turnId: activeTurnId,
+            source: 'tool',
+            status: 'superseded',
+          },
+        })
+
+        const duplicate = yield* upsert({
+          proposalId: ProposalId.make('proposal-orchestrate-duplicate'),
+          runId: 'run-orchestrate-exact',
+          revision: 6,
+        }).pipe(Effect.flip)
+        expect(duplicate.code).toBe('persistence-failed')
+        const duplicateRows = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM proposals
+          WHERE proposal_id = 'proposal-orchestrate-duplicate'
+        `
+        expect(duplicateRows[0]?.count).toBe(0)
+
+        yield* sql`
+          DELETE FROM projection_thread_orchestrate_plans
+          WHERE thread_id = ${scope.sourceThreadId}
+            AND run_id = 'run-orchestrate-exact'
+            AND revision = 6
+        `
+        expect(
+          yield* service.findByOrchestrateRevision({
+            sourceThreadId: scope.sourceThreadId,
+            runId: 'run-orchestrate-exact',
+            revision: 6,
+          }),
+        ).toBeNull()
+        const retainedLinks = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM proposal_orchestrate_plan_links
+          WHERE source_thread_id = ${scope.sourceThreadId}
+            AND run_id = 'run-orchestrate-exact'
+            AND orchestrate_revision = 6
+        `
+        expect(retainedLinks[0]?.count).toBe(1)
       }),
     )
   })

@@ -9,6 +9,7 @@ import { it, assert } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Queue from 'effect/Queue'
 import * as Stream from 'effect/Stream'
@@ -21,6 +22,7 @@ import {
   ProviderEventLoggers,
 } from '../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts'
 import { makeProviderServiceLive } from '../../../../apps/server/src/provider/Layers/ProviderService.ts'
+import { ProviderRuntimeInboxLive } from '../../../../apps/server/src/persistence/Layers/ProviderRuntimeInbox.ts'
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -30,6 +32,9 @@ import { AnalyticsService } from '../../../../apps/server/src/telemetry/Services
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as ProviderSessionRuntime from '../../../../apps/server/src/persistence/Services/ProviderSessionRuntime.ts'
 import * as ProviderSessionRuntimeLayers from '../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
+import * as McpSessionRegistry from '../../../../apps/server/src/mcp/McpSessionRegistry.ts'
+import { ThreadArchiveLifecyclePermitLive } from '../../../../apps/server/src/orchestration/Layers/ThreadArchiveLifecyclePermit.ts'
+import { ProjectionSnapshotQuery } from '../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 
 import {
   makeTestProviderAdapterHarness,
@@ -81,7 +86,20 @@ const makeIntegrationFixture = Effect.gen(function* ()
     Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers),
   ).pipe(Layer.provide(SqlitePersistenceMemory))
 
-  const layer = makeProviderServiceLive().pipe(Layer.provide(shared))
+  const layer = makeProviderServiceLive().pipe(
+    Layer.provide(
+      Layer.merge(
+        ThreadArchiveLifecyclePermitLive,
+        Layer.mock(ProjectionSnapshotQuery)({
+          getThreadShellById: () => Effect.succeed(Option.some(null as never)),
+        }),
+      ),
+    ),
+    Layer.provide(ProviderRuntimeInboxLive.pipe(Layer.provide(SqlitePersistenceMemory))),
+    Layer.provide(McpSessionRegistry.disabledLayer),
+    Layer.provide(shared),
+    Layer.provide(NodeServices.layer),
+  )
 
   return {
     cwd,

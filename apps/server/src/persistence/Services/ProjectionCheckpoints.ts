@@ -31,6 +31,11 @@ export const ProjectionCheckpoint = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
+  // the tree this snapshot was taken in; NULL for every checkpoint written
+  // before migration 055
+  checkpointCaptureRoot: Schema.NullOr(Schema.String),
+  checkpointRepositoryCommonDir: Schema.NullOr(Schema.String),
+  checkpointCommitOid: Schema.NullOr(Schema.String),
 })
 export type ProjectionCheckpoint = typeof ProjectionCheckpoint.Type
 

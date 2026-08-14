@@ -90,7 +90,6 @@ const importScanTimeoutMs = 60_000
 const defaultAcpScanPhaseTimeoutMs = Math.floor(importScanTimeoutMs / 2)
 const exactTailCandidateLimit = 256
 const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
-const importScanSemaphore = Semaphore.makeUnsafe(1)
 
 export interface ImportDiscoveryResourceLimits
 {
@@ -604,6 +603,7 @@ function selectFairCandidates(
 export const make = Effect.gen(function* ()
 {
   const deps = yield* ImportDiscoveryDeps
+  const importScanSemaphore = yield* Semaphore.make(1)
   const configuredScanTimeoutMs = boundedPositiveInteger(
     deps.resourceLimits?.scanTimeoutMs,
     importScanTimeoutMs,

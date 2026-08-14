@@ -1,5 +1,5 @@
 // tests/apps/server/workers/WorkerBrokerStore.test.ts
-// verifies bounded and backward-compatible worker activity reads
+// verifies backward-compatible worker-broker reads and evidence mapping
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { WorkersActivitySnapshot } from '@t3tools/contracts'
@@ -242,17 +242,24 @@ describe('WorkerBrokerStore activity', () =>
 
 describe('WorkerBrokerStore failure classification', () =>
 {
-  it.effect('projects failure class, patch presence, and verification exit codes', () =>
+  it.effect('projects broker evidence and rolls up explicit outcomes', () =>
     withWorkerStore(({ writeJob }) =>
       Effect.gen(function* ()
       {
         yield* writeJob('job-env', {
           job_id: 'job-env',
           status: 'failed',
-          request: { provider: 'codex', mode: 'edit', repo: '/r', task: 't' },
+          request: {
+            provider: 'codex',
+            mode: 'edit',
+            repo: '/r',
+            task: 't',
+            run: 'run-evidence',
+          },
           result: {
             status: 'failed',
-            failure_class: 'environment',
+            outcome: 'worker-failed',
+            failure_class: 'verification-failed',
             patch_path: '/state/jobs/job-env/change.patch',
             changed_files: ['a.ts', 'b.ts'],
             verification: [{ command: 'vp test run x', exit_code: 127, timed_out: false }],
@@ -270,6 +277,42 @@ describe('WorkerBrokerStore failure classification', () =>
           request: { provider: 'codex', mode: 'read', repo: '/r', task: 't' },
           result: { status: 'completed', patch_path: '/state/jobs/job-ok/change.patch' },
         })
+        yield* writeJob('job-superseded', {
+          job_id: 'job-superseded',
+          status: 'cancelled',
+          request: {
+            provider: 'codex',
+            mode: 'edit',
+            repo: '/r',
+            task: 't',
+            run: 'run-evidence',
+            relaunch_of: 'job-before',
+          },
+          result: {
+            status: 'cancelled',
+            outcome: 'superseded',
+            cancel_reason: 'superseded',
+            superseded_by: 'job-after',
+            baseline_verification: [
+              { command: 'vp test run baseline', exit_code: 1, timed_out: false },
+            ],
+            scope_violations: ['legacy/path.ts'],
+            scope_violation_details: [
+              {
+                path: 'apps/web/a.ts',
+                phase: 'provider',
+                nearest_allowed: 'apps/web',
+                root: 'apps/web',
+              },
+              {
+                path: 'apps/web/b.ts',
+                phase: 'final',
+                nearest_allowed: null,
+                root: 'apps/web',
+              },
+            ],
+          },
+        })
 
         const store = yield* WorkerBrokerStore.WorkerBrokerStore
         const listed = yield* store.list({})
@@ -277,13 +320,18 @@ describe('WorkerBrokerStore failure classification', () =>
 
         const env = byId.get('job-env')
         assert.ok(env)
-        assert.deepStrictEqual(env.failureClass, Option.some('environment'))
+        assert.deepStrictEqual(env.outcome, Option.some('worker-failed'))
+        assert.deepStrictEqual(env.failureClass, Option.some('verification-failed'))
         assert.deepStrictEqual(env.hasPatch, Option.some(true))
         assert.deepStrictEqual(env.verificationExitCodes, [Option.some(127)])
 
         // legacy failed records degrade to "unknown", never to a false claim
         const legacy = byId.get('job-legacy')
         assert.ok(legacy)
+        assert.deepStrictEqual(legacy.outcome, Option.none())
+        assert.deepStrictEqual(legacy.cancelReason, Option.none())
+        assert.deepStrictEqual(legacy.supersededBy, Option.none())
+        assert.deepStrictEqual(legacy.relaunchOf, Option.none())
         assert.deepStrictEqual(legacy.failureClass, Option.some('unknown'))
         assert.deepStrictEqual(legacy.hasPatch, Option.some(false))
 
@@ -292,7 +340,144 @@ describe('WorkerBrokerStore failure classification', () =>
         assert.ok(ok)
         assert.deepStrictEqual(ok.failureClass, Option.none())
         assert.deepStrictEqual(ok.hasPatch, Option.some(true))
+
+        const superseded = byId.get('job-superseded')
+        assert.ok(superseded)
+        assert.deepStrictEqual(superseded.outcome, Option.some('superseded'))
+        assert.deepStrictEqual(superseded.cancelReason, Option.some('superseded'))
+        assert.deepStrictEqual(superseded.supersededBy, Option.some('job-after'))
+        assert.deepStrictEqual(superseded.relaunchOf, Option.some('job-before'))
+        assert.strictEqual(superseded.scopeViolationCount, 2)
+        assert.deepStrictEqual(
+          superseded.scopeViolationGroups,
+          Option.some([{ root: 'apps/web', count: 2 }]),
+        )
+
+        const detail = yield* store.getJob({ jobId: 'job-superseded' })
+        const detailJob = Option.getOrUndefined(detail.job)
+        assert.ok(detailJob)
+        assert.deepStrictEqual(
+          detailJob.baselineVerification,
+          Option.some([
+            {
+              command: 'vp test run baseline',
+              exitCode: Option.some(1),
+              timedOut: false,
+              elapsedMs: Option.none(),
+            },
+          ]),
+        )
+        assert.deepStrictEqual(
+          detailJob.scopeViolationDetails,
+          Option.some([
+            {
+              path: 'apps/web/a.ts',
+              phase: 'provider',
+              nearestAllowed: Option.some('apps/web'),
+              root: 'apps/web',
+            },
+            {
+              path: 'apps/web/b.ts',
+              phase: 'final',
+              nearestAllowed: Option.none(),
+              root: 'apps/web',
+            },
+          ]),
+        )
+
+        const runs = yield* store.listRuns({})
+        const evidenceRun = runs.runs.find((run) => run.run === 'run-evidence')
+        assert.ok(evidenceRun)
+        assert.deepStrictEqual(evidenceRun.outcomeCounts, {
+          'worker-failed': 1,
+          superseded: 1,
+        })
+        assert.deepStrictEqual(
+          evidenceRun.scopeViolationGroups,
+          Option.some([{ root: 'apps/web', count: 2 }]),
+        )
       }),
     ),
+  )
+})
+
+describe('WorkerBrokerStore execution evidence', () =>
+{
+  it.effect(
+    'returns raw immutable request and result identity without normalizing mismatches',
+    () =>
+      withWorkerStore(({ writeJob }) =>
+        Effect.gen(function* ()
+        {
+          yield* writeJob('job-execution', {
+            job_id: 'job-execution',
+            status: 'completed',
+            base_sha: 'base-oid',
+            branch: 'record-branch',
+            worktree: '/repo/worktrees/record',
+            request: {
+              run: 'run-execution',
+              repo: '/repo',
+            },
+            result: {
+              status: 'completed',
+              repo: '/repo/worktrees/result',
+              base_sha: 'base-oid',
+              head_sha: 'head-oid',
+              branch: 'result-branch',
+              worktree: '/repo/worktrees/result',
+            },
+          })
+          yield* writeJob('job-requested-path', {
+            job_id: 'different-record-id',
+            status: 'failed',
+            request: { run: 'run-other', repo: '/other' },
+            result: { status: 'failed' },
+          })
+
+          const store = yield* WorkerBrokerStore.WorkerBrokerStore
+          const loaded = yield* store.getExecutionEvidence('job-execution')
+          assert.deepStrictEqual(loaded, {
+            state: 'loaded',
+            evidence: {
+              requestedJobId: 'job-execution',
+              recordJobId: 'job-execution',
+              recordStatus: 'completed',
+              resultStatus: 'completed',
+              requestRunId: 'run-execution',
+              requestRepositoryRoot: '/repo',
+              resultRepositoryRoot: '/repo/worktrees/result',
+              recordBaseOid: 'base-oid',
+              resultBaseOid: 'base-oid',
+              headOid: 'head-oid',
+              recordBranch: 'record-branch',
+              resultBranch: 'result-branch',
+              recordWorktreeRoot: '/repo/worktrees/record',
+              resultWorktreeRoot: '/repo/worktrees/result',
+            },
+          })
+
+          const mismatched = yield* store.getExecutionEvidence('job-requested-path')
+          assert.deepStrictEqual(mismatched, {
+            state: 'loaded',
+            evidence: {
+              requestedJobId: 'job-requested-path',
+              recordJobId: 'different-record-id',
+              recordStatus: 'failed',
+              resultStatus: 'failed',
+              requestRunId: 'run-other',
+              requestRepositoryRoot: '/other',
+              resultRepositoryRoot: null,
+              recordBaseOid: null,
+              resultBaseOid: null,
+              headOid: null,
+              recordBranch: null,
+              resultBranch: null,
+              recordWorktreeRoot: null,
+              resultWorktreeRoot: null,
+            },
+          })
+        }),
+      ),
   )
 })

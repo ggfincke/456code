@@ -1,54 +1,170 @@
 // packages/contracts/src/cartographer.ts
-// defines authenticated cartographer embed and analysis transports
+// defines cartographer analysis and proposal-generation transports
 
 import * as Schema from 'effect/Schema'
 
-import { IsoDateTime, ThreadId, TrimmedNonEmptyString, TurnId } from './baseSchemas.ts'
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+  TurnId,
+} from './baseSchemas.ts'
 import { OrchestrationProposedPlanId } from './orchestration.ts'
-import { ProposalId, ProposalRevisionId } from './proposal.ts'
-
-export const CartographerEmbedSessionId = TrimmedNonEmptyString.pipe(
-  Schema.brand('CartographerEmbedSessionId'),
-)
-export type CartographerEmbedSessionId = typeof CartographerEmbedSessionId.Type
+import { ProposalGitObjectOid, ProposalId, ProposalRevisionId } from './proposal.ts'
+import { ReviewDiffPreviewSourceKind } from './review.ts'
 
 export const ProposalGenerationId = TrimmedNonEmptyString.pipe(Schema.brand('ProposalGenerationId'))
 export type ProposalGenerationId = typeof ProposalGenerationId.Type
 
-export const CartographerIssueEmbedInput = Schema.Struct({
-  threadId: ThreadId,
-  generationId: Schema.optionalKey(ProposalGenerationId),
-  parentOrigin: TrimmedNonEmptyString,
-  theme: Schema.Literals(['light', 'dark']),
-})
-export type CartographerIssueEmbedInput = typeof CartographerIssueEmbedInput.Type
+export const DiffAnalysisId = TrimmedNonEmptyString.pipe(Schema.brand('DiffAnalysisId'))
+export type DiffAnalysisId = typeof DiffAnalysisId.Type
 
-export const CartographerCloseEmbedInput = Schema.Struct({
-  threadId: ThreadId,
-  sessionId: CartographerEmbedSessionId,
-})
-export type CartographerCloseEmbedInput = typeof CartographerCloseEmbedInput.Type
+export const DiffAnalysisSourceKind = Schema.Literals([
+  'checkpoint',
+  'review',
+  'tree-pair',
+  'commit-pair',
+])
+export type DiffAnalysisSourceKind = typeof DiffAnalysisSourceKind.Type
 
-export const CartographerIssueEmbedResult = Schema.Struct({
+export const DiffAnalysisSource = Schema.Union([
+  Schema.Struct({
+    sourceKind: Schema.Literal('checkpoint'),
+    threadId: ThreadId,
+    fromTurnCount: NonNegativeInt,
+    toTurnCount: NonNegativeInt,
+  }),
+  Schema.Struct({
+    sourceKind: Schema.Literal('review'),
+    cwd: TrimmedNonEmptyString,
+    kind: ReviewDiffPreviewSourceKind,
+    baseRef: Schema.optionalKey(TrimmedNonEmptyString),
+  }),
+  Schema.Struct({
+    sourceKind: Schema.Literal('tree-pair'),
+    cwd: TrimmedNonEmptyString,
+    baseTreeOid: ProposalGitObjectOid,
+    headTreeOid: ProposalGitObjectOid,
+  }),
+  Schema.Struct({
+    sourceKind: Schema.Literal('commit-pair'),
+    cwd: TrimmedNonEmptyString,
+    baseCommitOid: ProposalGitObjectOid,
+    headCommitOid: ProposalGitObjectOid,
+  }),
+])
+export type DiffAnalysisSource = typeof DiffAnalysisSource.Type
+
+export const DiffAnalysisOwner = Schema.Union([
+  Schema.Struct({ threadId: ThreadId }),
+  Schema.Struct({ projectId: ProjectId }),
+])
+export type DiffAnalysisOwner = typeof DiffAnalysisOwner.Type
+
+export const DiffAnalysisState = Schema.Literals([
+  'queued',
+  'preparing',
+  'analyzing',
+  'ready',
+  'failed',
+  'cancelled',
+  'abandoned',
+])
+export type DiffAnalysisState = typeof DiffAnalysisState.Type
+
+export const DiffAnalysisErrorCode = Schema.Literals([
+  'invalid-source',
+  'thread-not-found',
+  'workspace-path-missing',
+  'repository-out-of-scope',
+  'not-git-repository',
+  'repository-identity-failed',
+  'checkpoint-ref-missing',
+  'base-ref-missing',
+  'merge-base-missing',
+  'tree-object-missing',
+  'dirty-submodule',
+  'unsupported',
+  'limit-exceeded',
+  'materialization-failed',
+  'analysis-timeout',
+  'analysis-failed',
+  'analysis-manifest-invalid',
+  'artifact-invalid',
+  'request-cancelled',
+  'server-restarted',
+  'persistence-failed',
+])
+export type DiffAnalysisErrorCode = typeof DiffAnalysisErrorCode.Type
+
+export const DiffAnalysisGeneration = Schema.Struct({
   version: Schema.Literal(1),
-  sessionId: CartographerEmbedSessionId,
-  url: TrimmedNonEmptyString,
-  expiresAt: IsoDateTime,
+  diffAnalysisId: DiffAnalysisId,
+  sourceKind: DiffAnalysisSourceKind,
+  state: DiffAnalysisState,
+  baseTreeOid: ProposalGitObjectOid,
+  headTreeOid: ProposalGitObjectOid,
+  analyzerVersion: TrimmedNonEmptyString,
+  analysisPolicyVersion: TrimmedNonEmptyString,
+  sourceCurrent: Schema.Boolean,
+  baseGraphArtifact: Schema.NullOr(TrimmedNonEmptyString),
+  headGraphArtifact: Schema.NullOr(TrimmedNonEmptyString),
+  impactArtifact: Schema.NullOr(TrimmedNonEmptyString),
+  artifactByteLength: NonNegativeInt,
+  errorCode: Schema.NullOr(DiffAnalysisErrorCode),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  lastAccessedAt: IsoDateTime,
 })
-export type CartographerIssueEmbedResult = typeof CartographerIssueEmbedResult.Type
+export type DiffAnalysisGeneration = typeof DiffAnalysisGeneration.Type
 
-export class CartographerEmbedError extends Schema.TaggedErrorClass<CartographerEmbedError>()(
-  'CartographerEmbedError',
+export const CartographerRequestDiffAnalysisInput = Schema.Struct({
+  owner: DiffAnalysisOwner,
+  source: DiffAnalysisSource,
+})
+export type CartographerRequestDiffAnalysisInput = typeof CartographerRequestDiffAnalysisInput.Type
+
+export const CartographerGetDiffAnalysisInput = Schema.Struct({
+  owner: DiffAnalysisOwner,
+  source: DiffAnalysisSource,
+  diffAnalysisId: Schema.optionalKey(DiffAnalysisId),
+})
+export type CartographerGetDiffAnalysisInput = typeof CartographerGetDiffAnalysisInput.Type
+
+export class DiffAnalysisError extends Schema.TaggedErrorClass<DiffAnalysisError>()(
+  'DiffAnalysisError',
+  {
+    code: DiffAnalysisErrorCode,
+    message: TrimmedNonEmptyString,
+    diffAnalysisId: Schema.optionalKey(DiffAnalysisId),
+  },
+)
+{}
+
+export const CartographerRebuildProjectAtlasInput = Schema.Struct({
+  projectId: ProjectId,
+})
+export type CartographerRebuildProjectAtlasInput = typeof CartographerRebuildProjectAtlasInput.Type
+
+export const CartographerPrepareCurrentWorktreeArchitectureInput = Schema.Struct({
+  threadId: ThreadId,
+})
+export type CartographerPrepareCurrentWorktreeArchitectureInput =
+  typeof CartographerPrepareCurrentWorktreeArchitectureInput.Type
+
+export class CartographerError extends Schema.TaggedErrorClass<CartographerError>()(
+  'CartographerError',
   {
     failure: Schema.Literals([
       'unsupported',
       'workspace_context_not_found',
       'generation_not_found',
-      'start_failed',
-      'invalid_handshake',
-      'session_not_found',
-      'ticket_invalid',
-      'proxy_failed',
+      'snapshot_failed',
+      'context_start_failed',
+      'context_not_found',
+      'diff_analysis_not_found',
     ]),
     message: TrimmedNonEmptyString,
   },

@@ -12,11 +12,13 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type CodexSettings,
+  EventId,
   ProviderDriverKind,
   type ProviderEvent,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderRequestKind,
+  type RateLimitWindowSnapshot,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
@@ -27,10 +29,13 @@ import {
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Crypto from 'effect/Crypto'
+import * as DateTime from 'effect/DateTime'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
 import * as Queue from 'effect/Queue'
+import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
@@ -40,7 +45,6 @@ import * as EffectCodexSchema from 'effect-codex-app-server/schema'
 
 import { getModelSelectionStringOptionValue } from '@t3tools/shared/model'
 import { getCodexServiceTierOptionValue } from '../../codexModelOptions.ts'
-import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 
 import {
   ProviderAdapterRequestError,
@@ -51,6 +55,10 @@ import {
   type ProviderAdapterError,
 } from '../Errors.ts'
 import { type CodexAdapterShape } from '../Services/CodexAdapter.ts'
+import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
+} from '../Services/ProviderAdapter.ts'
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
 import {
@@ -88,9 +96,11 @@ export interface CodexAdapterLiveOptions
 interface CodexAdapterSessionContext
 {
   readonly threadId: ThreadId
+  readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
   readonly scope: Scope.Closeable
   readonly runtime: CodexSessionRuntimeShape
   readonly eventFiber: Fiber.Fiber<void, never>
+  readonly terminalPublished: Ref.Ref<boolean>
   stopped: boolean
 }
 
@@ -151,6 +161,50 @@ function trimText(value: string | undefined | null): string | undefined
 {
   const trimmed = value?.trim()
   return trimmed && trimmed.length > 0 ? trimmed : undefined
+}
+
+// this provider reports windows but never a status, so the pre-failure band has to be derived.
+// 90% used is the same line isProviderUsageWindowDanger draws in the web usage meter, so the
+// work-log row and the meter agree instead of disagreeing about when a limit is about to bite
+const CODEX_RATE_LIMIT_WARNING_PERCENT = 90
+
+function codexRateLimitResetsAt(value: number | null | undefined): string | undefined
+{
+  if (value === null || value === undefined || !Number.isFinite(value))
+  {
+    return undefined
+  }
+  return Option.match(DateTime.make(value * 1_000), {
+    onNone: () => undefined,
+    onSome: DateTime.formatIso,
+  })
+}
+
+function codexRateLimitSnapshot(
+  snapshot: EffectCodexSchema.V2AccountRateLimitsUpdatedNotification['rateLimits'],
+): RateLimitWindowSnapshot
+{
+  const windows = [snapshot.primary, snapshot.secondary].flatMap((window) =>
+    window ? [window] : [],
+  )
+  const worst = windows.toSorted((left, right) => right.usedPercent - left.usedPercent)[0]
+
+  const reached =
+    (snapshot.rateLimitReachedType ?? null) !== null || snapshot.spendControlReached === true
+  const status = reached
+    ? 'rejected'
+    : worst !== undefined && worst.usedPercent >= CODEX_RATE_LIMIT_WARNING_PERCENT
+      ? 'allowed_warning'
+      : 'allowed'
+
+  const windowId = trimText(snapshot.limitName) ?? trimText(snapshot.limitId)
+  const resetsAt = codexRateLimitResetsAt(worst?.resetsAt)
+  return {
+    status,
+    ...(windowId !== undefined ? { windowId } : {}),
+    ...(worst !== undefined ? { utilization: worst.usedPercent } : {}),
+    ...(resetsAt !== undefined ? { resetsAt } : {}),
+  }
 }
 
 const FATAL_CODEX_STDERR_SNIPPETS = ['failed to connect to websocket']
@@ -538,6 +592,9 @@ function mapItemLifecycle(
 function mapToRuntimeEvents(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
+  // per-session holder for the last rate-limit transition. passed in rather than kept module-side
+  // so two concurrent Codex sessions cannot silence each other's warning
+  rateLimitDedup?: { lastKey: string | undefined },
 ): ReadonlyArray<ProviderRuntimeEvent>
 {
   if (event.kind === 'error')
@@ -1232,16 +1289,36 @@ function mapToRuntimeEvents(
 
   if (event.method === 'account/rateLimits/updated')
   {
-    if (!readPayload(EffectCodexSchema.V2AccountRateLimitsUpdatedNotification, event.payload))
+    const notification = readPayload(
+      EffectCodexSchema.V2AccountRateLimitsUpdatedNotification,
+      event.payload,
+    )
+    if (!notification)
     {
       return []
+    }
+    const snapshot = codexRateLimitSnapshot(notification.rateLimits)
+    // the provider sends a rolling update with no transition concept, so without this every
+    // sparse refresh past the warning line would append another identical row
+    const key = `${snapshot.status}:${snapshot.windowId ?? ''}`
+    if (rateLimitDedup !== undefined)
+    {
+      if (rateLimitDedup.lastKey === key)
+      {
+        return []
+      }
+      rateLimitDedup.lastKey = key
     }
     return [
       {
         type: 'account.rate-limits.updated',
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          rateLimits: event.payload ?? {},
+          snapshot,
+          // the validated snapshot, not the notification envelope. `event.payload` wrapped the
+          // whole `{ rateLimits: ... }` bag in another `rateLimits` key, so the shape a reader
+          // would have to unwrap did not match the one the contract names
+          rateLimits: notification.rateLimits,
         },
       },
     ]
@@ -1506,7 +1583,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
       : undefined)
   const managedNativeEventLogger =
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined
-  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>()
+  const runtimeEventQueue = yield* Queue.unbounded<ProviderAdapterRuntimeEvent>()
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>()
 
   const startSession: CodexAdapterShape['startSession'] = (input) =>
@@ -1532,7 +1609,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined
-        const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId)
+        const mcpSession = input.mcp
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1588,11 +1665,13 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
           ),
         )
 
+        const rateLimitDedup: { lastKey: string | undefined } = { lastKey: undefined }
+        const terminalPublished = yield* Ref.make(false)
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* ()
           {
             yield* writeNativeEvent(event)
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId)
+            const runtimeEvents = mapToRuntimeEvents(event, event.threadId, rateLimitDedup)
             if (runtimeEvents.length === 0)
             {
               yield* Effect.logDebug('ignoring unhandled Codex provider event', {
@@ -1603,7 +1682,30 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
               })
               return
             }
-            yield* Queue.offerAll(runtimeEventQueue, runtimeEvents)
+            yield* Effect.uninterruptible(
+              Ref.modify(terminalPublished, (published) =>
+              {
+                const terminalIndex = runtimeEvents.findIndex(
+                  (runtimeEvent) => runtimeEvent.type === 'session.exited',
+                )
+                const accepted = published
+                  ? []
+                  : terminalIndex === -1
+                    ? runtimeEvents
+                    : runtimeEvents.slice(0, terminalIndex + 1)
+                return [accepted, published || terminalIndex !== -1] as const
+              }).pipe(
+                Effect.flatMap((accepted) =>
+                  Queue.offerAll(
+                    runtimeEventQueue,
+                    accepted.map((runtimeEvent) => ({
+                      binding: input.runtimeSessionBinding,
+                      event: runtimeEvent,
+                    })),
+                  ),
+                ),
+              ),
+            )
           }),
         ).pipe(Effect.forkIn(sessionScope))
 
@@ -1628,9 +1730,11 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
 
         sessions.set(input.threadId, {
           threadId: input.threadId,
+          runtimeSessionBinding: input.runtimeSessionBinding,
           scope: sessionScope,
           runtime,
           eventFiber,
+          terminalPublished,
           stopped: false,
         })
         sessionScopeTransferred = true
@@ -1703,6 +1807,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
           : {}),
         ...(serviceTier ? { serviceTier } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+        ...(input.orchestrate !== undefined ? { orchestrate: input.orchestrate } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, 'turn/start', cause)))
@@ -1816,6 +1921,37 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
     session.stopped = true
     sessions.delete(session.threadId)
     yield* session.runtime.close.pipe(Effect.ignore)
+    yield* Effect.uninterruptible(
+      Ref.getAndSet(session.terminalPublished, true).pipe(
+        Effect.flatMap((published) =>
+          published
+            ? Effect.void
+            : DateTime.now.pipe(
+                Effect.map(DateTime.formatIso),
+                Effect.flatMap((createdAt) =>
+                  Queue.offer(runtimeEventQueue, {
+                    binding: session.runtimeSessionBinding,
+                    event: {
+                      type: 'session.exited',
+                      eventId: EventId.make(
+                        `codex-adapter-stopped:${session.runtimeSessionBinding.providerInstanceId}:${session.threadId}:${session.runtimeSessionBinding.sessionGeneration}`,
+                      ),
+                      provider: PROVIDER,
+                      providerInstanceId: session.runtimeSessionBinding.providerInstanceId,
+                      threadId: session.threadId,
+                      createdAt,
+                      payload: {
+                        reason: 'Codex adapter stopped the session.',
+                        recoverable: false,
+                        exitKind: 'graceful',
+                      },
+                    },
+                  }),
+                ),
+              ),
+        ),
+      ),
+    )
     yield* Effect.ignore(Scope.close(session.scope, Exit.void))
     yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore)
   })
@@ -1840,6 +1976,9 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
 
   const hasSession: CodexAdapterShape['hasSession'] = (threadId) =>
     Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped))
+
+  const getSessionRuntimeBinding: CodexAdapterShape['getSessionRuntimeBinding'] = (threadId) =>
+    Effect.succeed(sessions.get(threadId)?.runtimeSessionBinding)
 
   const stopAll: CodexAdapterShape['stopAll'] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
@@ -1870,6 +2009,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
     stopSession,
     listSessions,
     hasSession,
+    getSessionRuntimeBinding,
     stopAll,
     get streamEvents()
     {

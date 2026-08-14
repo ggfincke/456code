@@ -1,5 +1,5 @@
 // apps/server/src/serverRuntimeStartup.ts
-// run cartographer embed reconciliation
+// coordinates server startup readiness and lifecycle publication
 
 import {
   CommandId,
@@ -26,7 +26,6 @@ import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 
 import * as ServerConfig from './config.ts'
-import * as CartographerEmbedBroker from './cartographer/CartographerEmbedBroker.ts'
 import * as Keybindings from './keybindings.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import * as OrchestrationEngine from './orchestration/Services/OrchestrationEngine.ts'
@@ -36,15 +35,12 @@ import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
 import * as ServerSettings from './serverSettings.ts'
 import * as AnalyticsService from './telemetry/Services/AnalyticsService.ts'
 import * as ServerEnvironment from './environment/ServerEnvironment.ts'
+import { formatHostForUrl, isWildcardHost } from './environment/accessHost.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
+import * as ImportService from './import/importService.ts'
 import * as ProviderSessionReaper from './provider/Services/ProviderSessionReaper.ts'
 import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefReconciler.ts'
-import {
-  formatHeadlessServeOutput,
-  formatHostForUrl,
-  isWildcardHost,
-  issueHeadlessServeAccessInfo,
-} from './startupAccess.ts'
+import { formatHeadlessServeOutput, issueHeadlessServeAccessInfo } from './startupAccess.ts'
 
 export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
   'ServerRuntimeStartupError',
@@ -293,6 +289,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* ()
           title: 'New thread',
           modelSelection: nextProjectDefaultModelSelection,
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          orchestrate: false,
           runtimeMode: 'full-access',
           branch: null,
           worktreePath: null,
@@ -357,40 +354,23 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
     Effect.withSpan(`server.startup.${phase}`),
   )
 
-export const runCartographerEmbedReconciliation = (
-  reconciliation: Effect.Effect<CartographerEmbedBroker.CartographerEmbedReconciliationReport>,
-) =>
-  runStartupPhase(
-    'cartographer.embed.reconcile',
-    reconciliation.pipe(
-      Effect.timeoutOption(250),
-      Effect.flatMap(
-        Option.match({
-          onNone: () =>
-            Effect.logWarning('cartographer embed restart reconciliation exceeded its budget', {
-              owner: 'cartographer-embed',
-              budgetMs: 250,
-            }),
-          onSome: (report) =>
-            report.budgetExceeded
-              ? Effect.logWarning('cartographer embed restart reconciliation budget exceeded', {
-                  owner: 'cartographer-embed',
-                  report,
-                })
-              : Effect.logInfo('cartographer embed restart reconciliation completed', {
-                  owner: 'cartographer-embed',
-                  report,
-                }),
-        }),
-      ),
-      Effect.catchCause((cause) =>
-        Effect.logWarning('cartographer embed restart reconciliation failed', {
-          owner: 'cartographer-embed',
-          cause,
-        }),
-      ),
-    ),
+export const runImportReplacementStartupRecovery = Effect.gen(function* ()
+{
+  const importService = yield* ImportService.ImportService
+  yield* Effect.logDebug('startup phase: inventorying open import replacement intents')
+  const importInventory = yield* runStartupPhase(
+    'import-replacements.inventory',
+    importService.inspectOpenReplacementIntents,
   )
+  yield* Effect.logInfo('import replacement intent inventory', importInventory)
+
+  yield* Effect.logDebug('startup phase: recovering source-independent import replacements')
+  const importRecovery = yield* runStartupPhase(
+    'import-replacements.recover',
+    importService.recoverOpenReplacementIntents,
+  )
+  yield* Effect.logInfo('import replacement recovery report', importRecovery)
+})
 
 export const runProposalRetainedRefReconciliation = Effect.gen(function* ()
 {
@@ -428,13 +408,28 @@ export const make = Effect.gen(function* ()
   const serverSettings = yield* ServerSettings.ServerSettingsService
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment
   const crypto = yield* Crypto.Crypto
-  const cartographerEmbedBroker = yield* CartographerEmbedBroker.CartographerEmbedBroker
 
   const commandGate = yield* makeCommandGate
   const httpListening = yield* Deferred.make<void>()
   const reactorScope = yield* Scope.make('sequential')
+  const reactorsStarted = yield* Ref.make(false)
 
-  yield* Effect.addFinalizer(() => Scope.close(reactorScope, Exit.void))
+  yield* Effect.addFinalizer(() =>
+    Ref.get(reactorsStarted).pipe(
+      Effect.flatMap((started) =>
+        started
+          ? orchestrationReactor.shutdown.pipe(
+              Effect.catch((cause) =>
+                Effect.logError('provider ingress shutdown drain failed', {
+                  operation: cause.operation,
+                }),
+              ),
+            )
+          : Effect.void,
+      ),
+      Effect.ensuring(Scope.close(reactorScope, Exit.void)),
+    ),
+  )
 
   const startup = Effect.gen(function* ()
   {
@@ -476,9 +471,12 @@ export const make = Effect.gen(function* ()
       Effect.gen(function* ()
       {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope))
+        yield* Ref.set(reactorsStarted, true)
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope))
       }),
     )
+
+    yield* runImportReplacementStartupRecovery
 
     yield* Effect.logDebug('startup phase: reconciling proposal retained refs')
     yield* runStartupPhase('proposal-retained-refs.reconcile', runProposalRetainedRefReconciliation)
@@ -544,9 +542,6 @@ export const make = Effect.gen(function* ()
         ),
       )
     }
-
-    yield* Effect.logDebug('startup phase: reconciling cartographer embed roots')
-    yield* runCartographerEmbedReconciliation(cartographerEmbedBroker.reconcileEmbedRoots)
   }).pipe(
     Effect.annotateSpans({
       'server.mode': serverConfig.mode,

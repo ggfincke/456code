@@ -10,14 +10,11 @@ const decode = Schema.decodeUnknownSync(ProjectFile)
 
 describe('ProjectFile', () =>
 {
-  it('decodes an empty object and ignores unknown fields', () =>
+  it('defaults empty objects, trims fields, and ignores unknown keys', () =>
   {
     expect(decode({})).toEqual({})
     expect(decode({ futureField: true })).toEqual({})
-  })
 
-  it('trims icon paths and script fields', () =>
-  {
     const decoded = decode({
       iconPath: ' assets/logo.svg ',
       scripts: [{ name: ' Dev ', command: ' pnpm dev ' }],

@@ -1,14 +1,37 @@
 // tests/packages/shared/composerTrigger.test.ts
-// verify serialize composer mention path behavior
+// verifies composer trigger parsing and serialization
 
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
   detectComposerTrigger,
+  isBareProviderSlashCommand,
+  parseBareProviderSlashCommand,
   parseStandaloneComposerSlashCommand,
   serializeComposerFileLink,
   serializeComposerMentionPath,
 } from '../../../packages/shared/src/composerTrigger.ts'
+
+describe('isBareProviderSlashCommand', () =>
+{
+  it.each(['/compact', ' /compact ', '/review focus on errors'])('accepts %s', (text) =>
+  {
+    expect(isBareProviderSlashCommand(text)).toBe(true)
+  })
+
+  it.each(['/compact\nthen continue with the task', '//x', '/ x', 'use /compact'])(
+    'rejects %s',
+    (text) =>
+    {
+      expect(isBareProviderSlashCommand(text)).toBe(false)
+    },
+  )
+
+  it('returns the command name for a bare invocation', () =>
+  {
+    expect(parseBareProviderSlashCommand('/COMPACT now')).toBe('COMPACT')
+  })
+})
 
 describe('serializeComposerMentionPath', () =>
 {

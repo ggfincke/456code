@@ -12,8 +12,13 @@ import type { ReactorDeliveryError } from '../Errors.ts'
 
 export const ReactorId = Schema.Literals([
   'thread-deletion',
+  'thread-archive',
+  'project-atlas-lifecycle',
   'checkpoint-domain',
   'provider-command',
+  'architecture-auto-analysis',
+  'provider-runtime-ingestion',
+  'provider-runtime-checkpoint',
 ])
 export type ReactorId = typeof ReactorId.Type
 

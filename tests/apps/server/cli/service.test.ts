@@ -8,6 +8,7 @@ import { formatServiceStatus } from '../../../../apps/server/src/cli/service.ts'
 const status = {
   supported: true,
   installed: true,
+  active: true,
   current: true,
   unitPath: '/home/me/.config/systemd/user/456code.service',
   logPath: '/home/me/.456code/userdata/logs/boot-service.log',

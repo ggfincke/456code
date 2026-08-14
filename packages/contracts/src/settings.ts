@@ -69,6 +69,12 @@ export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // opt-out rather than opt-in: the failure this notification exists to prevent
+  // is a turn that finished or died while nobody was looking, so it has to be
+  // on until the user says otherwise.
+  desktopNotificationsEnabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
   dismissedProviderUpdateNotificationKeys: Schema.Array(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
@@ -430,6 +436,10 @@ export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyle
 
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30)
 
+export const ArchitectureAutoAnalysis = Schema.Literals(['off', 'on-demand', 'auto'])
+export type ArchitectureAutoAnalysis = typeof ArchitectureAutoAnalysis.Type
+export const DEFAULT_ARCHITECTURE_AUTO_ANALYSIS: ArchitectureAutoAnalysis = 'on-demand'
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -437,6 +447,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(
       Effect.succeed(Duration.toMillis(DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL)),
     ),
+  ),
+  architectureAutoAnalysis: ArchitectureAutoAnalysis.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_ARCHITECTURE_AUTO_ANALYSIS)),
   ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(Effect.succeed('local' as const satisfies ThreadEnvMode)),
@@ -582,6 +595,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
+  architectureAutoAnalysis: Schema.optionalKey(ArchitectureAutoAnalysis),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
@@ -621,6 +635,7 @@ export const ClientSettingsPatch = Schema.Struct({
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
+  desktopNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   glassOpacity: Schema.optionalKey(GlassOpacity),
   favorites: Schema.optionalKey(

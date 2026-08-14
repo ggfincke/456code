@@ -95,6 +95,30 @@ export interface ResolvedSpawnCommand
   readonly shell: boolean
 }
 
+export function prepareSpawnCommandForPlatform(
+  command: string,
+  args: ReadonlyArray<string>,
+  platform: NodeJS.Platform,
+): ResolvedSpawnCommand
+{
+  if (platform !== 'win32')
+  {
+    return { command, args: [...args], shell: false }
+  }
+
+  const extension = NodePath.win32.extname(command).toLowerCase()
+  if (extension !== '.cmd' && extension !== '.bat')
+  {
+    return { command, args: [...args], shell: false }
+  }
+
+  return {
+    command: escapeWindowsShellArg(command),
+    args: sanitizeShellModeArgsForPlatform(args, platform),
+    shell: true,
+  }
+}
+
 export type SpawnExecutableResolver = (
   command: string,
   platform: NodeJS.Platform,
@@ -659,7 +683,7 @@ export const resolveSpawnCommand = Effect.fn('shell.resolveSpawnCommand')(functi
   const platform = yield* HostProcessPlatform
   if (platform !== 'win32')
   {
-    return { command, args: [...args], shell: false }
+    return prepareSpawnCommandForPlatform(command, args, platform)
   }
 
   const hostEnvironment = yield* HostProcessEnvironment
@@ -671,17 +695,7 @@ export const resolveSpawnCommand = Effect.fn('shell.resolveSpawnCommand')(functi
         : options.env
   const resolveExecutable = yield* SpawnExecutableResolution
   const resolvedCommand = resolveExecutable(command, platform, env) ?? command
-  const extension = NodePath.win32.extname(resolvedCommand).toLowerCase()
-  if (extension !== '.cmd' && extension !== '.bat')
-  {
-    return { command: resolvedCommand, args: [...args], shell: false }
-  }
-
-  return {
-    command: escapeWindowsShellArg(resolvedCommand),
-    args: sanitizeShellModeArgsForPlatform(args, platform),
-    shell: true,
-  }
+  return prepareSpawnCommandForPlatform(resolvedCommand, args, platform)
 })
 
 export const isCommandAvailable = Effect.fn('shell.isCommandAvailable')(function* (

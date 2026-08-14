@@ -31,8 +31,11 @@ import {
 import {
   assertAbnormalChildExitFinalizesOnce,
   assertAbnormalExitDisabledByDefault,
+  assertConcurrentStartSerializesSameThread,
   assertOneExitWhenStopRacesTermination,
   assertStopClosesAcpChild,
+  startAcpTestSession,
+  unwrapAcpRuntimeEvents,
   waitForAcpSessionDrop,
 } from './acpLifecycleTestHelpers.ts'
 import {
@@ -48,6 +51,11 @@ import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
 import type { CursorAdapterShape } from '../../../../../apps/server/src/provider/Services/CursorAdapter.ts'
 import { makeCursorAdapter } from '../../../../../apps/server/src/provider/Layers/CursorAdapter.ts'
+import {
+  makeTestMcpProviderSession,
+  TEST_MCP_AUTHORIZATION,
+  TEST_MCP_ENDPOINT,
+} from './mcpProviderSessionTestHelpers.ts'
 const decodeCursorSettings = Schema.decodeSync(CursorSettings)
 
 // test-local service tag so the rest of the file can keep using `yield* CursorAdapter`.
@@ -82,6 +90,19 @@ exec ${JSON.stringify(mockAgentCommand)} ${mockAgentArgs.map((arg) => JSON.strin
   await NodeFSP.writeFile(wrapperPath, script, 'utf8')
   await NodeFSP.chmod(wrapperPath, 0o755)
   return wrapperPath
+}
+
+// densify lifecycle/import wrapper setup — keep Cursor driver entrypoints
+const makeTestCursorAdapter = (
+  binaryPath: string,
+  options?: { readonly enableAbnormalTermination?: boolean },
+) =>
+{
+  const cursorConfig = decodeCursorSettings({ binaryPath })
+  return makeCursorAdapter(cursorConfig, {
+    ...(options?.enableAbnormalTermination ? { enableAbnormalTermination: true } : {}),
+    resolveSettings: Effect.succeed(cursorConfig),
+  })
 }
 
 async function makeProbeWrapper(
@@ -225,7 +246,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper())
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      const session = yield* adapter.startSession({
+      const session = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -266,7 +287,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         schemaVersion: 1,
         sessionId: 'mock-session-1',
       }
-      const session = yield* adapter.startSession({
+      const session = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -304,7 +325,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       })
 
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),
@@ -334,7 +355,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper())
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      const active = yield* adapter.startSession({
+      const active = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -345,7 +366,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         },
       })
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),
@@ -380,7 +401,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),
@@ -410,7 +431,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper())
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      const imported = yield* adapter.startSession({
+      const imported = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -422,7 +443,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         resumeCursor: STRICT_IMPORT_RESUME_CURSOR,
       })
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),
@@ -455,12 +476,12 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper())
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+      const runtimeEventsFiber = yield* Stream.take(unwrapAcpRuntimeEvents(adapter), 9).pipe(
         Stream.runCollect,
         Effect.forkChild,
       )
 
-      const session = yield* adapter.startSession({
+      const session = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -543,7 +564,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       )
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -619,10 +640,8 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           T3_ACP_EXIT_DURING_PROMPT_DELAY_MS: '100',
         }),
       )
-      const cursorConfig = decodeCursorSettings({ binaryPath: wrapperPath })
-      const adapter = yield* makeCursorAdapter(cursorConfig, {
+      const adapter = yield* makeTestCursorAdapter(wrapperPath, {
         enableAbnormalTermination: true,
-        resolveSettings: Effect.succeed(cursorConfig),
       })
 
       yield* assertAbnormalChildExitFinalizesOnce(adapter, {
@@ -640,10 +659,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() =>
         makeMockAgentWrapper({ T3_ACP_EXIT_DURING_PROMPT_CODE: '9' }),
       )
-      const cursorConfig = decodeCursorSettings({ binaryPath: wrapperPath })
-      const adapter = yield* makeCursorAdapter(cursorConfig, {
-        resolveSettings: Effect.succeed(cursorConfig),
-      })
+      const adapter = yield* makeTestCursorAdapter(wrapperPath)
 
       yield* assertAbnormalExitDisabledByDefault(adapter, {
         threadId: ThreadId.make('cursor-abnormal-child-exit-disabled'),
@@ -659,10 +675,8 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() =>
         makeMockAgentWrapper({ T3_ACP_EXIT_DURING_PROMPT_CODE: '9' }),
       )
-      const cursorConfig = decodeCursorSettings({ binaryPath: wrapperPath })
-      const adapter = yield* makeCursorAdapter(cursorConfig, {
+      const adapter = yield* makeTestCursorAdapter(wrapperPath, {
         enableAbnormalTermination: true,
-        resolveSettings: Effect.succeed(cursorConfig),
       })
 
       yield* assertOneExitWhenStopRacesTermination(adapter, {
@@ -695,44 +709,13 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           ),
         )
         yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
-        const events: Array<ProviderRuntimeEvent> = []
-        yield* Stream.runForEach(adapter.streamEvents, (event) =>
-          Effect.sync(() => events.push(event)),
-        ).pipe(Effect.forkChild)
 
-        const [firstSession, secondSession] = yield* Effect.all(
-          [
-            adapter.startSession({
-              threadId,
-              provider: ProviderDriverKind.make('cursor'),
-              cwd: process.cwd(),
-              runtimeMode: 'full-access',
-              modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
-            }),
-            adapter.startSession({
-              threadId,
-              provider: ProviderDriverKind.make('cursor'),
-              cwd: process.cwd(),
-              runtimeMode: 'full-access',
-              modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
-            }),
-          ],
-          { concurrency: 'unbounded' },
-        )
-
-        assert.equal(firstSession.threadId, threadId)
-        assert.equal(secondSession.threadId, threadId)
-        yield* Effect.yieldNow
-        assert.isTrue(yield* adapter.hasSession(threadId))
-        assert.equal((yield* adapter.listSessions()).length, 1)
-        assert.equal(events.filter((event) => event.type === 'session.exited').length, 1)
-
-        yield* adapter.stopSession(threadId)
-        yield* Effect.yieldNow
-        assert.equal(events.filter((event) => event.type === 'session.exited').length, 2)
-
-        const exitLog = yield* Effect.promise(() => waitForFileContent(exitLogPath))
-        assert.equal(exitLog.match(/SIGTERM/g)?.length ?? 0, 2)
+        yield* assertConcurrentStartSerializesSameThread(adapter, {
+          threadId,
+          provider: ProviderDriverKind.make('cursor'),
+          modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
+          readExitLog: Effect.promise(() => waitForFileContent(exitLogPath)),
+        })
       }),
   )
 
@@ -740,16 +723,55 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
     Effect.gen(function* ()
     {
       const adapter = yield* CursorAdapter
-      const result = yield* adapter
-        .startSession({
-          threadId: ThreadId.make('bad-provider'),
-          provider: ProviderDriverKind.make('codex'),
-          cwd: process.cwd(),
-          runtimeMode: 'full-access',
-        })
-        .pipe(Effect.result)
+      const result = yield* startAcpTestSession(adapter, {
+        threadId: ThreadId.make('bad-provider'),
+        provider: ProviderDriverKind.make('codex'),
+        cwd: process.cwd(),
+        runtimeMode: 'full-access',
+      }).pipe(Effect.result)
 
       assert.equal(result._tag, 'Failure')
+    }),
+  )
+
+  it.effect('passes the scoped MCP endpoint and bearer header to Cursor ACP', () =>
+    Effect.gen(function* ()
+    {
+      const adapter = yield* CursorAdapter
+      const serverSettings = yield* ServerSettingsService
+      const threadId = ThreadId.make('cursor-mcp-probe')
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), 'cursor-acp-')),
+      )
+      const requestLogPath = NodePath.join(tempDir, 'requests.ndjson')
+      const argvLogPath = NodePath.join(tempDir, 'argv.txt')
+      yield* Effect.promise(() => NodeFSP.writeFile(requestLogPath, '', 'utf8'))
+      const wrapperPath = yield* Effect.promise(() => makeProbeWrapper(requestLogPath, argvLogPath))
+      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
+
+      yield* startAcpTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('cursor'),
+        cwd: process.cwd(),
+        runtimeMode: 'full-access',
+        mcp: makeTestMcpProviderSession(threadId, ProviderInstanceId.make('cursor')),
+      })
+      yield* Effect.promise(() => waitForFileContent(requestLogPath))
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath))
+      const sessionStart = requests.find((entry) => entry.method === 'session/new')
+
+      assert.deepStrictEqual(
+        (sessionStart?.params as Record<string, unknown> | undefined)?.mcpServers,
+        [
+          {
+            type: 'http',
+            name: 'code456',
+            url: TEST_MCP_ENDPOINT,
+            headers: [{ name: 'Authorization', value: TEST_MCP_AUTHORIZATION }],
+          },
+        ],
+      )
+      yield* adapter.stopSession(threadId)
     }),
   )
 
@@ -768,7 +790,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeProbeWrapper(requestLogPath, argvLogPath))
       yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -835,7 +857,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           { id: 'fastMode', value: true },
         ])
 
-        yield* adapter.startSession({
+        yield* startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),
@@ -904,7 +926,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           providers: { cursor: { binaryPath: wrapperPath } },
         })
 
-        yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
           Effect.gen(function* ()
           {
             runtimeEvents.push(event)
@@ -937,7 +959,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
 
         const program = Effect.gen(function* ()
         {
-          yield* adapter.startSession({
+          yield* startAcpTestSession(adapter, {
             threadId,
             provider: ProviderDriverKind.make('cursor'),
             cwd: process.cwd(),
@@ -1097,30 +1119,33 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           providers: { cursor: { binaryPath: wrapperPath } },
         })
 
-        const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-          Effect.gen(function* ()
-          {
-            runtimeEvents.push(event)
-            if (String(event.threadId) !== String(threadId))
+        const runtimeEventsFiber = yield* Stream.runForEach(
+          unwrapAcpRuntimeEvents(adapter),
+          (event) =>
+            Effect.gen(function* ()
             {
-              return
-            }
-            if (
-              event.type === 'turn.completed' ||
-              (event.type === 'item.completed' && event.payload.itemType === 'command_execution') ||
-              event.type === 'content.delta'
-            )
-            {
-              settledEventTypes.add(event.type)
-              if (settledEventTypes.size === 3)
+              runtimeEvents.push(event)
+              if (String(event.threadId) !== String(threadId))
               {
-                yield* Deferred.succeed(settledEventsReady, undefined).pipe(Effect.orDie)
+                return
               }
-            }
-          }),
+              if (
+                event.type === 'turn.completed' ||
+                (event.type === 'item.completed' &&
+                  event.payload.itemType === 'command_execution') ||
+                event.type === 'content.delta'
+              )
+              {
+                settledEventTypes.add(event.type)
+                if (settledEventTypes.size === 3)
+                {
+                  yield* Deferred.succeed(settledEventsReady, undefined).pipe(Effect.orDie)
+                }
+              }
+            }),
         ).pipe(Effect.forkChild)
 
-        yield* adapter.startSession({
+        yield* startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),
@@ -1192,42 +1217,44 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         providers: { cursor: { binaryPath: wrapperPath } },
       })
 
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.gen(function* ()
-        {
-          runtimeEvents.push(event)
-          if (String(event.threadId) !== String(threadId))
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.gen(function* ()
           {
-            return
-          }
-          if (
-            event.type === 'content.delta' ||
-            (event.type === 'item.completed' && event.payload.itemType === 'command_execution') ||
-            event.type === 'turn.completed'
-          )
-          {
-            if (event.type === 'content.delta')
+            runtimeEvents.push(event)
+            if (String(event.threadId) !== String(threadId))
             {
-              settledEventTypes.add(`delta:${event.payload.delta}`)
-            }
-            else
-            {
-              settledEventTypes.add(event.type)
+              return
             }
             if (
-              settledEventTypes.has('delta:before tool') &&
-              settledEventTypes.has('delta:after tool') &&
-              settledEventTypes.has('item.completed') &&
-              settledEventTypes.has('turn.completed')
+              event.type === 'content.delta' ||
+              (event.type === 'item.completed' && event.payload.itemType === 'command_execution') ||
+              event.type === 'turn.completed'
             )
             {
-              yield* Deferred.succeed(settledEventsReady, undefined).pipe(Effect.orDie)
+              if (event.type === 'content.delta')
+              {
+                settledEventTypes.add(`delta:${event.payload.delta}`)
+              }
+              else
+              {
+                settledEventTypes.add(event.type)
+              }
+              if (
+                settledEventTypes.has('delta:before tool') &&
+                settledEventTypes.has('delta:after tool') &&
+                settledEventTypes.has('item.completed') &&
+                settledEventTypes.has('turn.completed')
+              )
+              {
+                yield* Deferred.succeed(settledEventsReady, undefined).pipe(Effect.orDie)
+              }
             }
-          }
-        }),
+          }),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -1333,37 +1360,39 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>()
       let interrupted = false
 
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.gen(function* ()
-        {
-          if (String(event.threadId) !== String(threadId))
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.gen(function* ()
           {
-            return
-          }
-          if (event.type === 'request.opened' && event.requestId && !interrupted)
-          {
-            interrupted = true
-            yield* adapter.respondToRequest(
-              threadId,
-              ApprovalRequestId.make(String(event.requestId)),
-              'cancel',
-            )
-            yield* adapter.interruptTurn(threadId)
-            return
-          }
-          if (event.type === 'request.resolved')
-          {
-            yield* Deferred.succeed(requestResolvedReady, event).pipe(Effect.ignore)
-            return
-          }
-          if (event.type === 'turn.completed')
-          {
-            yield* Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore)
-          }
-        }),
+            if (String(event.threadId) !== String(threadId))
+            {
+              return
+            }
+            if (event.type === 'request.opened' && event.requestId && !interrupted)
+            {
+              interrupted = true
+              yield* adapter.respondToRequest(
+                threadId,
+                ApprovalRequestId.make(String(event.requestId)),
+                'cancel',
+              )
+              yield* adapter.interruptTurn(threadId)
+              return
+            }
+            if (event.type === 'request.resolved')
+            {
+              yield* Deferred.succeed(requestResolvedReady, event).pipe(Effect.ignore)
+              return
+            }
+            if (event.type === 'turn.completed')
+            {
+              yield* Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore)
+            }
+          }),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -1415,143 +1444,100 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       yield* adapter.stopSession(threadId)
     }),
   )
-  it.effect('stopping a session settles pending approval waits', () =>
-    Effect.gen(function* ()
+  it.effect.each([
     {
-      const adapter = yield* CursorAdapter
-      const serverSettings = yield* ServerSettingsService
-      const threadId = ThreadId.make('cursor-stop-pending-approval')
-      const approvalRequested = yield* Deferred.make<void>()
-
-      const wrapperPath = yield* Effect.promise(() =>
-        makeMockAgentWrapper({ T3_ACP_EMIT_TOOL_CALLS: '1' }),
-      )
-      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
-
-      yield* Stream.runForEach(adapter.streamEvents, (event) =>
-      {
-        if (String(event.threadId) !== String(threadId) || event.type !== 'request.opened')
-        {
-          return Effect.void
-        }
-        return Deferred.succeed(approvalRequested, undefined).pipe(Effect.ignore)
-      }).pipe(Effect.forkChild)
-
-      yield* adapter.startSession({
-        threadId,
-        provider: ProviderDriverKind.make('cursor'),
-        cwd: process.cwd(),
-        runtimeMode: 'approval-required',
-        modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
-      })
-
-      const sendTurnFiber = yield* adapter
-        .sendTurn({
-          threadId,
-          input: 'run a tool call and then stop',
-          attachments: [],
-        })
-        .pipe(Effect.forkChild)
-
-      yield* Deferred.await(approvalRequested)
-      yield* adapter.stopSession(threadId)
-      yield* Fiber.await(sendTurnFiber)
-
-      assert.equal(yield* adapter.hasSession(threadId), false)
-    }),
-  )
-
-  it.effect('stopping a session settles pending user-input waits', () =>
-    Effect.gen(function* ()
+      name: 'stop settles pending approval waits',
+      threadId: 'cursor-stop-pending-approval',
+      emitEnv: { T3_ACP_EMIT_TOOL_CALLS: '1' },
+      waitEvent: 'request.opened' as const,
+      runtimeMode: 'approval-required' as const,
+      input: 'run a tool call and then stop',
+      settle: 'stop' as const,
+      expectSessionAfterSettle: false,
+    },
     {
-      const adapter = yield* CursorAdapter
-      const serverSettings = yield* ServerSettingsService
-      const threadId = ThreadId.make('cursor-stop-pending-user-input')
-      const userInputRequested = yield* Deferred.make<void>()
-
-      const wrapperPath = yield* Effect.promise(() =>
-        makeMockAgentWrapper({ T3_ACP_EMIT_ASK_QUESTION: '1' }),
-      )
-      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
-
-      yield* Stream.runForEach(adapter.streamEvents, (event) =>
-      {
-        if (String(event.threadId) !== String(threadId) || event.type !== 'user-input.requested')
-        {
-          return Effect.void
-        }
-        return Deferred.succeed(userInputRequested, undefined).pipe(Effect.ignore)
-      }).pipe(Effect.forkChild)
-
-      yield* adapter.startSession({
-        threadId,
-        provider: ProviderDriverKind.make('cursor'),
-        cwd: process.cwd(),
-        runtimeMode: 'full-access',
-        modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
-      })
-
-      const sendTurnFiber = yield* adapter
-        .sendTurn({
-          threadId,
-          input: 'ask me a question and then stop',
-          attachments: [],
-        })
-        .pipe(Effect.forkChild)
-
-      yield* Deferred.await(userInputRequested)
-      yield* adapter.stopSession(threadId)
-      yield* Fiber.await(sendTurnFiber)
-
-      assert.equal(yield* adapter.hasSession(threadId), false)
-    }),
-  )
-
-  it.effect('interrupting a session settles pending user-input waits', () =>
-    Effect.gen(function* ()
+      name: 'stop settles pending user-input waits',
+      threadId: 'cursor-stop-pending-user-input',
+      emitEnv: { T3_ACP_EMIT_ASK_QUESTION: '1' },
+      waitEvent: 'user-input.requested' as const,
+      runtimeMode: 'full-access' as const,
+      input: 'ask me a question and then stop',
+      settle: 'stop' as const,
+      expectSessionAfterSettle: false,
+    },
     {
-      const adapter = yield* CursorAdapter
-      const serverSettings = yield* ServerSettingsService
-      const threadId = ThreadId.make('cursor-interrupt-pending-user-input')
-      const userInputRequested = yield* Deferred.make<void>()
-
-      const wrapperPath = yield* Effect.promise(() =>
-        makeMockAgentWrapper({ T3_ACP_EMIT_ASK_QUESTION: '1' }),
-      )
-      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
-
-      yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      name: 'interrupt settles pending user-input waits',
+      threadId: 'cursor-interrupt-pending-user-input',
+      emitEnv: { T3_ACP_EMIT_ASK_QUESTION: '1' },
+      waitEvent: 'user-input.requested' as const,
+      runtimeMode: 'full-access' as const,
+      input: 'ask me a question and then interrupt',
+      settle: 'interrupt' as const,
+      expectSessionAfterSettle: true,
+    },
+  ])(
+    '$name',
+    ({
+      threadId: threadIdValue,
+      emitEnv,
+      waitEvent,
+      runtimeMode,
+      input,
+      settle,
+      expectSessionAfterSettle,
+    }) =>
+      Effect.gen(function* ()
       {
-        if (String(event.threadId) !== String(threadId) || event.type !== 'user-input.requested')
+        const adapter = yield* CursorAdapter
+        const serverSettings = yield* ServerSettingsService
+        const threadId = ThreadId.make(threadIdValue)
+        const pendingRequested = yield* Deferred.make<void>()
+
+        const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper(emitEnv))
+        yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
+
+        yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
         {
-          return Effect.void
-        }
-        return Deferred.succeed(userInputRequested, undefined).pipe(Effect.ignore)
-      }).pipe(Effect.forkChild)
+          if (String(event.threadId) !== String(threadId) || event.type !== waitEvent)
+          {
+            return Effect.void
+          }
+          return Deferred.succeed(pendingRequested, undefined).pipe(Effect.ignore)
+        }).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
-        threadId,
-        provider: ProviderDriverKind.make('cursor'),
-        cwd: process.cwd(),
-        runtimeMode: 'full-access',
-        modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
-      })
-
-      const sendTurnFiber = yield* adapter
-        .sendTurn({
+        yield* startAcpTestSession(adapter, {
           threadId,
-          input: 'ask me a question and then interrupt',
-          attachments: [],
+          provider: ProviderDriverKind.make('cursor'),
+          cwd: process.cwd(),
+          runtimeMode,
+          modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
         })
-        .pipe(Effect.forkChild)
 
-      yield* Deferred.await(userInputRequested)
-      yield* adapter.interruptTurn(threadId)
-      yield* Fiber.await(sendTurnFiber)
+        const sendTurnFiber = yield* adapter
+          .sendTurn({
+            threadId,
+            input,
+            attachments: [],
+          })
+          .pipe(Effect.forkChild)
 
-      assert.equal(yield* adapter.hasSession(threadId), true)
-      yield* adapter.stopSession(threadId)
-    }),
+        yield* Deferred.await(pendingRequested)
+        if (settle === 'stop')
+        {
+          yield* adapter.stopSession(threadId)
+        }
+        else
+        {
+          yield* adapter.interruptTurn(threadId)
+        }
+        yield* Fiber.await(sendTurnFiber)
+
+        assert.equal(yield* adapter.hasSession(threadId), expectSessionAfterSettle)
+        if (expectSessionAfterSettle)
+        {
+          yield* adapter.stopSession(threadId)
+        }
+      }),
   )
 
   it.effect('broadcasts runtime events to multiple stream consumers', () =>
@@ -1564,16 +1550,16 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper())
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      const firstConsumer = yield* Stream.take(adapter.streamEvents, 3).pipe(
+      const firstConsumer = yield* Stream.take(unwrapAcpRuntimeEvents(adapter), 3).pipe(
         Stream.runCollect,
         Effect.forkChild,
       )
-      const secondConsumer = yield* Stream.take(adapter.streamEvents, 3).pipe(
+      const secondConsumer = yield* Stream.take(unwrapAcpRuntimeEvents(adapter), 3).pipe(
         Stream.runCollect,
         Effect.forkChild,
       )
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -1612,7 +1598,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeProbeWrapper(requestLogPath, argvLogPath))
       yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -1676,7 +1662,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeProbeWrapper(requestLogPath, argvLogPath))
       yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('cursor'),
         cwd: process.cwd(),
@@ -1767,7 +1753,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           providers: { cursor: { binaryPath: wrapperPath } },
         })
 
-        yield* adapter.startSession({
+        yield* startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),

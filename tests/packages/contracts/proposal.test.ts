@@ -8,21 +8,36 @@ import {
   PROPOSAL_MAX_OPERATIONS,
   PROPOSAL_SNAPSHOT_POLICY_V1,
   ProposalChangeInput,
+  ProposalOrchestratePlanLookupInput,
   ProposalPreviewUpsertInput,
   ProposalRevisionManifest,
 } from '../../../packages/contracts/src/proposal.ts'
 
 const sha256 = 'a'.repeat(64)
+const decodeChanges = Schema.decodeUnknownSync(ProposalChangeInput, {
+  errors: 'all',
+  onExcessProperty: 'error',
+})
+const decodeManifest = Schema.decodeUnknownSync(ProposalRevisionManifest, {
+  errors: 'all',
+  onExcessProperty: 'error',
+})
+const decodePreviewUpsert = Schema.decodeUnknownSync(ProposalPreviewUpsertInput, {
+  errors: 'all',
+  onExcessProperty: 'error',
+})
+const decodeOrchestratePlanLookupInput = Schema.decodeUnknownSync(
+  ProposalOrchestratePlanLookupInput,
+  {
+    errors: 'all',
+    onExcessProperty: 'error',
+  },
+)
 
 describe('proposal contracts', () =>
 {
   it('accepts all typed operations and the fixed snapshot policy', () =>
   {
-    const decodeChanges = Schema.decodeUnknownSync(ProposalChangeInput, {
-      errors: 'all',
-      onExcessProperty: 'error',
-    })
-
     const changes = decodeChanges({
       _tag: 'typed',
       operations: [
@@ -65,14 +80,6 @@ describe('proposal contracts', () =>
 
   it('rejects malformed hashes, empty or oversized operation sets, and bodies in manifests', () =>
   {
-    const decodeChanges = Schema.decodeUnknownSync(ProposalChangeInput, {
-      errors: 'all',
-      onExcessProperty: 'error',
-    })
-    const decodeManifest = Schema.decodeUnknownSync(ProposalRevisionManifest, {
-      errors: 'all',
-      onExcessProperty: 'error',
-    })
     const operation = {
       _tag: 'delete',
       path: 'src/deleted.ts',
@@ -117,10 +124,6 @@ describe('proposal contracts', () =>
 
   it('keeps proposal preview input free of spoofable scope and unified patches', () =>
   {
-    const decode = Schema.decodeUnknownSync(ProposalPreviewUpsertInput, {
-      errors: 'all',
-      onExcessProperty: 'error',
-    })
     const changes = {
       _tag: 'typed',
       operations: [
@@ -133,21 +136,75 @@ describe('proposal contracts', () =>
     } as const
 
     expect(
-      decode({
+      decodePreviewUpsert({
+        proposalId: 'proposal-contract',
+        changes,
+        orchestratePlan: {
+          runId: 'run-contract',
+          revision: 0,
+        },
+        narrativeMdx: '# Proposed change\n',
+      }).orchestratePlan,
+    ).toEqual({
+      runId: 'run-contract',
+      revision: 0,
+    })
+    expect(
+      decodePreviewUpsert({
         proposalId: 'proposal-contract',
         changes,
         narrativeMdx: '# Proposed change\n',
       }).changes._tag,
     ).toBe('typed')
-    expect(() => decode({ changes, planMarkdownSha256: sha256 })).toThrow()
-    expect(() => decode({ changes, planId: 'spoofed' })).toThrow()
-    expect(() => decode({ changes, environmentId: 'spoofed' })).toThrow()
+    expect(() => decodePreviewUpsert({ changes, planMarkdownSha256: sha256 })).toThrow()
+    expect(() => decodePreviewUpsert({ changes, planId: 'spoofed' })).toThrow()
+    expect(() => decodePreviewUpsert({ changes, environmentId: 'spoofed' })).toThrow()
     expect(() =>
-      decode({
+      decodePreviewUpsert({
+        changes,
+        orchestratePlan: {
+          runId: 'run-contract',
+          revision: 1,
+          sourceThreadId: 'spoofed-thread',
+        },
+      }),
+    ).toThrow()
+    expect(() =>
+      decodePreviewUpsert({
         changes: {
           _tag: 'unified-diff',
           diff: 'diff --git a/a b/a\n',
         },
+      }),
+    ).toThrow()
+  })
+
+  it('accepts only an exact nonnegative orchestrate revision identity', () =>
+  {
+    expect(
+      decodeOrchestratePlanLookupInput({
+        sourceThreadId: 'thread-contract',
+        runId: 'run-contract',
+        revision: 0,
+      }),
+    ).toEqual({
+      sourceThreadId: 'thread-contract',
+      runId: 'run-contract',
+      revision: 0,
+    })
+    expect(() =>
+      decodeOrchestratePlanLookupInput({
+        sourceThreadId: 'thread-contract',
+        runId: 'run-contract',
+        revision: -1,
+      }),
+    ).toThrow()
+    expect(() =>
+      decodeOrchestratePlanLookupInput({
+        sourceThreadId: 'thread-contract',
+        runId: 'run-contract',
+        revision: 1,
+        environmentId: 'spoofed',
       }),
     ).toThrow()
   })

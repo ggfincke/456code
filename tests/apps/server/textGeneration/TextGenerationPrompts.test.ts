@@ -126,73 +126,100 @@ describe('buildPrContentPrompt', () =>
   })
 })
 
+function expectUserMessageAndAttachmentMetadata(
+  prompt: string,
+  input: {
+    readonly message: string
+    readonly attachment?: {
+      readonly name: string
+      readonly mimeType: string
+      readonly sizeBytes: number
+    }
+  },
+)
+{
+  expect(prompt).toContain('User message:')
+  expect(prompt).toContain(input.message)
+  if (!input.attachment)
+  {
+    expect(prompt).not.toContain('Attachment metadata:')
+    return
+  }
+  expect(prompt).toContain('Attachment metadata:')
+  expect(prompt).toContain(input.attachment.name)
+  expect(prompt).toContain(input.attachment.mimeType)
+  expect(prompt).toContain(`${input.attachment.sizeBytes} bytes`)
+}
+
 describe('buildBranchNamePrompt', () =>
 {
-  it('includes the user message in the prompt', () =>
+  it('includes the user message and optional attachment metadata', () =>
   {
-    const result = buildBranchNamePrompt({
-      message: 'Fix the login timeout bug',
-    })
+    expectUserMessageAndAttachmentMetadata(
+      buildBranchNamePrompt({
+        message: 'Fix the login timeout bug',
+      }).prompt,
+      { message: 'Fix the login timeout bug' },
+    )
 
-    expect(result.prompt).toContain('User message:')
-    expect(result.prompt).toContain('Fix the login timeout bug')
-    expect(result.prompt).not.toContain('Attachment metadata:')
-  })
-
-  it('includes attachment metadata when attachments are provided', () =>
-  {
-    const result = buildBranchNamePrompt({
-      message: 'Fix the layout from screenshot',
-      attachments: [
-        {
-          type: 'image' as const,
-          id: 'att-123',
+    expectUserMessageAndAttachmentMetadata(
+      buildBranchNamePrompt({
+        message: 'Fix the layout from screenshot',
+        attachments: [
+          {
+            type: 'image' as const,
+            id: 'att-123',
+            name: 'screenshot.png',
+            mimeType: 'image/png',
+            sizeBytes: 12345,
+          },
+        ],
+      }).prompt,
+      {
+        message: 'Fix the layout from screenshot',
+        attachment: {
           name: 'screenshot.png',
           mimeType: 'image/png',
           sizeBytes: 12345,
         },
-      ],
-    })
-
-    expect(result.prompt).toContain('Attachment metadata:')
-    expect(result.prompt).toContain('screenshot.png')
-    expect(result.prompt).toContain('image/png')
-    expect(result.prompt).toContain('12345 bytes')
+      },
+    )
   })
 })
 
 describe('buildThreadTitlePrompt', () =>
 {
-  it('includes the user message in the prompt', () =>
+  it('includes the user message and optional attachment metadata', () =>
   {
-    const result = buildThreadTitlePrompt({
-      message: 'Investigate reconnect regressions after session restore',
-    })
+    expectUserMessageAndAttachmentMetadata(
+      buildThreadTitlePrompt({
+        message: 'Investigate reconnect regressions after session restore',
+      }).prompt,
+      { message: 'Investigate reconnect regressions after session restore' },
+    )
 
-    expect(result.prompt).toContain('User message:')
-    expect(result.prompt).toContain('Investigate reconnect regressions after session restore')
-    expect(result.prompt).not.toContain('Attachment metadata:')
-  })
-
-  it('includes attachment metadata when attachments are provided', () =>
-  {
-    const result = buildThreadTitlePrompt({
-      message: 'Name this thread from the screenshot',
-      attachments: [
-        {
-          type: 'image' as const,
-          id: 'att-456',
+    expectUserMessageAndAttachmentMetadata(
+      buildThreadTitlePrompt({
+        message: 'Name this thread from the screenshot',
+        attachments: [
+          {
+            type: 'image' as const,
+            id: 'att-456',
+            name: 'thread.png',
+            mimeType: 'image/png',
+            sizeBytes: 67890,
+          },
+        ],
+      }).prompt,
+      {
+        message: 'Name this thread from the screenshot',
+        attachment: {
           name: 'thread.png',
           mimeType: 'image/png',
           sizeBytes: 67890,
         },
-      ],
-    })
-
-    expect(result.prompt).toContain('Attachment metadata:')
-    expect(result.prompt).toContain('thread.png')
-    expect(result.prompt).toContain('image/png')
-    expect(result.prompt).toContain('67890 bytes')
+      },
+    )
   })
 })
 

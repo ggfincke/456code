@@ -7,6 +7,8 @@ import {
   isUncPath,
   isWindowsAbsolutePath,
   isWindowsDrivePath,
+  normalizeProjectPathForComparison,
+  normalizeProjectPathForDispatch,
 } from '../../../packages/shared/src/path.ts'
 
 describe('path helpers', () =>
@@ -20,5 +22,14 @@ describe('path helpers', () =>
   ] as const)('%s', (_label, run, expected) =>
   {
     expect(run()).toBe(expected)
+  })
+
+  it('normalizes bare Windows drive input like drive-root input', () =>
+  {
+    expect(normalizeProjectPathForDispatch('C:')).toBe('C:\\')
+    expect(normalizeProjectPathForComparison('C:')).toBe('c:\\')
+    expect(normalizeProjectPathForComparison('C:')).toBe(normalizeProjectPathForComparison('C:\\'))
+    expect(normalizeProjectPathForComparison('C:')).toBe(normalizeProjectPathForComparison('C:/'))
+    expect(normalizeProjectPathForDispatch('C:\\repo\\')).toBe('C:\\repo')
   })
 })

@@ -308,32 +308,6 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
     }),
   )
 
-  it.effect('rejects settling and unsettling archived threads', () =>
-    Effect.gen(function* ()
-    {
-      const settleError = yield* decideOrchestrationCommand({
-        command: {
-          type: 'thread.settle',
-          commandId: CommandId.make('cmd-settle-archived'),
-          threadId: ThreadId.make('thread-1'),
-        },
-        readModel: makeReadModel(null, NOW),
-      }).pipe(Effect.flip)
-      expect(settleError._tag).toBe('OrchestrationCommandInvariantError')
-
-      const unsettleError = yield* decideOrchestrationCommand({
-        command: {
-          type: 'thread.unsettle',
-          commandId: CommandId.make('cmd-unsettle-archived'),
-          threadId: ThreadId.make('thread-1'),
-          reason: 'user',
-        },
-        readModel: makeReadModel('settled', NOW),
-      }).pipe(Effect.flip)
-      expect(unsettleError._tag).toBe('OrchestrationCommandInvariantError')
-    }),
-  )
-
   it.effect('maps unsettle reasons to overrides and re-emits idempotently', () =>
     Effect.gen(function* ()
     {

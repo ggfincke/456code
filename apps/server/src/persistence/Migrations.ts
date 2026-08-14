@@ -12,6 +12,7 @@
 import * as Migrator from 'effect/unstable/sql/Migrator'
 import * as Layer from 'effect/Layer'
 import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 // import all migrations statically
@@ -66,6 +67,19 @@ import Migration0048 from './Migrations/048_CheckpointRevertOperations.ts'
 import Migration0049 from './Migrations/049_OrchestrationCommandReceiptErrorCode.ts'
 import Migration0050 from './Migrations/050_AttachmentLifecycleGenerations.ts'
 import Migration0051 from './Migrations/051_ProjectionThreadOrchestratePlans.ts'
+import Migration0052 from './Migrations/052_ProjectionThreadsInteractionOrchestrate.ts'
+import Migration0053 from './Migrations/053_ProposalOrchestratePlanLinks.ts'
+import Migration0054 from './Migrations/054_ProjectionThreadOrchestratePlanLeadModel.ts'
+import Migration0055 from './Migrations/055_ProjectionThreadsOrchestrateIntegration.ts'
+import Migration0059 from './Migrations/059_DiffAnalysisGenerations.ts'
+import Migration0060 from './Migrations/060_RuntimeRecoveryAudit.ts'
+import Migration0061 from './Migrations/061_ProviderRuntimeInbox.ts'
+import Migration0062 from './Migrations/062_CheckpointCaptureIdentity.ts'
+import Migration0063 from './Migrations/063_OrchestrateRunExecutions.ts'
+import Migration0064 from './Migrations/064_ProjectionThreadArchiveGeneration.ts'
+import Migration0065 from './Migrations/065_CheckpointRevertProviderGeneration.ts'
+import Migration0066 from './Migrations/066_ProviderRuntimeInboxProviderKind.ts'
+import Migration0067 from './Migrations/067_CheckpointRevertRequestedFence.ts'
 
 // migration loader with all migrations defined inline.
 //
@@ -127,7 +141,124 @@ export const migrationEntries = [
   [49, 'OrchestrationCommandReceiptErrorCode', Migration0049],
   [50, 'AttachmentLifecycleGenerations', Migration0050],
   [51, 'ProjectionThreadOrchestratePlans', Migration0051],
+  [52, 'ProjectionThreadsInteractionOrchestrate', Migration0052],
+  [53, 'ProposalOrchestratePlanLinks', Migration0053],
+  [54, 'ProjectionThreadOrchestratePlanLeadModel', Migration0054],
+  [55, 'ProjectionThreadsOrchestrateIntegration', Migration0055],
+  [59, 'DiffAnalysisGenerations', Migration0059],
+  [60, 'RuntimeRecoveryAudit', Migration0060],
+  [61, 'ProviderRuntimeInbox', Migration0061],
+  [62, 'CheckpointCaptureIdentity', Migration0062],
+  [63, 'OrchestrateRunExecutions', Migration0063],
+  [64, 'ProjectionThreadArchiveGeneration', Migration0064],
+  [65, 'CheckpointRevertProviderGeneration', Migration0065],
+  [66, 'ProviderRuntimeInboxProviderKind', Migration0066],
+  [67, 'CheckpointRevertRequestedFence', Migration0067],
 ] as const
+
+export interface MigrationIdentity
+{
+  readonly id: number
+  readonly name: string
+}
+
+export class MigrationLineageError extends Schema.TaggedErrorClass<MigrationLineageError>()(
+  'MigrationLineageError',
+  {
+    reason: Schema.Literals([
+      'duplicate-manifest-id',
+      'duplicate-manifest-name',
+      'duplicate-ledger-id',
+      'unknown-ledger-id',
+      'ledger-name-mismatch',
+      'historical-schema-mismatch',
+      'historical-row-59-collision',
+    ]),
+    detail: Schema.String,
+    migrationId: Schema.optional(Schema.Int),
+    expectedName: Schema.optional(Schema.String),
+    actualName: Schema.optional(Schema.String),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Migration lineage validation failed: ${this.detail}`
+  }
+}
+
+export const currentMigrationManifest: ReadonlyArray<MigrationIdentity> = migrationEntries.map(
+  ([id, name]) => ({ id, name }),
+)
+
+export const validateMigrationLineage = Effect.fn('validateMigrationLineage')(function* (input: {
+  readonly manifest?: ReadonlyArray<MigrationIdentity> | undefined
+  readonly applied: ReadonlyArray<MigrationIdentity>
+})
+{
+  const manifest = input.manifest ?? currentMigrationManifest
+  const manifestById = new Map<number, string>()
+  const manifestNames = new Set<string>()
+  for (const identity of manifest)
+  {
+    if (manifestById.has(identity.id))
+    {
+      return yield* new MigrationLineageError({
+        reason: 'duplicate-manifest-id',
+        detail: `current manifest contains migration id ${identity.id} more than once`,
+        migrationId: identity.id,
+        expectedName: manifestById.get(identity.id),
+        actualName: identity.name,
+      })
+    }
+    if (manifestNames.has(identity.name))
+    {
+      return yield* new MigrationLineageError({
+        reason: 'duplicate-manifest-name',
+        detail: `current manifest contains migration name ${identity.name} more than once`,
+        actualName: identity.name,
+      })
+    }
+    manifestById.set(identity.id, identity.name)
+    manifestNames.add(identity.name)
+  }
+
+  const appliedIds = new Set<number>()
+  for (const identity of input.applied)
+  {
+    if (appliedIds.has(identity.id))
+    {
+      return yield* new MigrationLineageError({
+        reason: 'duplicate-ledger-id',
+        detail: `database ledger contains migration id ${identity.id} more than once`,
+        migrationId: identity.id,
+        actualName: identity.name,
+      })
+    }
+    appliedIds.add(identity.id)
+
+    const expectedName = manifestById.get(identity.id)
+    if (expectedName === undefined)
+    {
+      return yield* new MigrationLineageError({
+        reason: 'unknown-ledger-id',
+        detail: `database contains migration ${identity.id}_${identity.name}, which is absent from this binary's full manifest`,
+        migrationId: identity.id,
+        actualName: identity.name,
+      })
+    }
+    if (expectedName !== identity.name)
+    {
+      return yield* new MigrationLineageError({
+        reason: 'ledger-name-mismatch',
+        detail: `database contains ${identity.id}_${identity.name}; this binary requires ${identity.id}_${expectedName}`,
+        migrationId: identity.id,
+        expectedName,
+        actualName: identity.name,
+      })
+    }
+  }
+})
 
 export const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
@@ -146,6 +277,354 @@ export interface RunMigrationsOptions
 {
   readonly toMigrationInclusive?: number | undefined
 }
+
+interface SqliteTableColumn
+{
+  readonly cid: number
+  readonly name: string
+  readonly type: string
+  readonly notnull: number
+  readonly dflt_value: string | null
+  readonly pk: number
+}
+
+interface SqliteIndex
+{
+  readonly name: string
+  readonly unique: number
+  readonly origin: string
+  readonly partial: number
+}
+
+const expectedHistoricalDiffColumns: ReadonlyArray<Omit<SqliteTableColumn, 'cid'>> = [
+  { name: 'diff_analysis_id', type: 'TEXT', notnull: 0, dflt_value: null, pk: 1 },
+  { name: 'environment_id', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'repository_key', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'base_tree_oid', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'head_tree_oid', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'base_analyzer_ref', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'head_analyzer_ref', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'analyzer_version', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'analysis_policy_version', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'config_digest', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'scope_digest', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'tsconfig_digest', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'source_descriptor_json', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'state', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'artifact_root', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'head_root_path', type: 'TEXT', notnull: 0, dflt_value: null, pk: 0 },
+  { name: 'base_graph_path', type: 'TEXT', notnull: 0, dflt_value: null, pk: 0 },
+  { name: 'head_graph_path', type: 'TEXT', notnull: 0, dflt_value: null, pk: 0 },
+  { name: 'impact_path', type: 'TEXT', notnull: 0, dflt_value: null, pk: 0 },
+  { name: 'artifact_byte_length', type: 'INTEGER', notnull: 1, dflt_value: '0', pk: 0 },
+  { name: 'error_code', type: 'TEXT', notnull: 0, dflt_value: null, pk: 0 },
+  { name: 'created_at', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'updated_at', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+  { name: 'last_accessed_at', type: 'TEXT', notnull: 1, dflt_value: null, pk: 0 },
+]
+
+const expectedDiffIdentityColumns = [
+  'environment_id',
+  'repository_key',
+  'base_tree_oid',
+  'head_tree_oid',
+  'analyzer_version',
+  'analysis_policy_version',
+  'config_digest',
+  'scope_digest',
+  'tsconfig_digest',
+] as const
+
+const expectedDiffIndexes = new Map([
+  [
+    'idx_diff_analysis_generations_repository_lru',
+    ['environment_id', 'repository_key', 'last_accessed_at', 'diff_analysis_id'],
+  ],
+  ['idx_diff_analysis_generations_global_lru', ['last_accessed_at', 'diff_analysis_id']],
+  ['idx_diff_analysis_generations_terminal_cutoff', ['updated_at', 'diff_analysis_id']],
+] as const)
+
+const normalizeSql = (value: string): string =>
+  value
+    .toLowerCase()
+    .replaceAll(/\s/g, '')
+    .replaceAll('"', '')
+    .replaceAll('`', '')
+    .replaceAll('[', '')
+    .replaceAll(']', '')
+
+const expectedHistoricalDiffTableSql = normalizeSql(`
+  CREATE TABLE diff_analysis_generations (
+    diff_analysis_id TEXT PRIMARY KEY,
+    environment_id TEXT NOT NULL,
+    repository_key TEXT NOT NULL,
+    base_tree_oid TEXT NOT NULL,
+    head_tree_oid TEXT NOT NULL,
+    base_analyzer_ref TEXT NOT NULL,
+    head_analyzer_ref TEXT NOT NULL,
+    analyzer_version TEXT NOT NULL,
+    analysis_policy_version TEXT NOT NULL,
+    config_digest TEXT NOT NULL,
+    scope_digest TEXT NOT NULL,
+    tsconfig_digest TEXT NOT NULL,
+    source_descriptor_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(
+      state IN (
+        'queued',
+        'preparing',
+        'analyzing',
+        'ready',
+        'failed',
+        'cancelled',
+        'abandoned'
+      )
+    ),
+    artifact_root TEXT NOT NULL,
+    head_root_path TEXT,
+    base_graph_path TEXT,
+    head_graph_path TEXT,
+    impact_path TEXT,
+    artifact_byte_length INTEGER NOT NULL DEFAULT 0 CHECK(artifact_byte_length >= 0),
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_accessed_at TEXT NOT NULL,
+    UNIQUE (
+      environment_id,
+      repository_key,
+      base_tree_oid,
+      head_tree_oid,
+      analyzer_version,
+      analysis_policy_version,
+      config_digest,
+      scope_digest,
+      tsconfig_digest
+    )
+  )
+`)
+
+const sameStringArray = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
+  left.length === right.length && left.every((value, index) => value === right[index])
+
+const sameHistoricalColumns = (actual: ReadonlyArray<Omit<SqliteTableColumn, 'cid'>>): boolean =>
+  actual.length === expectedHistoricalDiffColumns.length &&
+  actual.every((column, index) =>
+  {
+    const expected = expectedHistoricalDiffColumns[index]
+    return (
+      expected !== undefined &&
+      column.name === expected.name &&
+      column.type === expected.type &&
+      column.notnull === expected.notnull &&
+      column.dflt_value === expected.dflt_value &&
+      column.pk === expected.pk
+    )
+  })
+
+const historicalSchemaMismatch = (detail: string) =>
+  new MigrationLineageError({
+    reason: 'historical-schema-mismatch',
+    detail,
+    migrationId: 52,
+    expectedName: 'ProjectionThreadsInteractionOrchestrate',
+    actualName: 'DiffAnalysisGenerations',
+  })
+
+const readAppliedMigrationIdentities = Effect.fn('readAppliedMigrationIdentities')(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
+  return yield* sql<MigrationIdentity>`
+    SELECT migration_id AS id, name
+    FROM effect_sql_migrations
+    ORDER BY migration_id
+  `
+})
+
+const verifyHistoricalDiffSchema = Effect.fn('verifyHistoricalDiffSchema')(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
+  const columns = yield* sql<SqliteTableColumn>`PRAGMA table_info(diff_analysis_generations)`
+  const actualColumns = columns.map(({ name, type, notnull, dflt_value, pk }) => ({
+    name,
+    type: type.toUpperCase(),
+    notnull,
+    dflt_value,
+    pk,
+  }))
+  if (!sameHistoricalColumns(actualColumns))
+  {
+    return yield* historicalSchemaMismatch(
+      'historical 52 ledger row does not have the exact DiffAnalysisGenerations column signature',
+    )
+  }
+
+  const tableDefinition = yield* sql<{ readonly sql: string }>`
+    SELECT sql
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'diff_analysis_generations'
+  `
+  const normalizedTableSql = normalizeSql(tableDefinition[0]?.sql ?? '')
+  if (normalizedTableSql !== expectedHistoricalDiffTableSql)
+  {
+    return yield* historicalSchemaMismatch(
+      'historical 52 diff table definition differs from the exact known lineage',
+    )
+  }
+
+  const indexes = yield* sql<SqliteIndex>`PRAGMA index_list(diff_analysis_generations)`
+  if (indexes.length !== 5)
+  {
+    return yield* historicalSchemaMismatch(
+      `historical 52 diff table has ${indexes.length} indexes instead of the expected 5`,
+    )
+  }
+
+  const identityIndexes = indexes.filter((index) => index.origin === 'u')
+  if (identityIndexes.length !== 1 || identityIndexes[0]?.unique !== 1)
+  {
+    return yield* historicalSchemaMismatch(
+      'historical 52 diff table does not have exactly one unique cache-identity index',
+    )
+  }
+  const identityColumns = yield* sql<{ readonly name: string }>`
+    SELECT name
+    FROM pragma_index_info(${identityIndexes[0]!.name})
+    ORDER BY seqno
+  `
+  if (
+    !sameStringArray(
+      identityColumns.map((column) => column.name),
+      expectedDiffIdentityColumns,
+    )
+  )
+  {
+    return yield* historicalSchemaMismatch(
+      'historical 52 diff table has an unknown cache-identity index signature',
+    )
+  }
+
+  for (const [name, expectedColumns] of expectedDiffIndexes)
+  {
+    const index = indexes.find((candidate) => candidate.name === name)
+    if (index === undefined || index.unique !== 0 || index.origin !== 'c' || index.partial !== 1)
+    {
+      return yield* historicalSchemaMismatch(
+        `historical 52 diff index ${name} is missing or changed`,
+      )
+    }
+    const indexColumns = yield* sql<{ readonly name: string }>`
+      SELECT name
+      FROM pragma_index_info(${name})
+      ORDER BY seqno
+    `
+    if (
+      !sameStringArray(
+        indexColumns.map((column) => column.name),
+        expectedColumns,
+      )
+    )
+    {
+      return yield* historicalSchemaMismatch(`historical 52 diff index ${name} has changed columns`)
+    }
+    const indexDefinition = yield* sql<{ readonly sql: string }>`
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'index' AND name = ${name}
+    `
+    const predicate = name.endsWith('_terminal_cutoff')
+      ? "wherestatein('failed','cancelled','abandoned')"
+      : "wherestate='ready'"
+    if (!normalizeSql(indexDefinition[0]?.sql ?? '').includes(predicate))
+    {
+      return yield* historicalSchemaMismatch(`historical 52 diff index ${name} has changed policy`)
+    }
+  }
+})
+
+const verifyCanonicalInteractionColumn = Effect.fn('verifyCanonicalInteractionColumn')(function* (
+  required: boolean,
+)
+{
+  const sql = yield* SqlClient.SqlClient
+  const projectionTables = yield* sql<{ readonly name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'projection_threads'
+  `
+  if (projectionTables.length !== 1)
+  {
+    return yield* historicalSchemaMismatch(
+      'historical 52 lineage is missing the projection_threads prerequisite',
+    )
+  }
+  const columns = yield* sql<SqliteTableColumn>`PRAGMA table_info(projection_threads)`
+  const interactionColumns = columns.filter((column) => column.name === 'interaction_orchestrate')
+  if (interactionColumns.length === 0 && !required) return
+  const column = interactionColumns[0]
+  if (
+    interactionColumns.length !== 1 ||
+    column?.type.toUpperCase() !== 'INTEGER' ||
+    column.notnull !== 1 ||
+    column.dflt_value !== '0' ||
+    column.pk !== 0
+  )
+  {
+    return yield* historicalSchemaMismatch(
+      'projection_threads interaction_orchestrate column is missing or has an unknown signature',
+    )
+  }
+})
+
+const reconcileHistoricalMigration052 = Effect.fn('reconcileHistoricalMigration052')(function* (
+  applied: ReadonlyArray<MigrationIdentity>,
+)
+{
+  const historical052 = applied.find(
+    (identity) => identity.id === 52 && identity.name === 'DiffAnalysisGenerations',
+  )
+  if (historical052 === undefined) return false
+
+  const row59 = applied.find((identity) => identity.id === 59)
+  if (row59 !== undefined && row59.name !== 'DiffAnalysisGenerations')
+  {
+    return yield* new MigrationLineageError({
+      reason: 'historical-row-59-collision',
+      detail: `historical 52 lineage has occupied migration 59_${row59.name}; expected 59_DiffAnalysisGenerations`,
+      migrationId: 59,
+      expectedName: 'DiffAnalysisGenerations',
+      actualName: row59.name,
+    })
+  }
+
+  yield* verifyHistoricalDiffSchema()
+  yield* verifyCanonicalInteractionColumn(false)
+  yield* Migration0059
+  yield* verifyHistoricalDiffSchema()
+  yield* verifyCanonicalInteractionColumn(true)
+
+  const sql = yield* SqlClient.SqlClient
+  yield* sql`
+    UPDATE effect_sql_migrations
+    SET name = 'ProjectionThreadsInteractionOrchestrate'
+    WHERE migration_id = 52 AND name = 'DiffAnalysisGenerations'
+  `
+  if (row59 === undefined)
+  {
+    yield* sql`
+      INSERT INTO effect_sql_migrations (migration_id, name)
+      VALUES (59, 'DiffAnalysisGenerations')
+    `
+  }
+
+  yield* Effect.logWarning('Reconciled schema-proven historical migration lineage').pipe(
+    Effect.annotateLogs({
+      previousIdentity: '52_DiffAnalysisGenerations',
+      canonicalIdentities: [
+        '52_ProjectionThreadsInteractionOrchestrate',
+        '59_DiffAnalysisGenerations',
+      ],
+    }),
+  )
+  return true
+})
 
 // ! the upstream migrator selects work by high-water mark: it skips every id
 // <= the newest recorded migration. An id introduced *below* that mark - a
@@ -215,6 +694,10 @@ export const runMigrations = Effect.fn('runMigrations')(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {})
 {
+  // validate the full binary manifest before touching a database so duplicate
+  // identities cannot create an ambiguous ledger even in bounded test runs.
+  yield* validateMigrationLineage({ applied: [] })
+
   const sql = yield* SqlClient.SqlClient
   yield* sql`PRAGMA busy_timeout = 60000`
   yield* sql`
@@ -234,6 +717,11 @@ export const runMigrations = Effect.fn('runMigrations')(function* ({
         SET name = name
         WHERE migration_id = (SELECT MAX(migration_id) FROM effect_sql_migrations)
       `
+
+      const appliedBeforeReconciliation = yield* readAppliedMigrationIdentities()
+      yield* reconcileHistoricalMigration052(appliedBeforeReconciliation)
+      const applied = yield* readAppliedMigrationIdentities()
+      yield* validateMigrationLineage({ applied })
 
       const backfilled = yield* backfillSkippedMigrations(toMigrationInclusive)
       const forward = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })

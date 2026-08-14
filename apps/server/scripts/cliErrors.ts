@@ -83,3 +83,17 @@ export class ServerCliBuildAssetMissingError extends Schema.TaggedErrorClass<Ser
     return `Missing build asset: ${this.assetPath}. Run the build subcommand first.`
   }
 }
+
+export class ServerCliPackOutputError extends Schema.TaggedErrorClass<ServerCliPackOutputError>()(
+  'ServerCliPackOutputError',
+  {
+    packDirectory: Schema.String,
+    archiveFiles: Schema.Array(Schema.String),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Expected one packed server archive in ${this.packDirectory}; found ${this.archiveFiles.length}.`
+  }
+}

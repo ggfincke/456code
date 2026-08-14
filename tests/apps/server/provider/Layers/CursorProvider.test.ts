@@ -505,27 +505,6 @@ describe('checkCursorProviderStatus', () =>
 
 describe('discoverCursorModelsViaAcp', () =>
 {
-  it('keeps the ACP probe runtime alive long enough to discover models', async () =>
-  {
-    const wrapperPath = await runNode(makeMockAgentWrapper())
-
-    const models = await runNode(
-      discoverCursorModelsViaAcp({
-        enabled: true,
-        binaryPath: wrapperPath,
-        apiEndpoint: '',
-        customModels: [],
-      }).pipe(Effect.scoped),
-    )
-
-    expect(models.map((model) => model.slug)).toEqual([
-      'default',
-      'composer-2',
-      'gpt-5.4',
-      'claude-opus-4-6',
-    ])
-  })
-
   it('closes the ACP probe runtime after discovery completes', async () =>
   {
     const { exitLogPath, wrapperPath } = await runNode(

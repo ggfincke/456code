@@ -216,6 +216,22 @@ describe('serverSettings helpers', () =>
     ).toBeNull()
   })
 
+  it('replaces the architecture auto-analysis scalar without disturbing other settings', () =>
+  {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      architectureAutoAnalysis: 'off' as const,
+      addProjectBaseDirectory: '~/Development',
+    }
+
+    const next = applyServerSettingsPatch(current, {
+      architectureAutoAnalysis: 'auto',
+    })
+
+    expect(next.architectureAutoAnalysis).toBe('auto')
+    expect(next.addProjectBaseDirectory).toBe('~/Development')
+  })
+
   it('falls back from a disabled source control writer provider without clearing its selection', () =>
   {
     const instanceId = ProviderInstanceId.make('codex_writer')

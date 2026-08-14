@@ -8,6 +8,7 @@ import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 
 import {
+  CommandId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -35,6 +36,7 @@ import {
   ImportServiceDeps,
   make,
   type ImportedThreadMatch,
+  type ImportRequestContext,
   type ImportServiceDepsShape,
   type ResolvedImportTarget,
 } from '../../../../apps/server/src/import/importService.ts'
@@ -49,6 +51,7 @@ import type {
   ImportReplacementIntent,
   ImportReplacementIntentRepositoryShape,
 } from '../../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
+import { ACTIVE_IMPORT_REPLACEMENT_VERSION } from '../../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
 
 const temporaryPaths: string[] = []
 
@@ -110,6 +113,66 @@ function makeReplacementIntentMemory(): ImportReplacementIntentRepositoryShape
         })
         return true
       }),
+  }
+}
+
+function replacementIntentFixture(
+  phase: ImportReplacementIntent['phase'],
+  suffix: string,
+  options: { readonly withEvidence?: boolean } = {},
+): ImportReplacementIntent
+{
+  const replacementThreadId = ThreadId.make(`replacement-${suffix}`)
+  const replacementProjectId = ProjectId.make(`replacement-project-${suffix}`)
+  const sourceVersion = suffix.padEnd(64, '0').slice(0, 64)
+  const withEvidence = options.withEvidence ?? false
+  return {
+    intentKey: `intent-${suffix}`,
+    source: 'codex-cli',
+    sourcePath: `/imports/${suffix}.jsonl`,
+    nativeSessionId: `native-${suffix}`,
+    providerInstanceId: ProviderInstanceId.make('codex'),
+    originalWorkspaceRoot: null,
+    sourceVersion,
+    replacementVersion: ACTIVE_IMPORT_REPLACEMENT_VERSION,
+    sourceThreadId: ThreadId.make(`source-${suffix}`),
+    sourceProjectId: ProjectId.make(`source-project-${suffix}`),
+    replacementThreadId,
+    replacementProjectId,
+    replacementWorkspaceRoot: '/workspace/imported',
+    createCommandId: CommandId.make(`create-${suffix}`),
+    tombstoneCommandId: CommandId.make(`delete-${suffix}`),
+    expectedMessageCount: 1,
+    expectedActivityCount: 0,
+    expectedRecordFingerprint: `records-${suffix}`,
+    phase,
+    threadEvidence: withEvidence
+      ? {
+          replacementThreadId,
+          projectId: replacementProjectId,
+          sourceVersion,
+          messageCount: 1,
+          activityCount: 0,
+          snapshotSequence: 1,
+          verifiedAt: '2026-01-01T00:00:00.000Z',
+        }
+      : null,
+    attachmentEvidence: withEvidence
+      ? {
+          replacementThreadId,
+          expectedRelativePaths: [],
+          exactSetVerified: true,
+          sourceCleanupComplete: false,
+          verifiedAt: '2026-01-01T00:00:00.000Z',
+        }
+      : null,
+    indexEvidence: null,
+    attemptCount: 0,
+    lastError: phase === 'manual' ? 'operator review required' : null,
+    retryAfter: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    retiredAt: null,
   }
 }
 
@@ -369,26 +432,18 @@ function runImport(input: {
         findProjectByWorkspaceRoot: () => Effect.succeed(activeProjectId),
         isImportFinalized: () => Effect.succeed(input.existingFinalized ?? true),
         normalizeWorkspaceRoot: (root) => Effect.succeed(root),
-        ...(input.resolveImportWorkspaceRoot === undefined
-          ? {}
-          : { resolveImportWorkspaceRoot: input.resolveImportWorkspaceRoot }),
-        resolveImportTarget: (_driver, requestedInstanceId, compatibleIds) =>
-          Effect.sync(() =>
-          {
-            targetResolutions.push({
-              requestedInstanceId,
-              compatibleInstanceIds: compatibleIds,
-            })
-            return input.resolvedTarget === undefined
-              ? {
-                  defaultModelSelection: {
-                    instanceId: defaultInstanceId,
-                    model: 'gpt-fallback',
-                  },
-                  availableModels: ['gpt-fallback', 'gpt-imported'],
-                }
-              : input.resolvedTarget
-          }),
+        resolveImportWorkspaceRoot:
+          input.resolveImportWorkspaceRoot ??
+          ((request) =>
+            Effect.succeed({
+              workspaceRoot:
+                request.existingWorkspaceRoot ??
+                request.recordedWorkspaceRoot ??
+                '/workspace/imported-history',
+              ...(request.originalWorkspaceRoot === undefined
+                ? {}
+                : { originalWorkspaceRoot: request.originalWorkspaceRoot }),
+            })),
         threadExistsInShell: (threadId) =>
           Effect.succeed(input.existingThreadId === threadId || activeThreadIds.has(threadId)),
         replacementIntents,
@@ -409,18 +464,38 @@ function runImport(input: {
             replacementVisible: activeThreadIds.has(replacementThreadId),
             sourceVisible: !existingThreadDeleted && sourceThreadId === input.existingThreadId,
           }),
-        fallbackModelSelection: {
-          instanceId: ProviderInstanceId.make('fallback'),
-          model: 'gpt-fallback',
-        },
         ...(input.maximumRequestBytes === undefined
           ? {}
           : { maximumRequestBytes: input.maximumRequestBytes }),
         ...(input.maximumRequestRecords === undefined
           ? {}
           : { maximumRequestRecords: input.maximumRequestRecords }),
-        sourceDescriptors,
-        loadAcpSessionsBatch: () => Effect.succeed([]),
+        loadRequestContext: () =>
+          Effect.succeed({
+            fallbackModelSelection: {
+              instanceId: ProviderInstanceId.make('fallback'),
+              model: 'gpt-fallback',
+            },
+            sourceDescriptors,
+            resolveImportTarget: (_driver, requestedInstanceId, compatibleIds) =>
+              Effect.sync(() =>
+              {
+                targetResolutions.push({
+                  requestedInstanceId,
+                  compatibleInstanceIds: compatibleIds,
+                })
+                return input.resolvedTarget === undefined
+                  ? {
+                      defaultModelSelection: {
+                        instanceId: defaultInstanceId,
+                        model: 'gpt-fallback',
+                      },
+                      availableModels: ['gpt-fallback', 'gpt-imported'],
+                    }
+                  : input.resolvedTarget
+              }),
+            loadAcpSessionsBatch: () => Effect.succeed([]),
+          }),
       }),
     ),
     Effect.provideService(
@@ -507,7 +582,7 @@ function runStretchImport(input: {
   readonly sourceDescriptors: ReadonlyArray<ImportFileSourceDescriptor>
   readonly acpSession?: AcpImportedSession
   readonly items?: ImportSessionsRequest['items']
-  readonly loadAcpSessionsBatch?: ImportServiceDepsShape['loadAcpSessionsBatch']
+  readonly loadAcpSessionsBatch?: ImportRequestContext['loadAcpSessionsBatch']
   readonly maximumRequestBytes?: number
   readonly maximumRequestRecords?: number
   readonly requestDeadlineMs?: number
@@ -526,6 +601,7 @@ function runStretchImport(input: {
   let activeProjectId: ProjectId | null = null
   const activeThreadIds = new Set<ThreadId>()
   const fallbackInstanceId = ProviderInstanceId.make('fallback')
+  const replacementIntents = makeReplacementIntentMemory()
   return make.pipe(
     Effect.provideService(
       ImportServiceDeps,
@@ -555,30 +631,26 @@ function runStretchImport(input: {
         findProjectByWorkspaceRoot: () => Effect.succeed(activeProjectId),
         isImportFinalized: () => Effect.succeed(true),
         normalizeWorkspaceRoot: (root) => Effect.succeed(root),
-        resolveImportTarget: (driver, requestedInstanceId, compatibleInstanceIds) =>
-          Effect.sync(() =>
-          {
-            resolvedDrivers.push(driver)
-            if (
-              requestedInstanceId === null ||
-              !compatibleInstanceIds.includes(requestedInstanceId)
-            )
-            {
-              return null
-            }
-            return {
-              defaultModelSelection: {
-                instanceId: requestedInstanceId,
-                model: 'fallback-model',
-              },
-              availableModels: ['fallback-model', 'openai/gpt-5.2', 'cursor-model'],
-            }
+        resolveImportWorkspaceRoot: (request) =>
+          Effect.succeed({
+            workspaceRoot:
+              request.existingWorkspaceRoot ??
+              request.recordedWorkspaceRoot ??
+              '/workspace/imported-history',
+            ...(request.originalWorkspaceRoot === undefined
+              ? {}
+              : { originalWorkspaceRoot: request.originalWorkspaceRoot }),
           }),
         threadExistsInShell: (threadId) => Effect.succeed(activeThreadIds.has(threadId)),
-        fallbackModelSelection: {
-          instanceId: fallbackInstanceId,
-          model: 'fallback-model',
-        },
+        replacementIntents,
+        verifyReplacementThread: () => Effect.succeed(null),
+        verifyReplacementAttachments: () => Effect.succeed({ complete: true }),
+        cleanupDeletedThreadAttachments: () => Effect.succeed({ complete: true }),
+        verifyReplacementIndex: ({ replacementThreadId, sourceThreadId }) =>
+          Effect.succeed({
+            replacementVisible: activeThreadIds.has(replacementThreadId),
+            sourceVisible: activeThreadIds.has(sourceThreadId),
+          }),
         ...(input.maximumRequestBytes === undefined
           ? {}
           : { maximumRequestBytes: input.maximumRequestBytes }),
@@ -588,42 +660,68 @@ function runStretchImport(input: {
         ...(input.requestDeadlineMs === undefined
           ? {}
           : { requestDeadlineMs: input.requestDeadlineMs }),
-        sourceDescriptors: input.sourceDescriptors,
-        loadAcpSessionsBatch: (request) =>
-          Effect.gen(function* ()
-          {
-            acpLoads.push({
-              source: request.source,
-              sourcePaths: request.sourcePaths,
-              providerInstanceId: request.providerInstanceId,
-              maximumBytes: request.maximumBytes,
-            })
-            if (input.loadAcpSessionsBatch !== undefined)
-            {
-              return yield* input.loadAcpSessionsBatch(request)
-            }
-            if (input.acpSession === undefined)
-            {
-              return yield* Effect.die('unexpected ACP session load')
-            }
-            return request.sourcePaths.map(
-              (sourcePath) =>
-                ({
-                  sourcePath,
-                  descriptor: {
-                    driverKind: request.source,
-                    providerInstanceId: request.providerInstanceId,
-                    source: request.source === 'cursor' ? 'cursor-acp' : 'grok-acp',
-                    sourcePath,
-                    nativeSessionId: input.acpSession!.meta.nativeSessionId,
-                    cwd: input.acpSession!.meta.cwd,
-                    title: input.acpSession!.meta.title,
-                    updatedAt: input.acpSession!.meta.lastActivityAt,
+        loadRequestContext: () =>
+          Effect.succeed({
+            fallbackModelSelection: {
+              instanceId: fallbackInstanceId,
+              model: 'fallback-model',
+            },
+            sourceDescriptors: input.sourceDescriptors,
+            resolveImportTarget: (driver, requestedInstanceId, compatibleInstanceIds) =>
+              Effect.sync(() =>
+              {
+                resolvedDrivers.push(driver)
+                if (
+                  requestedInstanceId === null ||
+                  !compatibleInstanceIds.includes(requestedInstanceId)
+                )
+                {
+                  return null
+                }
+                return {
+                  defaultModelSelection: {
+                    instanceId: requestedInstanceId,
+                    model: 'fallback-model',
                   },
-                  session: input.acpSession!,
-                  error: null,
-                }) satisfies AcpImportBatchLoadResult,
-            )
+                  availableModels: ['fallback-model', 'openai/gpt-5.2', 'cursor-model'],
+                }
+              }),
+            loadAcpSessionsBatch: (request) =>
+              Effect.gen(function* ()
+              {
+                acpLoads.push({
+                  source: request.source,
+                  sourcePaths: request.sourcePaths,
+                  providerInstanceId: request.providerInstanceId,
+                  maximumBytes: request.maximumBytes,
+                })
+                if (input.loadAcpSessionsBatch !== undefined)
+                {
+                  return yield* input.loadAcpSessionsBatch(request)
+                }
+                if (input.acpSession === undefined)
+                {
+                  return yield* Effect.die('unexpected ACP session load')
+                }
+                return request.sourcePaths.map(
+                  (sourcePath) =>
+                    ({
+                      sourcePath,
+                      descriptor: {
+                        driverKind: request.source,
+                        providerInstanceId: request.providerInstanceId,
+                        source: request.source === 'cursor' ? 'cursor-acp' : 'grok-acp',
+                        sourcePath,
+                        nativeSessionId: input.acpSession!.meta.nativeSessionId,
+                        cwd: input.acpSession!.meta.cwd,
+                        title: input.acpSession!.meta.title,
+                        updatedAt: input.acpSession!.meta.lastActivityAt,
+                      },
+                      session: input.acpSession!,
+                      error: null,
+                    }) satisfies AcpImportBatchLoadResult,
+                )
+              }),
           }),
       }),
     ),
@@ -671,6 +769,7 @@ function runCrossSourceHashImport()
   const grokInstanceId = ProviderInstanceId.make('grok_exact')
   const sharedContentHash = 'c'.repeat(64)
   const activeThreadIds = new Set<ThreadId>()
+  const replacementIntents = makeReplacementIntentMemory()
   return make.pipe(
     Effect.provideService(
       ImportServiceDeps,
@@ -690,65 +789,84 @@ function runCrossSourceHashImport()
         findProjectByWorkspaceRoot: () => Effect.succeed(ProjectId.make('existing-project')),
         isImportFinalized: () => Effect.succeed(true),
         normalizeWorkspaceRoot: (root) => Effect.succeed(root),
-        resolveImportTarget: (driver, requestedInstanceId) =>
-          Effect.succeed(
-            requestedInstanceId === null
-              ? null
-              : {
-                  defaultModelSelection: {
-                    instanceId: requestedInstanceId,
-                    model: `${driver}-model`,
-                  },
-                  availableModels: [`${driver}-model`],
-                },
-          ),
+        resolveImportWorkspaceRoot: (request) =>
+          Effect.succeed({
+            workspaceRoot:
+              request.existingWorkspaceRoot ??
+              request.recordedWorkspaceRoot ??
+              '/workspace/imported-history',
+          }),
         threadExistsInShell: (threadId) => Effect.succeed(activeThreadIds.has(threadId)),
-        fallbackModelSelection: {
-          instanceId: ProviderInstanceId.make('fallback'),
-          model: 'fallback-model',
-        },
-        sourceDescriptors: [],
-        loadAcpSessionsBatch: (request) =>
-          Effect.succeed(
-            request.sourcePaths.map((sourcePath) => ({
-              sourcePath,
-              descriptor: {
-                driverKind: request.source,
-                providerInstanceId: request.providerInstanceId,
-                source: request.source === 'cursor' ? 'cursor-acp' : 'grok-acp',
-                sourcePath,
-                nativeSessionId: `${request.source}-session`,
-                cwd: '/workspace/imported',
-                title: `${request.source} import`,
-                updatedAt: '2026-01-01T00:00:00.000Z',
-              },
-              session: {
-                meta: {
-                  source: request.source === 'cursor' ? 'cursor-acp' : 'grok-acp',
+        replacementIntents,
+        verifyReplacementThread: () => Effect.succeed(null),
+        verifyReplacementAttachments: () => Effect.succeed({ complete: true }),
+        cleanupDeletedThreadAttachments: () => Effect.succeed({ complete: true }),
+        verifyReplacementIndex: ({ replacementThreadId, sourceThreadId }) =>
+          Effect.succeed({
+            replacementVisible: activeThreadIds.has(replacementThreadId),
+            sourceVisible: activeThreadIds.has(sourceThreadId),
+          }),
+        loadRequestContext: () =>
+          Effect.succeed({
+            fallbackModelSelection: {
+              instanceId: ProviderInstanceId.make('fallback'),
+              model: 'fallback-model',
+            },
+            sourceDescriptors: [],
+            resolveImportTarget: (driver, requestedInstanceId) =>
+              Effect.succeed(
+                requestedInstanceId === null
+                  ? null
+                  : {
+                      defaultModelSelection: {
+                        instanceId: requestedInstanceId,
+                        model: `${driver}-model`,
+                      },
+                      availableModels: [`${driver}-model`],
+                    },
+              ),
+            loadAcpSessionsBatch: (request) =>
+              Effect.succeed(
+                request.sourcePaths.map((sourcePath) => ({
                   sourcePath,
-                  contentHash: sharedContentHash,
-                  nativeSessionId: `${request.source}-session`,
-                  cwd: '/workspace/imported',
-                  gitBranch: null,
-                  model: null,
-                  title: `${request.source} import`,
-                  firstActivityAt: '2026-01-01T00:00:00.000Z',
-                  lastActivityAt: '2026-01-01T00:00:00.000Z',
-                },
-                records: [
-                  {
-                    kind: 'message' as const,
-                    role: 'user' as const,
-                    text: `${request.source} message`,
-                    sourceIndex: 0,
-                    createdAt: '2026-01-01T00:00:00.000Z',
+                  descriptor: {
+                    driverKind: request.source,
+                    providerInstanceId: request.providerInstanceId,
+                    source: request.source === 'cursor' ? 'cursor-acp' : 'grok-acp',
+                    sourcePath,
+                    nativeSessionId: `${request.source}-session`,
+                    cwd: '/workspace/imported',
+                    title: `${request.source} import`,
+                    updatedAt: '2026-01-01T00:00:00.000Z',
                   },
-                ],
-                warnings: [],
-              },
-              error: null,
-            })),
-          ),
+                  session: {
+                    meta: {
+                      source: request.source === 'cursor' ? 'cursor-acp' : 'grok-acp',
+                      sourcePath,
+                      contentHash: sharedContentHash,
+                      nativeSessionId: `${request.source}-session`,
+                      cwd: '/workspace/imported',
+                      gitBranch: null,
+                      model: null,
+                      title: `${request.source} import`,
+                      firstActivityAt: '2026-01-01T00:00:00.000Z',
+                      lastActivityAt: '2026-01-01T00:00:00.000Z',
+                    },
+                    records: [
+                      {
+                        kind: 'message' as const,
+                        role: 'user' as const,
+                        text: `${request.source} message`,
+                        sourceIndex: 0,
+                        createdAt: '2026-01-01T00:00:00.000Z',
+                      },
+                    ],
+                    warnings: [],
+                  },
+                  error: null,
+                })),
+              ),
+          }),
       }),
     ),
     Effect.provideService(
@@ -1293,6 +1411,7 @@ describe('ImportService', () =>
       let failNextOldDelete = false
       let hangNextNormalization = false
       let unrelatedThreadId: ThreadId | null = null
+      const replacementIntents = makeReplacementIntentMemory()
 
       const service = yield* make.pipe(
         Effect.provideService(
@@ -1377,10 +1496,12 @@ describe('ImportService', () =>
                     Effect.andThen(Effect.never),
                   )
                 : Effect.succeed(root),
-            resolveImportTarget: () =>
+            resolveImportWorkspaceRoot: (request) =>
               Effect.succeed({
-                defaultModelSelection: modelSelection,
-                availableModels: [modelSelection.model],
+                workspaceRoot:
+                  request.existingWorkspaceRoot ??
+                  request.recordedWorkspaceRoot ??
+                  '/workspace/imported-history',
               }),
             threadExistsInShell: (threadId) =>
               Effect.sync(() =>
@@ -1388,21 +1509,38 @@ describe('ImportService', () =>
                 const thread = threads.get(threadId)
                 return thread !== undefined && !thread.deleted && !thread.archived
               }),
-            fallbackModelSelection: modelSelection,
+            replacementIntents,
+            verifyReplacementThread: () => Effect.succeed(null),
+            verifyReplacementAttachments: () => Effect.succeed({ complete: true }),
+            cleanupDeletedThreadAttachments: () => Effect.succeed({ complete: true }),
+            verifyReplacementIndex: ({ replacementThreadId, sourceThreadId }) =>
+              Effect.sync(() => ({
+                replacementVisible: threads.get(replacementThreadId)?.deleted === false,
+                sourceVisible: threads.get(sourceThreadId)?.deleted === false,
+              })),
             requestDeadlineMs,
-            sourceDescriptors: [
-              {
-                source: 'codex-cli',
-                driverKind: ProviderDriverKind.make('codex'),
-                providerInstanceId,
-                scanRoot,
-                continuationIdentity: fileContinuationIdentity(
-                  ProviderDriverKind.make('codex'),
-                  scanRoot,
-                ),
-              },
-            ],
-            loadAcpSessionsBatch: () => Effect.succeed([]),
+            loadRequestContext: () =>
+              Effect.succeed({
+                fallbackModelSelection: modelSelection,
+                sourceDescriptors: [
+                  {
+                    source: 'codex-cli',
+                    driverKind: ProviderDriverKind.make('codex'),
+                    providerInstanceId,
+                    scanRoot,
+                    continuationIdentity: fileContinuationIdentity(
+                      ProviderDriverKind.make('codex'),
+                      scanRoot,
+                    ),
+                  },
+                ],
+                resolveImportTarget: () =>
+                  Effect.succeed({
+                    defaultModelSelection: modelSelection,
+                    availableModels: [modelSelection.model],
+                  }),
+                loadAcpSessionsBatch: () => Effect.succeed([]),
+              }),
           }),
         ),
         Effect.provideService(
@@ -2416,7 +2554,157 @@ describe('ImportService', () =>
     }),
   )
 
-  it.effect('interrupts a hung import deadline and releases the process-wide permit', () =>
+  it.effect('inventories every open replacement and recovers only source-independent phases', () =>
+    Effect.gen(function* ()
+    {
+      const replacementIntents = makeReplacementIntentMemory()
+      const awaitingIntents = [
+        replacementIntentFixture('intent', 'awaiting-intent'),
+        replacementIntentFixture('creating', 'awaiting-creating'),
+        replacementIntentFixture('importing', 'awaiting-importing'),
+      ]
+      const verifyingIntent = replacementIntentFixture('verifying', 'recover-verifying')
+      const manualIntent = replacementIntentFixture('manual', 'manual')
+      const unsafeTombstoneIntent = replacementIntentFixture('tombstoning', 'unsafe-tombstone')
+      for (const intent of [
+        ...awaitingIntents,
+        verifyingIntent,
+        manualIntent,
+        unsafeTombstoneIntent,
+      ])
+      {
+        yield* replacementIntents.insertIfAbsent(intent)
+      }
+
+      let sourceVisible = true
+      let requestContextLoadCount = 0
+      const dispatchedCommands: OrchestrationCommand[] = []
+      const service = yield* make.pipe(
+        Effect.provideService(
+          ImportServiceDeps,
+          ImportServiceDeps.of({
+            dispatch: (command) =>
+              Effect.sync(() =>
+              {
+                dispatchedCommands.push(command)
+                if (
+                  command.type === 'thread.delete' &&
+                  command.threadId === verifyingIntent.sourceThreadId
+                )
+                {
+                  sourceVisible = false
+                }
+                return { sequence: dispatchedCommands.length }
+              }),
+            findThreadByContentHash: () => Effect.succeed(null),
+            findThreadById: (threadId) =>
+              Effect.succeed(
+                threadId === verifyingIntent.sourceThreadId && sourceVisible
+                  ? {
+                      threadId,
+                      projectId: verifyingIntent.sourceProjectId,
+                      contentHash: 'old-source',
+                      source: verifyingIntent.source,
+                      sourcePath: verifyingIntent.sourcePath,
+                      nativeSessionId: verifyingIntent.nativeSessionId,
+                      providerInstanceId: verifyingIntent.providerInstanceId,
+                      modelSelection: {
+                        instanceId: ProviderInstanceId.make('codex'),
+                        model: 'gpt-default',
+                      },
+                      archived: true,
+                    }
+                  : null,
+              ),
+            findProjectByWorkspaceRoot: () => Effect.succeed(null),
+            isImportFinalized: () => Effect.succeed(true),
+            normalizeWorkspaceRoot: (root) => Effect.succeed(root),
+            resolveImportWorkspaceRoot: () =>
+              Effect.succeed({ workspaceRoot: '/workspace/imported-history' }),
+            threadExistsInShell: () => Effect.succeed(false),
+            replacementIntents,
+            verifyReplacementThread: (replacement) =>
+              Effect.succeed({
+                replacementThreadId: replacement.replacementThreadId,
+                projectId: replacement.replacementProjectId,
+                sourceVersion: replacement.sourceVersion,
+                messageCount: replacement.expectedMessageCount,
+                activityCount: replacement.expectedActivityCount,
+                snapshotSequence: 2,
+                verifiedAt: '2026-01-01T00:00:01.000Z',
+              }),
+            verifyReplacementAttachments: () => Effect.succeed({ complete: true }),
+            cleanupDeletedThreadAttachments: () => Effect.succeed({ complete: true }),
+            verifyReplacementIndex: ({ replacementThreadId, sourceThreadId }) =>
+              Effect.succeed({
+                replacementVisible: replacementThreadId === verifyingIntent.replacementThreadId,
+                sourceVisible: sourceThreadId === verifyingIntent.sourceThreadId && sourceVisible,
+              }),
+            loadRequestContext: () =>
+              Effect.sync(() =>
+              {
+                requestContextLoadCount += 1
+                return {
+                  fallbackModelSelection: {
+                    instanceId: ProviderInstanceId.make('codex'),
+                    model: 'gpt-default',
+                  },
+                  sourceDescriptors: [],
+                  resolveImportTarget: () => Effect.succeed(null),
+                  loadAcpSessionsBatch: () => Effect.succeed([]),
+                }
+              }),
+          }),
+        ),
+        Effect.provideService(
+          ImportContinuationDeps,
+          ImportContinuationDeps.of({
+            bind: () => Effect.die('startup recovery must not bind continuation state'),
+          }),
+        ),
+      )
+
+      const inventory = yield* service.inspectOpenReplacementIntents
+      expect(inventory).toMatchObject({
+        openIntentCount: 6,
+        awaitingSourceRetryCount: 3,
+        manualCount: 1,
+        recoveredCount: 0,
+        blockedCount: 2,
+      })
+      expect(dispatchedCommands).toEqual([])
+      expect(yield* replacementIntents.listOpen()).toHaveLength(6)
+
+      const recovery = yield* service.recoverOpenReplacementIntents
+      expect(recovery).toMatchObject({
+        openIntentCount: 6,
+        awaitingSourceRetryCount: 3,
+        manualCount: 2,
+        recoveredCount: 1,
+        blockedCount: 0,
+      })
+      expect(recovery.items).toContainEqual(
+        expect.objectContaining({
+          intentKey: unsafeTombstoneIntent.intentKey,
+          disposition: 'manual',
+        }),
+      )
+      expect(requestContextLoadCount).toBe(0)
+      expect(dispatchedCommands).toEqual([
+        {
+          type: 'thread.delete',
+          commandId: verifyingIntent.tombstoneCommandId,
+          threadId: verifyingIntent.sourceThreadId,
+        },
+      ])
+      expect(
+        Option.getOrThrow(yield* replacementIntents.getByIntentKey(verifyingIntent.intentKey)),
+      ).toMatchObject({ phase: 'retired' })
+      expect(yield* replacementIntents.listOpen()).toHaveLength(5)
+    }),
+  )
+
+  it.effect('interrupts a hung import deadline', () =>
     Effect.gen(function* ()
     {
       const providerInstanceId = ProviderInstanceId.make('cursor-request-deadline')
@@ -2488,7 +2776,7 @@ describe('ImportService', () =>
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   )
 
-  it.effect('rejects overlapping imports across service instances and releases on interrupt', () =>
+  it.effect('isolates concurrent imports owned by independent service scopes', () =>
     Effect.gen(function* ()
     {
       const firstProviderInstanceId = ProviderInstanceId.make('cursor-mutex-first')
@@ -2503,7 +2791,7 @@ describe('ImportService', () =>
       const firstLoadStarted = yield* Deferred.make<void>()
       const secondLoadStarted = yield* Deferred.make<void>()
       const batchResult = (
-        request: Parameters<ImportServiceDepsShape['loadAcpSessionsBatch']>[0],
+        request: Parameters<ImportRequestContext['loadAcpSessionsBatch']>[0],
         session: AcpImportedSession,
       ): AcpImportBatchLoadResult => ({
         sourcePath: request.sourcePaths[0]!,
@@ -2547,25 +2835,13 @@ describe('ImportService', () =>
         })
       const overlappingRun = yield* runSecondImport()
 
-      expect(yield* Deferred.isDone(secondLoadStarted)).toBe(false)
-      expect(overlappingRun.result).toEqual({
-        imported: [],
-        skipped: [],
-        failed: [
-          {
-            sourcePath: secondSourcePath,
-            message: 'import skipped because another session import is already in progress',
-          },
-        ],
-      })
-
-      yield* Fiber.interrupt(firstFiber)
-      const runAfterInterrupt = yield* runSecondImport()
-
       expect(yield* Deferred.isDone(secondLoadStarted)).toBe(true)
-      expect(runAfterInterrupt.result.imported).toEqual([
+      expect(overlappingRun.result.failed).toEqual([])
+      expect(overlappingRun.result.imported).toEqual([
         expect.objectContaining({ sourcePath: secondSourcePath }),
       ])
+
+      yield* Fiber.interrupt(firstFiber)
     }),
   )
 
@@ -2583,27 +2859,6 @@ describe('ImportService', () =>
       expect(threadCreates).toHaveLength(2)
       expect(new Set(threadCreates.map((command) => command.threadId)).size).toBe(2)
       expect(new Set(threadCreates.map((command) => command.commandId)).size).toBe(2)
-    }),
-  )
-
-  it.effect('skips sessions without a cwd', () =>
-    Effect.gen(function* ()
-    {
-      const sourcePath = yield* Effect.promise(() =>
-        temporaryFile(
-          [
-            '{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"native"}}',
-            '{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}',
-          ].join('\n'),
-        ),
-      )
-      const run = yield* runImport({ sourcePath })
-
-      expect(run.commands).toEqual([])
-      expect(run.result.skipped[0]).toMatchObject({
-        reason: 'no cwd recorded',
-        threadId: null,
-      })
     }),
   )
 

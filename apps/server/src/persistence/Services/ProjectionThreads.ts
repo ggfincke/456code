@@ -35,13 +35,20 @@ export const ProjectionThread = Schema.Struct({
   providerSwitch: Schema.NullOr(OrchestrationProviderSwitch),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  interactionOrchestrate: NonNegativeInt,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  // required-but-nullable on purpose: it makes the compiler enumerate every full
+  // row literal, so no write path can silently null the run's integration target
+  // back out and take the thread's evidence surfaces with it
+  orchestrateRunWorktreePath: Schema.NullOr(Schema.String),
+  orchestrateRunBranch: Schema.NullOr(Schema.String),
   originJson: Schema.NullOr(Schema.String),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
+  archiveGeneration: NonNegativeInt,
   settledOverride: Schema.NullOr(Schema.Literals(['settled', 'active'])),
   settledAt: Schema.NullOr(IsoDateTime),
   snoozedUntil: Schema.NullOr(IsoDateTime),

@@ -34,6 +34,9 @@ import {
   ThreadInteractionModeSetPayload,
   ThreadHandoffClearedPayload,
   ThreadMetaUpdatedPayload,
+  ThreadOrchestrateRunExecutionAdmittedPayload,
+  ThreadOrchestrateRunExecutionUpdatedPayload,
+  ThreadOrchestrateRunIntegrationSetPayload,
   ThreadOrchestratePlanResponseRequestedPayload,
   ThreadOrchestratePlanUpsertedPayload,
   ThreadProviderSwitchedPayload,
@@ -351,6 +354,8 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    orchestrateRuns: [],
+    orchestrateRunExecutions: [],
     updatedAt: nowIso,
   }
 }
@@ -452,6 +457,7 @@ export function projectEvent(
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
+            ...(payload.orchestrate !== undefined ? { orchestrate: payload.orchestrate } : {}),
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
@@ -460,6 +466,7 @@ export function projectEvent(
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
+            archiveGeneration: 0,
             origin: payload.origin,
             settledOverride: null,
             settledAt: null,
@@ -501,6 +508,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             archivedAt: payload.archivedAt,
+            archiveGeneration: payload.archiveGeneration ?? 0,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -581,6 +589,121 @@ export function projectEvent(
         })),
       )
 
+    // updatedAt is left alone on purpose; see ThreadOrchestrateRunIntegrationSetPayload
+    case 'thread.orchestrate-run-integration-set':
+      if (
+        nextBase.threads.find((thread) => thread.id === event.payload.threadId)
+          ?.orchestrateRunExecution !== undefined
+      )
+      {
+        return Effect.succeed(nextBase)
+      }
+      return decodeForEvent(
+        ThreadOrchestrateRunIntegrationSetPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            orchestrateRunWorktreePath: payload.worktreePath,
+            orchestrateRunBranch: payload.branch,
+          }),
+        })),
+      )
+
+    case 'thread.orchestrate-run-execution-admitted':
+      return decodeForEvent(
+        ThreadOrchestrateRunExecutionAdmittedPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map(({ execution }) =>
+        {
+          const nextExecution = { ...execution, current: true }
+          const orchestrateRunExecutions = [
+            ...(nextBase.orchestrateRunExecutions ?? [])
+              .filter(
+                (entry) =>
+                  entry.threadId !== execution.threadId ||
+                  entry.runId !== execution.runId ||
+                  entry.planRevision !== execution.planRevision,
+              )
+              .map((entry) =>
+                entry.threadId === execution.threadId && entry.current
+                  ? { ...entry, current: false }
+                  : entry,
+              ),
+            nextExecution,
+          ]
+          const existingRun = (nextBase.orchestrateRuns ?? []).find(
+            (entry) => entry.threadId === execution.threadId && entry.runId === execution.runId,
+          )
+          const nextRun = {
+            threadId: execution.threadId,
+            runId: execution.runId,
+            currentPlanRevision: execution.planRevision,
+            createdAt: existingRun?.createdAt ?? execution.admittedAt,
+            updatedAt: execution.updatedAt,
+          }
+          return {
+            ...nextBase,
+            orchestrateRuns: [
+              ...(nextBase.orchestrateRuns ?? []).filter(
+                (entry) => entry.threadId !== execution.threadId || entry.runId !== execution.runId,
+              ),
+              nextRun,
+            ],
+            orchestrateRunExecutions,
+            threads: updateThread(nextBase.threads, execution.threadId, {
+              orchestrateRunExecution: nextExecution,
+              orchestrateRunWorktreePath:
+                nextExecution.availability === 'available' ? nextExecution.integrationRoot : null,
+              orchestrateRunBranch:
+                nextExecution.availability === 'available' ? nextExecution.integrationBranch : null,
+            }),
+          }
+        }),
+      )
+
+    case 'thread.orchestrate-run-execution-updated':
+      return decodeForEvent(
+        ThreadOrchestrateRunExecutionUpdatedPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map(({ execution }) =>
+        {
+          const orchestrateRunExecutions = [
+            ...(nextBase.orchestrateRunExecutions ?? []).filter(
+              (entry) =>
+                entry.threadId !== execution.threadId ||
+                entry.runId !== execution.runId ||
+                entry.planRevision !== execution.planRevision,
+            ),
+            execution,
+          ]
+          if (!execution.current)
+          {
+            return { ...nextBase, orchestrateRunExecutions }
+          }
+          return {
+            ...nextBase,
+            orchestrateRunExecutions,
+            threads: updateThread(nextBase.threads, execution.threadId, {
+              orchestrateRunExecution: execution,
+              orchestrateRunWorktreePath:
+                execution.availability === 'available' ? execution.integrationRoot : null,
+              orchestrateRunBranch:
+                execution.availability === 'available' ? execution.integrationBranch : null,
+            }),
+          }
+        }),
+      )
+
     case 'thread.runtime-mode-set':
       return decodeForEvent(ThreadRuntimeModeSetPayload, event.payload, event.type, 'payload').pipe(
         Effect.map((payload) => ({
@@ -603,6 +726,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             interactionMode: payload.interactionMode,
+            orchestrate: payload.orchestrate ?? false,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -1020,7 +1144,7 @@ export function projectEvent(
                   }
                 : entry,
             ),
-          payload.plan,
+          { ...payload.plan, sourceSequence: event.sequence },
         ]
           .toSorted(
             (left, right) =>
@@ -1080,6 +1204,11 @@ export function projectEvent(
         }
       })
 
+    // turn-zero identity is durable projection evidence but is intentionally
+    // absent from the public turn timeline because no turn owns that boundary
+    case 'thread.checkpoint-baseline-recorded':
+      return Effect.succeed(nextBase)
+
     case 'thread.turn-diff-completed':
       return Effect.gen(function* ()
       {
@@ -1105,6 +1234,9 @@ export function projectEvent(
             files: payload.files,
             assistantMessageId: payload.assistantMessageId,
             completedAt: payload.completedAt,
+            checkpointCaptureRoot: payload.checkpointCaptureRoot ?? null,
+            checkpointRepositoryCommonDir: payload.checkpointRepositoryCommonDir ?? null,
+            checkpointCommitOid: payload.checkpointCommitOid ?? null,
           },
           event.type,
           'checkpoint',

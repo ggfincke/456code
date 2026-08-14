@@ -1,5 +1,7 @@
 // apps/server/src/auth/http.ts
-// expose current environment trace id
+// authenticates and serves the environment HTTP API
+
+import * as NodeCrypto from 'node:crypto'
 
 import {
   AuthAccessReadScope,
@@ -7,6 +9,7 @@ import {
   AuthStandardClientScopes,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthOrchestrationRecoverScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
   AuthReviewWriteScope,
@@ -24,6 +27,8 @@ import {
   EnvironmentScopeRequiredError,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
+  EnvironmentStorageOwnerTokenHeaderName,
+  AuthSessionId,
 } from '@t3tools/contracts'
 import type { AuthEnvironmentScope } from '@t3tools/contracts'
 import { parseAllowedOAuthScope } from '@t3tools/shared/oauthScope'
@@ -31,6 +36,7 @@ import { causeErrorTag } from '@t3tools/shared/observability'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Cookies from 'effect/unstable/http/Cookies'
 import * as HttpEffect from 'effect/unstable/http/HttpEffect'
 import { HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
@@ -40,6 +46,8 @@ import * as EnvironmentAuth from './EnvironmentAuth.ts'
 import * as SessionStore from './SessionStore.ts'
 import { deriveAuthClientMetadata } from './utils.ts'
 import { verifyRequestDpopProof } from './dpop.ts'
+import { isLoopbackHost } from '../environment/accessHost.ts'
+import * as ServerStorageLease from '../serverStorageLease.ts'
 
 const CREDENTIAL_RESPONSE_HEADERS = {
   'cache-control': 'no-store',
@@ -186,6 +194,72 @@ export const requireEnvironmentScope = Effect.fn('environment.auth.requireScope'
   return session
 })
 
+export const requirePairingDelegatedScopes = Effect.fn(
+  'environment.auth.requirePairingDelegatedScopes',
+)(function* (
+  session: EnvironmentAuthenticatedPrincipal['Service'],
+  delegatedScopes: ReadonlyArray<AuthEnvironmentScope>,
+)
+{
+  if (
+    delegatedScopes.length === 0 ||
+    new Set<AuthEnvironmentScope>(delegatedScopes).size !== delegatedScopes.length ||
+    delegatedScopes.includes(AuthOrchestrationRecoverScope)
+  )
+  {
+    return yield* failEnvironmentInvalidRequest('invalid_scope')
+  }
+  for (const delegatedScope of delegatedScopes)
+  {
+    if (!session.scopes.has(delegatedScope))
+    {
+      return yield* failEnvironmentScopeRequired(delegatedScope)
+    }
+  }
+  return delegatedScopes
+})
+
+const STORAGE_OWNER_ENDPOINTS = new Set([
+  '/api/orchestration/shell',
+  '/api/orchestration/project-commands/v1',
+])
+
+const timingSafeEqualString = (left: string, right: string): boolean =>
+{
+  const leftBytes = Buffer.from(left)
+  const rightBytes = Buffer.from(right)
+  return leftBytes.length === rightBytes.length && NodeCrypto.timingSafeEqual(leftBytes, rightBytes)
+}
+
+const storageOwnerPrincipal = Effect.fn('environment.auth.storageOwnerPrincipal')(function* (
+  request: HttpServerRequest.HttpServerRequest,
+)
+{
+  const lease = yield* Effect.serviceOption(ServerStorageLease.ServerStorageLease)
+  if (Option.isNone(lease)) return Option.none<EnvironmentAuthenticatedPrincipal['Service']>()
+
+  const token = request.headers[EnvironmentStorageOwnerTokenHeaderName]
+  const path = request.originalUrl.split('?', 1)[0] ?? ''
+  const remoteAddress = deriveAuthClientMetadata({ request }).ipAddress
+  if (
+    typeof token !== 'string' ||
+    !STORAGE_OWNER_ENDPOINTS.has(path) ||
+    remoteAddress === undefined ||
+    !isLoopbackHost(remoteAddress) ||
+    !timingSafeEqualString(token, lease.value.owner.token)
+  )
+  {
+    return Option.none<EnvironmentAuthenticatedPrincipal['Service']>()
+  }
+
+  return Option.some<EnvironmentAuthenticatedPrincipal['Service']>({
+    sessionId: AuthSessionId.make('server-storage-owner'),
+    subject: 'server-storage-owner',
+    method: 'bearer-access-token',
+    scopes: new Set([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
+  })
+})
+
 export const environmentAuthenticatedAuthLayer = Layer.effect(
   EnvironmentAuthenticatedAuth,
   Effect.gen(function* ()
@@ -195,14 +269,17 @@ export const environmentAuthenticatedAuthLayer = Layer.effect(
       Effect.gen(function* ()
       {
         const request = yield* HttpServerRequest.HttpServerRequest
-        const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
-          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-            failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-          ),
-          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-            failEnvironmentInternal('internal_error', error),
-          ),
-        )
+        const storageOwner = yield* storageOwnerPrincipal(request)
+        const session = Option.isSome(storageOwner)
+          ? storageOwner.value
+          : yield* serverAuth.authenticateHttpRequest(request).pipe(
+              Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+                failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+              ),
+              Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+                failEnvironmentInternal('internal_error', error),
+              ),
+            )
         return yield* httpEffect.pipe(
           Effect.provideService(EnvironmentAuthenticatedPrincipal, {
             ...session,
@@ -360,20 +437,7 @@ export const authHttpApiLayer = HttpApiBuilder.group(
             yield* annotateEnvironmentRequest(args.endpoint.name)
             const session = yield* requireEnvironmentScope(AuthAccessWriteScope)
             const delegatedScopes = args.payload.scopes ?? AuthStandardClientScopes
-            if (
-              delegatedScopes.length === 0 ||
-              new Set<AuthEnvironmentScope>(delegatedScopes).size !== delegatedScopes.length
-            )
-            {
-              return yield* failEnvironmentInvalidRequest('invalid_scope')
-            }
-            for (const delegatedScope of delegatedScopes)
-            {
-              if (!session.scopes.has(delegatedScope))
-              {
-                return yield* failEnvironmentScopeRequired(delegatedScope)
-              }
-            }
+            yield* requirePairingDelegatedScopes(session, delegatedScopes)
             return yield* serverAuth.issuePairingCredential(args.payload)
           },
           Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>

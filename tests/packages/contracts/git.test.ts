@@ -14,16 +14,27 @@ const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActio
 
 describe('GitRunStackedActionInput', () =>
 {
-  it('accepts explicit stacked actions and requires a client-provided actionId', () =>
+  it.each([
+    {
+      label: 'accepts explicit stacked actions with client-provided actionId',
+      input: { actionId: 'action-1', cwd: '/repo', action: 'create_pr' as const },
+      expectValid: true,
+    },
+    {
+      label: 'rejects missing actionId',
+      input: { cwd: '/repo', action: 'create_pr' as const },
+      expectValid: false,
+    },
+  ])('$label', ({ input, expectValid }) =>
   {
-    const parsed = decodeRunStackedActionInput({
-      actionId: 'action-1',
-      cwd: '/repo',
-      action: 'create_pr',
-    })
-
-    expect(parsed.actionId).toBe('action-1')
-    expect(parsed.action).toBe('create_pr')
+    if (expectValid)
+    {
+      const parsed = decodeRunStackedActionInput(input)
+      expect(parsed.actionId).toBe('action-1')
+      expect(parsed.action).toBe('create_pr')
+      return
+    }
+    expect(() => decodeRunStackedActionInput(input)).toThrow()
   })
 })
 

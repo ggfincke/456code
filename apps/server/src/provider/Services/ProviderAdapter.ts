@@ -10,6 +10,7 @@ import type {
   ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderDriverKind,
+  ProviderInstanceId,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -21,6 +22,8 @@ import type {
 } from '@t3tools/contracts'
 import type * as Effect from 'effect/Effect'
 import type * as Stream from 'effect/Stream'
+
+import type { McpProviderSessionConfig } from '../../mcp/McpProviderSession.ts'
 
 export type ProviderSessionModelSwitchMode = 'in-session' | 'unsupported'
 
@@ -58,6 +61,25 @@ export interface ProviderThreadSnapshot
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>
 }
 
+export interface ProviderAdapterSessionStartInput extends ProviderSessionStartInput
+{
+  readonly mcp?: McpProviderSessionConfig
+  readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
+}
+
+export interface ProviderAdapterRuntimeSessionBinding
+{
+  readonly providerInstanceId: ProviderInstanceId
+  readonly threadId: ThreadId
+  readonly sessionGeneration: number
+}
+
+export interface ProviderAdapterRuntimeEvent
+{
+  readonly binding: ProviderAdapterRuntimeSessionBinding
+  readonly event: ProviderRuntimeEvent
+}
+
 export interface ProviderAdapterShape<TError>
 {
   // provider kind implemented by this adapter.
@@ -66,7 +88,7 @@ export interface ProviderAdapterShape<TError>
 
   // start a provider-backed session.
   readonly startSession: (
-    input: ProviderSessionStartInput,
+    input: ProviderAdapterSessionStartInput,
     context?: ProviderEffectContext,
   ) => Effect.Effect<ProviderSession, TError>
 
@@ -111,6 +133,11 @@ export interface ProviderAdapterShape<TError>
   // check whether this adapter owns an active session id.
   readonly hasSession: (threadId: ThreadId) => Effect.Effect<boolean>
 
+  // read the immutable durable generation captured by this exact adapter session.
+  readonly getSessionRuntimeBinding: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ProviderAdapterRuntimeSessionBinding | undefined>
+
   // read a provider thread snapshot.
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>
 
@@ -125,5 +152,5 @@ export interface ProviderAdapterShape<TError>
   readonly stopAll: () => Effect.Effect<void, TError>
 
   // canonical runtime event stream emitted by this adapter.
-  readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>
+  readonly streamEvents: Stream.Stream<ProviderAdapterRuntimeEvent>
 }

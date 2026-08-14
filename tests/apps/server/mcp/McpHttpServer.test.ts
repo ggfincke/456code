@@ -4,7 +4,9 @@ import { expect, it } from '@effect/vitest'
 import { NodeHttpServer } from '@effect/platform-node'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
+import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'
 import { McpSchema, McpServer } from 'effect/unstable/ai'
@@ -320,4 +322,24 @@ it.effect('registers annotated tools and preserves authenticated request context
       expect(press.content).toEqual([{ type: 'text', text: 'null' }])
     }),
   ).pipe(Effect.provide(TestLayer)),
+)
+
+it.effect('masks unexpected architecture tool failures and preserves interruption', () =>
+  Effect.gen(function* ()
+  {
+    const defect = yield* McpHttpServer.architectureToolCallFailure('architecture_context')(
+      Cause.die(new Error('/Users/secret/workspace/db.sqlite is locked')),
+    )
+
+    expect(defect.isError).toBe(true)
+    expect(defect.content).toEqual([
+      { type: 'text', text: McpHttpServer.ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT },
+    ])
+    expect(defect.structuredContent).toBeUndefined()
+
+    const interrupted = yield* Effect.exit(
+      McpHttpServer.architectureToolCallFailure('architecture_context')(Cause.interrupt(1)),
+    )
+    expect(Exit.isFailure(interrupted)).toBe(true)
+  }),
 )

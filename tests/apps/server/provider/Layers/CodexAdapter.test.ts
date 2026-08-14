@@ -15,6 +15,7 @@ import {
   ProviderItemId,
   type ProviderApprovalDecision,
   type ProviderEvent,
+  type ProviderRuntimeEvent,
   type ProviderSession,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
@@ -26,6 +27,7 @@ import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it, vi } from '@effect/vitest'
 
 import * as Context from 'effect/Context'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
@@ -42,6 +44,7 @@ import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
 import { ProviderAdapterValidationError } from '../../../../../apps/server/src/provider/Errors.ts'
 import type { CodexAdapterShape } from '../../../../../apps/server/src/provider/Services/CodexAdapter.ts'
+import type { ProviderAdapterRuntimeEvent } from '../../../../../apps/server/src/provider/Services/ProviderAdapter.ts'
 import { ProviderSessionDirectory } from '../../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts'
 import {
   type CodexSessionRuntimeOptions,
@@ -50,6 +53,7 @@ import {
   type CodexThreadSnapshot,
 } from '../../../../../apps/server/src/provider/Layers/CodexSessionRuntime.ts'
 import { makeCodexAdapter } from '../../../../../apps/server/src/provider/Layers/CodexAdapter.ts'
+import { makeTestMcpProviderSession, TEST_MCP_ENDPOINT } from './mcpProviderSessionTestHelpers.ts'
 const decodeCodexSettings = Schema.decodeSync(CodexSettings)
 
 // test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
@@ -62,6 +66,70 @@ const asThreadId = (value: string): ThreadId => ThreadId.make(value)
 const asTurnId = (value: string): TurnId => TurnId.make(value)
 const asEventId = (value: string): EventId => EventId.make(value)
 const asItemId = (value: string): ProviderItemId => ProviderItemId.make(value)
+
+type CodexTestSessionStartInput = Omit<
+  Parameters<CodexAdapterShape['startSession']>[0],
+  'runtimeSessionBinding'
+> & {
+  readonly runtimeSessionBinding?: Parameters<
+    CodexAdapterShape['startSession']
+  >[0]['runtimeSessionBinding']
+}
+
+type CodexRuntimeSessionBinding = NonNullable<CodexTestSessionStartInput['runtimeSessionBinding']>
+
+const codexBindingByAdapter = new WeakMap<CodexAdapterShape, CodexRuntimeSessionBinding>()
+const codexGenerationByAdapter = new WeakMap<CodexAdapterShape, number>()
+
+function isSameCodexRuntimeSessionBinding(
+  left: CodexRuntimeSessionBinding,
+  right: CodexRuntimeSessionBinding,
+): boolean
+{
+  return (
+    left.providerInstanceId === right.providerInstanceId &&
+    left.threadId === right.threadId &&
+    left.sessionGeneration === right.sessionGeneration
+  )
+}
+
+function startCodexTestSession(adapter: CodexAdapterShape, input: CodexTestSessionStartInput)
+{
+  const previousGeneration = codexGenerationByAdapter.get(adapter) ?? 0
+  const runtimeSessionBinding = input.runtimeSessionBinding ?? {
+    providerInstanceId:
+      input.providerInstanceId ??
+      input.modelSelection?.instanceId ??
+      ProviderInstanceId.make(String(adapter.provider)),
+    threadId: input.threadId,
+    sessionGeneration: previousGeneration + 1,
+  }
+  codexGenerationByAdapter.set(
+    adapter,
+    Math.max(previousGeneration, runtimeSessionBinding.sessionGeneration),
+  )
+
+  return Effect.sync(() => codexBindingByAdapter.set(adapter, runtimeSessionBinding)).pipe(
+    Effect.andThen(
+      adapter.startSession({
+        ...input,
+        runtimeSessionBinding,
+      }),
+    ),
+  )
+}
+
+function unwrapCodexRuntimeEvents(adapter: CodexAdapterShape): Stream.Stream<ProviderRuntimeEvent>
+{
+  const expectedBinding = codexBindingByAdapter.get(adapter)
+  return adapter.streamEvents.pipe(
+    Stream.filter(
+      ({ binding }) =>
+        expectedBinding === undefined || isSameCodexRuntimeSessionBinding(binding, expectedBinding),
+    ),
+    Stream.map(({ event }) => event),
+  )
+}
 
 class FakeCodexRuntime implements CodexSessionRuntimeShape
 {
@@ -118,6 +186,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape
   )
 
   public readonly closeImpl = vi.fn(() => Promise.resolve(undefined))
+  public eventDeliveryGate: Deferred.Deferred<void> | undefined
+  public eventDeliveryStarted: Deferred.Deferred<void> | undefined
 
   readonly options: CodexSessionRuntimeOptions
 
@@ -162,7 +232,24 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape
 
   get events()
   {
-    return Stream.fromQueue(this.eventQueue)
+    return Stream.fromQueue(this.eventQueue).pipe(
+      Stream.mapEffect((event) =>
+      {
+        const eventDeliveryGate = this.eventDeliveryGate
+        if (eventDeliveryGate === undefined)
+        {
+          return Effect.succeed(event)
+        }
+        const notifyDeliveryStarted =
+          this.eventDeliveryStarted === undefined
+            ? Effect.void
+            : Deferred.succeed(this.eventDeliveryStarted, undefined).pipe(Effect.asVoid)
+        return notifyDeliveryStarted.pipe(
+          Effect.andThen(Deferred.await(eventDeliveryGate)),
+          Effect.as(event),
+        )
+      }),
+    )
   }
 
   close = Effect.promise(() => this.closeImpl())
@@ -266,13 +353,11 @@ validationLayer('CodexAdapterLive validation', (it) =>
     Effect.gen(function* ()
     {
       const adapter = yield* CodexAdapter
-      const result = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('claudeAgent'),
-          threadId: asThreadId('thread-1'),
-          runtimeMode: 'full-access',
-        })
-        .pipe(Effect.result)
+      const result = yield* startCodexTestSession(adapter, {
+        provider: ProviderDriverKind.make('claudeAgent'),
+        threadId: asThreadId('thread-1'),
+        runtimeMode: 'full-access',
+      }).pipe(Effect.result)
 
       NodeAssert.equal(result._tag, 'Failure')
       NodeAssert.deepStrictEqual(
@@ -286,31 +371,31 @@ validationLayer('CodexAdapterLive validation', (it) =>
       NodeAssert.equal(validationRuntimeFactory.factory.mock.calls.length, 0)
     }),
   )
-  it.effect('maps codex model options before starting a session', () =>
+  it.effect('passes the scoped MCP endpoint and bearer token to the Codex runtime', () =>
     Effect.gen(function* ()
     {
       validationRuntimeFactory.factory.mockClear()
       const adapter = yield* CodexAdapter
+      const threadId = asThreadId('thread-mcp')
 
-      yield* adapter.startSession({
+      yield* startCodexTestSession(adapter, {
         provider: ProviderDriverKind.make('codex'),
-        threadId: asThreadId('thread-1'),
-        modelSelection: createModelSelection(ProviderInstanceId.make('codex'), 'gpt-5.3-codex', [
-          { id: 'serviceTier', value: 'priority' },
-        ]),
+        threadId,
         runtimeMode: 'full-access',
+        mcp: makeTestMcpProviderSession(threadId, ProviderInstanceId.make('codex')),
       })
 
-      NodeAssert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
-        binaryPath: 'codex',
-        cwd: process.cwd(),
-        launchArgs: '',
-        model: 'gpt-5.3-codex',
-        providerInstanceId: ProviderInstanceId.make('codex'),
-        serviceTier: 'priority',
-        threadId: asThreadId('thread-1'),
-        runtimeMode: 'full-access',
-      })
+      const runtimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0]
+      NodeAssert.equal(
+        runtimeOptions?.environment?.CODE456_MCP_BEARER_TOKEN,
+        'provider-session-test-token',
+      )
+      NodeAssert.deepStrictEqual(runtimeOptions?.appServerArgs, [
+        '-c',
+        `mcp_servers.code456.url=${TEST_MCP_ENDPOINT}`,
+        '-c',
+        'mcp_servers.code456.bearer_token_env_var="CODE456_MCP_BEARER_TOKEN"',
+      ])
     }),
   )
 
@@ -320,7 +405,7 @@ validationLayer('CodexAdapterLive validation', (it) =>
       validationRuntimeFactory.factory.mockClear()
       const adapter = yield* CodexAdapter
 
-      yield* adapter.startSession({
+      yield* startCodexTestSession(adapter, {
         provider: ProviderDriverKind.make('codex'),
         threadId: asThreadId('thread-imported'),
         runtimeMode: 'approval-required',
@@ -378,22 +463,40 @@ sessionErrorLayer('CodexAdapterLive session errors', (it) =>
     }),
   )
 
-  it.effect('maps codex model options before sending a turn', () =>
+  it.effect('maps codex model options on startSession and sendTurn', () =>
     Effect.gen(function* ()
     {
+      sessionRuntimeFactory.factory.mockClear()
       const adapter = yield* CodexAdapter
-      yield* adapter.startSession({
+      const threadId = asThreadId('sess-model-options')
+
+      yield* startCodexTestSession(adapter, {
         provider: ProviderDriverKind.make('codex'),
-        threadId: asThreadId('sess-missing'),
+        threadId,
+        modelSelection: createModelSelection(ProviderInstanceId.make('codex'), 'gpt-5.3-codex', [
+          { id: 'serviceTier', value: 'priority' },
+        ]),
         runtimeMode: 'full-access',
       })
+
+      NodeAssert.deepStrictEqual(sessionRuntimeFactory.factory.mock.calls[0]?.[0], {
+        binaryPath: 'codex',
+        cwd: process.cwd(),
+        launchArgs: '',
+        model: 'gpt-5.3-codex',
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        serviceTier: 'priority',
+        threadId,
+        runtimeMode: 'full-access',
+      })
+
       const runtime = sessionRuntimeFactory.lastRuntime
       NodeAssert.ok(runtime)
       runtime.sendTurnImpl.mockClear()
 
       yield* Effect.ignore(
         adapter.sendTurn({
-          threadId: asThreadId('sess-missing'),
+          threadId,
           input: 'hello',
           modelSelection: createModelSelection(ProviderInstanceId.make('codex'), 'gpt-5.3-codex', [
             { id: 'reasoningEffort', value: 'high' },
@@ -452,7 +555,7 @@ sessionErrorLayer('CodexAdapterLive session errors', (it) =>
     return Effect.gen(function* ()
     {
       const configuredAdapter = yield* CodexAdapter
-      yield* configuredAdapter.startSession({
+      yield* startCodexTestSession(configuredAdapter, {
         provider: ProviderDriverKind.make('codex'),
         threadId: asThreadId('sess-launch-args'),
         runtimeMode: 'full-access',
@@ -468,7 +571,7 @@ sessionErrorLayer('CodexAdapterLive session errors', (it) =>
         Effect.gen(function* ()
         {
           const envAdapter = yield* CodexAdapter
-          yield* envAdapter.startSession({
+          yield* startCodexTestSession(envAdapter, {
             provider: ProviderDriverKind.make('codex'),
             threadId: asThreadId('sess-launch-args-env'),
             runtimeMode: 'full-access',
@@ -507,8 +610,9 @@ sessionErrorLayer('CodexAdapterLive session errors', (it) =>
     return Effect.gen(function* ()
     {
       const adapter = yield* CodexAdapter
-      yield* adapter.startSession({
+      yield* startCodexTestSession(adapter, {
         provider: ProviderDriverKind.make('codex'),
+        providerInstanceId: customInstanceId,
         threadId: asThreadId('sess-custom-instance'),
         runtimeMode: 'full-access',
       })
@@ -566,7 +670,7 @@ function startLifecycleRuntime()
   return Effect.gen(function* ()
   {
     const adapter = yield* CodexAdapter
-    yield* adapter.startSession({
+    yield* startCodexTestSession(adapter, {
       provider: ProviderDriverKind.make('codex'),
       threadId: asThreadId('thread-1'),
       runtimeMode: 'full-access',
@@ -583,7 +687,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       const event: ProviderEvent = {
         id: asEventId('evt-msg-complete'),
@@ -629,7 +735,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-mcp-complete'),
@@ -689,7 +797,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       const event: ProviderEvent = {
         id: asEventId('evt-plan-complete'),
@@ -734,7 +844,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-plan-delta'),
@@ -774,7 +886,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       const event: ProviderEvent = {
         id: asEventId('evt-session-closed'),
@@ -808,7 +922,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-retryable-error'),
@@ -849,7 +965,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-resume-fallback'),
@@ -885,7 +1003,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-process-stderr'),
@@ -922,7 +1042,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-realtime-started'),
@@ -959,7 +1081,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-process-stderr-websocket'),
@@ -1011,7 +1135,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
       Effect.gen(function* ()
       {
         const { adapter, runtime } = yield* startLifecycleRuntime()
-        const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+        const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+          Effect.forkChild,
+        )
 
         const event: ProviderEvent = {
           id: asEventId(`evt-${requestKind}-request-resolved`),
@@ -1049,7 +1175,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       const event: ProviderEvent = {
         id: asEventId('evt-user-input-empty'),
@@ -1090,9 +1218,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
-        Effect.forkChild,
-      )
+      const eventsFiber = yield* Stream.runCollect(
+        Stream.take(unwrapCodexRuntimeEvents(adapter), 2),
+      ).pipe(Effect.forkChild)
 
       const event: ProviderEvent = {
         id: asEventId('evt-windows-sandbox-failed'),
@@ -1138,9 +1266,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
       Effect.gen(function* ()
       {
         const { adapter, runtime } = yield* startLifecycleRuntime()
-        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
-          Effect.forkChild,
-        )
+        const eventsFiber = yield* Stream.runCollect(
+          Stream.take(unwrapCodexRuntimeEvents(adapter), 2),
+        ).pipe(Effect.forkChild)
 
         yield* runtime.emit({
           id: asEventId('evt-user-input-requested'),
@@ -1210,7 +1338,9 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     Effect.gen(function* ()
     {
       const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
 
       yield* runtime.emit({
         id: asEventId('evt-codex-thread-token-usage-updated'),
@@ -1303,7 +1433,7 @@ scopedLifecycleLayer('CodexAdapterLive scoped lifecycle', (it) =>
       yield* Effect.raceFirst(
         Effect.gen(function* ()
         {
-          yield* adapter.startSession({
+          yield* startCodexTestSession(adapter, {
             provider: ProviderDriverKind.make('codex'),
             threadId,
             runtimeMode: 'full-access',
@@ -1320,7 +1450,9 @@ scopedLifecycleLayer('CodexAdapterLive scoped lifecycle', (it) =>
       const runtime = scopedLifecycleRuntimeFactory.lastRuntime
       NodeAssert.ok(runtime)
 
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
       yield* runtime.emit({
         id: asEventId('evt-after-start-caller-exit'),
         kind: 'notification',
@@ -1353,7 +1485,7 @@ scopedLifecycleLayer('CodexAdapterLive scoped lifecycle', (it) =>
       scopedLifecycleRuntimeFactory.releasedThreadIds.length = 0
       const adapter = yield* CodexAdapter
 
-      yield* adapter.startSession({
+      yield* startCodexTestSession(adapter, {
         provider: ProviderDriverKind.make('codex'),
         threadId: asThreadId('thread-stop'),
         runtimeMode: 'full-access',
@@ -1370,6 +1502,92 @@ scopedLifecycleLayer('CodexAdapterLive scoped lifecycle', (it) =>
       ])
       NodeAssert.equal(yield* adapter.hasSession(asThreadId('thread-stop')), false)
     }),
+  )
+
+  it.effect(
+    'emits one bound graceful terminal and suppresses a delayed native event after stop',
+    () =>
+      Effect.gen(function* ()
+      {
+        const adapter = yield* CodexAdapter
+        const threadId = asThreadId('thread-graceful-terminal')
+        const runtimeSessionBinding: CodexRuntimeSessionBinding = {
+          providerInstanceId: ProviderInstanceId.make('codex'),
+          threadId,
+          sessionGeneration: 701,
+        }
+        yield* startCodexTestSession(adapter, {
+          provider: ProviderDriverKind.make('codex'),
+          threadId,
+          runtimeMode: 'full-access',
+          runtimeSessionBinding,
+        })
+
+        const runtime = scopedLifecycleRuntimeFactory.lastRuntime
+        NodeAssert.ok(runtime)
+        const eventDeliveryGate = yield* Deferred.make<void>()
+        const eventDeliveryStarted = yield* Deferred.make<void>()
+        runtime.eventDeliveryGate = eventDeliveryGate
+        runtime.eventDeliveryStarted = eventDeliveryStarted
+
+        const envelopes: ProviderAdapterRuntimeEvent[] = []
+        const terminalObserved = yield* Deferred.make<void>()
+        const collectorFiber = yield* Stream.runForEach(adapter.streamEvents, (envelope) =>
+          Effect.sync(() =>
+          {
+            envelopes.push(envelope)
+          }).pipe(
+            Effect.andThen(
+              isSameCodexRuntimeSessionBinding(envelope.binding, runtimeSessionBinding) &&
+                envelope.event.type === 'session.exited'
+                ? Deferred.succeed(terminalObserved, undefined).pipe(Effect.asVoid)
+                : Effect.void,
+            ),
+          ),
+        ).pipe(Effect.forkChild)
+
+        yield* runtime.emit({
+          id: asEventId('evt-delayed-after-stop'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          threadId,
+          turnId: asTurnId('turn-delayed-after-stop'),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          method: 'turn/started',
+        } satisfies ProviderEvent)
+        const eventDeliveryStart = yield* Deferred.await(eventDeliveryStarted).pipe(
+          Effect.timeoutOption('1 second'),
+          TestClock.withLive,
+        )
+        NodeAssert.equal(eventDeliveryStart._tag, 'Some', 'event delivery did not start')
+
+        const stopFiber = yield* adapter.stopSession(threadId).pipe(Effect.forkChild)
+        const observedTerminal = yield* Deferred.await(terminalObserved).pipe(
+          Effect.timeoutOption('1 second'),
+          TestClock.withLive,
+        )
+        NodeAssert.equal(observedTerminal._tag, 'Some', 'terminal was not observed')
+        yield* Deferred.succeed(eventDeliveryGate, undefined)
+        yield* Fiber.join(stopFiber).pipe(Effect.timeout('1 second'), TestClock.withLive)
+        yield* Effect.yieldNow
+        yield* Fiber.interrupt(collectorFiber)
+
+        const boundEnvelopes = envelopes.filter((envelope) =>
+          isSameCodexRuntimeSessionBinding(envelope.binding, runtimeSessionBinding),
+        )
+        NodeAssert.equal(boundEnvelopes.length, 1)
+        NodeAssert.deepStrictEqual(boundEnvelopes[0]?.binding, runtimeSessionBinding)
+        NodeAssert.equal(boundEnvelopes.at(-1)?.event.type, 'session.exited')
+        const terminalEvent = boundEnvelopes[0]?.event
+        NodeAssert.equal(terminalEvent?.type, 'session.exited')
+        if (terminalEvent?.type === 'session.exited')
+        {
+          NodeAssert.equal(terminalEvent.payload.reason, 'Codex adapter stopped the session.')
+          NodeAssert.equal(terminalEvent.payload.exitKind, 'graceful')
+          NodeAssert.equal(terminalEvent.payload.recoverable, false)
+        }
+        NodeAssert.equal(runtime.closeImpl.mock.calls.length, 1)
+      }),
   )
 })
 
@@ -1400,13 +1618,11 @@ scopedFailureLayer('CodexAdapterLive scoped startup failure', (it) =>
       scopedFailureRuntimeFactory.releasedThreadIds.length = 0
       const adapter = yield* CodexAdapter
 
-      const result = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make('codex'),
-          threadId: asThreadId('thread-fail'),
-          runtimeMode: 'full-access',
-        })
-        .pipe(Effect.result)
+      const result = yield* startCodexTestSession(adapter, {
+        provider: ProviderDriverKind.make('codex'),
+        threadId: asThreadId('thread-fail'),
+        runtimeMode: 'full-access',
+      }).pipe(Effect.result)
 
       NodeAssert.equal(result._tag, 'Failure')
       NodeAssert.equal(result.failure._tag, 'ProviderAdapterProcessError')
@@ -1450,7 +1666,7 @@ it.effect('flushes managed native logs when the adapter layer shuts down', () =>
       const context = yield* Layer.buildWithScope(layer, scope)
       const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context))
 
-      yield* adapter.startSession({
+      yield* startCodexTestSession(adapter, {
         provider: ProviderDriverKind.make('codex'),
         threadId: asThreadId('thread-logger'),
         runtimeMode: 'full-access',
@@ -1459,7 +1675,9 @@ it.effect('flushes managed native logs when the adapter layer shuts down', () =>
       const runtime = runtimeFactory.lastRuntime
       NodeAssert.ok(runtime)
 
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
       yield* runtime.emit({
         id: asEventId('evt-native-log'),
         kind: 'notification',

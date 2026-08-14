@@ -10,9 +10,11 @@ import {
   type TerminalMetadataStreamEvent,
   type TerminalOpenInput,
   type TerminalRestartInput,
+  ThreadId,
 } from '@t3tools/contracts'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Data from 'effect/Data'
+import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Encoding from 'effect/Encoding'
@@ -32,6 +34,8 @@ import { expect } from 'vite-plus/test'
 import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import * as TerminalManager from '../../../../apps/server/src/terminal/Manager.ts'
 import * as PtyAdapter from '../../../../apps/server/src/terminal/PtyAdapter.ts'
+import { ThreadArchiveLifecyclePermit } from '../../../../apps/server/src/orchestration/Services/ThreadArchiveLifecyclePermit.ts'
+import { ThreadArchiveLifecyclePermitLive } from '../../../../apps/server/src/orchestration/Layers/ThreadArchiveLifecyclePermit.ts'
 
 class WaitForConditionError extends Data.TaggedError('WaitForConditionError')<{
   readonly message: string
@@ -119,6 +123,10 @@ class FakePtyAdapter
   readonly spawnInputs: PtyAdapter.PtySpawnInput[] = []
   readonly processes: FakePtyProcess[] = []
   readonly spawnFailures: Error[] = []
+  spawnGate: {
+    readonly started: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  } | null = null
   private readonly mode: 'sync' | 'async'
   private nextPid = 9000
 
@@ -145,19 +153,18 @@ class FakePtyAdapter
     }
     const process = new FakePtyProcess(this.nextPid++)
     this.processes.push(process)
+    const gated =
+      this.spawnGate === null
+        ? Effect.succeed(process)
+        : Deferred.succeed(this.spawnGate.started, undefined).pipe(
+            Effect.andThen(Deferred.await(this.spawnGate.release)),
+            Effect.as(process),
+          )
     if (this.mode === 'async')
     {
-      return Effect.tryPromise({
-        try: async () => process,
-        catch: (cause) =>
-          new PtyAdapter.PtySpawnError({
-            adapter: 'fake',
-            shell: input.shell,
-            cause,
-          }),
-      })
+      return Effect.yieldNow.pipe(Effect.andThen(gated))
     }
-    return Effect.succeed(process)
+    return gated
   }
 }
 
@@ -241,6 +248,8 @@ interface CreateManagerOptions
   processKillGraceMs?: number
   maxRetainedInactiveSessions?: number
   ptyAdapter?: FakePtyAdapter
+  threadArchiveLifecyclePermit?: ThreadArchiveLifecyclePermit['Service']
+  isThreadActive?: (threadId: ThreadId) => Effect.Effect<boolean>
 }
 
 interface ManagerFixture
@@ -272,6 +281,10 @@ const createManager = (
         logsDir,
         historyLineLimit,
         ptyAdapter,
+        threadArchiveLifecyclePermit: options.threadArchiveLifecyclePermit ?? {
+          withPermit: (_threadId, effect) => effect,
+        },
+        isThreadActive: options.isThreadActive ?? (() => Effect.succeed(true)),
         ...(options.shellResolver !== undefined ? { shellResolver: options.shellResolver } : {}),
         ...(options.env !== undefined ? { env: options.env } : {}),
         ...(options.subprocessInspector !== undefined
@@ -305,7 +318,11 @@ const createManager = (
 const withHostPlatform = (platform: NodeJS.Platform) => Layer.succeed(HostProcessPlatform, platform)
 
 it.layer(
-  Layer.merge(NodeServices.layer, ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer))),
+  Layer.mergeAll(
+    NodeServices.layer,
+    ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer)),
+    ThreadArchiveLifecyclePermitLive,
+  ),
   { excludeTestServices: true },
 )('TerminalManager', (it) =>
 {
@@ -1144,6 +1161,159 @@ it.layer(
     }),
   )
 
+  it.effect('captures current lifecycles and never closes a restarted identity', () =>
+    Effect.gen(function* ()
+    {
+      const { manager, ptyAdapter } = yield* createManager()
+      yield* manager.open(openInput())
+
+      const [firstIdentity] = yield* manager.captureLifecycleIdentities({
+        threadId: 'thread-1',
+      })
+      expect(firstIdentity).toBeDefined()
+      if (!firstIdentity) return
+      expect(
+        yield* manager.captureLifecycleIdentities({
+          threadId: 'thread-1',
+        }),
+      ).toEqual([firstIdentity])
+
+      yield* manager.restart(restartInput())
+      const restartedProcess = ptyAdapter.processes[1]
+      expect(restartedProcess).toBeDefined()
+      if (!restartedProcess) return
+
+      assert.equal(yield* manager.closeIfExact(firstIdentity), false)
+      assert.equal(restartedProcess.killed, false)
+
+      const [restartedIdentity] = yield* manager.captureLifecycleIdentities({
+        threadId: 'thread-1',
+      })
+      expect(restartedIdentity).toBeDefined()
+      if (!restartedIdentity) return
+      expect(restartedIdentity.lifecycleId).not.toBe(firstIdentity.lifecycleId)
+      assert.equal(yield* manager.closeIfExact(restartedIdentity), true)
+      assert.equal(restartedProcess.killed, true)
+    }),
+  )
+
+  it.effect('serializes terminal creation with archive capture in both directions', () =>
+    Effect.gen(function* ()
+    {
+      const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
+      let threadActive = true
+      const ptyAdapter = new FakePtyAdapter()
+      const spawnStarted = yield* Deferred.make<void>()
+      const releaseSpawn = yield* Deferred.make<void>()
+      ptyAdapter.spawnGate = { started: spawnStarted, release: releaseSpawn }
+      const { manager } = yield* createManager(5, {
+        ptyAdapter,
+        threadArchiveLifecyclePermit,
+        isThreadActive: () => Effect.sync(() => threadActive),
+      })
+
+      const opening = yield* Effect.forkChild(manager.open(openInput()))
+      yield* Deferred.await(spawnStarted)
+      const archiveEntered = yield* Deferred.make<void>()
+      const capture = yield* Effect.forkChild(
+        threadArchiveLifecyclePermit.withPermit(
+          ThreadId.make('thread-1'),
+          Effect.gen(function* ()
+          {
+            threadActive = false
+            yield* Deferred.succeed(archiveEntered, undefined)
+            return yield* manager.captureLifecycleIdentities({
+              threadId: 'thread-1',
+            })
+          }),
+        ),
+      )
+      yield* Effect.yieldNow
+      expect(capture.pollUnsafe()).toBeUndefined()
+
+      yield* Deferred.succeed(releaseSpawn, undefined)
+      yield* Fiber.join(opening)
+      const captured = yield* Fiber.join(capture)
+      expect(captured).toHaveLength(1)
+
+      threadActive = true
+      ptyAdapter.spawnGate = null
+      const existing = ptyAdapter.processes[0]
+      expect(existing).toBeDefined()
+      if (!existing) return
+      const archiveHolding = yield* Deferred.make<void>()
+      const releaseArchive = yield* Deferred.make<void>()
+      const archive = yield* Effect.forkChild(
+        threadArchiveLifecyclePermit.withPermit(
+          ThreadId.make('thread-1'),
+          Effect.sync(() =>
+          {
+            threadActive = false
+          }).pipe(
+            Effect.andThen(Deferred.succeed(archiveHolding, undefined)),
+            Effect.andThen(Deferred.await(releaseArchive)),
+          ),
+        ),
+      )
+      yield* Deferred.await(archiveHolding)
+
+      const blockedOpen = yield* Effect.forkChild(
+        Effect.exit(manager.open(openInput({ terminalId: 'new-open' }))),
+      )
+      const blockedRestart = yield* Effect.forkChild(Effect.exit(manager.restart(restartInput())))
+      const blockedAttach = yield* Effect.forkChild(
+        Effect.exit(
+          manager.attachStream(
+            {
+              ...openInput({ terminalId: 'new-attach' }),
+              restartIfNotRunning: true,
+            },
+            () => Effect.void,
+          ),
+        ),
+      )
+      yield* Effect.yieldNow
+      expect(blockedOpen.pollUnsafe()).toBeUndefined()
+      expect(blockedRestart.pollUnsafe()).toBeUndefined()
+      expect(blockedAttach.pollUnsafe()).toBeUndefined()
+
+      yield* Deferred.succeed(releaseArchive, undefined)
+      yield* Fiber.join(archive)
+      const [openExit, restartExit, attachExit] = yield* Effect.all([
+        Fiber.join(blockedOpen),
+        Fiber.join(blockedRestart),
+        Fiber.join(blockedAttach),
+      ])
+      expect(Exit.isFailure(openExit)).toBe(true)
+      expect(Exit.isFailure(restartExit)).toBe(true)
+      expect(Exit.isFailure(attachExit)).toBe(true)
+      expect(ptyAdapter.spawnInputs).toHaveLength(1)
+      expect(existing.killed).toBe(false)
+    }),
+  )
+
+  it.effect('keeps persisted history when exact archive cleanup closes a lifecycle', () =>
+    Effect.gen(function* ()
+    {
+      const { manager, ptyAdapter } = yield* createManager()
+      yield* manager.open(openInput())
+      const process = ptyAdapter.processes[0]
+      expect(process).toBeDefined()
+      if (!process) return
+      process.emitData('archive keeps this\n')
+
+      const [identity] = yield* manager.captureLifecycleIdentities({
+        threadId: 'thread-1',
+      })
+      expect(identity).toBeDefined()
+      if (!identity) return
+      assert.equal(yield* manager.closeIfExact(identity), true)
+
+      const reopened = yield* manager.open(openInput())
+      assert.equal(reopened.history, 'archive keeps this\n')
+    }),
+  )
+
   it.effect('closes all terminals for a thread when close omits terminalId', () =>
     Effect.gen(function* ()
     {
@@ -1381,37 +1551,17 @@ it.layer(
     }),
   )
 
-  it.effect('filters app runtime env variables from terminal sessions', () =>
-    Effect.gen(function* ()
-    {
-      const { manager, ptyAdapter } = yield* createManager(5, {
-        env: {
-          PORT: '5173',
-          T3CODE_PORT: '3773',
-          VITE_DEV_SERVER_URL: 'http://localhost:5173',
-          TEST_TERMINAL_KEEP: 'keep-me',
-        },
-      })
-      yield* manager.open(openInput())
-      const spawnInput = ptyAdapter.spawnInputs[0]
-      expect(spawnInput).toBeDefined()
-      if (!spawnInput) return
-
-      expect(spawnInput.env.PORT).toBeUndefined()
-      expect(spawnInput.env.T3CODE_PORT).toBeUndefined()
-      expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined()
-      // arbitrary host env vars must pass through — terminals inherit the
-      // user's environment apart from the explicit blocklist.
-      expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe('keep-me')
-    }),
-  )
-
-  it.effect('strips AppImage runtime env from terminal sessions', () =>
+  it.effect('strips AppImage and app-runtime env from terminal sessions', () =>
     Effect.gen(function* ()
     {
       const appDir = '/tmp/.mount_T3Codeabc123'
       const { manager, ptyAdapter } = yield* createManager(5, {
         env: {
+          // app-runtime blocklist
+          PORT: '5173',
+          T3CODE_PORT: '3773',
+          VITE_DEV_SERVER_URL: 'http://localhost:5173',
+          // AppImage runtime markers + mount-prefixed search paths
           APPIMAGE: '/home/user/T3-Code.AppImage',
           APPDIR: appDir,
           ARGV0: '/home/user/T3-Code.AppImage',
@@ -1426,6 +1576,9 @@ it.layer(
       expect(spawnInput).toBeDefined()
       if (!spawnInput) return
 
+      expect(spawnInput.env.PORT).toBeUndefined()
+      expect(spawnInput.env.T3CODE_PORT).toBeUndefined()
+      expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined()
       // AppImage runtime markers must never reach the PTY — tools inside the
       // terminal otherwise resolve against the AppImage mount (e.g. PHP_BINARY
       // reporting the AppImage path instead of the real binary).
@@ -1449,8 +1602,6 @@ it.layer(
         env: {
           PATH: '/usr/local/bin:/usr/bin:/bin',
           LD_LIBRARY_PATH: '/home/user/.local/lib',
-          // without APPIMAGE/APPDIR set, OWD is an ordinary variable and must
-          // not be stripped — only an AppImage launch gives it special meaning.
           OWD: '/home/user/keep-this',
         },
       })

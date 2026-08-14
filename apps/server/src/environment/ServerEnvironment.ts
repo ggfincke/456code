@@ -12,6 +12,7 @@ import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 
 import packageJson from '../../package.json' with { type: 'json' }
+import { workspaceDistributionCapabilities } from '../cartographer/CartographerAnalyzer.ts'
 import * as ServerConfig from '../config.ts'
 import * as ProcessRunner from '../process/processRunner.ts'
 import { resolveServerEnvironmentLabel } from './ServerEnvironmentLabel.ts'
@@ -163,6 +164,7 @@ export const make = Effect.gen(function* ()
   const environmentId = EnvironmentId.make(environmentIdRaw)
   const cwdBaseName = path.basename(serverConfig.cwd).trim()
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName })
+  const cartographer = yield* workspaceDistributionCapabilities()
 
   const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
@@ -181,7 +183,8 @@ export const make = Effect.gen(function* ()
       threadSnooze: true,
       safeMdxDocument: true,
       proposalPreview: true,
-      ...(process.env.T3CODE_CARTOGRAPHER_CLI?.trim().length ? { cartographerEmbed: true } : {}),
+      orchestrateRunExecutionV1: true,
+      architectureImpact: cartographer.architectureImpact,
     },
   }
 

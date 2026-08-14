@@ -47,6 +47,7 @@ import * as Layer from 'effect/Layer'
 import * as PubSub from 'effect/PubSub'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
+import * as Semaphore from 'effect/Semaphore'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
 
@@ -57,6 +58,7 @@ import {
 } from '../Services/ProviderInstanceRegistry.ts'
 import {
   ProviderInstanceRegistryMutator,
+  type ProviderInstanceRegistryLifecycleOwner,
   type ProviderInstanceRegistryMutatorShape,
 } from '../Services/ProviderInstanceRegistryMutator.ts'
 import type { AnyProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
@@ -81,8 +83,29 @@ interface RegistryState
 {
   readonly entries: Ref.Ref<ReadonlyMap<ProviderInstanceId, LiveEntry>>
   readonly unavailable: Ref.Ref<ReadonlyMap<ProviderInstanceId, ServerProvider>>
+  readonly lifecycleOwner: Ref.Ref<ProviderInstanceRegistryLifecycleOwner | undefined>
+  readonly lifecycleOwnerRequired: Ref.Ref<boolean>
+  readonly lifecycleOwnerChanges: PubSub.PubSub<void>
+  readonly requireLifecycleOwnerForRetirement: boolean
   readonly changes: PubSub.PubSub<void>
 }
+
+const awaitLifecycleOwner = (state: RegistryState) =>
+  Effect.scoped(
+    Effect.gen(function* ()
+    {
+      const changes = yield* PubSub.subscribe(state.lifecycleOwnerChanges)
+      while (true)
+      {
+        const owner = yield* Ref.get(state.lifecycleOwner)
+        if (owner !== undefined)
+        {
+          return owner
+        }
+        yield* PubSub.take(changes)
+      }
+    }),
+  )
 
 // structural equality on `ProviderInstanceConfig` envelopes. Used by
 // `reconcile` to skip rebuilds when settings arrive unchanged. Config
@@ -213,7 +236,7 @@ const makeReconcile = <R>(input: {
   readonly state: RegistryState
   readonly driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>
   readonly parentScope: Scope.Scope
-}): ((configMap: ProviderInstanceConfigMap) => Effect.Effect<void, never, R>) =>
+}) =>
 {
   const { state, driversById, parentScope } = input
   return (configMap: ProviderInstanceConfigMap) =>
@@ -244,90 +267,109 @@ const makeReconcile = <R>(input: {
           replacedIds.add(instanceId)
         }
       }
-      for (const id of [...removedIds, ...replacedIds])
+      const retiringIds = [...removedIds, ...replacedIds]
+      const mutation = Effect.gen(function* ()
       {
-        const live = previousEntries.get(id)
-        if (live)
+        for (const id of retiringIds)
         {
-          yield* Scope.close(live.scope, Exit.void).pipe(Effect.ignore)
-        }
-      }
-
-      // 2. Build additions and replacements. Walk `nextRaw` so the final
-      //    entry order follows settings-author order.
-      const builtEntries = new Map<ProviderInstanceId, LiveEntry>()
-      const builtUnavailable = new Map<ProviderInstanceId, ServerProvider>()
-      let orderChanged = false
-      const previousOrder = [...previousEntries.keys()]
-      const nextOrder: Array<ProviderInstanceId> = []
-
-      for (const [rawInstanceId, entry] of nextRaw)
-      {
-        const instanceId = ProviderInstanceId.make(rawInstanceId)
-        nextOrder.push(instanceId)
-
-        const existing = previousEntries.get(instanceId)
-        if (existing !== undefined && !replacedIds.has(instanceId))
-        {
-          // no-op update: keep the existing live entry and scope.
-          builtEntries.set(instanceId, existing)
-          continue
+          const live = previousEntries.get(id)
+          if (live)
+          {
+            yield* Scope.close(live.scope, Exit.void).pipe(Effect.ignore)
+          }
         }
 
-        const result = yield* buildEntry({
-          driversById,
-          parentScope,
-          instanceId,
-          rawInstanceId,
-          entry,
-        })
-        if (result.kind === 'live')
+        // 2. Build additions and replacements. Walk `nextRaw` so the final
+        //    entry order follows settings-author order.
+        const builtEntries = new Map<ProviderInstanceId, LiveEntry>()
+        const builtUnavailable = new Map<ProviderInstanceId, ServerProvider>()
+        let orderChanged = false
+        const previousOrder = [...previousEntries.keys()]
+        const nextOrder: Array<ProviderInstanceId> = []
+
+        for (const [rawInstanceId, entry] of nextRaw)
         {
-          builtEntries.set(instanceId, result.live)
+          const instanceId = ProviderInstanceId.make(rawInstanceId)
+          nextOrder.push(instanceId)
+
+          const existing = previousEntries.get(instanceId)
+          if (existing !== undefined && !replacedIds.has(instanceId))
+          {
+            // no-op update: keep the existing live entry and scope.
+            builtEntries.set(instanceId, existing)
+            continue
+          }
+
+          const result = yield* buildEntry({
+            driversById,
+            parentScope,
+            instanceId,
+            rawInstanceId,
+            entry,
+          })
+          if (result.kind === 'live')
+          {
+            builtEntries.set(instanceId, result.live)
+          }
+          else
+          {
+            builtUnavailable.set(instanceId, result.snapshot)
+          }
+        }
+
+        if (previousOrder.length === nextOrder.length)
+        {
+          for (let i = 0; i < previousOrder.length; i++)
+          {
+            if (previousOrder[i] !== nextOrder[i])
+            {
+              orderChanged = true
+              break
+            }
+          }
         }
         else
         {
-          builtUnavailable.set(instanceId, result.snapshot)
+          orderChanged = true
         }
-      }
 
-      if (previousOrder.length === nextOrder.length)
-      {
-        for (let i = 0; i < previousOrder.length; i++)
-        {
-          if (previousOrder[i] !== nextOrder[i])
+        const entriesChanged =
+          orderChanged ||
+          removedIds.length > 0 ||
+          replacedIds.size > 0 ||
+          builtEntries.size !== previousEntries.size
+        const unavailableChanged =
+          builtUnavailable.size !== previousUnavailable.size ||
+          [...builtUnavailable].some(([id, snapshot]) =>
           {
-            orderChanged = true
-            break
-          }
-        }
-      }
-      else
-      {
-        orderChanged = true
-      }
+            const prev = previousUnavailable.get(id)
+            return prev === undefined || !Equal.equals(prev, snapshot)
+          }) ||
+          [...previousUnavailable].some(([id]) => !builtUnavailable.has(id))
 
-      const entriesChanged =
-        orderChanged ||
-        removedIds.length > 0 ||
-        replacedIds.size > 0 ||
-        builtEntries.size !== previousEntries.size
-      const unavailableChanged =
-        builtUnavailable.size !== previousUnavailable.size ||
-        [...builtUnavailable].some(([id, snapshot]) =>
+        yield* Ref.set(state.entries, builtEntries)
+        yield* Ref.set(state.unavailable, builtUnavailable)
+
+        if (entriesChanged || unavailableChanged)
         {
-          const prev = previousUnavailable.get(id)
-          return prev === undefined || !Equal.equals(prev, snapshot)
-        }) ||
-        [...previousUnavailable].some(([id]) => !builtUnavailable.has(id))
+          yield* PubSub.publish(state.changes, undefined)
+        }
+      })
 
-      yield* Ref.set(state.entries, builtEntries)
-      yield* Ref.set(state.unavailable, builtUnavailable)
-
-      if (entriesChanged || unavailableChanged)
+      const lifecycleOwner = yield* Ref.get(state.lifecycleOwner)
+      if (lifecycleOwner !== undefined)
       {
-        yield* PubSub.publish(state.changes, undefined)
+        return yield* lifecycleOwner.aroundMutation(retiringIds, mutation)
       }
+      const lifecycleOwnerRequired = yield* Ref.get(state.lifecycleOwnerRequired)
+      if (
+        state.requireLifecycleOwnerForRetirement &&
+        (retiringIds.length > 0 || lifecycleOwnerRequired)
+      )
+      {
+        return yield* (yield* awaitLifecycleOwner(state)).aroundMutation(retiringIds, mutation)
+      }
+      return yield* mutation
     })
 }
 
@@ -348,6 +390,7 @@ const makeReconcile = <R>(input: {
 export const makeProviderInstanceRegistry = <R>(input: {
   readonly drivers: ReadonlyArray<AnyProviderDriver<R>>
   readonly configMap: ProviderInstanceConfigMap
+  readonly requireLifecycleOwnerForRetirement?: boolean
 }): Effect.Effect<
   {
     readonly registry: ProviderInstanceRegistryShape
@@ -376,17 +419,68 @@ export const makeProviderInstanceRegistry = <R>(input: {
 
     const entries = yield* Ref.make<ReadonlyMap<ProviderInstanceId, LiveEntry>>(new Map())
     const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ServerProvider>>(new Map())
+    const lifecycleOwner = yield* Ref.make<ProviderInstanceRegistryLifecycleOwner | undefined>(
+      undefined,
+    )
+    const lifecycleOwnerRequired = yield* Ref.make(false)
+    const lifecycleOwnerChanges = yield* PubSub.unbounded<void>()
     const changes = yield* PubSub.unbounded<void>()
+    const reconcileGate = yield* Semaphore.make(1)
+    yield* Effect.addFinalizer(() => PubSub.shutdown(lifecycleOwnerChanges))
     yield* Effect.addFinalizer(() => PubSub.shutdown(changes))
 
-    const state: RegistryState = { entries, unavailable, changes }
+    const state: RegistryState = {
+      entries,
+      unavailable,
+      lifecycleOwner,
+      lifecycleOwnerRequired,
+      lifecycleOwnerChanges,
+      requireLifecycleOwnerForRetirement: input.requireLifecycleOwnerForRetirement ?? false,
+      changes,
+    }
     const reconcileWithR = makeReconcile({ state, driversById, parentScope })
     const reconcile: ProviderInstanceRegistryMutatorShape['reconcile'] = (configMap) =>
-      reconcileWithR(configMap).pipe(Effect.provideContext(driverContext))
+      reconcileGate.withPermits(1)(
+        reconcileWithR(configMap).pipe(Effect.provideContext(driverContext)),
+      )
+
+    const registerLifecycleOwner: ProviderInstanceRegistryMutatorShape['registerLifecycleOwner'] = (
+      owner,
+    ) =>
+      Ref.set(lifecycleOwnerRequired, true).pipe(
+        Effect.andThen(
+          Ref.modify(
+            lifecycleOwner,
+            (current): readonly [boolean, ProviderInstanceRegistryLifecycleOwner | undefined] =>
+            {
+              if (current !== undefined && current !== owner)
+              {
+                return [false, current] as const
+              }
+              return [true, owner] as const
+            },
+          ),
+        ),
+        Effect.flatMap((registered) =>
+          registered
+            ? PubSub.publish(lifecycleOwnerChanges, undefined).pipe(Effect.asVoid)
+            : Effect.die(
+                new Error(
+                  'ProviderInstanceRegistryMutator already has a different lifecycle owner.',
+                ),
+              ),
+        ),
+      )
+    const unregisterLifecycleOwner: ProviderInstanceRegistryMutatorShape['unregisterLifecycleOwner'] =
+      (owner) =>
+        Ref.update(lifecycleOwner, (current) => (current === owner ? undefined : current)).pipe(
+          Effect.andThen(PubSub.publish(lifecycleOwnerChanges, undefined)),
+          Effect.asVoid,
+        )
 
     // hydrate the initial configMap synchronously so callers can read
     // `listInstances` immediately after this effect completes.
-    yield* reconcile(input.configMap)
+    yield* reconcile(input.configMap).pipe(Effect.orDie)
 
     const registry: ProviderInstanceRegistryShape = {
       getInstance: (id) => Ref.get(entries).pipe(Effect.map((map) => map.get(id)?.instance)),
@@ -418,7 +512,11 @@ export const makeProviderInstanceRegistry = <R>(input: {
       },
     }
 
-    const mutator: ProviderInstanceRegistryMutatorShape = { reconcile }
+    const mutator: ProviderInstanceRegistryMutatorShape = {
+      reconcile,
+      registerLifecycleOwner,
+      unregisterLifecycleOwner,
+    }
 
     return { registry, mutator }
   })
@@ -446,6 +544,7 @@ export const ProviderInstanceRegistryLayer = <R>(input: {
 export const ProviderInstanceRegistryMutableLayer = <R>(input: {
   readonly drivers: ReadonlyArray<AnyProviderDriver<R>>
   readonly configMap: ProviderInstanceConfigMap
+  readonly requireLifecycleOwnerForRetirement?: boolean
 }): Layer.Layer<ProviderInstanceRegistry | ProviderInstanceRegistryMutator, never, R> =>
   Layer.effectContext(
     makeProviderInstanceRegistry(input).pipe(

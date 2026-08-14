@@ -30,8 +30,11 @@ import {
 import {
   assertAbnormalChildExitFinalizesOnce,
   assertAbnormalExitDisabledByDefault,
+  assertConcurrentStartSerializesSameThread,
   assertOneExitWhenStopRacesTermination,
   assertStopClosesAcpChild,
+  startAcpTestSession,
+  unwrapAcpRuntimeEvents,
   waitForAcpSessionDrop,
 } from './acpLifecycleTestHelpers.ts'
 import {
@@ -49,6 +52,15 @@ import {
   grokPromptSettlementBelongsToContext,
   makeGrokAdapter,
 } from '../../../../../apps/server/src/provider/Layers/GrokAdapter.ts'
+import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
+} from '../../../../../apps/server/src/provider/Services/ProviderAdapter.ts'
+import {
+  makeTestMcpProviderSession,
+  TEST_MCP_AUTHORIZATION,
+  TEST_MCP_ENDPOINT,
+} from './mcpProviderSessionTestHelpers.ts'
 const decodeGrokSettings = Schema.decodeSync(GrokSettings)
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url))
@@ -168,6 +180,46 @@ it('requires a settlement to match the live Grok turn', () =>
 
 it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
 {
+  it.effect('passes the scoped MCP endpoint and bearer header to Grok ACP', () =>
+    Effect.gen(function* ()
+    {
+      const threadId = ThreadId.make('grok-mcp-probe')
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), 'grok-acp-')),
+      )
+      const requestLogPath = NodePath.join(tempDir, 'requests.ndjson')
+      yield* Effect.promise(() => NodeFSP.writeFile(requestLogPath, '', 'utf8'))
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      )
+      const adapter = yield* makeTestAdapter(wrapperPath)
+
+      yield* startAcpTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('grok'),
+        cwd: process.cwd(),
+        runtimeMode: 'full-access',
+        mcp: makeTestMcpProviderSession(threadId, ProviderInstanceId.make('grok')),
+      })
+      yield* waitForFileContent(requestLogPath)
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath))
+      const sessionStart = requests.find((entry) => entry.method === 'session/new')
+
+      assert.deepStrictEqual(
+        (sessionStart?.params as Record<string, unknown> | undefined)?.mcpServers,
+        [
+          {
+            type: 'http',
+            name: 'code456',
+            url: TEST_MCP_ENDPOINT,
+            headers: [{ name: 'Authorization', value: TEST_MCP_AUTHORIZATION }],
+          },
+        ],
+      )
+      yield* adapter.stopSession(threadId)
+    }),
+  )
+
   it.effect('preserves the strict import marker through a successful Grok turn', () =>
     Effect.gen(function* ()
     {
@@ -175,7 +227,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper())
       const adapter = yield* makeTestAdapter(wrapperPath)
 
-      const session = yield* adapter.startSession({
+      const session = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -210,7 +262,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const adapter = yield* makeTestAdapter('/definitely/missing/grok')
 
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('grok'),
           cwd: process.cwd(),
@@ -238,7 +290,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper())
       const adapter = yield* makeTestAdapter(wrapperPath)
 
-      const active = yield* adapter.startSession({
+      const active = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -249,7 +301,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         },
       })
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('grok'),
           cwd: process.cwd(),
@@ -282,7 +334,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const adapter = yield* makeTestAdapter(wrapperPath)
 
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('grok'),
           cwd: process.cwd(),
@@ -310,7 +362,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper())
       const adapter = yield* makeTestAdapter(wrapperPath)
 
-      const imported = yield* adapter.startSession({
+      const imported = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -322,7 +374,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         resumeCursor: STRICT_IMPORT_RESUME_CURSOR,
       })
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('grok'),
           cwd: process.cwd(),
@@ -354,20 +406,22 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
 
       const runtimeEvents: ProviderRuntimeEvent[] = []
       const turnCompleted = yield* Deferred.make<void>()
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }).pipe(
-          Effect.andThen(
-            event.type === 'turn.completed'
-              ? Deferred.succeed(turnCompleted, undefined)
-              : Effect.void,
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }).pipe(
+            Effect.andThen(
+              event.type === 'turn.completed'
+                ? Deferred.succeed(turnCompleted, undefined)
+                : Effect.void,
+            ),
           ),
-        ),
       ).pipe(Effect.forkChild)
 
-      const session = yield* adapter.startSession({
+      const session = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -503,40 +557,97 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         makeMockGrokWrapper({ T3_ACP_EXIT_LOG_PATH: exitLogPath }, { initialDelaySeconds: 0.2 }),
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
-      const events: Array<ProviderRuntimeEvent> = []
-      yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() => events.push(event)),
-      ).pipe(Effect.forkChild)
-      const startInput = {
+
+      yield* assertConcurrentStartSerializesSameThread(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
-        cwd: process.cwd(),
-        runtimeMode: 'full-access' as const,
         modelSelection: {
           instanceId: ProviderInstanceId.make('grok'),
           model: 'grok-build',
         },
+        readExitLog: waitForFileContent(exitLogPath),
+      })
+    }),
+  )
+
+  it.effect('drops delayed prompt settlement after the same native session id is rebound', () =>
+    Effect.gen(function* ()
+    {
+      const threadId = ThreadId.make('grok-rebound-native-session')
+      const providerInstanceId = ProviderInstanceId.make('grok')
+      const staleBinding = {
+        providerInstanceId,
+        threadId,
+        sessionGeneration: 1,
+      } satisfies ProviderAdapterRuntimeSessionBinding
+      const replacementBinding = {
+        providerInstanceId,
+        threadId,
+        sessionGeneration: 2,
+      } satisfies ProviderAdapterRuntimeSessionBinding
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), 'grok-rebound-native-session-')),
+      )
+      const requestLogPath = NodePath.join(tempDir, 'requests.ndjson')
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({
+          T3_ACP_PROMPT_DELAY_MS: '30000',
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+        }),
+      )
+      const adapter = yield* makeTestAdapter(wrapperPath)
+      const envelopes: ProviderAdapterRuntimeEvent[] = []
+      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (envelope) =>
+        Effect.sync(() => envelopes.push(envelope)),
+      ).pipe(Effect.forkChild)
+
+      const staleSession = yield* startAcpTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('grok'),
+        cwd: process.cwd(),
+        runtimeMode: 'full-access',
+        runtimeSessionBinding: staleBinding,
+      })
+      const staleTurnFiber = yield* adapter
+        .sendTurn({ threadId, input: 'finish after replacement', attachments: [] })
+        .pipe(Effect.result, Effect.forkChild)
+      yield* waitForFileContent(requestLogPath, 80, '"method":"session/prompt"')
+
+      const replacementSession = yield* startAcpTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('grok'),
+        cwd: process.cwd(),
+        runtimeMode: 'full-access',
+        runtimeSessionBinding: replacementBinding,
+      })
+      yield* Fiber.join(staleTurnFiber).pipe(Effect.timeout('2 seconds'))
+      for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1)
+      {
+        yield* Effect.yieldNow
       }
 
-      const [firstSession, secondSession] = yield* Effect.all(
-        [adapter.startSession(startInput), adapter.startSession(startInput)],
-        { concurrency: 'unbounded' },
+      const liveSession = (yield* adapter.listSessions()).find(
+        (session) => session.threadId === threadId,
+      )
+      const snapshot = yield* adapter.readThread(threadId)
+      const terminalTurnEnvelopes = envelopes.filter(({ event }) => event.type === 'turn.completed')
+      const replacementTurnEnvelopes = envelopes.filter(
+        ({ binding, event }) =>
+          binding.sessionGeneration === replacementBinding.sessionGeneration &&
+          (event.type === 'turn.started' || event.type === 'turn.completed'),
       )
 
-      assert.equal(firstSession.threadId, threadId)
-      assert.equal(secondSession.threadId, threadId)
-      yield* Effect.yieldNow
-      assert.isTrue(yield* adapter.hasSession(threadId))
-      assert.equal((yield* adapter.listSessions()).length, 1)
-      assert.equal(events.filter((event) => event.type === 'session.exited').length, 1)
+      assert.deepEqual(staleSession.resumeCursor, replacementSession.resumeCursor)
+      assert.deepEqual(yield* adapter.getSessionRuntimeBinding(threadId), replacementBinding)
+      assert.equal(liveSession?.status, 'ready')
+      assert.isUndefined(liveSession?.activeTurnId)
+      assert.deepEqual(snapshot.turns, [])
+      assert.deepEqual(terminalTurnEnvelopes, [])
+      assert.deepEqual(replacementTurnEnvelopes, [])
 
+      yield* Fiber.interrupt(eventsFiber)
       yield* adapter.stopSession(threadId)
-      yield* Effect.yieldNow
-      assert.equal(events.filter((event) => event.type === 'session.exited').length, 2)
-
-      const exitLog = yield* waitForFileContent(exitLogPath)
-      assert.equal(exitLog.match(/SIGTERM/g)?.length ?? 0, 2)
-    }),
+    }).pipe(TestClock.withLive),
   )
 
   it.effect('reports a Grok session running only while the prompt is in flight', () =>
@@ -551,13 +662,13 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const adapter = yield* makeTestAdapter(wrapperPath)
       const requestOpened =
         yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: 'request.opened' }>>()
-      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      const eventsFiber = yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
         event.type === 'request.opened'
           ? Deferred.succeed(requestOpened, event).pipe(Effect.ignore)
           : Effect.void,
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -600,14 +711,16 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const adapter = yield* makeTestAdapter(wrapperPath)
 
       const runtimeEvents: ProviderRuntimeEvent[] = []
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }),
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -666,20 +779,22 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
 
       const runtimeEvents: ProviderRuntimeEvent[] = []
       const turnCompleted = yield* Deferred.make<void>()
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }).pipe(
-          Effect.andThen(
-            event.type === 'turn.completed'
-              ? Deferred.succeed(turnCompleted, undefined)
-              : Effect.void,
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }).pipe(
+            Effect.andThen(
+              event.type === 'turn.completed'
+                ? Deferred.succeed(turnCompleted, undefined)
+                : Effect.void,
+            ),
           ),
-        ),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -757,11 +872,13 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
       const contentDelta = yield* Deferred.make<void>()
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        event.type === 'content.delta' ? Deferred.succeed(contentDelta, undefined) : Effect.void,
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          event.type === 'content.delta' ? Deferred.succeed(contentDelta, undefined) : Effect.void,
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -811,20 +928,22 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
 
       const runtimeEvents: ProviderRuntimeEvent[] = []
       const turnCompleted = yield* Deferred.make<void>()
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }).pipe(
-          Effect.andThen(
-            event.type === 'turn.completed'
-              ? Deferred.succeed(turnCompleted, undefined)
-              : Effect.void,
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }).pipe(
+            Effect.andThen(
+              event.type === 'turn.completed'
+                ? Deferred.succeed(turnCompleted, undefined)
+                : Effect.void,
+            ),
           ),
-        ),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -864,14 +983,16 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const adapter = yield* makeTestAdapter(wrapperPath)
 
       const runtimeEvents: ProviderRuntimeEvent[] = []
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }),
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -952,32 +1073,34 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const firstTurnStarted = yield* Deferred.make<TurnId>()
       const twoTurnsCompleted = yield* Deferred.make<void>()
       const completedCountRef = yield* Ref.make(0)
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.gen(function* ()
-        {
-          runtimeEvents.push(event)
-          if (String(event.threadId) !== String(threadId))
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.gen(function* ()
           {
-            return
-          }
-          if (event.type === 'turn.started' && event.turnId !== undefined)
-          {
-            yield* Deferred.succeed(firstTurnStarted, event.turnId).pipe(Effect.ignore)
-            return
-          }
-          if (event.type !== 'turn.completed')
-          {
-            return
-          }
-          const completedCount = yield* Ref.updateAndGet(completedCountRef, (count) => count + 1)
-          if (completedCount === 2)
-          {
-            yield* Deferred.succeed(twoTurnsCompleted, undefined)
-          }
-        }),
+            runtimeEvents.push(event)
+            if (String(event.threadId) !== String(threadId))
+            {
+              return
+            }
+            if (event.type === 'turn.started' && event.turnId !== undefined)
+            {
+              yield* Deferred.succeed(firstTurnStarted, event.turnId).pipe(Effect.ignore)
+              return
+            }
+            if (event.type !== 'turn.completed')
+            {
+              return
+            }
+            const completedCount = yield* Ref.updateAndGet(completedCountRef, (count) => count + 1)
+            if (completedCount === 2)
+            {
+              yield* Deferred.succeed(twoTurnsCompleted, undefined)
+            }
+          }),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1044,22 +1167,24 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
 
       const runtimeEvents: ProviderRuntimeEvent[] = []
       const turnStarted = yield* Deferred.make<TurnId>()
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }).pipe(
-          Effect.andThen(
-            event.type === 'turn.started' &&
-              event.turnId !== undefined &&
-              String(event.threadId) === String(threadId)
-              ? Deferred.succeed(turnStarted, event.turnId).pipe(Effect.asVoid)
-              : Effect.void,
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }).pipe(
+            Effect.andThen(
+              event.type === 'turn.started' &&
+                event.turnId !== undefined &&
+                String(event.threadId) === String(threadId)
+                ? Deferred.succeed(turnStarted, event.turnId).pipe(Effect.asVoid)
+                : Effect.void,
+            ),
           ),
-        ),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1120,32 +1245,34 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const runtimeEvents: ProviderRuntimeEvent[] = []
       const activeTurnIdRef = yield* Ref.make<TurnId | undefined>(undefined)
       const trailingChunkTurnId = yield* Deferred.make<TurnId>()
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.gen(function* ()
-        {
-          runtimeEvents.push(event)
-          if (String(event.threadId) !== String(threadId))
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.gen(function* ()
           {
-            return
-          }
-          if (event.type === 'turn.started')
-          {
-            yield* Ref.set(activeTurnIdRef, event.turnId)
-          }
-          if (event.type !== 'content.delta' || event.payload.delta !== 'mock')
-          {
-            return
-          }
-          const turnId = event.turnId ?? (yield* Ref.get(activeTurnIdRef))
-          if (turnId === undefined)
-          {
-            return
-          }
-          yield* Deferred.succeed(trailingChunkTurnId, turnId).pipe(Effect.ignore)
-        }),
+            runtimeEvents.push(event)
+            if (String(event.threadId) !== String(threadId))
+            {
+              return
+            }
+            if (event.type === 'turn.started')
+            {
+              yield* Ref.set(activeTurnIdRef, event.turnId)
+            }
+            if (event.type !== 'content.delta' || event.payload.delta !== 'mock')
+            {
+              return
+            }
+            const turnId = event.turnId ?? (yield* Ref.get(activeTurnIdRef))
+            if (turnId === undefined)
+            {
+              return
+            }
+            yield* Deferred.succeed(trailingChunkTurnId, turnId).pipe(Effect.ignore)
+          }),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1191,40 +1318,43 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const completedCountRef = yield* Ref.make(0)
       const secondTurnCompleted = yield* Deferred.make<void>()
 
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-      {
-        if (event.type !== 'turn.completed' || String(event.threadId) !== String(threadId))
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
         {
-          return Effect.void
-        }
-
-        return Ref.modify(completedCountRef, (count) =>
-        {
-          const nextCount = count + 1
-          return [nextCount, nextCount] as const
-        }).pipe(
-          Effect.flatMap((count) =>
+          if (event.type !== 'turn.completed' || String(event.threadId) !== String(threadId))
           {
-            if (count === 1)
-            {
-              return adapter
-                .sendTurn({
-                  threadId,
-                  input: 'second turn after completion',
-                  attachments: [],
-                })
-                .pipe(Effect.forkChild, Effect.asVoid)
-            }
-            if (count === 2)
-            {
-              return Deferred.succeed(secondTurnCompleted, undefined).pipe(Effect.asVoid)
-            }
             return Effect.void
-          }),
-        )
-      }).pipe(Effect.forkChild)
+          }
 
-      yield* adapter.startSession({
+          return Ref.modify(completedCountRef, (count) =>
+          {
+            const nextCount = count + 1
+            return [nextCount, nextCount] as const
+          }).pipe(
+            Effect.flatMap((count) =>
+            {
+              if (count === 1)
+              {
+                return adapter
+                  .sendTurn({
+                    threadId,
+                    input: 'second turn after completion',
+                    attachments: [],
+                  })
+                  .pipe(Effect.forkChild, Effect.asVoid)
+              }
+              if (count === 2)
+              {
+                return Deferred.succeed(secondTurnCompleted, undefined).pipe(Effect.asVoid)
+              }
+              return Effect.void
+            }),
+          )
+        },
+      ).pipe(Effect.forkChild)
+
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1263,14 +1393,16 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
       const runtimeEvents: ProviderRuntimeEvent[] = []
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }),
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }),
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1317,14 +1449,16 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
       const runtimeEvents: ProviderRuntimeEvent[] = []
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
-        Effect.sync(() =>
-        {
-          runtimeEvents.push(event)
-        }),
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) =>
+          Effect.sync(() =>
+          {
+            runtimeEvents.push(event)
+          }),
       ).pipe(Effect.forkChild)
 
-      const session = yield* adapter.startSession({
+      const session = yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1372,7 +1506,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const threadId = ThreadId.make('grok-provider-mismatch')
 
       const error = yield* Effect.flip(
-        adapter.startSession({
+        startAcpTestSession(adapter, {
           threadId,
           provider: ProviderDriverKind.make('cursor'),
           cwd: process.cwd(),
@@ -1393,7 +1527,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper())
       const adapter = yield* makeTestAdapter(wrapperPath)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1431,7 +1565,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         }),
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
-      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      const eventsFiber = yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
         event.type === 'request.opened'
           ? adapter.respondToRequest(
               threadId,
@@ -1441,7 +1575,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
           : Effect.void,
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1482,7 +1616,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       const resolved =
         yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: 'user-input.resolved' }>>()
 
-      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      const eventsFiber = yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
       {
         if (String(event.threadId) !== String(threadId))
         {
@@ -1499,7 +1633,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         return Effect.void
       }).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),
@@ -1558,11 +1692,11 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         },
       })
       const contentDelta = yield* Deferred.make<void>()
-      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      const eventsFiber = yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
         event.type === 'content.delta' ? Deferred.succeed(contentDelta, undefined) : Effect.void,
       ).pipe(Effect.forkChild)
 
-      yield* adapter.startSession({
+      yield* startAcpTestSession(adapter, {
         threadId,
         provider: ProviderDriverKind.make('grok'),
         cwd: process.cwd(),

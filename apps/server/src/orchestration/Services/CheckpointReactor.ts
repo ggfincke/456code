@@ -16,7 +16,26 @@ import type { PersistenceSqlError, ReactorDeliveryError } from '../../persistenc
  */
 export interface CheckpointReactorShape
 {
-  // start the checkpoint reactor.
+  // start only the provider-runtime inbox lane.
+  //
+  // orchestration startup uses this split phase to catch both durable inbox
+  // consumers up to the persisted handoff high-water before provider admission
+  // is resumed or any checkpoint journal can publish a terminal event.
+  readonly startRuntimeLane: () => Effect.Effect<
+    void,
+    PersistenceSqlError | ReactorDeliveryError,
+    Scope.Scope
+  >
+
+  // resume persisted checkpoint journals and start the domain-event lane.
+  // the runtime lane and provider admission handoff must already be ready.
+  readonly startDomain: () => Effect.Effect<
+    void,
+    PersistenceSqlError | ReactorDeliveryError,
+    Scope.Scope
+  >
+
+  // start both checkpoint lanes for compatibility callers.
   //
   // the returned effect must be run in a scope so all worker fibers can be
   // finalized on shutdown.

@@ -20,6 +20,7 @@ import {
   ProjectId,
   ProviderItemId,
   ThreadId,
+  TrimmedString,
   TrimmedNonEmptyString,
   TurnId,
 } from './baseSchemas.ts'
@@ -35,6 +36,8 @@ export const ORCHESTRATION_WS_METHODS = {
   importSessions: 'orchestration.importSessions',
   getTurnDiff: 'orchestration.getTurnDiff',
   getFullThreadDiff: 'orchestration.getFullThreadDiff',
+  getRunDiff: 'orchestration.getRunDiff',
+  getRunExecutionDiffV1: 'orchestration.getRunExecutionDiff.v1',
   getArchivedShellSnapshot: 'orchestration.getArchivedShellSnapshot',
   subscribeShell: 'orchestration.subscribeShell',
   subscribeThread: 'orchestration.subscribeThread',
@@ -197,6 +200,37 @@ export const DEFAULT_RUNTIME_MODE: RuntimeMode = 'full-access'
 export const ProviderInteractionMode = Schema.Literals(['default', 'plan', 'orchestrate'])
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = 'default'
+export interface CollaborationMode
+{
+  readonly baseMode: 'default' | 'plan'
+  readonly orchestrate: boolean
+}
+
+export function normalizeCollaborationMode(
+  interactionMode: ProviderInteractionMode,
+  orchestrate?: boolean,
+): CollaborationMode
+{
+  return {
+    baseMode: interactionMode === 'plan' ? 'plan' : 'default',
+    orchestrate: interactionMode === 'orchestrate' || orchestrate === true,
+  }
+}
+
+export function toWireInteractionMode(mode: CollaborationMode): {
+  readonly interactionMode: ProviderInteractionMode
+  readonly orchestrate: boolean
+}
+{
+  if (mode.baseMode === 'plan')
+  {
+    return { interactionMode: 'plan', orchestrate: mode.orchestrate }
+  }
+  return {
+    interactionMode: mode.orchestrate ? 'orchestrate' : 'default',
+    orchestrate: mode.orchestrate,
+  }
+}
 export const ProviderRequestKind = Schema.Literals(['command', 'file-read', 'file-change'])
 export type ProviderRequestKind = typeof ProviderRequestKind.Type
 export const AssistantDeliveryMode = Schema.Literals(['buffered', 'streaming'])
@@ -354,12 +388,94 @@ export const OrchestratePlanRevision = Schema.Struct({
   totalWorkers: NonNegativeInt,
   maxWorkers: NonNegativeInt,
   source: Schema.Literals(['tool', 'fence']),
+  // stamped by the decider from the thread's live session so the agent can
+  // neither omit nor misreport the model it is itself burning; null on the
+  // revisions persisted before this field existed, which cannot be backfilled
+  // because their source events do not carry the value either
+  leadModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // discuss responses leave the revision pending
   status: Schema.Literals(['pending', 'approved', 'rejected', 'superseded']),
+  // exact source event sequence for authoritative execution admission. absent
+  // only on older projections that cannot prove which immutable event won
+  sourceSequence: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 })
 export type OrchestratePlanRevision = typeof OrchestratePlanRevision.Type
+
+export const OrchestrateRunExecutionLifecycle = Schema.Literals([
+  'active',
+  'completed',
+  'failed',
+  'cancelled',
+  'superseded',
+])
+export type OrchestrateRunExecutionLifecycle = typeof OrchestrateRunExecutionLifecycle.Type
+
+export const OrchestrateRunExecutionAvailability = Schema.Literals(['available', 'unavailable'])
+export type OrchestrateRunExecutionAvailability = typeof OrchestrateRunExecutionAvailability.Type
+
+export const OrchestrateRunExecutionIdentity = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  planRevision: NonNegativeInt,
+})
+export type OrchestrateRunExecutionIdentity = typeof OrchestrateRunExecutionIdentity.Type
+
+export const OrchestrateRunExecutionJob = Schema.Struct({
+  jobId: TrimmedNonEmptyString,
+  status: Schema.Literals(['completed', 'failed', 'rejected', 'cancelled']),
+  requestRunId: OrchestratePlanRunId,
+  requestRepositoryRoot: TrimmedNonEmptyString,
+  resultRepositoryRoot: Schema.NullOr(TrimmedNonEmptyString),
+  repositoryCommonDir: TrimmedNonEmptyString,
+  baseOid: TrimmedNonEmptyString,
+  headOid: Schema.NullOr(TrimmedNonEmptyString),
+  worktreeRoot: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  boundAt: IsoDateTime,
+})
+export type OrchestrateRunExecutionJob = typeof OrchestrateRunExecutionJob.Type
+
+// immutable source/base identity is captured once at admission. lifecycle and
+// availability change only through verified execution updates; terminal final
+// OIDs remain authoritative after a broker path or worktree is pruned
+export const OrchestrateRunExecution = Schema.Struct({
+  ...OrchestrateRunExecutionIdentity.fields,
+  sourceTurnId: TurnId,
+  sourceSequence: NonNegativeInt,
+  repositoryRoot: TrimmedNonEmptyString,
+  repositoryCommonDir: TrimmedNonEmptyString,
+  baseOid: TrimmedNonEmptyString,
+  lifecycle: OrchestrateRunExecutionLifecycle,
+  availability: OrchestrateRunExecutionAvailability,
+  integrationRoot: Schema.NullOr(TrimmedNonEmptyString),
+  integrationCommonDir: Schema.NullOr(TrimmedNonEmptyString),
+  integrationBranch: Schema.NullOr(TrimmedNonEmptyString),
+  integrationOid: Schema.NullOr(TrimmedNonEmptyString),
+  observedHeadOid: Schema.NullOr(TrimmedNonEmptyString),
+  finalHeadOid: Schema.NullOr(TrimmedNonEmptyString),
+  closeReason: Schema.NullOr(TrimmedNonEmptyString),
+  current: Schema.Boolean,
+  admittedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  terminalAt: Schema.NullOr(IsoDateTime),
+  jobs: Schema.Array(OrchestrateRunExecutionJob).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+})
+export type OrchestrateRunExecution = typeof OrchestrateRunExecution.Type
+
+export const OrchestrateRunAggregate = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  currentPlanRevision: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+})
+export type OrchestrateRunAggregate = typeof OrchestrateRunAggregate.Type
 
 const SourceProposedPlanReference = Schema.Struct({
   threadId: ThreadId,
@@ -400,6 +516,15 @@ export type OrchestrationCheckpointFile = typeof OrchestrationCheckpointFile.Typ
 export const OrchestrationCheckpointStatus = Schema.Literals(['ready', 'missing', 'error'])
 export type OrchestrationCheckpointStatus = typeof OrchestrationCheckpointStatus.Type
 
+const OptionalCheckpointCaptureIdentityFields = {
+  // these stay optional/null for wire and event-log compatibility; a complete
+  // non-null triple is authoritative, while older combinations follow the
+  // server's explicit read-only legacy policy
+  checkpointCaptureRoot: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  checkpointRepositoryCommonDir: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  checkpointCommitOid: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+}
+
 export const OrchestrationCheckpointSummary = Schema.Struct({
   turnId: TurnId,
   checkpointTurnCount: NonNegativeInt,
@@ -408,6 +533,7 @@ export const OrchestrationCheckpointSummary = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
+  ...OptionalCheckpointCaptureIdentityFields,
 })
 export type OrchestrationCheckpointSummary = typeof OrchestrationCheckpointSummary.Type
 
@@ -509,8 +635,18 @@ export const OrchestrationThread = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  // the tree and branch the thread's active orchestrate run integrates into.
+  // a run can live in a worktree the thread itself never had, and without these
+  // the app shows the thread's own (empty) tree and reports that the run changed
+  // nothing. optional so payloads from pre-integration servers still decode
+  orchestrateRunWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  orchestrateRunBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // authoritative current execution for new servers. optional distinguishes
+  // an older server from a new server whose thread has no admitted execution
+  orchestrateRunExecution: Schema.optional(Schema.NullOr(OrchestrateRunExecution)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   pendingHandoff: Schema.optional(Schema.NullOr(OrchestrationPendingHandoff)),
   providerSwitch: Schema.NullOr(OrchestrationProviderSwitch).pipe(
@@ -519,6 +655,9 @@ export const OrchestrationThread = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // optional on the wire so pre-generation snapshots keep decoding; live
+  // projections always emit a non-negative value and only archive advances it
+  archiveGeneration: Schema.optional(NonNegativeInt),
   origin: Schema.NullOr(ThreadOrigin).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   settledOverride: Schema.NullOr(Schema.Literals(['settled', 'active'])).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -550,6 +689,11 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  // optional while independently released servers/clients cross the exact-run
+  // capability boundary. Server command/projector owners normalize absence to
+  // an empty history; legacy payloads are never promoted into exact identity.
+  orchestrateRuns: Schema.optional(Schema.Array(OrchestrateRunAggregate)),
+  orchestrateRunExecutions: Schema.optional(Schema.Array(OrchestrateRunExecution)),
   updatedAt: IsoDateTime,
 })
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type
@@ -575,8 +719,15 @@ export const OrchestrationThreadShell = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  // projected onto the shell as well as the detail because the sidebar reads
+  // only the shell, and the sidebar is the surface that shows nothing at all for
+  // a thread whose run lives in another worktree
+  orchestrateRunWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  orchestrateRunBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  orchestrateRunExecution: Schema.optional(Schema.NullOr(OrchestrateRunExecution)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   providerSwitch: Schema.NullOr(OrchestrationProviderSwitch).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -718,6 +869,7 @@ const ThreadCreateCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   origin: Schema.optional(ThreadOrigin),
@@ -735,6 +887,7 @@ const ClientThreadCreateCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
@@ -819,6 +972,22 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   interactionMode: ProviderInteractionMode,
+  orchestrate: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+})
+
+export const WORKER_VERDICT_MAX_LENGTH = 200
+export const WORKER_VERDICT_ACTIVITY_KIND = 'orchestrate.worker.verdict'
+export const WorkerVerdict = TrimmedString.check(Schema.isMaxLength(WORKER_VERDICT_MAX_LENGTH))
+export type WorkerVerdict = typeof WorkerVerdict.Type
+
+const ThreadWorkerVerdictSetCommand = Schema.Struct({
+  type: Schema.Literal('thread.worker-verdict.set'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  runId: TrimmedNonEmptyString,
+  jobId: TrimmedNonEmptyString,
+  verdict: WorkerVerdict,
   createdAt: IsoDateTime,
 })
 
@@ -837,6 +1006,7 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  orchestrate: Schema.optional(Schema.Boolean),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
@@ -873,6 +1043,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   importContinuationConsent: Schema.optional(ThreadImportContinuationConsent),
@@ -893,6 +1064,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  orchestrate: Schema.optional(Schema.Boolean),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   importContinuationConsent: Schema.optional(ThreadImportContinuationConsent),
@@ -985,6 +1157,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadWorkerVerdictSetCommand,
   ThreadProviderSwitchCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
@@ -1012,6 +1185,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadWorkerVerdictSetCommand,
   ThreadProviderSwitchCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
@@ -1109,6 +1283,46 @@ const ThreadOrchestratePlanUpsertCommand = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+// server-internal: dispatched by the checkpoint reactor once it has verified
+// that a tree the turn wrote to is a worktree of the thread's own repository.
+// deliberately not client-dispatchable: adoption is only safe because the server
+// proved the shared git common dir, and a client-writable field would let any
+// surface be pointed at an unrelated repository
+const ThreadOrchestrateRunIntegrationSetCommand = Schema.Struct({
+  type: Schema.Literal('thread.orchestrate-run-integration.set'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // null clears the adoption and returns every surface to the thread's own tree.
+  // the reactor dispatches it once the recorded tree stops resolving as a
+  // worktree of its own, and once the thread's own tree records a turn again
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+})
+
+// server-internal: the authenticated orchestrate toolkit admits only the exact
+// approved plan event owned by its active turn and captures repository/base
+// identity before any broker output can become authoritative
+const ThreadOrchestrateRunExecutionAdmitCommand = Schema.Struct({
+  type: Schema.Literal('thread.orchestrate-run-execution.admit'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedProviderInstanceId: Schema.NullOr(ProviderInstanceId),
+  execution: OrchestrateRunExecution,
+  createdAt: IsoDateTime,
+})
+
+// server-internal: the toolkit supplies the complete next record after it has
+// verified every explicitly named broker job and integration Git revision
+const ThreadOrchestrateRunExecutionUpdateCommand = Schema.Struct({
+  type: Schema.Literal('thread.orchestrate-run-execution.update'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedProviderInstanceId: Schema.NullOr(ProviderInstanceId),
+  execution: OrchestrateRunExecution,
+  createdAt: IsoDateTime,
+})
+
 const ThreadTurnDiffCompleteCommand = Schema.Struct({
   type: Schema.Literal('thread.turn.diff.complete'),
   commandId: CommandId,
@@ -1120,6 +1334,22 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.optional(MessageId),
   checkpointTurnCount: NonNegativeInt,
+  ...OptionalCheckpointCaptureIdentityFields,
+  createdAt: IsoDateTime,
+})
+
+// server-internal: turn zero has no projected turn row, so its exact capture
+// identity is recorded as its own durable event instead of fabricating a turn
+const ThreadCheckpointBaselineRecordCommand = Schema.Struct({
+  type: Schema.Literal('thread.checkpoint.baseline.record'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  checkpointTurnCount: NonNegativeInt,
+  checkpointRef: CheckpointRef,
+  checkpointCaptureRoot: TrimmedNonEmptyString,
+  checkpointRepositoryCommonDir: TrimmedNonEmptyString,
+  checkpointCommitOid: TrimmedNonEmptyString,
+  capturedAt: IsoDateTime,
   createdAt: IsoDateTime,
 })
 
@@ -1166,7 +1396,11 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadOrchestratePlanUpsertCommand,
+  ThreadOrchestrateRunIntegrationSetCommand,
+  ThreadOrchestrateRunExecutionAdmitCommand,
+  ThreadOrchestrateRunExecutionUpdateCommand,
   ThreadTurnDiffCompleteCommand,
+  ThreadCheckpointBaselineRecordCommand,
   ThreadActivityAppendCommand,
   ThreadMessagesImportCommand,
   ThreadRevertCompleteCommand,
@@ -1192,6 +1426,9 @@ export const OrchestrationEventType = Schema.Literals([
   'thread.snoozed',
   'thread.unsnoozed',
   'thread.meta-updated',
+  'thread.orchestrate-run-integration-set',
+  'thread.orchestrate-run-execution-admitted',
+  'thread.orchestrate-run-execution-updated',
   'thread.runtime-mode-set',
   'thread.interaction-mode-set',
   'thread.provider-switch-requested',
@@ -1211,6 +1448,7 @@ export const OrchestrationEventType = Schema.Literals([
   'thread.proposed-plan-upserted',
   'thread.orchestrate-plan-upserted',
   'thread.orchestrate-plan-response-requested',
+  'thread.checkpoint-baseline-recorded',
   'thread.turn-diff-completed',
   'thread.activity-appended',
 ])
@@ -1255,6 +1493,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   origin: Schema.NullOr(ThreadOrigin).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1270,6 +1509,9 @@ export const ThreadDeletedPayload = Schema.Struct({
 export const ThreadArchivedPayload = Schema.Struct({
   threadId: ThreadId,
   archivedAt: IsoDateTime,
+  // historical archive events decode as generation zero and remain legacy;
+  // every newly decided archive carries the next monotonic generation
+  archiveGeneration: Schema.optional(NonNegativeInt),
   updatedAt: IsoDateTime,
 })
 
@@ -1316,6 +1558,28 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 })
 
+// the tree and branch the thread's active orchestrate run integrates into.
+// carries no updatedAt on purpose: adoption is a server observation, not user
+// activity, and bumping the thread's updatedAt would reshuffle the inbox for a
+// change the user never made
+export const ThreadOrchestrateRunIntegrationSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+})
+
+export const ThreadOrchestrateRunExecutionAdmittedPayload = Schema.Struct({
+  execution: OrchestrateRunExecution,
+})
+export type ThreadOrchestrateRunExecutionAdmittedPayload =
+  typeof ThreadOrchestrateRunExecutionAdmittedPayload.Type
+
+export const ThreadOrchestrateRunExecutionUpdatedPayload = Schema.Struct({
+  execution: OrchestrateRunExecution,
+})
+export type ThreadOrchestrateRunExecutionUpdatedPayload =
+  typeof ThreadOrchestrateRunExecutionUpdatedPayload.Type
+
 export const ThreadRuntimeModeSetPayload = Schema.Struct({
   threadId: ThreadId,
   runtimeMode: RuntimeMode,
@@ -1327,6 +1591,7 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   updatedAt: IsoDateTime,
 })
 
@@ -1398,6 +1663,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  orchestrate: Schema.optional(Schema.Boolean),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   importContinuationAuthority: Schema.optional(ThreadImportContinuationAuthority),
   createdAt: IsoDateTime,
@@ -1480,6 +1746,17 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
+  ...OptionalCheckpointCaptureIdentityFields,
+})
+
+export const ThreadCheckpointBaselineRecordedPayload = Schema.Struct({
+  threadId: ThreadId,
+  checkpointTurnCount: NonNegativeInt,
+  checkpointRef: CheckpointRef,
+  checkpointCaptureRoot: TrimmedNonEmptyString,
+  checkpointRepositoryCommonDir: TrimmedNonEmptyString,
+  checkpointCommitOid: TrimmedNonEmptyString,
+  capturedAt: IsoDateTime,
 })
 
 export const ThreadActivityAppendedPayload = Schema.Struct({
@@ -1568,6 +1845,21 @@ const knownOrchestrationEventMembers = [
     ...EventBaseFields,
     type: Schema.Literal('thread.meta-updated'),
     payload: ThreadMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.orchestrate-run-integration-set'),
+    payload: ThreadOrchestrateRunIntegrationSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.orchestrate-run-execution-admitted'),
+    payload: ThreadOrchestrateRunExecutionAdmittedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.orchestrate-run-execution-updated'),
+    payload: ThreadOrchestrateRunExecutionUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1663,6 +1955,11 @@ const knownOrchestrationEventMembers = [
     ...EventBaseFields,
     type: Schema.Literal('thread.proposed-plan-upserted'),
     payload: ThreadProposedPlanUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.checkpoint-baseline-recorded'),
+    payload: ThreadCheckpointBaselineRecordedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1861,6 +2158,53 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type
 
+// the run's integration tree and branch are recorded per thread, so the thread
+// id is the whole request. a client-supplied branch or worktree would be a new
+// trust boundary buying nothing the server cannot already read
+export const OrchestrationGetRunDiffInput = Schema.Struct({
+  threadId: ThreadId,
+  ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
+})
+export type OrchestrationGetRunDiffInput = typeof OrchestrationGetRunDiffInput.Type
+
+// a run diff spans an integration branch measured against its fork point, so it
+// has no turn range. reusing ThreadTurnDiff would drag fromTurnCount and
+// toTurnCount along with nothing meaningful to put in them. the metadata fields
+// are nullable because a thread that has adopted no run tree answers with an
+// empty diff rather than a failure
+export const OrchestrationGetRunDiffResult = Schema.Struct({
+  threadId: ThreadId,
+  diff: Schema.String,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  baseSha: Schema.NullOr(TrimmedNonEmptyString),
+  headSha: Schema.NullOr(TrimmedNonEmptyString),
+  truncated: Schema.optionalKey(Schema.Boolean),
+})
+export type OrchestrationGetRunDiffResult = typeof OrchestrationGetRunDiffResult.Type
+
+// additive versioned query: unlike the legacy thread-only method, both ends of
+// this range are immutable captured OIDs belonging to one exact execution
+export const OrchestrationGetRunExecutionDiffV1Input = Schema.Struct({
+  ...OrchestrateRunExecutionIdentity.fields,
+  ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
+})
+export type OrchestrationGetRunExecutionDiffV1Input =
+  typeof OrchestrationGetRunExecutionDiffV1Input.Type
+
+export const OrchestrationGetRunExecutionDiffV1Result = Schema.Struct({
+  ...OrchestrateRunExecutionIdentity.fields,
+  lifecycle: OrchestrateRunExecutionLifecycle,
+  availability: OrchestrateRunExecutionAvailability,
+  diff: Schema.String,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  baseSha: TrimmedNonEmptyString,
+  headSha: TrimmedNonEmptyString,
+  finalized: Schema.Boolean,
+  truncated: Schema.optionalKey(Schema.Boolean),
+})
+export type OrchestrationGetRunExecutionDiffV1Result =
+  typeof OrchestrationGetRunExecutionDiffV1Result.Type
+
 export const IMPORT_SCAN_MAX_CANDIDATES = 50_000
 export const IMPORT_SCAN_MAX_ERRORS = 100
 export const IMPORT_SESSIONS_MAX_ITEMS = 100
@@ -1977,6 +2321,14 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
   },
+  getRunDiff: {
+    input: OrchestrationGetRunDiffInput,
+    output: OrchestrationGetRunDiffResult,
+  },
+  getRunExecutionDiffV1: {
+    input: OrchestrationGetRunExecutionDiffV1Input,
+    output: OrchestrationGetRunExecutionDiffV1Result,
+  },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
     output: OrchestrationShellSnapshot,
@@ -2010,10 +2362,20 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
 )
 {}
 
+export const CheckpointIdentityErrorCode = Schema.Literals([
+  'checkpoint-identity-missing',
+  'checkpoint-repository-mismatch',
+  'checkpoint-ref-oid-mismatch',
+  'checkpoint-root-unavailable',
+  'checkpoint-destructive-legacy-refusal',
+])
+export type CheckpointIdentityErrorCode = typeof CheckpointIdentityErrorCode.Type
+
 export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<OrchestrationGetTurnDiffError>()(
   'OrchestrationGetTurnDiffError',
   {
     message: TrimmedNonEmptyString,
+    code: Schema.optional(CheckpointIdentityErrorCode),
     cause: Schema.optional(Schema.Defect()),
   },
 )
@@ -2023,6 +2385,35 @@ export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass
   'OrchestrationGetFullThreadDiffError',
   {
     message: TrimmedNonEmptyString,
+    code: Schema.optional(CheckpointIdentityErrorCode),
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{}
+
+export class OrchestrationGetRunDiffError extends Schema.TaggedErrorClass<OrchestrationGetRunDiffError>()(
+  'OrchestrationGetRunDiffError',
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{}
+
+export const OrchestrationRunExecutionErrorCode = Schema.Literals([
+  'execution-not-found',
+  'execution-head-unavailable',
+  'execution-repository-unavailable',
+  'execution-repository-mismatch',
+  'execution-oid-mismatch',
+])
+export type OrchestrationRunExecutionErrorCode = typeof OrchestrationRunExecutionErrorCode.Type
+
+export class OrchestrationGetRunExecutionDiffV1Error extends Schema.TaggedErrorClass<OrchestrationGetRunExecutionDiffV1Error>()(
+  'OrchestrationGetRunExecutionDiffV1Error',
+  {
+    message: TrimmedNonEmptyString,
+    code: OrchestrationRunExecutionErrorCode,
     cause: Schema.optional(Schema.Defect()),
   },
 )

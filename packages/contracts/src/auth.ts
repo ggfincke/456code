@@ -72,6 +72,7 @@ export type ServerAuthSessionMethod = typeof ServerAuthSessionMethod.Type
 
 export const AuthOrchestrationReadScope = 'orchestration:read' as const
 export const AuthOrchestrationOperateScope = 'orchestration:operate' as const
+export const AuthOrchestrationRecoverScope = 'orchestration:recover' as const
 export const AuthTerminalOperateScope = 'terminal:operate' as const
 export const AuthReviewWriteScope = 'review:write' as const
 export const AuthAccessReadScope = 'access:read' as const
@@ -81,6 +82,7 @@ export const AuthRelayWriteScope = 'relay:write' as const
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
+  AuthOrchestrationRecoverScope,
   AuthTerminalOperateScope,
   AuthReviewWriteScope,
   AuthAccessReadScope,

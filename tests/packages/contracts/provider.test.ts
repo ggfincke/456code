@@ -16,6 +16,11 @@ const decodeProviderSendTurnInput = Schema.decodeUnknownSync(ProviderSendTurnInp
 const decodeProviderSession = Schema.decodeUnknownSync(ProviderSession)
 const decodeProviderEvent = Schema.decodeUnknownSync(ProviderEvent)
 
+type ProviderRouting = {
+  readonly provider?: string | undefined
+  readonly providerInstanceId?: string | undefined
+}
+
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
   id: string,
@@ -104,70 +109,90 @@ describe('ProviderSendTurnInput', () =>
 
 describe('providerInstanceId routing key (slice-2 invariant)', () =>
 {
-  it('decodes a ProviderSessionStartInput without providerInstanceId (legacy producer)', () =>
+  it.each([
+    {
+      label: 'StartInput without providerInstanceId (legacy producer)',
+      decode: () =>
+        decodeProviderSessionStartInput({
+          threadId: 'thread-1',
+          provider: 'codex',
+          runtimeMode: 'full-access',
+        }),
+      assert: (parsed: ProviderRouting) =>
+      {
+        expect(parsed.providerInstanceId).toBeUndefined()
+      },
+    },
+    {
+      label: 'StartInput with providerInstanceId (post-migration producer)',
+      decode: () =>
+        decodeProviderSessionStartInput({
+          threadId: 'thread-1',
+          provider: 'codex',
+          providerInstanceId: 'codex_personal',
+          runtimeMode: 'full-access',
+        }),
+      assert: (parsed: ProviderRouting) =>
+      {
+        expect(parsed.providerInstanceId).toBe('codex_personal')
+      },
+    },
+    {
+      label: 'ProviderSession propagates providerInstanceId',
+      decode: () =>
+        decodeProviderSession({
+          provider: 'codex',
+          providerInstanceId: 'codex_work',
+          status: 'ready',
+          runtimeMode: 'full-access',
+          threadId: 'thread-1',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        }),
+      assert: (parsed: ProviderRouting) =>
+      {
+        expect(parsed.providerInstanceId).toBe('codex_work')
+      },
+    },
+    {
+      label: 'ProviderSession for fork-provided driver kinds',
+      decode: () =>
+        decodeProviderSession({
+          provider: 'ollama',
+          providerInstanceId: 'ollama_local',
+          status: 'ready',
+          runtimeMode: 'full-access',
+          threadId: 'thread-1',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        }),
+      assert: (parsed: ProviderRouting) =>
+      {
+        expect(parsed.provider).toBe('ollama')
+        expect(parsed.providerInstanceId).toBe('ollama_local')
+      },
+    },
+    {
+      label: 'ProviderEvent carries legacy provider and instance routing',
+      decode: () =>
+        decodeProviderEvent({
+          id: 'event-1',
+          kind: 'notification',
+          provider: 'codex',
+          providerInstanceId: 'codex_personal',
+          threadId: 'thread-1',
+          createdAt: '2024-01-01T00:00:00Z',
+          method: 'session.created',
+        }),
+      assert: (parsed: ProviderRouting) =>
+      {
+        expect(parsed.provider).toBe('codex')
+        expect(parsed.providerInstanceId).toBe('codex_personal')
+      },
+    },
+  ])('decodes $label', ({ decode, assert }) =>
   {
-    const parsed = decodeProviderSessionStartInput({
-      threadId: 'thread-1',
-      provider: 'codex',
-      runtimeMode: 'full-access',
-    })
-    expect(parsed.providerInstanceId).toBeUndefined()
-  })
-
-  it('decodes a ProviderSessionStartInput with providerInstanceId (post-migration producer)', () =>
-  {
-    const parsed = decodeProviderSessionStartInput({
-      threadId: 'thread-1',
-      provider: 'codex',
-      providerInstanceId: 'codex_personal',
-      runtimeMode: 'full-access',
-    })
-    expect(parsed.providerInstanceId).toBe('codex_personal')
-  })
-
-  it('propagates providerInstanceId through ProviderSession decode', () =>
-  {
-    const session = decodeProviderSession({
-      provider: 'codex',
-      providerInstanceId: 'codex_work',
-      status: 'ready',
-      runtimeMode: 'full-access',
-      threadId: 'thread-1',
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2024-01-01T00:00:00Z',
-    })
-    expect(session.providerInstanceId).toBe('codex_work')
-  })
-
-  it('decodes ProviderSession for fork-provided driver kinds', () =>
-  {
-    const session = decodeProviderSession({
-      provider: 'ollama',
-      providerInstanceId: 'ollama_local',
-      status: 'ready',
-      runtimeMode: 'full-access',
-      threadId: 'thread-1',
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2024-01-01T00:00:00Z',
-    })
-
-    expect(session.provider).toBe('ollama')
-    expect(session.providerInstanceId).toBe('ollama_local')
-  })
-
-  it('decodes a ProviderEvent carrying both legacy provider and new instance routing', () =>
-  {
-    const event = decodeProviderEvent({
-      id: 'event-1',
-      kind: 'notification',
-      provider: 'codex',
-      providerInstanceId: 'codex_personal',
-      threadId: 'thread-1',
-      createdAt: '2024-01-01T00:00:00Z',
-      method: 'session.created',
-    })
-    expect(event.provider).toBe('codex')
-    expect(event.providerInstanceId).toBe('codex_personal')
+    assert(decode())
   })
 
   it('rejects providerInstanceId values that fail the slug pattern (defense in depth)', () =>

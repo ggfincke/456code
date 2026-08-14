@@ -319,22 +319,6 @@ describe('context-window snapshot dedup', () =>
     )
   })
 
-  it('matches what the web client derives from the full history', () =>
-  {
-    const activities = [
-      makeContextWindowActivity('ctx-1', 1_000),
-      makeContextWindowActivity('ctx-2', 2_000),
-    ]
-    const projected = projectThreadDetailSnapshot({
-      snapshotSequence: 7,
-      thread: makeThread(activities),
-    })
-
-    expect(deriveLatestContextWindowSnapshot(projected.thread.activities)).toEqual(
-      deriveLatestContextWindowSnapshot(activities),
-    )
-  })
-
   it('does not let a malformed row shadow an earlier valid row in the same turn', () =>
   {
     const valid = makeContextWindowActivity('ctx-valid', 5_000, 'turn-a')

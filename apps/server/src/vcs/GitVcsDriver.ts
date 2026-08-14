@@ -156,6 +156,21 @@ export interface GitRangeContext
   diffPatch: string
 }
 
+export interface GitResolveBranchRangeInput
+{
+  readonly cwd: string
+  readonly baseRef?: string
+}
+
+export interface GitResolvedBranchRange
+{
+  readonly baseRef: string
+  readonly mergeBaseCommitOid: string
+  readonly headCommitOid: string
+  readonly baseTreeOid: string
+  readonly headTreeOid: string
+}
+
 export interface GitRenameBranchInput
 {
   cwd: string
@@ -203,6 +218,12 @@ export interface GitFetchRemoteInput
   remoteName: string
 }
 
+export interface GitRemoteExistsInput
+{
+  cwd: string
+  remoteName: string
+}
+
 export interface GitResolveRemoteTrackingCommitInput
 {
   cwd: string
@@ -233,6 +254,7 @@ export interface GitStageCheckpointTreeInput
 {
   readonly cwd: string
   readonly ref: string
+  readonly commitOid?: string
   readonly stagePath: string
 }
 
@@ -240,6 +262,7 @@ export interface GitCheckpointRestoreInput
 {
   readonly cwd: string
   readonly ref: string
+  readonly commitOid?: string
 }
 
 export interface GitApplyStagedCheckpointRestoreInput extends GitCheckpointRestoreInput
@@ -296,9 +319,20 @@ export class GitVcsDriver extends Context.Service<
     readonly getReviewDiffPreview: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, GitCommandError>
+    readonly resolveBranchRange: (
+      input: GitResolveBranchRangeInput,
+    ) => Effect.Effect<GitResolvedBranchRange, GitCommandError>
     readonly readConfigValue: (
       cwd: string,
       key: string,
+    ) => Effect.Effect<string | null, GitCommandError>
+    // the branch.<ref>.gh-merge-base / remote-default / main|master ladder,
+    // exposed so callers that need a fork point do not re-derive the precedence.
+    // returns '<remote>/<branch>', a local branch name, or null when nothing
+    // in the ladder resolves
+    readonly resolveBaseBranch: (
+      cwd: string,
+      refName: string,
     ) => Effect.Effect<string | null, GitCommandError>
     readonly listRefs: (
       input: VcsListRefsInput,
@@ -313,6 +347,7 @@ export class GitVcsDriver extends Context.Service<
     readonly ensureRemote: (input: GitEnsureRemoteInput) => Effect.Effect<string, GitCommandError>
     readonly resolvePrimaryRemoteName: (cwd: string) => Effect.Effect<string, GitCommandError>
     readonly fetchRemote: (input: GitFetchRemoteInput) => Effect.Effect<void, GitCommandError>
+    readonly remoteExists: (input: GitRemoteExistsInput) => Effect.Effect<boolean, GitCommandError>
     readonly resolveRemoteTrackingCommit: (
       input: GitResolveRemoteTrackingCommitInput,
     ) => Effect.Effect<GitResolveRemoteTrackingCommitResult, GitCommandError>
@@ -1159,7 +1194,11 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
       function* (input)
       {
         const operation = 'GitVcsDriver.checkpoints.stageCheckpointTree'
-        const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+        const target = yield* resolveRequiredCheckpointTarget(
+          input.cwd,
+          input.commitOid ?? input.ref,
+          operation,
+        )
         yield* exactCheckpointOperation(
           operation,
           input.cwd,
@@ -1191,7 +1230,11 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
       function* (input)
       {
         const operation = 'GitVcsDriver.checkpoints.verifyRestorePreconditions'
-        const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+        const target = yield* resolveRequiredCheckpointTarget(
+          input.cwd,
+          input.commitOid ?? input.ref,
+          operation,
+        )
         return yield* exactCheckpointOperation(
           operation,
           input.cwd,
@@ -1209,7 +1252,11 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
     applyStagedRestore: Effect.fn('GitVcsDriver.checkpoints.applyStagedRestore')(function* (input)
     {
       const operation = 'GitVcsDriver.checkpoints.applyStagedRestore'
-      const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+      const target = yield* resolveRequiredCheckpointTarget(
+        input.cwd,
+        input.commitOid ?? input.ref,
+        operation,
+      )
       const restored = yield* exactCheckpointOperation(
         operation,
         input.cwd,
@@ -1235,7 +1282,11 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
     postVerifyRestore: Effect.fn('GitVcsDriver.checkpoints.postVerifyRestore')(function* (input)
     {
       const operation = 'GitVcsDriver.checkpoints.postVerifyRestore'
-      const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+      const target = yield* resolveRequiredCheckpointTarget(
+        input.cwd,
+        input.commitOid ?? input.ref,
+        operation,
+      )
       const verification = yield* exactCheckpointOperation(
         operation,
         input.cwd,

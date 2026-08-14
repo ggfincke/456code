@@ -66,6 +66,7 @@ export interface StageCheckpointTreeInput
 {
   readonly cwd: string
   readonly ref: CheckpointRef
+  readonly commitOid?: string
   readonly stagePath: string
 }
 
@@ -73,6 +74,7 @@ export interface VerifyCheckpointRestorePreconditionsInput
 {
   readonly cwd: string
   readonly ref: CheckpointRef
+  readonly commitOid?: string
 }
 
 export interface ApplyStagedCheckpointRestoreInput extends VerifyCheckpointRestorePreconditionsInput

@@ -5,6 +5,7 @@ import type {
   WorkersActivityEntry,
   WorkersActivityInput,
   WorkersActivitySnapshot,
+  WorkersCancelReason,
   WorkersFailureClass,
   WorkersGetJobInput,
   WorkersGetJobResult,
@@ -12,6 +13,7 @@ import type {
   WorkersGetRunResult,
   WorkersJobChange,
   WorkersJobDetail,
+  WorkersJobOutcome,
   WorkersJobStatus,
   WorkersJobSummary,
   WorkersListInput,
@@ -20,6 +22,8 @@ import type {
   WorkersListRunsResult,
   WorkersRunStageRollup,
   WorkersRunSummary,
+  WorkersScopeViolationDetail,
+  WorkersScopeViolationGroupCount,
   WorkersVerificationRun,
   WorkersVerificationSummary,
 } from '@t3tools/contracts'
@@ -37,6 +41,28 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import * as NodeOS from 'node:os'
 
+export interface WorkerBrokerExecutionEvidence
+{
+  readonly requestedJobId: string
+  readonly recordJobId: string | null
+  readonly recordStatus: string | null
+  readonly resultStatus: string | null
+  readonly requestRunId: string | null
+  readonly requestRepositoryRoot: string | null
+  readonly resultRepositoryRoot: string | null
+  readonly recordBaseOid: string | null
+  readonly resultBaseOid: string | null
+  readonly headOid: string | null
+  readonly recordBranch: string | null
+  readonly resultBranch: string | null
+  readonly recordWorktreeRoot: string | null
+  readonly resultWorktreeRoot: string | null
+}
+
+export type WorkerBrokerExecutionEvidenceResult =
+  | { readonly state: 'loaded'; readonly evidence: WorkerBrokerExecutionEvidence }
+  | { readonly state: 'unavailable'; readonly detail: string }
+
 /**
  * WorkerBrokerStore - Read-only view over the local worker-broker state directory.
  *
@@ -50,6 +76,9 @@ export class WorkerBrokerStore extends Context.Service<
     readonly listRuns: (input: WorkersListRunsInput) => Effect.Effect<WorkersListRunsResult>
     readonly getJob: (input: WorkersGetJobInput) => Effect.Effect<WorkersGetJobResult>
     readonly getRun: (input: WorkersGetRunInput) => Effect.Effect<WorkersGetRunResult>
+    readonly getExecutionEvidence: (
+      jobId: string,
+    ) => Effect.Effect<WorkerBrokerExecutionEvidenceResult>
     readonly readActivity: (input: WorkersActivityInput) => Effect.Effect<WorkersActivitySnapshot>
     readonly jobsDir: string
   }
@@ -78,6 +107,13 @@ const DiskVerificationRun = Schema.Struct({
   elapsed_ms: Schema.optional(Schema.NullOr(Schema.Number)),
 })
 
+const DiskScopeViolationDetail = Schema.Struct({
+  path: Schema.optional(Schema.String),
+  phase: Schema.optional(Schema.String),
+  nearest_allowed: Schema.optional(Schema.NullOr(Schema.String)),
+  root: Schema.optional(Schema.String),
+})
+
 const DiskJobRequest = Schema.Struct({
   provider: Schema.optional(Schema.String),
   mode: Schema.optional(Schema.String),
@@ -90,6 +126,7 @@ const DiskJobRequest = Schema.Struct({
   stage: Schema.optional(Schema.String),
   workflow: Schema.optional(Schema.String),
   run: Schema.optional(Schema.String),
+  relaunch_of: Schema.optional(Schema.String),
 })
 
 const DiskJobResult = Schema.Struct({
@@ -106,7 +143,9 @@ const DiskJobResult = Schema.Struct({
   changed_files: Schema.optional(Schema.Array(Schema.String)),
   changes: Schema.optional(Schema.Array(DiskJobChange)),
   verification: Schema.optional(Schema.Array(DiskVerificationRun)),
+  baseline_verification: Schema.optional(Schema.Array(DiskVerificationRun)),
   scope_violations: Schema.optional(Schema.Array(Schema.String)),
+  scope_violation_details: Schema.optional(Schema.Array(DiskScopeViolationDetail)),
   summary: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
   assumptions: Schema.optional(Schema.Array(Schema.String)),
@@ -114,6 +153,10 @@ const DiskJobResult = Schema.Struct({
   follow_ups: Schema.optional(Schema.Array(Schema.String)),
   patch_path: Schema.optional(Schema.String),
   failure_class: Schema.optional(Schema.String),
+  outcome: Schema.optional(Schema.String),
+  cancel_reason: Schema.optional(Schema.String),
+  superseded_by: Schema.optional(Schema.String),
+  relaunch_of: Schema.optional(Schema.String),
   process_exit_code: Schema.optional(Schema.NullOr(Schema.Number)),
   created_at: Schema.optional(Schema.String),
   started_at: Schema.optional(Schema.String),
@@ -131,6 +174,7 @@ const DiskJobRecord = Schema.Struct({
   base_sha: Schema.optional(Schema.String),
   branch: Schema.optional(Schema.String),
   worktree: Schema.optional(Schema.String),
+  relaunch_of: Schema.optional(Schema.String),
   error: Schema.optional(Schema.NullOr(Schema.String)),
   schema_version: Schema.optional(Schema.NullOr(Schema.Number)),
   request: Schema.optional(DiskJobRequest),
@@ -247,7 +291,39 @@ const FAILURE_CLASSES: ReadonlySet<string> = new Set([
   'broker_fault',
   'scope',
   'verification',
+  'baseline-broken',
+  'verification-failed',
+  'verification-unusable',
 ])
+
+const JOB_OUTCOMES: ReadonlySet<string> = new Set([
+  'succeeded',
+  'worker-failed',
+  'environment-blocked',
+  'baseline-broken',
+  'rejected-scope',
+  'superseded',
+  'cancelled',
+  'broker-fault',
+])
+
+const CANCEL_REASONS: ReadonlySet<string> = new Set(['requested', 'superseded', 'shutdown'])
+
+function toJobOutcome(value: string | null | undefined): Option.Option<WorkersJobOutcome>
+{
+  const raw = toText(value)
+  return Option.fromNullishOr(
+    raw !== null && JOB_OUTCOMES.has(raw) ? (raw as WorkersJobOutcome) : null,
+  )
+}
+
+function toCancelReason(value: string | null | undefined): Option.Option<WorkersCancelReason>
+{
+  const raw = toText(value)
+  return Option.fromNullishOr(
+    raw !== null && CANCEL_REASONS.has(raw) ? (raw as WorkersCancelReason) : null,
+  )
+}
 
 // mirror the broker's failure taxonomy for terminal failures; legacy records
 // and unrecognized values degrade to "unknown" rather than failing decode
@@ -286,6 +362,62 @@ function toJobChanges(changes: DiskJobResult['changes']): ReadonlyArray<WorkersJ
   })
 }
 
+function toScopeViolationDetails(
+  details: DiskJobResult['scope_violation_details'],
+): ReadonlyArray<WorkersScopeViolationDetail>
+{
+  if (!Array.isArray(details)) return []
+  return details.flatMap((detail) =>
+  {
+    const path = toText(detail.path)
+    const phase = detail.phase === 'provider' || detail.phase === 'final' ? detail.phase : null
+    const root = toText(detail.root) ?? toText(detail.nearest_allowed)
+    if (path === null || phase === null || root === null) return []
+    return [
+      {
+        path,
+        phase,
+        nearestAllowed: toTextOption(detail.nearest_allowed),
+        root,
+      },
+    ]
+  })
+}
+
+function toScopeViolationGroupCounts(
+  result: DiskJobResult | undefined,
+): Option.Option<ReadonlyArray<WorkersScopeViolationGroupCount>>
+{
+  if (result?.scope_violation_details !== undefined)
+  {
+    const counts = new Map<string, number>()
+    for (const detail of toScopeViolationDetails(result.scope_violation_details))
+    {
+      counts.set(detail.root, (counts.get(detail.root) ?? 0) + 1)
+    }
+    if (counts.size > 0 || result.scope_violations === undefined)
+    {
+      return Option.some([...counts].map(([root, count]) => ({ root, count })))
+    }
+  }
+  if (result?.scope_violations !== undefined)
+  {
+    const count = toTextList(result.scope_violations).length
+    return Option.some(count === 0 ? [] : [{ root: 'ungrouped (legacy)', count }])
+  }
+  return Option.none()
+}
+
+function toScopeViolationCount(result: DiskJobResult | undefined): number
+{
+  if (result?.scope_violation_details !== undefined)
+  {
+    const count = toScopeViolationDetails(result.scope_violation_details).length
+    if (count > 0 || result.scope_violations === undefined) return count
+  }
+  return toTextList(result?.scope_violations).length
+}
+
 // top-level fields win; the terminal result block is the fallback for jobs
 // whose top level omits branch / base_sha / timestamps
 function toJobSummary(jobId: string, record: DiskJobRecord): WorkersJobSummary
@@ -304,6 +436,10 @@ function toJobSummary(jobId: string, record: DiskJobRecord): WorkersJobSummary
     run: toTextOption(request?.run),
     model: toTextOption(request?.model),
     effort: toTextOption(request?.effort),
+    outcome: toJobOutcome(result?.outcome),
+    cancelReason: toCancelReason(result?.cancel_reason),
+    supersededBy: toTextOption(result?.superseded_by),
+    relaunchOf: toTextOption(request?.relaunch_of ?? record.relaunch_of ?? result?.relaunch_of),
     error: toTextOption(record.error ?? result?.error),
     createdAt: toTextOption(record.created_at ?? result?.created_at),
     startedAt: toTextOption(record.started_at ?? result?.started_at),
@@ -313,7 +449,8 @@ function toJobSummary(jobId: string, record: DiskJobRecord): WorkersJobSummary
       ? Option.some(toTextList(result.changed_files).length)
       : Option.none(),
     verification: toVerificationSummary(record),
-    scopeViolationCount: toTextList(result?.scope_violations).length,
+    scopeViolationCount: toScopeViolationCount(result),
+    scopeViolationGroups: toScopeViolationGroupCounts(result),
     failureClass: toFailureClass(record),
     hasPatch: toHasPatch(result),
     verificationExitCodes: toVerificationExitCodes(result?.verification),
@@ -340,7 +477,15 @@ function toJobDetail(jobId: string, record: DiskJobRecord): WorkersJobDetail
     changedFiles: toTextList(result?.changed_files),
     changes: toJobChanges(result?.changes),
     verificationRuns: toVerificationRuns(result?.verification),
+    baselineVerification:
+      result?.baseline_verification === undefined
+        ? Option.none()
+        : Option.some(toVerificationRuns(result.baseline_verification)),
     scopeViolations: toTextList(result?.scope_violations),
+    scopeViolationDetails:
+      result?.scope_violation_details === undefined
+        ? Option.none()
+        : Option.some(toScopeViolationDetails(result.scope_violation_details)),
     processExitCode: Option.fromNullishOr(toInt(result?.process_exit_code)),
   }
 }
@@ -374,7 +519,10 @@ type RunAccumulator = RunCounts & {
   firstCreatedAt: string | null
   lastCompletedAt: string | null
   stages: Map<string | null, RunCounts>
+  outcomeCounts: Partial<Record<WorkersJobOutcome, number>>
   scopeViolationCount: number
+  scopeViolationGroups: Map<string, number>
+  hasScopeViolationGroups: boolean
 }
 
 function emptyRunCounts(): RunCounts
@@ -415,7 +563,10 @@ function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummar
         firstCreatedAt: null,
         lastCompletedAt: null,
         stages: new Map(),
+        outcomeCounts: {},
         scopeViolationCount: 0,
+        scopeViolationGroups: new Map(),
+        hasScopeViolationGroups: false,
         ...emptyRunCounts(),
       }
       runs.set(run, accumulator)
@@ -423,6 +574,25 @@ function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummar
 
     addJobToCounts(accumulator, job.status)
     accumulator.scopeViolationCount += job.scopeViolationCount
+
+    const outcome = Option.getOrUndefined(job.outcome)
+    if (outcome !== undefined)
+    {
+      accumulator.outcomeCounts[outcome] = (accumulator.outcomeCounts[outcome] ?? 0) + 1
+    }
+
+    const scopeViolationGroups = Option.getOrUndefined(job.scopeViolationGroups)
+    if (scopeViolationGroups !== undefined)
+    {
+      accumulator.hasScopeViolationGroups = true
+      for (const group of scopeViolationGroups)
+      {
+        accumulator.scopeViolationGroups.set(
+          group.root,
+          (accumulator.scopeViolationGroups.get(group.root) ?? 0) + group.count,
+        )
+      }
+    }
 
     const workflow = Option.getOrUndefined(job.workflow)
     if (workflow !== undefined) accumulator.workflows.add(workflow)
@@ -469,6 +639,7 @@ function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummar
       rejected: run.rejected,
       cancelled: run.cancelled,
       unknown: run.unknown,
+      outcomeCounts: run.outcomeCounts,
       stages: [...run.stages.entries()]
         .toSorted(([left], [right]) =>
         {
@@ -481,6 +652,9 @@ function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummar
           ...counts,
         })),
       scopeViolationCount: run.scopeViolationCount,
+      scopeViolationGroups: run.hasScopeViolationGroups
+        ? Option.some([...run.scopeViolationGroups].map(([root, count]) => ({ root, count })))
+        : Option.none(),
     }))
     .toSorted((left, right) =>
     {
@@ -594,6 +768,18 @@ type JobRecordOutcome =
   | { readonly _tag: 'Missing' }
   | { readonly _tag: 'Skipped'; readonly reason: string }
 
+type JobSummaryOutcome =
+  | { readonly _tag: 'Loaded'; readonly summary: WorkersJobSummary }
+  | { readonly _tag: 'Missing' }
+  | { readonly _tag: 'Skipped'; readonly reason: string }
+
+// mtime+size stamp of a job.json paired with the summary parsed from that exact
+// revision of the file
+type CachedJobSummary = {
+  readonly stamp: string
+  readonly summary: WorkersJobSummary
+}
+
 export const make = Effect.gen(function* ()
 {
   const fileSystem = yield* FileSystem.FileSystem
@@ -637,6 +823,55 @@ export const make = Effect.gen(function* ()
 
     return { _tag: 'Loaded', jobId: toText(record.job_id) ?? jobId, record }
   })
+
+  // every workers read used to re-read & re-parse every job.json on the host
+  // (tens of MB across ~900 records) once per subscriber every three seconds;
+  // the broker rewrites records in place, so an unchanged mtime+size proves the
+  // cached summary is still exact and a stat replaces the whole read+parse
+  const summaryCache = new Map<string, CachedJobSummary>()
+
+  const readJobSummary = Effect.fn('WorkerBrokerStore.readJobSummary')(function* (
+    jobId: string,
+  ): Effect.fn.Return<JobSummaryOutcome>
+  {
+    const recordPath = path.join(jobsDir, jobId, 'job.json')
+    const info = yield* fileSystem.stat(recordPath).pipe(Effect.result)
+    if (Result.isFailure(info))
+    {
+      if (isNotFoundError(info.failure)) return { _tag: 'Missing' }
+      return { _tag: 'Skipped', reason: `Failed to read job record '${recordPath}'.` }
+    }
+
+    // a record whose mtime the platform cannot report can never be proven
+    // fresh, so it falls back to an uncached read every time
+    const stamp = Option.match(info.success.mtime, {
+      onNone: () => null,
+      onSome: (mtime) => `${mtime.getTime()}:${info.success.size}`,
+    })
+    const cached = stamp === null ? undefined : summaryCache.get(jobId)
+    if (cached !== undefined && cached.stamp === stamp)
+    {
+      return { _tag: 'Loaded', summary: cached.summary }
+    }
+
+    const outcome = yield* readJobRecord(jobId)
+    if (outcome._tag !== 'Loaded') return outcome
+    const summary = toJobSummary(outcome.jobId, outcome.record)
+    if (stamp !== null) summaryCache.set(jobId, { stamp, summary })
+    return { _tag: 'Loaded', summary }
+  })
+
+  // archived & pruned runs disappear from jobs/, so drop their entries every
+  // enumeration to keep the cache proportional to what is actually on disk;
+  // this walk is trivial next to the stats it sits beside
+  const pruneSummaryCache = (jobIds: ReadonlyArray<string>): void =>
+  {
+    const present = new Set(jobIds)
+    for (const jobId of summaryCache.keys())
+    {
+      if (!present.has(jobId)) summaryCache.delete(jobId)
+    }
+  }
 
   const list: WorkerBrokerStore['Service']['list'] = Effect.fn('WorkerBrokerStore.list')(
     function* (input)
@@ -682,12 +917,14 @@ export const make = Effect.gen(function* ()
         }
       }
 
+      // parsing is CPU-bound on a single thread, so raising concurrency buys
+      // nothing here; the summary cache is what removes the work
+      const jobIds = entries.success.filter((entry) => isSafeJobId(entry))
       const outcomes = yield* Effect.all(
-        entries.success
-          .filter((entry) => isSafeJobId(entry))
-          .map((entry) => readJobRecord(entry).pipe(Effect.result)),
+        jobIds.map((entry) => readJobSummary(entry).pipe(Effect.result)),
         { concurrency: 1 },
       )
+      pruneSummaryCache(jobIds)
 
       const jobs: WorkersJobSummary[] = []
       let skippedJobCount = 0
@@ -700,7 +937,7 @@ export const make = Effect.gen(function* ()
         }
         if (outcome.success._tag === 'Loaded')
         {
-          const job = toJobSummary(outcome.success.jobId, outcome.success.record)
+          const job = outcome.success.summary
           const jobRun = Option.getOrUndefined(job.run)
           if (input.run === undefined || jobRun === input.run.trim()) jobs.push(job)
           continue
@@ -783,6 +1020,55 @@ export const make = Effect.gen(function* ()
       }
     },
   )
+
+  const getExecutionEvidence: WorkerBrokerStore['Service']['getExecutionEvidence'] = Effect.fn(
+    'WorkerBrokerStore.getExecutionEvidence',
+  )(function* (jobIdInput)
+  {
+    const jobId = jobIdInput.trim()
+    if (!isSafeJobId(jobId))
+    {
+      return { state: 'unavailable', detail: 'The job id is not a valid broker identifier.' }
+    }
+    if (!(yield* stateDirExists))
+    {
+      return {
+        state: 'unavailable',
+        detail: `Worker-broker state directory '${stateDir}' was not found.`,
+      }
+    }
+    const outcome = yield* readJobRecord(jobId)
+    if (outcome._tag !== 'Loaded')
+    {
+      return {
+        state: 'unavailable',
+        detail:
+          outcome._tag === 'Skipped'
+            ? outcome.reason
+            : `Worker-broker job '${jobId}' was not found.`,
+      }
+    }
+    const record = outcome.record
+    return {
+      state: 'loaded',
+      evidence: {
+        requestedJobId: jobId,
+        recordJobId: toText(record.job_id),
+        recordStatus: toText(record.status),
+        resultStatus: toText(record.result?.status),
+        requestRunId: toText(record.request?.run),
+        requestRepositoryRoot: toText(record.request?.repo),
+        resultRepositoryRoot: toText(record.result?.repo),
+        recordBaseOid: toText(record.base_sha),
+        resultBaseOid: toText(record.result?.base_sha),
+        headOid: toText(record.result?.head_sha),
+        recordBranch: toText(record.branch),
+        resultBranch: toText(record.result?.branch),
+        recordWorktreeRoot: toText(record.worktree),
+        resultWorktreeRoot: toText(record.result?.worktree),
+      },
+    }
+  })
 
   const getRun: WorkerBrokerStore['Service']['getRun'] = Effect.fn('WorkerBrokerStore.getRun')(
     function* (input)
@@ -930,7 +1216,15 @@ export const make = Effect.gen(function* ()
     })
   })
 
-  return WorkerBrokerStore.of({ list, listRuns, getJob, getRun, readActivity, jobsDir })
+  return WorkerBrokerStore.of({
+    list,
+    listRuns,
+    getJob,
+    getRun,
+    getExecutionEvidence,
+    readActivity,
+    jobsDir,
+  })
 })
 
 export const layer = Layer.effect(WorkerBrokerStore, make)

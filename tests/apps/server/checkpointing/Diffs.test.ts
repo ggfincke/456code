@@ -7,13 +7,10 @@ import { parseTurnDiffFilesFromUnifiedDiff } from '../../../../apps/server/src/c
 
 describe('parseTurnDiffFilesFromUnifiedDiff', () =>
 {
-  it('returns empty list for empty diff', () =>
-  {
-    expect(parseTurnDiffFilesFromUnifiedDiff('')).toEqual([])
-  })
-
   it('parses per-file additions and deletions', () =>
   {
+    expect(parseTurnDiffFilesFromUnifiedDiff('')).toEqual([])
+
     const diff = [
       'diff --git a/a.txt b/a.txt',
       'index 1111111..2222222 100644',

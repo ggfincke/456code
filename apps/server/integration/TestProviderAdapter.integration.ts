@@ -24,6 +24,8 @@ import {
   type ProviderAdapterError,
 } from '../src/provider/Errors.ts'
 import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
   ProviderAdapterShape,
   ProviderThreadSnapshot,
   ProviderThreadTurnSnapshot,
@@ -57,6 +59,7 @@ export type LegacyProviderRuntimeEvent = FixtureProviderRuntimeEvent
 interface SessionState
 {
   readonly session: ProviderSession
+  readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
   snapshot: ProviderThreadSnapshot
   turnCount: number
   readonly queuedResponses: Array<TestTurnResponse>
@@ -249,10 +252,11 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
   {
     const provider = options?.provider ?? ProviderDriverKind.make('codex')
     const crypto = yield* Crypto.Crypto
-    const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>()
+    const runtimeEvents = yield* Queue.unbounded<ProviderAdapterRuntimeEvent>()
     let sessionCount = 0
     const sessions = new Map<ThreadId, SessionState>()
     const queuedResponsesForNextSession: TestTurnResponse[] = []
+    const rollbackCallsBySession = new Map<ThreadId, Array<number>>()
     const interruptCallsBySession = new Map<ThreadId, Array<TurnId | undefined>>()
     const approvalResponsesBySession = new Map<
       ThreadId,
@@ -263,7 +267,8 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       }>
     >()
 
-    const emit = (event: ProviderRuntimeEvent) => Queue.offer(runtimeEvents, event)
+    const emit = (binding: ProviderAdapterRuntimeSessionBinding, event: ProviderRuntimeEvent) =>
+      Queue.offer(runtimeEvents, { binding, event })
     const randomUUIDv4 = (threadId: ThreadId) =>
       crypto.randomUUIDv4.pipe(
         Effect.mapError(
@@ -309,6 +314,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
 
         sessions.set(threadId, {
           session,
+          runtimeSessionBinding: input.runtimeSessionBinding,
           snapshot: {
             threadId,
             turns: [],
@@ -384,7 +390,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
             continue
           }
 
-          yield* emit(runtimeEvent)
+          yield* emit(state.runtimeSessionBinding, runtimeEvent)
         }
 
         if (response.mutateWorkspace && state.session.cwd)
@@ -414,7 +420,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
 
         if (deferredTurnCompletedEvents.length === 0)
         {
-          yield* emit({
+          yield* emit(state.runtimeSessionBinding, {
             type: 'turn.completed',
             eventId: EventId.make(yield* randomUUIDv4(input.threadId)),
             provider,
@@ -430,7 +436,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
         {
           for (const completedEvent of deferredTurnCompletedEvents)
           {
-            yield* emit(completedEvent)
+            yield* emit(state.runtimeSessionBinding, completedEvent)
           }
         }
 
@@ -478,9 +484,23 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
     ) => (sessions.has(threadId) ? Effect.void : missingSessionEffect(provider, threadId))
 
     const stopSession: ProviderAdapterShape<ProviderAdapterError>['stopSession'] = (threadId) =>
-      Effect.sync(() =>
+      Effect.gen(function* ()
       {
+        const state = sessions.get(threadId)
+        if (state === undefined) return
         sessions.delete(threadId)
+        yield* emit(state.runtimeSessionBinding, {
+          type: 'session.exited',
+          eventId: EventId.make(yield* randomUUIDv4(threadId)),
+          provider,
+          createdAt: nowIso(),
+          threadId,
+          payload: {
+            reason: 'Integration test provider session stopped',
+            recoverable: false,
+            exitKind: 'graceful',
+          },
+        })
       })
 
     const listSessions: ProviderAdapterShape<ProviderAdapterError>['listSessions'] = () =>
@@ -488,6 +508,9 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
 
     const hasSession: ProviderAdapterShape<ProviderAdapterError>['hasSession'] = (threadId) =>
       Effect.succeed(sessions.has(threadId))
+
+    const getSessionRuntimeBinding: ProviderAdapterShape<ProviderAdapterError>['getSessionRuntimeBinding'] =
+      (threadId) => Effect.succeed(sessions.get(threadId)?.runtimeSessionBinding)
 
     const readThread: ProviderAdapterShape<ProviderAdapterError>['readThread'] = (threadId) =>
     {
@@ -523,6 +546,9 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       return Effect.sync(() =>
       {
         state.rollbackCalls.push(numTurns)
+        const recordedCalls = rollbackCallsBySession.get(threadId) ?? []
+        recordedCalls.push(numTurns)
+        rollbackCallsBySession.set(threadId, recordedCalls)
         state.snapshot = {
           threadId: state.snapshot.threadId,
           turns: state.snapshot.turns.slice(0, state.snapshot.turns.length - numTurns),
@@ -533,9 +559,30 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
     }
 
     const stopAll: ProviderAdapterShape<ProviderAdapterError>['stopAll'] = () =>
-      Effect.sync(() =>
+      Effect.gen(function* ()
       {
+        const active = Array.from(sessions.values())
         sessions.clear()
+        yield* Effect.forEach(
+          active,
+          (state) =>
+            Effect.gen(function* ()
+            {
+              yield* emit(state.runtimeSessionBinding, {
+                type: 'session.exited',
+                eventId: EventId.make(yield* randomUUIDv4(state.session.threadId)),
+                provider,
+                createdAt: nowIso(),
+                threadId: state.session.threadId,
+                payload: {
+                  reason: 'Integration test provider stopped all sessions',
+                  recoverable: false,
+                  exitKind: 'graceful',
+                },
+              })
+            }),
+          { discard: true },
+        )
       })
 
     const adapter: ProviderAdapterShape<ProviderAdapterError> = {
@@ -551,6 +598,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       stopSession,
       listSessions,
       hasSession,
+      getSessionRuntimeBinding,
       readThread,
       rollbackThread,
       stopAll,
@@ -580,15 +628,9 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
         queuedResponsesForNextSession.push(response)
       })
 
-    const getRollbackCalls = (threadId: ThreadId): ReadonlyArray<number> =>
-    {
-      const state = sessions.get(threadId)
-      if (!state)
-      {
-        return []
-      }
-      return [...state.rollbackCalls]
-    }
+    const getRollbackCalls = (threadId: ThreadId): ReadonlyArray<number> => [
+      ...(rollbackCallsBySession.get(threadId) ?? []),
+    ]
 
     const getStartCount = (): number => sessionCount
 
