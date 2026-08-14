@@ -14,7 +14,7 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 
-import * as DesktopAppSettings from '../settings/DesktopAppSettings.ts'
+import * as DesktopSettingsModel from '../settings/DesktopSettingsModel.ts'
 import * as DesktopConfig from './DesktopConfig.ts'
 import { isNightlyDesktopVersion } from '../updates/updateChannels.ts'
 
@@ -71,7 +71,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly linuxDesktopEntryName: string
     readonly linuxWmClass: string
     readonly userDataDirName: string
-    readonly defaultDesktopSettings: DesktopAppSettings.DesktopSettings
+    readonly defaultDesktopSettings: DesktopSettingsModel.DesktopSettings
     readonly runtimeInfo: DesktopRuntimeInfo
     readonly resolvePickFolderDefaultPath: (rawOptions: unknown) => Option.Option<string>
     readonly resolveResourcePathCandidates: (fileName: string) => readonly string[]
@@ -216,7 +216,7 @@ const make = Effect.fn('desktop.environment.make')(function* (
     linuxDesktopEntryName: isDevelopment ? '456code-dev.desktop' : '456code.desktop',
     linuxWmClass: isDevelopment ? '456code-dev' : '456code',
     userDataDirName,
-    defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),
+    defaultDesktopSettings: DesktopSettingsModel.resolveDefaultDesktopSettings(input.appVersion),
     runtimeInfo: resolveDesktopRuntimeInfo({
       platform: input.platform,
       processArch: input.processArch,
