@@ -1,11 +1,13 @@
 // apps/web/src/components/chat/composer/chatComposerHandle.ts
 // define the imperative chat composer handle contract
 
-import type {
-  ModelSelection,
-  PreviewAnnotationPayload,
-  ProviderDriverKind,
-  ServerProvider,
+import {
+  coerceRuntimeMode,
+  type ModelSelection,
+  type PreviewAnnotationPayload,
+  type ProviderDriverKind,
+  type RuntimeMode,
+  type ServerProvider,
 } from '@t3tools/contracts'
 
 import type { ComposerImageAttachment } from '../../../composerDraftStore'
@@ -51,5 +53,15 @@ export interface ChatComposerHandle
     selectedModel: string
     selectedProviderModels: ReadonlyArray<ServerProvider['models'][number]>
     selectedProviderSlashCommands: ReadonlyArray<ServerProvider['slashCommands'][number]>
+    runtimeMode: RuntimeMode
   }
+}
+
+// footer may display a supported mode while draft still holds DEFAULT_RUNTIME_MODE
+export function runtimeModeForSend(
+  requested: RuntimeMode,
+  supported: ReadonlyArray<RuntimeMode> | undefined,
+): RuntimeMode
+{
+  return coerceRuntimeMode(requested, supported)
 }

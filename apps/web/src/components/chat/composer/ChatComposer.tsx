@@ -5,7 +5,6 @@ import type {
   CollaborationMode,
   EnvironmentId,
   ModelSelection,
-  PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ResolvedKeybindingsConfig,
   RuntimeMode,
@@ -15,6 +14,7 @@ import type {
   TurnId,
 } from '@t3tools/contracts'
 import {
+  CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
   normalizeCollaborationMode,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -143,7 +143,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { toastManager } from '../../ui/toast'
 import { ArrowRightLeftIcon, CircleAlertIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
 import { proposedPlanTitle, type PlanImplementVariant } from '../../../proposedPlan'
-import { getProviderDisplayName, getProviderInteractionModeToggle } from '../../../providerModels'
+import { getProviderDisplayName } from '../../../providerModels'
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -159,10 +159,7 @@ import type { SessionPhase, Thread } from '../../../types'
 import type { PendingUserInputDraftAnswer } from '../../../pendingUserInput'
 import type { PendingApproval, PendingUserInput } from '../../../session-logic'
 import { formatProviderDisplayName } from '../../../lib/contextWindow'
-import {
-  selectThreadContextWindowSnapshot,
-  type ThreadContextWindowSelection,
-} from './composerContextWindow'
+import { selectThreadContextWindowSnapshot } from './composerContextWindow'
 import { formatProviderSkillDisplayName } from '../../../providerSkillPresentation'
 import { searchProviderSkills } from '../../../providerSkillSearch'
 import { buildComposerSlashMenuItems, composerSkillInsertionText } from './composerSlashMenuItems'
@@ -171,7 +168,6 @@ import {
   shouldConfirmCompactComposerSlashCommand,
 } from './composerSlashCommandValidation'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import type { ReviewCommentContext } from '../../../reviewCommentContext'
 import { useEnvironmentQuery } from '../../../state/query'
 import { workersEnvironment } from '../../../state/workers'
 import * as Option from 'effect/Option'
@@ -179,7 +175,7 @@ import * as Option from 'effect/Option'
 // readiness input literal -> the readiness atom family keys on its JSON form
 const WORKERS_READINESS_INPUT = {}
 
-import type { ChatComposerHandle } from './chatComposerHandle'
+import { runtimeModeForSend, type ChatComposerHandle } from './chatComposerHandle'
 
 export type { ChatComposerHandle }
 
@@ -560,7 +556,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   )
-  const orchestrateMode = collaborationMode.orchestrate
+  const selectedProviderCapabilities =
+    selectedProviderStatus?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+  const orchestrateMode =
+    collaborationMode.orchestrate &&
+    selectedProviderCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+    selectedProviderCapabilities.orchestrateBaseModes.includes(collaborationMode.baseMode)
   const providerSkills = useMemo(
     () =>
       (selectedProviderStatus?.skills ?? []).filter(
@@ -587,7 +588,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [workersReadiness])
   const brokerNotReadyMessage = orchestrateMode ? workersNotReadyMessage : null
   const planOrchestrateNotReadyMessage = showPlanFollowUpPrompt ? workersNotReadyMessage : null
-  const effectiveSendDisabledReason = sendDisabledReason ?? brokerNotReadyMessage
+  const activeTurnInputDisabledReason =
+    phase === 'running' && selectedProviderCapabilities.activeTurnInput === 'unsupported'
+      ? 'Wait for the active provider turn to finish before sending another message.'
+      : null
+  const effectiveSendDisabledReason =
+    sendDisabledReason ?? activeTurnInputDisabledReason ?? brokerNotReadyMessage
   const isSendDisabled = effectiveSendDisabledReason !== null
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider['models'][number]>>(
     () => selectedProviderEntry?.models ?? [],
@@ -621,13 +627,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch
   const composerProviderControls = useMemo(
     () => ({
-      showInteractionModeToggle: getProviderInteractionModeToggle(
-        providerStatuses,
-        selectedProvider,
-      ),
+      showInteractionModeToggle:
+        selectedProviderStatus?.showInteractionModeToggle !== false &&
+        selectedProviderCapabilities.supportedInteractionModes.includes('plan'),
+      showOrchestrate:
+        selectedProviderCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+        selectedProviderCapabilities.orchestrateBaseModes.includes(collaborationMode.baseMode),
+      supportedRuntimeModes: selectedProviderCapabilities.supportedRuntimeModes,
     }),
-    [providerStatuses, selectedProvider],
+    [
+      collaborationMode.baseMode,
+      selectedProviderCapabilities,
+      selectedProviderStatus?.showInteractionModeToggle,
+    ],
   )
+  // footer already displays a supported mode; persist it so the next draft matches send
+  useEffect(() =>
+  {
+    const nextMode = runtimeModeForSend(
+      runtimeMode,
+      selectedProviderCapabilities.supportedRuntimeModes,
+    )
+    if (nextMode === runtimeMode) return
+    handleRuntimeModeChange(nextMode)
+  }, [handleRuntimeModeChange, runtimeMode, selectedProviderCapabilities.supportedRuntimeModes])
   const handleComposerModeChange = useCallback(
     (mode: 'build' | 'plan') =>
     {
@@ -848,39 +871,46 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTrigger.kind === 'slash-command')
     {
+      const builtInItems: Array<Extract<ComposerCommandItem, { type: 'slash-command' }>> = [
+        {
+          id: 'slash:model',
+          type: 'slash-command' as const,
+          command: 'model',
+          label: '/model',
+          description: 'Switch response model for this thread',
+        },
+      ]
+      if (composerProviderControls.showInteractionModeToggle)
+      {
+        builtInItems.push({
+          id: 'slash:plan',
+          type: 'slash-command',
+          command: 'plan',
+          label: '/plan',
+          description: 'Switch to Plan and keep the Orchestrate setting',
+        })
+      }
+      if (composerProviderControls.showOrchestrate)
+      {
+        builtInItems.push({
+          id: 'slash:orchestrate',
+          type: 'slash-command',
+          command: 'orchestrate',
+          label: '/orchestrate',
+          description: 'Enable Orchestrate and keep the current mode',
+        })
+      }
+      builtInItems.push({
+        id: 'slash:default',
+        type: 'slash-command',
+        command: 'default',
+        label: '/default',
+        description: 'Reset to Build with Orchestrate off',
+      })
       return buildComposerSlashMenuItems({
         provider: selectedProvider,
         query: composerTrigger.query,
-        builtInItems: [
-          {
-            id: 'slash:model',
-            type: 'slash-command',
-            command: 'model',
-            label: '/model',
-            description: 'Switch response model for this thread',
-          },
-          {
-            id: 'slash:plan',
-            type: 'slash-command',
-            command: 'plan',
-            label: '/plan',
-            description: 'Switch to Plan and keep the Orchestrate setting',
-          },
-          {
-            id: 'slash:orchestrate',
-            type: 'slash-command',
-            command: 'orchestrate',
-            label: '/orchestrate',
-            description: 'Enable Orchestrate and keep the current mode',
-          },
-          {
-            id: 'slash:default',
-            type: 'slash-command',
-            command: 'default',
-            label: '/default',
-            description: 'Reset to Build with Orchestrate off',
-          },
-        ],
+        builtInItems,
         slashCommands: selectedProviderStatus?.slashCommands ?? [],
         skills: providerSkills,
       })
@@ -902,6 +932,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return []
   }, [
     composerTrigger,
+    composerProviderControls,
     providerSkills,
     selectedProvider,
     selectedProviderStatus,
@@ -1530,6 +1561,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return
         }
+        if (
+          (item.command === 'plan' && !composerProviderControls.showInteractionModeToggle) ||
+          (item.command === 'orchestrate' && !composerProviderControls.showOrchestrate)
+        )
+        {
+          return
+        }
         void handleInteractionModeChange(
           resolveComposerSlashCommandMode(collaborationMode, item.command),
         )
@@ -1586,6 +1624,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       applyPromptReplacement,
       collaborationMode,
+      composerProviderControls,
       handleInteractionModeChange,
       resolveActiveComposerTrigger,
     ],
@@ -2625,6 +2664,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedModel,
         selectedProviderModels,
         selectedProviderSlashCommands: selectedProviderStatus?.slashCommands ?? [],
+        runtimeMode: runtimeModeForSend(
+          runtimeMode,
+          selectedProviderCapabilities.supportedRuntimeModes,
+        ),
       }),
     }),
     [
@@ -2654,6 +2697,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedProvider,
       selectedProviderModels,
       selectedProviderStatus,
+      runtimeMode,
+      selectedProviderCapabilities,
     ],
   )
 
@@ -2810,6 +2855,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       isPreparingWorktree={false}
                       hasSendableContent={false}
                       preserveComposerFocusOnPointerDown
+                      showOrchestrate={composerProviderControls.showOrchestrate}
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                       onInterrupt={handleInterruptPrimaryAction}
                       onImplementPlanWithOrchestrate={
@@ -3111,6 +3157,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isPreparingWorktree={false}
                     hasSendableContent={false}
                     preserveComposerFocusOnPointerDown
+                    showOrchestrate={composerProviderControls.showOrchestrate}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanWithOrchestrate={handleImplementPlanWithOrchestratePrimaryAction}
@@ -3195,7 +3242,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     planSidebarLabel={planSidebarLabel}
                     planSidebarOpen={planSidebarOpen}
                     runtimeMode={runtimeMode}
+                    showOrchestrate={composerProviderControls.showOrchestrate}
                     showPlanMode={composerProviderControls.showInteractionModeToggle}
+                    supportedRuntimeModes={composerProviderControls.supportedRuntimeModes}
                     traitsMenuContent={providerTraitsMenuContent}
                     onInteractionModeChange={handleComposerModeChange}
                     onOrchestrateChange={handleComposerOrchestrateChange}
@@ -3212,6 +3261,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     ) : null}
                     <ComposerFooterModeControls
                       showPlanMode={composerProviderControls.showInteractionModeToggle}
+                      showOrchestrate={composerProviderControls.showOrchestrate}
+                      supportedRuntimeModes={composerProviderControls.supportedRuntimeModes}
                       collaborationMode={collaborationMode}
                       runtimeMode={runtimeMode}
                       showPlanToggle={showPlanSidebarToggle}
@@ -3278,6 +3329,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
+                  showOrchestrate={composerProviderControls.showOrchestrate}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}

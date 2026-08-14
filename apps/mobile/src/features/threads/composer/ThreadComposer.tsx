@@ -1,7 +1,7 @@
 // apps/mobile/src/features/threads/composer/ThreadComposer.tsx
 // renders and controls the mobile thread message composer
-import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import {
+  CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
   normalizeCollaborationMode,
   type CollaborationMode,
   type EnvironmentId,
@@ -18,17 +18,8 @@ import {
   serializeComposerFileLink,
   type ComposerTrigger,
 } from '@t3tools/shared/composerTrigger'
-import type { ReactNode } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import {
-  ActivityIndicator,
-  Image,
-  Platform,
-  Pressable,
-  useColorScheme,
-  View,
-  type ViewStyle,
-} from 'react-native'
+import { ActivityIndicator, Image, Platform, Pressable, useColorScheme, View } from 'react-native'
 import ImageViewing from 'react-native-image-viewing'
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native-reanimated'
 import { useThemeColor } from '../../../lib/useThemeColor'
@@ -361,7 +352,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null)
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0
   const isExpanded = isFocused
-  const canSend = hasContent && props.sendBlockedReason === null
 
   const onPressImage = useCallback(
     (uri: string) =>
@@ -399,15 +389,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     providerSwitchActive: props.providerSwitchActive,
   })
 
-  const sendLabel =
-    props.sendBlockedReason !== null
-      ? 'Sending blocked'
-      : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
-        ? 'Queue'
-        : 'Send'
   const currentModelSelection = props.selectedThread.modelSelection
-  const currentRuntimeMode = props.selectedThread.runtimeMode
-  const currentInteractionMode = useMemo(
+  const selectedRuntimeMode = props.selectedThread.runtimeMode
+  const selectedInteractionMode = useMemo(
     () =>
       normalizeCollaborationMode(
         props.selectedThread.interactionMode ?? 'default',
@@ -433,6 +417,32 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ) ?? null
     )
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId])
+  const providerCapabilities =
+    selectedProviderStatus?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+  const currentRuntimeMode = providerCapabilities.supportedRuntimeModes.includes(
+    selectedRuntimeMode,
+  )
+    ? selectedRuntimeMode
+    : (providerCapabilities.supportedRuntimeModes[0] ?? 'approval-required')
+  const showPlanMode = providerCapabilities.supportedInteractionModes.includes('plan')
+  const showOrchestrate =
+    providerCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+    providerCapabilities.orchestrateBaseModes.includes(selectedInteractionMode.baseMode)
+  const currentInteractionMode = normalizeCollaborationMode(
+    showPlanMode && selectedInteractionMode.baseMode === 'plan' ? 'plan' : 'default',
+    showOrchestrate && selectedInteractionMode.orchestrate,
+  )
+  const providerRejectsActiveInput =
+    props.activeThreadBusy && providerCapabilities.activeTurnInput === 'unsupported'
+  const canSend = hasContent && props.sendBlockedReason === null && !providerRejectsActiveInput
+  const sendLabel =
+    props.sendBlockedReason !== null
+      ? 'Sending blocked'
+      : providerRejectsActiveInput
+        ? 'Wait for the current turn'
+        : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
+          ? 'Queue'
+          : 'Send'
   const providerSkills = useMemo(
     () =>
       (selectedProviderStatus?.skills ?? []).filter(
@@ -521,7 +531,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           description: 'Switch to default mode',
         },
       ]
-      const builtIn = allBuiltIn.filter((item) => item.command.includes(q))
+      const builtIn = allBuiltIn.filter(
+        (item) =>
+          item.command.includes(q) &&
+          (item.command !== 'plan' || showPlanMode) &&
+          (item.command !== 'orchestrate' || showOrchestrate),
+      )
 
       const collidingSkillNames = new Set(
         providerSkills.filter((skill) => skill.enabled).map((skill) => skill.name.toLowerCase()),
@@ -582,7 +597,15 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
 
     return []
-  }, [composerTrigger, modelOptions, pathSearch.entries, providerSkills, selectedProviderStatus])
+  }, [
+    composerTrigger,
+    modelOptions,
+    pathSearch.entries,
+    providerSkills,
+    selectedProviderStatus,
+    showOrchestrate,
+    showPlanMode,
+  ])
 
   // ── Handle command selection ──────────────────────────────
   const {
@@ -595,7 +618,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   const handleSend = useCallback(async () =>
   {
-    if (props.sendBlockedReason !== null)
+    if (props.sendBlockedReason !== null || providerRejectsActiveInput)
     {
       return
     }
@@ -624,6 +647,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.sendBlockedReason,
     props.selectedThread.id,
     props.selectedThread.title,
+    providerRejectsActiveInput,
   ])
   const handleCommandSelect = useCallback(
     (item: ComposerCommandItem) =>
@@ -649,6 +673,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         (item.command === 'plan' || item.command === 'orchestrate' || item.command === 'default')
       )
       {
+        if (item.command === 'plan' && !showPlanMode) return
+        if (item.command === 'orchestrate' && !showOrchestrate) return
         const result = replaceTextRange(
           draftMessage,
           composerTrigger.rangeStart,
@@ -701,6 +727,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       onChangeDraftMessage,
       onUpdateInteractionMode,
       onUpdateModelSelection,
+      showOrchestrate,
+      showPlanMode,
     ],
   )
 
@@ -767,42 +795,69 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           { id: 'options:runtime:auto-accept-edits', title: 'Auto-accept edits' },
           { id: 'options:runtime:auto', title: 'Auto' },
           { id: 'options:runtime:full-access', title: 'Full access' },
-        ].map((option) =>
-        {
-          const value = option.id.replace('options:runtime:', '')
-          return {
-            id: option.id,
-            title: option.title,
-            state: currentRuntimeMode === value ? ('on' as const) : undefined,
-          }
-        }),
+        ]
+          .filter((option) =>
+            providerCapabilities.supportedRuntimeModes.includes(
+              option.id.replace('options:runtime:', '') as RuntimeMode,
+            ),
+          )
+          .map((option) =>
+          {
+            const value = option.id.replace('options:runtime:', '')
+            return {
+              id: option.id,
+              title: option.title,
+              state: currentRuntimeMode === value ? ('on' as const) : undefined,
+            }
+          }),
       },
-      {
-        id: 'options-interaction',
-        title: 'Interaction',
-        subtitle: `${currentInteractionMode.baseMode === 'plan' ? 'Plan' : 'Default'}${
-          currentInteractionMode.orchestrate ? ' + Orchestrate' : ''
-        }`,
-        subactions: [
-          {
-            id: 'options:interaction:default',
-            title: 'Default',
-            state: currentInteractionMode.baseMode === 'default' ? ('on' as const) : undefined,
-          },
-          {
-            id: 'options:interaction:plan',
-            title: 'Plan',
-            state: currentInteractionMode.baseMode === 'plan' ? ('on' as const) : undefined,
-          },
-          {
-            id: 'options:interaction:orchestrate',
-            title: 'Orchestrate',
-            state: currentInteractionMode.orchestrate ? ('on' as const) : undefined,
-          },
-        ],
-      },
+      ...(showPlanMode || showOrchestrate
+        ? [
+            {
+              id: 'options-interaction',
+              title: 'Interaction',
+              subtitle: `${currentInteractionMode.baseMode === 'plan' ? 'Plan' : 'Default'}${
+                currentInteractionMode.orchestrate ? ' + Orchestrate' : ''
+              }`,
+              subactions: [
+                {
+                  id: 'options:interaction:default',
+                  title: 'Default',
+                  state:
+                    currentInteractionMode.baseMode === 'default' ? ('on' as const) : undefined,
+                },
+                ...(showPlanMode
+                  ? [
+                      {
+                        id: 'options:interaction:plan',
+                        title: 'Plan',
+                        state:
+                          currentInteractionMode.baseMode === 'plan' ? ('on' as const) : undefined,
+                      },
+                    ]
+                  : []),
+                ...(showOrchestrate
+                  ? [
+                      {
+                        id: 'options:interaction:orchestrate',
+                        title: 'Orchestrate',
+                        state: currentInteractionMode.orchestrate ? ('on' as const) : undefined,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : []),
     ],
-    [currentInteractionMode, currentRuntimeMode, providerOptionDescriptors],
+    [
+      currentInteractionMode,
+      currentRuntimeMode,
+      providerCapabilities.supportedRuntimeModes,
+      providerOptionDescriptors,
+      showOrchestrate,
+      showPlanMode,
+    ],
   )
 
   // ── Menu handlers ────────────────────────────────────────
@@ -834,12 +889,15 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     if (event.startsWith('options:runtime:'))
     {
       const runtimeMode = event.slice('options:runtime:'.length) as RuntimeMode
+      if (!providerCapabilities.supportedRuntimeModes.includes(runtimeMode)) return
       props.onUpdateRuntimeMode(runtimeMode)
       return
     }
     if (event.startsWith('options:interaction:'))
     {
       const value = event.slice('options:interaction:'.length)
+      if (value === 'plan' && !showPlanMode) return
+      if (value === 'orchestrate' && !showOrchestrate) return
       props.onUpdateInteractionMode(
         value === 'orchestrate'
           ? { ...currentInteractionMode, orchestrate: !currentInteractionMode.orchestrate }

@@ -637,6 +637,21 @@ export function NewTaskDraftScreen(props: {
       }),
     [flow.selectedModel?.options, flow.selectedModelOption?.capabilities],
   )
+  const selectedProviderRuntimeCapabilities = flow.selectedProviderRuntimeCapabilities
+  const effectiveRuntimeMode = selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(
+    flow.runtimeMode,
+  )
+    ? flow.runtimeMode
+    : (selectedProviderRuntimeCapabilities.supportedRuntimeModes[0] ?? 'approval-required')
+  const showPlanMode =
+    selectedProviderRuntimeCapabilities.supportedInteractionModes.includes('plan')
+  const showOrchestrate =
+    selectedProviderRuntimeCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+    selectedProviderRuntimeCapabilities.orchestrateBaseModes.includes(flow.interactionMode.baseMode)
+  const effectiveInteractionMode = normalizeCollaborationMode(
+    showPlanMode && flow.interactionMode.baseMode === 'plan' ? 'plan' : 'default',
+    showOrchestrate && flow.interactionMode.orchestrate,
+  )
 
   const optionsMenuActions = useMemo(
     () => [
@@ -645,11 +660,11 @@ export function NewTaskDraftScreen(props: {
         id: 'options-runtime',
         title: 'Runtime',
         subtitle:
-          flow.runtimeMode === 'approval-required'
+          effectiveRuntimeMode === 'approval-required'
             ? 'Approve actions'
-            : flow.runtimeMode === 'auto-accept-edits'
+            : effectiveRuntimeMode === 'auto-accept-edits'
               ? 'Auto-accept edits'
-              : flow.runtimeMode === 'auto'
+              : effectiveRuntimeMode === 'auto'
                 ? 'Auto'
                 : 'Full access',
         subactions: [
@@ -657,42 +672,74 @@ export function NewTaskDraftScreen(props: {
           { id: 'options:runtime:auto-accept-edits', title: 'Auto-accept edits' },
           { id: 'options:runtime:auto', title: 'Auto' },
           { id: 'options:runtime:full-access', title: 'Full access' },
-        ].map((option) =>
-        {
-          const value = option.id.replace('options:runtime:', '')
-          return {
-            id: option.id,
-            title: option.title,
-            state: flow.runtimeMode === value ? ('on' as const) : undefined,
-          }
-        }),
+        ]
+          .filter((option) =>
+            selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(
+              option.id.replace('options:runtime:', '') as Parameters<
+                typeof flow.setRuntimeMode
+              >[0],
+            ),
+          )
+          .map((option) =>
+          {
+            const value = option.id.replace('options:runtime:', '')
+            return {
+              id: option.id,
+              title: option.title,
+              state: effectiveRuntimeMode === value ? ('on' as const) : undefined,
+            }
+          }),
       },
-      {
-        id: 'options-interaction',
-        title: 'Interaction',
-        subtitle: `${flow.interactionMode.baseMode === 'plan' ? 'Plan' : 'Default'}${
-          flow.interactionMode.orchestrate ? ' + Orchestrate' : ''
-        }`,
-        subactions: [
-          {
-            id: 'options:interaction:default',
-            title: 'Default',
-            state: flow.interactionMode.baseMode === 'default' ? ('on' as const) : undefined,
-          },
-          {
-            id: 'options:interaction:plan',
-            title: 'Plan',
-            state: flow.interactionMode.baseMode === 'plan' ? ('on' as const) : undefined,
-          },
-          {
-            id: 'options:interaction:orchestrate',
-            title: 'Orchestrate',
-            state: flow.interactionMode.orchestrate ? ('on' as const) : undefined,
-          },
-        ],
-      },
+      ...(showPlanMode || showOrchestrate
+        ? [
+            {
+              id: 'options-interaction',
+              title: 'Interaction' as const,
+              subtitle: `${effectiveInteractionMode.baseMode === 'plan' ? 'Plan' : 'Default'}${
+                effectiveInteractionMode.orchestrate ? ' + Orchestrate' : ''
+              }`,
+              subactions: [
+                {
+                  id: 'options:interaction:default',
+                  title: 'Default',
+                  state:
+                    effectiveInteractionMode.baseMode === 'default' ? ('on' as const) : undefined,
+                },
+                ...(showPlanMode
+                  ? [
+                      {
+                        id: 'options:interaction:plan',
+                        title: 'Plan',
+                        state:
+                          effectiveInteractionMode.baseMode === 'plan'
+                            ? ('on' as const)
+                            : undefined,
+                      },
+                    ]
+                  : []),
+                ...(showOrchestrate
+                  ? [
+                      {
+                        id: 'options:interaction:orchestrate',
+                        title: 'Orchestrate',
+                        state: effectiveInteractionMode.orchestrate ? ('on' as const) : undefined,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : []),
     ],
-    [flow.interactionMode, flow.runtimeMode, providerOptionDescriptors],
+    [
+      effectiveInteractionMode,
+      effectiveRuntimeMode,
+      flow.setRuntimeMode,
+      providerOptionDescriptors,
+      selectedProviderRuntimeCapabilities.supportedRuntimeModes,
+      showOrchestrate,
+      showPlanMode,
+    ],
   )
 
   const workspaceMenuActions = useMemo(() =>
@@ -812,19 +859,23 @@ export function NewTaskDraftScreen(props: {
     }
     if (event.startsWith('options:runtime:'))
     {
-      flow.setRuntimeMode(
-        event.slice('options:runtime:'.length) as Parameters<typeof flow.setRuntimeMode>[0],
-      )
+      const runtimeMode = event.slice('options:runtime:'.length) as Parameters<
+        typeof flow.setRuntimeMode
+      >[0]
+      if (!selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(runtimeMode)) return
+      flow.setRuntimeMode(runtimeMode)
       return
     }
     if (event.startsWith('options:interaction:'))
     {
       const value = event.slice('options:interaction:'.length)
+      if (value === 'plan' && !showPlanMode) return
+      if (value === 'orchestrate' && !showOrchestrate) return
       flow.setInteractionMode(
         value === 'orchestrate'
-          ? { ...flow.interactionMode, orchestrate: !flow.interactionMode.orchestrate }
+          ? { ...effectiveInteractionMode, orchestrate: !effectiveInteractionMode.orchestrate }
           : {
-              ...flow.interactionMode,
+              ...effectiveInteractionMode,
               baseMode: value === 'plan' ? 'plan' : 'default',
             },
       )
@@ -909,10 +960,23 @@ export function NewTaskDraftScreen(props: {
     const selectedBranchName = draft.workspaceSelection?.branch ?? flow.selectedBranchName
     const selectedWorktreePath = draft.workspaceSelection?.worktreePath ?? flow.selectedWorktreePath
     const startFromOrigin = draft.workspaceSelection?.startFromOrigin ?? flow.startFromOrigin
-    const runtimeMode = draft.runtimeMode ?? flow.runtimeMode
-    const interactionMode = normalizeCollaborationMode(
+    const requestedRuntimeMode = draft.runtimeMode ?? flow.runtimeMode
+    const runtimeMode = selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(
+      requestedRuntimeMode,
+    )
+      ? requestedRuntimeMode
+      : (selectedProviderRuntimeCapabilities.supportedRuntimeModes[0] ?? 'approval-required')
+    const requestedInteractionMode = normalizeCollaborationMode(
       draft.interactionMode ?? flow.interactionMode.baseMode,
       draft.orchestrate ?? flow.interactionMode.orchestrate,
+    )
+    const interactionMode = normalizeCollaborationMode(
+      selectedProviderRuntimeCapabilities.supportedInteractionModes.includes(
+        requestedInteractionMode.baseMode,
+      )
+        ? requestedInteractionMode.baseMode
+        : 'default',
+      requestedInteractionMode.orchestrate && showOrchestrate,
     )
     const initialMessageText = draft.text.trim()
 

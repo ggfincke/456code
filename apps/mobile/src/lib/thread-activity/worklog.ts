@@ -128,7 +128,7 @@ export function workEntryIcon(entry: DerivedWorkLogEntry): ThreadFeedActivity['i
   if (entry.requestKind === 'file-change') return 'edit'
   if (entry.itemType === 'command_execution' || entry.command) return 'command'
   if (entry.itemType === 'file_change' || (entry.changedFiles?.length ?? 0) > 0) return 'edit'
-  if (entry.itemType === 'web_search') return 'globe'
+  if (entry.itemType === 'repository_search' || entry.itemType === 'web_search') return 'globe'
   if (entry.itemType === 'image_view') return 'eye'
   if (entry.itemType === 'mcp_tool_call') return 'wrench'
   if (entry.itemType === 'dynamic_tool_call' || entry.itemType === 'collab_agent_tool_call')

@@ -282,6 +282,15 @@ export function isOrchestratePlanRevisionStarted(runId: string, revisionKey: str
   return runStates.get(runId)?.startedRevisionKey === revisionKey
 }
 
+export function clearOrchestratePlanRevisionStarted(runId: string, revisionKey: string): void
+{
+  const state = runStates.get(runId)
+  if (state === undefined || state.startedRevisionKey !== revisionKey) return
+  state.startedRevisionKey = null
+  touchRunState(runId, state)
+  emit()
+}
+
 export function resetOrchestratePlanStoreForTests(): void
 {
   cardStates.clear()

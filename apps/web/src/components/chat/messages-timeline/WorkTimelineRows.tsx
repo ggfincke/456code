@@ -1,63 +1,25 @@
 // apps/web/src/components/chat/messages-timeline/WorkTimelineRows.tsx
 // render working indicators and expandable work-group timeline rows
 
-import { FileDiff } from '@pierre/diffs/react'
 import {
-  type EnvironmentId,
-  type MessageId,
-  type ScopedThreadRef,
-  type ServerProviderSkill,
-  type TurnId,
-} from '@t3tools/contracts'
-import { type TimestampFormat } from '@t3tools/contracts/settings'
-import {
-  ArrowRightIcon,
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
   MessageCircleIcon,
   MinusIcon,
-  MousePointerClickIcon,
-  PaintbrushIcon,
   SquarePenIcon,
   TerminalIcon,
-  Undo2Icon,
   WrenchIcon,
   XIcon,
   ZapIcon,
 } from 'lucide-react'
-import {
-  Fragment,
-  memo,
-  use,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from 'react'
-import { type ParsedElementContextEntry } from '~/lib/elementContext'
-import {
-  extractTrailingPreviewAnnotation,
-  type ParsedPreviewAnnotation,
-} from '~/lib/previewAnnotation'
-import {
-  deriveDisplayedUserMessageState,
-  type ParsedTerminalContextEntry,
-} from '~/lib/terminalContext'
+import { memo, use, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { cn } from '~/lib/utils'
-import { useUiStateStore } from '~/uiStateStore'
-import { useSyntaxThemeName } from '../../../hooks/useSyntaxThemeName'
-import { getRenderablePatch, resolveFileDiffPath } from '../../../lib/diffRendering'
-import { type ProviderSwitchTimelineParty } from '../../../providerSwitchPresentation'
 import {
-  deriveTimelineEntries,
   formatDuration,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
@@ -65,38 +27,9 @@ import {
   workLogEntryIsToolLike,
 } from '../../../session-logic'
 import { workEntryIndicatesToolRunning, workEntryRunningSince } from '../../../session/worklog'
-import { formatChatTimestampTooltip, formatShortTimestamp } from '../../../timestampFormat'
-import { type TurnDiffSummary } from '../../../types'
-import ChatMarkdown from '../../ChatMarkdown'
-import { Button } from '../../ui/button'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
-import { shouldAutoExpandChangedFiles } from '../changedFilesPresentation'
-import { ChangedFilesCard } from '../ChangedFilesTree'
-import { buildExpandedImagePreview, ExpandedImagePreview } from '../ExpandedImagePreview'
-import { MessageCopyButton } from '../MessageCopyButton'
-import {
-  normalizeCompactToolLabel,
-  resolveAssistantMessageCopyState,
-  type MessagesTimelineRow,
-} from './MessagesTimeline.logic'
-import type { OrchestratePlanActions } from '../OrchestratePlanCard'
-import { ProposedPlanCard } from '../ProposedPlanCard'
-import { ProviderInstanceIcon } from '../ProviderInstanceIcon'
-import { TerminalContextInlineChip } from '../TerminalContextInlineChip'
+import { normalizeCompactToolLabel, type MessagesTimelineRow } from './MessagesTimeline.logic'
 import { formatWorkspaceRelativePath } from '../../../lib/filePathDisplay'
-import {
-  buildReviewCommentRenderablePatch,
-  formatReviewCommentFence,
-  formatReviewCommentContext,
-  parseReviewCommentMessageSegments,
-  type ReviewCommentContext,
-} from '../../../reviewCommentContext'
-import { SkillInlineText } from '../SkillInlineText'
-import {
-  buildInlineTerminalContextText,
-  formatInlineTerminalContextLabel,
-  textContainsInlineTerminalContextLabels,
-} from '../userMessageTerminalContexts'
 import {
   TimelineRowActivityCtx,
   TimelineRowCtx,
@@ -455,7 +388,10 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName
   {
     return 'square-pen'
   }
-  if (workEntry.itemType === 'web_search') return 'globe'
+  if (workEntry.itemType === 'repository_search' || workEntry.itemType === 'web_search')
+  {
+    return 'globe'
+  }
   if (workEntry.itemType === 'image_view') return 'eye'
 
   switch (workEntry.itemType)

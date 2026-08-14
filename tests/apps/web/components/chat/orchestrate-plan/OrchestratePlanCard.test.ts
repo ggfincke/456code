@@ -3,6 +3,7 @@
 import {
   type EnvironmentId,
   type OrchestratePlanRevision,
+  type ProjectId,
   type ProposalGeneration,
   type ProposalOrchestratePlanLookupResult,
   type ScopedThreadRef,
@@ -22,13 +23,17 @@ import {
   type OrchestratePlan,
   type OrchestratePlanActions,
   parseOrchestratePlan,
-  refreshOrchestrateArchitectureQueries,
   resolveOrchestrateArchitectureRevision,
 } from '../../../../../../apps/web/src/components/chat/orchestrate-plan/OrchestratePlanCard'
 import {
+  createOrchestratePlanCardStateKey,
   hashOrchestratePlanText,
+  isOrchestratePlanRevisionStarted,
+  markOrchestratePlanRevisionStarted,
+  readOrchestratePlanCardState,
   registerOrchestratePlanCard,
   resetOrchestratePlanStoreForTests,
+  setOrchestratePlanCardStatus,
 } from '../../../../../../apps/web/src/components/chat/orchestrate-plan/orchestratePlanStore'
 import {
   planContentText,
@@ -36,15 +41,24 @@ import {
 } from '../../../../../../apps/web/src/components/chat/orchestrate-plan/parse'
 
 const mocks = vi.hoisted(() => ({
-  buttons: [] as Array<{ readonly label: string; readonly onClick?: () => void }>,
+  buttons: [] as Array<{
+    readonly label: string
+    readonly disabled?: boolean
+    readonly onClick?: () => void
+  }>,
   clearInterval: vi.fn(),
   effectCleanups: [] as Array<() => void>,
+  ensureProjectArchitecture: vi.fn(),
   findProposalByOrchestrateRevision: vi.fn((input: unknown) => ({
     kind: 'find-proposal-by-orchestrate-revision',
     input,
   })),
   generation: null as unknown,
   generationRefresh: vi.fn(),
+  getArchitecturePathScope: vi.fn((input: unknown) => ({
+    kind: 'architecture-path-scope',
+    input,
+  })),
   intervalCallbacks: [] as Array<() => void>,
   latestProposalGeneration: vi.fn((input: unknown) => ({
     kind: 'latest-proposal-generation',
@@ -52,7 +66,14 @@ const mocks = vi.hoisted(() => ({
   })),
   lookup: null as unknown,
   lookupRefresh: vi.fn(),
+  openArchitectureSurface: vi.fn(),
   openExplorer: vi.fn(),
+  atlasStatus: null as unknown,
+  pathScope: null as unknown,
+  projectAtlasStatus: vi.fn((input: unknown) => ({
+    kind: 'project-atlas-status',
+    input,
+  })),
   query: vi.fn(),
   setInterval: vi.fn(),
   startProposalGeneration: vi.fn(),
@@ -79,9 +100,16 @@ vi.mock('react', async (importOriginal) =>
 vi.mock('~/state/projects', () => ({
   projectEnvironment: {
     findProposalByOrchestrateRevision: mocks.findProposalByOrchestrateRevision,
+    getArchitecturePathScope: mocks.getArchitecturePathScope,
     latestProposalGeneration: mocks.latestProposalGeneration,
+    projectAtlasStatus: mocks.projectAtlasStatus,
     startProposalGeneration: mocks.startProposalGeneration,
+    ensureProjectArchitecture: { kind: 'ensure-project-architecture' },
   },
+}))
+
+vi.mock('~/state/use-atom-command', () => ({
+  useAtomCommand: () => mocks.ensureProjectArchitecture,
 }))
 
 vi.mock('~/state/query', () => ({
@@ -96,7 +124,10 @@ vi.mock('~/state/workers', () => ({
 
 vi.mock('~/rightPanelStore', () => ({
   useRightPanelStore: {
-    getState: () => ({ openExplorer: mocks.openExplorer }),
+    getState: () => ({
+      openExplorer: mocks.openExplorer,
+      openArchitectureSurface: mocks.openArchitectureSurface,
+    }),
   },
 }))
 
@@ -120,11 +151,14 @@ vi.mock('~/components/ui/button', async () =>
       readonly disabled?: boolean
       readonly onClick?: () => void
       readonly type?: 'button' | 'reset' | 'submit'
+      readonly 'data-architecture-chip'?: string
+      readonly 'data-architecture-level'?: string
     }) =>
     {
       const label = labelFor(props.children)
       mocks.buttons.push({
         label,
+        ...(props.disabled === true ? { disabled: true } : {}),
         ...(props.onClick === undefined ? {} : { onClick: props.onClick }),
       })
       return react.createElement(
@@ -133,6 +167,12 @@ vi.mock('~/components/ui/button', async () =>
           'data-button-label': label,
           disabled: props.disabled,
           type: props.type,
+          ...(props['data-architecture-chip'] === undefined
+            ? {}
+            : { 'data-architecture-chip': props['data-architecture-chip'] }),
+          ...(props['data-architecture-level'] === undefined
+            ? {}
+            : { 'data-architecture-level': props['data-architecture-level'] }),
         },
         props.children,
       )
@@ -175,7 +215,10 @@ const BASE_PLAN = {
   maxWorkers: 2,
 } satisfies Record<string, unknown>
 
-function persistedRevision(revision: number): OrchestratePlanRevision
+function persistedRevision(
+  revision: number,
+  architecturePaths?: ReadonlyArray<string>,
+): OrchestratePlanRevision
 {
   return {
     runId: 'run-42',
@@ -191,6 +234,7 @@ function persistedRevision(revision: number): OrchestratePlanRevision
     status: 'pending',
     createdAt: '2026-08-07T12:00:00.000Z',
     updatedAt: '2026-08-07T12:00:00.000Z',
+    ...(architecturePaths === undefined ? {} : { architecturePaths }),
   }
 }
 
@@ -200,10 +244,40 @@ function generation(state: ProposalGeneration['state']): ProposalGeneration
 }
 
 const environmentId = 'environment-orchestrate-card' as EnvironmentId
+const projectId = 'project-orchestrate-card' as ProjectId
 const threadRef = {
   environmentId,
   threadId: ThreadId.make('thread-1'),
 } as ScopedThreadRef
+const standingSource = {
+  kind: 'standing-project-generation' as const,
+  projectId,
+  generationId: 'a'.repeat(64),
+  side: 'analyzed' as const,
+  graphDigest: `sha256:${'b'.repeat(64)}`,
+}
+const readyAtlasStatus = {
+  state: 'ready' as const,
+  source: standingSource,
+  freshness: { builtAt: '2026-08-13T12:00:00.000Z', dirty: false },
+  lastBuildError: null,
+}
+const pathScopeChips = [
+  {
+    role: 'touched' as const,
+    level: 'systems' as const,
+    id: 'systems:runtime',
+    key: 'runtime',
+    label: 'Runtime',
+  },
+  {
+    role: 'context' as const,
+    level: 'blocks' as const,
+    id: 'blocks:store',
+    key: 'store',
+    label: 'Store',
+  },
+]
 const linkedLookup = {
   link: {
     proposalId: 'proposal-1',
@@ -224,6 +298,7 @@ function planActions(
   return {
     environmentId,
     threadRef,
+    projectId,
     instanceEntries: [],
     modelOptionsByInstance: new Map(),
     orchestratePlans,
@@ -259,6 +334,8 @@ beforeEach(() =>
   mocks.intervalCallbacks.length = 0
   mocks.lookup = linkedLookup
   mocks.generation = null
+  mocks.atlasStatus = readyAtlasStatus
+  mocks.pathScope = { version: 1, source: standingSource, chips: pathScopeChips }
   mocks.setInterval.mockImplementation((handler: TimerHandler) =>
   {
     if (typeof handler === 'function') mocks.intervalCallbacks.push(() => handler())
@@ -283,6 +360,22 @@ beforeEach(() =>
           isPending: false,
           hasSettled: true,
           refresh: mocks.generationRefresh,
+        }
+      case 'project-atlas-status':
+        return {
+          data: mocks.atlasStatus,
+          error: null,
+          isPending: false,
+          hasSettled: true,
+          refresh: vi.fn(),
+        }
+      case 'architecture-path-scope':
+        return {
+          data: mocks.pathScope,
+          error: null,
+          isPending: false,
+          hasSettled: true,
+          refresh: vi.fn(),
         }
       case 'workers-list':
         return {
@@ -427,42 +520,49 @@ describe('persisted orchestrate revision resolution', () =>
 
 describe('OrchestratePlanCard architecture strip', () =>
 {
-  it('places the immutable-revision strip on an active card and opens the exact proposal target', () =>
+  it('routes standing atlas chips without proposal APIs', () =>
   {
+    mocks.lookup = null
     const plan = parsePlan({ ...BASE_PLAN, revision: 3 })
-    const markup = renderCard(plan, [persistedRevision(3)])
+    const markup = renderCard(plan, [persistedRevision(3, ['src/api.ts'])])
     const stripIndex = markup.indexOf('data-orchestrate-architecture=')
 
     expect(stripIndex).toBeGreaterThan(markup.indexOf('</header>'))
     expect(stripIndex).toBeLessThan(markup.indexOf('<table'))
-    expect(markup.match(/data-orchestrate-architecture=/g)).toHaveLength(1)
-    expect(markup).toContain('data-orchestrate-architecture="linked-no-generation"')
-    expect(mocks.findProposalByOrchestrateRevision).toHaveBeenCalledWith({
+    expect(markup).toContain('data-orchestrate-architecture="ready"')
+    expect(markup).toContain('data-architecture-chip="touched"')
+    expect(markup).toContain('data-architecture-chip="context"')
+    expect(mocks.projectAtlasStatus).toHaveBeenCalledWith({
       environmentId,
-      input: {
-        sourceThreadId: threadRef.threadId,
-        runId: 'run-42',
-        revision: 3,
-      },
+      input: { projectId },
     })
-    expect(mocks.latestProposalGeneration).toHaveBeenCalledWith({
+    expect(mocks.getArchitecturePathScope).toHaveBeenCalledWith({
       environmentId,
       input: {
         threadId: threadRef.threadId,
-        proposalId: 'proposal-1',
-        revision: 2,
+        projectId,
+        paths: ['src/api.ts'],
+        generationId: standingSource.generationId,
       },
     })
+    expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
+    expect(mocks.latestProposalGeneration).not.toHaveBeenCalled()
+    expect(mocks.intervalCallbacks).toHaveLength(0)
+    expect(mocks.buttons.some((button) => button.label === 'Open review')).toBe(false)
 
-    const openExplorer = mocks.buttons.find((button) => button.label === 'Open review')
-    expect(openExplorer?.onClick).toBeTypeOf('function')
-    openExplorer?.onClick?.()
-    expect(mocks.openExplorer).toHaveBeenCalledWith(threadRef, {
-      kind: 'orchestrate',
-      threadId: threadRef.threadId,
-      runId: 'run-42',
-      revision: 3,
-    })
+    const chip = mocks.buttons.find((button) => button.label === 'Runtime')
+    expect(chip?.onClick).toBeTypeOf('function')
+    chip?.onClick?.()
+    expect(mocks.openArchitectureSurface).toHaveBeenCalledWith(
+      threadRef,
+      expect.objectContaining({
+        kind: 'architecture-scope',
+        target: {
+          source: standingSource,
+          scope: { level: 'systems', id: 'systems:runtime' },
+        },
+      }),
+    )
   })
 
   it('keeps the immutable-revision strip directly under a compact superseded summary', () =>
@@ -478,7 +578,7 @@ describe('OrchestratePlanCard architecture strip', () =>
       planIndex: 0,
     })
 
-    const markup = renderCard(plan, [persistedRevision(3)])
+    const markup = renderCard(plan, [persistedRevision(3, ['src/api.ts'])])
     const summaryIndex = markup.indexOf('A newer card owns this run response')
     const summaryEndIndex = markup.indexOf('</div>', summaryIndex)
     const stripIndex = markup.indexOf('data-orchestrate-architecture=')
@@ -491,26 +591,71 @@ describe('OrchestratePlanCard architecture strip', () =>
     expect(markup).not.toContain('<table')
   })
 
-  it('omits the strip when an exact committed revision is missing or the fence is legacy', () =>
+  it('reports an unready standing atlas honestly', () =>
   {
-    const revisions = [persistedRevision(3)]
+    mocks.atlasStatus = {
+      state: 'idle' as const,
+      source: null,
+      freshness: null,
+      lastBuildError: null,
+    }
+    const plan = parsePlan({ ...BASE_PLAN, revision: 3 })
+    const markup = renderCard(plan, [persistedRevision(3, ['src/api.ts'])])
+
+    expect(markup).toContain('data-orchestrate-architecture="unready"')
+    expect(markup).toContain('The standing Repository Atlas has not been built for this project.')
+    expect(mocks.getArchitecturePathScope).not.toHaveBeenCalled()
+    expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
+  })
+
+  it('omits the strip when paths or an exact committed revision are missing', () =>
+  {
+    const revisions = [persistedRevision(3, ['src/api.ts'])]
     const missing = renderCard(parsePlan({ ...BASE_PLAN, revision: 2 }), revisions)
     const legacy = renderCard(parsePlan(BASE_PLAN), revisions)
+    const noPaths = renderCard(parsePlan({ ...BASE_PLAN, revision: 3 }), [persistedRevision(3)])
 
     expect(missing).not.toContain('data-orchestrate-architecture=')
     expect(legacy).not.toContain('data-orchestrate-architecture=')
-    expect(mocks.findProposalByOrchestrateRevision).not.toHaveBeenCalled()
+    expect(noPaths).not.toContain('data-orchestrate-architecture=')
+    expect(mocks.getArchitecturePathScope).not.toHaveBeenCalled()
   })
 
-  it('refreshes linked queries without starting proposal generation', () =>
+  it('offers Open review when a generation exists even without architecture paths', () =>
   {
+    mocks.generation = generation('ready')
     const plan = parsePlan({ ...BASE_PLAN, revision: 3 })
-    renderCard(plan, [persistedRevision(3)])
+    const markup = renderCard(plan, [persistedRevision(3)])
 
-    expect(mocks.intervalCallbacks).toHaveLength(1)
-    mocks.intervalCallbacks[0]!()
-    expect(mocks.lookupRefresh).toHaveBeenCalledTimes(1)
-    expect(mocks.generationRefresh).toHaveBeenCalledTimes(1)
+    expect(markup).toContain('data-orchestrate-architecture="review"')
+    expect(mocks.getArchitecturePathScope).not.toHaveBeenCalled()
+    expect(mocks.projectAtlasStatus).not.toHaveBeenCalled()
+    const openExplorer = mocks.buttons.find((button) => button.label === 'Open review')
+    expect(openExplorer?.onClick).toBeTypeOf('function')
+    openExplorer?.onClick?.()
+    expect(mocks.openExplorer).toHaveBeenCalledWith(threadRef, {
+      kind: 'orchestrate',
+      threadId: threadRef.threadId,
+      runId: 'run-42',
+      revision: 3,
+    })
+  })
+
+  it('offers Open review only when a real proposal generation already exists', () =>
+  {
+    mocks.generation = generation('ready')
+    const plan = parsePlan({ ...BASE_PLAN, revision: 3 })
+    renderCard(plan, [persistedRevision(3, ['src/api.ts'])])
+
+    const openExplorer = mocks.buttons.find((button) => button.label === 'Open review')
+    expect(openExplorer?.onClick).toBeTypeOf('function')
+    openExplorer?.onClick?.()
+    expect(mocks.openExplorer).toHaveBeenCalledWith(threadRef, {
+      kind: 'orchestrate',
+      threadId: threadRef.threadId,
+      runId: 'run-42',
+      revision: 3,
+    })
     expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
   })
 })
@@ -592,26 +737,6 @@ describe('orchestrate architecture linkage', () =>
       }).kind,
     ).toBe('terminal')
   })
-
-  it('keeps polling the exact link and stops generation polling after revert pruning', () =>
-  {
-    const refreshLookup = vi.fn()
-    const refreshGeneration = vi.fn()
-
-    refreshOrchestrateArchitectureQueries({
-      linked: true,
-      refreshLookup,
-      refreshGeneration,
-    })
-    refreshOrchestrateArchitectureQueries({
-      linked: false,
-      refreshLookup,
-      refreshGeneration,
-    })
-
-    expect(refreshLookup).toHaveBeenCalledTimes(2)
-    expect(refreshGeneration).toHaveBeenCalledTimes(1)
-  })
 })
 
 describe('buildOrchestrateApprovalReply', () =>
@@ -668,5 +793,24 @@ describe('buildOrchestrateApprovalReply', () =>
         },
       }),
     ).toBe('approve run=run-42 review=cursor')
+  })
+})
+
+describe('OrchestratePlanCard respond-failure retry', () =>
+{
+  it('re-enables Approve when the server returns the revision to pending', () =>
+  {
+    const plan = parsePlan({ ...BASE_PLAN, revision: 3 })
+    const draftKey = createOrchestratePlanCardStateKey('run-42', 'persisted-revision:3')
+    setOrchestratePlanCardStatus(draftKey, 'sent')
+    markOrchestratePlanRevisionStarted('run-42', 'persisted-revision:3')
+
+    const markup = renderCard(plan, [persistedRevision(3)])
+    const approve = mocks.buttons.find((button) => button.label === 'Approve')
+
+    expect(markup).not.toContain('Response sent')
+    expect(approve?.disabled).toBeUndefined()
+    expect(readOrchestratePlanCardState(draftKey).status).toBe('idle')
+    expect(isOrchestratePlanRevisionStarted('run-42', 'persisted-revision:3')).toBe(false)
   })
 })

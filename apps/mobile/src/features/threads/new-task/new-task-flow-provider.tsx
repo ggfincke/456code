@@ -8,11 +8,13 @@ import type {
   EnvironmentId,
   ModelSelection,
   ProviderOptionSelection,
+  ProviderRuntimeCapabilities,
   RuntimeMode,
   ServerProviderSkill,
 } from '@t3tools/contracts'
 import {
   CommandId,
+  CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   MessageId,
@@ -60,7 +62,6 @@ import {
 
 import {
   EMPTY_BRANCH_REFS,
-  branchBadgeLabel,
   normalizeSelectedWorktreePath,
   pendingTaskDraftKey,
   type WorkspaceMode,
@@ -116,6 +117,7 @@ type NewTaskFlowContextValue = {
   readonly selectedModel: ModelSelection | null
   readonly selectedModelOption: ModelOption | null
   readonly selectedProviderSkills: ReadonlyArray<ServerProviderSkill>
+  readonly selectedProviderRuntimeCapabilities: ProviderRuntimeCapabilities
   readonly providerGroups: ReadonlyArray<ProviderGroup>
   readonly filteredBranches: ReadonlyArray<VcsRef>
   readonly reset: () => void
@@ -401,6 +403,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       ) ?? null,
     [selectedEnvironmentServerConfig, selectedModel?.instanceId],
   )
+  const selectedProviderRuntimeCapabilities =
+    selectedProvider?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
   const selectedProviderSkills = useMemo(
     () =>
       (selectedProvider?.skills ?? []).filter(
@@ -660,17 +664,26 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
   const setRuntimeMode = useCallback(
     (value: RuntimeMode) =>
     {
-      if (selectedProjectDraftKey)
+      if (
+        selectedProjectDraftKey &&
+        selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(value)
+      )
       {
         updateComposerDraftSettings(selectedProjectDraftKey, { runtimeMode: value })
       }
     },
-    [selectedProjectDraftKey],
+    [selectedProjectDraftKey, selectedProviderRuntimeCapabilities.supportedRuntimeModes],
   )
   const setInteractionMode = useCallback(
     (value: CollaborationMode) =>
     {
-      if (selectedProjectDraftKey)
+      const supportsBaseMode =
+        selectedProviderRuntimeCapabilities.supportedInteractionModes.includes(value.baseMode)
+      const supportsOrchestrate =
+        !value.orchestrate ||
+        (selectedProviderRuntimeCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+          selectedProviderRuntimeCapabilities.orchestrateBaseModes.includes(value.baseMode))
+      if (selectedProjectDraftKey && supportsBaseMode && supportsOrchestrate)
       {
         updateComposerDraftSettings(selectedProjectDraftKey, {
           interactionMode: value.baseMode,
@@ -678,7 +691,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
         })
       }
     },
-    [selectedProjectDraftKey],
+    [selectedProjectDraftKey, selectedProviderRuntimeCapabilities],
   )
 
   const beginEditingPendingTask = useCallback((messageId: string): boolean =>
@@ -733,10 +746,27 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       }
       const workspaceSelection = draft.workspaceSelection
       const mode = workspaceSelection?.mode ?? 'local'
-      const collaborationMode = normalizeCollaborationMode(
+      const requestedCollaborationMode = normalizeCollaborationMode(
         draft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
         draft.orchestrate,
       )
+      const collaborationMode = normalizeCollaborationMode(
+        selectedProviderRuntimeCapabilities.supportedInteractionModes.includes(
+          requestedCollaborationMode.baseMode,
+        )
+          ? requestedCollaborationMode.baseMode
+          : 'default',
+        requestedCollaborationMode.orchestrate &&
+          selectedProviderRuntimeCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+          selectedProviderRuntimeCapabilities.orchestrateBaseModes.includes(
+            requestedCollaborationMode.baseMode,
+          ),
+      )
+      const requestedRuntimeMode = draft.runtimeMode ?? DEFAULT_RUNTIME_MODE
+      const persistedRuntimeMode =
+        selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(requestedRuntimeMode)
+          ? requestedRuntimeMode
+          : (selectedProviderRuntimeCapabilities.supportedRuntimeModes[0] ?? 'approval-required')
       // when the selection is the stand-in built from the queued snapshot,
       // persist the original (possibly absent) snapshot values — the
       // stand-in's placeholder title/workspaceRoot must never be written back
@@ -756,7 +786,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
         text,
         attachments: draft.attachments,
         modelSelection: draftModelSelection,
-        runtimeMode: draft.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        runtimeMode: persistedRuntimeMode,
         interactionMode: collaborationMode.baseMode,
         orchestrate: collaborationMode.orchestrate,
         creation: {
@@ -783,6 +813,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       selectedProject,
       selectedProjectDraftKey,
       startFromOrigin,
+      selectedProviderRuntimeCapabilities,
     ],
   )
 
@@ -919,6 +950,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       selectedModel,
       selectedModelOption,
       selectedProviderSkills,
+      selectedProviderRuntimeCapabilities,
       providerGroups,
       filteredBranches,
       reset,
@@ -974,6 +1006,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       selectedModelOption,
       selectedProjectDraftKey,
       selectedProviderSkills,
+      selectedProviderRuntimeCapabilities,
       setSelectedModelOptions,
       selectedProject,
       selectedProjectKey,

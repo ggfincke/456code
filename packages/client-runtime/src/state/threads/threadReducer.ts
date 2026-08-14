@@ -718,12 +718,21 @@ export function applyThreadDetailEvent(
         thread.activities.filter((entry) => entry.id !== replacedActivityId),
         activity,
       )
+      const orchestratePlans =
+        event.payload.activity.kind === 'provider.orchestrate-plan.respond.failed'
+          ? revertOrchestratePlansAfterRespondFailure(
+              thread.orchestratePlans,
+              event.payload.activity.payload,
+              event.payload.activity.createdAt,
+            )
+          : thread.orchestratePlans
 
       return {
         kind: 'updated',
         thread: {
           ...thread,
           activities,
+          orchestratePlans,
           pendingHandoff:
             event.payload.activity.kind === 'provider.handoff.delivered'
               ? null
@@ -806,6 +815,98 @@ export function applyThreadDetailEvent(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+// command ACK occupies the revision as approved/rejected before sendTurn;
+// a failed envelope must free it so the user can respond again
+function readOrchestratePlanRespondFailureTarget(payload: unknown): {
+  readonly runId: string
+  readonly revision: number
+} | null
+{
+  if (typeof payload !== 'object' || payload === null)
+  {
+    return null
+  }
+  const record = payload as Record<string, unknown>
+  const runId = typeof record.runId === 'string' ? record.runId.trim() : ''
+  const revision = record.revision
+  if (
+    runId.length === 0 ||
+    typeof revision !== 'number' ||
+    !Number.isInteger(revision) ||
+    revision < 0
+  )
+  {
+    return null
+  }
+  return { runId, revision }
+}
+
+function pickOccupiedOrchestratePlanForRespondFailure(
+  plans: OrchestrationThread['orchestratePlans'],
+  payload: unknown,
+  failureCreatedAt: string,
+): { readonly runId: string; readonly revision: number } | null
+{
+  const occupied = plans.filter(
+    (entry) =>
+      (entry.status === 'approved' || entry.status === 'rejected') &&
+      entry.updatedAt <= failureCreatedAt,
+  )
+  if (occupied.length === 0)
+  {
+    return null
+  }
+  const target = readOrchestratePlanRespondFailureTarget(payload)
+  if (target !== null)
+  {
+    return occupied.some(
+      (entry) => entry.runId === target.runId && entry.revision === target.revision,
+    )
+      ? target
+      : null
+  }
+  return occupied.reduce((best, entry) =>
+  {
+    if (entry.updatedAt > best.updatedAt)
+    {
+      return entry
+    }
+    if (entry.updatedAt === best.updatedAt && entry.revision > best.revision)
+    {
+      return entry
+    }
+    return best
+  })
+}
+
+function revertOrchestratePlansAfterRespondFailure(
+  plans: OrchestrationThread['orchestratePlans'],
+  payload: unknown,
+  updatedAt: string,
+): OrchestrationThread['orchestratePlans']
+{
+  const picked = pickOccupiedOrchestratePlanForRespondFailure(plans, payload, updatedAt)
+  if (picked === null)
+  {
+    return plans
+  }
+  let changed = false
+  const next = plans.map((entry) =>
+  {
+    if (
+      entry.runId !== picked.runId ||
+      entry.revision !== picked.revision ||
+      (entry.status !== 'approved' && entry.status !== 'rejected')
+    )
+    {
+      return entry
+    }
+    changed = true
+    return { ...entry, status: 'pending' as const, updatedAt }
+  })
+  return changed ? next : plans
+}
 
 // turn state to settle a still-running latest turn with when its session
 // leaves the "running" status, or null while the session is (re)starting or

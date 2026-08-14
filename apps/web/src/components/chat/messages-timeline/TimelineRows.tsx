@@ -6,6 +6,7 @@ import { cn } from '~/lib/utils'
 
 import { AssistantTimelineRow } from './AssistantTimelineRow'
 import {
+  OrchestratePlanTimelineRow,
   ProposedPlanTimelineRow,
   ProviderSwitchTimelineRow,
   TurnFoldTimelineRow,
@@ -46,6 +47,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === 'proposed-plan' ? <ProposedPlanTimelineRow row={row} /> : null}
+      {row.kind === 'orchestrate-plan' ? <OrchestratePlanTimelineRow row={row} /> : null}
       {row.kind === 'provider-switch' ? <ProviderSwitchTimelineRow row={row} /> : null}
       {row.kind === 'worker-verdict' ? <WorkerVerdictTimelineRow row={row} /> : null}
       {row.kind === 'working' ? <WorkingTimelineRow row={row} /> : null}

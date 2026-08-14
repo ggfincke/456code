@@ -66,6 +66,13 @@ export function getProviderSummary(provider: ServerProvider | undefined)
       detail: provider.message ?? null,
     }
   }
+  if (provider.auth.status === 'not-applicable')
+  {
+    return {
+      headline: 'No sign-in required',
+      detail: provider.message ?? null,
+    }
+  }
   if (provider.status === 'warning')
   {
     return {

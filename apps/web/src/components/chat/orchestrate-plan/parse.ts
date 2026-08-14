@@ -7,6 +7,7 @@ import type {
   OrchestratePlanStageOverride,
   ProviderInstanceId,
   EnvironmentId,
+  ProjectId,
   ScopedThreadRef,
 } from '@t3tools/contracts'
 
@@ -58,6 +59,7 @@ export interface OrchestratePlanActions
 {
   environmentId: EnvironmentId
   threadRef: ScopedThreadRef | null
+  projectId: ProjectId | null
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>
   orchestratePlans: ReadonlyArray<OrchestratePlanRevision>
@@ -428,18 +430,28 @@ export function persistedRevisionToPlan(revision: OrchestratePlanRevision): Orch
 }
 
 // harnesses the worker broker can launch directly; models picked from other
-// providers are sent model-only and the orchestrator resolves the harness
-export const BROKER_PROVIDERS = new Set(['codex', 'cursor', 'coral'])
+// providers are sent model-only and the orchestrator resolves the harness.
+// coral stays a reserved broker slug even after the app Coral driver ships.
+export const BROKER_HARNESSES = new Set(['codex', 'cursor', 'coral'])
+export const BROKER_PROVIDERS = BROKER_HARNESSES
 
-// the configured instance a plan-declared provider maps to, if any; a plan may
-// name a broker-only provider (coral) that no app driver serves, and such a
-// stage has no resolved binding of its own
+const BROKER_HARNESS_BY_APP_DRIVER = new Map([
+  ['codex', 'codex'],
+  ['cursor', 'cursor'],
+] as const)
+
+// the configured instance a plan-declared provider maps to, if any; coral is a
+// reserved broker harness slug and never binds to the app Coral driver
 export function findStageProviderEntry(
   provider: string,
   entries: ReadonlyArray<ProviderInstanceEntry>,
 ): ProviderInstanceEntry | null
 {
-  return entries.find((candidate) => candidate.driverKind === provider) ?? null
+  const driver = [...BROKER_HARNESS_BY_APP_DRIVER.entries()].find(
+    ([, harness]) => harness === provider,
+  )?.[0]
+  if (BROKER_HARNESSES.has(provider) && driver === undefined) return null
+  return entries.find((candidate) => candidate.driverKind === (driver ?? provider)) ?? null
 }
 
 export function initialSelection(

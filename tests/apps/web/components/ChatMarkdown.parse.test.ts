@@ -1,11 +1,15 @@
 // tests/apps/web/components/ChatMarkdown.parse.test.ts
 // verifies orchestrate plan diagnostics without rendering the chat surface
+import type { OrchestratePlanRevision } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
 
+import { resolveChatMarkdownOrchestrateFence } from '../../../../apps/web/src/components/ChatMarkdown'
 import { parseOrchestratePlanResult } from '../../../../apps/web/src/components/chat/OrchestratePlanCard'
 
 const VALID_PLAN = {
   workflow: 'review-and-fix',
+  runId: 'run-42',
+  revision: 3,
   stages: [
     {
       id: 'review',
@@ -25,6 +29,22 @@ const VALID_PLAN = {
     },
   ],
 }
+
+const persistedRevision = {
+  runId: 'run-42',
+  revision: 3,
+  turnId: null,
+  workflow: 'review-and-fix',
+  task: '',
+  stages: [],
+  totalWorkers: 0,
+  maxWorkers: 0,
+  source: 'tool',
+  leadModelSelection: null,
+  status: 'pending',
+  createdAt: '2026-08-13T12:00:00.000Z',
+  updatedAt: '2026-08-13T12:00:00.000Z',
+} satisfies OrchestratePlanRevision
 
 describe('parseOrchestratePlanResult', () =>
 {
@@ -49,5 +69,34 @@ describe('parseOrchestratePlanResult', () =>
 
     expect(result).toEqual({ status: 'incomplete' })
     expect('diagnostic' in result).toBe(false)
+  })
+})
+
+describe('ChatMarkdown orchestrate-plan fences', () =>
+{
+  it('returns null for a persisted matching fence', () =>
+  {
+    const mount = resolveChatMarkdownOrchestrateFence({
+      language: 'orchestrate-plan',
+      code: JSON.stringify(VALID_PLAN),
+      isComplete: true,
+      orchestratePlans: [persistedRevision],
+      hasActions: true,
+    })
+
+    expect(mount).toEqual({ kind: 'suppress' })
+  })
+
+  it('still mounts a card when persist lookup misses', () =>
+  {
+    const mount = resolveChatMarkdownOrchestrateFence({
+      language: 'orchestrate-plan',
+      code: JSON.stringify(VALID_PLAN),
+      isComplete: true,
+      orchestratePlans: [],
+      hasActions: true,
+    })
+
+    expect(mount.kind).toBe('card')
   })
 })

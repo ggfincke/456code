@@ -198,6 +198,12 @@ export function createProjectEnvironmentAtoms<R, E>(
       staleTimeMs: Number.POSITIVE_INFINITY,
       idleTtlMs: 5 * 60_000,
     }),
+    getArchitecturePathScope: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:cartographer:architecture-path-scope',
+      tag: WS_METHODS.cartographerGetArchitecturePathScope,
+      staleTimeMs: Number.POSITIVE_INFINITY,
+      idleTtlMs: 5 * 60_000,
+    }),
     getArchitectureSource: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:cartographer:architecture-source',
       tag: WS_METHODS.cartographerGetArchitectureSource,

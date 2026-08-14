@@ -563,6 +563,89 @@ describe('deriveMessagesTimelineRows', () =>
     ).toBeDefined()
   })
 
+  it('keeps persisted orchestrate plan rows visible when commentary is folded', () =>
+  {
+    const revision = {
+      runId: 'run-42',
+      revision: 1,
+      turnId: null,
+      workflow: 'implementation',
+      task: 'Ship it',
+      stages: [],
+      totalWorkers: 0,
+      maxWorkers: 0,
+      source: 'tool' as const,
+      leadModelSelection: null,
+      status: 'pending' as const,
+      createdAt: '2026-01-01T00:00:12Z',
+      updatedAt: '2026-01-01T00:00:12Z',
+    }
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: 'user-entry',
+          kind: 'message' as const,
+          createdAt: '2026-01-01T00:00:00Z',
+          message: {
+            id: 'user-1' as never,
+            role: 'user' as const,
+            text: 'orchestrate this',
+            turnId: null,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            streaming: false,
+          },
+        },
+        {
+          id: 'assistant-thought-entry',
+          kind: 'message' as const,
+          createdAt: '2026-01-01T00:00:05Z',
+          message: {
+            id: 'assistant-thought' as never,
+            role: 'assistant' as const,
+            text: 'Planning.',
+            turnId: 'turn-1' as never,
+            createdAt: '2026-01-01T00:00:05Z',
+            updatedAt: '2026-01-01T00:00:06Z',
+            streaming: false,
+          },
+        },
+        {
+          id: 'orchestrate-plan:run-42:1',
+          kind: 'orchestrate-plan' as const,
+          createdAt: '2026-01-01T00:00:12Z',
+          revision,
+        },
+        {
+          id: 'assistant-final-entry',
+          kind: 'message' as const,
+          createdAt: '2026-01-01T00:00:20Z',
+          message: {
+            id: 'assistant-final' as never,
+            role: 'assistant' as const,
+            text: 'Waiting for approval.',
+            turnId: 'turn-1' as never,
+            createdAt: '2026-01-01T00:00:20Z',
+            updatedAt: '2026-01-01T00:00:22Z',
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    })
+
+    expect(rows.map((row) => row.id)).toEqual([
+      'user-entry',
+      'turn-fold:turn-1',
+      'orchestrate-plan:run-42:1',
+      'assistant-final-entry',
+    ])
+    expect(rows.some((row) => row.kind === 'orchestrate-plan')).toBe(true)
+  })
+
   it('derives a sane duration for a steer-superseded turn with one instant commentary message', () =>
   {
     // a steer ends the previous turn early: its only message completes the

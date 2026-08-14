@@ -948,6 +948,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
       selectedProviderSlashCommands: ctxSelectedProviderSlashCommands,
+      runtimeMode: dispatchRuntimeMode,
     } = sendCtx
     const promptForDispatch = directProviderSlashCommand ?? sendCtx.prompt
     if (
@@ -1300,7 +1301,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         ...(send.localCheckoutBranchMismatch
           ? { branch: send.localCheckoutBranchMismatch.currentBranch }
           : {}),
-        runtimeMode: send.runtimeMode,
+        runtimeMode: dispatchRuntimeMode,
         collaborationMode: collaborationModeForSend,
       })
       if (settingsResult._tag === 'Failure')
@@ -1327,7 +1328,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
                       projectId: activeProject.id,
                       title,
                       modelSelection: threadCreateModelSelection,
-                      runtimeMode: send.runtimeMode,
+                      runtimeMode: dispatchRuntimeMode,
                       interactionMode: dispatchMode.interactionMode,
                       orchestrate: dispatchMode.orchestrate,
                       branch: send.activeThreadBranch,
@@ -1362,7 +1363,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           },
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
-          runtimeMode: send.runtimeMode,
+          runtimeMode: dispatchRuntimeMode,
           interactionMode: dispatchMode.interactionMode,
           orchestrate: dispatchMode.orchestrate,
           ...(bootstrap ? { bootstrap } : {}),

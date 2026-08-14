@@ -1,7 +1,12 @@
 // apps/web/src/components/chat/messages-timeline/grouping.ts
 // derives stable timeline rows from session entries
 
-import { type MessageId, type OrchestrationLatestTurn, type TurnId } from '@t3tools/contracts'
+import {
+  type MessageId,
+  type OrchestratePlanRevision,
+  type OrchestrationLatestTurn,
+  type TurnId,
+} from '@t3tools/contracts'
 import * as Equal from 'effect/Equal'
 import { type ProviderSwitchTimelineEvent } from '../../../providerSwitchPresentation'
 import {
@@ -93,6 +98,12 @@ export type MessagesTimelineRow =
       id: string
       createdAt: string
       proposedPlan: ProposedPlan
+    }
+  | {
+      kind: 'orchestrate-plan'
+      id: string
+      createdAt: string
+      revision: OrchestratePlanRevision
     }
   | {
       kind: 'provider-switch'
@@ -498,6 +509,17 @@ export function deriveMessagesTimelineRows(input: {
       continue
     }
 
+    if (timelineEntry.kind === 'orchestrate-plan')
+    {
+      nextRows.push({
+        kind: 'orchestrate-plan',
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        revision: timelineEntry.revision,
+      })
+      continue
+    }
+
     if (timelineEntry.kind === 'provider-switch')
     {
       nextRows.push({
@@ -609,6 +631,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case 'proposed-plan':
       return a.proposedPlan === (b as typeof a).proposedPlan
+
+    case 'orchestrate-plan':
+      return a.revision === (b as typeof a).revision
 
     case 'provider-switch':
       return a.event === (b as typeof a).event
