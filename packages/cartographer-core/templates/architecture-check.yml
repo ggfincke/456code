@@ -1,0 +1,97 @@
+# templates/architecture-check.yml
+# starting-point PR workflow -> copy into .github/workflows/ of a target repo
+# uses pull_request (not pull_request_target) & comments on same-repo PRs only
+
+# ! pin every third-party action to an immutable commit SHA before production
+# ! use; replace the CARTOGRAPHER_REF tag below with a full release commit SHA
+# ! so the analyzed toolchain can't shift underneath a security-sensitive PR
+
+name: Architecture Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  # pin to a released Cartographer commit SHA (or tag) for reproducibility
+  CARTOGRAPHER_REPO: https://github.com/ggfincke/cartographer
+  CARTOGRAPHER_REF: main
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # cartographer is not yet published -> build standalone from source at a
+      # pinned ref; npm ci only (never fall back to a non-reproducible install)
+      # shallow fetch (not clone --branch) so CARTOGRAPHER_REF may be a branch,
+      # tag, or raw commit SHA
+      - name: Install cartographer
+        run: |
+          git init /tmp/cartographer
+          cd /tmp/cartographer
+          git remote add origin "$CARTOGRAPHER_REPO"
+          git fetch --depth 1 origin "$CARTOGRAPHER_REF"
+          git -c advice.detachedHead=false checkout FETCH_HEAD
+          npm ci
+          npm run build
+
+      - name: Baseline graph from base ref
+        run: |
+          git checkout ${{ github.event.pull_request.base.sha }}
+          node /tmp/cartographer/dist/cli/index.js build .
+          git checkout ${{ github.event.pull_request.head.sha }}
+
+      - name: Check drift against baseline
+        id: drift
+        continue-on-error: true
+        run: node /tmp/cartographer/dist/cli/index.js check-pr .
+
+      - name: Read architectural drift state
+        id: drift-state
+        if: ${{ always() && hashFiles('.cartographer/pr-diff.json') != '' }}
+        run: |
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync } from "node:fs"
+            const diff = JSON.parse(
+              readFileSync(".cartographer/pr-diff.json", "utf8")
+            )
+            appendFileSync(
+              process.env.GITHUB_OUTPUT,
+              `changed=${diff.changed === true}\n`
+            )
+          '
+
+      - name: Upload architecture artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-artifacts
+          path: .cartographer/
+
+      - name: Comment on same-repo PRs
+        if: ${{ steps.drift-state.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('.cartographer/pr-summary.md') != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --body-file .cartographer/pr-summary.md
+
+      # re-emit the error-severity gate after upload/comment ran
+      # (continue-on-error above only defers it so artifacts always publish)
+      - name: Enforce architecture gate
+        if: ${{ steps.drift.outcome == 'failure' }}
+        run: |
+          echo "new error-severity rule violation -> see the PR comment / artifacts"
+          exit 1

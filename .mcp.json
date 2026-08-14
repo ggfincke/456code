@@ -6,6 +6,10 @@
       "env": {
         "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,ui-automation,debugging,logging"
       }
+    },
+    "cartographer": {
+      "command": "node",
+      "args": ["packages/cartographer-core/dist/mcp/bin.js"]
     }
   }
 }
