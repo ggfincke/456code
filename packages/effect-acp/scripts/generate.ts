@@ -2,9 +2,13 @@
 // packages/effect-acp/scripts/generate.ts
 // run the generate repository workflow
 
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeOS from 'node:os'
+
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { make as makeJsonSchemaGenerator } from '@effect/openapi-generator/JsonSchemaGenerator'
+import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -15,7 +19,9 @@ import { Command, Flag } from 'effect/unstable/cli'
 import { FetchHttpClient, HttpClient, HttpClientResponse } from 'effect/unstable/http'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
-const CURRENT_SCHEMA_RELEASE = 'v0.11.3'
+const CURRENT_SCHEMA_RELEASE = 'schema-v1.20.0'
+const CURRENT_SCHEMA_SHA256 = 'f71fbcb7beeae82770e9c33d1e5969999868789cacec509289331a1205816838'
+const CURRENT_META_SHA256 = '3026898232badf413624010d1343e20bef853e6705c62d6b56387cf9de6b0543'
 
 interface GenerateCommandError
 {
@@ -38,6 +44,7 @@ const UpstreamJsonSchemaSchema = Schema.Struct({
 const MetaJsonSchema = Schema.Struct({
   agentMethods: Schema.Record(Schema.String, Schema.String),
   clientMethods: Schema.Record(Schema.String, Schema.String),
+  protocolMethods: Schema.Record(Schema.String, Schema.String),
   version: Schema.Union([Schema.Number, Schema.String]),
 })
 const encodeAgentMethods = Schema.encodeEffect(
@@ -45,6 +52,9 @@ const encodeAgentMethods = Schema.encodeEffect(
 )
 const encodeClientMethods = Schema.encodeEffect(
   Schema.fromJsonString(MetaJsonSchema.fields.clientMethods),
+)
+const encodeProtocolMethods = Schema.encodeEffect(
+  Schema.fromJsonString(MetaJsonSchema.fields.protocolMethods),
 )
 const encodeVersion = Schema.encodeEffect(Schema.fromJsonString(MetaJsonSchema.fields.version))
 
@@ -72,8 +82,13 @@ const ensureGeneratedDir = Effect.fn('ensureGeneratedDir')(function* ()
   yield* fs.makeDirectory(generatedDir, { recursive: true })
 })
 
-const downloadFile = Effect.fn('downloadFile')(function* (url: string, outputPath: string)
+const downloadFile = Effect.fn('downloadFile')(function* (
+  url: string,
+  outputPath: string,
+  expectedSha256: string,
+)
 {
+  const crypto = yield* Crypto.Crypto
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
 
@@ -84,6 +99,16 @@ const downloadFile = Effect.fn('downloadFile')(function* (url: string, outputPat
     Effect.flatMap((response) => response.text),
   )
 
+  const digest = yield* crypto.digest('SHA-256', new TextEncoder().encode(text))
+  const actualSha256 = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  if (actualSha256 !== expectedSha256)
+  {
+    return yield* Effect.fail<GenerateCommandError>({
+      _tag: 'GenerateCommandError',
+      message: `ACP schema asset checksum mismatch for ${url}: expected ${expectedSha256}, received ${actualSha256}`,
+    })
+  }
+
   yield* fs.writeFileString(outputPath, text)
 })
 
@@ -93,8 +118,8 @@ const downloadSchemas = Effect.fn('downloadSchemas')(function* (tag: string)
   const fs = yield* FileSystem.FileSystem
   const baseUrl = `https://github.com/agentclientprotocol/agent-client-protocol/releases/download/${tag}`
 
-  yield* downloadFile(`${baseUrl}/schema.unstable.json`, upstreamSchemaPath)
-  yield* downloadFile(`${baseUrl}/meta.unstable.json`, upstreamMetaPath)
+  yield* downloadFile(`${baseUrl}/schema.unstable.json`, upstreamSchemaPath, CURRENT_SCHEMA_SHA256)
+  yield* downloadFile(`${baseUrl}/meta.unstable.json`, upstreamMetaPath, CURRENT_META_SHA256)
 
   yield* Effect.addFinalizer(() =>
     Effect.all([fs.remove(upstreamSchemaPath), fs.remove(upstreamMetaPath)]).pipe(
@@ -283,6 +308,8 @@ const generateSchemas = Effect.fn('generateSchemas')(function* (skipDownload: bo
     '',
     `export const CLIENT_METHODS = ${yield* encodeClientMethods(upstreamMeta.clientMethods)} as const;`,
     '',
+    `export const PROTOCOL_METHODS = ${yield* encodeProtocolMethods(upstreamMeta.protocolMethods)} as const;`,
+    '',
     `export const PROTOCOL_VERSION = ${yield* encodeVersion(upstreamMeta.version)} as const;`,
     '',
   ].join('\n')
@@ -290,16 +317,28 @@ const generateSchemas = Effect.fn('generateSchemas')(function* (skipDownload: bo
   yield* writeGeneratedFiles(schemaOutput, metaOutput)
   yield* Effect.log(`Generated ${generatedEntries.size} ACP schemas from ${CURRENT_SCHEMA_RELEASE}`)
 
-  const { generatedDir } = yield* getGeneratedPaths()
+  const { metaOutputPath, schemaOutputPath } = yield* getGeneratedPaths()
   yield* Effect.service(ChildProcessSpawner.ChildProcessSpawner).pipe(
-    Effect.flatMap((spawner) => spawner.spawn(ChildProcess.make('bun', ['oxfmt', generatedDir]))),
+    Effect.flatMap((spawner) =>
+      spawner.spawn(
+        ChildProcess.make('pnpm', [
+          'exec',
+          'prettier',
+          '--ignore-path',
+          NodeOS.devNull,
+          '--write',
+          schemaOutputPath,
+          metaOutputPath,
+        ]),
+      ),
+    ),
     Effect.flatMap((child) => child.exitCode),
     Effect.tap((code) =>
       code === 0
         ? Effect.void
         : Effect.fail<GenerateCommandError>({
             _tag: 'GenerateCommandError',
-            message: `oxfmt failed with exit code ${code}`,
+            message: `Generated ACP source formatting failed with exit code ${code}`,
           }),
     ),
   )

@@ -10,12 +10,14 @@ import * as Queue from 'effect/Queue'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import * as Ref from 'effect/Ref'
+import * as Option from 'effect/Option'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
 import { it, assert } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 
 import * as AcpSchema from '../../../packages/effect-acp/src/_generated/schema.gen.ts'
+import * as AcpClient from '../../../packages/effect-acp/src/client.ts'
 import * as AcpProtocol from '../../../packages/effect-acp/src/protocol.ts'
 import {
   encodeJsonl,
@@ -38,8 +40,12 @@ const SessionUpdateNotification = jsonRpcNotification(
   AcpSchema.SessionNotification,
 )
 const ElicitationCompleteNotification = jsonRpcNotification(
-  'session/elicitation/complete',
-  AcpSchema.ElicitationCompleteNotification,
+  'elicitation/complete',
+  AcpSchema.CompleteElicitationNotification,
+)
+const CancelRequestNotification = jsonRpcNotification(
+  '$/cancel_request',
+  AcpSchema.CancelRequestNotification,
 )
 const RequestPermissionRequest = jsonRpcRequest(
   'session/request_permission',
@@ -57,6 +63,7 @@ const decodeRequestPermissionResponse = Schema.decodeEffect(
   Schema.fromJsonString(RequestPermissionResponse),
 )
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 const encoder = new TextEncoder()
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, '../../../packages/effect-acp/test/fixtures/acp-mock-peer.ts'),
@@ -132,7 +139,7 @@ it.layer(NodeServices.layer)('effect-acp protocol', (it) =>
           input,
           yield* encodeJsonl(ElicitationCompleteNotification, {
             jsonrpc: '2.0',
-            method: 'session/elicitation/complete',
+            method: 'elicitation/complete',
             params: {
               elicitationId: 'elicitation-1',
             },
@@ -225,9 +232,37 @@ it.layer(NodeServices.layer)('effect-acp protocol', (it) =>
           direction: 'outgoing',
           stage: 'raw',
           payload:
-            '{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"session-1"},"id":"","headers":[]}\n',
+            '{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"session-1"}}\n',
         },
       ])
+    }),
+  )
+
+  it.effect('maps interrupted core RPC calls to exact ACP request cancellation frames', () =>
+    Effect.gen(function* ()
+    {
+      const { stdio, output } = yield* makeInMemoryStdio()
+      const client = yield* AcpClient.make(stdio)
+      const request = yield* client.agent
+        .initialize({
+          protocolVersion: 1,
+          clientCapabilities: {},
+          clientInfo: { name: 'effect-acp-test', version: '0.0.0' },
+        })
+        .pipe(Effect.forkScoped)
+
+      assert.deepInclude(decodeUnknownJsonString(yield* Queue.take(output)), {
+        jsonrpc: '2.0',
+        id: 4_294_967_296,
+        method: 'initialize',
+      })
+
+      yield* Fiber.interrupt(request)
+      assert.deepEqual(decodeUnknownJsonString(yield* Queue.take(output)), {
+        jsonrpc: '2.0',
+        method: '$/cancel_request',
+        params: { requestId: 4_294_967_296 },
+      })
     }),
   )
 
@@ -635,7 +670,7 @@ it.layer(NodeServices.layer)('effect-acp protocol', (it) =>
       assert.instanceOf(bigintError, AcpError.AcpProtocolParseError)
       assert.equal(bigintError.operation, 'encode-message')
       assert.equal(bigintError.method, 'x/test')
-      assert.instanceOf(bigintError.cause, TypeError)
+      assert.isTrue(Schema.isSchemaError(bigintError.cause))
       assert.equal(
         bigintError.message,
         "ACP protocol operation 'encode-message' failed for method 'x/test'.",
@@ -647,7 +682,7 @@ it.layer(NodeServices.layer)('effect-acp protocol', (it) =>
       assert.instanceOf(circularError, AcpError.AcpProtocolParseError)
       assert.equal(circularError.operation, 'encode-message')
       assert.equal(circularError.method, 'x/test')
-      assert.instanceOf(circularError.cause, TypeError)
+      assert.isTrue(Schema.isSchemaError(circularError.cause))
 
       const requestError = yield* transport.request('x/request', 1n).pipe(
         Effect.match({
@@ -750,6 +785,119 @@ it.layer(NodeServices.layer)('effect-acp protocol', (it) =>
         id: 77,
         result: { ok: true },
       })
+    }),
+  )
+
+  it.effect('returns a structured error when an extension response cannot be encoded', () =>
+    Effect.gen(function* ()
+    {
+      const { stdio, input, output } = yield* makeInMemoryStdio()
+      yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        serverRequestMethods: new Set(),
+        onExtRequest: () => Effect.succeed(1n),
+      })
+
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(ExtRequest, {
+          jsonrpc: '2.0',
+          id: 79,
+          method: 'x/test',
+          params: { hello: 'unencodable' },
+          headers: [],
+        }),
+      )
+
+      const response = decodeUnknownJsonString(yield* Queue.take(output)) as {
+        readonly jsonrpc: string
+        readonly id: number
+        readonly error: {
+          readonly _tag: string
+          readonly data: ReadonlyArray<unknown>
+        }
+      }
+      assert.equal(response.jsonrpc, '2.0')
+      assert.equal(response.id, 79)
+      assert.equal(response.error._tag, 'Cause')
+      assert.deepEqual(response.error.data, [
+        {
+          _tag: 'Fail',
+          error: {
+            code: -32603,
+            message: 'Internal error',
+          },
+        },
+      ])
+    }),
+  )
+
+  it.effect('cancels only the matching inbound extension request and drains the rest on EOF', () =>
+    Effect.gen(function* ()
+    {
+      const { stdio, input, output } = yield* makeInMemoryStdio()
+      const firstStarted = yield* Deferred.make<void>()
+      const secondStarted = yield* Deferred.make<void>()
+      const firstFinalized = yield* Deferred.make<void>()
+      const secondFinalized = yield* Deferred.make<void>()
+      yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        serverRequestMethods: new Set(),
+        onExtRequest: (_method, params) =>
+        {
+          const isFirst =
+            typeof params === 'object' &&
+            params !== null &&
+            'hello' in params &&
+            params.hello === 'first'
+          return Deferred.succeed(isFirst ? firstStarted : secondStarted, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(
+              Deferred.succeed(isFirst ? firstFinalized : secondFinalized, undefined).pipe(
+                Effect.asVoid,
+              ),
+            ),
+          )
+        },
+      })
+
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(ExtRequest, {
+          jsonrpc: '2.0',
+          id: 77,
+          method: 'x/test',
+          params: { hello: 'first' },
+          headers: [],
+        }),
+      )
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(ExtRequest, {
+          jsonrpc: '2.0',
+          id: 78,
+          method: 'x/test',
+          params: { hello: 'second' },
+          headers: [],
+        }),
+      )
+      yield* Deferred.await(firstStarted)
+      yield* Deferred.await(secondStarted)
+
+      const cancelFirst = yield* encodeJsonl(CancelRequestNotification, {
+        jsonrpc: '2.0',
+        method: '$/cancel_request',
+        params: { requestId: 77 },
+      })
+      yield* Queue.offer(input, cancelFirst)
+      yield* Queue.offer(input, cancelFirst)
+      yield* Deferred.await(firstFinalized).pipe(Effect.timeout('1 second'))
+
+      assert.isTrue(Option.isNone(yield* Deferred.poll(secondFinalized)))
+      assert.isTrue(Option.isNone(yield* Queue.poll(output)))
+
+      yield* Queue.end(input)
+      yield* Deferred.await(secondFinalized).pipe(Effect.timeout('1 second'))
     }),
   )
 
