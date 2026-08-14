@@ -18,6 +18,7 @@ import { resolveServerBackedAppDisplayName } from '../branding.logic'
 import { AppSidebarLayout } from '../components/AppSidebarLayout'
 import { CommandPalette } from '../components/CommandPalette'
 import { SshPasswordPromptDialog } from '../components/desktop/SshPasswordPromptDialog'
+import { ThreadAttentionNotifier } from '../desktop/threadAttentionNotifier'
 import { ProviderUpdateLaunchNotification } from '../components/ProviderUpdateLaunchNotification'
 import { SlowRpcRequestToastCoordinator } from '../components/SlowRpcRequestToastCoordinator'
 import { Button } from '../components/ui/button'
@@ -138,6 +139,9 @@ function RootRouteView()
       <AnchoredToastProvider>
         <DocumentTitleSync />
         <GlassAppearanceSync />
+        {/* mounted here rather than inside a thread view so a turn that ends
+            while the user is somewhere else still notifies. */}
+        {primaryEnvironmentAuthenticated ? <ThreadAttentionNotifier /> : null}
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         <SshPasswordPromptDialog />
         <SlowRpcRequestToastCoordinator />

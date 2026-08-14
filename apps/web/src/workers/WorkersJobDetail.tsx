@@ -1,13 +1,14 @@
 // apps/web/src/workers/WorkersJobDetail.tsx
-// workers job detail, patch, task, and activity sections
+// workers job detail, verdict, patch, task, and activity sections
 
-import type {
-  EnvironmentId,
-  WorkersJobDetail,
-  WorkersJobStatus,
-  WorkersJobSummary,
-  WorkersListInput,
-  WorkersRunSummary,
+import {
+  WORKER_VERDICT_MAX_LENGTH,
+  type EnvironmentId,
+  type WorkersJobDetail,
+  type WorkersJobStatus,
+  type WorkersJobSummary,
+  type WorkersListInput,
+  type WorkersRunSummary,
 } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import { Check, ChevronLeft, ChevronRight, Copy, RefreshCw, TriangleAlert } from 'lucide-react'
@@ -16,6 +17,7 @@ import { type ReactNode, useEffect, useId, useMemo, useState } from 'react'
 import { Badge } from '~/components/ui/badge'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '~/components/ui/collapsible'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
+import { DraftInput } from '~/components/ui/draft-input'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import { Skeleton } from '~/components/ui/skeleton'
 import {
@@ -54,6 +56,7 @@ import {
   sortWorkerRunsNewestFirst,
   workerFailureView,
   workerJobElapsedLabel,
+  workerJobOutcomeView,
   workerJobPresentation,
   workerJobsHaveStages,
   workerModelLabel,
@@ -62,6 +65,7 @@ import {
   workerRunFailureBreakdown,
   workerRunSpanLabel,
   workerRunStatusChips,
+  workerScopeViolationGroups,
   workerStageCounts,
   workerStageGroups,
   workerStatusBadgeVariant,
@@ -84,6 +88,7 @@ export function WorkersJobPatchSection({ job }: { job: WorkersJobDetail })
 {
   const entries = workerPatchFileEntries(job)
   const clipboard = workerPatchClipboard(job)
+  const outcome = workerJobOutcomeView(job)
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: 'patch' })
 
   return (
@@ -99,6 +104,11 @@ export function WorkersJobPatchSection({ job }: { job: WorkersJobDetail })
               inline
             >{`Patch (${entries.length} file${entries.length === 1 ? '' : 's'})`}</SectionHeading>
           </CollapsibleTrigger>
+          {outcome === null ? null : (
+            <Badge size="sm" variant={outcome.variant}>
+              {outcome.label}
+            </Badge>
+          )}
           {clipboard === null ? null : (
             <button
               type="button"
@@ -209,6 +219,39 @@ export function WorkersJobTaskSection({ task }: { task: string })
       >
         {text.length > 0 ? text : 'No task text recorded.'}
       </p>
+    </section>
+  )
+}
+
+export function WorkersJobVerdictSection({
+  verdict,
+  onSave,
+}: {
+  verdict: string
+  onSave: (verdict: string) => void
+})
+{
+  return (
+    <section className="border-b border-border/60 px-3 py-2.5 last:border-b-0">
+      <div className="mb-1.5 flex items-center gap-2">
+        <SectionHeading inline>Verdict</SectionHeading>
+        <span className="ml-auto text-[10px] text-muted-foreground">Enter or blur to save</span>
+      </div>
+      <DraftInput
+        aria-label="Worker job verdict"
+        maxLength={WORKER_VERDICT_MAX_LENGTH}
+        placeholder="Add a one-line verdict"
+        size="sm"
+        value={verdict}
+        onCommit={(next) =>
+        {
+          const trimmed = next.trim()
+          if (trimmed !== verdict)
+          {
+            onSave(trimmed)
+          }
+        }}
+      />
     </section>
   )
 }
@@ -375,11 +418,15 @@ export function WorkersJobDetailView({
   job,
   summary: listSummary,
   nowMs,
+  verdict,
+  onSaveVerdict,
 }: {
   environmentId: EnvironmentId
   job: WorkersJobDetail
   summary: WorkersJobSummary | null
   nowMs: number
+  verdict?: string | undefined
+  onSaveVerdict?: ((verdict: string) => void) | undefined
 })
 {
   const verification = workerVerificationView(job.verification)
@@ -404,10 +451,22 @@ export function WorkersJobDetailView({
   const branch = Option.getOrNull(job.branch)
   const worktree = Option.getOrNull(job.worktree)
   const processExitCode = Option.getOrNull(job.processExitCode)
+  const scopeViolationGroups = workerScopeViolationGroups(job)
+  const scopeViolationCount = scopeViolationGroups.reduce(
+    (count, group) => count + group.items.length,
+    0,
+  )
+  const scopeViolationTitle = `${scopeViolationCount} warning${
+    scopeViolationCount === 1 ? '' : 's'
+  } in ${scopeViolationGroups.length} group${scopeViolationGroups.length === 1 ? '' : 's'}`
 
   return (
     <div className="pb-4">
       <WorkersJobTaskSection task={job.task} />
+
+      {onSaveVerdict === undefined ? null : (
+        <WorkersJobVerdictSection verdict={verdict ?? ''} onSave={onSaveVerdict} />
+      )}
 
       <WorkersJobActivitySection
         environmentId={environmentId}
@@ -514,12 +573,25 @@ export function WorkersJobDetailView({
         )}
       </DetailSection>
 
-      {job.scopeViolations.length === 0 ? null : (
-        <DetailSection title={`Scope violations (${job.scopeViolations.length})`}>
-          <ul className="space-y-0.5 font-mono text-xs text-destructive">
-            {job.scopeViolations.map((path) => (
-              <li key={path} className="break-all">
-                {path}
+      {scopeViolationGroups.length === 0 ? null : (
+        <DetailSection title={scopeViolationTitle}>
+          <ul className="space-y-2 text-xs text-destructive">
+            {scopeViolationGroups.map((group) => (
+              <li key={group.key}>
+                <div className="font-medium text-foreground">{group.label}</div>
+                <ul className="mt-1 space-y-0.5 border-s border-destructive/30 ps-2 font-mono">
+                  {group.items.map((item, index) => (
+                    <li
+                      key={`${item.path}:${item.phase ?? 'legacy'}:${index}`}
+                      className="break-all"
+                    >
+                      {item.path}
+                      {item.phase === null ? null : (
+                        <span className="ms-1 font-sans text-muted-foreground">({item.phase})</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
           </ul>

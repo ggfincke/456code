@@ -32,6 +32,14 @@ export function isProviderAuthFailureMessage(message: string | null | undefined)
   return message ? PROVIDER_AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(message)) : false
 }
 
+export function shouldPromoteThreadErrorToProviderReAuth(
+  status: ServerProvider | null,
+  visibleThreadError: string | null,
+): boolean
+{
+  return status !== null && isProviderAuthFailureMessage(visibleThreadError)
+}
+
 export function getProviderStatusBannerKey(
   status: ServerProvider | null,
   reAuthRequired = false,

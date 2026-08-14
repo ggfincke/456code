@@ -67,12 +67,47 @@ function usageWindowDurationMinutes(label: string): number | null
   }
 }
 
+// a scoped window measures one model, so it is not comparable to an aggregate one and stays out
+// of the duration ranking. it is re-admitted once it is nearly spent, because the blanket
+// exclusion meant no compact surface could ever say a model's own window was exhausted -- the
+// picker offered a model that had nothing left and the run kept choosing it
+function exhaustedScopedUsageWindows(
+  windows: ReadonlyArray<ServerProviderAccountUsageWindow>,
+): ReadonlyArray<ServerProviderAccountUsageWindow>
+{
+  return windows
+    .filter((window) => window.scopeLabel !== undefined && isProviderUsageWindowDanger(window))
+    .toSorted((left, right) => providerUsagePercentLeft(left) - providerUsagePercentLeft(right))
+}
+
+export function selectLongestProviderUsageWindow(
+  windows: ReadonlyArray<ServerProviderAccountUsageWindow>,
+): ServerProviderAccountUsageWindow | null
+{
+  // the most-spent scoped window outranks the longest aggregate one: it is the only number that
+  // explains why the next turn will fail, and the aggregate can look healthy while it is gone
+  const exhaustedScoped = exhaustedScopedUsageWindows(windows)[0]
+  if (exhaustedScoped) return exhaustedScoped
+
+  const ranked = windows
+    .filter((window) => window.scopeLabel === undefined)
+    .flatMap((window) =>
+    {
+      const duration = usageWindowDurationMinutes(window.label)
+      return duration === null ? [] : [{ window, duration }]
+    })
+    .toSorted((left, right) => right.duration - left.duration)
+
+  return ranked[0]?.window ?? null
+}
+
 export function selectCompactProviderUsageWindows(
   windows: ReadonlyArray<ServerProviderAccountUsageWindow>,
 ): ReadonlyArray<ServerProviderAccountUsageWindow>
 {
+  const exhaustedScoped = exhaustedScopedUsageWindows(windows)
   const aggregateWindows = windows.filter((window) => window.scopeLabel === undefined)
-  if (aggregateWindows.length <= 2) return aggregateWindows
+  if (aggregateWindows.length <= 2) return [...aggregateWindows, ...exhaustedScoped]
 
   const ranked = aggregateWindows
     .map((window, index) => ({
@@ -89,9 +124,9 @@ export function selectCompactProviderUsageWindows(
     })
   const shortest = ranked[0]?.window
   const longest = ranked.at(-1)?.window
-  if (!shortest) return []
-  if (!longest || longest.id === shortest.id) return [shortest]
-  return [shortest, longest]
+  if (!shortest) return exhaustedScoped
+  if (!longest || longest.id === shortest.id) return [shortest, ...exhaustedScoped]
+  return [shortest, longest, ...exhaustedScoped]
 }
 
 export function shouldShowProviderUsageStrip(input: {

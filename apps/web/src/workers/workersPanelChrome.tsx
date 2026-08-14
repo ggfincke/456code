@@ -53,6 +53,8 @@ import {
   shortSha,
   sortWorkerRunsNewestFirst,
   workerFailureView,
+  workerEvidenceOutcomeView,
+  workerJobOutcomeView,
   workerJobElapsedLabel,
   workerJobPresentation,
   workerJobsHaveStages,
@@ -136,7 +138,7 @@ export function StatusChips({ chips }: { chips: readonly WorkerRunStatusChip[] }
   return (
     <>
       {chips.map((chip) => (
-        <Badge key={chip.status} size="sm" variant={chip.variant}>
+        <Badge key={chip.status} size="sm" variant={chip.variant} className="opacity-70">
           {chip.count} {chip.status}
         </Badge>
       ))}
@@ -152,30 +154,53 @@ export function relativeOrDash(timestamp: Option.Option<string>): string
   return label.length === 0 ? iso : label
 }
 
-export function ScopeViolationBadge({ count }: { count: number })
+export function ScopeViolationBadge({
+  count,
+  groupCount,
+}: {
+  count: number
+  groupCount?: number | undefined
+})
 {
   if (count === 0) return null
+  const label =
+    groupCount === undefined
+      ? `${count} warning${count === 1 ? '' : 's'}`
+      : `${count} warning${count === 1 ? '' : 's'} in ${groupCount} group${
+          groupCount === 1 ? '' : 's'
+        }`
   return (
     <Badge size="sm" variant="destructive">
       <TriangleAlert />
-      {count} scope
+      {label}
     </Badge>
   )
 }
 
-// status chip plus, for terminal failures, the broker's failure class and the
-// salvageability evidence separating recoverable work from lost work
+// broker outcome evidence leads; patch, raw status, and failure diagnostics stay visible
 export function JobStatusBadges({ job }: { job: WorkersJobSummary })
 {
+  const evidenceOutcome = workerEvidenceOutcomeView(job)
+  const patchOutcome = workerJobOutcomeView(job)
   const failure = workerFailureView(job)
   const failureBadge =
     failure === null ? null : (
-      <Badge size="sm" variant={failure.salvageable ? 'warning' : 'outline'}>
+      <Badge size="sm" variant="outline">
         {failure.label}
       </Badge>
     )
   return (
     <span className="flex flex-wrap items-center gap-1">
+      {evidenceOutcome === null ? null : (
+        <Badge size="sm" variant={evidenceOutcome.variant}>
+          {evidenceOutcome.label}
+        </Badge>
+      )}
+      {patchOutcome === null ? null : (
+        <Badge size="sm" variant={patchOutcome.variant}>
+          {patchOutcome.label}
+        </Badge>
+      )}
       <Badge size="sm" variant={workerStatusBadgeVariant(job.status)}>
         {job.status}
       </Badge>

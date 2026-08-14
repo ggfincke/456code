@@ -1,5 +1,5 @@
 // tests/apps/web/composer-logic.test.ts
-// verify should submit composer on enter behavior
+// verify composer parsing, cursor, trigger, and submit behavior
 
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -9,9 +9,12 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
+  findUnknownLeadingComposerSlashCommand,
+  parseLeadingComposerSlashCommand,
   parseStandaloneComposerSlashCommand,
   parseLegacyOrchestrateInvocation,
   replaceTextRange,
+  resolveComposerSlashCommandMode,
   shouldSubmitComposerOnEnter,
 } from '../../../apps/web/src/composer-logic'
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from '../../../apps/web/src/lib/terminalContext'
@@ -425,6 +428,92 @@ describe('parseStandaloneComposerSlashCommand', () =>
   it('ignores slash commands with extra message text', () =>
   {
     expect(parseStandaloneComposerSlashCommand('/plan explain this')).toBeNull()
+  })
+})
+
+describe('resolveComposerSlashCommandMode', () =>
+{
+  it.each([
+    {
+      command: 'plan' as const,
+      current: { baseMode: 'default' as const, orchestrate: false },
+      expected: { baseMode: 'plan', orchestrate: false },
+    },
+    {
+      command: 'plan' as const,
+      current: { baseMode: 'default' as const, orchestrate: true },
+      expected: { baseMode: 'plan', orchestrate: true },
+    },
+    {
+      command: 'orchestrate' as const,
+      current: { baseMode: 'default' as const, orchestrate: false },
+      expected: { baseMode: 'default', orchestrate: true },
+    },
+    {
+      command: 'orchestrate' as const,
+      current: { baseMode: 'plan' as const, orchestrate: false },
+      expected: { baseMode: 'plan', orchestrate: true },
+    },
+    {
+      command: 'default' as const,
+      current: { baseMode: 'default' as const, orchestrate: true },
+      expected: { baseMode: 'default', orchestrate: false },
+    },
+    {
+      command: 'default' as const,
+      current: { baseMode: 'plan' as const, orchestrate: true },
+      expected: { baseMode: 'default', orchestrate: false },
+    },
+  ])('$command applies its collaboration-mode semantics', ({ command, current, expected }) =>
+  {
+    expect(resolveComposerSlashCommandMode(current, command)).toEqual(expected)
+  })
+})
+
+describe('parseLeadingComposerSlashCommand', () =>
+{
+  it.each([
+    ['/foo', 'foo'],
+    ['/foo-bar args', 'foo-bar'],
+    ['/FOO_2\nargs', 'FOO_2'],
+  ])('parses a leading slash command token from %s', (text, expected) =>
+  {
+    expect(parseLeadingComposerSlashCommand(text)).toBe(expected)
+  })
+
+  it.each(['//x', '/ x', '/foo.bar', 'use /foo'])('treats %s as prose', (text) =>
+  {
+    expect(parseLeadingComposerSlashCommand(text)).toBeNull()
+  })
+})
+
+describe('findUnknownLeadingComposerSlashCommand', () =>
+{
+  const providerSlashCommands = [{ name: 'compact' }]
+
+  it('returns an unknown command name', () =>
+  {
+    expect(findUnknownLeadingComposerSlashCommand('/mystery args', providerSlashCommands)).toBe(
+      'mystery',
+    )
+  })
+
+  it.each(['/model', '/plan', '/orchestrate', '/default'])(
+    'allows the built-in command %s',
+    (text) =>
+    {
+      expect(findUnknownLeadingComposerSlashCommand(text, providerSlashCommands)).toBeNull()
+    },
+  )
+
+  it.each(['/compact', '/COMPACT keep going'])('allows the provider command %s', (text) =>
+  {
+    expect(findUnknownLeadingComposerSlashCommand(text, providerSlashCommands)).toBeNull()
+  })
+
+  it.each(['//x', '/ x'])('does not classify prose %s as an unknown command', (text) =>
+  {
+    expect(findUnknownLeadingComposerSlashCommand(text, providerSlashCommands)).toBeNull()
   })
 })
 

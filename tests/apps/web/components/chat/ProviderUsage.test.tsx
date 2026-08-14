@@ -46,16 +46,17 @@ describe('provider usage presentation', () =>
     expect(isProviderUsageWindowDanger(threshold)).toBe(true)
   })
 
-  it('selects the shortest and longest aggregate windows and omits scoped limits', () =>
+  it('selects the shortest and longest aggregate windows and re-admits spent scoped limits', () =>
   {
     const selected = selectCompactProviderUsageWindows([
       window('week', 'Week', 84),
       window('month', 'Month', 20),
       window('five-hour', '5h', 62),
+      window('sonnet', 'Week', 30, 'Sonnet'),
       window('opus', 'Week', 95, 'Opus'),
     ])
 
-    expect(selected.map(({ id }) => id)).toEqual(['five-hour', 'month'])
+    expect(selected.map(({ id }) => id)).toEqual(['five-hour', 'month', 'opus'])
   })
 
   it('suppresses the strip for Favorites and search', () =>

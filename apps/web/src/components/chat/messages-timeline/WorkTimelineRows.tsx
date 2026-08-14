@@ -64,6 +64,7 @@ import {
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
 } from '../../../session-logic'
+import { workEntryIndicatesToolRunning, workEntryRunningSince } from '../../../session/worklog'
 import { formatChatTimestampTooltip, formatShortTimestamp } from '../../../timestampFormat'
 import { type TurnDiffSummary } from '../../../types'
 import ChatMarkdown from '../../ChatMarkdown'
@@ -433,6 +434,15 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName
   {
     return 'message-circle'
   }
+  // a compaction is the runtime working on itself, not a tool call. give both halves of the
+  // pair the same mark so the start row and the finished row read as one event
+  if (
+    workEntry.sourceActivityKind === 'context-compaction' ||
+    workEntry.sourceActivityKind === 'context-compaction.started'
+  )
+  {
+    return 'zap'
+  }
   if (workEntry.requestKind === 'command') return 'terminal'
   if (workEntry.requestKind === 'file-read') return 'eye'
   if (workEntry.requestKind === 'file-change') return 'square-pen'
@@ -527,7 +537,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const activity = use(TimelineRowActivityCtx)
   const [expanded, setExpanded] = useState(false)
   const iconConfig = workToneIcon(workEntry.tone)
-  const showWarningIndicator = workEntry.sourceActivityKind === 'runtime.warning'
+  // an approaching plan limit is the one warning that has to survive being skimmed, so it gets
+  // the same destructive treatment runtime.warning already has instead of blending into info rows
+  const showWarningIndicator =
+    workEntry.sourceActivityKind === 'runtime.warning' ||
+    workEntry.sourceActivityKind === 'account.rate-limit.warning'
   const entryIconName = showWarningIndicator ? 'x' : workEntryIconName(workEntry)
   const heading = toolWorkEntryHeading(workEntry)
   const rawPreview = workEntryPreview(workEntry, workspaceRoot)
@@ -561,6 +575,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       ? 'font-medium text-destructive'
       : 'font-medium text-foreground/82'
   const turnSettled = !activity.activeTurnInProgress
+  // a running row is never neutral, so it can never be upgraded to the check
+  // below: a tool the turn abandoned mid-flight must not read as completed
+  const showRunningIndicator = workEntryIndicatesToolRunning(workEntry)
+  const runningSince =
+    showRunningIndicator && !turnSettled ? workEntryRunningSince(workEntry) : null
   const showNeutralIndicator = !turnSettled && workEntryIndicatesToolNeutralStatus(workEntry)
   const showSuccessIndicator =
     workEntryIndicatesToolSuccess(workEntry) ||
@@ -606,9 +625,15 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{preview}</span>
               )}
             </p>
-            {metadataParts.length > 0 ? (
+            {metadataParts.length > 0 || runningSince ? (
               <p className="truncate text-[11px] leading-4 text-muted-foreground/55">
-                {metadataParts.join(' · ')}
+                {metadataParts.length > 0 ? metadataParts.join(' · ') : null}
+                {metadataParts.length > 0 && runningSince ? ' · ' : null}
+                {runningSince ? (
+                  <>
+                    Running for <WorkingTimer createdAt={runningSince} />
+                  </>
+                ) : null}
               </p>
             ) : null}
           </div>
@@ -641,6 +666,22 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                     <XIcon className="block size-3 shrink-0 text-destructive" aria-hidden />
                   </TooltipTrigger>
                   <TooltipPopup>Failed</TooltipPopup>
+                </Tooltip>
+              ) : showRunningIndicator ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="flex size-4 items-center justify-center" />}
+                  >
+                    {turnSettled ? (
+                      <MinusIcon className="block size-3 shrink-0 opacity-70" aria-hidden />
+                    ) : (
+                      <span className="inline-flex items-center gap-[2px]">
+                        <span className="h-1 w-1 rounded-full bg-current opacity-60 animate-status-pulse" />
+                        <span className="h-1 w-1 rounded-full bg-current opacity-60 animate-status-pulse [animation-delay:220ms]" />
+                      </span>
+                    )}
+                  </TooltipTrigger>
+                  <TooltipPopup>{turnSettled ? 'Interrupted' : 'Running'}</TooltipPopup>
                 </Tooltip>
               ) : showSuccessIndicator ? (
                 <Tooltip>

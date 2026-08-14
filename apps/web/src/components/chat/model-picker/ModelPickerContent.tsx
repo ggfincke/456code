@@ -8,7 +8,7 @@ import {
 import { resolveSelectableModel } from '@t3tools/shared/model'
 import { LegendList, type LegendListRef } from '@legendapp/list/react'
 import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
-import { SearchIcon } from 'lucide-react'
+import { SearchIcon, TriangleAlertIcon } from 'lucide-react'
 import { ModelListRow } from './ModelListRow'
 import { ModelPickerSidebar } from './ModelPickerSidebar'
 import { ProviderUsageStrip, shouldShowProviderUsageStrip } from '../ProviderUsage'
@@ -33,8 +33,8 @@ import {
 import { providerModelKey, sortProviderModelItems } from '../../../modelOrdering'
 import {
   describeProviderSwitchPickerIntent,
+  type ModelSwitchCacheHint,
   PROVIDER_SWITCH_PICKER_HEADING,
-  PROVIDER_SWITCH_PICKER_HINT,
 } from '../../../providerSwitchPresentation'
 
 type ModelPickerItem = {
@@ -93,6 +93,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // model set but are free to diverge via customModels).
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>
   switchableThreadProviderInstanceId?: ProviderInstanceId | null
+  // set only by the composer, and only when a same-instance model change would
+  // make the next turn re-read a large resident context. left unset by the
+  // worker-stage picker, where there is no live session to re-read.
+  modelSwitchCacheHint?: ModelSwitchCacheHint | null
   terminalOpen: boolean
   onRequestClose?: () => void
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null
@@ -722,15 +726,34 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   <p className="text-[11px] font-medium text-muted-foreground">
                     {PROVIDER_SWITCH_PICKER_HEADING}
                   </p>
-                  <p className="text-[11px] leading-snug text-muted-foreground/70">
-                    {PROVIDER_SWITCH_PICKER_HINT}
-                  </p>
                 </div>
               ) : null}
             </div>
 
             {showProviderUsage && selectedAccountUsage ? (
               <ProviderUsageStrip usage={selectedAccountUsage} displayMode={usageDisplayMode} />
+            ) : null}
+
+            {/* unlike the usage strip this stays visible while searching: a pick
+                can still be committed with Enter from the search results */}
+            {props.modelSwitchCacheHint ? (
+              <div
+                className="flex min-h-8 items-center gap-2 overflow-hidden border-b border-border/55 px-4 py-1.5 text-[11px]"
+                data-model-picker-cache-hint="true"
+                aria-label="Model change cost"
+              >
+                <TriangleAlertIcon
+                  aria-hidden="true"
+                  className="size-3 shrink-0 text-amber-600 dark:text-amber-400"
+                />
+                <span
+                  className="min-w-0 truncate font-medium text-muted-foreground/85"
+                  title={props.modelSwitchCacheHint.detail}
+                >
+                  {props.modelSwitchCacheHint.label}
+                </span>
+                <span className="sr-only">{props.modelSwitchCacheHint.detail}</span>
+              </div>
             ) : null}
 
             {/* Model list */}

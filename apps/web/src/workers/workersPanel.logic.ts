@@ -3,10 +3,13 @@
 
 import type {
   WorkersFailureClass,
+  WorkersJobOutcome,
   WorkersJobChange,
   WorkersJobStatus,
   WorkersJobSummary,
+  WorkersOutcomeCounts,
   WorkersRunSummary,
+  WorkersScopeViolationDetail,
   WorkersVerificationRun,
   WorkersVerificationSummary,
 } from '@t3tools/contracts'
@@ -16,6 +19,203 @@ import { formatDuration } from '~/session-logic'
 
 export type WorkerStatusBadgeVariant =
   'default' | 'destructive' | 'error' | 'info' | 'outline' | 'secondary' | 'success' | 'warning'
+
+export interface WorkerJobOutcomeFields
+{
+  readonly hasPatch?: Option.Option<boolean>
+}
+
+export interface WorkerJobOutcomeView
+{
+  readonly label: 'Patch available'
+  readonly variant: 'success'
+}
+
+// only the broker's explicit patch signal establishes this positive outcome;
+// legacy records and changed-file counts do not imply that a patch exists
+export function workerJobOutcomeView(job: WorkerJobOutcomeFields): WorkerJobOutcomeView | null
+{
+  if (Option.getOrNull(job.hasPatch ?? Option.none<boolean>()) !== true) return null
+  return { label: 'Patch available', variant: 'success' }
+}
+
+const JOB_OUTCOME_LABELS: Record<WorkersJobOutcome, string> = {
+  succeeded: 'Succeeded',
+  'worker-failed': 'Worker failed',
+  'environment-blocked': 'Environment blocked',
+  'baseline-broken': 'Baseline broken',
+  'rejected-scope': 'Rejected scope',
+  superseded: 'Superseded',
+  cancelled: 'Cancelled',
+  'broker-fault': 'Broker fault',
+}
+
+const JOB_OUTCOME_VARIANTS: Record<WorkersJobOutcome, WorkerStatusBadgeVariant> = {
+  succeeded: 'success',
+  'worker-failed': 'error',
+  'environment-blocked': 'warning',
+  'baseline-broken': 'warning',
+  'rejected-scope': 'destructive',
+  superseded: 'secondary',
+  cancelled: 'warning',
+  'broker-fault': 'error',
+}
+
+export interface WorkerEvidenceOutcomeView
+{
+  readonly outcome: WorkersJobOutcome
+  readonly label: string
+  readonly inferred: boolean
+  readonly variant: WorkerStatusBadgeVariant
+}
+
+function inferredJobOutcome(job: WorkersJobSummary): WorkersJobOutcome | null
+{
+  if (Option.getOrNull(job.cancelReason) === 'superseded') return 'superseded'
+
+  if (job.status === 'failed' || job.status === 'rejected')
+  {
+    switch (Option.getOrNull(job.failureClass))
+    {
+      case 'environment':
+      case 'verification-unusable':
+        return 'environment-blocked'
+      case 'baseline-broken':
+        return 'baseline-broken'
+      case 'broker_fault':
+        return 'broker-fault'
+      case 'scope':
+        return 'rejected-scope'
+      case 'model':
+      case 'verification':
+      case 'verification-failed':
+      case 'unknown':
+      case null:
+        return job.status === 'rejected' ? 'rejected-scope' : 'worker-failed'
+    }
+  }
+
+  switch (job.status)
+  {
+    case 'completed':
+      return 'succeeded'
+    case 'cancelled':
+      return 'cancelled'
+    case 'queued':
+    case 'running':
+    case 'unknown':
+      return null
+  }
+  return null
+}
+
+// explicit broker evidence wins; only legacy records fall back to status taxonomy
+export function workerEvidenceOutcomeView(
+  job: WorkersJobSummary,
+): WorkerEvidenceOutcomeView | null
+{
+  const explicit = Option.getOrNull(job.outcome)
+  const outcome = explicit ?? inferredJobOutcome(job)
+  if (outcome === null) return null
+  const inferred = explicit === null
+  return {
+    outcome,
+    label: `${JOB_OUTCOME_LABELS[outcome]}${inferred ? ' (inferred)' : ''}`,
+    inferred,
+    variant: JOB_OUTCOME_VARIANTS[outcome],
+  }
+}
+
+export interface WorkerRunOutcomePart
+{
+  readonly key: WorkersJobOutcome | 'patch-available'
+  readonly count: number
+  readonly inferredCount: number
+  readonly label: string
+}
+
+export interface WorkerRunOutcomeSummaryView
+{
+  readonly label: string
+  readonly parts: readonly WorkerRunOutcomePart[]
+}
+
+const RUN_OUTCOME_ORDER: readonly (WorkersJobOutcome | 'patch-available')[] = [
+  'worker-failed',
+  'environment-blocked',
+  'baseline-broken',
+  'rejected-scope',
+  'broker-fault',
+  'succeeded',
+  'patch-available',
+  'superseded',
+  'cancelled',
+]
+
+// one derivation owns the outcome-first line on panel and plan surfaces
+export function workerRunOutcomeSummaryView(
+  jobs: readonly WorkersJobSummary[],
+  rollup: WorkersOutcomeCounts = {},
+): WorkerRunOutcomeSummaryView | null
+{
+  const counts = new Map<WorkersJobOutcome, { count: number; inferredCount: number }>()
+  let patchCount = 0
+  for (const job of jobs)
+  {
+    const outcome = workerEvidenceOutcomeView(job)
+    if (outcome !== null)
+    {
+      const current = counts.get(outcome.outcome) ?? { count: 0, inferredCount: 0 }
+      current.count += 1
+      if (outcome.inferred) current.inferredCount += 1
+      counts.set(outcome.outcome, current)
+    }
+    if (workerJobOutcomeView(job) !== null) patchCount += 1
+  }
+  if (jobs.length === 0)
+  {
+    for (const outcome of RUN_OUTCOME_ORDER)
+    {
+      if (outcome === 'patch-available') continue
+      const count = rollup[outcome]
+      if (count !== undefined && count > 0) counts.set(outcome, { count, inferredCount: 0 })
+    }
+  }
+
+  const parts: WorkerRunOutcomePart[] = []
+  for (const outcome of RUN_OUTCOME_ORDER)
+  {
+    if (outcome === 'patch-available')
+    {
+      if (patchCount > 0)
+      {
+        parts.push({
+          key: 'patch-available',
+          count: patchCount,
+          inferredCount: 0,
+          label: `${patchCount} patch available`,
+        })
+      }
+      continue
+    }
+    const count = counts.get(outcome)
+    if (count === undefined) continue
+    const inference =
+      count.inferredCount === 0
+        ? ''
+        : count.inferredCount === count.count
+          ? ' (inferred)'
+          : ` (${count.inferredCount} inferred)`
+    parts.push({
+      key: outcome,
+      count: count.count,
+      inferredCount: count.inferredCount,
+      label: `${count.count} ${outcome}${inference}`,
+    })
+  }
+
+  return parts.length === 0 ? null : { label: parts.map((part) => part.label).join(' · '), parts }
+}
 
 // every broker status gets its own tint so a scan of the table separates
 // terminal failures from in-flight work without reading the label
@@ -66,13 +266,15 @@ const FAILURE_CLASS_LABELS: Record<WorkersFailureClass, string> = {
   broker_fault: 'Broker fault',
   scope: 'Scope',
   verification: 'Verification',
+  'baseline-broken': 'Baseline broken',
+  'verification-failed': 'Verification failed',
+  'verification-unusable': 'Verification unusable',
   unknown: 'Unclassified',
 }
 
 export interface WorkerFailureView
 {
   readonly label: string
-  readonly salvageable: boolean
   readonly evidence: string | null
 }
 
@@ -87,46 +289,39 @@ function firstFailedExitCode(codes: ReadonlyArray<Option.Option<number>>): numbe
   return null
 }
 
-// distinguishes "20 minutes of good work, env-failed verification" from "died
-// instantly, nothing done" — the evidence line keeps the proof next to the badge
+// failure evidence stays diagnostic; an intact patch is a separate positive outcome
 export function workerFailureView(job: WorkersJobSummary): WorkerFailureView | null
 {
   const failureClass = Option.getOrNull(job.failureClass)
   if (failureClass === null) return null
-  const hasPatch = Option.getOrNull(job.hasPatch)
+  const hasPatch = Option.getOrNull(job.hasPatch ?? Option.none<boolean>())
   const parts: string[] = []
-  if (hasPatch !== null) parts.push(hasPatch ? 'patch available' : 'no patch')
+  if (hasPatch === false) parts.push('no patch')
   const changed = Option.getOrNull(job.changedFileCount)
   if (changed !== null && changed > 0) parts.push(`${changed} file${changed === 1 ? '' : 's'}`)
   const exitCode = firstFailedExitCode(job.verificationExitCodes)
   if (exitCode !== null) parts.push(`verify exit ${exitCode}`)
   return {
     label: FAILURE_CLASS_LABELS[failureClass],
-    salvageable: hasPatch === true,
     evidence: parts.length === 0 ? null : parts.join(' · '),
   }
 }
 
-// run-level replacement for a bare "N failed": salvageable work first, then
-// zero-work causes, e.g. "10 patch available · 2 environment · 2 broker fault"
+// failure classes remain diagnostic context after the positive outcomes are summarized
 export function workerRunFailureBreakdown(jobs: readonly WorkersJobSummary[]): string | null
 {
-  const failed = jobs.filter((job) => Option.isSome(job.failureClass))
+  const failed = jobs.filter(
+    (job) =>
+      Option.isSome(job.failureClass) && workerEvidenceOutcomeView(job)?.outcome !== 'superseded',
+  )
   if (failed.length === 0) return null
-  let salvageable = 0
   const byClass = new Map<WorkersFailureClass, number>()
   for (const job of failed)
   {
-    if (Option.getOrNull(job.hasPatch) === true)
-    {
-      salvageable += 1
-      continue
-    }
     const failureClass = Option.getOrElse(job.failureClass, () => 'unknown' as const)
     byClass.set(failureClass, (byClass.get(failureClass) ?? 0) + 1)
   }
   const parts: string[] = []
-  if (salvageable > 0) parts.push(`${salvageable} patch available`)
   for (const [failureClass, count] of byClass)
   {
     parts.push(`${count} ${FAILURE_CLASS_LABELS[failureClass].toLowerCase()}`)
@@ -326,6 +521,157 @@ export function workerStageGroups(jobs: readonly WorkersJobSummary[]): readonly 
 export function workerJobsHaveStages(jobs: readonly WorkersJobSummary[]): boolean
 {
   return jobs.some((job) => Option.isSome(job.stage))
+}
+
+export interface WorkerRunJobRow
+{
+  readonly job: WorkersJobSummary
+  readonly priorAttempts: readonly WorkersJobSummary[]
+}
+
+function jobIsExplicitlySuperseded(job: WorkersJobSummary): boolean
+{
+  return (
+    job.status === 'cancelled' &&
+    (Option.getOrNull(job.outcome) === 'superseded' ||
+      Option.getOrNull(job.cancelReason) === 'superseded')
+  )
+}
+
+// only broker links connect attempts; ordering and timestamps never imply supersession
+export function workerRunJobRows(jobs: readonly WorkersJobSummary[]): readonly WorkerRunJobRow[]
+{
+  const byId = new Map(jobs.map((job) => [job.jobId, job]))
+  const relaunches = new Map<string, WorkersJobSummary[]>()
+  for (const job of jobs)
+  {
+    const priorId = Option.getOrNull(job.relaunchOf)
+    if (priorId === null) continue
+    const matches = relaunches.get(priorId)
+    if (matches === undefined) relaunches.set(priorId, [job])
+    else matches.push(job)
+  }
+
+  const successorByPrior = new Map<string, string>()
+  for (const job of jobs)
+  {
+    if (!jobIsExplicitlySuperseded(job)) continue
+    const forwardId = Option.getOrNull(job.supersededBy)
+    if (forwardId !== null && forwardId !== job.jobId && byId.has(forwardId))
+    {
+      successorByPrior.set(job.jobId, forwardId)
+      continue
+    }
+    const linkedRelaunches = relaunches.get(job.jobId) ?? []
+    const linkedRelaunch = linkedRelaunches[0]
+    if (linkedRelaunches.length === 1 && linkedRelaunch !== undefined)
+    {
+      successorByPrior.set(job.jobId, linkedRelaunch.jobId)
+    }
+  }
+
+  // discard cyclic evidence instead of hiding every row in a malformed chain
+  for (const priorId of Array.from(successorByPrior.keys()))
+  {
+    const visited = new Set<string>([priorId])
+    let current = successorByPrior.get(priorId)
+    while (current !== undefined)
+    {
+      if (visited.has(current))
+      {
+        for (const cycleId of visited) successorByPrior.delete(cycleId)
+        break
+      }
+      visited.add(current)
+      current = successorByPrior.get(current)
+    }
+  }
+
+  const priorsBySuccessor = new Map<string, WorkersJobSummary[]>()
+  for (const [priorId, successorId] of successorByPrior)
+  {
+    const prior = byId.get(priorId)
+    if (prior === undefined) continue
+    const priors = priorsBySuccessor.get(successorId)
+    if (priors === undefined) priorsBySuccessor.set(successorId, [prior])
+    else priors.push(prior)
+  }
+
+  const collectPriors = (jobId: string, visited: Set<string>): WorkersJobSummary[] =>
+  {
+    const direct = priorsBySuccessor.get(jobId) ?? []
+    const collected: WorkersJobSummary[] = []
+    for (const prior of direct)
+    {
+      if (visited.has(prior.jobId)) continue
+      visited.add(prior.jobId)
+      collected.push(prior, ...collectPriors(prior.jobId, visited))
+    }
+    return collected
+  }
+
+  return jobs.flatMap((job) =>
+    successorByPrior.has(job.jobId)
+      ? []
+      : [{ job, priorAttempts: collectPriors(job.jobId, new Set([job.jobId])) }],
+  )
+}
+
+export interface WorkerScopeViolationFields
+{
+  readonly scopeViolationDetails?: Option.Option<ReadonlyArray<WorkersScopeViolationDetail>>
+  readonly scopeViolations?: ReadonlyArray<string>
+}
+
+export interface WorkerScopeViolationItem
+{
+  readonly path: string
+  readonly phase: WorkersScopeViolationDetail['phase'] | null
+}
+
+export interface WorkerScopeViolationGroup
+{
+  readonly key: string
+  readonly label: string
+  readonly legacy: boolean
+  readonly items: readonly WorkerScopeViolationItem[]
+}
+
+// structured warnings group by root cause; legacy strings stay visibly ungrouped
+export function workerScopeViolationGroups(
+  fields: WorkerScopeViolationFields,
+): readonly WorkerScopeViolationGroup[]
+{
+  const details = Option.getOrNull(
+    fields.scopeViolationDetails ?? Option.none<ReadonlyArray<WorkersScopeViolationDetail>>(),
+  )
+  if (details !== null && details.length > 0)
+  {
+    const groups = new Map<string, WorkerScopeViolationItem[]>()
+    for (const detail of details)
+    {
+      const root = detail.root.trim()
+      const nearestAllowed = Option.getOrNull(detail.nearestAllowed)
+      const key = root === '' ? (nearestAllowed ?? 'ungrouped') : root
+      const items = groups.get(key)
+      const item = { path: detail.path, phase: detail.phase }
+      if (items === undefined) groups.set(key, [item])
+      else items.push(item)
+    }
+    return [...groups].map(([key, items]) => ({ key, label: key, legacy: false, items }))
+  }
+
+  const legacy = fields.scopeViolations ?? []
+  return legacy.length === 0
+    ? []
+    : [
+        {
+          key: 'ungrouped (legacy)',
+          label: 'ungrouped (legacy)',
+          legacy: true,
+          items: legacy.map((path) => ({ path, phase: null })),
+        },
+      ]
 }
 
 export interface WorkerRunStatusChip

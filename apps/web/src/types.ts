@@ -1,8 +1,9 @@
 // apps/web/src/types.ts
-// define session phase
+// defines shared web session, thread, and composer defaults
 
 import type {
   ChatImageAttachment as ContractChatImageAttachment,
+  CollaborationMode,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointSummary,
   OrchestrationLatestTurn,
@@ -13,6 +14,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
 } from '@t3tools/contracts'
+import { normalizeCollaborationMode } from '@t3tools/contracts'
 import type {
   EnvironmentProject,
   EnvironmentThread,
@@ -23,6 +25,9 @@ export type SessionPhase = 'disconnected' | 'connecting' | 'ready' | 'running'
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = 'full-access'
 
 export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = 'default'
+export const DEFAULT_COLLABORATION_MODE: CollaborationMode = Object.freeze(
+  normalizeCollaborationMode(DEFAULT_INTERACTION_MODE),
+)
 export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280
 export const DEFAULT_THREAD_TERMINAL_ID = 'term-1'
 export const MAX_TERMINALS_PER_GROUP = 4

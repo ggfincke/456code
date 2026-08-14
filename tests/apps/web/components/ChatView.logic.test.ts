@@ -11,21 +11,25 @@ import {
   ThreadId,
   TurnId,
 } from '@t3tools/contracts'
-import { describe, expect, it } from 'vite-plus/test'
+import { createModelCapabilities } from '@t3tools/shared/model'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import type { Thread, ThreadShell } from '../../../../apps/web/src/types'
 import {
   MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
+  buildLocalDraftThread,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   deriveLockedProvider,
   dismissBranchMismatchForSession,
+  ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   formatOutgoingPrompt,
   getStartedThreadModelChangeBlockReason,
   getStartedThreadProviderSwitchBlockReason,
+  hasEnvironmentReconnectWarningGraceElapsed,
   handleImportContinuationSendBlock,
   hasServerAcknowledgedLocalDispatch,
   importContinuationConsentToken,
@@ -38,7 +42,9 @@ import {
   resolveImportContinuationProviderSnapshot,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  scheduleEnvironmentReconnectWarning,
   shouldRestoreComposerDraftAfterSendFailure,
+  shouldSuppressTransientEnvironmentReconnectWarning,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldReconcileComposerDraftModelSelection,
@@ -49,6 +55,53 @@ const environmentId = EnvironmentId.make('environment-local')
 const projectId = ProjectId.make('project-1')
 const threadId = ThreadId.make('thread-1')
 const now = '2026-03-29T00:00:00.000Z'
+
+describe('environment reconnect warning grace', () =>
+{
+  afterEach(() => vi.useRealTimers())
+
+  it('shows a persistent reconnect after the grace period', () =>
+  {
+    vi.useFakeTimers()
+    const showWarning = vi.fn()
+
+    scheduleEnvironmentReconnectWarning(showWarning)
+    vi.advanceTimersByTime(ENVIRONMENT_RECONNECT_WARNING_GRACE_MS - 1)
+    expect(showWarning).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1)
+    expect(showWarning).toHaveBeenCalledOnce()
+  })
+
+  it('cancels the warning when the connection recovers during the grace period', () =>
+  {
+    vi.useFakeTimers()
+    const showWarning = vi.fn()
+
+    const cancel = scheduleEnvironmentReconnectWarning(showWarning)
+    cancel()
+    vi.advanceTimersByTime(ENVIRONMENT_RECONNECT_WARNING_GRACE_MS)
+
+    expect(showWarning).not.toHaveBeenCalled()
+  })
+
+  it('does not reuse elapsed grace from another environment', () =>
+  {
+    const anotherEnvironmentId = EnvironmentId.make('environment-remote')
+
+    expect(hasEnvironmentReconnectWarningGraceElapsed(environmentId, environmentId)).toBe(true)
+    expect(hasEnvironmentReconnectWarningGraceElapsed(anotherEnvironmentId, environmentId)).toBe(
+      false,
+    )
+  })
+
+  it('suppresses only reconnect warnings whose grace has not elapsed', () =>
+  {
+    expect(shouldSuppressTransientEnvironmentReconnectWarning(true, false)).toBe(true)
+    expect(shouldSuppressTransientEnvironmentReconnectWarning(true, true)).toBe(false)
+    expect(shouldSuppressTransientEnvironmentReconnectWarning(false, false)).toBe(false)
+  })
+})
 
 describe('shouldReconcileComposerDraftModelSelection', () =>
 {
@@ -236,6 +289,39 @@ const readySession = {
   lastError: null,
   updatedAt: '2026-03-29T00:00:10.000Z',
 }
+
+describe('buildLocalDraftThread', () =>
+{
+  it('projects Plan with Orchestrate as Plan plus the modifier', () =>
+  {
+    const thread = buildLocalDraftThread(
+      threadId,
+      {
+        threadId,
+        environmentId,
+        projectId,
+        logicalProjectKey: 'project-1',
+        createdAt: now,
+        runtimeMode: 'full-access',
+        collaborationMode: { baseMode: 'plan', orchestrate: true },
+        branch: null,
+        worktreePath: null,
+        envMode: 'local',
+        startFromOrigin: false,
+        promotedTo: null,
+      },
+      {
+        instanceId: ProviderInstanceId.make('codex'),
+        model: 'gpt-5.4',
+      },
+    )
+
+    expect(thread).toMatchObject({
+      interactionMode: 'plan',
+      orchestrate: true,
+    })
+  })
+})
 
 describe('buildLoadingThreadFromShell', () =>
 {
@@ -1527,5 +1613,56 @@ describe('formatOutgoingPrompt', () =>
         text: 'hello',
       }),
     ).toBe('hello')
+  })
+
+  const claudeModels = [
+    {
+      slug: 'claude-sonnet-4-6',
+      name: 'Claude Sonnet 4.6',
+      isCustom: false,
+      capabilities: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: 'effort',
+            label: 'Reasoning',
+            type: 'select' as const,
+            options: [
+              { id: 'high', label: 'High', isDefault: true },
+              { id: 'ultrathink', label: 'Ultrathink' },
+            ],
+            promptInjectedValues: ['ultrathink'],
+          },
+        ],
+      }),
+    },
+  ]
+
+  it('leaves a bare known provider command unchanged under ultrathink effort', () =>
+  {
+    expect(
+      formatOutgoingPrompt({
+        provider: ProviderDriverKind.make('claudeAgent'),
+        model: 'claude-sonnet-4-6',
+        models: claudeModels,
+        effort: 'ultrathink',
+        text: '/compact',
+        providerSlashCommands: [{ name: 'compact' }],
+      }),
+    ).toBe('/compact')
+  })
+
+  it('keeps attachment-bearing command text on the prose formatting path', () =>
+  {
+    expect(
+      formatOutgoingPrompt({
+        provider: ProviderDriverKind.make('claudeAgent'),
+        model: 'claude-sonnet-4-6',
+        models: claudeModels,
+        effort: 'ultrathink',
+        text: '/compact',
+        providerSlashCommands: [{ name: 'compact' }],
+        hasAttachmentsOrContext: true,
+      }),
+    ).toBe('Ultrathink:\n/compact')
   })
 })

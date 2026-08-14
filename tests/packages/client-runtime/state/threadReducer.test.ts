@@ -61,6 +61,33 @@ const baseThread: OrchestrationThread = {
   session: null,
 }
 
+const makeOrchestratePlan = (
+  overrides: Partial<OrchestrationThread['orchestratePlans'][number]> = {},
+): OrchestrationThread['orchestratePlans'][number] => ({
+  runId: 'run-1',
+  revision: 1,
+  turnId: TurnId.make('turn-1'),
+  workflow: 'review',
+  task: 'Review the implementation.',
+  stages: [
+    {
+      id: 'stage-1',
+      provider: 'codex',
+      model: null,
+      mode: 'read',
+      workers: 1,
+    },
+  ],
+  totalWorkers: 1,
+  maxWorkers: 1,
+  source: 'tool',
+  leadModelSelection: null,
+  status: 'pending',
+  createdAt: '2026-04-01T10:00:00.000Z',
+  updatedAt: '2026-04-01T10:00:00.000Z',
+  ...overrides,
+})
+
 describe('applyThreadDetailEvent', () =>
 {
   describe('project events', () =>
@@ -994,6 +1021,133 @@ describe('applyThreadDetailEvent', () =>
     })
   })
 
+  describe('orchestrate plan events', () =>
+  {
+    it('supersedes earlier pending revisions when a newer revision is upserted', () =>
+    {
+      const incoming = makeOrchestratePlan({
+        revision: 2,
+        updatedAt: '2026-04-01T10:01:00.000Z',
+      })
+      const result = applyThreadDetailEvent(
+        {
+          ...baseThread,
+          orchestratePlans: [makeOrchestratePlan(), makeOrchestratePlan({ runId: 'run-2' })],
+        },
+        {
+          ...baseEventFields,
+          sequence: 12,
+          occurredAt: '2026-04-01T10:01:00.000Z',
+          aggregateKind: 'thread',
+          aggregateId: baseThread.id,
+          type: 'thread.orchestrate-plan-upserted',
+          payload: {
+            threadId: baseThread.id,
+            plan: incoming,
+            createdAt: '2026-04-01T10:01:00.000Z',
+          },
+        },
+      )
+
+      expect(result.kind).toBe('updated')
+      if (result.kind === 'updated')
+      {
+        expect(
+          result.thread.orchestratePlans.map((plan) => ({
+            runId: plan.runId,
+            revision: plan.revision,
+            status: plan.status,
+            updatedAt: plan.updatedAt,
+          })),
+        ).toEqual([
+          {
+            runId: 'run-1',
+            revision: 1,
+            status: 'superseded',
+            updatedAt: '2026-04-01T10:01:00.000Z',
+          },
+          {
+            runId: 'run-2',
+            revision: 1,
+            status: 'pending',
+            updatedAt: '2026-04-01T10:00:00.000Z',
+          },
+          {
+            runId: 'run-1',
+            revision: 2,
+            status: 'pending',
+            updatedAt: '2026-04-01T10:01:00.000Z',
+          },
+        ])
+      }
+    })
+
+    it('applies approve and reject decisions only to their exact revisions', () =>
+    {
+      const thread = {
+        ...baseThread,
+        orchestratePlans: [
+          makeOrchestratePlan(),
+          makeOrchestratePlan({ revision: 2 }),
+          makeOrchestratePlan({ runId: 'run-2' }),
+        ],
+      }
+      const approved = applyThreadDetailEvent(thread, {
+        ...baseEventFields,
+        sequence: 13,
+        occurredAt: '2026-04-01T10:02:00.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.orchestrate-plan-response-requested',
+        payload: {
+          threadId: baseThread.id,
+          runId: 'run-1',
+          revision: 1,
+          decision: 'approve',
+          createdAt: '2026-04-01T10:02:00.000Z',
+        },
+      })
+
+      expect(approved.kind).toBe('updated')
+      if (approved.kind !== 'updated') return
+      expect(
+        approved.thread.orchestratePlans.map((plan) => [plan.runId, plan.revision, plan.status]),
+      ).toEqual([
+        ['run-1', 1, 'approved'],
+        ['run-1', 2, 'pending'],
+        ['run-2', 1, 'pending'],
+      ])
+
+      const rejected = applyThreadDetailEvent(approved.thread, {
+        ...baseEventFields,
+        sequence: 14,
+        occurredAt: '2026-04-01T10:03:00.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.orchestrate-plan-response-requested',
+        payload: {
+          threadId: baseThread.id,
+          runId: 'run-1',
+          revision: 2,
+          decision: 'reject',
+          createdAt: '2026-04-01T10:03:00.000Z',
+        },
+      })
+
+      expect(rejected.kind).toBe('updated')
+      if (rejected.kind === 'updated')
+      {
+        expect(
+          rejected.thread.orchestratePlans.map((plan) => [plan.runId, plan.revision, plan.status]),
+        ).toEqual([
+          ['run-1', 1, 'approved'],
+          ['run-1', 2, 'rejected'],
+          ['run-2', 1, 'pending'],
+        ])
+      }
+    })
+  })
+
   describe('thread.activity-appended', () =>
   {
     it('adds an activity', () =>
@@ -1024,6 +1178,58 @@ describe('applyThreadDetailEvent', () =>
       {
         expect(result.thread.activities).toHaveLength(1)
         expect(result.thread.activities[0]?.kind).toBe('file-edit')
+      }
+    })
+
+    it('replaces a worker verdict activity with the same deterministic id', () =>
+    {
+      const activityId = EventId.make('worker-verdict:run-1:job-1')
+      const result = applyThreadDetailEvent(
+        {
+          ...baseThread,
+          activities: [
+            {
+              id: activityId,
+              tone: 'info',
+              kind: 'orchestrate.worker.verdict',
+              summary: 'Worker verdict',
+              payload: { runId: 'run-1', jobId: 'job-1', verdict: 'needs changes' },
+              turnId: null,
+              createdAt: '2026-04-01T11:00:00.000Z',
+            },
+          ],
+        },
+        {
+          ...baseEventFields,
+          sequence: 13,
+          occurredAt: '2026-04-01T11:01:00.000Z',
+          aggregateKind: 'thread',
+          aggregateId: ThreadId.make('thread-1'),
+          type: 'thread.activity-appended',
+          payload: {
+            threadId: ThreadId.make('thread-1'),
+            activity: {
+              id: activityId,
+              tone: 'info',
+              kind: 'orchestrate.worker.verdict',
+              summary: 'Worker verdict',
+              payload: { runId: 'run-1', jobId: 'job-1', verdict: 'approved' },
+              turnId: null,
+              createdAt: '2026-04-01T11:01:00.000Z',
+            },
+          },
+        },
+      )
+
+      expect(result.kind).toBe('updated')
+      if (result.kind === 'updated')
+      {
+        expect(result.thread.activities).toHaveLength(1)
+        expect(result.thread.activities[0]?.payload).toEqual({
+          runId: 'run-1',
+          jobId: 'job-1',
+          verdict: 'approved',
+        })
       }
     })
 
@@ -1208,6 +1414,15 @@ describe('applyThreadDetailEvent', () =>
             completedAt: '2026-04-01T03:00:00.000Z',
           },
         ],
+        orchestratePlans: [
+          makeOrchestratePlan({ runId: 'run-retained', turnId: TurnId.make('turn-1') }),
+          makeOrchestratePlan({ runId: 'run-unbound', revision: 2, turnId: null }),
+          makeOrchestratePlan({
+            runId: 'run-reverted',
+            revision: 3,
+            turnId: TurnId.make('turn-2'),
+          }),
+        ],
       }
 
       const result = applyThreadDetailEvent(threadWithData, {
@@ -1232,6 +1447,10 @@ describe('applyThreadDetailEvent', () =>
         // msg-3 (turn-2) is filtered, msg-1 (no turn) and msg-2 (turn-1) remain
         expect(result.thread.messages).toHaveLength(2)
         expect(result.thread.latestTurn?.turnId).toBe('turn-1')
+        expect(result.thread.orchestratePlans.map((plan) => [plan.runId, plan.turnId])).toEqual([
+          ['run-retained', 'turn-1'],
+          ['run-unbound', null],
+        ])
       }
     })
   })
@@ -1309,6 +1528,52 @@ describe('applyThreadDetailEvent', () =>
         },
       } as any)
       expect(result.kind).toBe('unchanged')
+    })
+  })
+
+  describe('collaboration mode events', () =>
+  {
+    it('applies and clears the orchestrate modifier', () =>
+    {
+      const enabled = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 20,
+        occurredAt: '2026-04-01T14:00:00.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.interaction-mode-set',
+        payload: {
+          threadId: baseThread.id,
+          interactionMode: 'plan',
+          orchestrate: true,
+          updatedAt: '2026-04-01T14:00:00.000Z',
+        },
+      })
+
+      expect(enabled.kind).toBe('updated')
+      if (enabled.kind !== 'updated') return
+      expect(enabled.thread.interactionMode).toBe('plan')
+      expect(enabled.thread.orchestrate).toBe(true)
+
+      const cleared = applyThreadDetailEvent(enabled.thread, {
+        ...baseEventFields,
+        sequence: 21,
+        occurredAt: '2026-04-01T14:01:00.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.interaction-mode-set',
+        payload: {
+          threadId: baseThread.id,
+          interactionMode: 'plan',
+          updatedAt: '2026-04-01T14:01:00.000Z',
+        },
+      })
+
+      expect(cleared.kind).toBe('updated')
+      if (cleared.kind === 'updated')
+      {
+        expect(cleared.thread.orchestrate).toBe(false)
+      }
     })
   })
 })

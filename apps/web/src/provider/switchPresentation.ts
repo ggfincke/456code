@@ -17,6 +17,7 @@ import {
   type TurnId,
 } from '@t3tools/contracts'
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
+import { formatContextWindowTokens } from '../lib/contextWindow'
 
 export {
   describeProviderSwitchFailureReason,
@@ -447,9 +448,6 @@ export type ProviderSwitchPickerIntent = 'instant' | 'handoff'
 
 export const PROVIDER_SWITCH_PICKER_HEADING = 'Switch provider for this thread'
 
-export const PROVIDER_SWITCH_PICKER_HINT =
-  'Models on the current provider apply instantly — another provider asks you to confirm, then pauses sending for the handoff'
-
 export function describeProviderSwitchPickerIntent(input: {
   readonly rowInstanceId: ProviderInstanceId
   readonly threadInstanceId: ProviderInstanceId | null
@@ -477,4 +475,50 @@ export function providerSwitchPickerIntentCopy(intent: ProviderSwitchPickerInten
         description:
           'Different provider — you confirm first, then this thread is summarized and handed off before you can send again.',
       }
+}
+
+// below this much resident context the re-read is small enough that naming it
+// is pure noise. an absolute floor rather than a share of the window: maxTokens
+// is optional on the context-window payload, so a percentage gate would
+// silently never fire for a provider that omits it.
+export const MODEL_SWITCH_CACHE_HINT_MIN_TOKENS = 50_000
+
+// the picker's inline disclosure for the 'instant' intent: `label` is short
+// enough for one strip, `detail` carries the reason for the tooltip and screen
+// readers, and `tokens` is the raw number the copy was built from.
+export interface ModelSwitchCacheHint
+{
+  readonly label: string
+  readonly detail: string
+  readonly tokens: number
+}
+
+// a same-instance model change retargets the live session at the new model with
+// the whole accumulated context still resident, and prompt caches are
+// model-scoped — so the next turn re-reads all of it at full input price.
+//
+// * tokens only, never dollars: this repo carries no per-token pricing, so a
+//   dollar figure would have to hardcode rates that go stale silently.
+// * the '~' is load-bearing — `usedTokens` is the newest recorded snapshot, not
+//   a live number, so it can lag a turn.
+export function describeModelSwitchCacheCost(input: {
+  readonly hasStarted: boolean
+  readonly usedTokens: number | null
+}): ModelSwitchCacheHint | null
+{
+  const { hasStarted, usedTokens } = input
+  if (!hasStarted || usedTokens === null || !Number.isFinite(usedTokens))
+  {
+    return null
+  }
+  if (usedTokens < MODEL_SWITCH_CACHE_HINT_MIN_TOKENS)
+  {
+    return null
+  }
+  const formatted = formatContextWindowTokens(usedTokens)
+  return {
+    label: `Changing model re-reads ~${formatted} tokens`,
+    detail: `Prompt caches are per-model. Picking a different model makes the next turn re-read this thread's ~${formatted}-token context at full input price instead of the cached rate. Staying on the current model keeps the cache.`,
+    tokens: usedTokens,
+  }
 }

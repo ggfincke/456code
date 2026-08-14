@@ -1,8 +1,8 @@
 // apps/web/src/components/chat/ChangedFilesTree.tsx
 // render changed files tree
 
-import { type TurnId } from '@t3tools/contracts'
-import { memo, useCallback, useMemo, useState } from 'react'
+import { type ScopedThreadRef, type TurnId } from '@t3tools/contracts'
+import { memo, use, useCallback, useMemo, useState } from 'react'
 import { type TurnDiffFileChange } from '../../types'
 import {
   buildTurnDiffTree,
@@ -16,6 +16,7 @@ import {
   FileDiffIcon,
   FolderIcon,
   FolderClosedIcon,
+  Network,
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { DiffStatLabel, hasNonZeroStat } from './DiffStatLabel'
@@ -27,8 +28,54 @@ import {
   selectChangedFilePreview,
   summarizeChangedFileScopes,
 } from './changedFilesPresentation'
+import { useDiffPanelStore } from '~/diffPanelStore'
+import { useServerConfigs } from '~/state/entities'
+import { TimelineRowCtx } from './messages-timeline/timelineRowContext'
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {}
+
+export function openChangedFilesArchitectureImpact(input: {
+  readonly threadRef: ScopedThreadRef
+  readonly turnId: TurnId
+  readonly onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void
+}): void
+{
+  input.onOpenTurnDiff(input.turnId)
+  useDiffPanelStore.getState().requestView(input.threadRef, 'architecture')
+}
+
+export function ArchitectureImpactAction(props: {
+  readonly threadRef: ScopedThreadRef
+  readonly turnId: TurnId
+  readonly onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void
+})
+{
+  const serverConfigs = useServerConfigs()
+  const available =
+    serverConfigs.get(props.threadRef.environmentId)?.environment.capabilities
+      .architectureImpact === true
+  if (!available) return null
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            aria-label="Architecture impact"
+            onClick={() => openChangedFilesArchitectureImpact(props)}
+          />
+        }
+      >
+        <Network className="size-3" />
+        <span className="hidden @[32rem]/changed-files:inline">Architecture impact</span>
+      </TooltipTrigger>
+      <TooltipPopup side="top">Analyze architecture affected by this turn</TooltipPopup>
+    </Tooltip>
+  )
+}
 
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   turnId: TurnId
@@ -42,6 +89,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void
 })
 {
+  const timelineContext = use(TimelineRowCtx)
   const {
     turnId,
     files,
@@ -60,7 +108,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
 
   return (
     <div
-      className="mt-4 rounded-2xl border border-border/70 bg-secondary p-2 dark:border-transparent dark:bg-input/32"
+      className="@container/changed-files mt-4 rounded-2xl border border-border/70 bg-secondary p-2 dark:border-transparent dark:bg-input/32"
       data-changed-files-state={
         expanded ? 'expanded' : compactPreviewVisible ? 'preview' : 'collapsed'
       }
@@ -76,7 +124,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           type="button"
           aria-expanded={expanded}
           data-scroll-anchor-ignore
-          className="group flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => onExpandedChange(!expanded)}
         >
           <ChevronRightIcon
@@ -86,7 +134,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
               expanded && 'rotate-90',
             )}
           />
-          <span className="flex min-w-0 items-center gap-1 whitespace-nowrap font-medium text-foreground text-xs leading-4">
+          <span className="flex shrink-0 items-center gap-1 whitespace-nowrap font-medium text-foreground text-xs leading-4">
             <span>
               {files.length} changed file{files.length === 1 ? '' : 's'}
             </span>
@@ -99,11 +147,18 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
               />
             )}
           </span>
-          <span className="ml-1 hidden truncate text-[11px] text-muted-foreground group-hover:text-foreground/80 sm:inline">
+          <span className="ml-1 hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground group-hover:text-foreground/80 @[24rem]/changed-files:inline">
             {expanded ? 'Hide files' : 'Show files'}
           </span>
         </button>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
+          {timelineContext?.threadRef ? (
+            <ArchitectureImpactAction
+              threadRef={timelineContext.threadRef}
+              turnId={turnId}
+              onOpenTurnDiff={onOpenTurnDiff}
+            />
+          ) : null}
           {expanded ? (
             <Tooltip>
               <TooltipTrigger
@@ -145,7 +200,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
               }
             >
               <FileDiffIcon className="size-3" />
-              <span className="hidden sm:inline">Open diff</span>
+              <span className="hidden @[24rem]/changed-files:inline">Open diff</span>
             </TooltipTrigger>
             <TooltipPopup side="top">Open the full diff</TooltipPopup>
           </Tooltip>

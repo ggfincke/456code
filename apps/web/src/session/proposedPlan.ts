@@ -1,5 +1,7 @@
 // apps/web/src/session/proposedPlan.ts
-// expose proposed plan title
+// defines proposed plan presentation and handoff helpers
+
+import { type CollaborationMode, normalizeCollaborationMode } from '@t3tools/contracts'
 
 export function proposedPlanTitle(planMarkdown: string): string | null
 {
@@ -91,9 +93,18 @@ export function buildPlanImplementationPrompt(planMarkdown: string): string
   return `PLEASE IMPLEMENT THIS PLAN:\n${planMarkdown.trim()}`
 }
 
-export function resolvePlanFollowUpSubmission(input: { draftText: string; planMarkdown: string }): {
+export type PlanImplementVariant = 'build' | 'orchestrate'
+export const ORCHESTRATE_PLAN_IMPLEMENTATION_PROMPT =
+  'Implement this plan by delegating bounded packages through orchestrate workers.'
+
+export function resolvePlanFollowUpSubmission(input: {
+  draftText: string
+  planMarkdown: string
+  currentMode: CollaborationMode
+  implementVariant?: PlanImplementVariant
+}): {
   text: string
-  interactionMode: 'default' | 'plan'
+  collaborationMode: CollaborationMode
 }
 {
   const trimmedDraftText = input.draftText.trim()
@@ -101,13 +112,21 @@ export function resolvePlanFollowUpSubmission(input: { draftText: string; planMa
   {
     return {
       text: trimmedDraftText,
-      interactionMode: 'plan',
+      collaborationMode: normalizeCollaborationMode('plan', input.currentMode.orchestrate),
+    }
+  }
+
+  if (input.implementVariant === 'orchestrate')
+  {
+    return {
+      text: ORCHESTRATE_PLAN_IMPLEMENTATION_PROMPT,
+      collaborationMode: normalizeCollaborationMode('default', true),
     }
   }
 
   return {
     text: buildPlanImplementationPrompt(input.planMarkdown),
-    interactionMode: 'default',
+    collaborationMode: normalizeCollaborationMode('default', false),
   }
 }
 

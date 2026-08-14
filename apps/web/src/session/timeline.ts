@@ -21,7 +21,8 @@ import type {
   ThreadSession,
   TurnDiffSummary,
 } from '../types'
-import type { WorkLogEntry } from './worklog'
+import { deriveWorkerVerdictEntries, type WorkerVerdictEntry, type WorkLogEntry } from './worklog'
+
 export interface ActivePlanState
 {
   createdAt: string
@@ -68,6 +69,12 @@ export type TimelineEntry =
       kind: 'provider-switch'
       createdAt: string
       providerSwitch: ProviderSwitchTimelineEvent
+    }
+  | {
+      id: string
+      kind: 'worker-verdict'
+      createdAt: string
+      workerVerdict: WorkerVerdictEntry
     }
 
 export function deriveActivePlanState(
@@ -222,6 +229,7 @@ const TIMELINE_ENTRY_KIND_RANK = {
   'proposed-plan': 1,
   work: 2,
   'provider-switch': 3,
+  'worker-verdict': 4,
 } as const satisfies Record<TimelineEntry['kind'], number>
 
 function timelineEntryKindRank(entry: TimelineEntry): number
@@ -234,6 +242,7 @@ export function deriveTimelineEntries(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
   providerSwitchEvents: ReadonlyArray<ProviderSwitchTimelineEvent> = [],
+  activities: ReadonlyArray<OrchestrationThreadActivity> = [],
 ): TimelineEntry[]
 {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
@@ -260,7 +269,21 @@ export function deriveTimelineEntries(
     createdAt: providerSwitch.createdAt,
     providerSwitch,
   }))
-  const rows = [...messageRows, ...proposedPlanRows, ...workRows, ...providerSwitchRows]
+  const workerVerdictRows: TimelineEntry[] = deriveWorkerVerdictEntries(activities).map(
+    (workerVerdict) => ({
+      id: workerVerdict.id,
+      kind: 'worker-verdict',
+      createdAt: workerVerdict.createdAt,
+      workerVerdict,
+    }),
+  )
+  const rows = [
+    ...messageRows,
+    ...proposedPlanRows,
+    ...workRows,
+    ...providerSwitchRows,
+    ...workerVerdictRows,
+  ]
   const sourceOrder = new Map(rows.map((entry, index) => [entry, index]))
   return rows.toSorted((left, right) =>
   {

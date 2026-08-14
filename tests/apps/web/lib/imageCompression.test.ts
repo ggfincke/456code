@@ -29,6 +29,7 @@ function stubCanvasPipeline(
   const supportsWebp = options?.supportsWebp ?? true
   const close = vi.fn()
   const fillRect = vi.fn()
+  const candidateArrayBuffer = vi.fn()
   vi.stubGlobal(
     'createImageBitmap',
     vi.fn(async () => ({ width: 4000, height: 3000, close })),
@@ -53,11 +54,18 @@ function stubCanvasPipeline(
       async convertToBlob({ type, quality }: { type: string; quality: number })
       {
         const resolvedType = type === 'image/webp' && !supportsWebp ? 'image/png' : type
-        return new Blob([new Uint8Array(sizeForQuality(quality))], { type: resolvedType })
+        const blob = new Blob([new Uint8Array(sizeForQuality(quality))], { type: resolvedType })
+        const originalArrayBuffer = blob.arrayBuffer.bind(blob)
+        vi.spyOn(blob, 'arrayBuffer').mockImplementation(async () =>
+        {
+          candidateArrayBuffer()
+          return originalArrayBuffer()
+        })
+        return blob
       }
     },
   )
-  return { close, fillRect }
+  return { candidateArrayBuffer, close, fillRect }
 }
 
 afterEach(() =>
@@ -128,11 +136,13 @@ describe('compressImageForStash', () =>
 
   it('reports too-large when even the smallest encoding overflows the budget', async () =>
   {
-    const { close } = stubCanvasPipeline(() => 8_000_000)
+    const { candidateArrayBuffer, close } = stubCanvasPipeline(() => 8_000_000)
 
     const result = await compressImageForStash(makeFile(9_000_000))
 
     expect(result).toEqual({ ok: false, reason: 'too-large' })
+    // reject oversized candidates before allocating base64 payloads
+    expect(candidateArrayBuffer).not.toHaveBeenCalled()
     // the give-up path still releases the bitmap
     expect(close).toHaveBeenCalled()
   })

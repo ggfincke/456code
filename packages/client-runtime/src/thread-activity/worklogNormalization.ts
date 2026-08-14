@@ -9,6 +9,7 @@ import type {
 } from '@t3tools/contracts'
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
 import { isToolLifecycleItemType } from '@t3tools/shared/toolActivity'
+import { collectToolMutationTargets } from '@t3tools/shared/toolMutationTargets'
 
 export type WorkLogRequestKind = 'command' | 'file-read' | 'file-change'
 
@@ -332,80 +333,12 @@ export function extractWorkLogRequestKind(
   return requestKindFromRequestType(payload?.requestType) ?? undefined
 }
 
-function pushChangedFile(target: string[], seen: Set<string>, value: unknown)
-{
-  const normalized = asTrimmedString(value)
-  if (!normalized || seen.has(normalized))
-  {
-    return
-  }
-  seen.add(normalized)
-  target.push(normalized)
-}
-
-function collectChangedFiles(value: unknown, target: string[], seen: Set<string>, depth: number)
-{
-  if (depth > 4 || target.length >= 12)
-  {
-    return
-  }
-  if (Array.isArray(value))
-  {
-    for (const entry of value)
-    {
-      collectChangedFiles(entry, target, seen, depth + 1)
-      if (target.length >= 12)
-      {
-        return
-      }
-    }
-    return
-  }
-
-  const record = asRecord(value)
-  if (!record)
-  {
-    return
-  }
-
-  pushChangedFile(target, seen, record.path)
-  pushChangedFile(target, seen, record.filePath)
-  pushChangedFile(target, seen, record.relativePath)
-  pushChangedFile(target, seen, record.filename)
-  pushChangedFile(target, seen, record.newPath)
-  pushChangedFile(target, seen, record.oldPath)
-
-  for (const nestedKey of [
-    'item',
-    'result',
-    'input',
-    'data',
-    'changes',
-    'files',
-    'edits',
-    'patch',
-    'patches',
-    'operations',
-  ])
-  {
-    if (!(nestedKey in record))
-    {
-      continue
-    }
-    collectChangedFiles(record[nestedKey], target, seen, depth + 1)
-    if (target.length >= 12)
-    {
-      return
-    }
-  }
-}
-
+// the walk itself now lives in @t3tools/shared so the server-side divergence
+// classifier reads mutation targets out of a payload exactly the way this
+// timeline does; the defaults there reproduce this call byte for byte
 export function extractChangedFiles(payload: Record<string, unknown> | null): string[]
 {
-  const changedFiles: string[] = []
-  const seen = new Set<string>()
-  collectChangedFiles(asRecord(payload?.data), changedFiles, seen, 0)
-  return changedFiles
+  return [...collectToolMutationTargets(asRecord(payload?.data))]
 }
 
 export function parseUserInputQuestions(
@@ -510,14 +443,32 @@ function extractWorkLogItemType(
     : undefined
 }
 
-function extractToolCallId(payload: Record<string, unknown> | null): string | null
+// a tool.progress heartbeat carries its id as a top-level toolUseId rather than
+// under data. without reading it, the thousand-odd heartbeats a long tool call
+// emits share no key & each becomes its own row
+function extractToolCallId(
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown> | null,
+): string | null
 {
-  return asTrimmedString(asRecord(payload?.data)?.toolCallId)
+  const dataToolCallId = asTrimmedString(asRecord(payload?.data)?.toolCallId)
+  if (dataToolCallId !== null)
+  {
+    return dataToolCallId
+  }
+  return activity.kind === 'tool.progress' ? asTrimmedString(payload?.toolUseId) : null
+}
+
+// the frames that open & close a tool call; a heartbeat is deliberately not one
+// of them, because it is identified by tool call id & these are not
+function isToolLifecycleFrameKind(kind: OrchestrationThreadActivity['kind']): boolean
+{
+  return kind === 'tool.updated' || kind === 'tool.completed'
 }
 
 function deriveToolLifecycleCollapseKey(entry: NormalizedWorkLogEntry): string | undefined
 {
-  if (entry.activityKind !== 'tool.updated' && entry.activityKind !== 'tool.completed')
+  if (!isToolLifecycleFrameKind(entry.activityKind))
   {
     return undefined
   }
@@ -550,13 +501,20 @@ function toNormalizedWorkLogEntry(
     isTaskActivity && !taskSummary ? asNonEmptyString(payload?.detail) : null
   const itemType = extractWorkLogItemType(payload)
   const requestKind = extractWorkLogRequestKind(payload, requestKindFromRequestType)
-  const toolCallId = isTaskActivity ? null : extractToolCallId(payload)
+  const toolCallId = isTaskActivity ? null : extractToolCallId(activity, payload)
   const detail = !taskDetailAsLabel
     ? stripTrailingExitCode(asTrimmedString(payload?.detail) ?? '').output
     : null
+  // a tool.progress frame carries no status field, but a heartbeat is by
+  // definition still in flight. without this the row classifies as a finished
+  // success and mobile stamps a green check on a tool that never returned
   const toolLifecycleStatus =
     extractWorkLogToolLifecycleStatus(payload) ??
-    (activity.kind === 'tool.completed' ? 'completed' : undefined)
+    (activity.kind === 'tool.completed'
+      ? 'completed'
+      : activity.kind === 'tool.progress'
+        ? 'inProgress'
+        : undefined)
   const toolData = itemType === 'mcp_tool_call' ? asRecord(payload?.data)?.item : undefined
   const base: NormalizedWorkLogEntry = {
     id: activity.id,
@@ -630,14 +588,15 @@ function shouldCollapseToolLifecycleEntries(
   next: NormalizedWorkLogEntry,
 ): boolean
 {
-  if (previous.activityKind !== 'tool.updated' && previous.activityKind !== 'tool.completed')
+  if (!isToolLifecycleFrameKind(previous.activityKind))
   {
     return false
   }
-  if (next.activityKind !== 'tool.updated' && next.activityKind !== 'tool.completed')
+  if (!isToolLifecycleFrameKind(next.activityKind))
   {
     return false
   }
+  // a finished row is never reopened by a later frame
   if (previous.activityKind === 'tool.completed')
   {
     return false
@@ -646,31 +605,207 @@ function shouldCollapseToolLifecycleEntries(
   {
     return true
   }
+  // exactly one side carries a tool call id: a frame written before ids were projected
+  // pairing with one written after, in either order. item type & label are all that is
+  // left to match on
+  const exactlyOneHasToolCallId =
+    (previous.toolCallId === undefined) !== (next.toolCallId === undefined)
   return (
-    previous.toolCallId !== undefined &&
-    next.toolCallId === undefined &&
+    exactlyOneHasToolCallId &&
     previous.itemType === next.itemType &&
     normalizeCompactToolLabel(previous.toolTitle ?? previous.label) ===
       normalizeCompactToolLabel(next.toolTitle ?? next.label)
   )
 }
 
+// a row already emitted for a tool call that has not closed yet
+interface OpenHeartbeatRow
+{
+  readonly index: number
+  readonly toolCallId?: string | undefined
+}
+
+function findOpenHeartbeatToRetire(
+  openHeartbeats: ReadonlyArray<OpenHeartbeatRow>,
+  closeToolCallId: string | undefined,
+): number
+{
+  if (closeToolCallId === undefined)
+  {
+    return openHeartbeats.length > 0 ? 0 : -1
+  }
+  const exact = openHeartbeats.findIndex((row) => row.toolCallId === closeToolCallId)
+  // an id-bearing close frame never claims a row that names a different call,
+  // but it does claim an id-less one: codex heartbeats carry no id to match on
+  return exact >= 0 ? exact : openHeartbeats.findIndex((row) => row.toolCallId === undefined)
+}
+
+// two tiers of matching, because two id namespaces meet here. an id-bearing
+// lifecycle frame owns exactly one row, found by tool call id no matter what has
+// been appended since, so two concurrent calls to the same tool stop closing each
+// other's rows. an id-less frame keeps the older behavior: it merges into the
+// last live row when item type & label agree. a heartbeat is in neither tier --
+// it stands in for a call that has not closed yet, so it is retired by the frame
+// that closes that call rather than merged into it, and an id-less heartbeat
+// (codex sends no tool id) is retired by whichever call closes next, because it
+// carries no identity to match on. without that retirement every long call
+// strands a row at "in progress" forever, which the timeline reports as
+// "Interrupted" over a tool that succeeded
 function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
   entries: ReadonlyArray<T>,
 ): T[]
 {
   const collapsed: T[] = []
+  const retiredIndexes = new Set<number>()
+  const openHeartbeats: OpenHeartbeatRow[] = []
+  const openRowIndexByToolCallId = new Map<string, number>()
+
+  const lastLiveIndex = (): number =>
+  {
+    for (let index = collapsed.length - 1; index >= 0; index -= 1)
+    {
+      if (!retiredIndexes.has(index))
+      {
+        return index
+      }
+    }
+    return -1
+  }
+
+  // a closed row is never reopened: dropping the ids pointing at it stops a later
+  // frame carrying the same id from merging into a call that already finished
+  const forgetClosedRow = (index: number): void =>
+  {
+    if (collapsed[index]?.activityKind !== 'tool.completed')
+    {
+      return
+    }
+    for (const [toolCallId, rowIndex] of openRowIndexByToolCallId)
+    {
+      if (rowIndex === index)
+      {
+        openRowIndexByToolCallId.delete(toolCallId)
+      }
+    }
+  }
+
+  const mergeIntoRow = (index: number, entry: T): void =>
+  {
+    const previous = collapsed[index]
+    if (!previous)
+    {
+      return
+    }
+    const merged = mergeNormalizedWorkLogEntries(previous, entry)
+    // a live row keeps the id it was born with so it does not remount on every
+    // heartbeat; both surfaces key their row on entry.id
+    collapsed[index] =
+      previous.activityKind === 'tool.progress' ? { ...merged, id: previous.id } : merged
+    forgetClosedRow(index)
+  }
+
+  const mergeIntoLastLiveRow = (entry: T): boolean =>
+  {
+    const index = lastLiveIndex()
+    const previous = index >= 0 ? collapsed[index] : undefined
+    if (!previous || !shouldCollapseToolLifecycleEntries(previous, entry))
+    {
+      return false
+    }
+    mergeIntoRow(index, entry)
+    return true
+  }
+
   for (const entry of entries)
   {
-    const previous = collapsed.at(-1)
-    if (previous && shouldCollapseToolLifecycleEntries(previous, entry))
+    if (entry.activityKind === 'tool.progress')
     {
-      collapsed[collapsed.length - 1] = mergeNormalizedWorkLogEntries(previous, entry)
+      // an id-less heartbeat updates the newest open id-less row, because
+      // nothing distinguishes it from the call that row already stands for
+      const open =
+        entry.toolCallId === undefined
+          ? openHeartbeats.findLast((row) => row.toolCallId === undefined)
+          : openHeartbeats.find((row) => row.toolCallId === entry.toolCallId)
+      if (open)
+      {
+        mergeIntoRow(open.index, entry)
+        continue
+      }
+      openHeartbeats.push({
+        index: collapsed.length,
+        ...(entry.toolCallId !== undefined ? { toolCallId: entry.toolCallId } : {}),
+      })
+      collapsed.push(entry)
       continue
+    }
+
+    // an id-bearing lifecycle frame is matched by identity, so anything appended
+    // between its open & close frames cannot steal the row
+    if (isToolLifecycleFrameKind(entry.activityKind) && entry.toolCallId !== undefined)
+    {
+      // * the id-less fallback inside findOpenHeartbeatToRetire is load-bearing:
+      // codex heartbeats carry no id, so retiring only on an exact match would
+      // strand their row at "in progress" forever
+      const retireIndex = findOpenHeartbeatToRetire(openHeartbeats, entry.toolCallId)
+      if (retireIndex >= 0)
+      {
+        const [retired] = openHeartbeats.splice(retireIndex, 1)
+        if (retired)
+        {
+          retiredIndexes.add(retired.index)
+        }
+      }
+      const openIndex = openRowIndexByToolCallId.get(entry.toolCallId)
+      if (openIndex !== undefined)
+      {
+        mergeIntoRow(openIndex, entry)
+        continue
+      }
+      // no row claims this id yet, but an id-less row for the same call can still
+      // be the last live one when the open frame predates the id projection
+      if (mergeIntoLastLiveRow(entry))
+      {
+        const mergedIndex = lastLiveIndex()
+        if (mergedIndex >= 0 && collapsed[mergedIndex]?.activityKind !== 'tool.completed')
+        {
+          openRowIndexByToolCallId.set(entry.toolCallId, mergedIndex)
+        }
+        continue
+      }
+      const pushedIndex = collapsed.length
+      collapsed.push(entry)
+      if (entry.activityKind !== 'tool.completed')
+      {
+        openRowIndexByToolCallId.set(entry.toolCallId, pushedIndex)
+      }
+      continue
+    }
+
+    if (mergeIntoLastLiveRow(entry))
+    {
+      continue
+    }
+    if (isToolLifecycleFrameKind(entry.activityKind))
+    {
+      const retireIndex = findOpenHeartbeatToRetire(openHeartbeats, entry.toolCallId)
+      if (retireIndex >= 0)
+      {
+        const [retired] = openHeartbeats.splice(retireIndex, 1)
+        if (retired)
+        {
+          retiredIndexes.add(retired.index)
+        }
+        // retiring the heartbeat puts the open & close frames of the same call
+        // back in contact, so they collapse into the one row they always were
+        if (mergeIntoLastLiveRow(entry))
+        {
+          continue
+        }
+      }
     }
     collapsed.push(entry)
   }
-  return collapsed
+  return collapsed.filter((_, index) => !retiredIndexes.has(index))
 }
 
 export function deriveNormalizedWorkLogEntries<
@@ -788,6 +923,23 @@ export function workEntryIndicatesToolSuccess(
   )
 }
 
+// an in-flight tool row is running, not empty. it is the only row that exists
+// while a multi-minute tool call waits, so it has to survive the neutral drop
+export function workEntryIndicatesToolRunning(
+  entry: Pick<
+    NormalizedWorkLogEntry,
+    'tone' | 'command' | 'detail' | 'requestKind' | 'itemType' | 'toolLifecycleStatus'
+  >,
+  options: WorkLogClassificationOptions = {},
+): boolean
+{
+  return (
+    workLogEntryIsToolLike(entry, options) &&
+    entry.toolLifecycleStatus === 'inProgress' &&
+    !workEntryIndicatesToolFailure(entry, options)
+  )
+}
+
 export function workEntryIndicatesToolNeutralStatus(
   entry: Pick<
     NormalizedWorkLogEntry,
@@ -799,6 +951,7 @@ export function workEntryIndicatesToolNeutralStatus(
   return (
     workLogEntryIsToolLike(entry, options) &&
     !workEntryIndicatesToolFailure(entry, options) &&
+    !workEntryIndicatesToolRunning(entry, options) &&
     !workEntryIndicatesToolSuccess(entry, options)
   )
 }

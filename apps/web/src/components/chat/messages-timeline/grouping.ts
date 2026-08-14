@@ -11,6 +11,7 @@ import {
   type TimelineEntry,
   type WorkLogEntry,
 } from '../../../session-logic'
+import { type WorkerVerdictEntry } from '../../../session/worklog'
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from '../../../types'
 
 // timeline consumers reach the shared label normalizer through this module
@@ -98,6 +99,12 @@ export type MessagesTimelineRow =
       id: string
       createdAt: string
       event: ProviderSwitchTimelineEvent
+    }
+  | {
+      kind: 'worker-verdict'
+      id: string
+      createdAt: string
+      workerVerdict: WorkerVerdictEntry
     }
   | { kind: 'working'; id: string; createdAt: string | null }
 
@@ -431,6 +438,8 @@ export function deriveMessagesTimelineRows(input: {
         groupedEntries.push(nextEntry.entry)
         cursor += 1
       }
+      // rows with nothing to show are dropped; in-flight rows are not neutral &
+      // must survive, or a multi-minute tool call leaves the timeline blank
       const visibleGroupedEntries = groupedEntries.filter(
         (entry) => !workEntryIndicatesToolNeutralStatus(entry),
       )
@@ -496,6 +505,17 @@ export function deriveMessagesTimelineRows(input: {
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
         event: timelineEntry.providerSwitch,
+      })
+      continue
+    }
+
+    if (timelineEntry.kind === 'worker-verdict')
+    {
+      nextRows.push({
+        kind: 'worker-verdict',
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        workerVerdict: timelineEntry.workerVerdict,
       })
       continue
     }
@@ -592,6 +612,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case 'provider-switch':
       return a.event === (b as typeof a).event
+
+    case 'worker-verdict':
+      return a.workerVerdict === (b as typeof a).workerVerdict
 
     case 'work':
       return Equal.equals(a.groupedEntries, (b as typeof a).groupedEntries)

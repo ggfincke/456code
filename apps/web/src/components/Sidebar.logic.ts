@@ -2,8 +2,9 @@
 // derives sidebar thread grouping and presentation
 
 import * as React from 'react'
-import type { ContextMenuItem } from '@t3tools/contracts'
+import { normalizeCollaborationMode, type ContextMenuItem } from '@t3tools/contracts'
 import { hasBlockingApprovalOutcome } from '@t3tools/client-runtime/state/thread-settled'
+import { isThreadAwarenessStale } from '@t3tools/shared/agentAwareness'
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from '@t3tools/contracts/settings'
 import {
   getThreadSortTimestamp,
@@ -114,16 +115,26 @@ export function buildMultiSelectThreadContextMenuItems(input: {
 export interface ThreadStatusPill
 {
   label:
-    'Working' | 'Connecting' | 'Completed' | 'Pending Approval' | 'Awaiting Input' | 'Plan Ready'
+    | 'Working'
+    | 'Stalled'
+    | 'Connecting'
+    | 'Completed'
+    | 'Pending Approval'
+    | 'Awaiting Input'
+    | 'Plan Ready'
   colorClass: string
   dotClass: string
   pulse: boolean
 }
 
+// the stalled pill shares the working rank because it REPLACES working for the
+// same thread: a silent run is still less urgent than one blocked on the user,
+// so it must not outrank approval or input in a project rollup.
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill['label'], number> = {
   'Pending Approval': 5,
   'Awaiting Input': 4,
   Working: 3,
+  Stalled: 3,
   Connecting: 3,
   'Plan Ready': 2,
   Completed: 1,
@@ -137,9 +148,27 @@ type ThreadStatusInput = Pick<
   | 'hasPendingUserInput'
   | 'interactionMode'
   | 'latestTurn'
+  | 'orchestrate'
   | 'session'
 > & {
   lastVisitedAt?: string | undefined
+  // the staleness stamp, optional so callers holding a partial row (the menu
+  // bar tray, tests) still typecheck; without it a running thread simply never
+  // resolves to Stalled.
+  updatedAt?: string | undefined
+}
+
+// shared by both status resolvers so the v1 pill and the v2 row can never
+// disagree about when a running thread has gone quiet. Both halves are
+// optional-tolerant: a caller that passes no clock, or a row carrying no
+// updatedAt, keeps the pre-existing behaviour.
+function isThreadStalled(
+  thread: { readonly updatedAt?: string | undefined },
+  nowMs: number | undefined,
+): boolean
+{
+  if (nowMs === undefined || thread.updatedAt === undefined) return false
+  return isThreadAwarenessStale({ updatedAt: thread.updatedAt }, nowMs)
 }
 
 export interface ThreadJumpHintVisibilityController
@@ -260,6 +289,38 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean
   const lastVisitedAt = Date.parse(thread.lastVisitedAt)
   if (Number.isNaN(lastVisitedAt)) return true
   return completedAt > lastVisitedAt
+}
+
+// the routed-to thread marks itself visited whenever its updatedAt advances,
+// and turn.completed advances updatedAt — so the completion stamp was always
+// already "seen" and hasUnseenCompletion above could never fire for an open
+// thread. withholding the mark while the tab is in the background is what
+// keeps the Completed pill alive for a run the user was not watching.
+// returns the timestamp to store, or null when the visit must not be recorded.
+export function resolveAutoVisitTimestamp(input: {
+  readonly threadUpdatedAt: string
+  readonly lastVisitedAt?: string | undefined
+  readonly latestTurnCompletedAt?: string | null | undefined
+  readonly documentVisible: boolean
+}): string | null
+{
+  const threadUpdatedAt = Date.parse(input.threadUpdatedAt)
+  if (Number.isNaN(threadUpdatedAt)) return null
+
+  const lastVisitedAt = input.lastVisitedAt ? Date.parse(input.lastVisitedAt) : Number.NaN
+  if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= threadUpdatedAt) return null
+
+  if (!input.documentVisible)
+  {
+    const completedAt = input.latestTurnCompletedAt
+      ? Date.parse(input.latestTurnCompletedAt)
+      : Number.NaN
+    const completionUnseen =
+      !Number.isNaN(completedAt) && (Number.isNaN(lastVisitedAt) || completedAt > lastVisitedAt)
+    if (completionUnseen) return null
+  }
+
+  return input.threadUpdatedAt
 }
 
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean
@@ -456,14 +517,25 @@ export function resolveThreadRowClassName(input: {
 // whether it finished, asked a question, or proposed a plan.
 // unread completion is tracked separately: it describes whether a ready
 // thread needs attention, not what the thread is currently doing.
-export type SidebarV2Status = 'approval' | 'input' | 'working' | 'failed' | 'ready'
+// 'stale' is a sixth state rather than a variant of working: it is still an
+// in-flight run, but one that has said nothing for long enough that "Working"
+// is a claim the data no longer supports.
+export type SidebarV2Status = 'approval' | 'input' | 'working' | 'stale' | 'failed' | 'ready'
 
 type SidebarV2StatusInput = Pick<
   SidebarThreadSummary,
   'approvalOutcomes' | 'hasPendingApprovals' | 'hasPendingUserInput' | 'session'
->
+> & {
+  updatedAt?: string | undefined
+}
 
-export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2Status
+// the clock is an optional argument rather than a read: this module is pure,
+// and surfaces adopt the ticking value one at a time. Without one, a thread
+// resolves exactly as it did before.
+export function resolveSidebarV2Status(
+  thread: SidebarV2StatusInput,
+  options?: { readonly nowMs?: number | undefined },
+): SidebarV2Status
 {
   if (thread.hasPendingApprovals || hasBlockingApprovalOutcome(thread))
   {
@@ -475,7 +547,11 @@ export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2S
   }
   if (thread.session?.status === 'running' || thread.session?.status === 'starting')
   {
-    return 'working'
+    // only a run that actually started can go quiet; 'starting' has produced
+    // nothing yet, so there is no silence to measure.
+    return thread.session.status === 'running' && isThreadStalled(thread, options?.nowMs)
+      ? 'stale'
+      : 'working'
   }
   if (thread.session?.status === 'error')
   {
@@ -614,6 +690,9 @@ export function formatWorkingDurationLabel(elapsedMs: number): string
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput
+  // ticking clock, optional for the same reason resolveSidebarV2Status takes
+  // one: surfaces adopt it one at a time and none of them regress without it.
+  nowMs?: number | undefined
 }): ThreadStatusPill | null
 {
   const { thread } = input
@@ -640,6 +719,18 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.session?.status === 'running')
   {
+    // amber and non-pulsing, matching the mobile Live Activity's decision that
+    // a run which stopped reporting is closer to needing a human than to
+    // healthy work. A pulsing dot next to "Stalled" would say both at once.
+    if (isThreadStalled(thread, input.nowMs))
+    {
+      return {
+        label: 'Stalled',
+        colorClass: 'text-amber-600 dark:text-amber-300/90',
+        dotClass: 'bg-amber-500 dark:bg-amber-300/90',
+        pulse: false,
+      }
+    }
     return {
       label: 'Working',
       colorClass: 'text-sky-600 dark:text-sky-300/80',
@@ -660,7 +751,7 @@ export function resolveThreadStatusPill(input: {
 
   const hasPlanReadyPrompt =
     !thread.hasPendingUserInput &&
-    thread.interactionMode === 'plan' &&
+    normalizeCollaborationMode(thread.interactionMode, thread.orchestrate).baseMode === 'plan' &&
     isLatestTurnSettled(thread.latestTurn, thread.session) &&
     thread.hasActionableProposedPlan
   if (hasPlanReadyPrompt)

@@ -29,6 +29,14 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: 'environment-data:orchestration:full-thread-diff',
       tag: ORCHESTRATION_WS_METHODS.getFullThreadDiff,
     }),
+    runDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:orchestration:run-diff',
+      tag: ORCHESTRATION_WS_METHODS.getRunDiff,
+    }),
+    runExecutionDiffV1: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:orchestration:run-execution-diff-v1',
+      tag: ORCHESTRATION_WS_METHODS.getRunExecutionDiffV1,
+    }),
     archivedShellSnapshot: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:orchestration:archived-shell-snapshot',
       tag: ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,

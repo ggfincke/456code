@@ -1,5 +1,5 @@
 // apps/web/src/components/chat/composer/ComposerFooterPrimaryActions.tsx
-// wraps usage meter and primary send/interrupt actions in the composer footer
+// wrap usage meter and primary composer actions in the footer
 
 import type { ServerProvider } from '@t3tools/contracts'
 import { memo } from 'react'
@@ -12,6 +12,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   activeContextWindow: ThreadContextWindowSelection
   accountUsage: ServerProvider['accountUsage']
   usageProviderDisplayName: string | null
+  canCompactNow: boolean
   isPreparingWorktree: boolean
   pendingAction: {
     questionIndex: number
@@ -28,10 +29,14 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   isConnecting: boolean
   isEnvironmentUnavailable: boolean
   hasSendableContent: boolean
+  orchestrateReadinessMessage: string | null
   preserveComposerFocusOnPointerDown?: boolean
   onPreviousPendingQuestion: () => void
   onInterrupt: () => void
+  onImplementPlanWithOrchestrate: () => void
   onImplementPlanInNewThread: () => void
+  onImplementPlanWithOrchestrateInNewThread: () => void
+  onCompactNow: () => void
 })
 {
   return (
@@ -40,6 +45,8 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
         contextUsage={props.activeContextWindow}
         accountUsage={props.accountUsage}
         providerDisplayName={props.usageProviderDisplayName}
+        canCompactNow={props.canCompactNow}
+        onCompactNow={props.onCompactNow}
       />
       {props.isPreparingWorktree ? (
         <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
@@ -56,10 +63,13 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        orchestrateReadinessMessage={props.orchestrateReadinessMessage}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
+        onImplementPlanWithOrchestrate={props.onImplementPlanWithOrchestrate}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
+        onImplementPlanWithOrchestrateInNewThread={props.onImplementPlanWithOrchestrateInNewThread}
       />
     </>
   )

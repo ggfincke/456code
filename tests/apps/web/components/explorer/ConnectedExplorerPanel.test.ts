@@ -1,14 +1,19 @@
 // tests/apps/web/components/explorer/ConnectedExplorerPanel.test.ts
-// verifies exact cartographer embed ownership across target transitions
+// verifies Proposal Review discovery and exact target scoping
+import {
+  ThreadId,
+  type ArchitectureImpactResult,
+  type ProposalGenerationId,
+} from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
-  isCurrentEmbedRequest,
+  isExplorerTargetScopedToThread,
   isProposalDiscoverySettled,
-  resolveEmbedTargetTransition,
+  selectExactProposalDiffSources,
 } from '../../../../../apps/web/src/components/explorer/ConnectedExplorerPanel'
 
-describe('ConnectedExplorerPanel embed lifecycle', () =>
+describe('ConnectedExplorerPanel proposal selection', () =>
 {
   it('keeps a negative proposal lookup settled across polling refreshes', () =>
   {
@@ -35,66 +40,52 @@ describe('ConnectedExplorerPanel embed lifecycle', () =>
     ).toBe(true)
   })
 
-  it('invalidates one-time requests and releases only the previous exact target', () =>
+  it('rejects an orchestrate target persisted under a different thread', () =>
   {
-    expect(
-      resolveEmbedTargetTransition({
-        previousTargetKey: 'proposal:generation-1',
-        nextTargetKey: null,
-        issuedSessionKey: 'proposal:generation-1',
-      }),
-    ).toEqual({
-      invalidateRequest: true,
-      releaseIssuedSession: true,
-    })
-
-    expect(
-      resolveEmbedTargetTransition({
-        previousTargetKey: null,
-        nextTargetKey: 'proposal:generation-1',
-        issuedSessionKey: null,
-      }),
-    ).toEqual({
-      invalidateRequest: true,
-      releaseIssuedSession: false,
-    })
-
-    expect(
-      resolveEmbedTargetTransition({
-        previousTargetKey: 'proposal:generation-1',
-        nextTargetKey: 'proposal:generation-1',
-        issuedSessionKey: 'proposal:generation-1',
-      }),
-    ).toEqual({
-      invalidateRequest: false,
-      releaseIssuedSession: false,
-    })
-
-    expect(
-      resolveEmbedTargetTransition({
-        previousTargetKey: 'proposal:generation-1',
-        nextTargetKey: 'proposal:generation-2',
-        issuedSessionKey: 'proposal:generation-1',
-      }),
-    ).toEqual({
-      invalidateRequest: true,
-      releaseIssuedSession: true,
-    })
+    const target = {
+      kind: 'orchestrate' as const,
+      threadId: ThreadId.make('thread-B'),
+      runId: 'run-1',
+      revision: 1,
+    }
+    expect(isExplorerTargetScopedToThread(target, ThreadId.make('thread-A'))).toBe(false)
+    expect(isExplorerTargetScopedToThread(target, ThreadId.make('thread-B'))).toBe(true)
   })
 
-  it('does not accept an obsolete one-time result after the same target returns', () =>
+  it('accepts only matching v2 proposal identities and preserves unavailable sides', () =>
   {
-    const obsolete = {
-      key: 'proposal:generation-1',
-      requestId: 1,
-    }
-    const replacement = {
-      key: 'proposal:generation-1',
-      requestId: 2,
-    }
+    const threadId = ThreadId.make('thread-exact-proposal-source')
+    const generationId = 'generation-exact-proposal-source' as ProposalGenerationId
+    const baseSource = {
+      kind: 'proposal-generation',
+      threadId,
+      generationId,
+      side: 'base',
+      graphDigest: `sha256:${'a'.repeat(64)}`,
+    } as const
+    const result = {
+      version: 2,
+      comparison: { kind: 'proposal-generation', generationId },
+      baseSource,
+      headSource: {
+        kind: 'diff-analysis',
+        threadId,
+        diffAnalysisId: 'unrelated-diff-analysis',
+        side: 'head',
+        graphDigest: `sha256:${'b'.repeat(64)}`,
+      },
+    } as unknown as ArchitectureImpactResult
 
-    expect(isCurrentEmbedRequest(replacement, obsolete)).toBe(false)
-    expect(isCurrentEmbedRequest(replacement, replacement)).toBe(true)
-    expect(isCurrentEmbedRequest(null, replacement)).toBe(false)
+    expect(selectExactProposalDiffSources(null, { generationId, threadId })).toBeNull()
+    expect(
+      selectExactProposalDiffSources(result, {
+        generationId: 'different-generation' as ProposalGenerationId,
+        threadId,
+      }),
+    ).toBeNull()
+    expect(selectExactProposalDiffSources(result, { generationId, threadId })).toEqual({
+      beforeSource: baseSource,
+      proposedSource: null,
+    })
   })
 })

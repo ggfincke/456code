@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   acknowledgeRpcRequest,
   getSlowRpcAckRequests,
+  LONG_RUNNING_RPC_ACK_THRESHOLD_MS,
   resetRequestLatencyStateForTests,
   trackRpcRequestSent,
   SLOW_RPC_ACK_THRESHOLD_MS,
@@ -70,10 +71,42 @@ describe('requestLatencyState', () =>
 
   it('ignores session imports with environment-qualified request tags', () =>
   {
-    trackRpcRequestSent('1', `${ORCHESTRATION_WS_METHODS.importSessions} · environment-primary`)
+    trackRpcRequestSent(
+      '1',
+      ORCHESTRATION_WS_METHODS.importSessions,
+      `${ORCHESTRATION_WS_METHODS.importSessions} · environment-primary`,
+    )
     vi.advanceTimersByTime(SLOW_RPC_ACK_THRESHOLD_MS * 2)
 
     expect(getSlowRpcAckRequests()).toEqual([])
+  })
+
+  it('keeps ignoring untracked methods when a display tag is supplied', () =>
+  {
+    trackRpcRequestSent(
+      '1',
+      WS_METHODS.previewAutomationConnect,
+      `${WS_METHODS.previewAutomationConnect} · environment-primary`,
+    )
+    vi.advanceTimersByTime(SLOW_RPC_ACK_THRESHOLD_MS * 2)
+
+    expect(getSlowRpcAckRequests()).toEqual([])
+  })
+
+  it('gives provider updates a longer threshold before warning', () =>
+  {
+    trackRpcRequestSent('1', WS_METHODS.serverUpdateProvider, 'server.updateProvider · env-1')
+    vi.advanceTimersByTime(LONG_RUNNING_RPC_ACK_THRESHOLD_MS - 1)
+    expect(getSlowRpcAckRequests()).toEqual([])
+
+    vi.advanceTimersByTime(1)
+    expect(getSlowRpcAckRequests()).toMatchObject([
+      {
+        requestId: '1',
+        tag: 'server.updateProvider · env-1',
+        thresholdMs: LONG_RUNNING_RPC_ACK_THRESHOLD_MS,
+      },
+    ])
   })
 
   it('evicts the oldest pending requests once the tracker reaches capacity', () =>

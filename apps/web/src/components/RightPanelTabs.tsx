@@ -3,11 +3,15 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from '@t3tools/contracts'
 import { getTerminalLabel } from '@t3tools/shared/terminalLabels'
 import {
+  Blocks,
   Bot,
   ClipboardList,
   FileDiff,
   Files,
+  FolderTree,
+  GitCompareArrows,
   Globe2,
+  Map,
   Network,
   Plus,
   TerminalSquare,
@@ -15,10 +19,12 @@ import {
 } from 'lucide-react'
 import {
   type MouseEvent as ReactMouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from 'react'
@@ -58,10 +64,12 @@ interface RightPanelTabsProps
   onAddDiff: () => void
   onAddFiles: () => void
   onAddWorkers: () => void
+  onAddRepositoryAtlas?: () => void
   onAddExplorer?: () => void
   browserAvailable: boolean
   diffAvailable: boolean
   filesAvailable: boolean
+  repositoryAtlasAvailable?: boolean
   explorerAvailable?: boolean
   children: ReactNode
 }
@@ -70,8 +78,8 @@ const SURFACE_DISABLED_REASONS = {
   browser: 'Browser previews are only available in the 456code desktop app.',
   files: 'Files are only available when a project is open.',
   diff: 'Diff is only available for server threads in Git repositories.',
-  explorer:
-    'Explorer requires proposal previews or Cartographer support for an open server project.',
+  atlas: 'Repository Atlas requires native architecture analysis for an open project.',
+  explorer: 'Proposal Review requires proposal previews for an open server project.',
 } as const
 const NOOP_SURFACE_ACTION = () => undefined
 
@@ -113,10 +121,12 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void
   onAddFiles: () => void
   onAddWorkers: () => void
+  onAddRepositoryAtlas: () => void
   onAddExplorer: () => void
   browserAvailable: boolean
   diffAvailable: boolean
   filesAvailable: boolean
+  repositoryAtlasAvailable: boolean
   explorerAvailable: boolean
 })
 {
@@ -154,12 +164,20 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddDiff,
     },
     {
-      label: 'Explorer',
-      description: 'Inspect proposal narrative, code, and architecture.',
+      label: 'Proposal Review',
+      description: 'Review proposal narrative, changes, and impact.',
       icon: Network,
       available: props.explorerAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.explorer,
       onClick: props.onAddExplorer,
+    },
+    {
+      label: 'Repository Atlas',
+      description: "Explore this project's sealed architecture map.",
+      icon: Map,
+      available: props.repositoryAtlasAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.atlas,
+      onClick: props.onAddRepositoryAtlas,
     },
     {
       label: 'Workers',
@@ -242,7 +260,21 @@ function surfaceTitle(
     case 'files':
       return 'Files'
     case 'file':
-      return surface.relativePath.slice(surface.relativePath.lastIndexOf('/') + 1)
+    {
+      const fileName = surface.relativePath.slice(surface.relativePath.lastIndexOf('/') + 1)
+      if (!surface.source) return fileName
+      const side =
+        surface.source.side === 'base'
+          ? 'Before'
+          : surface.source.side === 'proposed'
+            ? 'Proposed'
+            : 'After'
+      const revision =
+        surface.source.kind === 'diff-analysis'
+          ? surface.source.diffAnalysisId
+          : surface.source.generationId
+      return `${fileName} · ${side} · ${revision.slice(0, 8)}`
+    }
     case 'terminal':
       return (
         terminalLabelsById.get(surface.activeTerminalId) ??
@@ -252,8 +284,32 @@ function surfaceTitle(
       return 'Plan'
     case 'workers':
       return 'Workers'
+    case 'repository-atlas-home':
+      return 'Repository Atlas'
     case 'explorer':
-      return 'Explorer'
+      return 'Proposal Review'
+    case 'architecture-impact':
+    {
+      const revision =
+        surface.target.comparison.kind === 'diff-analysis'
+          ? surface.target.comparison.diffAnalysisId
+          : surface.target.comparison.generationId
+      return `Impact Diff · ${revision.slice(0, 8)}`
+    }
+    case 'repository-atlas':
+      return `Repository Atlas · ${surface.target.generationId.slice(0, 8)}`
+    case 'architecture-scope':
+    {
+      const label =
+        surface.target.scope.level === 'file-neighborhood'
+          ? surface.target.scope.path.slice(surface.target.scope.path.lastIndexOf('/') + 1)
+          : surface.target.scope.id
+      const revision =
+        surface.target.source.kind === 'diff-analysis'
+          ? surface.target.source.diffAnalysisId
+          : surface.target.source.generationId
+      return `Architecture Scope · ${label} · ${revision.slice(0, 8)}`
+    }
     case 'preview':
     {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null
@@ -268,6 +324,36 @@ function surfaceTitle(
         return 'Browser'
       }
     }
+  }
+}
+
+function surfaceTooltip(title: string, surface: RightPanelSurface): string
+{
+  switch (surface.kind)
+  {
+    case 'architecture-impact':
+      return `${title} · ${
+        surface.target.comparison.kind === 'diff-analysis'
+          ? surface.target.comparison.diffAnalysisId
+          : surface.target.comparison.generationId
+      }`
+    case 'repository-atlas':
+      return `${title} · ${surface.target.generationId}`
+    case 'architecture-scope':
+      return `${title} · ${
+        surface.target.source.kind === 'diff-analysis'
+          ? surface.target.source.diffAnalysisId
+          : surface.target.source.generationId
+      }`
+    case 'file':
+      if (!surface.source) return title
+      return `${title} · ${
+        surface.source.kind === 'diff-analysis'
+          ? surface.source.diffAnalysisId
+          : surface.source.generationId
+      }`
+    default:
+      return title
   }
 }
 
@@ -325,8 +411,16 @@ function SurfaceIcon({
       return <ClipboardList className="size-3.5 shrink-0" />
     case 'workers':
       return <Bot className="size-3.5 shrink-0" />
+    case 'repository-atlas-home':
+      return <Blocks className="size-3.5 shrink-0" />
     case 'explorer':
       return <Network className="size-3.5 shrink-0" />
+    case 'architecture-impact':
+      return <GitCompareArrows className="size-3.5 shrink-0" />
+    case 'repository-atlas':
+      return <Map className="size-3.5 shrink-0" />
+    case 'architecture-scope':
+      return <FolderTree className="size-3.5 shrink-0" />
   }
 }
 
@@ -334,7 +428,24 @@ export function RightPanelTabs(props: RightPanelTabsProps)
 {
   const ownsDesktopTitleBar = isElectron && props.mode === 'inline'
   const { resolvedTheme } = useTheme()
+  const tabsetId = useId()
   const tabListRef = useRef<HTMLDivElement>(null)
+  const tabButtonRefs = useRef(new globalThis.Map<string, HTMLButtonElement>())
+  const focusAfterCloseRef = useRef(false)
+  const activeSurfaceIndex = props.surfaces.findIndex(
+    (surface) => surface.id === props.activeSurfaceId,
+  )
+  const panelId = `${tabsetId}-panel`
+  const activeTabId = activeSurfaceIndex < 0 ? undefined : `${tabsetId}-tab-${activeSurfaceIndex}`
+
+  const closeSurface = useCallback(
+    (surface: RightPanelSurface): void =>
+    {
+      focusAfterCloseRef.current = true
+      props.onCloseSurface(surface)
+    },
+    [props.onCloseSurface],
+  )
 
   const handleTabContextMenu = useCallback(
     async (event: ReactMouseEvent, surface: RightPanelSurface) =>
@@ -379,7 +490,7 @@ export function RightPanelTabs(props: RightPanelTabsProps)
           if (surface.kind === 'file') props.onCopyFilePath(surface.relativePath)
           break
         case 'close':
-          props.onCloseSurface(surface)
+          closeSurface(surface)
           break
         case 'close-others':
           props.onCloseOtherSurfaces(surface)
@@ -394,7 +505,7 @@ export function RightPanelTabs(props: RightPanelTabsProps)
           break
       }
     },
-    [props],
+    [closeSurface, props],
   )
   const handleTabMouseDown = useCallback((event: ReactMouseEvent) =>
   {
@@ -407,15 +518,53 @@ export function RightPanelTabs(props: RightPanelTabsProps)
       if (event.button !== 1) return
       event.preventDefault()
       event.stopPropagation()
-      props.onCloseSurface(surface)
+      closeSurface(surface)
     },
-    [props],
+    [closeSurface],
+  )
+
+  const handleTabKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>, surfaceIndex: number): void =>
+    {
+      let nextIndex: number | null = null
+      switch (event.key)
+      {
+        case 'ArrowLeft':
+          nextIndex = surfaceIndex === 0 ? props.surfaces.length - 1 : surfaceIndex - 1
+          break
+        case 'ArrowRight':
+          nextIndex = surfaceIndex === props.surfaces.length - 1 ? 0 : surfaceIndex + 1
+          break
+        case 'Home':
+          nextIndex = 0
+          break
+        case 'End':
+          nextIndex = props.surfaces.length - 1
+          break
+        default:
+          return
+      }
+      const nextSurface = props.surfaces[nextIndex]
+      if (!nextSurface) return
+      event.preventDefault()
+      props.onActivate(nextSurface)
+      tabButtonRefs.current.get(nextSurface.id)?.focus()
+    },
+    [props.onActivate, props.surfaces],
   )
 
   useEffect(() =>
   {
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']")
     activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    if (!focusAfterCloseRef.current) return
+    focusAfterCloseRef.current = false
+    const activeSurfaceId = props.activeSurfaceId
+    if (activeSurfaceId === null) return
+    globalThis.requestAnimationFrame(() =>
+    {
+      tabButtonRefs.current.get(activeSurfaceId)?.focus()
+    })
   }, [props.activeSurfaceId])
 
   return (
@@ -439,16 +588,22 @@ export function RightPanelTabs(props: RightPanelTabsProps)
           className={cn('min-w-0 flex-1 rounded-none', ownsDesktopTitleBar && 'drag-region')}
           data-right-panel-tab-list
         >
-          <div className="flex h-full w-max min-w-full items-center gap-1">
-            {props.surfaces.map((surface) =>
+          <div
+            aria-label="Right panel resources"
+            className="flex h-full w-max min-w-full items-center gap-1"
+            role="tablist"
+          >
+            {props.surfaces.map((surface, surfaceIndex) =>
             {
               const active = surface.id === props.activeSurfaceId
               const pending = props.pendingSurfaceIds.has(surface.id)
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById)
+              const tooltip = surfaceTooltip(title, surface)
               return (
                 <div
                   key={surface.id}
                   data-active-tab={active}
+                  role="presentation"
                   onMouseDown={handleTabMouseDown}
                   onAuxClick={(event) => handleTabAuxClick(event, surface)}
                   onContextMenu={(event) => void handleTabContextMenu(event, surface)}
@@ -463,9 +618,20 @@ export function RightPanelTabs(props: RightPanelTabsProps)
                     <TooltipTrigger
                       render={
                         <button
+                          aria-controls={panelId}
+                          aria-selected={active}
+                          id={`${tabsetId}-tab-${surfaceIndex}`}
+                          ref={(element) =>
+                          {
+                            if (element) tabButtonRefs.current.set(surface.id, element)
+                            else tabButtonRefs.current.delete(surface.id)
+                          }}
+                          role="tab"
+                          tabIndex={active ? 0 : -1}
                           type="button"
                           className="flex min-w-0 flex-1 items-center gap-1.5"
                           onClick={() => props.onActivate(surface)}
+                          onKeyDown={(event) => handleTabKeyDown(event, surfaceIndex)}
                         >
                           <SurfaceIcon
                             surface={surface}
@@ -476,7 +642,7 @@ export function RightPanelTabs(props: RightPanelTabsProps)
                         </button>
                       }
                     />
-                    <TooltipPopup>{title}</TooltipPopup>
+                    <TooltipPopup>{tooltip}</TooltipPopup>
                   </Tooltip>
                   <button
                     type="button"
@@ -485,7 +651,11 @@ export function RightPanelTabs(props: RightPanelTabsProps)
                       pending ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                     )}
                     aria-label={`Close ${title}`}
-                    onClick={() => props.onCloseSurface(surface)}
+                    onClick={(event) =>
+                    {
+                      event.stopPropagation()
+                      closeSurface(surface)
+                    }}
                   >
                     {pending ? (
                       <>
@@ -549,7 +719,15 @@ export function RightPanelTabs(props: RightPanelTabsProps)
                     onClick={props.onAddExplorer ?? NOOP_SURFACE_ACTION}
                   >
                     <Network />
-                    Explorer
+                    Proposal Review
+                  </SurfaceMenuItem>
+                  <SurfaceMenuItem
+                    available={props.repositoryAtlasAvailable === true}
+                    disabledReason={SURFACE_DISABLED_REASONS.atlas}
+                    onClick={props.onAddRepositoryAtlas ?? NOOP_SURFACE_ACTION}
+                  >
+                    <Map />
+                    Repository Atlas
                   </SurfaceMenuItem>
                 </MenuPopup>
               </Menu>
@@ -558,7 +736,12 @@ export function RightPanelTabs(props: RightPanelTabsProps)
         </ScrollArea>
         {props.layoutControls}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div
+        aria-labelledby={activeTabId}
+        className="flex min-h-0 flex-1 flex-col"
+        id={panelId}
+        role={props.activeSurfaceId === null ? undefined : 'tabpanel'}
+      >
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
             onAddBrowser={props.onAddBrowser}
@@ -566,10 +749,12 @@ export function RightPanelTabs(props: RightPanelTabsProps)
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddWorkers={props.onAddWorkers}
+            onAddRepositoryAtlas={props.onAddRepositoryAtlas ?? NOOP_SURFACE_ACTION}
             onAddExplorer={props.onAddExplorer ?? NOOP_SURFACE_ACTION}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
+            repositoryAtlasAvailable={props.repositoryAtlasAvailable === true}
             explorerAvailable={props.explorerAvailable === true}
           />
         ) : (

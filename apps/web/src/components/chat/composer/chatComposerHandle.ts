@@ -50,5 +50,6 @@ export interface ChatComposerHandle
     selectedProvider: ProviderDriverKind
     selectedModel: string
     selectedProviderModels: ReadonlyArray<ServerProvider['models'][number]>
+    selectedProviderSlashCommands: ReadonlyArray<ServerProvider['slashCommands'][number]>
   }
 }

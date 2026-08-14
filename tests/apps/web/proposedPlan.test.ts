@@ -1,5 +1,5 @@
 // tests/apps/web/proposedPlan.test.ts
-// verify proposed plan title behavior
+// verify proposed plan presentation and handoff behavior
 
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -79,29 +79,57 @@ describe('stripDisplayedPlanMarkdown', () =>
 
 describe('resolvePlanFollowUpSubmission', () =>
 {
-  it('switches to default mode when implementing the ready plan without extra text', () =>
+  it('keeps the build variant in default mode when implementing without extra text', () =>
   {
+    const expected = {
+      text: 'PLEASE IMPLEMENT THIS PLAN:\n## Ship it\n\n- step 1',
+      collaborationMode: { baseMode: 'default', orchestrate: false },
+    }
+
     expect(
       resolvePlanFollowUpSubmission({
         draftText: '   ',
         planMarkdown: '## Ship it\n\n- step 1\n',
+        currentMode: { baseMode: 'plan', orchestrate: true },
+      }),
+    ).toEqual(expected)
+    expect(
+      resolvePlanFollowUpSubmission({
+        draftText: '   ',
+        planMarkdown: '## Ship it\n\n- step 1\n',
+        currentMode: { baseMode: 'plan', orchestrate: true },
+        implementVariant: 'build',
+      }),
+    ).toEqual(expected)
+  })
+
+  it('enables the Orchestrate modifier and uses its delegation prompt', () =>
+  {
+    expect(
+      resolvePlanFollowUpSubmission({
+        draftText: '',
+        planMarkdown: '## Ship it\n\n- step 1\n',
+        currentMode: { baseMode: 'plan', orchestrate: false },
+        implementVariant: 'orchestrate',
       }),
     ).toEqual({
-      text: 'PLEASE IMPLEMENT THIS PLAN:\n## Ship it\n\n- step 1',
-      interactionMode: 'default',
+      text: 'Implement this plan by delegating bounded packages through orchestrate workers.',
+      collaborationMode: { baseMode: 'default', orchestrate: true },
     })
   })
 
-  it('stays in plan mode when the user adds a follow-up prompt', () =>
+  it('keeps non-empty follow-up text in plan mode regardless of the implement variant', () =>
   {
     expect(
       resolvePlanFollowUpSubmission({
         draftText: 'Refine step 2 first',
         planMarkdown: '## Ship it\n\n- step 1\n',
+        currentMode: { baseMode: 'plan', orchestrate: true },
+        implementVariant: 'orchestrate',
       }),
     ).toEqual({
       text: 'Refine step 2 first',
-      interactionMode: 'plan',
+      collaborationMode: { baseMode: 'plan', orchestrate: true },
     })
   })
 })

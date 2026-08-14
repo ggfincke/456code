@@ -15,9 +15,11 @@ import {
   scopedThreadKey,
 } from '@t3tools/client-runtime/environment'
 import type { ScopedThreadRef, SidebarProjectGroupingMode } from '@t3tools/contracts'
+import { resolveThreadChangeRoot } from '@t3tools/shared/threadChangeRoot'
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
+  BlocksIcon,
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
@@ -156,6 +158,8 @@ import { SidebarChromeFooter, SidebarChromeHeader } from './sidebar/SidebarChrom
 import { Popover, PopoverPopup, PopoverTrigger } from './ui/popover'
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { useComposerDraftStore } from '../composerDraftStore'
+import { useRightPanelStore } from '../rightPanelStore'
+import { repositoryAtlasDisabledReason } from './architecture/architectureAvailability'
 
 // settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
@@ -170,6 +174,52 @@ const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> =
   repository: 'Group by repository',
   repository_path: 'Group by repository path',
   separate: 'Keep separate',
+}
+
+function ProjectArchitectureButton(props: {
+  readonly member: SidebarProjectGroupMember
+  readonly hasServerThread: boolean
+  readonly activeEnvironmentId: string | null
+  readonly activeProjectId: string | null
+  readonly architectureCapability: boolean | null
+  readonly onOpen: (member: SidebarProjectGroupMember) => void
+})
+{
+  const exactProject =
+    props.activeEnvironmentId === props.member.environmentId &&
+    props.activeProjectId === props.member.id
+  const disabledReason = repositoryAtlasDisabledReason({
+    hasServerThread: props.hasServerThread,
+    exactProject,
+    capability: props.architectureCapability,
+    environmentLabel: props.member.environmentLabel ?? undefined,
+  })
+  const available = disabledReason === null
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-disabled={!available || undefined}
+            className={cn(!available && 'cursor-not-allowed opacity-50')}
+            onClick={() =>
+            {
+              if (available) props.onOpen(props.member)
+            }}
+          />
+        }
+      >
+        <BlocksIcon />
+        Repository Atlas
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        {disabledReason ?? `Open the Repository Atlas for ${props.member.title}.`}
+      </TooltipPopup>
+    </Tooltip>
+  )
 }
 
 function importedThreadListKey(thread: EnvironmentThreadShell): string
@@ -529,7 +579,12 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // same semantics as v1 (never-visited counts as read): flipping the beta
   // flag must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt })
-  const status = resolveSidebarV2Status(thread)
+  // subscribed per row rather than threaded down from the list: useNowMinute is
+  // one module timer fanned out through useSyncExternalStore, so a row costs one
+  // listener entry, while a prop from the list would re-render every row a tick.
+  const nowMinute = useNowMinute()
+  const nowMs = Date.parse(`${nowMinute}:00.000Z`)
+  const status = resolveSidebarV2Status(thread, { nowMs })
   const approvalLifecycleStatus = thread.approvalOutcomes?.some(
     (outcome) => outcome.status === 'unknown',
   )
@@ -553,6 +608,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // findable. In-flight rows recede the same as read-ready ones (inbox-zero:
   // working threads aren't your problem yet) — only the colored status label
   // stands out.
+  // 'stale' is deliberately NOT in-flight: the whole point of the state is that
+  // the run may be dead, so the row must not recede like work that is merely
+  // not your problem yet.
   const isInFlight = status === 'working' || status === 'approval' || status === 'input'
   const shouldRecede =
     (status === 'ready' || isInFlight) && !isUnread && !isWoke && !props.isActive && !isSelected
@@ -560,62 +618,113 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
   const topStatus =
-    status === 'working'
+    status === 'stale'
       ? {
-          label: 'Working',
-          icon: 'working' as const,
-          className:
-            'animate-sidebar-working-text text-sky-600 motion-reduce:animate-none dark:text-sky-400',
+          label: 'Stalled',
+          icon: null,
+          className: 'text-amber-700 dark:text-amber-300',
         }
-      : status === 'approval'
+      : status === 'working'
         ? {
-            label:
-              approvalLifecycleStatus === 'unknown'
-                ? 'Approval unknown'
-                : approvalLifecycleStatus === 'responding'
-                  ? 'Approval pending'
-                  : 'Approval',
-            icon: null,
-            className: 'text-amber-700 dark:text-amber-300',
+            label: 'Working',
+            icon: 'working' as const,
+            className:
+              'animate-sidebar-working-text text-sky-600 motion-reduce:animate-none dark:text-sky-400',
           }
-        : status === 'input'
+        : status === 'approval'
           ? {
-              label: 'Input',
+              label:
+                approvalLifecycleStatus === 'unknown'
+                  ? 'Approval unknown'
+                  : approvalLifecycleStatus === 'responding'
+                    ? 'Approval pending'
+                    : 'Approval',
               icon: null,
-              className: 'text-indigo-600 dark:text-indigo-300',
+              className: 'text-amber-700 dark:text-amber-300',
             }
-          : status === 'failed'
+          : status === 'input'
             ? {
-                label: 'Failed',
+                label: 'Input',
                 icon: null,
-                className: 'text-red-700 dark:text-red-300',
+                className: 'text-indigo-600 dark:text-indigo-300',
               }
-            : isWoke
+            : status === 'failed'
               ? {
-                  label: 'Woke',
-                  icon: 'woke' as const,
-                  className: 'text-amber-700 dark:text-amber-300',
+                  label: 'Failed',
+                  icon: null,
+                  className: 'text-red-700 dark:text-red-300',
                 }
-              : isUnread
+              : isWoke
                 ? {
-                    label: 'Done',
-                    icon: 'done' as const,
-                    className: 'text-emerald-700 dark:text-emerald-300',
+                    label: 'Woke',
+                    icon: 'woke' as const,
+                    className: 'text-amber-700 dark:text-amber-300',
                   }
-                : null
+                : isUnread
+                  ? {
+                      label: 'Done',
+                      icon: 'done' as const,
+                      className: 'text-emerald-700 dark:text-emerald-300',
+                    }
+                  : null
 
-  const gitCwd = thread.worktreePath ?? props.projectCwd
+  const runWorktreePath = thread.orchestrateRunWorktreePath ?? null
+  // the adopted run worktree can be pruned while the thread sits idle, and the
+  // server only releases the recorded path on that thread's next turn. this probe
+  // is pinned to the adopted path instead of reusing gitStatus below, whose cwd
+  // moves with the resolver and would flap between the two candidates forever
+  // ! this cwd must stay pinned to runWorktreePath. point it at gitCwd, or derive
+  // the flag below from the resolver's output, and it never settles: dead root ->
+  // isRepo false -> the chain falls back -> live root -> isRepo true -> the flag
+  // clears -> dead root again
+  const runWorktreeStatus = useEnvironmentQuery(
+    runWorktreePath === null
+      ? null
+      : vcsEnvironment.status({
+          environmentId: thread.environmentId,
+          input: { cwd: runWorktreePath },
+        }),
+  )
+  // one derived answer to "is the adopted tree still there", so the gate and the
+  // mismatch below agree with the root the status query actually read. while the
+  // probe is pending data is null, so the adopted path is kept and the row settles
+  // once rather than blinking
+  const runWorktreeIsNotRepository = runWorktreeStatus.data?.isRepo === false
+  const effectiveRunWorktreePath = runWorktreeIsNotRepository ? null : runWorktreePath
+  // a pruned run worktree answers "not a git repository" rather than failing, so
+  // trusting it would leave the row reporting a clean tree for work that is still
+  // sitting in the thread's own checkout
+  const gitCwd = resolveThreadChangeRoot({
+    orchestrateRunWorktreePath: runWorktreePath,
+    worktreePath: thread.worktreePath,
+    workspaceRoot: props.projectCwd,
+    orchestrateRunWorktreeIsNotRepository: runWorktreeIsNotRepository,
+  })
+  // the gate has to widen with the resolver. an orchestrate thread carries no
+  // branch and no worktree of its own, so the old condition skipped the query
+  // entirely and the row showed nothing at all while the run was committing.
+  // it tracks what the two consumers below actually need, so once the adopted
+  // tree is gone a branchless row skips a status call nothing could have read
   const gitStatus = useEnvironmentQuery(
-    (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    (thread.branch != null || thread.worktreePath !== null || effectiveRunWorktreePath !== null) &&
+      gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
         })
       : null,
   )
+  // resolveLocalCheckoutBranchMismatch only fires for a local checkout with no
+  // worktree, and it compares thread.branch against whatever branch gitCwd is on.
+  // now that gitCwd can be the run's worktree, a null-worktree thread would read
+  // the run's branch and raise a mismatch against its own — a badge that is pure
+  // noise. treat a run worktree as a worktree, exactly like the thread's own, but
+  // only for as long as it still resolves as one: currentGitBranch below is read
+  // from the resolved root, so both inputs have to describe that same tree
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
-    effectiveEnvMode: thread.worktreePath === null ? 'local' : 'worktree',
-    activeWorktreePath: thread.worktreePath,
+    effectiveEnvMode:
+      thread.worktreePath === null && effectiveRunWorktreePath === null ? 'local' : 'worktree',
+    activeWorktreePath: thread.worktreePath ?? effectiveRunWorktreePath,
     activeThreadBranch: thread.branch,
     currentGitBranch: gitStatus.data?.refName ?? null,
   })
@@ -1563,6 +1672,35 @@ export default function SidebarV2()
   // merging, no optimistic holds. Archived threads remain hidden here —
   // archive keeps its original "remove from sidebar" meaning.
   const serverConfigs = useAtomValue(environmentServerConfigsAtom)
+  const hasArchitectureServerThread = newThreadContext.activeThread !== null
+  const activeArchitectureEnvironmentId = newThreadContext.activeThread?.environmentId ?? null
+  const activeArchitectureProjectId = newThreadContext.activeThread?.projectId ?? null
+  const activeArchitectureThreadRef = newThreadContext.activeThread
+    ? scopeThreadRef(newThreadContext.activeThread.environmentId, newThreadContext.activeThread.id)
+    : null
+  const handleOpenProjectArchitecture = useCallback(
+    (member: SidebarProjectGroupMember) =>
+    {
+      if (
+        activeArchitectureThreadRef === null ||
+        activeArchitectureEnvironmentId !== member.environmentId ||
+        activeArchitectureProjectId !== member.id ||
+        serverConfigs.get(member.environmentId)?.environment.capabilities.architectureImpact !==
+          true
+      )
+      {
+        return
+      }
+      useRightPanelStore.getState().open(activeArchitectureThreadRef, 'repository-atlas-home')
+      setProjectActionsTarget(null)
+    },
+    [
+      activeArchitectureEnvironmentId,
+      activeArchitectureProjectId,
+      activeArchitectureThreadRef,
+      serverConfigs,
+    ],
+  )
   const { activeThreads, importedThreads, snoozedThreads, settledThreads, snoozeNow } =
     useMemo(() =>
     {
@@ -3066,6 +3204,17 @@ export default function SidebarV2()
                       <CopyIcon />
                       Copy path
                     </Button>
+                    <ProjectArchitectureButton
+                      member={member}
+                      hasServerThread={hasArchitectureServerThread}
+                      activeEnvironmentId={activeArchitectureEnvironmentId}
+                      activeProjectId={activeArchitectureProjectId}
+                      architectureCapability={
+                        serverConfigs.get(member.environmentId)?.environment.capabilities
+                          .architectureImpact ?? null
+                      }
+                      onOpen={handleOpenProjectArchitecture}
+                    />
                     <Button
                       size="sm"
                       variant="ghost"

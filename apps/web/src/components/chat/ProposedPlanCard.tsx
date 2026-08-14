@@ -1,5 +1,5 @@
 // apps/web/src/components/chat/ProposedPlanCard.tsx
-// renders proposed plans, exact preview identity, and export actions
+// renders proposed plans, exact preview generation state, and export actions
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -7,11 +7,10 @@ import {
 import type {
   EnvironmentId,
   OrchestrationProposedPlanId,
-  ProposalGeneration,
   ScopedThreadRef,
 } from '@t3tools/contracts'
 import { EllipsisIcon } from 'lucide-react'
-import { memo, useEffect, useId, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useState } from 'react'
 
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
@@ -44,6 +43,14 @@ import {
 import { Input } from '../ui/input'
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../ui/menu'
 import { stackedThreadToast, toastManager } from '../ui/toast'
+import { formatProposalGenerationFailure } from '../cartographer/proposalGenerationFailure'
+import {
+  completeProposalGenerationStart,
+  createProposalGenerationStartTarget,
+  failProposalGenerationStart,
+  recordObservedProposalGenerationFailure,
+  useProposalGenerationStart,
+} from './proposedPlanGenerationStart'
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planId,
@@ -67,7 +74,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false)
   const serverConfig = useServerConfigs().get(environmentId) ?? null
   const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true
-  const cartographerAvailable = serverConfig?.environment.capabilities.cartographerEmbed === true
+  const architectureImpactAvailable =
+    serverConfig?.environment.capabilities.architectureImpact === true
   const planProposalQuery = useEnvironmentQuery(
     proposalPreviewAvailable && threadRef
       ? projectEnvironment.findProposalByPlan({
@@ -85,14 +93,19 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     planProposalQuery.data.revision.planId === planId
       ? planProposalQuery.data
       : null
-  const canOpenExplorer =
-    threadRef !== undefined && (proposalPreviewAvailable || cartographerAvailable)
-  const revisionKey =
-    exactPlanProposal === null
+  const canOpenExplorer = threadRef !== undefined && proposalPreviewAvailable
+  const generationStartTarget =
+    exactPlanProposal === null || !threadRef
       ? null
-      : `${exactPlanProposal.proposal.proposalId}:${exactPlanProposal.revision.revision}`
+      : createProposalGenerationStartTarget({
+          environmentId,
+          threadId: threadRef.threadId,
+          proposalId: exactPlanProposal.proposal.proposalId,
+          revision: exactPlanProposal.revision.revision,
+        })
+  const generationStartKey = generationStartTarget?.key ?? null
   const latestGenerationQuery = useEnvironmentQuery(
-    exactPlanProposal !== null && threadRef && cartographerAvailable
+    exactPlanProposal !== null && threadRef && architectureImpactAvailable
       ? projectEnvironment.latestProposalGeneration({
           environmentId,
           input: {
@@ -106,65 +119,103 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const startProposalGeneration = useAtomCommand(projectEnvironment.startProposalGeneration, {
     reportFailure: false,
   })
-  const generationStartRef = useRef<string | null>(null)
-  const [startedGeneration, setStartedGeneration] = useState<{
-    readonly key: string
-    readonly generation: ProposalGeneration
-  } | null>(null)
+  const {
+    state: generationStartState,
+    claimAutomatic,
+    claimManual,
+  } = useProposalGenerationStart(generationStartTarget)
+
+  const requestProposalGeneration = useCallback(
+    (mode: 'automatic' | 'manual'): void =>
+    {
+      if (exactPlanProposal === null || !threadRef || generationStartKey === null) return
+      const attempt =
+        mode === 'automatic'
+          ? claimAutomatic(latestGenerationQuery.data)
+          : claimManual(latestGenerationQuery.data)
+      if (attempt === null) return
+
+      void startProposalGeneration({
+        environmentId,
+        input: {
+          threadId: threadRef.threadId,
+          proposalId: exactPlanProposal.proposal.proposalId,
+          revision: exactPlanProposal.revision.revision,
+        },
+      }).then((result) =>
+      {
+        if (result._tag === 'Success')
+        {
+          if (completeProposalGenerationStart(attempt, result.value))
+          {
+            latestGenerationQuery.refresh()
+          }
+          return
+        }
+
+        let errorMessage = 'Exact architecture analysis could not start.'
+        if (isAtomCommandInterrupted(result))
+        {
+          errorMessage =
+            'The request to start exact architecture analysis was superseded by a newer request.'
+        }
+        else
+        {
+          const error = squashAtomCommandFailure(result)
+          if (error instanceof Error && error.message.trim().length > 0)
+          {
+            errorMessage = error.message
+          }
+        }
+        if (failProposalGenerationStart(attempt, errorMessage))
+        {
+          latestGenerationQuery.refresh()
+        }
+      })
+    },
+    [
+      claimAutomatic,
+      claimManual,
+      environmentId,
+      exactPlanProposal,
+      generationStartKey,
+      latestGenerationQuery.data,
+      latestGenerationQuery.refresh,
+      startProposalGeneration,
+      threadRef,
+    ],
+  )
 
   useEffect(() =>
   {
     if (
       exactPlanProposal === null ||
       !threadRef ||
-      !cartographerAvailable ||
-      revisionKey === null ||
+      !architectureImpactAvailable ||
+      generationStartKey === null ||
       latestGenerationQuery.isPending ||
       latestGenerationQuery.error !== null ||
-      latestGenerationQuery.data !== null ||
-      generationStartRef.current === revisionKey
+      latestGenerationQuery.data !== null
     )
     {
       return
     }
-    generationStartRef.current = revisionKey
-    void startProposalGeneration({
-      environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        proposalId: exactPlanProposal.proposal.proposalId,
-        revision: exactPlanProposal.revision.revision,
-      },
-    }).then((result) =>
-    {
-      if (result._tag !== 'Success')
-      {
-        if (generationStartRef.current === revisionKey)
-        {
-          generationStartRef.current = null
-          latestGenerationQuery.refresh()
-        }
-        return
-      }
-      setStartedGeneration({ key: revisionKey, generation: result.value })
-      latestGenerationQuery.refresh()
-    })
+    requestProposalGeneration('automatic')
   }, [
-    cartographerAvailable,
-    environmentId,
+    architectureImpactAvailable,
     exactPlanProposal,
+    generationStartKey,
     latestGenerationQuery.data,
     latestGenerationQuery.error,
     latestGenerationQuery.isPending,
-    latestGenerationQuery.refresh,
-    revisionKey,
-    startProposalGeneration,
+    requestProposalGeneration,
     threadRef,
   ])
 
   const generationSeed =
-    latestGenerationQuery.data ??
-    (startedGeneration?.key === revisionKey ? startedGeneration.generation : null)
+    generationStartState.status === 'started'
+      ? generationStartState.generation
+      : latestGenerationQuery.data
   const generationQuery = useEnvironmentQuery(
     generationSeed !== null && threadRef
       ? projectEnvironment.getProposalGeneration({
@@ -176,7 +227,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         })
       : null,
   )
-  const generation = generationQuery.data ?? generationSeed
+  const generation =
+    generationQuery.data !== null &&
+    generationQuery.data.generationId === generationSeed?.generationId
+      ? generationQuery.data
+      : generationSeed
   useEffect(() =>
   {
     if (
@@ -193,9 +248,42 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   }, [generation, generationQuery.refresh])
 
   const generationIsActive =
+    generationStartState.status === 'starting' ||
     generation?.state === 'queued' ||
     generation?.state === 'preparing' ||
     generation?.state === 'analyzing'
+  const generationIsTerminalFailure =
+    generation?.state === 'failed' ||
+    generation?.state === 'cancelled' ||
+    generation?.state === 'abandoned'
+  useEffect(() =>
+  {
+    if (generationStartTarget === null || generation === null || !generationIsTerminalFailure)
+    {
+      return
+    }
+    recordObservedProposalGenerationFailure(
+      generationStartTarget,
+      generationStartState.attemptId,
+      generation,
+      formatProposalGenerationFailure(generation),
+    )
+  }, [
+    generation,
+    generationIsTerminalFailure,
+    generationStartState.attemptId,
+    generationStartTarget,
+  ])
+  const generationFailure =
+    generationStartState.status === 'starting' ||
+    generation?.state === 'ready' ||
+    generationIsActive
+      ? null
+      : generationStartState.status === 'failed' || generationStartState.status === 'superseded'
+        ? generationStartState.error
+        : generation !== null && generationIsTerminalFailure
+          ? formatProposalGenerationFailure(generation)
+          : null
   const previewIdentity =
     exactPlanProposal !== null
       ? generationIsActive
@@ -248,7 +336,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const handleOpenExplorer = () =>
   {
     if (!threadRef || !canOpenExplorer) return
-    useRightPanelStore.getState().openExplorer(threadRef, planId)
+    useRightPanelStore.getState().openExplorer(threadRef, { kind: 'plan', planId })
   }
 
   const openSaveDialog = () =>
@@ -345,27 +433,47 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         </Menu>
       </div>
       <div className="mt-4">
-        {previewIdentity !== null || canOpenExplorer ? (
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
-            {previewIdentity !== null ? (
-              <p
-                className="min-w-0 flex-1 break-words text-xs leading-relaxed text-muted-foreground"
-                data-proposal-preview-identity
+        {previewIdentity !== null || canOpenExplorer || generationFailure !== null ? (
+          <div className="mb-4 grid gap-2 rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {previewIdentity !== null ? (
+                <p
+                  className="min-w-0 flex-1 break-words text-xs leading-relaxed text-muted-foreground"
+                  data-proposal-preview-identity
+                >
+                  {previewIdentity}
+                </p>
+              ) : (
+                <span />
+              )}
+              {canOpenExplorer ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-scroll-anchor-ignore
+                  onClick={handleOpenExplorer}
+                >
+                  Open review
+                </Button>
+              ) : null}
+            </div>
+            {generationFailure !== null ? (
+              <div
+                className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-2"
+                role="alert"
               >
-                {previewIdentity}
-              </p>
-            ) : (
-              <span />
-            )}
-            {canOpenExplorer ? (
-              <Button
-                size="sm"
-                variant="outline"
-                data-scroll-anchor-ignore
-                onClick={handleOpenExplorer}
-              >
-                Open Explorer
-              </Button>
+                <p className="min-w-0 flex-1 break-words text-xs leading-relaxed text-destructive">
+                  {generationFailure}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-scroll-anchor-ignore
+                  onClick={() => requestProposalGeneration('manual')}
+                >
+                  Retry analysis
+                </Button>
+              </div>
             ) : null}
           </div>
         ) : null}

@@ -1,7 +1,7 @@
 // apps/web/src/components/DiffPanelShell.tsx
-// render diff panel shell
+// render the diff panel shell and accessible view tabs
 
-import type { ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 import { isElectron } from '~/env'
 import { cn } from '~/lib/utils'
@@ -9,6 +9,43 @@ import { cn } from '~/lib/utils'
 import { Skeleton } from './ui/skeleton'
 
 export type DiffPanelMode = 'inline' | 'sheet' | 'sidebar' | 'embedded'
+export type DiffPanelView = 'changes' | 'architecture'
+
+export function DiffPanelChangesAvailability(props: {
+  hasActiveThread: boolean
+  isCurrentPathGitRepository: boolean
+  readsRetainedRepositoryIdentity: boolean
+  hasSelectedTurn: boolean
+  hasCompletedTurns: boolean
+  children: ReactNode
+})
+{
+  if (!props.hasActiveThread)
+  {
+    return (
+      <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        Select a thread to inspect turn diffs.
+      </div>
+    )
+  }
+  if (!props.isCurrentPathGitRepository && !props.readsRetainedRepositoryIdentity)
+  {
+    return (
+      <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        Turn diffs are unavailable because this project is not a git repository.
+      </div>
+    )
+  }
+  if (props.hasSelectedTurn && !props.hasCompletedTurns)
+  {
+    return (
+      <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        No completed turns yet.
+      </div>
+    )
+  }
+  return props.children
+}
 
 function getDiffPanelHeaderRowClassName(mode: DiffPanelMode)
 {
@@ -46,6 +83,116 @@ export function DiffPanelShell(props: {
       </div>
       {props.children}
     </div>
+  )
+}
+
+export function DiffPanelViews(props: {
+  activeView: DiffPanelView
+  onViewChange: (view: DiffPanelView) => void
+  changes: ReactNode
+  architecture: ReactNode
+})
+{
+  const id = useId()
+  const [architectureVisited, setArchitectureVisited] = useState(
+    props.activeView === 'architecture',
+  )
+  const changesTabRef = useRef<HTMLButtonElement>(null)
+  const architectureTabRef = useRef<HTMLButtonElement>(null)
+  const changesTabId = `${id}-changes-tab`
+  const architectureTabId = `${id}-architecture-tab`
+  const changesPanelId = `${id}-changes-panel`
+  const architecturePanelId = `${id}-architecture-panel`
+
+  useEffect(() =>
+  {
+    if (props.activeView === 'architecture') setArchitectureVisited(true)
+  }, [props.activeView])
+
+  const selectView = (view: DiffPanelView): void =>
+  {
+    if (view === 'architecture') setArchitectureVisited(true)
+    props.onViewChange(view)
+  }
+
+  const selectFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>) =>
+  {
+    const nextView =
+      event.key === 'ArrowLeft' || event.key === 'Home'
+        ? 'changes'
+        : event.key === 'ArrowRight' || event.key === 'End'
+          ? 'architecture'
+          : null
+    if (nextView === null) return
+    event.preventDefault()
+    selectView(nextView)
+    if (nextView === 'changes') changesTabRef.current?.focus()
+    else architectureTabRef.current?.focus()
+  }
+
+  return (
+    <>
+      <div
+        className="flex h-9 shrink-0 items-end gap-1 border-b border-border px-4"
+        role="tablist"
+        aria-label="Diff views"
+      >
+        <button
+          ref={changesTabRef}
+          id={changesTabId}
+          type="button"
+          role="tab"
+          aria-controls={changesPanelId}
+          aria-selected={props.activeView === 'changes'}
+          tabIndex={props.activeView === 'changes' ? 0 : -1}
+          className={cn(
+            'relative h-8 px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            props.activeView === 'changes' &&
+              'text-foreground after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:bg-foreground',
+          )}
+          onClick={() => selectView('changes')}
+          onKeyDown={selectFromKeyboard}
+        >
+          Changes
+        </button>
+        <button
+          ref={architectureTabRef}
+          id={architectureTabId}
+          type="button"
+          role="tab"
+          aria-controls={architecturePanelId}
+          aria-selected={props.activeView === 'architecture'}
+          tabIndex={props.activeView === 'architecture' ? 0 : -1}
+          className={cn(
+            'relative h-8 px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            props.activeView === 'architecture' &&
+              'text-foreground after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:bg-foreground',
+          )}
+          onClick={() => selectView('architecture')}
+          onKeyDown={selectFromKeyboard}
+        >
+          Impact
+        </button>
+      </div>
+      <div
+        id={changesPanelId}
+        className="flex min-h-0 flex-1 flex-col"
+        role="tabpanel"
+        aria-labelledby={changesTabId}
+        hidden={props.activeView !== 'changes'}
+      >
+        {props.changes}
+      </div>
+      <div
+        id={architecturePanelId}
+        className="flex min-h-0 flex-1 flex-col"
+        role="tabpanel"
+        aria-labelledby={architectureTabId}
+        hidden={props.activeView !== 'architecture'}
+      >
+        {architectureVisited || props.activeView === 'architecture' ? props.architecture : null}
+      </div>
+    </>
   )
 }
 

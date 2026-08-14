@@ -1,6 +1,6 @@
 // apps/web/src/components/proposals/ProposalDiffPanel.tsx
 // presents immutable proposal metadata with its exact native code diff
-import type { ScopedThreadRef } from '@t3tools/contracts'
+import type { ArchitectureProposalSource, ScopedThreadRef } from '@t3tools/contracts'
 import { useState } from 'react'
 
 import { type DraftId } from '~/composerDraftStore'
@@ -11,6 +11,7 @@ import { DiffPanelShell, type DiffPanelMode } from '../DiffPanelShell'
 import {
   NativeDiffSurface,
   NativeDiffSurfaceControls,
+  type NativeDiffFileSourceActions,
   type NativeDiffRenderMode,
   useNativeDiffSurfaceController,
 } from '../diffs/NativeDiffSurface'
@@ -31,6 +32,13 @@ export type ProposalDiffAvailability =
   | { readonly kind: 'unsupported'; readonly reason: string }
   | { readonly kind: 'error'; readonly message: string }
 
+export interface ProposalDiffFileActions
+{
+  readonly beforeSource: ArchitectureProposalSource | null
+  readonly proposedSource: ArchitectureProposalSource | null
+  readonly onOpenFile: (source: ArchitectureProposalSource, filePath: string) => void
+}
+
 function formatCount(value: number, singular: string, plural: string): string
 {
   return `${value.toLocaleString()} ${value === 1 ? singular : plural}`
@@ -41,7 +49,7 @@ export function ProposalDiffPanel(props: {
   readonly composerDraftTarget: ScopedThreadRef | DraftId
   readonly availability?: ProposalDiffAvailability
   readonly mode?: DiffPanelMode
-  readonly onOpenFile?: (filePath: string) => void
+  readonly fileActions?: ProposalDiffFileActions
   readonly selectedFilePath?: string | null
   readonly selectedFileRevealRequestId?: number
 })
@@ -51,7 +59,7 @@ export function ProposalDiffPanel(props: {
     composerDraftTarget,
     availability = { kind: 'ready' },
     mode = 'embedded',
-    onOpenFile,
+    fileActions,
     selectedFilePath = null,
     selectedFileRevealRequestId = 0,
   } = props
@@ -86,6 +94,30 @@ export function ProposalDiffPanel(props: {
         : diffSurface.hasNoNetChanges
           ? 'This proposal revision contains no textual changes.'
           : 'No exact diff is available for this proposal revision.'
+  const beforeSource = fileActions?.beforeSource?.side === 'base' ? fileActions.beforeSource : null
+  const proposedSource =
+    fileActions?.proposedSource?.side === 'proposed' ? fileActions.proposedSource : null
+  const fileSourceActions: NativeDiffFileSourceActions | undefined =
+    fileActions && (beforeSource || proposedSource)
+      ? {
+          ...(beforeSource
+            ? {
+                before: {
+                  label: 'Before',
+                  onOpen: (filePath: string) => fileActions.onOpenFile(beforeSource, filePath),
+                },
+              }
+            : {}),
+          ...(proposedSource
+            ? {
+                after: {
+                  label: 'Proposed',
+                  onOpen: (filePath: string) => fileActions.onOpenFile(proposedSource, filePath),
+                },
+              }
+            : {}),
+        }
+      : undefined
 
   const header = (
     <>
@@ -124,7 +156,7 @@ export function ProposalDiffPanel(props: {
         loadingLabel={`Loading exact diff for proposal revision ${proposal.revisionNumber}...`}
         error={error}
         emptyMessage={emptyMessage}
-        {...(onOpenFile ? { onOpenFile } : {})}
+        {...(fileSourceActions ? { fileSourceActions } : {})}
       />
     </DiffPanelShell>
   )

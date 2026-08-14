@@ -51,6 +51,7 @@ import {
 } from '../Icons'
 import { RedactedSensitiveText } from './RedactedSensitiveText'
 import { SourceControlWritingSettingsSection } from './SourceControlWritingSettings'
+import { ArchitectureAutoAnalysisSettings } from './ArchitectureAutoAnalysisSettings'
 import { SettingResetButton, SettingsPageContainer, SettingsSection } from './settingsLayout'
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
@@ -518,7 +519,12 @@ export function SourceControlSettingsPanel()
             <SettingsSection title="Version Control" headerAction={scanButton}>
               {result.versionControlSystems.map((item) => (
                 <DiscoveryItemRow key={`vcs:${item.kind}`} item={item}>
-                  {item.kind === 'git' ? <GitFetchIntervalSettings /> : undefined}
+                  {item.kind === 'git' ? (
+                    <>
+                      <GitFetchIntervalSettings />
+                      <ArchitectureAutoAnalysisSettings />
+                    </>
+                  ) : undefined}
                 </DiscoveryItemRow>
               ))}
             </SettingsSection>

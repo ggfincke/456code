@@ -9,6 +9,7 @@ import {
   scopedThreadKey,
 } from '@t3tools/client-runtime/environment'
 import {
+  type CollaborationMode,
   type EnvironmentId,
   ModelSelection,
   type PreviewAnnotationPayload,
@@ -21,6 +22,7 @@ import {
   type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
+  toWireInteractionMode,
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
@@ -34,17 +36,21 @@ import {
   normalizeTerminalContextText,
 } from '../lib/terminalContext'
 import { type ReviewCommentContext, ReviewCommentContextSchema } from '../reviewCommentContext'
-import { type ChatImageAttachment, DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from '../types'
+import {
+  type ChatImageAttachment,
+  DEFAULT_COLLABORATION_MODE,
+  DEFAULT_RUNTIME_MODE,
+} from '../types'
 
 import {
   EMPTY_MODEL_SELECTION_BY_PROVIDER,
   compactModelSelectionByProvider,
-  isProviderInteractionMode,
   isRuntimeMode,
   legacyMergeModelSelectionIntoProviderModelOptions,
   legacySyncModelSelectionOptions,
   legacyToModelSelectionByProvider,
   normalizeModelSelection,
+  normalizePersistedCollaborationMode,
   normalizeProviderInstanceId,
   normalizeProviderModelOptions,
 } from './model-selection'
@@ -56,7 +62,7 @@ export const isReviewCommentContext = Schema.is(ReviewCommentContextSchema)
 
 export const COMPOSER_DRAFT_STORAGE_KEY = '456code:composer-drafts:v1'
 
-export const COMPOSER_DRAFT_STORAGE_VERSION = 9
+export const COMPOSER_DRAFT_STORAGE_VERSION = 10
 
 const DraftThreadEnvModeSchema = Schema.Literals(['local', 'worktree'])
 
@@ -146,6 +152,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   activeProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
+  orchestrate: Schema.optionalKey(Schema.Boolean),
   orchestrateMode: Schema.optionalKey(
     Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   ),
@@ -213,6 +220,7 @@ const PersistedDraftThreadState = Schema.Struct({
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  orchestrate: Schema.optionalKey(Schema.Boolean),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
@@ -274,7 +282,7 @@ export interface ComposerThreadDraftState
   // routing key of the last picked instance (see `modelSelectionByProvider`).
   activeProvider: ProviderInstanceId | null
   runtimeMode: RuntimeMode | null
-  interactionMode: ProviderInteractionMode | null
+  collaborationMode: CollaborationMode | null
 }
 
 /**
@@ -291,7 +299,7 @@ export interface DraftSessionState
   logicalProjectKey: string
   createdAt: string
   runtimeMode: RuntimeMode
-  interactionMode: ProviderInteractionMode
+  collaborationMode: CollaborationMode
   branch: string | null
   worktreePath: string | null
   envMode: DraftThreadEnvMode
@@ -351,7 +359,7 @@ export const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
   activeProvider: null,
   runtimeMode: null,
-  interactionMode: null,
+  collaborationMode: null,
 })
 
 // canonical factory for a blank `ComposerThreadDraftState`. Exported so tests
@@ -372,7 +380,7 @@ export function createEmptyThreadDraft(): ComposerThreadDraftState
     modelSelectionByProvider: {},
     activeProvider: null,
     runtimeMode: null,
-    interactionMode: null,
+    collaborationMode: null,
   }
 }
 
@@ -454,7 +462,7 @@ export function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
     draft.runtimeMode === null &&
-    draft.interactionMode === null
+    draft.collaborationMode === null
   )
 }
 
@@ -801,7 +809,7 @@ export function createDraftThreadState(
     envMode?: DraftThreadEnvMode
     startFromOrigin?: boolean
     runtimeMode?: RuntimeMode
-    interactionMode?: ProviderInteractionMode
+    collaborationMode?: CollaborationMode
   },
 ): DraftThreadState
 {
@@ -834,8 +842,8 @@ export function createDraftThreadState(
     logicalProjectKey,
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-    interactionMode:
-      options?.interactionMode ?? existingThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
+    collaborationMode:
+      options?.collaborationMode ?? existingThread?.collaborationMode ?? DEFAULT_COLLABORATION_MODE,
     branch: nextBranch,
     worktreePath: nextWorktreePath,
     envMode:
@@ -875,7 +883,8 @@ export function draftThreadsEqual(
     left.logicalProjectKey === right.logicalProjectKey &&
     left.createdAt === right.createdAt &&
     left.runtimeMode === right.runtimeMode &&
-    left.interactionMode === right.interactionMode &&
+    left.collaborationMode.baseMode === right.collaborationMode.baseMode &&
+    left.collaborationMode.orchestrate === right.collaborationMode.orchestrate &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
@@ -1008,6 +1017,12 @@ function normalizePersistedDraftThreads(
         continue
       }
       const normalizedEnvironmentId = environmentId as EnvironmentId
+      const collaborationMode =
+        normalizePersistedCollaborationMode(
+          candidateDraftThread.interactionMode,
+          candidateDraftThread.orchestrate,
+        ) ?? DEFAULT_COLLABORATION_MODE
+      const wireMode = toWireInteractionMode(collaborationMode)
       draftThreadsByThreadKey[threadKey] = {
         threadId,
         environmentId: normalizedEnvironmentId,
@@ -1026,9 +1041,8 @@ function normalizePersistedDraftThreads(
         runtimeMode: isRuntimeMode(candidateDraftThread.runtimeMode)
           ? candidateDraftThread.runtimeMode
           : DEFAULT_RUNTIME_MODE,
-        interactionMode: isProviderInteractionMode(candidateDraftThread.interactionMode)
-          ? candidateDraftThread.interactionMode
-          : DEFAULT_INTERACTION_MODE,
+        interactionMode: wireMode.interactionMode,
+        orchestrate: wireMode.orchestrate,
         branch: typeof branch === 'string' ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
@@ -1081,7 +1095,8 @@ function normalizePersistedDraftThreads(
           logicalProjectKey,
           createdAt: new Date().toISOString(),
           runtimeMode: DEFAULT_RUNTIME_MODE,
-          interactionMode: DEFAULT_INTERACTION_MODE,
+          interactionMode: toWireInteractionMode(DEFAULT_COLLABORATION_MODE).interactionMode,
+          orchestrate: DEFAULT_COLLABORATION_MODE.orchestrate,
           branch: null,
           worktreePath: null,
           envMode: 'local',
@@ -1178,12 +1193,10 @@ function normalizePersistedDraftsByThreadId(
     const runtimeMode = isRuntimeMode(draftCandidate.runtimeMode)
       ? draftCandidate.runtimeMode
       : null
-    const interactionMode =
-      draftCandidate.orchestrateMode === true
-        ? 'orchestrate'
-        : isProviderInteractionMode(draftCandidate.interactionMode)
-          ? draftCandidate.interactionMode
-          : null
+    const collaborationMode = normalizePersistedCollaborationMode(
+      draftCandidate.interactionMode,
+      draftCandidate.orchestrate === true || draftCandidate.orchestrateMode === true,
+    )
     const prompt = ensureInlineTerminalContextPlaceholders(promptCandidate, terminalContexts.length)
     // if the draft already has the v3 shape, use it directly
     const legacyDraftCandidate = draftValue as LegacyPersistedComposerThreadDraftState
@@ -1244,7 +1257,7 @@ function normalizePersistedDraftsByThreadId(
       reviewComments.length === 0 &&
       !hasModelData &&
       !runtimeMode &&
-      !interactionMode
+      !collaborationMode
     )
     {
       continue
@@ -1262,6 +1275,7 @@ function normalizePersistedDraftsByThreadId(
                 ? normalizeLegacyComposerStorageKey(threadKeyOrId, { environmentId })
                 : threadKeyOrId
             })()
+    const wireMode = collaborationMode ? toWireInteractionMode(collaborationMode) : null
     nextDraftsByThreadKey[normalizedThreadKey] = {
       prompt,
       attachments,
@@ -1276,7 +1290,12 @@ function normalizePersistedDraftsByThreadId(
           }
         : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
-      ...(interactionMode ? { interactionMode } : {}),
+      ...(wireMode
+        ? {
+            interactionMode: wireMode.interactionMode,
+            orchestrate: wireMode.orchestrate,
+          }
+        : {}),
     }
   }
 
@@ -1358,11 +1377,12 @@ export function partializeComposerDraftStoreState(
       draft.reviewComments.length === 0 &&
       !hasModelData &&
       draft.runtimeMode === null &&
-      draft.interactionMode === null
+      draft.collaborationMode === null
     )
     {
       continue
     }
+    const wireMode = draft.collaborationMode ? toWireInteractionMode(draft.collaborationMode) : null
     const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
       prompt: draft.prompt,
       attachments: draft.persistedAttachments,
@@ -1417,13 +1437,33 @@ export function partializeComposerDraftStoreState(
           }
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
-      ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
+      ...(wireMode
+        ? {
+            interactionMode: wireMode.interactionMode,
+            orchestrate: wireMode.orchestrate,
+          }
+        : {}),
     }
     persistedDraftsByThreadKey[threadKey] = persistedDraft
   }
+  const persistedDraftThreadsByThreadKey = Object.fromEntries(
+    Object.entries(state.draftThreadsByThreadKey).map(([threadKey, draftThread]) =>
+    {
+      const wireMode = toWireInteractionMode(draftThread.collaborationMode)
+      const { collaborationMode: _collaborationMode, ...persistedDraftThread } = draftThread
+      return [
+        threadKey,
+        {
+          ...persistedDraftThread,
+          interactionMode: wireMode.interactionMode,
+          orchestrate: wireMode.orchestrate,
+        },
+      ]
+    }),
+  ) as DeepMutable<PersistedComposerDraftStoreState['draftThreadsByThreadKey']>
   return {
     draftsByThreadKey: persistedDraftsByThreadKey,
-    draftThreadsByThreadKey: state.draftThreadsByThreadKey,
+    draftThreadsByThreadKey: persistedDraftThreadsByThreadKey,
     logicalProjectDraftThreadKeyByLogicalProjectKey:
       state.logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(
@@ -1686,10 +1726,10 @@ export function toHydratedThreadDraft(
     modelSelectionByProvider,
     activeProvider,
     runtimeMode: persistedDraft.runtimeMode ?? null,
-    interactionMode:
-      persistedDraft.orchestrateMode === true
-        ? 'orchestrate'
-        : (persistedDraft.interactionMode ?? null),
+    collaborationMode: normalizePersistedCollaborationMode(
+      persistedDraft.interactionMode,
+      persistedDraft.orchestrate === true || persistedDraft.orchestrateMode === true,
+    ),
   }
 }
 
@@ -1711,7 +1751,11 @@ export function toHydratedDraftThreadState(
       ),
     createdAt: persistedDraftThread.createdAt,
     runtimeMode: persistedDraftThread.runtimeMode,
-    interactionMode: persistedDraftThread.interactionMode,
+    collaborationMode:
+      normalizePersistedCollaborationMode(
+        persistedDraftThread.interactionMode,
+        persistedDraftThread.orchestrate,
+      ) ?? DEFAULT_COLLABORATION_MODE,
     branch: persistedDraftThread.branch,
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,

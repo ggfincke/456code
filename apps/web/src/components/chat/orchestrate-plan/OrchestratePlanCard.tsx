@@ -3,16 +3,25 @@
 
 import type {
   OrchestratePlanDecision,
+  OrchestratePlanRevision,
   WorkersJobSummary,
   WorkersListInput,
 } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import { ExternalLinkIcon } from 'lucide-react'
-import { useCallback, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import { cn } from '../../../lib/utils'
+import { useRightPanelStore } from '../../../rightPanelStore'
+import { projectEnvironment } from '../../../state/projects'
 import { useEnvironmentQuery } from '../../../state/query'
 import { workersEnvironment } from '../../../state/workers'
+import { workerRunJobRows, workerRunOutcomeSummaryView } from '../../../workers/workersPanel.logic'
+import {
+  resolveOrchestrateArchitectureState,
+  selectExactOrchestrateProposalLookup,
+} from '../../cartographer/orchestrateArchitecture'
+import { formatProposalGenerationFailure } from '../../cartographer/proposalGenerationFailure'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
 import {
@@ -24,6 +33,7 @@ import {
   type OrchestratePlanEmissionOrder,
   readOrchestratePlanCardState,
   registerOrchestratePlanCard,
+  setOrchestrateLeadSelection,
   setOrchestratePlanCardStatus,
   setOrchestratePlanMaxWorkers,
   setOrchestratePlanNote,
@@ -40,14 +50,14 @@ import {
   buildPlanRows,
   groupRowsByPhase,
   initialSelection,
-  latestPersistedRevision,
   persistedRevisionToPlan,
   planContentText,
+  resolvePersistedRevision,
+  resolveStageModelOption,
 } from './parse'
 import {
   partitionJobsByRow,
   resolveEffortOptions,
-  resolveStageModelOption,
   StageEffortPicker,
   StageModelPicker,
   StageScopeLines,
@@ -67,10 +77,154 @@ export {
   parseOrchestratePlanResult,
 } from './parse'
 
+// the lead's picker key; stage row keys are always `index:stageId`, so this
+// one can never collide with a stage
+const LEAD_ROW_KEY = 'lead'
+
 interface OrchestratePlanTimelineIdentity
 {
   readonly revisionKey: string
   readonly order: OrchestratePlanEmissionOrder
+}
+
+const ORCHESTRATE_ARCHITECTURE_REFRESH_MS = 3_000
+
+export function refreshOrchestrateArchitectureQueries(input: {
+  readonly linked: boolean
+  readonly refreshLookup: () => void
+  readonly refreshGeneration: () => void
+}): void
+{
+  input.refreshLookup()
+  if (input.linked) input.refreshGeneration()
+}
+
+export function resolveOrchestrateArchitectureRevision(
+  persistedRevision: OrchestratePlanRevision | null,
+  committedRevision: number | undefined,
+): OrchestratePlanRevision | null
+{
+  return committedRevision !== undefined && persistedRevision?.revision === committedRevision
+    ? persistedRevision
+    : null
+}
+
+function OrchestrateArchitectureStrip(props: {
+  readonly actions: OrchestratePlanActions
+  readonly revision: OrchestratePlanRevision
+  readonly compact?: boolean
+})
+{
+  const threadRef = props.actions.threadRef
+  const target = useMemo(
+    () =>
+      threadRef === null
+        ? null
+        : {
+            kind: 'orchestrate' as const,
+            threadId: threadRef.threadId,
+            runId: props.revision.runId,
+            revision: props.revision.revision,
+          },
+    [props.revision.revision, props.revision.runId, threadRef],
+  )
+  const lookupQuery = useEnvironmentQuery(
+    target === null
+      ? null
+      : projectEnvironment.findProposalByOrchestrateRevision({
+          environmentId: props.actions.environmentId,
+          input: {
+            sourceThreadId: target.threadId,
+            runId: target.runId,
+            revision: target.revision,
+          },
+        }),
+  )
+  const lookup = useMemo(
+    () => (target === null ? null : selectExactOrchestrateProposalLookup(lookupQuery.data, target)),
+    [lookupQuery.data, target],
+  )
+  const generationQuery = useEnvironmentQuery(
+    lookup === null
+      ? null
+      : projectEnvironment.latestProposalGeneration({
+          environmentId: props.actions.environmentId,
+          input: {
+            threadId: lookup.link.sourceThreadId,
+            proposalId: lookup.link.proposalId,
+            revision: lookup.link.proposalRevision,
+          },
+        }),
+  )
+  useEffect(() =>
+  {
+    if (target === null) return
+    const refresh = () =>
+      refreshOrchestrateArchitectureQueries({
+        linked: lookup !== null,
+        refreshLookup: lookupQuery.refresh,
+        refreshGeneration: generationQuery.refresh,
+      })
+    const intervalId = window.setInterval(refresh, ORCHESTRATE_ARCHITECTURE_REFRESH_MS)
+    return () => window.clearInterval(intervalId)
+  }, [generationQuery.refresh, lookup, lookupQuery.refresh, target])
+
+  if (target === null || threadRef === null) return null
+  const state = resolveOrchestrateArchitectureState({
+    lookup,
+    lookupSettled: lookupQuery.hasSettled,
+    lookupError: lookupQuery.error,
+    generation: generationQuery.data,
+    generationSettled: generationQuery.hasSettled,
+    generationError: generationQuery.error,
+  })
+  const message = (() =>
+  {
+    switch (state.kind)
+    {
+      case 'pending':
+        return 'Checking linked architecture analysis.'
+      case 'no-link':
+        return 'No architecture proposal is linked to this exact revision.'
+      case 'linked-no-generation':
+        return 'Architecture proposal linked. Open Proposal Review to start analysis.'
+      case 'active':
+        return `Architecture analysis is ${state.generation.state}.`
+      case 'ready':
+        return 'Architecture analysis is ready.'
+      case 'terminal':
+        return formatProposalGenerationFailure(state.generation)
+      case 'error':
+        return state.message
+    }
+  })()
+
+  return (
+    <div
+      data-orchestrate-architecture={state.kind}
+      className={cn(
+        'flex w-full flex-wrap items-center justify-between gap-2 border-border bg-muted/20 px-4 py-2 text-xs',
+        props.compact ? 'border-t' : 'border-b',
+      )}
+    >
+      <span className="min-w-0">
+        <strong className="font-medium">Architecture</strong>
+        <span className="ml-2 text-muted-foreground">{message}</span>
+      </span>
+      {lookup === null ? null : (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="gap-1.5"
+          onClick={() => useRightPanelStore.getState().openExplorer(threadRef, target)}
+        >
+          <ExternalLinkIcon aria-hidden="true" className="size-3" />
+          Open review
+        </Button>
+      )}
+    </div>
+  )
 }
 
 function resolvePlanTimelineIdentity(
@@ -123,12 +277,16 @@ export function OrchestratePlanCard({
   // the persisted revision (when the server has one) is the source of truth;
   // the fence-parsed plan is only the fallback for hosts without persistence
   const persistedRevision = useMemo(
-    () => latestPersistedRevision(actions.orchestratePlans, runId),
-    [actions.orchestratePlans, runId],
+    () => resolvePersistedRevision(actions.orchestratePlans, runId, plan.revision),
+    [actions.orchestratePlans, plan.revision, runId],
   )
   const displayPlan = useMemo(
     () => (persistedRevision === null ? plan : persistedRevisionToPlan(persistedRevision)),
     [persistedRevision, plan],
+  )
+  const architectureRevision = resolveOrchestrateArchitectureRevision(
+    persistedRevision,
+    plan.revision,
   )
   const rows = useMemo(() => buildPlanRows(displayPlan.stages), [displayPlan.stages])
   const contentKey = useMemo(() => hashOrchestratePlanText(planContentText(plan)), [plan])
@@ -195,6 +353,10 @@ export function OrchestratePlanCard({
     [cardState.workers, rows],
   )
 
+  // the lead's live selection; the card's own draft wins so the row reflects a
+  // pick immediately, without waiting for the session rebind to land
+  const leadSelection = cardState.lead ?? actions.lead ?? null
+
   // live run status: jobs carrying this plan's runId identify the launched
   // run, which also marks the plan approved across reloads; the query is
   // stream-backed, so the card never polls
@@ -224,19 +386,22 @@ export function OrchestratePlanCard({
       ? Math.max(displayPlan.totalWorkers, selectedWorkerTotal)
       : selectedWorkerTotal
   const runStarted = runJobs.length > 0
-  const revisionStarted = runStarted && (startedRevision || serverStatus === 'approved')
-  const runActive = runJobs.some((job) => !TERMINAL_STATUSES.has(job.status))
-  const finishedCount = runJobs.filter((job) => TERMINAL_STATUSES.has(job.status)).length
-  const failedCount = runJobs.filter(
-    (job) => job.status === 'failed' || job.status === 'rejected',
-  ).length
-  // failures with an intact patch are recoverable work, not lost work
-  const salvageableCount = runJobs.filter(
-    (job) =>
-      (job.status === 'failed' || job.status === 'rejected') &&
-      Option.getOrNull(job.hasPatch) === true,
-  ).length
-  const notLaunchedCount = Math.max(0, plannedTotal - runJobs.length)
+  const currentRunJobs = workerRunJobRows(runJobs).map((row) => row.job)
+  // broker jobs carrying this runId are durable proof the run launched, so the
+  // status column and progress must not be ANDed with startedRevision, which
+  // lives in a module-level map that a page reload wipes; a live run used to
+  // read as dead after a refresh. that evidence stays display-only: re-gating a
+  // running plan is a designed flow, so a live run reports progress beside the
+  // approval row and never replaces or disables it
+  const revisionStarted = runStarted || startedRevision
+  const runActive = currentRunJobs.some((job) => !TERMINAL_STATUSES.has(job.status))
+  const finishedCount = currentRunJobs.filter((job) => TERMINAL_STATUSES.has(job.status)).length
+  const outcomeSummary = workerRunOutcomeSummaryView(runJobs)
+  const notLaunchedCount = Math.max(0, plannedTotal - currentRunJobs.length)
+  // the readout counts the whole run while plannedTotal is only this revision's
+  // budget, so a re-gate raised mid-run can see more jobs than it asks for;
+  // widening the denominator keeps it from reading "5 of 3 finished"
+  const runWorkerTotal = Math.max(plannedTotal, currentRunJobs.length)
   // a run with workers still to launch is not finished, however quiet the
   // broker's job list looks right now
   const runFinished = revisionStarted && notLaunchedCount === 0 && !runActive
@@ -246,7 +411,6 @@ export function OrchestratePlanCard({
     displayPlan.validationError !== null ||
     status === 'sending' ||
     status === 'sent' ||
-    revisionStarted ||
     (serverStatus !== null && serverStatus !== 'pending')
   const minimumMaxWorkers = persistedRevision === null ? 1 : 0
   const maxWorkersValid = Number.isSafeInteger(maxWorkers) && maxWorkers >= minimumMaxWorkers
@@ -347,15 +511,20 @@ export function OrchestratePlanCard({
         ref={registerCardElement}
         data-orchestrate-plan="true"
         data-orchestrate-plan-superseded="true"
-        className="relative left-1/2 my-2 flex w-[max(100%,calc(50%+50cqw-1.5rem))] -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-foreground opacity-60 shadow-sm"
+        className="relative left-1/2 my-2 flex w-[max(100%,calc(50%+50cqw-1.5rem))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-card text-foreground opacity-60 shadow-sm"
       >
-        <h3 className="truncate font-semibold text-sm">{displayPlan.workflow}</h3>
-        <Badge variant="secondary" size="sm">
-          Superseded
-        </Badge>
-        <span className="truncate text-muted-foreground text-xs">
-          A newer card owns this run response
-        </span>
+        <div className="flex w-full items-center gap-2 px-4 py-2">
+          <h3 className="truncate font-semibold text-sm">{displayPlan.workflow}</h3>
+          <Badge variant="secondary" size="sm">
+            Superseded
+          </Badge>
+          <span className="truncate text-muted-foreground text-xs">
+            A newer card owns this run response
+          </span>
+        </div>
+        {architectureRevision === null ? null : (
+          <OrchestrateArchitectureStrip actions={actions} revision={architectureRevision} compact />
+        )}
       </section>
     )
   }
@@ -394,6 +563,9 @@ export function OrchestratePlanCard({
           <p className="mt-0.5 text-muted-foreground text-xs">{displayPlan.task}</p>
         )}
       </header>
+      {architectureRevision === null ? null : (
+        <OrchestrateArchitectureStrip actions={actions} revision={architectureRevision} />
+      )}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-xs">
           <thead className="bg-muted/20 text-left text-muted-foreground">
@@ -420,6 +592,55 @@ export function OrchestratePlanCard({
             </tr>
           </thead>
           <tbody>
+            {leadSelection === null ? null : (
+              // pinned above the phase headers: the session's own binding is
+              // part of the budget being approved, not context around it
+              <tr className="border-border border-b-2 bg-muted/10 align-top">
+                <td className="whitespace-nowrap px-2 py-2">
+                  <span className="block font-mono">lead</span>
+                  <span className="block text-[11px] text-muted-foreground">this session</span>
+                </td>
+                <td className="whitespace-nowrap px-2 py-2">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <StageModelPicker
+                      rowLabel="lead"
+                      selection={leadSelection}
+                      actions={actions}
+                      disabled={disabled || actions.onLeadModelChange === undefined}
+                      open={openRowKey === LEAD_ROW_KEY}
+                      onOpenChange={(next) => setOpenRowKey(next ? LEAD_ROW_KEY : null)}
+                      onSelect={(instanceId, model) =>
+                        {
+                        const entry = actions.instanceEntries.find(
+                          (candidate) => candidate.instanceId === instanceId,
+                        )
+                        const provider =
+                          entry === undefined ? leadSelection.provider : entry.driverKind
+                        setOrchestrateLeadSelection(draftKey, { provider, model, instanceId })
+                        // a cross-instance pick routes through the composer's
+                        // own handler so it reuses the provider-switch
+                        // confirmation and its compaction handoff
+                        actions.onLeadModelChange?.(instanceId, model)
+                      }}
+                      onClear={() =>
+                        {}}
+                      allowClear={false}
+                    />
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
+                  {actions.leadEffort === undefined || actions.leadEffort === ''
+                    ? 'default'
+                    : actions.leadEffort}
+                </td>
+                <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">—</td>
+                <td className="px-2 py-2 text-muted-foreground">—</td>
+                {revisionStarted ? (
+                  <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">—</td>
+                ) : null}
+                <td aria-hidden />
+              </tr>
+            )}
             {rowGroups.map((group, groupIndex) => [
               hasPhases ? (
                 <tr
@@ -474,35 +695,37 @@ export function OrchestratePlanCard({
                   >
                     <td className="whitespace-nowrap px-2 py-2 font-mono">{rowLabel}</td>
                     <td className="whitespace-nowrap px-2 py-2">
-                      <StageModelPicker
-                        rowLabel={rowLabel}
-                        selection={selection}
-                        actions={actions}
-                        disabled={disabled}
-                        open={openRowKey === rowKey}
-                        onOpenChange={(next) => setOpenRowKey(next ? rowKey : null)}
-                        onSelect={(instanceId, model) =>
-                        {
-                          const entry = actions.instanceEntries.find(
-                            (candidate) => candidate.instanceId === instanceId,
-                          )
-                          const provider =
-                            entry === undefined ? selection.provider : entry.driverKind
-                          setOrchestrateStageSelection(draftKey, rowKey, {
-                            provider,
-                            model,
-                            instanceId,
-                          })
-                        }}
-                        onClear={() =>
-                          setOrchestrateStageSelection(
-                            draftKey,
-                            rowKey,
-                            initialSelection({ ...stage, model: '' }, actions.instanceEntries),
-                          )
-                        }
-                        allowClear={persistedRevision === null || stage.model === ''}
-                      />
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <StageModelPicker
+                          rowLabel={rowLabel}
+                          selection={selection}
+                          actions={actions}
+                          disabled={disabled}
+                          open={openRowKey === rowKey}
+                          onOpenChange={(next) => setOpenRowKey(next ? rowKey : null)}
+                          onSelect={(instanceId, model) =>
+                          {
+                            const entry = actions.instanceEntries.find(
+                              (candidate) => candidate.instanceId === instanceId,
+                            )
+                            const provider =
+                              entry === undefined ? selection.provider : entry.driverKind
+                            setOrchestrateStageSelection(draftKey, rowKey, {
+                              provider,
+                              model,
+                              instanceId,
+                            })
+                          }}
+                          onClear={() =>
+                            setOrchestrateStageSelection(
+                              draftKey,
+                              rowKey,
+                              initialSelection({ ...stage, model: '' }, actions.instanceEntries),
+                            )
+                          }
+                          allowClear={persistedRevision === null || stage.model === ''}
+                        />
+                      </span>
                     </td>
                     <td className="whitespace-nowrap px-2 py-2">
                       <StageEffortPicker
@@ -577,7 +800,27 @@ export function OrchestratePlanCard({
         </table>
       </div>
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/20 px-4 py-2.5">
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex flex-wrap items-center gap-4 text-xs">
+          {revisionStarted ? (
+            <span className="flex flex-wrap items-center gap-2">
+              {runFinished ? null : (
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 animate-pulse rounded-full bg-sky-500"
+                />
+              )}
+              {outcomeSummary === null ? null : (
+                <span className="font-medium text-foreground">{outcomeSummary.label}</span>
+              )}
+              <span>
+                {finishedCount} of {runWorkerTotal} planned worker
+                {runWorkerTotal === 1 ? '' : 's'} finished
+              </span>
+              {notLaunchedCount > 0 ? (
+                <span className="text-muted-foreground">{notLaunchedCount} not launched yet</span>
+              ) : null}
+            </span>
+          ) : null}
           <span>
             Total workers: <strong>{plannedTotal}</strong>
           </span>
@@ -598,48 +841,13 @@ export function OrchestratePlanCard({
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {serverStatus === 'approved' ? (
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-medium text-emerald-700 dark:text-emerald-300">
-                This plan revision was approved
-              </span>
-              {revisionStarted ? (
-                <span className="text-muted-foreground">
-                  {finishedCount} of {plannedTotal} planned worker
-                  {plannedTotal === 1 ? '' : 's'} finished
-                </span>
-              ) : null}
-            </div>
+            <span className="font-medium text-emerald-700 text-xs dark:text-emerald-300">
+              This plan revision was approved
+            </span>
           ) : serverStatus === 'rejected' ? (
             <span className="font-medium text-red-600 text-xs dark:text-red-400">
               This plan revision was rejected
             </span>
-          ) : revisionStarted ? (
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {runFinished ? null : (
-                <span
-                  aria-hidden="true"
-                  className="size-2 shrink-0 animate-pulse rounded-full bg-sky-500"
-                />
-              )}
-              <span>
-                {finishedCount} of {plannedTotal} planned worker
-                {plannedTotal === 1 ? '' : 's'} finished
-              </span>
-              {notLaunchedCount > 0 ? (
-                <span className="text-muted-foreground">{notLaunchedCount} not launched yet</span>
-              ) : null}
-              {failedCount > 0 ? (
-                <span className="font-medium text-red-600 dark:text-red-400">
-                  {failedCount} failed
-                  {salvageableCount > 0 ? (
-                    <span className="font-normal text-amber-600 dark:text-amber-400">
-                      {' '}
-                      · {salvageableCount} salvageable
-                    </span>
-                  ) : null}
-                </span>
-              ) : null}
-            </div>
           ) : superseded ? (
             <span className="text-muted-foreground text-xs">
               Superseded by a newer plan for this run

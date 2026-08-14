@@ -10,12 +10,14 @@ import {
   stripTrailingExitCode,
   workEntryIndicatesToolFailure as normalizedWorkEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus as normalizedWorkEntryIndicatesToolNeutralStatus,
+  workEntryIndicatesToolRunning as normalizedWorkEntryIndicatesToolRunning,
   workEntryIndicatesToolSuccess as normalizedWorkEntryIndicatesToolSuccess,
   workLogEntryIsToolLike as normalizedWorkLogEntryIsToolLike,
   type NormalizedWorkLogEntry,
   type WorkLogToolLifecycleStatus,
 } from '@t3tools/client-runtime/thread-activity'
 import {
+  WORKER_VERDICT_ACTIVITY_KIND,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type ToolLifecycleItemType,
@@ -50,6 +52,9 @@ export interface WorkLogEntry
   toolLifecycleStatus?: WorkLogToolLifecycleStatus
   // originating orchestration activity kind (e.g. `user-input.requested`) for row chrome.
   sourceActivityKind?: OrchestrationThreadActivity['kind']
+  // provider-reported age of an in-flight tool call, carried on tool.progress
+  // heartbeats so a running row can date itself from the tool's own start
+  elapsedSeconds?: number
   taskId?: string
   model?: string
   subagentType?: string
@@ -59,6 +64,52 @@ export interface WorkLogEntry
   lastToolName?: string
   agentId?: string
   workflowName?: string
+}
+
+export interface WorkerVerdictEntry
+{
+  readonly id: string
+  readonly runId: string
+  readonly jobId: string
+  readonly verdict: string
+  readonly createdAt: string
+}
+
+export function workerVerdictKey(runId: string, jobId: string): string
+{
+  return JSON.stringify([runId, jobId])
+}
+
+export function deriveWorkerVerdictEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): WorkerVerdictEntry[]
+{
+  return activities.flatMap((activity) =>
+  {
+    if (activity.kind !== WORKER_VERDICT_ACTIVITY_KIND)
+    {
+      return []
+    }
+    const payload = asRecord(activity.payload)
+    const runId = asTrimmedString(payload?.runId)
+    const jobId = asTrimmedString(payload?.jobId)
+    const verdict = asTrimmedString(payload?.verdict)
+    return runId === null || jobId === null || verdict === null
+      ? []
+      : [{ id: activity.id, runId, jobId, verdict, createdAt: activity.createdAt }]
+  })
+}
+
+export function deriveWorkerVerdictMap(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyMap<string, string>
+{
+  return new Map(
+    deriveWorkerVerdictEntries(activities).map((entry) => [
+      workerVerdictKey(entry.runId, entry.jobId),
+      entry.verdict,
+    ]),
+  )
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry
@@ -89,6 +140,28 @@ export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean
 export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean
 {
   return normalizedWorkEntryIndicatesToolNeutralStatus(entry)
+}
+
+export function workEntryIndicatesToolRunning(entry: WorkLogEntry): boolean
+{
+  return normalizedWorkEntryIndicatesToolRunning(entry)
+}
+
+// a running row dates itself from the tool's own start instant, not from the
+// heartbeat that happens to be newest: the collapsed row's createdAt advances
+// with every heartbeat, so a timer keyed off it would restart every few seconds
+export function workEntryRunningSince(entry: WorkLogEntry): string | null
+{
+  if (entry.elapsedSeconds === undefined)
+  {
+    return null
+  }
+  const observedAt = Date.parse(entry.createdAt)
+  if (!Number.isFinite(observedAt))
+  {
+    return null
+  }
+  return new Date(observedAt - Math.max(0, entry.elapsedSeconds) * 1000).toISOString()
 }
 
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, 'turnId' | 'startedAt' | 'completedAt'>
@@ -136,6 +209,7 @@ export function deriveWorkLogEntries(
     excludedActivityKinds: new Set([
       PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND,
       PROVIDER_SWITCH_FAILED_ACTIVITY_KIND,
+      WORKER_VERDICT_ACTIVITY_KIND,
     ]),
     includeTaskStarted: true,
     mapEntry: mapWebWorkLogEntry,
@@ -224,8 +298,10 @@ function mapWebWorkLogEntry(input: {
   {
     const parentToolUseId = asTrimmedString(payload?.parentToolUseId)
     const lastToolName = asTrimmedString(payload?.toolName)
+    const elapsedSeconds = asNumber(payload?.elapsedSeconds)
     if (parentToolUseId) entry.parentToolUseId = parentToolUseId
     if (lastToolName) entry.lastToolName = lastToolName
+    if (elapsedSeconds !== null) entry.elapsedSeconds = elapsedSeconds
   }
   if (
     entry.toolLifecycleStatus === undefined &&
@@ -242,27 +318,30 @@ function collapseTaskWorkLogEntries(
 ): DerivedWorkLogEntry[]
 {
   const collapsed: DerivedWorkLogEntry[] = []
-  // task lifecycle rows collapse by taskId into one live row; nested
-  // tool.progress rows update their owning task's last-tool label
+  // task lifecycle rows collapse by taskId into one live row & nested
+  // tool.progress rows update their owning task's last-tool label. a
+  // lead-level heartbeat owns no task row, so it falls through as the live row
+  // the shared pass already collapsed by tool call id
   const taskIndexById = new Map<string, number>()
   const taskIdByToolUseId = new Map<string, string>()
   for (const entry of entries)
   {
-    if (entry.activityKind === 'tool.progress')
+    if (entry.activityKind === 'tool.progress' && entry.parentToolUseId)
     {
-      const taskId = entry.parentToolUseId
-        ? taskIdByToolUseId.get(entry.parentToolUseId)
-        : undefined
+      const taskId = taskIdByToolUseId.get(entry.parentToolUseId)
       const taskIndex = taskId ? taskIndexById.get(taskId) : undefined
-      if (taskIndex !== undefined && entry.lastToolName)
+      if (taskIndex !== undefined)
       {
-        const taskEntry = collapsed[taskIndex]
-        if (taskEntry && taskEntry.activityKind !== 'task.completed')
+        if (entry.lastToolName)
         {
-          collapsed[taskIndex] = { ...taskEntry, lastToolName: entry.lastToolName }
+          const taskEntry = collapsed[taskIndex]
+          if (taskEntry && taskEntry.activityKind !== 'task.completed')
+          {
+            collapsed[taskIndex] = { ...taskEntry, lastToolName: entry.lastToolName }
+          }
         }
+        continue
       }
-      continue
     }
     if (entry.taskId)
     {

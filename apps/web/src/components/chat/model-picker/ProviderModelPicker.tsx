@@ -20,6 +20,7 @@ import {
   getTriggerDisplayModelName,
 } from '../providerIconUtils'
 import type { ProviderInstanceEntry } from '../../../providerInstances'
+import type { ModelSwitchCacheHint } from '../../../providerSwitchPresentation'
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   // the instance currently selected in the composer. Drives the trigger
@@ -33,6 +34,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   keybindings?: ResolvedKeybindingsConfig
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>
   switchableThreadProviderInstanceId?: ProviderInstanceId | null
+  modelSwitchCacheHint?: ModelSwitchCacheHint | null
   activeProviderIconClassName?: string
   compact?: boolean
   disabled?: boolean
@@ -225,6 +227,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByInstance={props.modelOptionsByInstance}
           switchableThreadProviderInstanceId={props.switchableThreadProviderInstanceId ?? null}
+          modelSwitchCacheHint={props.modelSwitchCacheHint ?? null}
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           {...(props.getModelDisabledReason

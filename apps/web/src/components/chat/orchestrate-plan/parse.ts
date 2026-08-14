@@ -7,6 +7,7 @@ import type {
   OrchestratePlanStageOverride,
   ProviderInstanceId,
   EnvironmentId,
+  ScopedThreadRef,
 } from '@t3tools/contracts'
 
 import type { AppModelOption } from '../../../modelSelection'
@@ -33,6 +34,7 @@ export interface OrchestratePlan
   totalWorkers: number
   maxWorkers: number
   runId?: string
+  revision?: number
   validationError: string | null
 }
 
@@ -49,16 +51,22 @@ export interface OrchestratePlanResponse
 /**
  * Callbacks and model-catalog data the chat view supplies so plan cards can
  * edit stage bindings with the app's regular model picker and send responses.
+ * `lead` carries the session's own binding so the card can show the model the
+ * orchestrator itself burns alongside the stages it is approving.
  */
 export interface OrchestratePlanActions
 {
   environmentId: EnvironmentId
+  threadRef: ScopedThreadRef | null
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>
   orchestratePlans: ReadonlyArray<OrchestratePlanRevision>
+  lead: OrchestrateStageSelection | null
+  leadEffort?: string | undefined
   onApprove: (reply: string) => Promise<boolean>
   onRespond: (response: OrchestratePlanResponse) => Promise<boolean>
   onEditInChat: (reply: string) => void
+  onLeadModelChange?: ((instanceId: ProviderInstanceId, model: string) => void) | undefined
   onOpenRun?: ((runId: string) => void) | undefined
 }
 
@@ -313,6 +321,10 @@ export function parseOrchestratePlanResult(
   const workerSum = stages.reduce((sum, stage) => sum + stage.workers, 0)
   const totalWorkers = isNonNegativeInteger(parsed.totalWorkers) ? parsed.totalWorkers : workerSum
   const maxWorkers = isNonNegativeInteger(parsed.maxWorkers) ? parsed.maxWorkers : totalWorkers
+  if (parsed.revision !== undefined && !isNonNegativeInteger(parsed.revision))
+  {
+    return invalid(`revision must be a non-negative integer (got ${valueType(parsed.revision)})`)
+  }
 
   return {
     status: 'success',
@@ -323,6 +335,7 @@ export function parseOrchestratePlanResult(
       totalWorkers,
       maxWorkers,
       ...(typeof parsed.runId === 'string' && parsed.runId !== '' ? { runId: parsed.runId } : {}),
+      ...(isNonNegativeInteger(parsed.revision) ? { revision: parsed.revision } : {}),
       validationError:
         duplicateStageId === undefined
           ? null
@@ -346,6 +359,7 @@ export function planContentText(plan: OrchestratePlan): string
     plan.totalWorkers,
     plan.maxWorkers,
     plan.runId ?? '',
+    plan.revision ?? '',
     plan.stages.map((stage) => [
       stage.id,
       stage.provider,
@@ -376,6 +390,20 @@ export function latestPersistedRevision(
   return latest
 }
 
+export function resolvePersistedRevision(
+  revisions: ReadonlyArray<OrchestratePlanRevision>,
+  runId: string | null,
+  revision: number | undefined,
+): OrchestratePlanRevision | null
+{
+  if (runId === null) return null
+  if (revision === undefined) return latestPersistedRevision(revisions, runId)
+  return (
+    revisions.find((candidate) => candidate.runId === runId && candidate.revision === revision) ??
+    null
+  )
+}
+
 export function persistedRevisionToPlan(revision: OrchestratePlanRevision): OrchestratePlan
 {
   return {
@@ -394,6 +422,7 @@ export function persistedRevisionToPlan(revision: OrchestratePlanRevision): Orch
     totalWorkers: revision.totalWorkers,
     maxWorkers: revision.maxWorkers,
     runId: revision.runId,
+    revision: revision.revision,
     validationError: null,
   }
 }
@@ -402,14 +431,42 @@ export function persistedRevisionToPlan(revision: OrchestratePlanRevision): Orch
 // providers are sent model-only and the orchestrator resolves the harness
 export const BROKER_PROVIDERS = new Set(['codex', 'cursor', 'coral'])
 
+// the configured instance a plan-declared provider maps to, if any; a plan may
+// name a broker-only provider (coral) that no app driver serves, and such a
+// stage has no resolved binding of its own
+export function findStageProviderEntry(
+  provider: string,
+  entries: ReadonlyArray<ProviderInstanceEntry>,
+): ProviderInstanceEntry | null
+{
+  return entries.find((candidate) => candidate.driverKind === provider) ?? null
+}
+
 export function initialSelection(
   stage: OrchestratePlanStage,
   entries: ReadonlyArray<ProviderInstanceEntry>,
 ): OrchestrateStageSelection
 {
-  const entry =
-    entries.find((candidate) => candidate.driverKind === stage.provider) ?? entries[0] ?? null
+  // a stage with no instance for its provider still borrows the first entry so
+  // its picker opens on a catalog; that borrowed driver is not what the broker
+  // launches, so callers reasoning about the real binding must check
+  // findStageProviderEntry instead of trusting this instanceId
+  const entry = findStageProviderEntry(stage.provider, entries) ?? entries[0] ?? null
   return { provider: stage.provider, model: stage.model, instanceId: entry?.instanceId ?? null }
+}
+
+// the catalog option a row resolves to: its picked model, or the
+// instance default when the row is left on provider defaults
+export function resolveStageModelOption(
+  entry: ProviderInstanceEntry | null,
+  options: ReadonlyArray<AppModelOption>,
+  model: string,
+): AppModelOption | undefined
+{
+  if (entry === null) return undefined
+  return model === ''
+    ? (options.find((option) => option.isDefault) ?? options[0])
+    : options.find((option) => option.slug === model)
 }
 
 export function buildPersistedStageOverrides(

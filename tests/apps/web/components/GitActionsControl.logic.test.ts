@@ -38,40 +38,24 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult
 
 describe('when: ref is clean and has an open PR', () =>
 {
-  it('resolveQuickAction opens the existing PR', () =>
+  it('opens the existing PR and disables commit/push in the menu', () =>
   {
-    const quick = resolveQuickAction(
-      status({
-        pr: {
-          number: 10,
-          title: 'Open PR',
-          url: 'https://example.com/pr/10',
-          baseRef: 'main',
-          headRef: 'feature/test',
-          state: 'open',
-        },
-      }),
-      false,
-    )
-    assert.deepInclude(quick, { kind: 'open_pr', label: 'View PR', disabled: false })
-  })
-
-  it('buildMenuItems disables commit/push and enables open PR', () =>
-  {
-    const items = buildMenuItems(
-      status({
-        pr: {
-          number: 11,
-          title: 'Existing PR',
-          url: 'https://example.com/pr/11',
-          baseRef: 'main',
-          headRef: 'feature/test',
-          state: 'open',
-        },
-      }),
-      false,
-    )
-    assert.deepEqual(items, [
+    const openPr = status({
+      pr: {
+        number: 10,
+        title: 'Open PR',
+        url: 'https://example.com/pr/10',
+        baseRef: 'main',
+        headRef: 'feature/test',
+        state: 'open',
+      },
+    })
+    assert.deepInclude(resolveQuickAction(openPr, false), {
+      kind: 'open_pr',
+      label: 'View PR',
+      disabled: false,
+    })
+    assert.deepEqual(buildMenuItems(openPr, false), [
       {
         id: 'commit',
         label: 'Commit',
@@ -101,7 +85,7 @@ describe('when: ref is clean and has an open PR', () =>
 
 describe('when: actions are busy', () =>
 {
-  it('resolveQuickAction returns running disabled state', () =>
+  it('disables the quick action and every menu item while a git action runs', () =>
   {
     const quick = resolveQuickAction(status(), true)
     assert.deepInclude(quick, {
@@ -110,12 +94,7 @@ describe('when: actions are busy', () =>
       disabled: true,
       hint: 'Git action in progress.',
     })
-  })
-
-  it('buildMenuItems disables all actions', () =>
-  {
-    const items = buildMenuItems(status(), true)
-    assert.deepEqual(items, [
+    assert.deepEqual(buildMenuItems(status(), true), [
       {
         id: 'commit',
         label: 'Commit',
@@ -146,21 +125,15 @@ describe('when: actions are busy', () =>
 
 describe('when: git status is unavailable', () =>
 {
-  it('resolveQuickAction returns unavailable disabled state', () =>
+  it('disables the quick action and returns no menu items', () =>
   {
-    const quick = resolveQuickAction(null, false)
-    assert.deepInclude(quick, {
+    assert.deepInclude(resolveQuickAction(null, false), {
       kind: 'show_hint',
       label: 'Commit',
       disabled: true,
       hint: 'Git status is unavailable.',
     })
-  })
-
-  it('buildMenuItems returns no menu items', () =>
-  {
-    const items = buildMenuItems(null, false)
-    assert.deepEqual(items, [])
+    assert.deepEqual(buildMenuItems(null, false), [])
   })
 })
 
@@ -285,14 +258,40 @@ describe('when: ref has diverged from upstream', () =>
 
 describe('when: working tree has local changes', () =>
 {
-  it('resolveQuickAction returns commit, push, and create PR', () =>
+  it('offers commit/push/PR as the quick action while the menu only enables commit', () =>
   {
-    const quick = resolveQuickAction(status({ hasWorkingTreeChanges: true }), false)
-    assert.deepInclude(quick, {
+    const dirty = status({ hasWorkingTreeChanges: true })
+    assert.deepInclude(resolveQuickAction(dirty, false), {
       kind: 'run_action',
       action: 'commit_push_pr',
       label: 'Commit, push & PR',
     })
+    assert.deepEqual(buildMenuItems(dirty, false), [
+      {
+        id: 'commit',
+        label: 'Commit',
+        disabled: false,
+        icon: 'commit',
+        kind: 'open_dialog',
+        dialogAction: 'commit',
+      },
+      {
+        id: 'push',
+        label: 'Push',
+        disabled: true,
+        icon: 'push',
+        kind: 'open_dialog',
+        dialogAction: 'push',
+      },
+      {
+        id: 'pr',
+        label: 'Create PR',
+        disabled: true,
+        icon: 'pr',
+        kind: 'open_dialog',
+        dialogAction: 'create_pr',
+      },
+    ])
   })
 
   it('resolveQuickAction falls back to commit when no origin remote exists', () =>
@@ -332,37 +331,6 @@ describe('when: working tree has local changes', () =>
       action: 'commit_push',
       label: 'Commit & push',
     })
-  })
-
-  it('buildMenuItems enables commit and disables push and PR', () =>
-  {
-    const items = buildMenuItems(status({ hasWorkingTreeChanges: true }), false)
-    assert.deepEqual(items, [
-      {
-        id: 'commit',
-        label: 'Commit',
-        disabled: false,
-        icon: 'commit',
-        kind: 'open_dialog',
-        dialogAction: 'commit',
-      },
-      {
-        id: 'push',
-        label: 'Push',
-        disabled: true,
-        icon: 'push',
-        kind: 'open_dialog',
-        dialogAction: 'push',
-      },
-      {
-        id: 'pr',
-        label: 'Create PR',
-        disabled: true,
-        icon: 'pr',
-        kind: 'open_dialog',
-        dialogAction: 'create_pr',
-      },
-    ])
   })
 
   it('buildMenuItems enables push for ahead commits while local changes remain uncommitted', () =>
@@ -471,15 +439,41 @@ describe('when: HEAD is detached and there are no local changes', () =>
 
 describe('when: ref has no upstream configured', () =>
 {
-  it('resolveQuickAction is disabled when clean, no upstream, and no local commits are ahead', () =>
+  it('disables push/create PR when clean with no upstream and no commits ahead', () =>
   {
-    const quick = resolveQuickAction(status({ hasUpstream: false, pr: null, aheadCount: 0 }), false)
-    assert.deepInclude(quick, {
+    const cleanNoUpstream = status({ hasUpstream: false, pr: null, aheadCount: 0 })
+    assert.deepInclude(resolveQuickAction(cleanNoUpstream, false), {
       kind: 'show_hint',
       label: 'Push',
       hint: 'No local commits to push.',
       disabled: true,
     })
+    assert.deepEqual(buildMenuItems(cleanNoUpstream, false), [
+      {
+        id: 'commit',
+        label: 'Commit',
+        disabled: true,
+        icon: 'commit',
+        kind: 'open_dialog',
+        dialogAction: 'commit',
+      },
+      {
+        id: 'push',
+        label: 'Push',
+        disabled: true,
+        icon: 'push',
+        kind: 'open_dialog',
+        dialogAction: 'push',
+      },
+      {
+        id: 'pr',
+        label: 'Create PR',
+        disabled: true,
+        icon: 'pr',
+        kind: 'open_dialog',
+        dialogAction: 'create_pr',
+      },
+    ])
   })
 
   it('resolveQuickAction opens PR when clean, no upstream, no local commits are ahead, and PR exists', () =>
@@ -531,78 +525,20 @@ describe('when: ref has no upstream configured', () =>
     })
   })
 
-  it('buildMenuItems disables push and create PR when no commits are ahead', () =>
+  it('enables push and create PR when no upstream and commits are ahead', () =>
   {
-    const items = buildMenuItems(status({ hasUpstream: false, pr: null, aheadCount: 0 }), false)
-    assert.deepEqual(items, [
-      {
-        id: 'commit',
-        label: 'Commit',
-        disabled: true,
-        icon: 'commit',
-        kind: 'open_dialog',
-        dialogAction: 'commit',
-      },
-      {
-        id: 'push',
-        label: 'Push',
-        disabled: true,
-        icon: 'push',
-        kind: 'open_dialog',
-        dialogAction: 'push',
-      },
-      {
-        id: 'pr',
-        label: 'Create PR',
-        disabled: true,
-        icon: 'pr',
-        kind: 'open_dialog',
-        dialogAction: 'create_pr',
-      },
-    ])
-  })
-
-  it('resolveQuickAction runs push and create PR when no upstream and commits are ahead', () =>
-  {
-    const quick = resolveQuickAction(
-      status({
-        hasUpstream: false,
-        aheadCount: 2,
-        pr: null,
-      }),
-      false,
-    )
-    assert.deepInclude(quick, {
+    const aheadNoUpstream = status({
+      hasUpstream: false,
+      aheadCount: 2,
+      pr: null,
+    })
+    assert.deepInclude(resolveQuickAction(aheadNoUpstream, false), {
       kind: 'run_action',
       action: 'create_pr',
       label: 'Push & create PR',
       disabled: false,
     })
-  })
-
-  it('resolveQuickAction publishes when no origin remote exists', () =>
-  {
-    const quick = resolveQuickAction(
-      status({
-        hasUpstream: false,
-        aheadCount: 2,
-        pr: null,
-      }),
-      false,
-      false,
-      false,
-    )
-    assert.deepEqual(quick, {
-      kind: 'open_publish',
-      label: 'Publish repository',
-      disabled: false,
-    })
-  })
-
-  it('buildMenuItems enables create PR when no upstream and commits are ahead', () =>
-  {
-    const items = buildMenuItems(status({ hasUpstream: false, pr: null, aheadCount: 2 }), false)
-    assert.deepEqual(items, [
+    assert.deepEqual(buildMenuItems(aheadNoUpstream, false), [
       {
         id: 'commit',
         label: 'Commit',
@@ -630,14 +566,19 @@ describe('when: ref has no upstream configured', () =>
     ])
   })
 
-  it('buildMenuItems hides push and create PR when no origin remote exists', () =>
+  it('publishes when no origin remote exists and hides push/create PR from the menu', () =>
   {
-    const items = buildMenuItems(
-      status({ hasUpstream: false, pr: null, aheadCount: 2 }),
-      false,
-      false,
-    )
-    assert.deepEqual(items, [
+    const aheadNoOrigin = status({
+      hasUpstream: false,
+      aheadCount: 2,
+      pr: null,
+    })
+    assert.deepEqual(resolveQuickAction(aheadNoOrigin, false, false, false), {
+      kind: 'open_publish',
+      label: 'Publish repository',
+      disabled: false,
+    })
+    assert.deepEqual(buildMenuItems(aheadNoOrigin, false, false), [
       {
         id: 'commit',
         label: 'Commit',
@@ -796,79 +737,76 @@ describe('resolveDefaultBranchActionDialogCopy', () =>
 
 describe('buildGitActionProgressStages', () =>
 {
-  it('shows only push progress for explicit push actions', () =>
+  it.each([
+    {
+      name: 'explicit push',
+      input: {
+        action: 'push' as const,
+        hasCustomCommitMessage: false,
+        hasWorkingTreeChanges: false,
+        pushTarget: 'origin/feature/test',
+      },
+      expected: ['Pushing to origin/feature/test...'],
+    },
+    {
+      name: 'create-pr with push',
+      input: {
+        action: 'create_pr' as const,
+        hasCustomCommitMessage: false,
+        hasWorkingTreeChanges: false,
+        pushTarget: 'origin/feature/test',
+        shouldPushBeforePr: true,
+      },
+      expected: [
+        'Pushing to origin/feature/test...',
+        'Preparing PR...',
+        'Generating PR content...',
+        'Creating pull request...',
+      ],
+    },
+    {
+      name: 'create-pr skipping push',
+      input: {
+        action: 'create_pr' as const,
+        hasCustomCommitMessage: false,
+        hasWorkingTreeChanges: false,
+        shouldPushBeforePr: false,
+      },
+      expected: ['Preparing PR...', 'Generating PR content...', 'Creating pull request...'],
+    },
+    {
+      name: 'commit+push dirty tree',
+      input: {
+        action: 'commit_push' as const,
+        hasCustomCommitMessage: false,
+        hasWorkingTreeChanges: true,
+        pushTarget: 'origin/feature/test',
+      },
+      expected: [
+        'Generating commit message...',
+        'Committing...',
+        'Pushing to origin/feature/test...',
+      ],
+    },
+    {
+      name: 'commit+push+PR',
+      input: {
+        action: 'commit_push_pr' as const,
+        hasCustomCommitMessage: true,
+        hasWorkingTreeChanges: true,
+        pushTarget: 'origin/feature/test',
+      },
+      expected: [
+        'Committing...',
+        'Pushing to origin/feature/test...',
+        'Preparing PR...',
+        'Generating PR content...',
+        'Creating pull request...',
+      ],
+    },
+  ])('maps $name actions to progress stages', ({ input, expected }) =>
   {
-    const stages = buildGitActionProgressStages({
-      action: 'push',
-      hasCustomCommitMessage: false,
-      hasWorkingTreeChanges: false,
-      pushTarget: 'origin/feature/test',
-    })
-    assert.deepEqual(stages, ['Pushing to origin/feature/test...'])
-  })
-
-  it('shows push and PR progress for create-pr actions that still need a push', () =>
-  {
-    const stages = buildGitActionProgressStages({
-      action: 'create_pr',
-      hasCustomCommitMessage: false,
-      hasWorkingTreeChanges: false,
-      pushTarget: 'origin/feature/test',
-      shouldPushBeforePr: true,
-    })
-    assert.deepEqual(stages, [
-      'Pushing to origin/feature/test...',
-      'Preparing PR...',
-      'Generating PR content...',
-      'Creating pull request...',
-    ])
-  })
-
-  it('shows only PR progress when create-pr can skip the push', () =>
-  {
-    const stages = buildGitActionProgressStages({
-      action: 'create_pr',
-      hasCustomCommitMessage: false,
-      hasWorkingTreeChanges: false,
-      shouldPushBeforePr: false,
-    })
-    assert.deepEqual(stages, [
-      'Preparing PR...',
-      'Generating PR content...',
-      'Creating pull request...',
-    ])
-  })
-
-  it('includes commit stages for commit+push when working tree is dirty', () =>
-  {
-    const stages = buildGitActionProgressStages({
-      action: 'commit_push',
-      hasCustomCommitMessage: false,
-      hasWorkingTreeChanges: true,
-      pushTarget: 'origin/feature/test',
-    })
-    assert.deepEqual(stages, [
-      'Generating commit message...',
-      'Committing...',
-      'Pushing to origin/feature/test...',
-    ])
-  })
-
-  it('includes granular PR stages for commit+push+PR actions', () =>
-  {
-    const stages = buildGitActionProgressStages({
-      action: 'commit_push_pr',
-      hasCustomCommitMessage: true,
-      hasWorkingTreeChanges: true,
-      pushTarget: 'origin/feature/test',
-    })
-    assert.deepEqual(stages, [
-      'Committing...',
-      'Pushing to origin/feature/test...',
-      'Preparing PR...',
-      'Generating PR content...',
-      'Creating pull request...',
-    ])
+    assert.deepEqual(buildGitActionProgressStages(input), expected)
   })
 })
 
