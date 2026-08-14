@@ -22,6 +22,15 @@ afterEach(() =>
 
 describe('environment palette colors', () =>
 {
+  it('gamut maps extreme finite chroma without losing the reachable hue', () =>
+  {
+    const input = 'oklch(0.5 1e303 0)'
+    expect(toCanonicalThemeColor(input)).toBe('oklch(0.5 1e+303 0)')
+    const colors = createManagedThemeColors('dark', '#000000', input)
+    expect(colors.accent).toBe(toCanonicalThemeColor('#b5005e'))
+    expect(Object.values(colors).every((color) => toCanonicalThemeColor(color) !== null)).toBe(true)
+  })
+
   it('canonicalizes bounded literal CSS colors and rejects references or nonfinite values', () =>
   {
     expect(toCanonicalThemeColor('rgb(255 0 0)')).toBe(toCanonicalThemeColor('#ff0000'))

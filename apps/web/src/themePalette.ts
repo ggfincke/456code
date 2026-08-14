@@ -206,7 +206,7 @@ function themeRgbToThemeColor(color: ThemeRgbColor): string
 
 function themeOklchToThemeColor(color: ThemeOklch): string
 {
-  return themeRgbToThemeColor(themeOklchToRgb(color))
+  return formatOklchThemeColor(mapThemeOklchToSrgbGamut(color))
 }
 
 export function toCanonicalThemeColor(value: unknown): string | null
@@ -286,26 +286,36 @@ function oklchToRgbUnclamped({ L, C, h }: ThemeOklch): { r: number; g: number; b
   }
 }
 
-function themeOklchToRgb(color: ThemeOklch): ThemeRgbColor
+// bound the search even when finite chroma would overflow division by the resolution
+function mapThemeOklchToSrgbGamut(color: ThemeOklch): ThemeOklch
 {
-  let { C } = color
-  for (let step = 0; step < 12; step += 1)
+  const isInGamut = (C: number) =>
   {
     const linear = oklchToRgbUnclamped({ ...color, C })
-    const inGamut = [linear.r, linear.g, linear.b].every(
+    return [linear.r, linear.g, linear.b].every(
       (channel) => channel >= -0.0001 && channel <= 1.0001,
     )
-    if (inGamut)
-    {
-      return {
-        r: linearChannelToSrgb(linear.r),
-        g: linearChannelToSrgb(linear.g),
-        b: linearChannelToSrgb(linear.b),
-      }
-    }
-    C *= 0.82
   }
-  const linear = oklchToRgbUnclamped({ ...color, C: 0 })
+  if (isInGamut(color.C)) return color
+  let low = 0
+  let high = color.C
+  const chromaResolution = 0.000001
+  const steps = Math.max(
+    1,
+    Math.ceil(Math.log2(Math.max(color.C, chromaResolution)) - Math.log2(chromaResolution)),
+  )
+  for (let step = 0; step < steps; step += 1)
+  {
+    const mid = (low + high) / 2
+    if (isInGamut(mid)) low = mid
+    else high = mid
+  }
+  return { ...color, C: low }
+}
+
+function themeOklchToRgb(color: ThemeOklch): ThemeRgbColor
+{
+  const linear = oklchToRgbUnclamped(mapThemeOklchToSrgbGamut(color))
   return {
     r: linearChannelToSrgb(linear.r),
     g: linearChannelToSrgb(linear.g),
