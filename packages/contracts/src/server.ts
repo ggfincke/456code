@@ -21,6 +21,7 @@ import {
 import { EditorId } from './editor.ts'
 import { ModelCapabilities } from './model.ts'
 import { ProviderDriverKind, ProviderInstanceId } from './providerInstance.ts'
+import { ProviderRuntimeCapabilities } from './provider.ts'
 import { ServerSettings } from './settings.ts'
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
@@ -48,6 +49,7 @@ export type ServerProviderState = typeof ServerProviderState.Type
 export const ServerProviderAuthStatus = Schema.Literals([
   'authenticated',
   'unauthenticated',
+  'not-applicable',
   'unknown',
 ])
 export type ServerProviderAuthStatus = typeof ServerProviderAuthStatus.Type
@@ -205,6 +207,9 @@ export const ServerProvider = Schema.Struct({
   accentColor: Schema.optional(TrimmedNonEmptyString),
   badgeLabel: Schema.optional(TrimmedNonEmptyString),
   continuation: Schema.optional(ServerProviderContinuation),
+  // older cached snapshots omit the matrix; consumers resolve that absence
+  // through the conservative capability helper before making decisions.
+  capabilities: Schema.optionalKey(ProviderRuntimeCapabilities),
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,

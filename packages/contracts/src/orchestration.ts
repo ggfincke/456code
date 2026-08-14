@@ -29,6 +29,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
 } from './providerInstance.ts'
+import { ARCHITECTURE_BLAST_PATH_LIMIT, ArchitectureRelativePath } from './architecturePath.ts'
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: 'orchestration.dispatchCommand',
@@ -197,6 +198,20 @@ export const RuntimeMode = Schema.Literals([
 ])
 export type RuntimeMode = typeof RuntimeMode.Type
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = 'full-access'
+
+// footer already displays a supported mode; send/start must persist the same value
+export function coerceRuntimeMode(
+  requested: RuntimeMode,
+  supported: ReadonlyArray<RuntimeMode> | undefined,
+): RuntimeMode
+{
+  if (supported === undefined || supported.length === 0)
+  {
+    return requested
+  }
+  return supported.includes(requested) ? requested : (supported[0] ?? 'approval-required')
+}
+
 export const ProviderInteractionMode = Schema.Literals(['default', 'plan', 'orchestrate'])
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = 'default'
@@ -373,6 +388,11 @@ export const OrchestratePlanStage = Schema.Struct({
 })
 export type OrchestratePlanStage = typeof OrchestratePlanStage.Type
 
+export const OrchestrateArchitecturePaths = Schema.Array(ArchitectureRelativePath).check(
+  Schema.isMaxLength(ARCHITECTURE_BLAST_PATH_LIMIT),
+)
+export type OrchestrateArchitecturePaths = typeof OrchestrateArchitecturePaths.Type
+
 // one revision of an orchestrate model plan: the durable server-held
 // counterpart of the fenced `orchestrate-plan` block, written by the agent
 // through the orchestrate MCP toolkit (or backfilled from a fence) and
@@ -400,6 +420,9 @@ export const OrchestratePlanRevision = Schema.Struct({
   // exact source event sequence for authoritative execution admission. absent
   // only on older projections that cannot prove which immutable event won
   sourceSequence: Schema.optional(NonNegativeInt),
+  // existing repo-relative files/dirs for the standing-atlas scope strip.
+  // stage `scope` stays worker text and is not graph identity
+  architecturePaths: Schema.optional(OrchestrateArchitecturePaths),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 })

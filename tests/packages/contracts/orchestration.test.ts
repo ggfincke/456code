@@ -10,6 +10,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ClientOrchestrationCommand,
+  coerceRuntimeMode,
   IMPORT_RESULT_MESSAGE_MAX_CHARS,
   IMPORT_SESSIONS_MAX_ITEMS,
   IMPORT_SOURCE_PATH_MAX_CHARS,
@@ -88,6 +89,24 @@ it('normalizes legacy and modifier collaboration modes', () =>
     interactionMode: 'plan',
     orchestrate: true,
   })
+})
+
+it('coerces unsupported runtime modes to the first advertised mode', () =>
+{
+  assert.strictEqual(
+    coerceRuntimeMode('full-access', ['approval-required']),
+    'approval-required',
+  )
+  assert.strictEqual(
+    coerceRuntimeMode('approval-required', ['approval-required']),
+    'approval-required',
+  )
+  assert.strictEqual(
+    coerceRuntimeMode('full-access', ['approval-required', 'full-access']),
+    'full-access',
+  )
+  assert.strictEqual(coerceRuntimeMode('auto', undefined), 'auto')
+  assert.strictEqual(coerceRuntimeMode('full-access', []), 'full-access')
 })
 
 function getOptionValue(
