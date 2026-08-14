@@ -9,6 +9,7 @@
     "src",
     "index.ts",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "UPSTREAM.md",
     "Code456MarkdownText.podspec",
     "react-native.config.js"
@@ -24,6 +25,10 @@
     "./primitive": "./src/MarkdownTextPrimitive.tsx",
     "./renderer": "./src/SelectableMarkdownText.ios.tsx",
     "./types": "./src/SelectableMarkdownText.types.ts"
+  },
+  "devDependencies": {
+    "@pierre/trees": "1.0.0-beta.4",
+    "@t3tools/shared": "workspace:*"
   },
   "peerDependencies": {
     "expo-asset": "*",

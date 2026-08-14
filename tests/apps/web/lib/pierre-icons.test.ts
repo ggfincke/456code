@@ -4,13 +4,24 @@
 import { assert, describe, it } from 'vite-plus/test'
 
 import {
+  PIERRE_CUSTOM_FILE_ICON_BY_FILE_NAME,
+  PIERRE_CUSTOM_FILE_ICON_SPRITE,
+} from '@t3tools/shared/pierreFileIcons'
+import {
   hasSpecificPierreIconForFileName,
+  PIERRE_ICONS,
   resolvePierreIconForEntry,
   syntheticFileNameForLanguageId,
 } from '../../../../apps/web/src/lib/pierre-icons'
 
 describe('Pierre file icons', () =>
 {
+  it('derives the web adapter from the neutral shared catalog', () =>
+  {
+    assert.strictEqual(PIERRE_ICONS.spriteSheet, PIERRE_CUSTOM_FILE_ICON_SPRITE)
+    assert.strictEqual(PIERRE_ICONS.byFileName, PIERRE_CUSTOM_FILE_ICON_BY_FILE_NAME)
+  })
+
   it('extends Pierre with a T3-specific exact filename icon', () =>
   {
     assert.equal(
