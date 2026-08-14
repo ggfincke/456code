@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import {
   getProviderStatusBannerKey,
   ProviderStatusBanner,
+  shouldPromoteThreadErrorToProviderReAuth,
   shouldShowProviderStatusBanner,
 } from '../../../../../apps/web/src/components/chat/ProviderStatusBanner'
 
@@ -38,6 +39,14 @@ describe('ProviderStatusBanner', () =>
 
     expect(shouldShowProviderStatusBanner(status, null)).toBe(true)
     expect(shouldShowProviderStatusBanner(status, getProviderStatusBannerKey(status))).toBe(false)
+  })
+
+  it('does not re-promote an authentication error after its thread banner is dismissed', () =>
+  {
+    const status = { ...warningProvider(), status: 'ready' as const }
+
+    expect(shouldPromoteThreadErrorToProviderReAuth(status, 'Authentication expired')).toBe(true)
+    expect(shouldPromoteThreadErrorToProviderReAuth(status, null)).toBe(false)
   })
 
   it('renders an accessible dismiss control for provider warnings', () =>

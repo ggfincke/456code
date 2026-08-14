@@ -17,7 +17,9 @@ import {
   type ThreadImportContinuationConsent,
   type ThreadId,
   type TurnId,
+  toWireInteractionMode,
 } from '@t3tools/contracts'
+import { isBareKnownProviderSlashCommand } from '@t3tools/shared/composerTrigger'
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from '@t3tools/shared/model'
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from '../types'
 import { type ComposerImageAttachment, type DraftThreadState } from '../composerDraftStore'
@@ -37,9 +39,32 @@ export const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   '[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]'
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3
+export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String)
 const isThreadImportContinuationActivityPayload = Schema.is(ThreadImportContinuationActivityPayload)
+
+export function scheduleEnvironmentReconnectWarning(showWarning: () => void): () => void
+{
+  const timeoutId = globalThis.setTimeout(showWarning, ENVIRONMENT_RECONNECT_WARNING_GRACE_MS)
+  return () => globalThis.clearTimeout(timeoutId)
+}
+
+export function hasEnvironmentReconnectWarningGraceElapsed(
+  activeEnvironmentId: EnvironmentId | null,
+  elapsedEnvironmentId: EnvironmentId | null,
+): boolean
+{
+  return activeEnvironmentId !== null && activeEnvironmentId === elapsedEnvironmentId
+}
+
+export function shouldSuppressTransientEnvironmentReconnectWarning(
+  isReconnecting: boolean,
+  reconnectWarningGraceElapsed: boolean,
+): boolean
+{
+  return isReconnecting && !reconnectWarningGraceElapsed
+}
 
 export type ImportContinuationGate =
   | {
@@ -353,6 +378,7 @@ export function buildLocalDraftThread(
   fallbackModelSelection: ModelSelection,
 ): Thread
 {
+  const wireMode = toWireInteractionMode(draftThread.collaborationMode)
   return {
     id: threadId,
     environmentId: draftThread.environmentId,
@@ -360,7 +386,8 @@ export function buildLocalDraftThread(
     title: 'New thread',
     modelSelection: fallbackModelSelection,
     runtimeMode: draftThread.runtimeMode,
-    interactionMode: draftThread.interactionMode,
+    interactionMode: wireMode.interactionMode,
+    orchestrate: wireMode.orchestrate,
     session: null,
     messages: [],
     createdAt: draftThread.createdAt,
@@ -568,8 +595,17 @@ export function formatOutgoingPrompt(params: {
   models: ReadonlyArray<ServerProvider['models'][number]>
   effort: string | null
   text: string
+  providerSlashCommands?: ReadonlyArray<{ readonly name: string }>
+  hasAttachmentsOrContext?: boolean
 }): string
 {
+  if (
+    params.hasAttachmentsOrContext !== true &&
+    isBareKnownProviderSlashCommand(params.text, params.providerSlashCommands ?? [])
+  )
+  {
+    return params.text.trim()
+  }
   const caps = getProviderModelCapabilities(params.models, params.model, params.provider)
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort)
   return applyClaudePromptEffortPrefix(params.text, promptEffort)

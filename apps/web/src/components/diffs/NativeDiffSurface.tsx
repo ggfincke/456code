@@ -52,6 +52,18 @@ export interface NativeDiffSource
   readonly compactPartialHunkOffsets?: boolean
 }
 
+export interface NativeDiffFileSourceAction
+{
+  readonly label: string
+  readonly onOpen: (filePath: string) => void
+}
+
+export interface NativeDiffFileSourceActions
+{
+  readonly before?: NativeDiffFileSourceAction
+  readonly after?: NativeDiffFileSourceAction
+}
+
 interface CollapsedDiffFilesState
 {
   readonly scopeKey: string | null
@@ -164,6 +176,12 @@ const NATIVE_DIFF_UNSAFE_CSS = `
 }
 
 [data-title] {
+  font-family: var(--font-sans) !important;
+}
+`
+
+const NATIVE_DIFF_CLICKABLE_TITLE_CSS = `
+[data-title] {
   cursor: pointer;
   transition:
     color 120ms ease,
@@ -171,7 +189,6 @@ const NATIVE_DIFF_UNSAFE_CSS = `
   text-decoration: underline;
   text-decoration-color: transparent;
   text-underline-offset: 2px;
-  font-family: var(--font-sans) !important;
 }
 
 [data-title]:hover {
@@ -441,6 +458,71 @@ function openFileFromDiffTitle(
   if (filePath) onOpenFile(filePath)
 }
 
+function parserDiffFilePath(path: string | undefined): string | null
+{
+  if (!path || path === '/dev/null') return null
+  return path
+}
+
+function diffFileSidePath(fileDiff: FileDiffMetadata, side: 'before' | 'after'): string | null
+{
+  if (side === 'before')
+  {
+    if (fileDiff.type === 'new') return null
+    return parserDiffFilePath(fileDiff.prevName ?? fileDiff.name)
+  }
+  if (fileDiff.type === 'deleted') return null
+  return parserDiffFilePath(fileDiff.name)
+}
+
+function FileSourceActions(props: {
+  readonly fileDiff: FileDiffMetadata
+  readonly actions: NativeDiffFileSourceActions | undefined
+})
+{
+  const beforePath = props.actions?.before ? diffFileSidePath(props.fileDiff, 'before') : null
+  const afterPath = props.actions?.after ? diffFileSidePath(props.fileDiff, 'after') : null
+  if (beforePath === null && afterPath === null) return null
+  const filePath = resolveFileDiffPath(props.fileDiff)
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-0.5"
+      role="group"
+      aria-label={`Open immutable versions of ${filePath}`}
+      data-native-diff-source-actions
+    >
+      {beforePath !== null && props.actions?.before ? (
+        <button
+          type="button"
+          className="inline-flex h-5 items-center rounded-sm px-1.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          aria-label={`Open ${props.actions.before.label} version of ${beforePath}`}
+          onClick={(event) =>
+            {
+            event.stopPropagation()
+            props.actions?.before?.onOpen(beforePath)
+          }}
+        >
+          {props.actions.before.label}
+        </button>
+      ) : null}
+      {afterPath !== null && props.actions?.after ? (
+        <button
+          type="button"
+          className="inline-flex h-5 items-center rounded-sm px-1.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          aria-label={`Open ${props.actions.after.label} version of ${afterPath}`}
+          onClick={(event) =>
+            {
+            event.stopPropagation()
+            props.actions?.after?.onOpen(afterPath)
+          }}
+        >
+          {props.actions.after.label}
+        </button>
+      ) : null}
+    </span>
+  )
+}
+
 export function NativeDiffSurface(props: {
   readonly controller: NativeDiffSurfaceController
   readonly collapseScopeKey: string
@@ -456,6 +538,7 @@ export function NativeDiffSurface(props: {
   readonly emptyMessage: string
   readonly truncated?: boolean
   readonly onOpenFile?: (filePath: string) => void
+  readonly fileSourceActions?: NativeDiffFileSourceActions
 })
 {
   const {
@@ -473,6 +556,7 @@ export function NativeDiffSurface(props: {
     emptyMessage,
     truncated = false,
     onOpenFile,
+    fileSourceActions,
   } = props
   const { renderablePatch } = controller
   const syntaxThemeName = useSyntaxThemeName()
@@ -523,35 +607,38 @@ export function NativeDiffSurface(props: {
               {
               const filePath = resolveFileDiffPath(fileDiff)
               return (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        className={cn(
-                          'inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden',
-                          getDiffCollapseIconClassName(fileDiff),
-                        )}
-                        aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
-                        aria-expanded={!collapsed}
-                        onClick={(event) =>
-                          {
-                          event.stopPropagation()
-                          controller.toggleFile(fileKey)
-                        }}
-                      />
-                    }
-                  >
-                    {collapsed ? (
-                      <ChevronRightIcon className="size-4" />
-                    ) : (
-                      <ChevronDownIcon className="size-4" />
-                    )}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">
-                    {collapsed ? 'Expand diff' : 'Collapse diff'}
-                  </TooltipPopup>
-                </Tooltip>
+                <>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          className={cn(
+                            'inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden',
+                            getDiffCollapseIconClassName(fileDiff),
+                          )}
+                          aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
+                          aria-expanded={!collapsed}
+                          onClick={(event) =>
+                            {
+                            event.stopPropagation()
+                            controller.toggleFile(fileKey)
+                          }}
+                        />
+                      }
+                    >
+                      {collapsed ? (
+                        <ChevronRightIcon className="size-4" />
+                      ) : (
+                        <ChevronDownIcon className="size-4" />
+                      )}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">
+                      {collapsed ? 'Expand diff' : 'Collapse diff'}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <FileSourceActions fileDiff={fileDiff} actions={fileSourceActions} />
+                </>
               )
             }}
             options={{
@@ -560,7 +647,7 @@ export function NativeDiffSurface(props: {
               overflow: wordWrap ? 'wrap' : 'scroll',
               theme: syntaxThemeName,
               themeType: resolvedTheme as NativeDiffThemeType,
-              unsafeCSS: NATIVE_DIFF_UNSAFE_CSS,
+              unsafeCSS: `${NATIVE_DIFF_UNSAFE_CSS}${onOpenFile ? NATIVE_DIFF_CLICKABLE_TITLE_CSS : ''}`,
               stickyHeaders: true,
               itemMetrics: { diffHeaderHeight: 33 },
               layout: { paddingTop: 0, paddingBottom: 8, gap: 8 },

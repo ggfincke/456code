@@ -364,6 +364,10 @@ export function useSettingsRestore(onRestored?: () => void)
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ['Auto-open task panel']
         : []),
+      ...(settings.desktopNotificationsEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled
+        ? ['Desktop notifications']
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ['Assistant output']
         : []),
@@ -374,6 +378,9 @@ export function useSettingsRestore(onRestored?: () => void)
       ...(Duration.toMillis(settings.automaticGitFetchInterval) !==
       Duration.toMillis(DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval)
         ? ['Automatic Git fetch interval']
+        : []),
+      ...(settings.architectureAutoAnalysis !== DEFAULT_UNIFIED_SETTINGS.architectureAutoAnalysis
+        ? ['Automatic architecture analysis']
         : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ['New thread mode']
@@ -398,12 +405,14 @@ export function useSettingsRestore(onRestored?: () => void)
       settings.autoOpenPlanSidebar,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.desktopNotificationsEnabled,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
       settings.glassOpacity,
       settings.automaticGitFetchInterval,
+      settings.architectureAutoAnalysis,
       settings.enableAssistantStreaming,
       settings.enableProviderUpdateChecks,
       settings.sidebarProjectGroupingMode,
@@ -436,9 +445,11 @@ export function useSettingsRestore(onRestored?: () => void)
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
+      desktopNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
+      architectureAutoAnalysis: DEFAULT_UNIFIED_SETTINGS.architectureAutoAnalysis,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -848,6 +859,38 @@ export function GeneralSettingsPanel()
             />
           }
         />
+
+        {/* desktop-only: the browser build has no bridge to raise a banner, so
+        a toggle there would be a control that does nothing. */}
+        {isElectron ? (
+          <SettingsRow
+            title="Desktop notifications"
+            description="Show a system notification when a thread finishes, stops, or needs you."
+            resetAction={
+              settings.desktopNotificationsEnabled !==
+              DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled ? (
+                <SettingResetButton
+                  label="desktop notifications"
+                  onClick={() =>
+                    updateSettings({
+                      desktopNotificationsEnabled:
+                        DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.desktopNotificationsEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ desktopNotificationsEnabled: Boolean(checked) })
+                }
+                aria-label="Show desktop notifications"
+              />
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="New threads"

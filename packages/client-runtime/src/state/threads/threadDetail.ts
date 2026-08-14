@@ -97,8 +97,41 @@ export function mergeEnvironmentThread(
     providerSwitch: shell.providerSwitch,
     runtimeMode: shell.runtimeMode,
     interactionMode: shell.interactionMode,
+    orchestrate: shell.orchestrate ?? false,
     branch: shell.branch,
     worktreePath: shell.worktreePath,
+    // this literal enumerates every shell-sourced field, so a new shell field is
+    // invisible to the detail surfaces until it is named here. the diff panel and
+    // the chat view both read the merged detail, and that is exactly where a
+    // 29-commit run stayed unreadable: the surfaces resolved a tree the run never
+    // wrote to. an older server omits the execution key and must preserve detail,
+    // while an exact-capable null owns both the retained legacy root and its clear
+    ...(shell.orchestrateRunExecution === undefined
+      ? {
+          ...(shell.orchestrateRunWorktreePath === undefined
+            ? {}
+            : { orchestrateRunWorktreePath: shell.orchestrateRunWorktreePath }),
+          ...(shell.orchestrateRunBranch === undefined
+            ? {}
+            : { orchestrateRunBranch: shell.orchestrateRunBranch }),
+        }
+      : shell.orchestrateRunExecution === null
+        ? {
+            orchestrateRunExecution: null,
+            orchestrateRunWorktreePath: shell.orchestrateRunWorktreePath ?? null,
+            orchestrateRunBranch: shell.orchestrateRunBranch ?? null,
+          }
+        : {
+            orchestrateRunExecution: shell.orchestrateRunExecution,
+            orchestrateRunWorktreePath:
+              shell.orchestrateRunExecution.availability === 'available'
+                ? shell.orchestrateRunExecution.integrationRoot
+                : null,
+            orchestrateRunBranch:
+              shell.orchestrateRunExecution.availability === 'available'
+                ? shell.orchestrateRunExecution.integrationBranch
+                : null,
+          }),
     origin: shell.origin,
     latestTurn: shell.latestTurn,
     createdAt: shell.createdAt,

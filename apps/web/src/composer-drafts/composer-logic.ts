@@ -1,6 +1,12 @@
 // apps/web/src/composer-drafts/composer-logic.ts
-// determine whether submit composer on enter
+// determines composer submit, slash-command, and dispatch behavior
 
+import {
+  type CollaborationMode,
+  normalizeCollaborationMode,
+  type ProviderInteractionMode,
+  toWireInteractionMode,
+} from '@t3tools/contracts'
 import { splitPromptIntoComposerSegments } from './editor-mentions'
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from '../lib/terminalContext'
 
@@ -313,6 +319,73 @@ export function parseStandaloneComposerSlashCommand(
   if (command === 'plan') return 'plan'
   if (command === 'orchestrate') return 'orchestrate'
   return 'default'
+}
+
+export function resolveComposerSlashCommandMode(
+  currentMode: CollaborationMode,
+  command: Exclude<ComposerSlashCommand, 'model'>,
+): CollaborationMode
+{
+  if (command === 'plan')
+  {
+    return normalizeCollaborationMode('plan', currentMode.orchestrate)
+  }
+  if (command === 'orchestrate')
+  {
+    return normalizeCollaborationMode(currentMode.baseMode, true)
+  }
+  return normalizeCollaborationMode('default', false)
+}
+
+export function resolveComposerDispatchMode(
+  currentMode: CollaborationMode,
+  forceOrchestrate: boolean,
+): {
+  readonly collaborationMode: CollaborationMode
+  readonly interactionMode: ProviderInteractionMode
+  readonly orchestrate: boolean
+}
+{
+  const collaborationMode = normalizeCollaborationMode(
+    currentMode.baseMode,
+    currentMode.orchestrate || forceOrchestrate,
+  )
+  return {
+    collaborationMode,
+    ...toWireInteractionMode(collaborationMode),
+  }
+}
+
+export function parseLeadingComposerSlashCommand(text: string): string | null
+{
+  const match = /^\/([a-z0-9][\w-]*)(?=\s|$)/i.exec(text)
+  return match?.[1] ?? null
+}
+
+export function findUnknownLeadingComposerSlashCommand(
+  text: string,
+  providerSlashCommands: ReadonlyArray<{ readonly name: string }>,
+): string | null
+{
+  const command = parseLeadingComposerSlashCommand(text)
+  if (command === null)
+  {
+    return null
+  }
+  const normalizedCommand = command.toLowerCase()
+  if (
+    normalizedCommand === 'model' ||
+    normalizedCommand === 'plan' ||
+    normalizedCommand === 'orchestrate' ||
+    normalizedCommand === 'default' ||
+    providerSlashCommands.some(
+      (providerCommand) => providerCommand.name.toLowerCase() === normalizedCommand,
+    )
+  )
+  {
+    return null
+  }
+  return command
 }
 
 export function parseLegacyOrchestrateInvocation(text: string): { readonly prompt: string } | null

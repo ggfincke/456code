@@ -21,7 +21,6 @@ import {
   formatProviderSwitchFailureToastDescription,
   formatProviderSwitchSendBlockedNotice,
   formatProviderSwitchTargetLabel,
-  PROVIDER_SWITCH_PICKER_HINT,
   PROVIDER_SWITCH_SEND_BLOCKED_NOTICE,
   providerSwitchPickerIntentCopy,
   reconcileProviderSwitchAnnouncements,
@@ -291,39 +290,79 @@ describe('deriveProviderSwitchTimelineEvents', () =>
     expect(deriveWorkLogEntries(activities)).toHaveLength(0)
   })
 
-  it('keeps two instances on the same model apart in the completed copy', () =>
-  {
-    const [personal, work] = deriveProviderSwitchTimelineEvents(
-      [
-        makeActivity({
-          createdAt: '2026-08-02T00:00:01.000Z',
-          kind: 'provider.switch.completed',
-          summary: 'Switched provider',
-          payload: {
-            fromInstanceId: 'codex',
-            fromModel: 'gpt-5-codex',
-            toInstanceId: 'claude',
-            toModel: 'opus-5',
-          },
-        }),
-        makeActivity({
-          createdAt: '2026-08-02T00:00:02.000Z',
-          kind: 'provider.switch.completed',
-          summary: 'Switched provider',
-          payload: {
-            fromInstanceId: 'claude',
-            fromModel: 'opus-5',
-            toInstanceId: 'claude-work',
-            toModel: 'opus-5',
-          },
-        }),
-      ],
-      resolveInstance,
-    )
+  it.each([
+    {
+      outcome: 'completed' as const,
+      personal: makeActivity({
+        createdAt: '2026-08-02T00:00:01.000Z',
+        kind: 'provider.switch.completed',
+        summary: 'Switched provider',
+        payload: {
+          fromInstanceId: 'codex',
+          fromModel: 'gpt-5-codex',
+          toInstanceId: 'claude',
+          toModel: 'opus-5',
+        },
+      }),
+      work: makeActivity({
+        createdAt: '2026-08-02T00:00:02.000Z',
+        kind: 'provider.switch.completed',
+        summary: 'Switched provider',
+        payload: {
+          fromInstanceId: 'claude',
+          fromModel: 'opus-5',
+          toInstanceId: 'claude-work',
+          toModel: 'opus-5',
+        },
+      }),
+      personalLabel: 'Switched from Codex · gpt-5-codex to Claude · opus-5',
+      workLabel: 'Switched from Claude · opus-5 to Claude Work · opus-5',
+    },
+    {
+      outcome: 'failed' as const,
+      personal: makeActivity({
+        createdAt: '2026-08-02T00:00:01.000Z',
+        kind: 'provider.switch.failed',
+        tone: 'error',
+        payload: {
+          reasonCode: 'target-unavailable',
+          targetInstanceId: 'claude',
+          targetModel: 'opus-5',
+        },
+      }),
+      work: makeActivity({
+        createdAt: '2026-08-02T00:00:02.000Z',
+        kind: 'provider.switch.failed',
+        tone: 'error',
+        payload: {
+          reasonCode: 'target-unavailable',
+          targetInstanceId: 'claude-work',
+          targetModel: 'opus-5',
+        },
+      }),
+      personalLabel: 'Provider switch to Claude · opus-5 failed — the new provider was unavailable',
+      workLabel:
+        'Provider switch to Claude Work · opus-5 failed — the new provider was unavailable',
+    },
+  ])(
+    'keeps two instances on the same model apart in the $outcome copy',
+    ({ outcome, personal, work, personalLabel, workLabel }) =>
+    {
+      const [personalEvent, workEvent] = deriveProviderSwitchTimelineEvents(
+        [personal, work],
+        resolveInstance,
+      )
 
-    expect(personal?.label).toBe('Switched from Codex · gpt-5-codex to Claude · opus-5')
-    expect(work?.label).toBe('Switched from Claude · opus-5 to Claude Work · opus-5')
-  })
+      expect(personalEvent?.label).toBe(personalLabel)
+      expect(workEvent?.label).toBe(workLabel)
+      expect(personalEvent?.label).not.toBe(workEvent?.label)
+      if (outcome === 'failed')
+      {
+        expect(personalEvent?.targetLabel).toBe('Claude · opus-5')
+        expect(workEvent?.targetLabel).toBe('Claude Work · opus-5')
+      }
+    },
+  )
 
   it('keeps the activity summary when the completed payload has no models', () =>
   {
@@ -365,39 +404,6 @@ describe('deriveProviderSwitchTimelineEvents', () =>
     expect(failure?.label).toBe(
       'Provider switch to Claude · opus-5 failed — the new provider was unavailable',
     )
-  })
-
-  it('keeps two instances on the same model apart in the failure copy', () =>
-  {
-    const [personal, work] = deriveProviderSwitchTimelineEvents(
-      [
-        makeActivity({
-          createdAt: '2026-08-02T00:00:01.000Z',
-          kind: 'provider.switch.failed',
-          tone: 'error',
-          payload: {
-            reasonCode: 'target-unavailable',
-            targetInstanceId: 'claude',
-            targetModel: 'opus-5',
-          },
-        }),
-        makeActivity({
-          createdAt: '2026-08-02T00:00:02.000Z',
-          kind: 'provider.switch.failed',
-          tone: 'error',
-          payload: {
-            reasonCode: 'target-unavailable',
-            targetInstanceId: 'claude-work',
-            targetModel: 'opus-5',
-          },
-        }),
-      ],
-      resolveInstance,
-    )
-
-    expect(personal?.targetLabel).toBe('Claude · opus-5')
-    expect(work?.targetLabel).toBe('Claude Work · opus-5')
-    expect(personal?.label).not.toBe(work?.label)
   })
 
   it('falls back to the instance name when the failed outcome resolved no model', () =>
@@ -670,11 +676,5 @@ describe('describeProviderSwitchPickerIntent', () =>
     expect(providerSwitchPickerIntentCopy('handoff').badge).toBe('Confirm & wait')
     expect(providerSwitchPickerIntentCopy('handoff').description).toContain('confirm')
     expect(providerSwitchPickerIntentCopy('handoff').description).toContain('handed off')
-  })
-
-  it('documents instant vs confirm in the shared picker hint', () =>
-  {
-    expect(PROVIDER_SWITCH_PICKER_HINT).toContain('instantly')
-    expect(PROVIDER_SWITCH_PICKER_HINT).toContain('confirm')
   })
 })

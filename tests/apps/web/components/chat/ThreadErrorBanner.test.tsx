@@ -1,0 +1,51 @@
+// tests/apps/web/components/chat/ThreadErrorBanner.test.tsx
+// verify thread error dismissal behavior
+
+import { describe, expect, it } from 'vite-plus/test'
+
+import {
+  dismissThreadErrorBannerForSession,
+  getThreadErrorBannerKey,
+  isThreadErrorBannerDismissedForSession,
+  shouldShowThreadErrorBanner,
+} from '../../../../../apps/web/src/components/chat/ThreadErrorBanner'
+
+describe('ThreadErrorBanner dismissal', () =>
+{
+  it('stays hidden after its current error is dismissed', () =>
+  {
+    const bannerKey = getThreadErrorBannerKey('env:thread-a', 'Aborted')
+    dismissThreadErrorBannerForSession(bannerKey)
+
+    expect(
+      shouldShowThreadErrorBanner(
+        'env:thread-a',
+        'Aborted',
+        isThreadErrorBannerDismissedForSession(bannerKey),
+      ),
+    ).toBe(false)
+  })
+
+  it('reappears when a new error arrives on the same thread', () =>
+  {
+    dismissThreadErrorBannerForSession(getThreadErrorBannerKey('env:thread-b', 'Turn failed'))
+    const newErrorKey = getThreadErrorBannerKey('env:thread-b', 'Provider crashed')
+
+    expect(isThreadErrorBannerDismissedForSession(newErrorKey)).toBe(false)
+    expect(
+      shouldShowThreadErrorBanner(
+        'env:thread-b',
+        'Provider crashed',
+        isThreadErrorBannerDismissedForSession(newErrorKey),
+      ),
+    ).toBe(true)
+  })
+
+  it('scopes dismissals to the thread that dismissed them', () =>
+  {
+    dismissThreadErrorBannerForSession(getThreadErrorBannerKey('env:thread-c', 'Aborted'))
+    const otherThreadKey = getThreadErrorBannerKey('env:other-thread', 'Aborted')
+
+    expect(isThreadErrorBannerDismissedForSession(otherThreadKey)).toBe(false)
+  })
+})

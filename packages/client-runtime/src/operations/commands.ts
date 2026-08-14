@@ -45,6 +45,7 @@ export type UnsnoozeThreadInput = CommandInput<'thread.unsnooze'>
 export type UpdateThreadMetadataInput = CommandInput<'thread.meta.update'>
 export type SetThreadRuntimeModeInput = CommandInput<'thread.runtime-mode.set'>
 export type SetThreadInteractionModeInput = CommandInput<'thread.interaction-mode.set'>
+export type SetThreadWorkerVerdictInput = CommandInput<'thread.worker-verdict.set'>
 export type StartThreadTurnInput = CommandInput<'thread.turn.start'>
 export type InterruptThreadTurnInput = CommandInput<'thread.turn.interrupt'>
 export type RespondToThreadApprovalInput = CommandInput<'thread.approval.respond'>
@@ -249,6 +250,18 @@ export const setThreadInteractionMode: (input: SetThreadInteractionModeInput) =>
     return yield* dispatch({
       ...input,
       type: 'thread.interaction-mode.set',
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    })
+  })
+
+export const setThreadWorkerVerdict: (input: SetThreadWorkerVerdictInput) => CommandEffect =
+  Effect.fn('EnvironmentCommands.setThreadWorkerVerdict')(function* (input)
+  {
+    const metadata = yield* timestampedCommandMetadata(input)
+    return yield* dispatch({
+      ...input,
+      type: 'thread.worker-verdict.set',
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     })

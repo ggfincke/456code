@@ -1,8 +1,14 @@
 // tests/apps/web/components/chat/useChatDispatchController.sendPorts.test.ts
-// verifies ChatSendPorts stays an explicit named-field surface for send/retry
-import { describe, expect, it } from 'vite-plus/test'
+// verifies explicit send ports and slash-command submission validation
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import type { ChatSendPorts } from '../../../../../apps/web/src/components/chat/useChatDispatchController'
+import { resolveComposerDispatchMode } from '../../../../../apps/web/src/composer-logic'
+import {
+  blockUnknownComposerSlashCommand,
+  shouldConfirmCompactComposerSlashCommand,
+} from '../../../../../apps/web/src/components/chat/composer/composerSlashCommandValidation'
+import { toastManager } from '../../../../../apps/web/src/components/ui/toast'
 
 type ExhaustiveChatSendPortKeys = {
   readonly [Key in keyof ChatSendPorts]: Key
@@ -33,7 +39,7 @@ const CHAT_SEND_PORT_KEYS = {
   handleInteractionModeChange: 'handleInteractionModeChange',
   importContinuationConsent: 'importContinuationConsent',
   importContinuationSendBlocked: 'importContinuationSendBlocked',
-  interactionMode: 'interactionMode',
+  collaborationMode: 'collaborationMode',
   isAtEndRef: 'isAtEndRef',
   isConnecting: 'isConnecting',
   isDraftHeroState: 'isDraftHeroState',
@@ -81,5 +87,96 @@ describe('ChatSendPorts', () =>
     expect(keys).toContain('resetLocalDispatch')
     // refuse catch-all bags that would reopen the plan 23 stop condition
     expect(keys.some((key) => key === 'deps' || key === 'context')).toBe(false)
+  })
+})
+
+describe('resolveComposerDispatchMode', () =>
+{
+  it('emits Build with Orchestrate through the legacy wire enum', () =>
+  {
+    expect(resolveComposerDispatchMode({ baseMode: 'default', orchestrate: true }, false)).toEqual({
+      collaborationMode: { baseMode: 'default', orchestrate: true },
+      interactionMode: 'orchestrate',
+      orchestrate: true,
+    })
+  })
+
+  it('emits Plan with Orchestrate as Plan plus the modifier', () =>
+  {
+    expect(resolveComposerDispatchMode({ baseMode: 'plan', orchestrate: true }, false)).toEqual({
+      collaborationMode: { baseMode: 'plan', orchestrate: true },
+      interactionMode: 'plan',
+      orchestrate: true,
+    })
+  })
+
+  it('enables legacy $orchestrate without changing the base mode', () =>
+  {
+    expect(resolveComposerDispatchMode({ baseMode: 'plan', orchestrate: false }, true)).toEqual({
+      collaborationMode: { baseMode: 'plan', orchestrate: true },
+      interactionMode: 'plan',
+      orchestrate: true,
+    })
+  })
+})
+
+describe('blockUnknownComposerSlashCommand', () =>
+{
+  afterEach(() =>
+  {
+    vi.restoreAllMocks()
+  })
+
+  it('blocks an unknown command with a toast naming it', () =>
+  {
+    const addToast = vi.spyOn(toastManager, 'add').mockReturnValue('unknown-command-toast')
+
+    expect(blockUnknownComposerSlashCommand('/mystery args', [{ name: 'compact' }])).toBe(true)
+    expect(addToast).toHaveBeenCalledWith({
+      type: 'warning',
+      title: 'Unknown slash command: /mystery',
+      description: 'Choose a command from the slash menu.',
+    })
+  })
+
+  it.each(['/plan explain this', '/compact now', '//x', '/ x'])(
+    'does not block the known command or prose %s',
+    (text) =>
+    {
+      const addToast = vi.spyOn(toastManager, 'add').mockReturnValue('unused-toast')
+
+      expect(blockUnknownComposerSlashCommand(text, [{ name: 'compact' }])).toBe(false)
+      expect(addToast).not.toHaveBeenCalled()
+    },
+  )
+})
+
+describe('shouldConfirmCompactComposerSlashCommand', () =>
+{
+  const providerSlashCommands = [{ name: 'compact' }]
+
+  it('requires confirmation for a bare known compact command', () =>
+  {
+    expect(
+      shouldConfirmCompactComposerSlashCommand({
+        text: '/compact',
+        providerSlashCommands,
+        hasAttachmentsOrContext: false,
+      }),
+    ).toBe(true)
+  })
+
+  it.each([
+    { text: '/review', providerSlashCommands, hasAttachmentsOrContext: false },
+    { text: '/compact', providerSlashCommands: [], hasAttachmentsOrContext: false },
+    { text: '/compact', providerSlashCommands, hasAttachmentsOrContext: true },
+    {
+      text: '/compact\ncontinue with the task',
+      providerSlashCommands,
+      hasAttachmentsOrContext: false,
+    },
+  ])('does not confirm non-executing compact text %#', (input) =>
+  {
+    expect(shouldConfirmCompactComposerSlashCommand(input)).toBe(false)
   })
 })

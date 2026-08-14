@@ -7,11 +7,17 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from '@t3tools/client-runtime/environment'
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef } from '@t3tools/contracts'
+import {
+  DEFAULT_RUNTIME_MODE,
+  normalizeCollaborationMode,
+  type ScopedProjectRef,
+} from '@t3tools/contracts'
 import { useParams, useRouter } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
 import {
   markPromotedDraftThreadByRef,
+  type ComposerThreadDraftState,
+  DraftId,
   type DraftThreadEnvMode,
   type DraftThreadState,
   useComposerDraftStore,
@@ -29,6 +35,23 @@ import { primaryServerSettingsAtom } from '../state/server'
 import { resolveThreadRouteTarget } from '../threadRoutes'
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from '../uiStateStore'
 import { useClientSettings } from './useSettings'
+
+function composerDraftHasUserContent(draft: ComposerThreadDraftState | null | undefined): boolean
+{
+  if (!draft)
+  {
+    return false
+  }
+  return (
+    draft.prompt.trim().length > 0 ||
+    draft.images.length > 0 ||
+    draft.persistedAttachments.length > 0 ||
+    draft.terminalContexts.length > 0 ||
+    draft.elementContexts.length > 0 ||
+    draft.previewAnnotations.length > 0 ||
+    draft.reviewComments.length > 0
+  )
+}
 
 export function useNewThreadHandler()
 {
@@ -56,6 +79,8 @@ export function useNewThreadHandler()
         envMode?: DraftThreadEnvMode
         startFromOrigin?: boolean
         replace?: boolean
+        // carries only typed text and images when the draft repo picker changes projects.
+        carryComposerContent?: boolean
       },
     ): Promise<void> =>
     {
@@ -65,6 +90,7 @@ export function useNewThreadHandler()
         getDraftSession,
         getDraftThread,
         applyStickyState,
+        moveComposerPromptAndImages,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
         setModelSelection,
@@ -72,7 +98,7 @@ export function useNewThreadHandler()
       const currentRouteTarget = getCurrentRouteTarget()
       // a new thread carries the user's *working mode* from the thread being
       // viewed: model (including options like reasoning effort and context
-      // window), permission mode, and interaction mode. Branch, worktree, and
+      // window), permission mode, and collaboration mode. Branch, worktree, and
       // env mode never carry implicitly — those come from the configured
       // defaults unless the caller passes them explicitly.
       const carrySourceShell =
@@ -98,11 +124,32 @@ export function useNewThreadHandler()
         carrySourceShell?.runtimeMode ??
         carrySourceDraft?.runtimeMode ??
         null
-      const carryInteractionMode =
-        carrySourceComposer?.interactionMode ??
-        carrySourceShell?.interactionMode ??
-        carrySourceDraft?.interactionMode ??
+      const carryCollaborationMode =
+        carrySourceComposer?.collaborationMode ??
+        (carrySourceShell
+          ? normalizeCollaborationMode(
+              carrySourceShell.interactionMode,
+              carrySourceShell.orchestrate,
+            )
+          : null) ??
+        carrySourceDraft?.collaborationMode ??
         null
+      const carryContentSourceDraftId =
+        options?.carryComposerContent === true && currentRouteTarget?.kind === 'draft'
+          ? currentRouteTarget.draftId
+          : null
+      const carryComposerContentTo = (destinationDraftId: DraftId): void =>
+      {
+        if (
+          carryContentSourceDraftId &&
+          carryContentSourceDraftId !== destinationDraftId &&
+          !composerDraftHasUserContent(getComposerDraft(destinationDraftId)) &&
+          composerDraftHasUserContent(getComposerDraft(carryContentSourceDraftId))
+        )
+        {
+          moveComposerPromptAndImages(carryContentSourceDraftId, destinationDraftId)
+        }
+      }
       const project = projects.find(
         (candidate) =>
           candidate.id === projectRef.projectId &&
@@ -173,7 +220,7 @@ export function useNewThreadHandler()
             setDraftThreadContext(reusableStoredDraftThread.draftId, {
               ...workspaceContext,
               ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
-              ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+              ...(carryCollaborationMode ? { collaborationMode: carryCollaborationMode } : {}),
             })
             if (carryModelSelection)
             {
@@ -194,9 +241,10 @@ export function useNewThreadHandler()
               threadId: reusableStoredDraftThread.threadId,
               ...workspaceContext,
               ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
-              ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+              ...(carryCollaborationMode ? { collaborationMode: carryCollaborationMode } : {}),
             },
           )
+          carryComposerContentTo(reusableStoredDraftThread.draftId)
           if (
             currentRouteTarget?.kind === 'draft' &&
             currentRouteTarget.draftId === reusableStoredDraftThread.draftId
@@ -237,7 +285,7 @@ export function useNewThreadHandler()
           threadId: latestActiveDraftThread.threadId,
           createdAt: latestActiveDraftThread.createdAt,
           runtimeMode: latestActiveDraftThread.runtimeMode,
-          interactionMode: latestActiveDraftThread.interactionMode,
+          collaborationMode: latestActiveDraftThread.collaborationMode,
           ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
           ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
@@ -265,7 +313,7 @@ export function useNewThreadHandler()
               newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
             }),
           runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
-          ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+          ...(carryCollaborationMode ? { collaborationMode: carryCollaborationMode } : {}),
         })
         applyStickyState(draftId)
         if (carryModelSelection)
@@ -277,6 +325,7 @@ export function useNewThreadHandler()
           // whatever sticky state just wrote".
           setModelSelection(draftId, carryModelSelection, { replaceOptions: true })
         }
+        carryComposerContentTo(draftId)
 
         await router.navigate({
           to: '/draft/$draftId',

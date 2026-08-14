@@ -10,6 +10,7 @@ import {
 import { scopedThreadKey, scopeThreadRef } from '@t3tools/client-runtime/environment'
 import {
   DEFAULT_MODEL,
+  type CollaborationMode,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -24,6 +25,7 @@ import {
   type ThreadImportContinuationConsent,
 } from '@t3tools/contracts'
 import type { UnifiedSettings } from '@t3tools/contracts/settings'
+import { isBareKnownProviderSlashCommand } from '@t3tools/shared/composerTrigger'
 import { createModelSelection } from '@t3tools/shared/model'
 import { truncate } from '@t3tools/shared/String'
 import { buildTemporaryWorktreeBranchName } from '@t3tools/shared/git'
@@ -63,6 +65,8 @@ import {
   collapseExpandedComposerCursor,
   parseLegacyOrchestrateInvocation,
   parseStandaloneComposerSlashCommand,
+  resolveComposerDispatchMode,
+  resolveComposerSlashCommandMode,
 } from '~/composer-logic'
 import type { ComposerImageAttachment, DraftId, DraftThreadEnvMode } from '~/composerDraftStore'
 import { useComposerDraftStore } from '~/composerDraftStore'
@@ -100,8 +104,9 @@ import type { LatestProposedPlanState } from '~/session-logic'
 import { type ChatMessage, type Project, type SessionPhase, type Thread } from '~/types'
 import { stackedThreadToast, toastManager } from '../ui/toast'
 import type { ChatComposerHandle } from './chatComposerHandle'
+import { blockUnknownComposerSlashCommand } from './composer/composerSlashCommandValidation'
 import type { TimelineScrollMode } from './messages-timeline/timelineScrollAnchoring'
-import { resolvePlanFollowUpSubmission } from '~/proposedPlan'
+import { resolvePlanFollowUpSubmission, type PlanImplementVariant } from '~/proposedPlan'
 
 // keep the payload structural so ChatView's atom command remains assignable
 type UpdateThreadMetadataMutation = (input: {
@@ -132,6 +137,7 @@ type StartThreadTurnMutation = (input: {
     readonly titleSeed: string
     readonly runtimeMode: RuntimeMode
     readonly interactionMode: ProviderInteractionMode
+    readonly orchestrate: boolean
     readonly bootstrap?: {
       readonly createThread?: {
         readonly projectId: Project['id']
@@ -139,6 +145,7 @@ type StartThreadTurnMutation = (input: {
         readonly modelSelection: ModelSelection
         readonly runtimeMode: RuntimeMode
         readonly interactionMode: ProviderInteractionMode
+        readonly orchestrate: boolean
         readonly branch: string | null
         readonly worktreePath: string | null
         readonly createdAt: string
@@ -183,10 +190,10 @@ export interface ChatSendPorts
   readonly composerRef: RefObject<ChatComposerHandle | null>
   readonly composerTerminalContextsRef: MutableRefObject<TerminalContextDraft[]>
   readonly focusImportContinuationBanner: () => void
-  readonly handleInteractionModeChange: (mode: ProviderInteractionMode) => void
+  readonly handleInteractionModeChange: (mode: CollaborationMode) => void
   readonly importContinuationConsent: ThreadImportContinuationConsent | null | undefined
   readonly importContinuationSendBlocked: boolean
-  readonly interactionMode: ProviderInteractionMode
+  readonly collaborationMode: CollaborationMode
   readonly isAtEndRef: MutableRefObject<boolean>
   readonly isConnecting: boolean
   readonly isDraftHeroState: boolean
@@ -197,7 +204,7 @@ export interface ChatSendPorts
   readonly onAdvanceActivePendingUserInput: () => void
   readonly onSubmitPlanFollowUp: (input: {
     text: string
-    interactionMode: 'default' | 'plan'
+    collaborationMode: CollaborationMode
   }) => Promise<boolean>
   readonly pendingTimelineAnchorRef: MutableRefObject<MessageId | null>
   readonly persistThreadSettingsForNextTurn: (input: {
@@ -206,7 +213,7 @@ export interface ChatSendPorts
     modelSelection?: ModelSelection
     branch?: string
     runtimeMode: RuntimeMode
-    interactionMode: ProviderInteractionMode
+    collaborationMode: CollaborationMode
   }) => Promise<AtomCommandResult<void, unknown>>
   readonly promptRef: MutableRefObject<string>
   readonly resetLocalDispatch: () => void
@@ -380,6 +387,13 @@ interface UseChatDispatchControllerInput
   // still be missing switch outcomes
   readonly threadDetailSynchronized: boolean
   readonly verifiedImportProviderInstanceId: ProviderInstanceId | null
+}
+
+interface ChatDispatchSendOptions
+{
+  readonly bypassPlanFollowUp?: boolean
+  readonly planImplementVariant?: PlanImplementVariant
+  readonly providerSlashCommand?: string
 }
 
 export function useChatDispatchController(input: UseChatDispatchControllerInput)
@@ -888,10 +902,11 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
   // ordered send/retry interaction; ports carry ChatView-owned refs/setters
   const runSend = async (
     e?: { preventDefault: () => void },
-    options: { bypassPlanFollowUp?: boolean } = {},
+    options: ChatDispatchSendOptions = {},
   ): Promise<boolean> =>
   {
     e?.preventDefault()
+    const directProviderSlashCommand = options.providerSlashCommand?.trim() ?? null
     if (
       !activeThread ||
       isSendBusy ||
@@ -912,32 +927,61 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     }
     if (send.activePendingProgress)
     {
+      if (directProviderSlashCommand !== null)
+      {
+        return false
+      }
       send.onAdvanceActivePendingUserInput()
       return false
     }
     const sendCtx = send.composerRef.current?.getSendContext()
     if (!sendCtx?.providerAvailable) return false
     const {
-      images: composerImages,
-      terminalContexts: composerTerminalContexts,
-      elementContexts: composerElementContexts,
-      previewAnnotations: composerPreviewAnnotations,
-      reviewComments: composerReviewComments,
+      images: sendContextComposerImages,
+      terminalContexts: sendContextComposerTerminalContexts,
+      elementContexts: sendContextComposerElementContexts,
+      previewAnnotations: sendContextComposerPreviewAnnotations,
+      reviewComments: sendContextComposerReviewComments,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
       selectedProviderModels: ctxSelectedProviderModels,
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
+      selectedProviderSlashCommands: ctxSelectedProviderSlashCommands,
     } = sendCtx
+    const promptForDispatch = directProviderSlashCommand ?? sendCtx.prompt
+    if (
+      directProviderSlashCommand !== null &&
+      !isBareKnownProviderSlashCommand(directProviderSlashCommand, ctxSelectedProviderSlashCommands)
+    )
+    {
+      return false
+    }
+    if (blockUnknownComposerSlashCommand(promptForDispatch, ctxSelectedProviderSlashCommands))
+    {
+      return false
+    }
+    const composerImages = directProviderSlashCommand === null ? sendContextComposerImages : []
+    const composerTerminalContexts =
+      directProviderSlashCommand === null ? sendContextComposerTerminalContexts : []
+    const composerElementContexts =
+      directProviderSlashCommand === null ? sendContextComposerElementContexts : []
+    const composerPreviewAnnotations =
+      directProviderSlashCommand === null ? sendContextComposerPreviewAnnotations : []
+    const composerReviewComments =
+      directProviderSlashCommand === null ? sendContextComposerReviewComments : []
     const composerDraftOwnerKeyForSend = send.composerDraftOwnerKey
-    const legacyOrchestrateInvocation = parseLegacyOrchestrateInvocation(send.promptRef.current)
-    const interactionModeForSend =
-      legacyOrchestrateInvocation === null ? send.interactionMode : 'orchestrate'
+    const legacyOrchestrateInvocation = parseLegacyOrchestrateInvocation(promptForDispatch)
+    const dispatchMode = resolveComposerDispatchMode(
+      send.collaborationMode,
+      legacyOrchestrateInvocation !== null,
+    )
+    const collaborationModeForSend = dispatchMode.collaborationMode
     if (legacyOrchestrateInvocation !== null)
     {
-      send.handleInteractionModeChange('orchestrate')
+      send.handleInteractionModeChange(collaborationModeForSend)
     }
-    const promptForSend = legacyOrchestrateInvocation?.prompt ?? send.promptRef.current
+    const promptForSend = legacyOrchestrateInvocation?.prompt ?? promptForDispatch
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -952,19 +996,51 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     })
-    if (!options.bypassPlanFollowUp && send.showPlanFollowUpPrompt && send.activeProposedPlan)
+    if (legacyOrchestrateInvocation !== null && !hasSendableContent)
+    {
+      send.promptRef.current = ''
+      send.clearComposerDraftContent(send.composerDraftTarget)
+      send.composerRef.current?.resetCursorState()
+      return false
+    }
+    const standaloneSlashCommand =
+      composerImages.length === 0 &&
+      sendableComposerTerminalContexts.length === 0 &&
+      composerElementContexts.length === 0 &&
+      composerPreviewAnnotations.length === 0 &&
+      composerReviewComments.length === 0
+        ? parseStandaloneComposerSlashCommand(trimmed)
+        : null
+    if (standaloneSlashCommand)
+    {
+      send.handleInteractionModeChange(
+        resolveComposerSlashCommandMode(send.collaborationMode, standaloneSlashCommand),
+      )
+      send.promptRef.current = ''
+      send.clearComposerDraftContent(send.composerDraftTarget)
+      send.composerRef.current?.resetCursorState()
+      return false
+    }
+    if (
+      directProviderSlashCommand === null &&
+      !options.bypassPlanFollowUp &&
+      send.showPlanFollowUpPrompt &&
+      send.activeProposedPlan
+    )
     {
       const draftPromptForRetry = send.promptRef.current
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
         planMarkdown: send.activeProposedPlan.planMarkdown,
+        currentMode: collaborationModeForSend,
+        ...(options.planImplementVariant ? { implementVariant: options.planImplementVariant } : {}),
       })
       send.promptRef.current = ''
       send.clearComposerDraftContent(send.composerDraftTarget)
       send.composerRef.current?.resetCursorState()
       const sent = await send.onSubmitPlanFollowUp({
         text: followUp.text,
-        interactionMode: followUp.interactionMode,
+        collaborationMode: followUp.collaborationMode,
       })
       if (!sent)
       {
@@ -988,29 +1064,6 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           })
         }
       }
-      return false
-    }
-    const standaloneSlashCommand =
-      composerImages.length === 0 &&
-      sendableComposerTerminalContexts.length === 0 &&
-      composerElementContexts.length === 0 &&
-      composerPreviewAnnotations.length === 0 &&
-      composerReviewComments.length === 0
-        ? parseStandaloneComposerSlashCommand(trimmed)
-        : null
-    if (standaloneSlashCommand)
-    {
-      send.handleInteractionModeChange(standaloneSlashCommand)
-      send.promptRef.current = ''
-      send.clearComposerDraftContent(send.composerDraftTarget)
-      send.composerRef.current?.resetCursorState()
-      return false
-    }
-    if (legacyOrchestrateInvocation !== null && !hasSendableContent)
-    {
-      send.promptRef.current = ''
-      send.clearComposerDraftContent(send.composerDraftTarget)
-      send.composerRef.current?.resetCursorState()
       return false
     }
     if (!hasSendableContent)
@@ -1084,20 +1137,33 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     const composerElementContextsSnapshot = [...composerElementContexts]
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations]
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments]
+    const hasAttachmentsOrContext =
+      composerImagesSnapshot.length > 0 ||
+      composerTerminalContextsSnapshot.length > 0 ||
+      composerElementContextsSnapshot.length > 0 ||
+      composerPreviewAnnotationsSnapshot.length > 0 ||
+      composerReviewCommentsSnapshot.length > 0
+    const isBareProviderSlashCommandForSend =
+      !hasAttachmentsOrContext &&
+      isBareKnownProviderSlashCommand(promptForSend, ctxSelectedProviderSlashCommands)
+    let messageTextForSend = promptForSend.trim()
     // this append order is the exact inverse of the TimelineRows peel order;
     // reordering only one side leaves raw context blocks visible (megacore U-125)
-    const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
-      composerElementContextsSnapshot,
-    )
-    const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
-      (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
-      messageTextWithContexts,
-    )
-    const messageTextForSend = appendReviewCommentsToPrompt(
-      messageTextWithPreviewAnnotations,
-      composerReviewCommentsSnapshot,
-    )
+    if (!isBareProviderSlashCommandForSend)
+    {
+      const messageTextWithContexts = appendElementContextsToPrompt(
+        appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
+        composerElementContextsSnapshot,
+      )
+      const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
+        (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
+        messageTextWithContexts,
+      )
+      messageTextForSend = appendReviewCommentsToPrompt(
+        messageTextWithPreviewAnnotations,
+        composerReviewCommentsSnapshot,
+      )
+    }
     const messageIdForSend = newMessageId()
     const messageCreatedAt = new Date().toISOString()
     const outgoingMessageText = formatOutgoingPrompt({
@@ -1106,6 +1172,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      providerSlashCommands: ctxSelectedProviderSlashCommands,
+      hasAttachmentsOrContext,
     })
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({
@@ -1163,9 +1231,12 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         }),
       )
     }
-    send.promptRef.current = ''
-    send.clearComposerDraftContent(send.composerDraftTarget)
-    send.composerRef.current?.resetCursorState()
+    if (directProviderSlashCommand === null)
+    {
+      send.promptRef.current = ''
+      send.clearComposerDraftContent(send.composerDraftTarget)
+      send.composerRef.current?.resetCursorState()
+    }
 
     let firstComposerImageName: string | null = null
     if (composerImagesSnapshot.length > 0)
@@ -1230,7 +1301,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           ? { branch: send.localCheckoutBranchMismatch.currentBranch }
           : {}),
         runtimeMode: send.runtimeMode,
-        interactionMode: interactionModeForSend,
+        collaborationMode: collaborationModeForSend,
       })
       if (settingsResult._tag === 'Failure')
       {
@@ -1257,7 +1328,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode: send.runtimeMode,
-                      interactionMode: interactionModeForSend,
+                      interactionMode: dispatchMode.interactionMode,
+                      orchestrate: dispatchMode.orchestrate,
                       branch: send.activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
@@ -1291,7 +1363,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
           runtimeMode: send.runtimeMode,
-          interactionMode: interactionModeForSend,
+          interactionMode: dispatchMode.interactionMode,
+          orchestrate: dispatchMode.orchestrate,
           ...(bootstrap ? { bootstrap } : {}),
           ...(send.importContinuationConsent
             ? { importContinuationConsent: send.importContinuationConsent }
@@ -1311,6 +1384,12 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
 
     if (failure !== null)
     {
+      if (directProviderSlashCommand !== null)
+      {
+        send.setOptimisticUserMessages((existing) =>
+          existing.filter((message) => message.id !== messageIdForSend),
+        )
+      }
       const retryDraft = useComposerDraftStore.getState().getComposerDraft(send.composerDraftTarget)
       const retryDraftIsEmpty =
         retryDraft === null ||
@@ -1323,6 +1402,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       const composerOwnerIsCurrent =
         send.composerDraftOwnerKeyRef.current === composerDraftOwnerKeyForSend
       if (
+        directProviderSlashCommand === null &&
         shouldRestoreComposerDraftAfterSendFailure({
           retryDraftIsEmpty,
           composerOwnerIsCurrent,
@@ -1397,10 +1477,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
   const runSendRef = useRef(runSend)
   runSendRef.current = runSend
   const dispatchSend = useCallback(
-    (
-      e?: { preventDefault: () => void },
-      options?: { bypassPlanFollowUp?: boolean },
-    ): Promise<boolean> => runSendRef.current(e, options),
+    (e?: { preventDefault: () => void }, options?: ChatDispatchSendOptions): Promise<boolean> =>
+      runSendRef.current(e, options),
     [],
   )
   const onSend = useCallback(
@@ -1417,6 +1495,9 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     dispatchSend,
     getModelDisabledReason,
     isSwitchingProvider,
+    // the orchestrate plan card pins the lead's own binding as a row, and it
+    // must agree with the composer mid-handoff instead of recomputing the rule
+    leadProviderInstanceId: currentProviderInstanceId,
     onInterrupt,
     onProviderModelSelect,
     onProviderSwitchConfirmationOpenChange,

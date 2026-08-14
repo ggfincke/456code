@@ -37,6 +37,10 @@ interface ChatHeaderProps
   availableEditors: ReadonlyArray<EditorId>
   rightPanelOpen: boolean
   gitCwd: string | null
+  // the branch the thread's active orchestrate run integrates into, or null when
+  // there is no live adopted run tree. countless by design: a count would force
+  // fetching the whole run patch on every orchestrate thread open
+  runBranch: string | null
   onNewThreadInProject: () => void
   onRunProjectScript: (script: ProjectScript) => void
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>
@@ -45,6 +49,7 @@ interface ChatHeaderProps
     input: NewProjectScriptInput,
   ) => Promise<ProjectScriptActionResult>
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>
+  onOpenRunDiff: () => void
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -74,11 +79,13 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  runBranch,
   onNewThreadInProject,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  onOpenRunDiff,
 }: ChatHeaderProps)
 {
   const primaryEnvironmentId = usePrimaryEnvironmentId()
@@ -145,6 +152,24 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? 'pr-0' : 'pr-16',
         )}
       >
+        {runBranch !== null && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Run changes on ${runBranch}`}
+                  onClick={onOpenRunDiff}
+                  className="inline-flex h-6 max-w-40 cursor-pointer items-center gap-1.5 rounded-md bg-muted/70 px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              }
+            >
+              <span className="shrink-0 text-muted-foreground">Run</span>
+              <span className="min-w-0 truncate">{runBranch}</span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">Run changes on {runBranch}</TooltipPopup>
+          </Tooltip>
+        )}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

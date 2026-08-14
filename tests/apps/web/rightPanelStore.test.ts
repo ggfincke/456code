@@ -1,7 +1,17 @@
 // tests/apps/web/rightPanelStore.test.ts
 // verifies thread-scoped right-panel surface persistence and transitions
 import { scopeThreadRef } from '@t3tools/client-runtime/environment'
-import { type EnvironmentId, type OrchestrationProposedPlanId, ThreadId } from '@t3tools/contracts'
+import {
+  type ArchitectureGenerationId,
+  type ArchitectureGraphDigest,
+  type DiffAnalysisId,
+  type EnvironmentId,
+  type OrchestratePlanRunId,
+  type OrchestrationProposedPlanId,
+  type ProjectId,
+  type ProposalGenerationId,
+  ThreadId,
+} from '@t3tools/contracts'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -11,9 +21,19 @@ import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from '../../../apps/web/src/rightPanelStore'
+import {
+  architectureFileSurfaceId,
+  createArchitectureImpactSurface,
+  createArchitectureScopeSurface,
+  createRepositoryAtlasSurface,
+} from '../../../apps/web/src/components/architecture/architectureResourceIdentity'
 
 const refA = scopeThreadRef('env-1' as EnvironmentId, ThreadId.make('thread-A'))
 const refB = scopeThreadRef('env-1' as EnvironmentId, ThreadId.make('thread-B'))
+const repositoryGenerationId = 'a'.repeat(64) as ArchitectureGenerationId
+const repositoryGraphDigest = `sha256:${'b'.repeat(64)}` as ArchitectureGraphDigest
+const baseGraphDigest = `sha256:${'c'.repeat(64)}` as ArchitectureGraphDigest
+const headGraphDigest = `sha256:${'d'.repeat(64)}` as ArchitectureGraphDigest
 
 beforeEach(() =>
 {
@@ -109,6 +129,363 @@ describe('rightPanelStore', () =>
     })
   })
 
+  it('drops a retired persisted Atlas surface', () =>
+  {
+    expect(
+      migratePersistedRightPanelState(
+        {
+          byThreadKey: {
+            'env-1:thread-A': {
+              isOpen: true,
+              activeSurfaceId: 'atlas',
+              surfaces: [{ id: 'atlas', kind: 'atlas' }],
+            },
+          },
+        },
+        8,
+      ),
+    ).toEqual({
+      byThreadKey: {
+        'env-1:thread-A': {
+          isOpen: true,
+          activeSurfaceId: null,
+          surfaces: [],
+        },
+      },
+    })
+  })
+
+  it('drops retired, spoofed, payload-bearing, duplicate, and unknown migration entries', () =>
+  {
+    expect(
+      migratePersistedRightPanelState(
+        {
+          byThreadKey: {
+            'env-1:thread-A': {
+              isOpen: true,
+              activeSurfaceId: 'atlas',
+              surfaces: [
+                { id: 'atlas:spoofed', kind: 'atlas' },
+                { id: 'atlas', kind: 'atlas', projectId: 'spoofed-project' },
+                { id: 'atlas', kind: 'atlas' },
+                { id: 'atlas', kind: 'atlas' },
+                { id: 'future', kind: 'future-surface', payload: true },
+              ],
+            },
+          },
+        },
+        8,
+      ),
+    ).toEqual({
+      byThreadKey: {
+        'env-1:thread-A': {
+          isOpen: true,
+          activeSurfaceId: null,
+          surfaces: [],
+        },
+      },
+    })
+  })
+
+  it('builds canonical injective architecture resource identities', () =>
+  {
+    const first = createArchitectureImpactSurface({
+      threadId: ThreadId.make('thread:a|b'),
+      comparison: {
+        kind: 'proposal-generation',
+        generationId: 'generation:c' as ProposalGenerationId,
+      },
+    })
+    const same = createArchitectureImpactSurface({
+      threadId: ThreadId.make('thread:a|b'),
+      comparison: {
+        kind: 'proposal-generation',
+        generationId: 'generation:c' as ProposalGenerationId,
+      },
+    })
+    const delimiterCollisionCandidate = createArchitectureImpactSurface({
+      threadId: ThreadId.make('thread:a'),
+      comparison: {
+        kind: 'proposal-generation',
+        generationId: 'b|generation:c' as ProposalGenerationId,
+      },
+    })
+    const otherSelectorArm = createArchitectureImpactSurface({
+      threadId: ThreadId.make('thread:a|b'),
+      comparison: {
+        kind: 'diff-analysis',
+        diffAnalysisId: 'generation:c' as DiffAnalysisId,
+      },
+    })
+
+    expect(first.id).toBe(same.id)
+    expect(first.id).not.toBe(delimiterCollisionCandidate.id)
+    expect(first.id).not.toBe(otherSelectorArm.id)
+    expect(first.id).toContain('%5B')
+  })
+
+  it('migrates exact architecture resources and drops spoofed identities', () =>
+  {
+    const impact = createArchitectureImpactSurface({
+      threadId: refA.threadId,
+      comparison: {
+        kind: 'proposal-generation',
+        generationId: 'proposal-generation-1' as ProposalGenerationId,
+      },
+    })
+    const repository = createRepositoryAtlasSurface({
+      kind: 'standing-project-generation',
+      projectId: 'project-1' as ProjectId,
+      generationId: repositoryGenerationId,
+      side: 'analyzed',
+      graphDigest: repositoryGraphDigest,
+    })
+    const scope = createArchitectureScopeSurface({
+      source: {
+        kind: 'standing-project-generation',
+        projectId: 'project-1' as ProjectId,
+        generationId: repositoryGenerationId,
+        side: 'analyzed',
+        graphDigest: repositoryGraphDigest,
+      },
+      scope: { level: 'dirs', id: 'dirs:apps/server/src' },
+    })
+    const retiredAdvanced = {
+      id: 'advanced-atlas:retired',
+      kind: 'advanced-atlas',
+      target: { kind: 'project', projectId: 'project-1' },
+    }
+
+    expect(
+      migratePersistedRightPanelState(
+        {
+          byThreadKey: {
+            'env-1:thread-A': {
+              isOpen: true,
+              activeSurfaceId: scope.id,
+              surfaces: [
+                impact,
+                repository,
+                scope,
+                retiredAdvanced,
+                impact,
+                { ...repository, id: `${repository.id}:spoofed` },
+                { ...scope, extra: 'spoofed' },
+              ],
+            },
+          },
+        },
+        11,
+      ),
+    ).toEqual({
+      byThreadKey: {
+        'env-1:thread-A': {
+          isOpen: true,
+          activeSurfaceId: scope.id,
+          surfaces: [impact, repository, scope],
+        },
+      },
+    })
+  })
+
+  it('preserves contract-valid architecture paths and rejects NUL-bearing resources', () =>
+  {
+    const source = {
+      kind: 'proposal-generation' as const,
+      threadId: refA.threadId,
+      generationId: 'proposal-generation-paths' as ProposalGenerationId,
+      side: 'proposed' as const,
+      graphDigest: headGraphDigest,
+    }
+    const validPaths = [
+      'src/ spaced.ts ',
+      'src/*.ts',
+      'src/[literal].ts',
+      'src/tab\tname.ts',
+      'src/newline\nname.ts',
+    ]
+    const scopes = validPaths.map((path) =>
+      createArchitectureScopeSurface({
+        source,
+        scope: { level: 'file-neighborhood', path },
+      }),
+    )
+    const files = validPaths.map((relativePath) => ({
+      id: architectureFileSurfaceId(source, relativePath),
+      kind: 'file' as const,
+      relativePath,
+      revealLine: null,
+      revealRequestId: 0,
+      source,
+    }))
+    const nulPath = 'src/nul\u0000name.ts'
+    const nulScope = createArchitectureScopeSurface({
+      source,
+      scope: { level: 'file-neighborhood', path: nulPath },
+    })
+    const nulFile = {
+      id: architectureFileSurfaceId(source, nulPath),
+      kind: 'file' as const,
+      relativePath: nulPath,
+      revealLine: null,
+      revealRequestId: 0,
+      source,
+    }
+
+    expect(
+      migratePersistedRightPanelState(
+        {
+          byThreadKey: {
+            'env-1:thread-A': {
+              isOpen: true,
+              activeSurfaceId: scopes[0]?.id,
+              surfaces: [...scopes, ...files, nulScope, nulFile],
+            },
+          },
+        },
+        12,
+      ),
+    ).toEqual({
+      byThreadKey: {
+        'env-1:thread-A': {
+          isOpen: true,
+          activeSurfaceId: scopes[0]?.id,
+          surfaces: [...scopes, ...files],
+        },
+      },
+    })
+  })
+
+  it('preserves contract-valid whitespace-edged architecture scope ids', () =>
+  {
+    const scope = createArchitectureScopeSurface({
+      source: {
+        kind: 'standing-project-generation',
+        projectId: 'project-whitespace-scope' as ProjectId,
+        generationId: repositoryGenerationId,
+        side: 'analyzed',
+        graphDigest: repositoryGraphDigest,
+      },
+      scope: { level: 'systems', id: 'systems: API ' },
+    })
+
+    expect(
+      migratePersistedRightPanelState(
+        {
+          byThreadKey: {
+            'env-1:thread-A': {
+              isOpen: true,
+              activeSurfaceId: scope.id,
+              surfaces: [scope],
+            },
+          },
+        },
+        12,
+      ),
+    ).toEqual({
+      byThreadKey: {
+        'env-1:thread-A': {
+          isOpen: true,
+          activeSurfaceId: scope.id,
+          surfaces: [scope],
+        },
+      },
+    })
+  })
+
+  it('deduplicates architecture resources and inserts explicit children adjacently', () =>
+  {
+    const impact = createArchitectureImpactSurface({
+      threadId: refA.threadId,
+      comparison: {
+        kind: 'proposal-generation',
+        generationId: 'proposal-generation-1' as ProposalGenerationId,
+      },
+    })
+    const scope = createArchitectureScopeSurface({
+      source: {
+        kind: 'proposal-generation',
+        threadId: refA.threadId,
+        generationId: 'proposal-generation-1' as ProposalGenerationId,
+        side: 'proposed',
+        graphDigest: headGraphDigest,
+      },
+      scope: { level: 'file-neighborhood', path: 'apps/web/src/App.tsx' },
+    })
+
+    useRightPanelStore.getState().open(refA, 'plan')
+    useRightPanelStore.getState().open(refA, 'diff')
+    useRightPanelStore.getState().openArchitectureSurface(refA, impact, 'plan')
+    useRightPanelStore.getState().openArchitectureSurface(refA, scope, impact.id)
+    useRightPanelStore.getState().openArchitectureSurface(refA, impact, 'diff')
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: impact.id,
+      surfaces: [{ id: 'plan', kind: 'plan' }, impact, scope, { id: 'diff', kind: 'diff' }],
+    })
+  })
+
+  it('inserts live and immutable architecture file children adjacently without duplicating them', () =>
+  {
+    const repository = createRepositoryAtlasSurface({
+      kind: 'standing-project-generation',
+      projectId: 'project-1' as ProjectId,
+      generationId: repositoryGenerationId,
+      side: 'analyzed',
+      graphDigest: repositoryGraphDigest,
+    })
+    const scope = createArchitectureScopeSurface({
+      source: repository.target,
+      scope: { level: 'blocks', id: 'server-runtime' },
+    })
+    const proposalSource = {
+      kind: 'proposal-generation' as const,
+      threadId: refA.threadId,
+      generationId: 'proposal-generation-1' as ProposalGenerationId,
+      side: 'proposed' as const,
+      graphDigest: headGraphDigest,
+    }
+
+    useRightPanelStore.getState().open(refA, 'plan')
+    useRightPanelStore.getState().openArchitectureSurface(refA, repository, 'plan')
+    useRightPanelStore.getState().openArchitectureSurface(refA, scope, repository.id)
+    useRightPanelStore.getState().open(refA, 'diff')
+    useRightPanelStore.getState().openFile(refA, 'apps/server/src/server.ts', undefined, scope.id)
+    useRightPanelStore
+      .getState()
+      .openArchitectureFile(refA, proposalSource, 'apps/web/src/App.tsx', 8, scope.id)
+    useRightPanelStore
+      .getState()
+      .openArchitectureFile(refA, proposalSource, 'apps/web/src/App.tsx', 21, scope.id)
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: architectureFileSurfaceId(proposalSource, 'apps/web/src/App.tsx'),
+      surfaces: [
+        { id: 'plan', kind: 'plan' },
+        repository,
+        scope,
+        {
+          id: architectureFileSurfaceId(proposalSource, 'apps/web/src/App.tsx'),
+          kind: 'file',
+          relativePath: 'apps/web/src/App.tsx',
+          revealLine: 21,
+          revealRequestId: 2,
+          source: proposalSource,
+        },
+        {
+          id: 'file:apps/server/src/server.ts',
+          kind: 'file',
+          relativePath: 'apps/server/src/server.ts',
+          revealLine: null,
+          revealRequestId: 1,
+        },
+        { id: 'diff', kind: 'diff' },
+      ],
+    })
+  })
+
   it('open sets the active panel for a thread', () =>
   {
     useRightPanelStore.getState().open(refA, 'preview')
@@ -153,6 +530,32 @@ describe('rightPanelStore', () =>
     })
   })
 
+  it('keeps Repository Atlas home as a payload-free singleton surface', () =>
+  {
+    useRightPanelStore.getState().open(refA, 'repository-atlas-home')
+    useRightPanelStore.getState().open(refA, 'repository-atlas-home')
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'repository-atlas-home',
+      surfaces: [{ id: 'repository-atlas-home', kind: 'repository-atlas-home' }],
+    })
+
+    useRightPanelStore.getState().toggle(refA, 'repository-atlas-home')
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: false,
+      activeSurfaceId: 'repository-atlas-home',
+      surfaces: [{ id: 'repository-atlas-home', kind: 'repository-atlas-home' }],
+    })
+
+    useRightPanelStore.getState().toggle(refA, 'repository-atlas-home')
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'repository-atlas-home',
+      surfaces: [{ id: 'repository-atlas-home', kind: 'repository-atlas-home' }],
+    })
+  })
+
   it('keeps Explorer as a validated singleton only while a workspace is available', () =>
   {
     expect(
@@ -173,7 +576,7 @@ describe('rightPanelStore', () =>
         'env-1:thread-A': {
           isOpen: true,
           activeSurfaceId: 'explorer',
-          surfaces: [{ id: 'explorer', kind: 'explorer', planId: null }],
+          surfaces: [{ id: 'explorer', kind: 'explorer', target: null }],
         },
       },
     })
@@ -183,15 +586,27 @@ describe('rightPanelStore', () =>
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: true,
       activeSurfaceId: 'explorer',
-      surfaces: [{ id: 'explorer', kind: 'explorer', planId: null }],
+      surfaces: [{ id: 'explorer', kind: 'explorer', target: null }],
     })
 
-    useRightPanelStore.getState().openExplorer(refA, 'plan-current' as OrchestrationProposedPlanId)
-    useRightPanelStore.getState().openExplorer(refA, 'plan-revised' as OrchestrationProposedPlanId)
+    useRightPanelStore.getState().openExplorer(refA, {
+      kind: 'plan',
+      planId: 'plan-current' as OrchestrationProposedPlanId,
+    })
+    useRightPanelStore.getState().openExplorer(refA, {
+      kind: 'plan',
+      planId: 'plan-revised' as OrchestrationProposedPlanId,
+    })
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: true,
       activeSurfaceId: 'explorer',
-      surfaces: [{ id: 'explorer', kind: 'explorer', planId: 'plan-revised' }],
+      surfaces: [
+        {
+          id: 'explorer',
+          kind: 'explorer',
+          target: { kind: 'plan', planId: 'plan-revised' },
+        },
+      ],
     })
 
     useRightPanelStore.getState().reconcileFileSurfaces(refA, false)
@@ -199,6 +614,145 @@ describe('rightPanelStore', () =>
       isOpen: false,
       activeSurfaceId: null,
       surfaces: [],
+    })
+  })
+
+  it('migrates legacy plan targets and validates v10 target arms exactly', () =>
+  {
+    const legacy = migratePersistedRightPanelState(
+      {
+        byThreadKey: {
+          'env-1:thread-A': {
+            isOpen: true,
+            activeSurfaceId: 'explorer',
+            surfaces: [{ id: 'explorer', kind: 'explorer', planId: 'plan-legacy' }],
+          },
+        },
+      },
+      9,
+    )
+    expect(legacy.byThreadKey['env-1:thread-A']?.surfaces).toEqual([
+      {
+        id: 'explorer',
+        kind: 'explorer',
+        target: { kind: 'plan', planId: 'plan-legacy' },
+      },
+    ])
+
+    const current = migratePersistedRightPanelState(
+      {
+        byThreadKey: {
+          'env-1:thread-A': {
+            isOpen: true,
+            activeSurfaceId: 'explorer',
+            surfaces: [
+              {
+                id: 'explorer',
+                kind: 'explorer',
+                target: {
+                  kind: 'orchestrate',
+                  threadId: 'thread-A',
+                  runId: 'run-3',
+                  revision: 3,
+                },
+              },
+            ],
+          },
+          'env-1:thread-B': {
+            isOpen: true,
+            activeSurfaceId: 'explorer',
+            surfaces: [
+              {
+                id: 'explorer',
+                kind: 'explorer',
+                target: {
+                  kind: 'orchestrate',
+                  threadId: 'thread-B',
+                  runId: 'run-4',
+                  revision: 4,
+                  fallbackPlanId: 'plan-spoofed',
+                },
+              },
+            ],
+          },
+          'env-1:thread-C': {
+            isOpen: true,
+            activeSurfaceId: 'explorer',
+            surfaces: [
+              {
+                id: 'explorer',
+                kind: 'explorer',
+                target: { kind: 'plan', planId: 'plan-current' },
+              },
+              {
+                id: 'explorer',
+                kind: 'explorer',
+                target: {
+                  kind: 'orchestrate',
+                  threadId: 'thread-C',
+                  runId: 'run-duplicate',
+                  revision: 1,
+                },
+              },
+            ],
+          },
+          'env-1:thread-D': {
+            isOpen: true,
+            activeSurfaceId: 'explorer',
+            surfaces: [
+              {
+                id: 'explorer',
+                kind: 'explorer',
+                target: {
+                  kind: 'orchestrate',
+                  threadId: 'thread-D',
+                  runId: 'run-invalid',
+                  revision: -1,
+                },
+              },
+            ],
+          },
+        },
+      },
+      10,
+    )
+    expect(current.byThreadKey['env-1:thread-A']?.surfaces).toEqual([
+      {
+        id: 'explorer',
+        kind: 'explorer',
+        target: {
+          kind: 'orchestrate',
+          threadId: 'thread-A',
+          runId: 'run-3',
+          revision: 3,
+        },
+      },
+    ])
+    expect(current.byThreadKey['env-1:thread-B']?.surfaces).toEqual([])
+    expect(current.byThreadKey['env-1:thread-C']?.surfaces).toEqual([
+      {
+        id: 'explorer',
+        kind: 'explorer',
+        target: { kind: 'plan', planId: 'plan-current' },
+      },
+    ])
+    expect(current.byThreadKey['env-1:thread-D']?.surfaces).toEqual([])
+
+    useRightPanelStore.getState().openExplorer(refA, {
+      kind: 'orchestrate',
+      threadId: refA.threadId,
+      runId: 'run-3' as OrchestratePlanRunId,
+      revision: 3,
+    })
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: 'explorer',
+      kind: 'explorer',
+      target: {
+        kind: 'orchestrate',
+        threadId: 'thread-A',
+        runId: 'run-3',
+        revision: 3,
+      },
     })
   })
 
@@ -267,6 +821,112 @@ describe('rightPanelStore', () =>
     })
   })
 
+  it('keeps immutable architecture files distinct by source and preserves them on workspace loss', () =>
+  {
+    const baseSource = {
+      kind: 'proposal-generation' as const,
+      threadId: refA.threadId,
+      generationId: 'proposal-generation-1' as ProposalGenerationId,
+      side: 'base' as const,
+      graphDigest: baseGraphDigest,
+    }
+    const proposedSource = {
+      ...baseSource,
+      side: 'proposed' as const,
+      graphDigest: headGraphDigest,
+    }
+
+    useRightPanelStore.getState().openArchitectureFile(refA, baseSource, '../src/index.ts', 1)
+    expect(useRightPanelStore.getState().byThreadKey).toEqual({})
+
+    useRightPanelStore.getState().openArchitectureFile(refA, baseSource, 'src/index.ts', 12)
+    useRightPanelStore.getState().openArchitectureFile(refA, baseSource, 'src/index.ts', 24)
+    useRightPanelStore.getState().openArchitectureFile(refA, proposedSource, 'src/index.ts', 36)
+    useRightPanelStore.getState().openFile(refA, 'src/index.ts', 48)
+
+    const beforeReconciliation = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      refA,
+    )
+    expect(beforeReconciliation.surfaces).toEqual([
+      {
+        id: architectureFileSurfaceId(baseSource, 'src/index.ts'),
+        kind: 'file',
+        relativePath: 'src/index.ts',
+        revealLine: 24,
+        revealRequestId: 2,
+        source: baseSource,
+      },
+      {
+        id: architectureFileSurfaceId(proposedSource, 'src/index.ts'),
+        kind: 'file',
+        relativePath: 'src/index.ts',
+        revealLine: 36,
+        revealRequestId: 1,
+        source: proposedSource,
+      },
+      {
+        id: 'file:src/index.ts',
+        kind: 'file',
+        relativePath: 'src/index.ts',
+        revealLine: 48,
+        revealRequestId: 1,
+      },
+    ])
+    expect(new Set(beforeReconciliation.surfaces.map((surface) => surface.id)).size).toBe(3)
+
+    useRightPanelStore.getState().reconcileFileSurfaces(refA, false)
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: architectureFileSurfaceId(proposedSource, 'src/index.ts'),
+      surfaces: beforeReconciliation.surfaces.slice(0, 2),
+    })
+  })
+
+  it('migrates exact architecture file identities and rejects mutable or spoofed variants', () =>
+  {
+    const source = {
+      kind: 'diff-analysis' as const,
+      threadId: refA.threadId,
+      diffAnalysisId: 'diff-analysis-1' as DiffAnalysisId,
+      side: 'head' as const,
+      graphDigest: headGraphDigest,
+    }
+    useRightPanelStore.getState().openArchitectureFile(refA, source, 'src/index.ts', 7)
+    const surface = selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)
+    if (surface?.kind !== 'file') throw new Error('expected an architecture file surface')
+
+    expect(
+      migratePersistedRightPanelState(
+        {
+          byThreadKey: {
+            'env-1:thread-A': {
+              isOpen: true,
+              activeSurfaceId: surface.id,
+              surfaces: [
+                surface,
+                surface,
+                { ...surface, id: `${surface.id}:spoofed` },
+                { ...surface, source: { ...source, side: 'base' } },
+                { ...surface, mutableRoot: '/tmp/spoofed' },
+              ],
+            },
+          },
+        },
+        11,
+      ),
+    ).toEqual({
+      byThreadKey: {
+        'env-1:thread-A': {
+          isOpen: true,
+          activeSurfaceId: surface.id,
+          surfaces: [surface],
+        },
+      },
+    })
+  })
+
   it('removes persisted file surfaces when their workspace no longer exists', () =>
   {
     useRightPanelStore.getState().openFile(refA, 'src/index.ts')
@@ -287,6 +947,39 @@ describe('rightPanelStore', () =>
       isOpen: false,
       activeSurfaceId: null,
       surfaces: [],
+    })
+  })
+
+  it('drops Repository Atlas home on workspace loss without resurrecting it', () =>
+  {
+    useRightPanelStore.getState().open(refA, 'plan')
+    useRightPanelStore.getState().open(refA, 'repository-atlas-home')
+
+    useRightPanelStore.getState().reconcileFileSurfaces(refA, true)
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'repository-atlas-home',
+      surfaces: [
+        { id: 'plan', kind: 'plan' },
+        { id: 'repository-atlas-home', kind: 'repository-atlas-home' },
+      ],
+    })
+
+    useRightPanelStore.getState().reconcileFileSurfaces(refA, false)
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'plan',
+      surfaces: [{ id: 'plan', kind: 'plan' }],
+    })
+
+    useRightPanelStore.getState().reconcileFileSurfaces(refA, true)
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'plan',
+      surfaces: [{ id: 'plan', kind: 'plan' }],
     })
   })
 

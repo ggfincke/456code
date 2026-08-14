@@ -673,7 +673,7 @@ const rpcRequestObserverLayer = Layer.succeed(
       {
         nextObservedRpcRequestId += 1
         const requestId = `${environmentId}:${nextObservedRpcRequestId}`
-        trackRpcRequestSent(requestId, `${method} · ${environmentId}`)
+        trackRpcRequestSent(requestId, method, `${method} · ${environmentId}`)
         return Effect.sync(() =>
         {
           acknowledgeRpcRequest(requestId)

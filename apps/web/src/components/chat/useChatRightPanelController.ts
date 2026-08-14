@@ -56,6 +56,7 @@ interface UseChatRightPanelControllerInput
   readonly activeRightPanelSurface: RightPanelSurface | null
   readonly activeThreadRef: ScopedThreadRef | null
   readonly activeThreadWorktreePath: string | null
+  readonly repositoryAtlasAvailable: boolean
   readonly canMaximizeRightPanel: boolean
   readonly closePreview: ClosePreviewMutation
   readonly closeTerminal: CloseTerminalMutation
@@ -90,6 +91,7 @@ export function useChatRightPanelController(input: UseChatRightPanelControllerIn
     activeRightPanelSurface,
     activeThreadRef,
     activeThreadWorktreePath,
+    repositoryAtlasAvailable,
     canMaximizeRightPanel,
     closePreview,
     closeTerminal,
@@ -194,6 +196,12 @@ export function useChatRightPanelController(input: UseChatRightPanelControllerIn
     useRightPanelStore.getState().open(activeThreadRef, 'workers')
   }, [activeThreadRef])
 
+  const addRepositoryAtlasSurface = useCallback(() =>
+  {
+    if (!activeThreadRef || !activeProjectWorkspaceRoot || !repositoryAtlasAvailable) return
+    useRightPanelStore.getState().open(activeThreadRef, 'repository-atlas-home')
+  }, [activeProjectWorkspaceRoot, activeThreadRef, repositoryAtlasAvailable])
+
   const addExplorerSurface = useCallback(() =>
   {
     if (!activeThreadRef || !explorerAvailable) return
@@ -207,15 +215,6 @@ export function useChatRightPanelController(input: UseChatRightPanelControllerIn
       useRightPanelStore.getState().openFile(activeThreadRef, relativePath, line)
     },
     [activeProjectWorkspaceRoot, activeThreadRef],
-  )
-
-  const selectExplorerFile = useCallback(
-    (relativePath: string | null) =>
-    {
-      if (relativePath === null) return
-      openFileSurface(relativePath)
-    },
-    [openFileSurface],
   )
 
   const togglePreviewPanel = useCallback(() =>
@@ -572,6 +571,7 @@ export function useChatRightPanelController(input: UseChatRightPanelControllerIn
   return {
     activatePanelTerminal,
     activateRightPanelSurface,
+    addRepositoryAtlasSurface,
     addDiffSurface,
     addExplorerSurface,
     addFilesSurface,
@@ -588,7 +588,6 @@ export function useChatRightPanelController(input: UseChatRightPanelControllerIn
     createBrowserSurface,
     onToggleDiff,
     openFileSurface,
-    selectExplorerFile,
     splitPanelTerminal,
     splitPanelTerminalVertical,
     togglePlanSidebar,

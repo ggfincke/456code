@@ -2,6 +2,7 @@
 // renders thread timelines, composer state, and guarded provider dispatch
 import {
   type ApprovalRequestId,
+  type CollaborationMode,
   defaultInstanceIdForDriver,
   type EnvironmentId,
   type MessageId,
@@ -16,10 +17,11 @@ import {
   type TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
-  ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
   TerminalOpenInput,
+  normalizeCollaborationMode,
+  toWireInteractionMode,
 } from '@t3tools/contracts'
 import {
   connectionStatusTitle,
@@ -41,6 +43,7 @@ import { CHAT_LIST_ANCHOR_OFFSET } from '@t3tools/shared/chatList'
 import { projectScriptCwd, projectScriptRuntimeEnv } from '@t3tools/shared/projectScripts'
 import { truncate } from '@t3tools/shared/String'
 import { nextTerminalId, resolveTerminalSessionLabel } from '@t3tools/shared/terminalLabels'
+import { resolveThreadChangeRoot } from '@t3tools/shared/threadChangeRoot'
 import { Debouncer } from '@tanstack/react-pacer'
 import { useAtomValue } from '@effect/atom-react'
 import {
@@ -80,6 +83,7 @@ import {
   hasActionableProposedPlan,
   isLatestTurnSettled,
 } from '../session-logic'
+import { deriveWorkerVerdictMap } from '../session/worklog'
 import { type LegendListRef } from '@legendapp/list/react'
 import {
   getAnchoredTurnMetrics,
@@ -93,9 +97,14 @@ import {
   type PendingUserInputDraftAnswer,
 } from '../pendingUserInput'
 import { useUiStateStore } from '../uiStateStore'
-import { buildPlanImplementationThreadTitle, buildPlanImplementationPrompt } from '../proposedPlan'
 import {
-  DEFAULT_INTERACTION_MODE,
+  buildPlanImplementationThreadTitle,
+  buildPlanImplementationPrompt,
+  ORCHESTRATE_PLAN_IMPLEMENTATION_PROMPT,
+  type PlanImplementVariant,
+} from '../proposedPlan'
+import {
+  DEFAULT_COLLABORATION_MODE,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
@@ -116,8 +125,16 @@ import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from '../rightPanelStore'
+import {
+  createArchitectureScopeSurface,
+  createRepositoryAtlasSurface,
+  type ArchitectureScopeTarget,
+} from './architecture/architectureResourceIdentity'
+import type { ArchitectureFileOpenTarget } from './architecture/ArchitectureScopeSurface'
+import { RepositoryAtlasBootstrap } from './architecture/RepositoryAtlasBootstrap'
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from '../previewStateStore'
 import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
+import { resolveAutoVisitTimestamp } from './Sidebar.logic'
 import { RightPanelTabs } from './RightPanelTabs'
 import { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
 import { BranchToolbar } from './BranchToolbar'
@@ -215,11 +232,17 @@ import { NoActiveThreadState } from './NoActiveThreadState'
 import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from './BranchToolbar.logic'
 import {
   getProviderStatusBannerKey,
-  isProviderAuthFailureMessage,
   ProviderStatusBanner,
+  shouldPromoteThreadErrorToProviderReAuth,
   shouldShowProviderStatusBanner,
 } from './chat/ProviderStatusBanner'
-import { ThreadErrorBanner } from './chat/ThreadErrorBanner'
+import {
+  dismissThreadErrorBannerForSession,
+  getThreadErrorBannerKey,
+  isThreadErrorBannerDismissedForSession,
+  shouldShowThreadErrorBanner,
+  ThreadErrorBanner,
+} from './chat/ThreadErrorBanner'
 import { resolveThreadPr } from './ThreadStatusIndicators'
 import {
   ComposerBannerStack,
@@ -244,6 +267,7 @@ import {
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   dismissBranchMismatchForSession,
+  hasEnvironmentReconnectWarningGraceElapsed,
   handleImportContinuationSendBlock,
   hasServerAcknowledgedLocalDispatch,
   importContinuationConsentToken,
@@ -263,9 +287,11 @@ import {
   resolveImportContinuationProviderSnapshot,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  scheduleEnvironmentReconnectWarning,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
+  shouldSuppressTransientEnvironmentReconnectWarning,
   startNewThreadForProject,
   threadHasStarted,
   waitForStartedServerThread,
@@ -403,6 +429,26 @@ const FilePreviewPanel = lazy(() => import('./files/FilePreviewPanel'))
 const ConnectedExplorerPanel = lazy(() =>
   import('./explorer/ConnectedExplorerPanel').then((module) => ({
     default: module.ConnectedExplorerPanel,
+  })),
+)
+const ConnectedArchitectureImpactSurface = lazy(() =>
+  import('./architecture/ConnectedArchitectureImpactSurface').then((module) => ({
+    default: module.ConnectedArchitectureImpactSurface,
+  })),
+)
+const ArchitectureSourceFilePanel = lazy(() =>
+  import('./architecture/ArchitectureSourceFilePanel').then((module) => ({
+    default: module.ArchitectureSourceFilePanel,
+  })),
+)
+const RepositoryAtlasSurface = lazy(() =>
+  import('./architecture/RepositoryAtlasSurface').then((module) => ({
+    default: module.RepositoryAtlasSurface,
+  })),
+)
+const ArchitectureScopeSurface = lazy(() =>
+  import('./architecture/ArchitectureScopeSurface').then((module) => ({
+    default: module.ArchitectureScopeSurface,
   })),
 )
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set()
@@ -609,6 +655,10 @@ function ChatViewContent(props: ChatViewProps)
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   })
+  const setThreadWorkerVerdict = useAtomCommand(
+    threadEnvironment.setWorkerVerdict,
+    'worker verdict',
+  )
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false })
   const switchThreadProvider = useAtomCommand(threadEnvironment.switchProvider, {
     reportFailure: false,
@@ -680,8 +730,8 @@ function ChatViewContent(props: ChatViewProps)
   const composerRuntimeMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.runtimeMode ?? null,
   )
-  const composerInteractionMode = useComposerDraftStore(
-    (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
+  const composerCollaborationMode = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.collaborationMode ?? null,
   )
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
@@ -877,9 +927,21 @@ function ChatViewContent(props: ChatViewProps)
   const threadError = isServerThread
     ? (localServerError ?? activeServerThread?.session?.lastError ?? null)
     : localDraftError
+  const threadErrorBannerKey = getThreadErrorBannerKey(routeThreadKey, threadError)
+  const visibleThreadError = shouldShowThreadErrorBanner(
+    routeThreadKey,
+    threadError,
+    isThreadErrorBannerDismissedForSession(threadErrorBannerKey),
+  )
+    ? threadError
+    : null
+  const [, setThreadErrorBannerDismissTick] = useState(0)
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE
-  const interactionMode =
-    composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE
+  const collaborationMode =
+    composerCollaborationMode ??
+    (activeThread
+      ? normalizeCollaborationMode(activeThread.interactionMode, activeThread.orchestrate)
+      : DEFAULT_COLLABORATION_MODE)
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined
   const canCheckoutPullRequestIntoThread = isLocalDraftThread
   const activeThreadId = activeThread?.id ?? null
@@ -1096,6 +1158,28 @@ function ChatViewContent(props: ChatViewProps)
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? 'available'
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== 'connected'
+  const activeReconnectingEnvironmentId =
+    activeEnvironmentConnectionPhase === 'connecting' ||
+    activeEnvironmentConnectionPhase === 'reconnecting'
+      ? (activeEnvironment?.environmentId ?? null)
+      : null
+  const [reconnectWarningGraceElapsedEnvironmentId, setReconnectWarningGraceElapsedEnvironmentId] =
+    useState<EnvironmentId | null>(null)
+  const reconnectWarningGraceElapsed = hasEnvironmentReconnectWarningGraceElapsed(
+    activeReconnectingEnvironmentId,
+    reconnectWarningGraceElapsedEnvironmentId,
+  )
+  useEffect(() =>
+  {
+    setReconnectWarningGraceElapsedEnvironmentId(null)
+    if (activeReconnectingEnvironmentId === null)
+    {
+      return
+    }
+    return scheduleEnvironmentReconnectWarning(() =>
+      setReconnectWarningGraceElapsedEnvironmentId(activeReconnectingEnvironmentId),
+    )
+  }, [activeReconnectingEnvironmentId])
   const activeEnvironmentUnavailableLabel = activeEnvironment?.label ?? null
   const activeEnvironmentUnavailableState = useMemo<EnvironmentUnavailableState | null>(() =>
   {
@@ -1233,7 +1317,7 @@ function ChatViewContent(props: ChatViewProps)
           threadId: activeDraftSession.threadId,
           createdAt: activeDraftSession.createdAt,
           runtimeMode: activeDraftSession.runtimeMode,
-          interactionMode: activeDraftSession.interactionMode,
+          collaborationMode: activeDraftSession.collaborationMode,
           ...input,
         })
         return activeDraftSession.threadId
@@ -1245,7 +1329,7 @@ function ChatViewContent(props: ChatViewProps)
         threadId: nextThreadId,
         createdAt: new Date().toISOString(),
         runtimeMode: DEFAULT_RUNTIME_MODE,
-        interactionMode: DEFAULT_INTERACTION_MODE,
+        collaborationMode: DEFAULT_COLLABORATION_MODE,
         ...input,
       })
       await navigate({
@@ -1280,23 +1364,39 @@ function ChatViewContent(props: ChatViewProps)
     [openOrReuseProjectDraftThread],
   )
 
+  // this effect marked the routed-to thread visited whenever updatedAt advanced, and
+  // turn.completed advances updatedAt -- so a completion was always already "seen" and the
+  // completion pill could never fire for the thread you had open. withholding the mark while the
+  // tab is backgrounded is what keeps that pill alive for a run nobody was watching, and the
+  // visibility listener records the visit the moment the user actually comes back to it
   useEffect(() =>
   {
     if (!serverThread?.id) return
-    const threadUpdatedAt = Date.parse(serverThread.updatedAt)
-    if (Number.isNaN(threadUpdatedAt)) return
-    const lastVisitedAt = activeThreadLastVisitedAt ? Date.parse(activeThreadLastVisitedAt) : NaN
-    if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= threadUpdatedAt) return
 
-    markThreadVisited(
-      scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
-      serverThread.updatedAt,
-    )
+    const markVisitedIfWatching = () =>
+    {
+      const visitedAt = resolveAutoVisitTimestamp({
+        threadUpdatedAt: serverThread.updatedAt,
+        ...(activeThreadLastVisitedAt ? { lastVisitedAt: activeThreadLastVisitedAt } : {}),
+        latestTurnCompletedAt: serverThread.latestTurn?.completedAt,
+        documentVisible: document.visibilityState === 'visible',
+      })
+      if (visitedAt === null) return
+      markThreadVisited(
+        scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
+        visitedAt,
+      )
+    }
+
+    markVisitedIfWatching()
+    document.addEventListener('visibilitychange', markVisitedIfWatching)
+    return () => document.removeEventListener('visibilitychange', markVisitedIfWatching)
   }, [
     activeThreadLastVisitedAt,
     markThreadVisited,
     serverThread?.environmentId,
     serverThread?.id,
+    serverThread?.latestTurn?.completedAt,
     serverThread?.updatedAt,
   ])
 
@@ -1313,7 +1413,8 @@ function ChatViewContent(props: ChatViewProps)
       ? (activeEnvironment?.serverConfig ?? null)
       : (primaryEnvironment?.serverConfig ?? null))
   const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true
-  const cartographerAvailable = serverConfig?.environment.capabilities.cartographerEmbed === true
+  const architectureImpactAvailable =
+    serverConfig?.environment.capabilities.architectureImpact === true
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig)
   const versionMismatchDismissKey =
     versionMismatch && activeThread
@@ -1343,37 +1444,44 @@ function ChatViewContent(props: ChatViewProps)
       const connection = activeEnvironmentUnavailableState.connection
       const isReconnecting =
         connection.phase === 'connecting' || connection.phase === 'reconnecting'
-      items.push({
-        id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
-        variant: connection.phase === 'error' ? 'error' : 'warning',
-        icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusTitle(connection)}`,
-        description:
-          connection.error ??
-          'Reconnect this environment before sending messages or running actions.',
-        actions: (
-          <>
-            <Button
-              size="xs"
-              disabled={isReconnecting}
-              onClick={() =>
-                void handleReconnectActiveEnvironment(
-                  activeEnvironmentUnavailableState.environmentId,
-                )
-              }
-            >
-              {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
-            </Button>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => void navigate({ to: '/settings/connections' })}
-            >
-              Connections
-            </Button>
-          </>
-        ),
-      })
+      const suppressTransientReconnectWarning = shouldSuppressTransientEnvironmentReconnectWarning(
+        isReconnecting,
+        reconnectWarningGraceElapsed,
+      )
+      if (!suppressTransientReconnectWarning)
+      {
+        items.push({
+          id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
+          variant: connection.phase === 'error' ? 'error' : 'warning',
+          icon: <WifiOffIcon />,
+          title: `${activeEnvironmentUnavailableState.label}: ${connectionStatusTitle(connection)}`,
+          description:
+            connection.error ??
+            'Reconnect this environment before sending messages or running actions.',
+          actions: (
+            <>
+              <Button
+                size="xs"
+                disabled={isReconnecting}
+                onClick={() =>
+                  void handleReconnectActiveEnvironment(
+                    activeEnvironmentUnavailableState.environmentId,
+                  )
+                }
+              >
+                {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void navigate({ to: '/settings/connections' })}
+              >
+                Connections
+              </Button>
+            </>
+          ),
+        })
+      }
     }
     if (
       showVersionMismatchBanner &&
@@ -1418,6 +1526,7 @@ function ChatViewContent(props: ChatViewProps)
     activeEnvironmentUnavailableState,
     handleReconnectActiveEnvironment,
     navigate,
+    reconnectWarningGraceElapsed,
     setDismissedVersionMismatchKey,
     showVersionMismatchBanner,
     versionMismatch,
@@ -1548,6 +1657,7 @@ function ChatViewContent(props: ChatViewProps)
   const phase = derivePhase(activeThread?.session ?? null)
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities])
+  const workerVerdicts = useMemo(() => deriveWorkerVerdictMap(threadActivities), [threadActivities])
   const providerSwitchTimelineEvents = useMemo(
     () => deriveProviderSwitchTimelineEvents(threadActivities, resolveProviderSwitchInstance),
     [resolveProviderSwitchInstance, threadActivities],
@@ -1654,10 +1764,11 @@ function ChatViewContent(props: ChatViewProps)
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   )
-  const planSidebarLabel = sidebarProposedPlan || interactionMode === 'plan' ? 'Plan' : 'Tasks'
+  const planSidebarLabel =
+    sidebarProposedPlan || collaborationMode.baseMode === 'plan' ? 'Plan' : 'Tasks'
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
-    interactionMode === 'plan' &&
+    collaborationMode.baseMode === 'plan' &&
     latestTurnSettled &&
     hasActionableProposedPlan(activeProposedPlan)
   const activePendingApproval = pendingApprovals[0] ?? null
@@ -1973,8 +2084,15 @@ function ChatViewContent(props: ChatViewProps)
         activeThread?.proposedPlans ?? [],
         workLogEntries,
         providerSwitchTimelineEvents,
+        threadActivities,
       ),
-    [activeThread?.proposedPlans, providerSwitchTimelineEvents, timelineMessages, workLogEntries],
+    [
+      activeThread?.proposedPlans,
+      providerSwitchTimelineEvents,
+      threadActivities,
+      timelineMessages,
+      workLogEntries,
+    ],
   )
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null)
   const draftHeroDockRequested =
@@ -2045,7 +2163,40 @@ function ChatViewContent(props: ChatViewProps)
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null
-  const gitStatusCwd = activeThread?.worktreePath ?? gitCwd
+  const activeRunWorktreePath = activeThread?.orchestrateRunWorktreePath ?? null
+  // the adopted run worktree can be pruned while the thread sits idle, and the
+  // server only releases the recorded path on that thread's next turn. this probe
+  // is pinned to the adopted path instead of reusing gitStatusQuery below, whose
+  // cwd moves with the resolver and would flap between the two candidates forever
+  // ! this cwd must stay pinned to activeRunWorktreePath. point it at gitStatusCwd,
+  // or derive the flag below from the resolver's output, and it never settles: dead
+  // root -> isRepo false -> the chain falls back -> live root -> isRepo true -> the
+  // flag clears -> dead root again
+  const runWorktreeStatusQuery = useEnvironmentQuery(
+    activeRunWorktreePath === null
+      ? null
+      : vcsEnvironment.status({
+          environmentId,
+          input: { cwd: activeRunWorktreePath },
+        }),
+  )
+  // one derived answer to "is the adopted tree still there", so the branch
+  // mismatch further down agrees with the root gitStatusQuery actually reads
+  const runWorktreeIsNotRepository = runWorktreeStatusQuery.data?.isRepo === false
+  const effectiveRunWorktreePath = runWorktreeIsNotRepository ? null : activeRunWorktreePath
+  // gitCwd above stays where the user's editor, terminal and scripts open, which
+  // is a question about execution. gitStatusCwd answers "where do this thread's
+  // changes live", so it follows the run's integration worktree first — otherwise
+  // the header reports a clean tree for a run that has been committing all day.
+  // a pruned run worktree answers "not a git repository" rather than failing, so
+  // trusting it would report exactly that same empty tree from the other side
+  const gitStatusCwd =
+    resolveThreadChangeRoot({
+      orchestrateRunWorktreePath: activeRunWorktreePath,
+      worktreePath: activeThread?.worktreePath ?? null,
+      workspaceRoot: null,
+      orchestrateRunWorktreeIsNotRepository: runWorktreeIsNotRepository,
+    }) ?? gitCwd
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -2083,8 +2234,10 @@ function ChatViewContent(props: ChatViewProps)
   // an auth failure that lands mid-thread arrives as a session error while the
   // provider probe still reads healthy, so promote it to the re-auth banner
   // instead of leaving it as one more generic thread error.
-  const providerReAuthRequired =
-    activeProviderStatus !== null && isProviderAuthFailureMessage(threadError)
+  const providerReAuthRequired = shouldPromoteThreadErrorToProviderReAuth(
+    activeProviderStatus,
+    visibleThreadError,
+  )
   const providerStatusBannerKey = getProviderStatusBannerKey(
     activeProviderStatus,
     providerReAuthRequired,
@@ -2109,7 +2262,7 @@ function ChatViewContent(props: ChatViewProps)
   // the promoted banner carries the raw error, so the generic one would only
   // repeat it; dismissing the promotion hands the error back.
   const promotedProviderAuthError = providerReAuthRequired && visibleProviderStatus !== null
-  const hasTimelineTopBanner = Boolean(threadError) || visibleProviderStatus !== null
+  const hasTimelineTopBanner = Boolean(visibleThreadError) || visibleProviderStatus !== null
   const activeProjectCwd = activeProject?.workspaceRoot ?? null
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined
@@ -2727,22 +2880,26 @@ function ChatViewContent(props: ChatViewProps)
   )
 
   const handleInteractionModeChange = useCallback(
-    (mode: ProviderInteractionMode) =>
+    (mode: CollaborationMode) =>
     {
-      if (mode === interactionMode)
+      const normalizedMode = normalizeCollaborationMode(mode.baseMode, mode.orchestrate)
+      if (
+        normalizedMode.baseMode === collaborationMode.baseMode &&
+        normalizedMode.orchestrate === collaborationMode.orchestrate
+      )
       {
         scheduleComposerFocus()
         return
       }
-      setComposerDraftInteractionMode(composerDraftTarget, mode)
+      setComposerDraftInteractionMode(composerDraftTarget, normalizedMode)
       if (isLocalDraftThread)
       {
-        setDraftThreadContext(composerDraftTarget, { interactionMode: mode })
+        setDraftThreadContext(composerDraftTarget, { collaborationMode: normalizedMode })
       }
       scheduleComposerFocus()
     },
     [
-      interactionMode,
+      collaborationMode,
       isLocalDraftThread,
       scheduleComposerFocus,
       composerDraftTarget,
@@ -2752,8 +2909,13 @@ function ChatViewContent(props: ChatViewProps)
   )
   const toggleInteractionMode = useCallback(() =>
   {
-    handleInteractionModeChange(interactionMode === 'plan' ? 'default' : 'plan')
-  }, [handleInteractionModeChange, interactionMode])
+    handleInteractionModeChange(
+      normalizeCollaborationMode(
+        collaborationMode.baseMode === 'plan' ? 'default' : 'plan',
+        collaborationMode.orchestrate,
+      ),
+    )
+  }, [collaborationMode, handleInteractionModeChange])
   const dismissPlanSidebarForCurrentTurn = useCallback(() =>
   {
     planSidebarDismissedForTurnRef.current =
@@ -2767,11 +2929,13 @@ function ChatViewContent(props: ChatViewProps)
   {
     setTerminalFocusRequestId((value) => value + 1)
   }, [])
-  const explorerAvailable =
-    activeProject !== null && isServerThread && (proposalPreviewAvailable || cartographerAvailable)
+  const explorerAvailable = activeProject !== null && isServerThread && proposalPreviewAvailable
+  const repositoryAtlasAvailable =
+    activeProject !== null && isServerThread && architectureImpactAvailable
   const {
     activatePanelTerminal,
     activateRightPanelSurface,
+    addRepositoryAtlasSurface,
     addDiffSurface,
     addExplorerSurface,
     addFilesSurface,
@@ -2788,7 +2952,6 @@ function ChatViewContent(props: ChatViewProps)
     createBrowserSurface,
     onToggleDiff,
     openFileSurface,
-    selectExplorerFile,
     splitPanelTerminal,
     splitPanelTerminalVertical,
     togglePlanSidebar,
@@ -2802,6 +2965,7 @@ function ChatViewContent(props: ChatViewProps)
     activeRightPanelSurface,
     activeThreadRef,
     activeThreadWorktreePath,
+    repositoryAtlasAvailable,
     canMaximizeRightPanel,
     closePreview,
     closeTerminal: closeTerminalMutation,
@@ -2825,6 +2989,56 @@ function ChatViewContent(props: ChatViewProps)
     setMaximizedRightPanelThreadKey,
     storeCloseTerminal,
   })
+  const architectureParentSurfaceId = activeRightPanelSurface?.id
+  const openArchitectureScopeSurface = useCallback(
+    (target: ArchitectureScopeTarget): void =>
+    {
+      if (!activeThreadRef) return
+      useRightPanelStore
+        .getState()
+        .openArchitectureSurface(
+          activeThreadRef,
+          createArchitectureScopeSurface(target),
+          architectureParentSurfaceId,
+        )
+    },
+    [activeThreadRef, architectureParentSurfaceId],
+  )
+  const openArchitectureResourceFile = useCallback(
+    (target: ArchitectureFileOpenTarget): void =>
+    {
+      if (!activeThreadRef) return
+      const store = useRightPanelStore.getState()
+      if (target.source.kind === 'standing-project-generation')
+      {
+        if (activeWorkspaceRoot === undefined) return
+        store.openFile(activeThreadRef, target.relativePath, undefined, architectureParentSurfaceId)
+        return
+      }
+      store.openArchitectureFile(
+        activeThreadRef,
+        target.source,
+        target.relativePath,
+        undefined,
+        architectureParentSurfaceId,
+      )
+    },
+    [activeThreadRef, activeWorkspaceRoot, architectureParentSurfaceId],
+  )
+  const viewUpdatedRepositoryAtlas = useCallback(
+    (target: Parameters<typeof createRepositoryAtlasSurface>[0]): void =>
+    {
+      if (!activeThreadRef) return
+      useRightPanelStore
+        .getState()
+        .openArchitectureSurface(
+          activeThreadRef,
+          createRepositoryAtlasSurface(target),
+          architectureParentSurfaceId,
+        )
+    },
+    [activeThreadRef, architectureParentSurfaceId],
+  )
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
       threadId: ThreadId
@@ -2832,7 +3046,7 @@ function ChatViewContent(props: ChatViewProps)
       modelSelection?: ModelSelection
       branch?: string
       runtimeMode: RuntimeMode
-      interactionMode: ProviderInteractionMode
+      collaborationMode: CollaborationMode
     }): Promise<AtomCommandResult<void, unknown>> =>
     {
       if (!serverThread)
@@ -2884,14 +3098,23 @@ function ChatViewContent(props: ChatViewProps)
         }
       }
 
-      if (input.interactionMode !== serverThread.interactionMode)
+      const currentCollaborationMode = normalizeCollaborationMode(
+        serverThread.interactionMode,
+        serverThread.orchestrate,
+      )
+      if (
+        input.collaborationMode.baseMode !== currentCollaborationMode.baseMode ||
+        input.collaborationMode.orchestrate !== currentCollaborationMode.orchestrate
+      )
       {
+        const wireMode = toWireInteractionMode(input.collaborationMode)
         result = mapAtomCommandResult(
           await setThreadInteractionMode({
             environmentId,
             input: {
               threadId: input.threadId,
-              interactionMode: input.interactionMode,
+              interactionMode: wireMode.interactionMode,
+              orchestrate: wireMode.orchestrate,
               createdAt: input.createdAt,
             },
           }),
@@ -3427,17 +3650,28 @@ function ChatViewContent(props: ChatViewProps)
     requestedEnvMode: envMode,
     isGitRepo,
   })
+  // currentGitBranch comes from gitStatusCwd, which follows the adopted run tree,
+  // so the other two inputs have to describe that same tree. without folding the
+  // run path in, an orchestrate thread with no worktree of its own reads 'local'
+  // against the run's branch and gets a banner about a checkout it never made
   const localCheckoutBranchMismatch = useMemo(
     () =>
       isServerThread
         ? resolveLocalCheckoutBranchMismatch({
-            effectiveEnvMode: envMode,
-            activeWorktreePath,
+            effectiveEnvMode: effectiveRunWorktreePath === null ? envMode : 'worktree',
+            activeWorktreePath: activeWorktreePath ?? effectiveRunWorktreePath,
             activeThreadBranch,
             currentGitBranch: gitStatusQuery.data?.refName ?? null,
           })
         : null,
-    [activeThreadBranch, activeWorktreePath, envMode, gitStatusQuery.data?.refName, isServerThread],
+    [
+      activeThreadBranch,
+      activeWorktreePath,
+      effectiveRunWorktreePath,
+      envMode,
+      gitStatusQuery.data?.refName,
+      isServerThread,
+    ],
   )
   // settled state of the open thread, resolved exactly like the sidebar
   // partition (same shell, same capability gate, same PR auto-settle input)
@@ -4295,6 +4529,26 @@ function ChatViewContent(props: ChatViewProps)
     [activeThreadRef],
   )
 
+  const onSaveWorkerVerdict = useCallback(
+    (runId: string, jobId: string, verdict: string) =>
+    {
+      if (!isServerThread || activeThreadId === null)
+      {
+        return
+      }
+      void setThreadWorkerVerdict({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          runId,
+          jobId,
+          verdict,
+        },
+      })
+    },
+    [activeThreadId, environmentId, isServerThread, setThreadWorkerVerdict],
+  )
+
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) =>
     {
@@ -4495,10 +4749,10 @@ function ChatViewContent(props: ChatViewProps)
   const onSubmitPlanFollowUp = useCallback(
     async ({
       text,
-      interactionMode: nextInteractionMode,
+      collaborationMode: nextCollaborationMode,
     }: {
       text: string
-      interactionMode: 'default' | 'plan'
+      collaborationMode: CollaborationMode
     }): Promise<boolean> =>
     {
       if (
@@ -4526,6 +4780,7 @@ function ChatViewContent(props: ChatViewProps)
       {
         return false
       }
+      const wireMode = toWireInteractionMode(nextCollaborationMode)
 
       const sendCtx = composerRef.current?.getSendContext()
       if (!sendCtx?.providerAvailable)
@@ -4585,11 +4840,15 @@ function ChatViewContent(props: ChatViewProps)
         threadId: threadIdForSend,
         createdAt: messageCreatedAt,
         modelSelection: ctxSelectedModelSelection,
+        // ? sending while the banner is up rewrites thread.branch to whatever the
+        // checkout happens to be on, so a thread that ran on feature/x is recorded
+        // as a thread on main the moment its user sends from main. it may be the
+        // behaviour people expect from the banner; it has never been decided
         ...(localCheckoutBranchMismatch
           ? { branch: localCheckoutBranchMismatch.currentBranch }
           : {}),
         runtimeMode,
-        interactionMode: nextInteractionMode,
+        collaborationMode: nextCollaborationMode,
       })
       let failure: AtomCommandResult<unknown, unknown> | null =
         settingsResult._tag === 'Failure' ? settingsResult : null
@@ -4600,7 +4859,7 @@ function ChatViewContent(props: ChatViewProps)
         // while the same-thread implementation turn is starting.
         setComposerDraftInteractionMode(
           scopeThreadRef(activeThread.environmentId, threadIdForSend),
-          nextInteractionMode,
+          nextCollaborationMode,
         )
 
         const startResult = await startThreadTurn({
@@ -4616,9 +4875,10 @@ function ChatViewContent(props: ChatViewProps)
             modelSelection: ctxSelectedModelSelection,
             titleSeed: activeThread.title,
             runtimeMode,
-            interactionMode: nextInteractionMode,
+            interactionMode: wireMode.interactionMode,
+            orchestrate: wireMode.orchestrate,
             ...(importContinuationConsent ? { importContinuationConsent } : {}),
-            ...(nextInteractionMode === 'default' && activeProposedPlan
+            ...(nextCollaborationMode.baseMode !== 'plan' && activeProposedPlan
               ? {
                   sourceProposedPlan: {
                     threadId: activeThread.id,
@@ -4637,7 +4897,7 @@ function ChatViewContent(props: ChatViewProps)
         // optimistically open the plan sidebar when implementing (not refining).
         // "default" mode here means the agent is executing the plan, which produces
         // step-tracking activities that the sidebar will display.
-        if (nextInteractionMode === 'default' && autoOpenPlanSidebar)
+        if (nextCollaborationMode.baseMode === 'default' && autoOpenPlanSidebar)
         {
           planSidebarDismissedForTurnRef.current = null
           if (activeThreadRef)
@@ -4687,188 +4947,201 @@ function ChatViewContent(props: ChatViewProps)
     ],
   )
 
-  const onImplementPlanInNewThread = useCallback(async () =>
-  {
-    if (
-      !activeThread ||
-      !activeProject ||
-      !activeProposedPlan ||
-      !isServerThread ||
-      isSendBusy ||
-      isConnecting ||
-      activeEnvironmentUnavailable ||
-      sendInFlightRef.current
-    )
+  const onImplementPlanInNewThread = useCallback(
+    async (implementVariant?: PlanImplementVariant) =>
     {
-      return
-    }
+      if (
+        !activeThread ||
+        !activeProject ||
+        !activeProposedPlan ||
+        !isServerThread ||
+        isSendBusy ||
+        isConnecting ||
+        activeEnvironmentUnavailable ||
+        sendInFlightRef.current
+      )
+      {
+        return
+      }
 
-    const sendCtx = composerRef.current?.getSendContext()
-    if (!sendCtx?.providerAvailable)
-    {
-      return
-    }
-    const {
-      selectedProvider: ctxSelectedProvider,
-      selectedModel: ctxSelectedModel,
-      selectedProviderModels: ctxSelectedProviderModels,
-      selectedPromptEffort: ctxSelectedPromptEffort,
-      selectedModelSelection: ctxSelectedModelSelection,
-    } = sendCtx
+      const sendCtx = composerRef.current?.getSendContext()
+      if (!sendCtx?.providerAvailable)
+      {
+        return
+      }
+      const {
+        selectedProvider: ctxSelectedProvider,
+        selectedModel: ctxSelectedModel,
+        selectedProviderModels: ctxSelectedProviderModels,
+        selectedPromptEffort: ctxSelectedPromptEffort,
+        selectedModelSelection: ctxSelectedModelSelection,
+      } = sendCtx
 
-    const createdAt = new Date().toISOString()
-    const nextThreadId = newThreadId()
-    const planMarkdown = activeProposedPlan.planMarkdown
-    const implementationPrompt = buildPlanImplementationPrompt(planMarkdown)
-    const outgoingImplementationPrompt = formatOutgoingPrompt({
-      provider: ctxSelectedProvider,
-      model: ctxSelectedModel,
-      models: ctxSelectedProviderModels,
-      effort: ctxSelectedPromptEffort,
-      text: implementationPrompt,
-    })
-    const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown))
-    const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection
+      const createdAt = new Date().toISOString()
+      const nextThreadId = newThreadId()
+      const planMarkdown = activeProposedPlan.planMarkdown
+      const implementationCollaborationMode = normalizeCollaborationMode(
+        'default',
+        implementVariant === 'orchestrate',
+      )
+      const implementationWireMode = toWireInteractionMode(implementationCollaborationMode)
+      const implementationPrompt =
+        implementVariant === 'orchestrate'
+          ? ORCHESTRATE_PLAN_IMPLEMENTATION_PROMPT
+          : buildPlanImplementationPrompt(planMarkdown)
+      const outgoingImplementationPrompt = formatOutgoingPrompt({
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+        models: ctxSelectedProviderModels,
+        effort: ctxSelectedPromptEffort,
+        text: implementationPrompt,
+      })
+      const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown))
+      const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection
 
-    sendInFlightRef.current = true
-    beginLocalDispatch({ preparingWorktree: false })
-    const finish = () =>
-    {
-      sendInFlightRef.current = false
-      resetLocalDispatch()
-    }
+      sendInFlightRef.current = true
+      beginLocalDispatch({ preparingWorktree: false })
+      const finish = () =>
+      {
+        sendInFlightRef.current = false
+        resetLocalDispatch()
+      }
 
-    const createResult = await createThread({
-      environmentId,
-      input: {
-        threadId: nextThreadId,
-        projectId: activeProject.id,
-        title: nextThreadTitle,
-        modelSelection: nextThreadModelSelection,
-        runtimeMode,
-        interactionMode: 'default',
-        branch: activeThreadBranch,
-        worktreePath: activeThread.worktreePath,
-        createdAt,
-      },
-    })
-    let failure: AtomCommandResult<unknown, unknown> | null =
-      createResult._tag === 'Failure' ? createResult : null
-    let implementationPhase: 'created' | 'started' = 'created'
-
-    if (failure === null)
-    {
-      const startResult = await startThreadTurn({
+      const createResult = await createThread({
         environmentId,
         input: {
           threadId: nextThreadId,
-          message: {
-            messageId: newMessageId(),
-            role: 'user',
-            text: outgoingImplementationPrompt,
-            attachments: [],
-          },
-          modelSelection: ctxSelectedModelSelection,
-          titleSeed: nextThreadTitle,
+          projectId: activeProject.id,
+          title: nextThreadTitle,
+          modelSelection: nextThreadModelSelection,
           runtimeMode,
-          interactionMode: 'default',
-          sourceProposedPlan: {
-            threadId: activeThread.id,
-            planId: activeProposedPlan.id,
-          },
+          interactionMode: implementationWireMode.interactionMode,
+          orchestrate: implementationWireMode.orchestrate,
+          branch: activeThreadBranch,
+          worktreePath: activeThread.worktreePath,
           createdAt,
         },
       })
-      failure = startResult._tag === 'Failure' ? startResult : null
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult._tag === 'Failure' ? createResult : null
+      let implementationPhase: 'created' | 'started' = 'created'
+
       if (failure === null)
       {
-        implementationPhase = 'started'
-      }
-    }
-
-    if (failure === null)
-    {
-      const startedResult = await settlePromise(() =>
-        waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId)),
-      )
-      failure = startedResult._tag === 'Failure' ? startedResult : null
-    }
-
-    if (failure === null)
-    {
-      // signal that the plan sidebar should open on the new thread when enabled.
-      planSidebarOpenOnNextThreadRef.current = autoOpenPlanSidebar
-      const navigateResult = await settlePromise(() =>
-        navigate({
-          to: '/$environmentId/$threadId',
-          params: {
-            environmentId: activeThread.environmentId,
-            threadId: nextThreadId,
-          },
-        }),
-      )
-      failure = navigateResult._tag === 'Failure' ? navigateResult : null
-    }
-
-    if (failure !== null)
-    {
-      if (implementationPhase !== 'started')
-      {
-        const cleanupResult = await deleteThread({
+        const startResult = await startThreadTurn({
           environmentId,
           input: {
             threadId: nextThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: 'user',
+              text: outgoingImplementationPrompt,
+              attachments: [],
+            },
+            modelSelection: ctxSelectedModelSelection,
+            titleSeed: nextThreadTitle,
+            runtimeMode,
+            interactionMode: implementationWireMode.interactionMode,
+            orchestrate: implementationWireMode.orchestrate,
+            sourceProposedPlan: {
+              threadId: activeThread.id,
+              planId: activeProposedPlan.id,
+            },
+            createdAt,
           },
         })
-        if (cleanupResult._tag === 'Failure' && !isAtomCommandInterrupted(cleanupResult))
+        failure = startResult._tag === 'Failure' ? startResult : null
+        if (failure === null)
         {
-          console.warn(
-            'Failed to clean up implementation thread after start failure.',
-            squashAtomCommandFailure(cleanupResult),
+          implementationPhase = 'started'
+        }
+      }
+
+      if (failure === null)
+      {
+        const startedResult = await settlePromise(() =>
+          waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId)),
+        )
+        failure = startedResult._tag === 'Failure' ? startedResult : null
+      }
+
+      if (failure === null)
+      {
+        // signal that the plan sidebar should open on the new thread when enabled.
+        planSidebarOpenOnNextThreadRef.current = autoOpenPlanSidebar
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: '/$environmentId/$threadId',
+            params: {
+              environmentId: activeThread.environmentId,
+              threadId: nextThreadId,
+            },
+          }),
+        )
+        failure = navigateResult._tag === 'Failure' ? navigateResult : null
+      }
+
+      if (failure !== null)
+      {
+        if (implementationPhase !== 'started')
+        {
+          const cleanupResult = await deleteThread({
+            environmentId,
+            input: {
+              threadId: nextThreadId,
+            },
+          })
+          if (cleanupResult._tag === 'Failure' && !isAtomCommandInterrupted(cleanupResult))
+          {
+            console.warn(
+              'Failed to clean up implementation thread after start failure.',
+              squashAtomCommandFailure(cleanupResult),
+            )
+          }
+        }
+        if (!isAtomCommandInterrupted(failure))
+        {
+          const error = squashAtomCommandFailure(failure)
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title:
+                implementationPhase === 'started'
+                  ? 'Implementation started, but navigation failed'
+                  : 'Could not start implementation thread',
+              description:
+                error instanceof Error
+                  ? error.message
+                  : implementationPhase === 'started'
+                    ? 'Open the implementation thread from the sidebar.'
+                    : 'An error occurred while creating the new thread.',
+            }),
           )
         }
       }
-      if (!isAtomCommandInterrupted(failure))
-      {
-        const error = squashAtomCommandFailure(failure)
-        toastManager.add(
-          stackedThreadToast({
-            type: 'error',
-            title:
-              implementationPhase === 'started'
-                ? 'Implementation started, but navigation failed'
-                : 'Could not start implementation thread',
-            description:
-              error instanceof Error
-                ? error.message
-                : implementationPhase === 'started'
-                  ? 'Open the implementation thread from the sidebar.'
-                  : 'An error occurred while creating the new thread.',
-          }),
-        )
-      }
-    }
-    finish()
-  }, [
-    activeProject,
-    activeProposedPlan,
-    activeThreadBranch,
-    activeThread,
-    beginLocalDispatch,
-    activeEnvironmentUnavailable,
-    createThread,
-    deleteThread,
-    isConnecting,
-    isSendBusy,
-    isServerThread,
-    navigate,
-    resetLocalDispatch,
-    runtimeMode,
-    startThreadTurn,
-    autoOpenPlanSidebar,
-    environmentId,
-    composerRef,
-  ])
+      finish()
+    },
+    [
+      activeProject,
+      activeProposedPlan,
+      activeThreadBranch,
+      activeThread,
+      beginLocalDispatch,
+      activeEnvironmentUnavailable,
+      createThread,
+      deleteThread,
+      isConnecting,
+      isSendBusy,
+      isServerThread,
+      navigate,
+      resetLocalDispatch,
+      runtimeMode,
+      startThreadTurn,
+      autoOpenPlanSidebar,
+      environmentId,
+      composerRef,
+    ],
+  )
 
   const {
     activeProviderSwitch,
@@ -4879,6 +5152,7 @@ function ChatViewContent(props: ChatViewProps)
     dispatchSend,
     getModelDisabledReason,
     isSwitchingProvider,
+    leadProviderInstanceId,
     onInterrupt,
     onProviderModelSelect,
     onProviderSwitchConfirmationOpenChange,
@@ -4926,7 +5200,7 @@ function ChatViewContent(props: ChatViewProps)
       handleInteractionModeChange,
       importContinuationConsent,
       importContinuationSendBlocked,
-      interactionMode,
+      collaborationMode,
       isAtEndRef,
       isConnecting,
       isDraftHeroState,
@@ -4970,6 +5244,11 @@ function ChatViewContent(props: ChatViewProps)
     verifiedImportProviderInstanceId,
   })
 
+  const onImplementPlanWithOrchestrate = useCallback(() =>
+  {
+    void dispatchSend(undefined, { planImplementVariant: 'orchestrate' })
+  }, [dispatchSend])
+
   const onApproveOrchestratePlan = useCallback(
     async (reply: string) =>
     {
@@ -4979,24 +5258,68 @@ function ChatViewContent(props: ChatViewProps)
     [dispatchSend, onEditOrchestratePlanInChat],
   )
 
+  const onSendProviderSlashCommand = useCallback(
+    (command: string) =>
+    {
+      void dispatchSend(undefined, { providerSlashCommand: command })
+    },
+    [dispatchSend],
+  )
+
+  // the workers panel reads a host-global broker, so this thread's own plan
+  // revisions supply the durable run association that scopes it
+  const threadRunIds = useMemo(
+    () => [...new Set((activeThread?.orchestratePlans ?? []).map((plan) => plan.runId))],
+    [activeThread?.orchestratePlans],
+  )
+
+  // the session's reasoning tier lives in the model selection's options array;
+  // a non-string value is not a tier label, so it renders as no tier at all
+  const leadEffort = useMemo(() =>
+  {
+    const raw = activeThread?.modelSelection.options?.find(
+      (option) => option.id === 'reasoningEffort',
+    )?.value
+    return typeof raw === 'string' ? raw : ''
+  }, [activeThread?.modelSelection])
+
   const orchestratePlanActions = useMemo(
     () => ({
       environmentId,
+      threadRef: activeThreadRef,
       instanceEntries: orchestrateInstanceEntries,
       modelOptionsByInstance: orchestrateModelOptions,
       orchestratePlans: activeThread?.orchestratePlans ?? [],
+      // the lead row shows the binding this session is actually running, so a
+      // stage bound to the same model is visible before the plan is approved
+      lead:
+        activeThread === undefined || leadProviderInstanceId === null
+          ? null
+          : {
+              provider:
+                orchestrateInstanceEntries.find(
+                  (entry) => entry.instanceId === leadProviderInstanceId,
+                )?.driverKind ?? '',
+              model: activeThread.modelSelection.model,
+              instanceId: leadProviderInstanceId,
+            },
+      ...(leadEffort === '' ? {} : { leadEffort }),
       onApprove: onApproveOrchestratePlan,
       onRespond: onRespondOrchestratePlan,
       onEditInChat: onEditOrchestratePlanInChat,
+      onLeadModelChange: onProviderModelSelect,
       onOpenRun: activeThreadRef ? onOpenOrchestrateRun : undefined,
     }),
     [
+      activeThread,
       activeThreadRef,
-      activeThread?.orchestratePlans,
       environmentId,
+      leadEffort,
+      leadProviderInstanceId,
       onApproveOrchestratePlan,
       onEditOrchestratePlanInChat,
       onOpenOrchestrateRun,
+      onProviderModelSelect,
       onRespondOrchestratePlan,
       orchestrateInstanceEntries,
       orchestrateModelOptions,
@@ -5076,6 +5399,13 @@ function ChatViewContent(props: ChatViewProps)
     },
     [activeThreadRef, isServerThread, onDiffPanelOpen],
   )
+  const onOpenRunDiff = useCallback(() =>
+  {
+    if (!isServerThread || !activeThreadRef) return
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, 'run')
+    useRightPanelStore.getState().open(activeThreadRef, 'diff')
+    onDiffPanelOpen?.()
+  }, [activeThreadRef, isServerThread, onDiffPanelOpen])
   // both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId)
@@ -5161,7 +5491,63 @@ function ChatViewContent(props: ChatViewProps)
       </Suspense>
     ) : activeRightPanelSurface?.kind === 'workers' ? (
       <Suspense fallback={null}>
-        <WorkersPanel environmentId={activeThreadRef.environmentId} />
+        <WorkersPanel
+          environmentId={activeThreadRef.environmentId}
+          threadId={isServerThread ? activeThreadRef.threadId : null}
+          threadRunIds={threadRunIds}
+          verdicts={workerVerdicts}
+          onSaveVerdict={onSaveWorkerVerdict}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === 'repository-atlas-home' ? (
+      repositoryAtlasAvailable && activeThread ? (
+        <RepositoryAtlasBootstrap projectId={activeThread.projectId} threadRef={activeThreadRef} />
+      ) : (
+        <div
+          className="flex min-h-0 flex-1 items-center justify-center px-6 py-8 text-center text-xs text-muted-foreground"
+          role="status"
+        >
+          Repository Atlas requires native architecture analysis for an open project.
+        </div>
+      )
+    ) : activeRightPanelSurface?.kind === 'repository-atlas' ? (
+      <Suspense
+        fallback={
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground"
+            role="status"
+          >
+            Loading Repository Atlas…
+          </div>
+        }
+      >
+        <RepositoryAtlasSurface
+          environmentId={activeThreadRef.environmentId}
+          target={activeRightPanelSurface.target}
+          threadId={activeThreadRef.threadId}
+          onOpenFile={openArchitectureResourceFile}
+          onOpenScope={openArchitectureScopeSurface}
+          onViewUpdated={viewUpdatedRepositoryAtlas}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === 'architecture-scope' ? (
+      <Suspense
+        fallback={
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground"
+            role="status"
+          >
+            Loading Architecture Scope…
+          </div>
+        }
+      >
+        <ArchitectureScopeSurface
+          environmentId={activeThreadRef.environmentId}
+          target={activeRightPanelSurface.target}
+          threadId={activeThreadRef.threadId}
+          onOpenFile={openArchitectureResourceFile}
+          onOpenScope={openArchitectureScopeSurface}
+        />
       </Suspense>
     ) : activeRightPanelSurface?.kind === 'explorer' ? (
       <Suspense
@@ -5170,18 +5556,33 @@ function ChatViewContent(props: ChatViewProps)
             className="flex min-h-0 flex-1 items-center justify-center px-6 py-8 text-center text-xs text-muted-foreground"
             role="status"
           >
-            Loading Explorer…
+            Loading Proposal Review…
           </div>
         }
       >
         <ConnectedExplorerPanel
           threadRef={activeThreadRef}
           projectId={activeThread.projectId}
-          proposalPlanId={activeRightPanelSurface.planId}
+          target={activeRightPanelSurface.target}
           proposalPreviewAvailable={proposalPreviewAvailable}
-          cartographerAvailable={cartographerAvailable}
+          architectureImpactAvailable={architectureImpactAvailable}
           onOpenFile={openFileSurface}
-          onSelectFile={selectExplorerFile}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === 'architecture-impact' ? (
+      <Suspense
+        fallback={
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground"
+            role="status"
+          >
+            Loading Impact Diff…
+          </div>
+        }
+      >
+        <ConnectedArchitectureImpactSurface
+          threadRef={activeThreadRef}
+          surface={activeRightPanelSurface}
         />
       </Suspense>
     ) : activeRightPanelSurface?.kind === 'plan' ? (
@@ -5196,6 +5597,25 @@ function ChatViewContent(props: ChatViewProps)
         timestampFormat={timestampFormat}
         mode="embedded"
       />
+    ) : activeRightPanelSurface?.kind === 'file' && activeRightPanelSurface.source ? (
+      <Suspense
+        fallback={
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground"
+            role="status"
+          >
+            Loading immutable source…
+          </div>
+        }
+      >
+        <ArchitectureSourceFilePanel
+          environmentId={activeThreadRef.environmentId}
+          source={activeRightPanelSurface.source}
+          relativePath={activeRightPanelSurface.relativePath}
+          revealLine={activeRightPanelSurface.revealLine}
+          revealRequestId={activeRightPanelSurface.revealRequestId}
+        />
+      </Suspense>
     ) : (activeRightPanelSurface?.kind === 'files' || activeRightPanelSurface?.kind === 'file') &&
       activeProject &&
       activeWorkspaceRoot ? (
@@ -5264,17 +5684,26 @@ function ChatViewContent(props: ChatViewProps)
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
+            runBranch={
+              runWorktreeIsNotRepository ? null : (activeThread?.orchestrateRunBranch ?? null)
+            }
             onNewThreadInProject={handleNewThreadInActiveProject}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
             onDeleteProjectScript={deleteProjectScript}
+            onOpenRunDiff={onOpenRunDiff}
           />
         </header>
 
         <ThreadErrorBanner
-          error={promotedProviderAuthError ? null : threadError}
-          onDismiss={() => setThreadError(activeThread.id, null)}
+          error={promotedProviderAuthError ? null : visibleThreadError}
+          onDismiss={() =>
+          {
+            setThreadError(activeThread.id, null)
+            dismissThreadErrorBannerForSession(threadErrorBannerKey)
+            setThreadErrorBannerDismissTick((tick) => tick + 1)
+          }}
         />
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
@@ -5285,7 +5714,7 @@ function ChatViewContent(props: ChatViewProps)
               <ProviderStatusBanner
                 status={visibleProviderStatus}
                 reAuthRequired={providerReAuthRequired}
-                reAuthDetail={providerReAuthRequired ? threadError : null}
+                reAuthDetail={providerReAuthRequired ? visibleThreadError : null}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
               />
             </div>
@@ -5482,7 +5911,7 @@ function ChatViewContent(props: ChatViewProps)
                             planSidebarLabel={planSidebarLabel}
                             planSidebarOpen={planSidebarOpen}
                             runtimeMode={runtimeMode}
-                            interactionMode={interactionMode}
+                            collaborationMode={collaborationMode}
                             lockedProvider={lockedProvider}
                             providerStatuses={composerProviderStatuses as ServerProvider[]}
                             activeProjectDefaultModelSelection={
@@ -5500,7 +5929,9 @@ function ChatViewContent(props: ChatViewProps)
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
+                            onSendProviderSlashCommand={onSendProviderSlashCommand}
                             onInterrupt={onInterrupt}
+                            onImplementPlanWithOrchestrate={onImplementPlanWithOrchestrate}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={
@@ -5697,10 +6128,12 @@ function ChatViewContent(props: ChatViewProps)
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddWorkers={addWorkersSurface}
+          onAddRepositoryAtlas={addRepositoryAtlasSurface}
           onAddExplorer={addExplorerSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
+          repositoryAtlasAvailable={repositoryAtlasAvailable}
           explorerAvailable={explorerAvailable}
         >
           {rightPanelContent}
@@ -5727,10 +6160,12 @@ function ChatViewContent(props: ChatViewProps)
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddWorkers={addWorkersSurface}
+            onAddRepositoryAtlas={addRepositoryAtlasSurface}
             onAddExplorer={addExplorerSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
+            repositoryAtlasAvailable={repositoryAtlasAvailable}
             explorerAvailable={explorerAvailable}
           >
             {rightPanelContent}

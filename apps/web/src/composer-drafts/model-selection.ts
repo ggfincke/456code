@@ -1,7 +1,9 @@
 // apps/web/src/composer-drafts/model-selection.ts
 // normalizes and derives composer model selections
 import {
+  type CollaborationMode,
   DEFAULT_MODEL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   ModelSelection,
@@ -10,6 +12,7 @@ import {
   ProviderInteractionMode,
   ProviderOptionSelection,
   RuntimeMode,
+  normalizeCollaborationMode,
   type ServerProvider,
 } from '@t3tools/contracts'
 import { UnifiedSettings } from '@t3tools/contracts/settings'
@@ -28,6 +31,22 @@ import {
 export const isRuntimeMode = Schema.is(RuntimeMode)
 
 export const isProviderInteractionMode = Schema.is(ProviderInteractionMode)
+
+export function normalizePersistedCollaborationMode(
+  interactionMode: unknown,
+  orchestrate?: unknown,
+): CollaborationMode | null
+{
+  if (isProviderInteractionMode(interactionMode))
+  {
+    return normalizeCollaborationMode(interactionMode, orchestrate === true)
+  }
+  if (orchestrate === true)
+  {
+    return normalizeCollaborationMode(DEFAULT_PROVIDER_INTERACTION_MODE, true)
+  }
+  return null
+}
 
 const isProviderDriverKind = Schema.is(ProviderDriverKind)
 

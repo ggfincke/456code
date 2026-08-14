@@ -1,21 +1,33 @@
 // apps/web/src/components/chat/composer/ComposerPrimaryActions.tsx
-// renders composer send and interrupt actions
+// render composer send, interrupt, and plan implementation actions
 
 import { memo, type PointerEventHandler } from 'react'
-import { ChevronDownIcon, ChevronLeftIcon } from 'lucide-react'
+import { ChevronDownIcon, ChevronLeftIcon, TriangleAlertIcon } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from '../../SidebarStageBackdrop'
 import { Button } from '../../ui/button'
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../ui/menu'
 import { Spinner } from '../../ui/spinner'
 
-interface PendingActionState
+export interface PendingActionState
 {
   questionIndex: number
   isLastQuestion: boolean
   canAdvance: boolean
   isResponding: boolean
   isComplete: boolean
+}
+
+export function resolveCollapsedMobilePendingActions(
+  pendingAction: PendingActionState | null,
+  isMultiSelect: boolean,
+  isRunning: boolean,
+): { readonly pendingAction: PendingActionState | null; readonly visible: boolean }
+{
+  return {
+    pendingAction: isMultiSelect ? pendingAction : null,
+    visible: isMultiSelect || isRunning,
+  }
 }
 
 interface ComposerPrimaryActionsProps
@@ -31,10 +43,13 @@ interface ComposerPrimaryActionsProps
   isEnvironmentUnavailable: boolean
   isPreparingWorktree: boolean
   hasSendableContent: boolean
+  orchestrateReadinessMessage: string | null
   preserveComposerFocusOnPointerDown?: boolean
   onPreviousPendingQuestion: () => void
   onInterrupt: () => void
+  onImplementPlanWithOrchestrate: () => void
   onImplementPlanInNewThread: () => void
+  onImplementPlanWithOrchestrateInNewThread: () => void
 }
 
 export const formatPendingPrimaryActionLabel = (input: {
@@ -76,10 +91,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
+  orchestrateReadinessMessage,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
   onInterrupt,
+  onImplementPlanWithOrchestrate,
   onImplementPlanInNewThread,
+  onImplementPlanWithOrchestrateInNewThread,
 }: ComposerPrimaryActionsProps)
 {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
@@ -87,11 +105,28 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     : undefined
   const isSendDisabled = sendDisabledReason !== null
   const stageBackdropVariant = useSidebarStageBackdropVariant()
+  const renderStopGenerationButton = (insidePendingAction: boolean) => (
+    <button
+      type="button"
+      className={cn(
+        'flex cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none',
+        insidePendingAction ? 'size-8 sm:size-7' : 'size-8 sm:h-8 sm:w-8',
+      )}
+      {...pointerFocusProps}
+      onClick={onInterrupt}
+      aria-label="Stop generation"
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+        <rect x="2" y="2" width="8" height="8" rx="1.5" />
+      </svg>
+    </button>
+  )
 
   if (pendingAction)
   {
     return (
       <div className={cn('flex items-center justify-end', compact ? 'gap-1.5' : 'gap-2')}>
+        {isRunning ? renderStopGenerationButton(true) : null}
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
@@ -142,19 +177,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 
   if (isRunning)
   {
-    return (
-      <button
-        type="button"
-        className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none sm:h-8 sm:w-8"
-        {...pointerFocusProps}
-        onClick={onInterrupt}
-        aria-label="Stop generation"
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-          <rect x="2" y="2" width="8" height="8" rx="1.5" />
-        </svg>
-      </button>
-    )
+    return renderStopGenerationButton(false)
   }
 
   if (showPlanFollowUpPrompt)
@@ -200,12 +223,44 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           >
             <ChevronDownIcon className="size-3.5" />
           </MenuTrigger>
-          <MenuPopup align="end" side="top">
+          <MenuPopup align="end" side="top" className="max-w-80">
+            <MenuItem
+              className="items-start"
+              disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+              title={orchestrateReadinessMessage ?? undefined}
+              onClick={() => void onImplementPlanWithOrchestrate()}
+            >
+              <span className="grid min-w-0 gap-0.5">
+                <span>Implement with Orchestrate</span>
+                {orchestrateReadinessMessage === null ? null : (
+                  <span className="flex items-start gap-1 text-amber-700 text-xs whitespace-normal dark:text-amber-400">
+                    <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+                    <span>{orchestrateReadinessMessage}</span>
+                  </span>
+                )}
+              </span>
+            </MenuItem>
             <MenuItem
               disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
               onClick={() => void onImplementPlanInNewThread()}
             >
               Implement in a new thread
+            </MenuItem>
+            <MenuItem
+              className="items-start"
+              disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+              title={orchestrateReadinessMessage ?? undefined}
+              onClick={() => void onImplementPlanWithOrchestrateInNewThread()}
+            >
+              <span className="grid min-w-0 gap-0.5">
+                <span>Implement with Orchestrate in a new thread</span>
+                {orchestrateReadinessMessage === null ? null : (
+                  <span className="flex items-start gap-1 text-amber-700 text-xs whitespace-normal dark:text-amber-400">
+                    <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+                    <span>{orchestrateReadinessMessage}</span>
+                  </span>
+                )}
+              </span>
             </MenuItem>
           </MenuPopup>
         </Menu>

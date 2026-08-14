@@ -1,7 +1,12 @@
 // apps/web/src/workers/WorkersPanel.tsx
-// read-only right-panel surface for worker-broker orchestration runs & jobs
+// right-panel surface for worker-broker orchestration runs, jobs, and verdicts
 
-import type { EnvironmentId, WorkersListInput } from '@t3tools/contracts'
+import type {
+  EnvironmentId,
+  ThreadId,
+  WorkersJobSummary,
+  WorkersListInput,
+} from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
@@ -22,6 +27,7 @@ import { cn } from '~/lib/utils'
 import { workersEnvironment, useWorkersRunDeepLink } from '~/state/workers'
 import { useEnvironmentQuery } from '~/state/query'
 import { formatRelativeTimeLabel } from '~/timestampFormat'
+import { workerVerdictKey } from '~/session/worklog'
 
 import { WorkersJobDetailView } from './WorkersJobDetail'
 import { WorkersJobRow, WorkersRunRow } from './WorkersList'
@@ -37,6 +43,10 @@ import {
 interface WorkersPanelProps
 {
   environmentId: EnvironmentId
+  threadId: ThreadId | null
+  threadRunIds: ReadonlyArray<string>
+  verdicts: ReadonlyMap<string, string>
+  onSaveVerdict: (runId: string, jobId: string, verdict: string) => void
 }
 
 // the atom family keys on JSON.stringify([environmentId, input]); a module-level
@@ -55,9 +65,15 @@ interface WorkersNav
 function ViewToggle({
   view,
   onChange,
+  scopeToThread,
+  onScopeChange,
+  scopeAvailable,
 }: {
   view: WorkersView
   onChange: (next: WorkersView) => void
+  scopeToThread: boolean
+  onScopeChange: (next: boolean) => void
+  scopeAvailable: boolean
 })
 {
   return (
@@ -78,11 +94,32 @@ function ViewToggle({
           {value === 'runs' ? 'Runs' : 'All jobs'}
         </button>
       ))}
+      {scopeAvailable ? (
+        <button
+          type="button"
+          aria-pressed={scopeToThread}
+          className={cn(
+            'ml-auto rounded-md px-2 py-0.5 text-[11px] font-medium',
+            scopeToThread
+              ? 'bg-accent text-foreground'
+              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+          )}
+          onClick={() => onScopeChange(!scopeToThread)}
+        >
+          {scopeToThread ? 'This thread' : 'All runs'}
+        </button>
+      ) : null}
     </div>
   )
 }
 
-export default function WorkersPanel({ environmentId }: WorkersPanelProps)
+export default function WorkersPanel({
+  environmentId,
+  threadId,
+  threadRunIds,
+  verdicts,
+  onSaveVerdict,
+}: WorkersPanelProps)
 {
   const deepLink = useWorkersRunDeepLink(environmentId)
   const deepLinkRun = deepLink.runId
@@ -102,6 +139,18 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
     setAppliedDeepLink(deepLink)
     setNav({ view: 'runs', runId: deepLinkRun, jobId: null })
   }
+
+  // the broker is host-global, so an unscoped panel shows every run on the
+  // machine next to the one thread the user is actually reading
+  const [scopeToThread, setScopeToThread] = useState(true)
+  // the deep-linked run covers fence plans that never persisted a revision, so
+  // "Open run" from such a card is never scoped away
+  const threadRunSet = useMemo(
+    () => new Set(deepLinkRun === null ? threadRunIds : [...threadRunIds, deepLinkRun]),
+    [deepLinkRun, threadRunIds],
+  )
+  const scopeAvailable = threadRunSet.size > 0
+  const scoped = scopeToThread && scopeAvailable
 
   const selectedRunId = nav.runId
   const selectedJobId = nav.jobId
@@ -144,11 +193,35 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
 
   const listData = listQuery.data
   const listError = listData === null ? null : Option.getOrNull(listData.error)
-  const jobs = listData?.jobs ?? []
+  const jobs = useMemo(() =>
+  {
+    const all = listData?.jobs ?? []
+    if (!scoped) return all
+    return all.filter((job) =>
+      Option.match(job.run, { onNone: () => false, onSome: (run) => threadRunSet.has(run) }),
+    )
+  }, [listData?.jobs, scoped, threadRunSet])
+  const jobsByRun = useMemo(() =>
+  {
+    const grouped = new Map<string, WorkersJobSummary[]>()
+    for (const job of jobs)
+    {
+      const run = Option.getOrNull(job.run)
+      if (run === null) continue
+      const runJobs = grouped.get(run)
+      if (runJobs === undefined) grouped.set(run, [job])
+      else runJobs.push(job)
+    }
+    return grouped
+  }, [jobs])
 
   const runsData = runsQuery.data
   const runsError = runsData === null ? null : Option.getOrNull(runsData.error)
-  const runs = useMemo(() => sortWorkerRunsNewestFirst(runsData?.runs ?? []), [runsData?.runs])
+  const runs = useMemo(() =>
+  {
+    const sorted = sortWorkerRunsNewestFirst(runsData?.runs ?? [])
+    return scoped ? sorted.filter((run) => threadRunSet.has(run.run)) : sorted
+  }, [runsData?.runs, scoped, threadRunSet])
 
   const detailOpen = selectedJobId !== null
   const runOpen = !detailOpen && selectedRunId !== null
@@ -225,7 +298,15 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
         </button>
       </div>
 
-      {listOpen ? <ViewToggle view={nav.view} onChange={selectView} /> : null}
+      {listOpen ? (
+        <ViewToggle
+          view={nav.view}
+          onChange={selectView}
+          scopeToThread={scopeToThread}
+          onScopeChange={setScopeToThread}
+          scopeAvailable={scopeAvailable}
+        />
+      ) : null}
 
       <ScrollArea className="min-h-0 flex-1">
         {detailOpen ? (
@@ -250,6 +331,7 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
                 )
               }
               // keyed by job so the task disclosure & activity stream reset per selection
+              const jobRunId = Option.getOrNull(job.run) ?? selectedRunId
               return (
                 <WorkersJobDetailView
                   key={job.jobId}
@@ -257,6 +339,16 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
                   job={job}
                   summary={selectedSummary}
                   nowMs={nowMs}
+                  verdict={
+                    jobRunId === null
+                      ? undefined
+                      : verdicts.get(workerVerdictKey(jobRunId, job.jobId))
+                  }
+                  onSaveVerdict={
+                    threadId === null || jobRunId === null
+                      ? undefined
+                      : (verdict: string) => onSaveVerdict(jobRunId, job.jobId, verdict)
+                  }
                 />
               )
             })()
@@ -287,9 +379,11 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
               return (
                 <WorkersRunDetailView
                   run={run}
+                  runId={selectedRunId}
                   jobs={detail.jobs}
                   nowMs={nowMs}
                   onSelectJob={selectJob}
+                  verdicts={verdicts}
                 />
               )
             })()
@@ -312,7 +406,9 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
             <div className="p-4 text-xs leading-relaxed text-destructive">{runsError.message}</div>
           ) : runs.length === 0 ? (
             <div className="p-4 text-xs leading-relaxed text-muted-foreground">
-              No orchestration runs recorded yet.
+              {scoped
+                ? 'No orchestration runs for this thread. Switch to All runs to see the host.'
+                : 'No orchestration runs recorded yet.'}
             </div>
           ) : (
             <>
@@ -322,7 +418,13 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
                 </div>
               )}
               {runs.map((run) => (
-                <WorkersRunRow key={run.run} run={run} nowMs={nowMs} onSelect={selectRun} />
+                <WorkersRunRow
+                  key={run.run}
+                  run={run}
+                  jobs={jobsByRun.get(run.run) ?? []}
+                  nowMs={nowMs}
+                  onSelect={selectRun}
+                />
               ))}
             </>
           )
@@ -343,7 +445,9 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
           <div className="p-4 text-xs leading-relaxed text-destructive">{listError.message}</div>
         ) : jobs.length === 0 ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground">
-            No worker jobs recorded yet.
+            {scoped
+              ? 'No worker jobs for this thread. Switch to All runs to see the host.'
+              : 'No worker jobs recorded yet.'}
           </div>
         ) : (
           <>
@@ -368,7 +472,16 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
               <TableBody>
                 {!workerJobsHaveStages(jobs)
                   ? jobs.map((job) => (
-                      <WorkersJobRow key={job.jobId} job={job} nowMs={nowMs} onSelect={selectJob} />
+                      <WorkersJobRow
+                        key={job.jobId}
+                        job={job}
+                        nowMs={nowMs}
+                        onSelect={selectJob}
+                        verdict={Option.match(job.run, {
+                          onNone: () => undefined,
+                          onSome: (runId) => verdicts.get(workerVerdictKey(runId, job.jobId)),
+                        })}
+                      />
                     ))
                   : workerStageGroups(jobs).flatMap((group) => [
                       <TableRow key={`group:${group.key}`} className="hover:bg-transparent">
@@ -394,6 +507,10 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps)
                           job={job}
                           nowMs={nowMs}
                           onSelect={selectJob}
+                          verdict={Option.match(job.run, {
+                            onNone: () => undefined,
+                            onSome: (runId) => verdicts.get(workerVerdictKey(runId, job.jobId)),
+                          })}
                         />
                       )),
                     ])}

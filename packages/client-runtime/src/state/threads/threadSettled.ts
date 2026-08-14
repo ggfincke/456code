@@ -3,6 +3,7 @@
 
 import type { OrchestrationThreadShell } from '@t3tools/contracts'
 import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
+import { isThreadAwarenessStale } from '@t3tools/shared/agentAwareness'
 
 export type ChangeRequestStateLike = 'open' | 'closed' | 'merged'
 
@@ -161,6 +162,73 @@ export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean
     return true
   }
   return false
+}
+
+// why a thread wants the user's eyes right now, ordered by urgency:
+// blocked-on-user outranks a dead run, which outranks a clean finish.
+// 'stale' sits between failed and completed: the run never reported an error,
+// it just stopped saying anything, which is the failure mode that stayed
+// invisible for 3.5 hours precisely because nothing declared it.
+export type ThreadAttentionKind =
+  'needs-approval' | 'needs-input' | 'failed' | 'stale' | 'completed'
+
+// the single attention classifier every surface reads (desktop notification,
+// dock badge). It exists as one function because the post-mortem's 3.5-hour
+// dead thread was invisible everywhere at once: with per-surface rules a
+// thread can be "done" to the tray, "running" to the badge and silent to the
+// notifier, and nothing tells the user the run died.
+//
+// an 'interrupted' turn is deliberately NOT attention-worthy: the user
+// cancelled it themselves, so they already know.
+//
+// the clock is optional: this module cannot read one (the repo's
+// effect(globalDate) rule bans it here), and a caller with no ticking value
+// classifies exactly as it did before staleness existed.
+export function resolveThreadAttention(
+  shell: Pick<
+    OrchestrationThreadShell,
+    | 'approvalOutcomes'
+    | 'hasPendingApprovals'
+    | 'hasPendingUserInput'
+    | 'session'
+    | 'latestTurn'
+    | 'updatedAt'
+  >,
+  options?: { readonly nowMs?: number | undefined },
+): ThreadAttentionKind | null
+{
+  if (shell.hasPendingApprovals || hasBlockingApprovalOutcome(shell)) return 'needs-approval'
+  if (shell.hasPendingUserInput) return 'needs-input'
+  // a session error is the failure mode that cost the post-mortem its 3.5
+  // hours: the run is dead and nothing else in the shell says so.
+  if (shell.session?.status === 'error' || shell.latestTurn?.state === 'error') return 'failed'
+  // the quieter twin of that failure: no error was ever reported, the run just
+  // stopped. It only applies to a run that actually started -- 'starting' has
+  // produced nothing yet, so there is no silence to measure.
+  if (
+    options?.nowMs !== undefined &&
+    (shell.session?.status === 'running' || shell.latestTurn?.state === 'running') &&
+    isThreadAwarenessStale(shell, options.nowMs)
+  )
+  {
+    return 'stale'
+  }
+  if (shell.latestTurn?.state === 'completed' && shell.latestTurn.completedAt !== null)
+  {
+    return 'completed'
+  }
+  return null
+}
+
+// whether an attention kind still needs the user to DO something. A completed
+// turn never clears on its own, so a badge that counted it would only ever
+// grow and would stop meaning anything; the blocked, failed and stale kinds
+// clear when the user acts, so they are the only ones worth a persistent
+// count. Stale clears either way -- the run resumes and the stamp moves, or
+// the user opens the thread and kills it.
+export function threadAttentionNeedsAction(kind: ThreadAttentionKind): boolean
+{
+  return kind !== 'completed'
 }
 
 // a thread may be snoozed unless the agent is blocked on the user: hiding a

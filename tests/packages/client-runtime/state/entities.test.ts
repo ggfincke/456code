@@ -3,9 +3,11 @@
 
 import {
   EnvironmentId,
+  type OrchestrateRunExecution,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type OrchestrationShellSnapshot,
   type OrchestrationThread,
 } from '@t3tools/contracts'
@@ -53,6 +55,31 @@ const IMPORTED_ORIGIN = {
   providerInstanceId: ProviderInstanceId.make('codex'),
   importedAt: '2026-06-01T00:30:00.000Z',
 } as const
+
+const CURRENT_RUN_EXECUTION: OrchestrateRunExecution = {
+  threadId: THREAD_ID,
+  runId: 'run-current',
+  planRevision: 2,
+  sourceTurnId: TurnId.make('turn-run-current'),
+  sourceSequence: 20,
+  repositoryRoot: '/repo',
+  repositoryCommonDir: '/repo/.git',
+  baseOid: 'base-oid',
+  lifecycle: 'completed',
+  availability: 'unavailable',
+  integrationRoot: '/repo/pruned-worktree',
+  integrationCommonDir: '/repo/.git',
+  integrationBranch: 'run-current',
+  integrationOid: 'head-oid',
+  observedHeadOid: 'head-oid',
+  finalHeadOid: 'head-oid',
+  closeReason: 'Completed.',
+  current: true,
+  admittedAt: '2026-06-01T00:00:00.000Z',
+  updatedAt: '2026-06-01T00:10:00.000Z',
+  terminalAt: '2026-06-01T00:10:00.000Z',
+  jobs: [],
+}
 
 describe('scoped entity keys', () =>
 {
@@ -274,6 +301,62 @@ describe('environment entity projections', () =>
       origin: IMPORTED_ORIGIN,
     })
     expect(merged?.messages).toBe(messages)
+  })
+
+  it('uses present exact execution availability while null preserves legacy path compatibility', () =>
+  {
+    const detail = {
+      ...THREAD_SHELL,
+      environmentId: ENVIRONMENT_ID,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      orchestratePlans: [],
+      activities: [],
+      checkpoints: [],
+      orchestrateRunExecution: {
+        ...CURRENT_RUN_EXECUTION,
+        runId: 'run-stale',
+        planRevision: 1,
+      },
+      orchestrateRunWorktreePath: '/repo/stale-worktree',
+      orchestrateRunBranch: 'run-stale',
+    } satisfies OrchestrationThread & { readonly environmentId: EnvironmentId }
+    const shell = {
+      ...THREAD_SHELL,
+      environmentId: ENVIRONMENT_ID,
+      orchestrateRunExecution: CURRENT_RUN_EXECUTION,
+      orchestrateRunWorktreePath: '/repo/stale-shell-path',
+      orchestrateRunBranch: 'stale-shell-branch',
+    }
+
+    const merged = mergeEnvironmentThread(detail, shell)
+    expect(merged).toMatchObject({
+      orchestrateRunExecution: CURRENT_RUN_EXECUTION,
+      orchestrateRunWorktreePath: null,
+      orchestrateRunBranch: null,
+    })
+
+    const compatibleLegacy = mergeEnvironmentThread(detail, {
+      ...shell,
+      orchestrateRunExecution: null,
+    })
+    expect(compatibleLegacy).toMatchObject({
+      orchestrateRunExecution: null,
+      orchestrateRunWorktreePath: '/repo/stale-shell-path',
+      orchestrateRunBranch: 'stale-shell-branch',
+    })
+
+    const cleared = mergeEnvironmentThread(detail, {
+      ...THREAD_SHELL,
+      environmentId: ENVIRONMENT_ID,
+      orchestrateRunExecution: null,
+    })
+    expect(cleared).toMatchObject({
+      orchestrateRunExecution: null,
+      orchestrateRunWorktreePath: null,
+      orchestrateRunBranch: null,
+    })
   })
 
   it('preserves untouched project and thread identities across unrelated shell updates', () =>

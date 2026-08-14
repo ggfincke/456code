@@ -1,5 +1,5 @@
 // apps/web/src/components/chat/messages-timeline/TimelineRows.tsx
-// renders timeline message, work, plan, and fold rows
+// renders timeline message, work, plan, verdict, and fold rows
 
 import { memo } from 'react'
 import { cn } from '~/lib/utils'
@@ -9,6 +9,7 @@ import {
   ProposedPlanTimelineRow,
   ProviderSwitchTimelineRow,
   TurnFoldTimelineRow,
+  WorkerVerdictTimelineRow,
 } from './MiscTimelineRows'
 import { UserTimelineRow } from './UserTimelineRow'
 import {
@@ -46,6 +47,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === 'proposed-plan' ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === 'provider-switch' ? <ProviderSwitchTimelineRow row={row} /> : null}
+      {row.kind === 'worker-verdict' ? <WorkerVerdictTimelineRow row={row} /> : null}
       {row.kind === 'working' ? <WorkingTimelineRow row={row} /> : null}
     </div>
   )

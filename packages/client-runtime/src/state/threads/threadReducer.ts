@@ -77,6 +77,9 @@ export function applyThreadDetailEvent(
           modelSelection: event.payload.modelSelection,
           runtimeMode: event.payload.runtimeMode,
           interactionMode: event.payload.interactionMode,
+          ...(event.payload.orchestrate !== undefined
+            ? { orchestrate: event.payload.orchestrate }
+            : {}),
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
           origin: event.payload.origin ?? null,
@@ -363,6 +366,7 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           interactionMode: event.payload.interactionMode,
+          orchestrate: event.payload.orchestrate ?? false,
           updatedAt: event.payload.updatedAt,
         },
       }
@@ -378,6 +382,7 @@ export function applyThreadDetailEvent(
             : {}),
           runtimeMode: event.payload.runtimeMode,
           interactionMode: event.payload.interactionMode,
+          orchestrate: event.payload.orchestrate ?? false,
           updatedAt: event.occurredAt,
         },
       }

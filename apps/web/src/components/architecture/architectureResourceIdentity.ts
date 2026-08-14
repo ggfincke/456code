@@ -1,0 +1,381 @@
+// apps/web/src/components/architecture/architectureResourceIdentity.ts
+// defines canonical identities for native architecture right-panel resources
+
+import {
+  ArchitectureRelativePath,
+  ArchitectureScopeSelector as ArchitectureScopeSelectorContract,
+  type ArchitectureComparisonSelector,
+  type ArchitectureDiffSource,
+  type ArchitectureGenerationId,
+  type ArchitectureGraphDigest,
+  type ArchitectureImpactInput,
+  type ArchitectureProjectionSource,
+  type ArchitectureProposalSource,
+  type ArchitectureScopeSelector as ArchitectureProjectionScopeSelector,
+  type ArchitectureStandingSource,
+  type DiffAnalysisId,
+  type ProjectId,
+  type ProposalGenerationId,
+  type ThreadId,
+} from '@t3tools/contracts'
+import * as Schema from 'effect/Schema'
+
+export type ArchitectureImpactTarget = ArchitectureImpactInput
+export type RepositoryAtlasTarget = ArchitectureStandingSource
+export type ArchitectureResourceSource = ArchitectureProjectionSource
+
+export type ArchitectureScopeSelector =
+  | ArchitectureProjectionScopeSelector
+  | { readonly level: 'file-neighborhood'; readonly path: string }
+
+export type ArchitectureScopeTarget =
+  | {
+      readonly source: ArchitectureStandingSource
+      readonly scope: ArchitectureProjectionScopeSelector
+    }
+  | {
+      readonly source: ArchitectureProjectionSource
+      readonly scope: { readonly level: 'file-neighborhood'; readonly path: string }
+    }
+
+export type ArchitectureFileSource = ArchitectureProposalSource | ArchitectureDiffSource
+
+export type ArchitectureImpactSurface = {
+  readonly id: `architecture-impact:${string}`
+  readonly kind: 'architecture-impact'
+  readonly target: ArchitectureImpactTarget
+}
+
+export type RepositoryAtlasSurface = {
+  readonly id: `repository-atlas:${string}`
+  readonly kind: 'repository-atlas'
+  readonly target: RepositoryAtlasTarget
+}
+
+export type ArchitectureScopeSurface = {
+  readonly id: `architecture-scope:${string}`
+  readonly kind: 'architecture-scope'
+  readonly target: ArchitectureScopeTarget
+}
+
+export type ArchitectureRightPanelSurface =
+  ArchitectureImpactSurface | RepositoryAtlasSurface | ArchitectureScopeSurface
+
+type CanonicalIdentity = readonly (string | CanonicalIdentity)[]
+
+function isRecord(value: unknown): value is Record<string, unknown>
+{
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean
+{
+  const actual = Object.keys(value)
+  return actual.length === keys.length && keys.every((key) => actual.includes(key))
+}
+
+function isIdentityString(value: unknown): value is string
+{
+  return typeof value === 'string' && value.length > 0 && value === value.trim()
+}
+
+function isGenerationId(value: unknown): value is ArchitectureGenerationId
+{
+  return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value)
+}
+
+function isGraphDigest(value: unknown): value is ArchitectureGraphDigest
+{
+  return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value)
+}
+
+const isArchitectureRelativePathContract = Schema.is(ArchitectureRelativePath)
+const isArchitectureScopeSelectorContract = Schema.is(ArchitectureScopeSelectorContract)
+
+export function isArchitectureRelativePath(value: string): boolean
+{
+  return isArchitectureRelativePathContract(value)
+}
+
+// fixed-order tuples avoid object-key ordering and delimiter collisions
+function encodeCanonicalIdentity(identity: CanonicalIdentity): string
+{
+  return encodeURIComponent(JSON.stringify(identity))
+}
+
+function comparisonIdentity(selector: ArchitectureComparisonSelector): CanonicalIdentity
+{
+  switch (selector.kind)
+  {
+    case 'proposal-generation':
+      return [selector.kind, selector.generationId]
+    case 'diff-analysis':
+      return [selector.kind, selector.diffAnalysisId]
+  }
+}
+
+function sourceIdentity(source: ArchitectureResourceSource): CanonicalIdentity
+{
+  switch (source.kind)
+  {
+    case 'proposal-generation':
+      return [source.kind, source.threadId, source.generationId, source.side, source.graphDigest]
+    case 'diff-analysis':
+      return [source.kind, source.threadId, source.diffAnalysisId, source.side, source.graphDigest]
+    case 'standing-project-generation':
+      return [source.kind, source.projectId, source.generationId, source.side, source.graphDigest]
+  }
+}
+
+function scopeIdentity(scope: ArchitectureScopeSelector): CanonicalIdentity
+{
+  switch (scope.level)
+  {
+    case 'systems':
+    case 'blocks':
+    case 'dirs':
+      return [scope.level, scope.id]
+    case 'file-neighborhood':
+      return [scope.level, scope.path]
+  }
+}
+
+export function architectureImpactSurfaceId(
+  target: ArchitectureImpactTarget,
+): ArchitectureImpactSurface['id']
+{
+  return `architecture-impact:${encodeCanonicalIdentity([
+    target.threadId,
+    comparisonIdentity(target.comparison),
+  ])}`
+}
+
+export function repositoryAtlasSurfaceId(
+  target: RepositoryAtlasTarget,
+): RepositoryAtlasSurface['id']
+{
+  return `repository-atlas:${encodeCanonicalIdentity(sourceIdentity(target))}`
+}
+
+export function architectureScopeSurfaceId(
+  target: ArchitectureScopeTarget,
+): ArchitectureScopeSurface['id']
+{
+  return `architecture-scope:${encodeCanonicalIdentity([
+    sourceIdentity(target.source),
+    scopeIdentity(target.scope),
+  ])}`
+}
+
+export function architectureFileSurfaceId(
+  source: ArchitectureFileSource,
+  relativePath: string,
+): `architecture-file:${string}`
+{
+  return `architecture-file:${encodeCanonicalIdentity([sourceIdentity(source), relativePath])}`
+}
+
+export function createArchitectureImpactSurface(
+  target: ArchitectureImpactTarget,
+): ArchitectureImpactSurface
+{
+  return {
+    id: architectureImpactSurfaceId(target),
+    kind: 'architecture-impact',
+    target,
+  }
+}
+
+export function createRepositoryAtlasSurface(
+  target: RepositoryAtlasTarget,
+): RepositoryAtlasSurface
+{
+  return {
+    id: repositoryAtlasSurfaceId(target),
+    kind: 'repository-atlas',
+    target,
+  }
+}
+
+export function createArchitectureScopeSurface(
+  target: ArchitectureScopeTarget,
+): ArchitectureScopeSurface
+{
+  return {
+    id: architectureScopeSurfaceId(target),
+    kind: 'architecture-scope',
+    target,
+  }
+}
+
+function decodeComparisonSelector(value: unknown): ArchitectureComparisonSelector | null
+{
+  if (!isRecord(value)) return null
+  if (
+    value.kind === 'proposal-generation' &&
+    hasExactKeys(value, ['kind', 'generationId']) &&
+    isIdentityString(value.generationId)
+  )
+  {
+    return {
+      kind: 'proposal-generation',
+      generationId: value.generationId as ProposalGenerationId,
+    }
+  }
+  if (
+    value.kind === 'diff-analysis' &&
+    hasExactKeys(value, ['kind', 'diffAnalysisId']) &&
+    isIdentityString(value.diffAnalysisId)
+  )
+  {
+    return {
+      kind: 'diff-analysis',
+      diffAnalysisId: value.diffAnalysisId as DiffAnalysisId,
+    }
+  }
+  return null
+}
+
+export function decodeArchitectureResourceSource(
+  value: unknown,
+): ArchitectureResourceSource | null
+{
+  if (!isRecord(value)) return null
+  if (
+    value.kind === 'proposal-generation' &&
+    hasExactKeys(value, ['kind', 'threadId', 'generationId', 'side', 'graphDigest']) &&
+    isIdentityString(value.threadId) &&
+    isIdentityString(value.generationId) &&
+    (value.side === 'base' || value.side === 'proposed') &&
+    isGraphDigest(value.graphDigest)
+  )
+  {
+    return {
+      kind: 'proposal-generation',
+      threadId: value.threadId as ThreadId,
+      generationId: value.generationId as ProposalGenerationId,
+      side: value.side,
+      graphDigest: value.graphDigest,
+    }
+  }
+  if (
+    value.kind === 'diff-analysis' &&
+    hasExactKeys(value, ['kind', 'threadId', 'diffAnalysisId', 'side', 'graphDigest']) &&
+    isIdentityString(value.threadId) &&
+    isIdentityString(value.diffAnalysisId) &&
+    (value.side === 'base' || value.side === 'head') &&
+    isGraphDigest(value.graphDigest)
+  )
+  {
+    return {
+      kind: 'diff-analysis',
+      threadId: value.threadId as ThreadId,
+      diffAnalysisId: value.diffAnalysisId as DiffAnalysisId,
+      side: value.side,
+      graphDigest: value.graphDigest,
+    }
+  }
+  if (
+    value.kind === 'standing-project-generation' &&
+    hasExactKeys(value, ['kind', 'projectId', 'generationId', 'side', 'graphDigest']) &&
+    isIdentityString(value.projectId) &&
+    isGenerationId(value.generationId) &&
+    value.side === 'analyzed' &&
+    isGraphDigest(value.graphDigest)
+  )
+  {
+    return {
+      kind: 'standing-project-generation',
+      projectId: value.projectId as ProjectId,
+      generationId: value.generationId,
+      side: 'analyzed',
+      graphDigest: value.graphDigest,
+    }
+  }
+  return null
+}
+
+export function decodeArchitectureFileSource(value: unknown): ArchitectureFileSource | null
+{
+  const source = decodeArchitectureResourceSource(value)
+  return source?.kind === 'standing-project-generation' ? null : source
+}
+
+function decodeScopeSelector(value: unknown): ArchitectureScopeSelector | null
+{
+  if (!isRecord(value)) return null
+  if (
+    (value.level === 'systems' || value.level === 'blocks' || value.level === 'dirs') &&
+    hasExactKeys(value, ['level', 'id']) &&
+    isArchitectureScopeSelectorContract(value)
+  )
+  {
+    return value
+  }
+  if (
+    value.level === 'file-neighborhood' &&
+    hasExactKeys(value, ['level', 'path']) &&
+    typeof value.path === 'string' &&
+    isArchitectureRelativePath(value.path)
+  )
+  {
+    return { level: value.level, path: value.path }
+  }
+  return null
+}
+
+function decodeImpactTarget(value: unknown): ArchitectureImpactTarget | null
+{
+  if (!isRecord(value) || !hasExactKeys(value, ['threadId', 'comparison'])) return null
+  if (!isIdentityString(value.threadId)) return null
+  const comparison = decodeComparisonSelector(value.comparison)
+  if (comparison === null) return null
+  return { threadId: value.threadId as ThreadId, comparison }
+}
+
+function decodeRepositoryTarget(value: unknown): RepositoryAtlasTarget | null
+{
+  const source = decodeArchitectureResourceSource(value)
+  return source?.kind === 'standing-project-generation' ? source : null
+}
+
+function decodeScopeTarget(value: unknown): ArchitectureScopeTarget | null
+{
+  if (!isRecord(value) || !hasExactKeys(value, ['source', 'scope'])) return null
+  const source = decodeArchitectureResourceSource(value.source)
+  const scope = decodeScopeSelector(value.scope)
+  if (source === null || scope === null) return null
+  if (scope.level === 'file-neighborhood') return { source, scope }
+  return source.kind === 'standing-project-generation' ? { source, scope } : null
+}
+
+export function decodeArchitectureRightPanelSurface(
+  value: unknown,
+): ArchitectureRightPanelSurface | null
+{
+  if (!isRecord(value) || !hasExactKeys(value, ['id', 'kind', 'target'])) return null
+  if (typeof value.id !== 'string') return null
+  switch (value.kind)
+  {
+    case 'architecture-impact':
+    {
+      const target = decodeImpactTarget(value.target)
+      if (target === null || value.id !== architectureImpactSurfaceId(target)) return null
+      return createArchitectureImpactSurface(target)
+    }
+    case 'repository-atlas':
+    {
+      const target = decodeRepositoryTarget(value.target)
+      if (target === null || value.id !== repositoryAtlasSurfaceId(target)) return null
+      return createRepositoryAtlasSurface(target)
+    }
+    case 'architecture-scope':
+    {
+      const target = decodeScopeTarget(value.target)
+      if (target === null || value.id !== architectureScopeSurfaceId(target)) return null
+      return createArchitectureScopeSurface(target)
+    }
+    default:
+      return null
+  }
+}

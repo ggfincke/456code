@@ -18,6 +18,10 @@ export type OrchestratePlanCardStatus = 'idle' | 'sending' | 'sent' | 'editing'
 export interface OrchestratePlanCardState
 {
   readonly selections: Readonly<Record<string, OrchestrateStageSelection>>
+  // the lead's own pick, kept out of `selections` so a stage rowKey can never
+  // collide with it and out of the composer draft so an unrelated composer
+  // model change cannot leak into an approval
+  readonly lead?: OrchestrateStageSelection | undefined
   readonly efforts: Readonly<Record<string, string>>
   readonly workers?: Readonly<Record<string, number>>
   readonly note?: string
@@ -163,6 +167,14 @@ export function setOrchestrateStageSelection(
     ...current,
     selections: { ...current.selections, [rowKey]: selection },
   }))
+}
+
+export function setOrchestrateLeadSelection(
+  key: string,
+  selection: OrchestrateStageSelection,
+): void
+{
+  updateCardState(key, (current) => ({ ...current, lead: selection }))
 }
 
 export function setOrchestrateStageEffort(key: string, rowKey: string, effort: string): void

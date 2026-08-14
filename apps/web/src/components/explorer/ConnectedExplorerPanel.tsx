@@ -1,8 +1,9 @@
 // apps/web/src/components/explorer/ConnectedExplorerPanel.tsx
-// connects the lazy explorer surface to proposal and cartographer environment state
+// connects Proposal Review to immutable proposal and architecture summary state
 import type {
-  CartographerIssueEmbedResult,
-  OrchestrationProposedPlanId,
+  ArchitectureImpactResult,
+  ArchitectureImpactResultV2,
+  ArchitectureProposalSource,
   ProjectId,
   ProposalGeneration,
   ScopedThreadRef,
@@ -12,28 +13,35 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from '@t3tools/client-runtime/state/runtime'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { useTheme } from '~/hooks/useTheme'
-import { useEnvironmentHttpBaseUrl } from '~/state/environments'
 import { projectEnvironment } from '~/state/projects'
 import { useEnvironmentQuery } from '~/state/query'
 import { useAtomCommand } from '~/state/use-atom-command'
+import { useRightPanelStore } from '~/rightPanelStore'
 
+import { createArchitectureImpactSurface } from '../architecture/architectureResourceIdentity'
+import { selectExactOrchestrateProposalLookup } from '../cartographer/orchestrateArchitecture'
+import { formatProposalGenerationFailure } from '../cartographer/proposalGenerationFailure'
+import {
+  completeProposalGenerationStart,
+  createProposalGenerationStartTarget,
+  failProposalGenerationStart,
+  recordObservedProposalGenerationFailure,
+  useProposalGenerationStart,
+} from '../chat/proposedPlanGenerationStart'
 import {
   ExplorerPanel,
   type ExplorerArchitecturePresentation,
   type ExplorerNarrativePresentation,
 } from './ExplorerPanel'
-import {
-  resolveCartographerEmbedLocation,
-  resolveCartographerParentOrigin,
-  selectLatestScopedProposal,
-} from './explorerIntegration'
+import { selectLatestScopedProposal } from './proposalSelection'
 import type {
   ProposalDiffAvailability,
+  ProposalDiffFileActions,
   ProposalDiffPresentation,
 } from '../proposals/ProposalDiffPanel'
+import type { ExplorerTarget } from '../../stores/rightPanelStore'
 
 const PROPOSAL_LIST_REFRESH_MS = 5_000
 const LATEST_GENERATION_REFRESH_MS = 3_000
@@ -45,40 +53,10 @@ interface ConnectedExplorerPanelProps
 {
   readonly threadRef: ScopedThreadRef
   readonly projectId: ProjectId
-  readonly proposalPlanId: OrchestrationProposedPlanId | null
+  readonly target: ExplorerTarget | null
   readonly proposalPreviewAvailable: boolean
-  readonly cartographerAvailable: boolean
+  readonly architectureImpactAvailable: boolean
   readonly onOpenFile: (path: string, line?: number) => void
-  readonly onSelectFile: (path: string | null) => void
-}
-
-interface GenerationStartState
-{
-  readonly key: string
-  readonly pending: boolean
-  readonly generation: ProposalGeneration | null
-  readonly error: string | null
-}
-
-type EmbedTarget =
-  | { readonly kind: 'current' }
-  | { readonly kind: 'proposal'; readonly generation: ProposalGeneration }
-
-type EmbedRequestState =
-  | { readonly key: string; readonly kind: 'loading' }
-  | { readonly key: string; readonly kind: 'error'; readonly message: string }
-  | {
-      readonly key: string
-      readonly kind: 'ready'
-      readonly result: CartographerIssueEmbedResult
-    }
-
-interface IssuedEmbedSession
-{
-  readonly key: string
-  readonly environmentId: ScopedThreadRef['environmentId']
-  readonly threadId: ScopedThreadRef['threadId']
-  readonly sessionId: CartographerIssueEmbedResult['sessionId']
 }
 
 export function isProposalDiscoverySettled(input: {
@@ -90,37 +68,38 @@ export function isProposalDiscoverySettled(input: {
   return input.settledNow || input.settledKey === input.key
 }
 
-export function resolveEmbedTargetTransition(input: {
-  readonly previousTargetKey: string | null
-  readonly nextTargetKey: string | null
-  readonly issuedSessionKey: string | null
-}): {
-  readonly invalidateRequest: boolean
-  readonly releaseIssuedSession: boolean
-}
-{
-  const invalidateRequest = input.previousTargetKey !== input.nextTargetKey
-  return {
-    invalidateRequest,
-    releaseIssuedSession:
-      invalidateRequest &&
-      input.issuedSessionKey !== null &&
-      input.issuedSessionKey !== input.nextTargetKey,
-  }
-}
-
-interface EmbedRequestIdentity
-{
-  readonly key: string
-  readonly requestId: number
-}
-
-export function isCurrentEmbedRequest(
-  current: EmbedRequestIdentity | null,
-  expected: EmbedRequestIdentity,
+export function isExplorerTargetScopedToThread(
+  target: ExplorerTarget | null,
+  threadId: ScopedThreadRef['threadId'],
 ): boolean
 {
-  return current?.key === expected.key && current.requestId === expected.requestId
+  return target?.kind !== 'orchestrate' || target.threadId === threadId
+}
+
+export function selectExactProposalDiffSources(
+  result: ArchitectureImpactResult | null,
+  expected: Pick<ProposalGeneration, 'generationId' | 'threadId'>,
+): Pick<ProposalDiffFileActions, 'beforeSource' | 'proposedSource'> | null
+{
+  if (
+    result?.version !== 2 ||
+    result.comparison.kind !== 'proposal-generation' ||
+    result.comparison.generationId !== expected.generationId
+  )
+  {
+    return null
+  }
+  const sourceMatches = (
+    source: ArchitectureImpactResultV2['baseSource'],
+    side: ArchitectureProposalSource['side'],
+  ): source is ArchitectureProposalSource =>
+    source.kind === 'proposal-generation' &&
+    source.threadId === expected.threadId &&
+    source.generationId === expected.generationId &&
+    source.side === side
+  const beforeSource = sourceMatches(result.baseSource, 'base') ? result.baseSource : null
+  const proposedSource = sourceMatches(result.headSource, 'proposed') ? result.headSource : null
+  return beforeSource === null && proposedSource === null ? null : { beforeSource, proposedSource }
 }
 
 function commandFailureMessage(
@@ -136,23 +115,6 @@ function commandFailureMessage(
   return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback
 }
 
-function generationFailureMessage(generation: ProposalGeneration): string
-{
-  switch (generation.state)
-  {
-    case 'failed':
-      return generation.errorCode
-        ? `Exact architecture analysis failed: ${generation.errorCode.replaceAll('-', ' ')}.`
-        : 'Exact architecture analysis failed.'
-    case 'cancelled':
-      return 'Exact architecture analysis was cancelled by a newer generation.'
-    case 'abandoned':
-      return 'Exact architecture analysis stopped before it completed.'
-    default:
-      return 'Exact architecture analysis is unavailable.'
-  }
-}
-
 function generationLoadingMessage(generation: ProposalGeneration): string
 {
   switch (generation.state)
@@ -166,19 +128,6 @@ function generationLoadingMessage(generation: ProposalGeneration): string
     default:
       return 'Preparing exact proposal analysis.'
   }
-}
-
-function embedTargetKey(input: {
-  readonly threadRef: ScopedThreadRef
-  readonly target: EmbedTarget
-  readonly parentOrigin: string
-  readonly environmentHttpBaseUrl: string
-  readonly embedThreadId: string
-}): string
-{
-  return `${input.threadRef.environmentId}:${input.embedThreadId}:${input.parentOrigin}:${
-    input.environmentHttpBaseUrl
-  }:${input.target.kind === 'current' ? 'current' : input.target.generation.generationId}`
 }
 
 function useProposalListRefresh(input: {
@@ -245,61 +194,49 @@ function useImplementationAttemptRefresh(input: {
 
 export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
 {
-  const { resolvedTheme } = useTheme()
-  const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(props.threadRef.environmentId)
   const startProposalGeneration = useAtomCommand(projectEnvironment.startProposalGeneration, {
     reportFailure: false,
   })
-  const issueCartographerEmbed = useAtomCommand(projectEnvironment.issueCartographerEmbed, {
-    reportFailure: false,
-  })
-  const closeCartographerEmbed = useAtomCommand(projectEnvironment.closeCartographerEmbed, {
-    reportFailure: false,
-  })
-  const disposedRef = useRef(false)
-  const issuedSessionRef = useRef<IssuedEmbedSession | null>(null)
-  const closeCartographerEmbedRef = useRef(closeCartographerEmbed)
-  closeCartographerEmbedRef.current = closeCartographerEmbed
-  const releaseIssuedSession = useCallback((issued: IssuedEmbedSession): void =>
-  {
-    void closeCartographerEmbedRef.current({
-      environmentId: issued.environmentId,
-      input: {
-        threadId: issued.threadId,
-        sessionId: issued.sessionId,
-      },
-    })
-  }, [])
-  useEffect(() =>
-  {
-    disposedRef.current = false
-    return () =>
-    {
-      disposedRef.current = true
-      const issued = issuedSessionRef.current
-      issuedSessionRef.current = null
-      if (issued === null) return
-      releaseIssuedSession(issued)
-    }
-  }, [props.threadRef.environmentId, props.threadRef.threadId, releaseIssuedSession])
-
+  const planTarget = props.target?.kind === 'plan' ? props.target : null
+  const rawOrchestrateTarget = props.target?.kind === 'orchestrate' ? props.target : null
+  const orchestrateTargetScoped = isExplorerTargetScopedToThread(
+    props.target,
+    props.threadRef.threadId,
+  )
+  const orchestrateTarget = orchestrateTargetScoped ? rawOrchestrateTarget : null
   const planProposalQuery = useEnvironmentQuery(
-    props.proposalPreviewAvailable && props.proposalPlanId !== null
+    props.proposalPreviewAvailable && planTarget !== null
       ? projectEnvironment.findProposalByPlan({
           environmentId: props.threadRef.environmentId,
           input: {
             sourceThreadId: props.threadRef.threadId,
-            planId: props.proposalPlanId,
+            planId: planTarget.planId,
           },
         })
       : null,
   )
   useProposalListRefresh({
-    enabled: props.proposalPreviewAvailable && props.proposalPlanId !== null,
+    enabled: props.proposalPreviewAvailable && planTarget !== null,
     refresh: planProposalQuery.refresh,
   })
+  const orchestrateProposalQuery = useEnvironmentQuery(
+    props.proposalPreviewAvailable && orchestrateTarget !== null
+      ? projectEnvironment.findProposalByOrchestrateRevision({
+          environmentId: props.threadRef.environmentId,
+          input: {
+            sourceThreadId: orchestrateTarget.threadId,
+            runId: orchestrateTarget.runId,
+            revision: orchestrateTarget.revision,
+          },
+        })
+      : null,
+  )
+  useProposalListRefresh({
+    enabled: props.proposalPreviewAvailable && orchestrateTarget !== null,
+    refresh: orchestrateProposalQuery.refresh,
+  })
   const proposalListQuery = useEnvironmentQuery(
-    props.proposalPreviewAvailable && props.proposalPlanId === null
+    props.proposalPreviewAvailable && props.target === null
       ? projectEnvironment.listProposals({
           environmentId: props.threadRef.environmentId,
           input: {
@@ -311,20 +248,36 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
       : null,
   )
   useProposalListRefresh({
-    enabled: props.proposalPreviewAvailable && props.proposalPlanId === null,
+    enabled: props.proposalPreviewAvailable && props.target === null,
     refresh: proposalListQuery.refresh,
   })
+  const exactOrchestrateLookup = useMemo(
+    () =>
+      orchestrateTarget === null
+        ? null
+        : selectExactOrchestrateProposalLookup(orchestrateProposalQuery.data, orchestrateTarget),
+    [orchestrateProposalQuery.data, orchestrateTarget],
+  )
 
   const selectedProposal = useMemo(() =>
   {
-    if (props.proposalPlanId !== null)
+    if (planTarget !== null)
     {
       const proposal = planProposalQuery.data?.proposal ?? null
       return proposal !== null &&
         proposal.environmentId === props.threadRef.environmentId &&
         proposal.projectId === props.projectId &&
         proposal.sourceThreadId === props.threadRef.threadId &&
-        planProposalQuery.data?.revision.planId === props.proposalPlanId
+        planProposalQuery.data?.revision.planId === planTarget.planId
+        ? proposal
+        : null
+    }
+    if (rawOrchestrateTarget !== null)
+    {
+      const proposal = exactOrchestrateLookup?.proposal ?? null
+      return proposal !== null &&
+        proposal.environmentId === props.threadRef.environmentId &&
+        proposal.projectId === props.projectId
         ? proposal
         : null
     }
@@ -336,17 +289,21 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
           threadId: props.threadRef.threadId,
         })
   }, [
+    exactOrchestrateLookup,
+    rawOrchestrateTarget,
     planProposalQuery.data,
+    planTarget,
     proposalListQuery.data,
     props.projectId,
-    props.proposalPlanId,
     props.threadRef.environmentId,
     props.threadRef.threadId,
   ])
   const selectedRevision =
-    selectedProposal !== null && props.proposalPlanId !== null
+    selectedProposal !== null && planTarget !== null
       ? (planProposalQuery.data?.revision.revision ?? null)
-      : (selectedProposal?.latestRevision ?? null)
+      : selectedProposal !== null && orchestrateTarget !== null
+        ? (exactOrchestrateLookup?.revision.revision ?? null)
+        : (selectedProposal?.latestRevision ?? null)
   const proposalSelector =
     selectedProposal === null || selectedRevision === null
       ? null
@@ -354,27 +311,48 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
           proposalId: selectedProposal.proposalId,
           revision: selectedRevision,
         }
-  const proposalSourceThreadId = selectedProposal?.sourceThreadId ?? props.threadRef.threadId
+  const proposalSourceThreadId =
+    orchestrateTarget?.threadId ?? selectedProposal?.sourceThreadId ?? props.threadRef.threadId
   const proposalDiscoveryError =
-    props.proposalPlanId !== null
+    planTarget !== null
       ? planProposalQuery.data === null
         ? planProposalQuery.error
         : null
-      : proposalListQuery.data === null
-        ? proposalListQuery.error
-        : null
+      : rawOrchestrateTarget !== null
+        ? orchestrateTargetScoped && orchestrateProposalQuery.data === null
+          ? orchestrateProposalQuery.error
+          : null
+        : proposalListQuery.data === null
+          ? proposalListQuery.error
+          : null
   const proposalDiscoveryPending =
-    props.proposalPlanId !== null
+    planTarget !== null
       ? planProposalQuery.data === null && planProposalQuery.isPending
-      : proposalListQuery.data === null && proposalListQuery.error === null
+      : rawOrchestrateTarget !== null
+        ? orchestrateTargetScoped &&
+          orchestrateProposalQuery.data === null &&
+          orchestrateProposalQuery.isPending
+        : proposalListQuery.data === null && proposalListQuery.error === null
   const proposalDiscoverySettledNow =
-    props.proposalPlanId !== null
+    planTarget !== null
       ? planProposalQuery.data !== null ||
         (!planProposalQuery.isPending && planProposalQuery.error === null)
-      : proposalListQuery.data !== null
-  const proposalDiscoveryKey = `${props.threadRef.environmentId}:${
-    props.threadRef.threadId
-  }:${props.proposalPlanId ?? 'latest'}`
+      : rawOrchestrateTarget !== null
+        ? !orchestrateTargetScoped ||
+          orchestrateProposalQuery.data !== null ||
+          (!orchestrateProposalQuery.isPending && orchestrateProposalQuery.error === null)
+        : proposalListQuery.data !== null
+  const proposalDiscoveryTargetKey =
+    planTarget !== null
+      ? `plan:${planTarget.planId}`
+      : rawOrchestrateTarget !== null
+        ? `orchestrate:${rawOrchestrateTarget.threadId}:${rawOrchestrateTarget.runId}:${rawOrchestrateTarget.revision}`
+        : 'latest'
+  const proposalDiscoveryKey = [
+    props.threadRef.environmentId,
+    props.threadRef.threadId,
+    proposalDiscoveryTargetKey,
+  ].join(':')
   const [settledProposalDiscoveryKey, setSettledProposalDiscoveryKey] = useState<string | null>(
     null,
   )
@@ -431,7 +409,7 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
     refresh: implementationAttemptQuery.refresh,
   })
   const latestGenerationQuery = useEnvironmentQuery(
-    proposalSelector === null || !props.cartographerAvailable
+    proposalSelector === null || !props.architectureImpactAvailable
       ? null
       : projectEnvironment.latestProposalGeneration({
           environmentId: props.threadRef.environmentId,
@@ -443,99 +421,107 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
         }),
   )
   useLatestGenerationRefresh({
-    enabled: proposalSelector !== null && props.cartographerAvailable,
+    enabled: proposalSelector !== null && props.architectureImpactAvailable,
     refresh: latestGenerationQuery.refresh,
   })
 
-  const revisionKey =
-    proposalSelector === null ? null : `${proposalSelector.proposalId}:${proposalSelector.revision}`
-  const revisionKeyRef = useRef(revisionKey)
-  revisionKeyRef.current = revisionKey
-  const generationStartRequestRef = useRef<{ readonly key: string } | null>(null)
-  const [generationStartState, setGenerationStartState] = useState<GenerationStartState | null>(
-    null,
-  )
-  const activeGenerationStartState =
-    generationStartState?.key === revisionKey ? generationStartState : null
-
-  const requestProposalGeneration = useCallback(() =>
-  {
-    if (proposalSelector === null || revisionKey === null) return
-    generationStartRequestRef.current = { key: revisionKey }
-    setGenerationStartState({
-      key: revisionKey,
-      pending: true,
-      generation: null,
-      error: null,
-    })
-    void startProposalGeneration({
-      environmentId: props.threadRef.environmentId,
-      input: {
-        threadId: proposalSourceThreadId,
-        proposalId: proposalSelector.proposalId,
-        revision: proposalSelector.revision,
-      },
-    }).then((result) =>
-    {
-      if (revisionKeyRef.current !== revisionKey) return
-      if (result._tag === 'Success')
-      {
-        setGenerationStartState({
-          key: revisionKey,
-          pending: false,
-          generation: result.value,
-          error: null,
+  const generationStartTarget =
+    proposalSelector === null
+      ? null
+      : createProposalGenerationStartTarget({
+          environmentId: props.threadRef.environmentId,
+          threadId: proposalSourceThreadId,
+          proposalId: proposalSelector.proposalId,
+          revision: proposalSelector.revision,
         })
-        latestGenerationQuery.refresh()
-        return
-      }
-      setGenerationStartState({
-        key: revisionKey,
-        pending: false,
-        generation: null,
-        error: commandFailureMessage(result, 'Exact architecture analysis could not start'),
+  const generationStartKey = generationStartTarget?.key ?? null
+  const {
+    state: generationStartState,
+    claimAutomatic,
+    claimManual,
+  } = useProposalGenerationStart(generationStartTarget)
+
+  const requestProposalGeneration = useCallback(
+    (mode: 'automatic' | 'manual'): void =>
+    {
+      if (proposalSelector === null || generationStartKey === null) return
+      const attempt =
+        mode === 'automatic'
+          ? claimAutomatic(latestGenerationQuery.data)
+          : claimManual(latestGenerationQuery.data)
+      if (attempt === null) return
+
+      void startProposalGeneration({
+        environmentId: props.threadRef.environmentId,
+        input: {
+          threadId: proposalSourceThreadId,
+          proposalId: proposalSelector.proposalId,
+          revision: proposalSelector.revision,
+        },
+      }).then((result) =>
+      {
+        if (result._tag === 'Success')
+        {
+          if (completeProposalGenerationStart(attempt, result.value))
+          {
+            latestGenerationQuery.refresh()
+          }
+          return
+        }
+        if (
+          failProposalGenerationStart(
+            attempt,
+            commandFailureMessage(result, 'Exact architecture analysis could not start'),
+          )
+        )
+        {
+          latestGenerationQuery.refresh()
+        }
       })
-    })
-  }, [
-    latestGenerationQuery.refresh,
-    proposalSourceThreadId,
-    proposalSelector,
-    props.threadRef.environmentId,
-    revisionKey,
-    startProposalGeneration,
-  ])
+    },
+    [
+      claimAutomatic,
+      claimManual,
+      generationStartKey,
+      latestGenerationQuery.data,
+      latestGenerationQuery.refresh,
+      proposalSourceThreadId,
+      proposalSelector,
+      props.threadRef.environmentId,
+      startProposalGeneration,
+    ],
+  )
 
   useEffect(() =>
   {
     if (
-      !props.cartographerAvailable ||
+      !props.architectureImpactAvailable ||
       proposalSelector === null ||
-      revisionKey === null ||
+      generationStartKey === null ||
       proposalQuery.data === null ||
       (latestGenerationQuery.isPending && latestGenerationQuery.data === null) ||
       (latestGenerationQuery.error !== null && latestGenerationQuery.data === null) ||
-      latestGenerationQuery.data !== null ||
-      activeGenerationStartState !== null ||
-      generationStartRequestRef.current?.key === revisionKey
+      latestGenerationQuery.data !== null
     )
     {
       return
     }
-    requestProposalGeneration()
+    requestProposalGeneration('automatic')
   }, [
-    activeGenerationStartState,
+    generationStartKey,
     latestGenerationQuery.data,
     latestGenerationQuery.error,
     latestGenerationQuery.isPending,
     proposalQuery.data,
     proposalSelector,
-    props.cartographerAvailable,
+    props.architectureImpactAvailable,
     requestProposalGeneration,
-    revisionKey,
   ])
 
   const generationSeed =
-    activeGenerationStartState?.generation ?? latestGenerationQuery.data ?? null
+    generationStartState.status === 'started'
+      ? generationStartState.generation
+      : latestGenerationQuery.data
   const generationQuery = useEnvironmentQuery(
     generationSeed === null
       ? null
@@ -547,12 +533,71 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
           },
         }),
   )
-  const generation = generationQuery.data ?? generationSeed
+  const generation =
+    generationQuery.data !== null &&
+    generationQuery.data.generationId === generationSeed?.generationId
+      ? generationQuery.data
+      : generationSeed
   useGenerationRefresh({
     generation,
     queryFailed: generationQuery.error !== null,
     refresh: generationQuery.refresh,
   })
+  const architectureImpactQuery = useEnvironmentQuery(
+    props.architectureImpactAvailable && generation?.state === 'ready'
+      ? projectEnvironment.getArchitectureImpact({
+          environmentId: props.threadRef.environmentId,
+          input: {
+            threadId: proposalSourceThreadId,
+            comparison: {
+              kind: 'proposal-generation',
+              generationId: generation.generationId,
+            },
+          },
+        })
+      : null,
+  )
+  const exactProposalDiffSources =
+    generation?.state === 'ready'
+      ? selectExactProposalDiffSources(architectureImpactQuery.data, {
+          generationId: generation.generationId,
+          threadId: proposalSourceThreadId,
+        })
+      : null
+  const openExactProposalFile = useCallback(
+    (source: ArchitectureProposalSource, filePath: string): void =>
+    {
+      useRightPanelStore
+        .getState()
+        .openArchitectureFile(props.threadRef, source, filePath, undefined, 'explorer')
+    },
+    [props.threadRef],
+  )
+  const proposalFileActions: ProposalDiffFileActions | undefined = exactProposalDiffSources
+    ? { ...exactProposalDiffSources, onOpenFile: openExactProposalFile }
+    : undefined
+  const generationIsTerminalFailure =
+    generation?.state === 'failed' ||
+    generation?.state === 'cancelled' ||
+    generation?.state === 'abandoned'
+  useEffect(() =>
+  {
+    if (generationStartTarget === null || generation === null || !generationIsTerminalFailure)
+    {
+      return
+    }
+    recordObservedProposalGenerationFailure(
+      generationStartTarget,
+      generationStartState.attemptId,
+      generation,
+      formatProposalGenerationFailure(generation),
+    )
+  }, [
+    generation,
+    generationIsTerminalFailure,
+    generationStartState.attemptId,
+    generationStartTarget,
+  ])
 
   const proposal: ProposalDiffPresentation | null =
     proposalQuery.data === null
@@ -578,9 +623,11 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
           ? {
               kind: 'unsupported',
               reason:
-                props.proposalPlanId === null
+                props.target === null
                   ? 'No immutable proposal revision exists for this thread.'
-                  : 'No immutable proposal revision is linked to this exact plan.',
+                  : rawOrchestrateTarget !== null
+                    ? 'No immutable proposal revision is linked to this exact orchestrate plan revision.'
+                    : 'No immutable proposal revision is linked to this exact plan.',
             }
           : proposalQuery.error !== null && proposalQuery.data === null
             ? { kind: 'error', message: proposalQuery.error }
@@ -606,9 +653,11 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
           ? {
               kind: 'empty',
               message:
-                props.proposalPlanId === null
+                props.target === null
                   ? 'No safe proposal narrative is available for this thread.'
-                  : 'No safe proposal narrative is linked to this exact plan.',
+                  : rawOrchestrateTarget !== null
+                    ? 'No safe proposal narrative is linked to this exact orchestrate plan revision.'
+                    : 'No safe proposal narrative is linked to this exact plan.',
             }
           : proposalNarrativeQuery.error !== null && proposalNarrativeQuery.data === null
             ? { kind: 'error', message: proposalNarrativeQuery.error }
@@ -634,169 +683,38 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
           intendedOperationCount: implementationAttemptQuery.data.intendedOperationCount,
         }
 
-  const parentOrigin =
-    typeof window === 'undefined' ? null : resolveCartographerParentOrigin(window.location)
-  const embedTarget: EmbedTarget | null =
-    !props.cartographerAvailable ||
-    parentOrigin === null ||
-    environmentHttpBaseUrl === null ||
-    (props.proposalPreviewAvailable &&
-      (proposalDiscoveryError !== null || !proposalDiscoverySettled))
-      ? null
-      : selectedProposal === null
-        ? { kind: 'current' }
-        : generation?.state === 'ready'
-          ? { kind: 'proposal', generation }
-          : null
-  const embedThreadId =
-    embedTarget?.kind === 'proposal' ? proposalSourceThreadId : props.threadRef.threadId
-  const targetKey =
-    embedTarget === null || parentOrigin === null || environmentHttpBaseUrl === null
-      ? null
-      : embedTargetKey({
-          threadRef: props.threadRef,
-          target: embedTarget,
-          parentOrigin,
-          environmentHttpBaseUrl,
-          embedThreadId,
-        })
-  const embedRequestRef = useRef<EmbedRequestIdentity | null>(null)
-  const embedRequestSequenceRef = useRef(0)
-  const embedTargetKeyRef = useRef<string | null>(null)
-  const [embedRequestState, setEmbedRequestState] = useState<EmbedRequestState | null>(null)
-  const activeEmbedRequestState = embedRequestState?.key === targetKey ? embedRequestState : null
-
-  useEffect(() =>
+  const retryGenerationDetail = useCallback(
+    () => generationQuery.refresh(),
+    [generationQuery.refresh],
+  )
+  const architectureImpactTarget =
+    generation?.state === 'ready'
+      ? {
+          threadId: proposalSourceThreadId,
+          comparison: {
+            kind: 'proposal-generation' as const,
+            generationId: generation.generationId,
+          },
+        }
+      : null
+  const openArchitectureImpact = useCallback((): void =>
   {
-    const issued = issuedSessionRef.current
-    const transition = resolveEmbedTargetTransition({
-      previousTargetKey: embedTargetKeyRef.current,
-      nextTargetKey: targetKey,
-      issuedSessionKey: issued?.key ?? null,
-    })
-    if (!transition.invalidateRequest) return
-    embedTargetKeyRef.current = targetKey
-    embedRequestRef.current = null
-    setEmbedRequestState(null)
-
-    if (issued === null || !transition.releaseIssuedSession) return
-    issuedSessionRef.current = null
-    releaseIssuedSession(issued)
-  }, [releaseIssuedSession, targetKey])
-
-  useEffect(() =>
-  {
-    if (
-      embedTarget === null ||
-      targetKey === null ||
-      parentOrigin === null ||
-      embedRequestRef.current?.key === targetKey
-    )
-    {
-      return
-    }
-    embedRequestSequenceRef.current += 1
-    const request = {
-      key: targetKey,
-      requestId: embedRequestSequenceRef.current,
-    }
-    embedRequestRef.current = request
-    setEmbedRequestState({ key: targetKey, kind: 'loading' })
-    void issueCartographerEmbed({
-      environmentId: props.threadRef.environmentId,
-      input: {
-        threadId: embedThreadId,
-        ...(embedTarget.kind === 'proposal'
-          ? { generationId: embedTarget.generation.generationId }
-          : {}),
-        parentOrigin,
-        theme: resolvedTheme,
-      },
-    }).then((result) =>
-    {
-      if (!isCurrentEmbedRequest(embedRequestRef.current, request))
-      {
-        if (result._tag === 'Success')
-        {
-          releaseIssuedSession({
-            key: targetKey,
-            environmentId: props.threadRef.environmentId,
-            threadId: embedThreadId,
-            sessionId: result.value.sessionId,
-          })
-        }
-        return
-      }
-      if (result._tag === 'Success')
-      {
-        const issued = {
-          key: targetKey,
-          environmentId: props.threadRef.environmentId,
-          threadId: embedThreadId,
-          sessionId: result.value.sessionId,
-        }
-        if (disposedRef.current)
-        {
-          releaseIssuedSession(issued)
-          return
-        }
-        const previous = issuedSessionRef.current
-        issuedSessionRef.current = issued
-        if (
-          previous !== null &&
-          (previous.environmentId !== issued.environmentId ||
-            previous.threadId !== issued.threadId ||
-            previous.sessionId !== issued.sessionId)
-        )
-        {
-          releaseIssuedSession(previous)
-        }
-      }
-      setEmbedRequestState(
-        result._tag === 'Success'
-          ? { key: targetKey, kind: 'ready', result: result.value }
-          : {
-              key: targetKey,
-              kind: 'error',
-              message: commandFailureMessage(
-                result,
-                'The authenticated Cartographer session could not start',
-              ),
-            },
+    if (architectureImpactTarget === null) return
+    useRightPanelStore
+      .getState()
+      .openArchitectureSurface(
+        props.threadRef,
+        createArchitectureImpactSurface(architectureImpactTarget),
+        'explorer',
       )
-    })
-  }, [
-    embedTarget,
-    issueCartographerEmbed,
-    parentOrigin,
-    embedThreadId,
-    props.threadRef.environmentId,
-    releaseIssuedSession,
-    resolvedTheme,
-    targetKey,
-  ])
-
+  }, [architectureImpactTarget, props.threadRef])
   const architecture: ExplorerArchitecturePresentation = (() =>
   {
-    if (!props.cartographerAvailable)
+    if (!props.architectureImpactAvailable)
     {
       return {
         kind: 'unavailable',
-        reason: 'Cartographer is not configured for this server environment.',
-      }
-    }
-    if (parentOrigin === null)
-    {
-      return {
-        kind: 'unavailable',
-        reason: 'This client URL cannot provide an exact Cartographer parent origin.',
-      }
-    }
-    if (environmentHttpBaseUrl === null)
-    {
-      return {
-        kind: 'loading',
-        message: 'Preparing the authenticated environment connection.',
+        reason: 'Native architecture impact is not available for this server environment.',
       }
     }
     if (props.proposalPreviewAvailable && proposalDiscoveryError !== null)
@@ -808,9 +726,32 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
       return {
         kind: 'loading',
         message:
-          props.proposalPlanId === null
+          props.target === null
             ? 'Looking for immutable proposal revisions.'
-            : 'Looking up the immutable revision linked to this exact plan.',
+            : rawOrchestrateTarget !== null
+              ? 'Looking up the immutable revision linked to this exact orchestrate plan revision.'
+              : 'Looking up the immutable revision linked to this exact plan.',
+      }
+    }
+    if (!orchestrateTargetScoped)
+    {
+      return {
+        kind: 'unavailable',
+        reason: 'This Proposal Review target belongs to a different thread.',
+      }
+    }
+    if (rawOrchestrateTarget !== null && selectedProposal === null)
+    {
+      return {
+        kind: 'unavailable',
+        reason: 'No architecture proposal is linked to this exact orchestrate plan revision.',
+      }
+    }
+    if (selectedProposal === null)
+    {
+      return {
+        kind: 'unavailable',
+        reason: 'No immutable proposal revision is available for Impact.',
       }
     }
     if (selectedProposal !== null)
@@ -829,18 +770,25 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
       }
       if (generationQuery.error !== null && generationQuery.data === null)
       {
-        return { kind: 'error', message: generationQuery.error }
+        return {
+          kind: 'error',
+          message: generationQuery.error,
+          retry: retryGenerationDetail,
+        }
       }
-      if (activeGenerationStartState?.pending)
+      if (generationStartState.status === 'starting')
       {
         return { kind: 'loading', message: 'Starting exact proposal analysis.' }
       }
-      if (generation === null && activeGenerationStartState?.error)
+      if (
+        generation === null &&
+        (generationStartState.status === 'failed' || generationStartState.status === 'superseded')
+      )
       {
         return {
           kind: 'error',
-          message: activeGenerationStartState.error,
-          retry: requestProposalGeneration,
+          message: generationStartState.error,
+          retry: () => requestProposalGeneration('manual'),
         }
       }
       if (generation === null)
@@ -858,8 +806,8 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
       {
         return {
           kind: 'error',
-          message: generationFailureMessage(generation),
-          retry: requestProposalGeneration,
+          message: formatProposalGenerationFailure(generation),
+          retry: () => requestProposalGeneration('manual'),
         }
       }
       if (
@@ -871,47 +819,27 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
         return { kind: 'loading', message: generationLoadingMessage(generation) }
       }
     }
-    if (embedTarget === null || targetKey === null || activeEmbedRequestState === null)
+    if (generation === null || generation.state !== 'ready')
     {
-      return {
-        kind: 'loading',
-        message:
-          selectedProposal === null
-            ? 'Starting current-worktree architecture exploration.'
-            : 'Starting exact proposed-tree architecture exploration.',
-      }
+      return { kind: 'loading', message: 'Preparing exact architecture impact.' }
     }
-    if (activeEmbedRequestState.kind === 'loading')
-    {
-      return {
-        kind: 'loading',
-        message: 'Starting the authenticated Cartographer session.',
-      }
-    }
-    if (activeEmbedRequestState.kind === 'error')
-    {
-      return { kind: 'error', message: activeEmbedRequestState.message }
-    }
-    const embedLocation = resolveCartographerEmbedLocation(
-      environmentHttpBaseUrl,
-      activeEmbedRequestState.result.url,
-    )
-    if (embedLocation === null)
-    {
-      return {
-        kind: 'error',
-        message: 'The issued Cartographer URL did not match the authenticated environment.',
-      }
-    }
+    const notices = [
+      ...(generation.authority === 'estimated'
+        ? ['This impact is an estimate, not an authoritative exact analysis.']
+        : []),
+      ...(generation.freshness === 'fresh'
+        ? []
+        : [`Analysis freshness: ${generation.freshness.replaceAll('-', ' ')}.`]),
+    ]
     return {
-      kind: 'ready',
-      url: embedLocation.url,
-      expectedOrigin: embedLocation.expectedOrigin,
-      generationId: embedTarget.kind === 'proposal' ? embedTarget.generation.generationId : null,
-      authority:
-        embedTarget.kind === 'proposal' ? embedTarget.generation.authority : 'authoritative',
-      freshness: embedTarget.kind === 'proposal' ? embedTarget.generation.freshness : 'fresh',
-      freshnessScope: embedTarget.kind === 'proposal' ? 'verified-generation' : 'capture-only',
+      kind: 'impact',
+      result: architectureImpactQuery.data,
+      error: architectureImpactQuery.error,
+      isPending: architectureImpactQuery.isPending,
+      hasSettled: architectureImpactQuery.hasSettled,
+      ...(notices.length === 0 ? {} : { notices }),
+      onRetry: architectureImpactQuery.refresh,
+      onOpen: openArchitectureImpact,
     }
   })()
 
@@ -921,10 +849,10 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
       narrative={narrative}
       proposal={proposal}
       proposalAvailability={proposalAvailability}
+      {...(proposalFileActions ? { proposalFileActions } : {})}
       architecture={architecture}
       attempt={attempt}
       onOpenFile={props.onOpenFile}
-      onSelectFile={props.onSelectFile}
     />
   )
 }

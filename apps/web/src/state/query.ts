@@ -14,13 +14,17 @@ export interface EnvironmentQueryView<A>
 {
   readonly data: A | null
   readonly error: string | null
+  readonly failure: unknown | null
   readonly isPending: boolean
+  // whether the query has produced a result at least once. `waiting` is an overlay on any
+  // variant, so isPending alone cannot separate the initial load from a refresh; consumers
+  // where null is a valid settled value need this to avoid flickering on every revalidation
+  readonly hasSettled: boolean
   readonly refresh: () => void
 }
 
-function formatError(cause: Cause.Cause<unknown>): string
+function formatError(error: unknown): string
 {
-  const error = Cause.squash(cause)
   return error instanceof Error && error.message.trim().length > 0
     ? error.message
     : 'The environment request failed.'
@@ -33,10 +37,13 @@ export function useEnvironmentQuery<A, E>(
   const selectedAtom = atom ?? EMPTY_ASYNC_RESULT_ATOM
   const result = useAtomValue(selectedAtom)
   const refresh = useAtomRefresh(selectedAtom)
+  const failure = result._tag === 'Failure' ? Cause.squash(result.cause) : null
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
-    error: result._tag === 'Failure' ? formatError(result.cause) : null,
+    error: failure === null ? null : formatError(failure),
+    failure,
     isPending: atom !== null && result.waiting,
+    hasSettled: atom !== null && !AsyncResult.isInitial(result),
     refresh,
   }
 }

@@ -1,17 +1,41 @@
 // tests/apps/web/components/chat/ChangedFilesTree.test.tsx
 // verify changed files card behavior
 
-import { TurnId } from '@t3tools/contracts'
+import { scopeThreadRef } from '@t3tools/client-runtime/environment'
+import { EnvironmentId, ThreadId, TurnId } from '@t3tools/contracts'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vite-plus/test'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+
+const mocks = vi.hoisted(() => ({ atlasAvailable: true }))
+
+vi.mock('~/state/entities', () => ({
+  useServerConfigs: () =>
+    new Map([
+      [
+        'environment-1',
+        { environment: { capabilities: { architectureImpact: mocks.atlasAvailable } } },
+      ],
+    ]),
+}))
 
 import {
+  ArchitectureImpactAction,
   ChangedFilesCard,
   ChangedFilesTree,
+  openChangedFilesArchitectureImpact,
 } from '../../../../../apps/web/src/components/chat/ChangedFilesTree'
+import { useDiffPanelStore } from '../../../../../apps/web/src/diffPanelStore'
+
+const THREAD_REF = scopeThreadRef(EnvironmentId.make('environment-1'), ThreadId.make('thread-1'))
 
 describe('ChangedFilesCard', () =>
 {
+  beforeEach(() =>
+  {
+    mocks.atlasAvailable = true
+    useDiffPanelStore.setState({ requestedViewByThreadKey: {} })
+  })
+
   it('keeps its compact header sticky while preserving singular labels', () =>
   {
     const markup = renderToStaticMarkup(
@@ -34,6 +58,15 @@ describe('ChangedFilesCard', () =>
     expect(markup).toContain('data-changed-files-state="expanded"')
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).toContain('whitespace-nowrap')
+    expect(markup).toContain('@container/changed-files')
+    expect(markup).toContain(
+      'class="group flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden',
+    )
+    expect(markup).toContain('class="flex shrink-0 items-center gap-1 whitespace-nowrap')
+    expect(markup).toContain('class="ml-1 hidden min-w-0 flex-1 truncate')
+    expect(markup).toContain('@[24rem]/changed-files:inline')
+    expect(markup).not.toContain('sm:inline')
+    expect(markup).toContain('class="flex shrink-0 items-center gap-1.5"')
     expect(markup).toContain('!size-[22px]')
     expect(markup).toContain('size-3')
     expect(markup).toContain('aria-label="Collapse all folders"')
@@ -108,6 +141,41 @@ describe('ChangedFilesCard', () =>
     expect(markup).toContain('1 changed file')
     expect(markup).not.toContain('Show all')
     expect(markup).not.toContain('App.tsx')
+  })
+
+  it('capability-gates the secondary Architecture impact action', () =>
+  {
+    const renderAction = () =>
+      renderToStaticMarkup(
+        <ArchitectureImpactAction
+          threadRef={THREAD_REF}
+          turnId={TurnId.make('turn-1')}
+          onOpenTurnDiff={() => undefined}
+        />,
+      )
+
+    expect(renderAction()).toContain('aria-label="Architecture impact"')
+    expect(renderAction()).toContain('@[32rem]/changed-files:inline')
+    expect(renderAction()).not.toContain('sm:inline')
+    mocks.atlasAvailable = false
+    expect(renderAction()).toBe('')
+  })
+
+  it('opens the turn diff before issuing a one-shot Architecture view request', () =>
+  {
+    const onOpenTurnDiff = vi.fn()
+    const turnId = TurnId.make('turn-1')
+
+    openChangedFilesArchitectureImpact({
+      threadRef: THREAD_REF,
+      turnId,
+      onOpenTurnDiff,
+    })
+
+    expect(onOpenTurnDiff).toHaveBeenCalledWith(turnId)
+    expect(Object.values(useDiffPanelStore.getState().requestedViewByThreadKey)[0]?.view).toBe(
+      'architecture',
+    )
   })
 })
 

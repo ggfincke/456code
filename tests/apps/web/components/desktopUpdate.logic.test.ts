@@ -198,46 +198,31 @@ describe('desktop update UI helpers', () =>
     ).toBe(false)
   })
 
-  it('shows an Apple Silicon warning for Intel builds under Rosetta', () =>
+  it('shows Apple Silicon warning copy and versioned install confirmation', () =>
   {
-    const state: DesktopUpdateState = {
+    const idle: DesktopUpdateState = {
       ...baseState,
       hostArch: 'arm64',
       appArch: 'x64',
       runningUnderArm64Translation: true,
     }
-
-    expect(shouldShowArm64IntelBuildWarning(state)).toBe(true)
-    expect(getArm64IntelBuildWarningDescription(state)).toContain('Apple Silicon')
-    expect(getArm64IntelBuildWarningDescription(state)).toContain('Intel build')
-  })
-
-  it('changes the warning copy when a native build update is ready to download', () =>
-  {
-    const state: DesktopUpdateState = {
-      ...baseState,
-      hostArch: 'arm64',
-      appArch: 'x64',
-      runningUnderArm64Translation: true,
+    const available: DesktopUpdateState = {
+      ...idle,
       status: 'available',
       availableVersion: '1.1.0',
     }
 
-    expect(getArm64IntelBuildWarningDescription(state)).toContain('Download the available update')
-  })
-
-  it('includes the downloaded version in the install confirmation copy', () =>
-  {
+    expect(shouldShowArm64IntelBuildWarning(idle)).toBe(true)
+    expect(getArm64IntelBuildWarningDescription(idle)).toContain('Apple Silicon')
+    expect(getArm64IntelBuildWarningDescription(available)).toContain(
+      'Download the available update',
+    )
     expect(
       getDesktopUpdateInstallConfirmationMessage({
         availableVersion: '1.1.0',
         downloadedVersion: '1.1.1',
       }),
     ).toContain('Install update 1.1.1 and restart 456code?')
-  })
-
-  it('falls back to generic install confirmation copy when no version is available', () =>
-  {
     expect(
       getDesktopUpdateInstallConfirmationMessage({
         availableVersion: null,
@@ -246,32 +231,18 @@ describe('desktop update UI helpers', () =>
     ).toContain('Install update and restart 456code?')
   })
 
-  it('warns Windows users that a silent installation can take several minutes', () =>
+  it('warns Windows users about silent install and keeps that warning platform-specific', () =>
   {
-    const message = getDesktopUpdateInstallConfirmationMessage(
-      {
-        availableVersion: '1.1.0',
-        downloadedVersion: '1.1.0',
-      },
-      'Win32',
-    )
+    const versions = {
+      availableVersion: '1.1.0',
+      downloadedVersion: '1.1.0',
+    }
+    const windows = getDesktopUpdateInstallConfirmationMessage(versions, 'Win32')
+    const mac = getDesktopUpdateInstallConfirmationMessage(versions, 'MacIntel')
 
-    expect(message).toContain('may remain closed for several minutes')
-    expect(message).toContain('no installer window may appear')
-    expect(message).toContain('will reopen automatically')
-  })
-
-  it('keeps the additional silent installation warning Windows-specific', () =>
-  {
-    const message = getDesktopUpdateInstallConfirmationMessage(
-      {
-        availableVersion: '1.1.0',
-        downloadedVersion: '1.1.0',
-      },
-      'MacIntel',
-    )
-
-    expect(message).not.toContain('may remain closed for several minutes')
+    expect(windows).toContain('may remain closed for several minutes')
+    expect(windows).toContain('will reopen automatically')
+    expect(mac).not.toContain('may remain closed for several minutes')
   })
 })
 

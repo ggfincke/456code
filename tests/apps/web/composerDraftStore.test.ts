@@ -319,6 +319,69 @@ describe('composerDraftStore clearComposerContent', () =>
   })
 })
 
+describe('composerDraftStore moveComposerPromptAndImages', () =>
+{
+  const sourceDraftId = DraftId.make('draft-move-source')
+  const destinationDraftId = DraftId.make('draft-move-destination')
+  let originalRevokeObjectUrl: typeof URL.revokeObjectURL
+  let revokeSpy: ReturnType<typeof vi.fn<(url: string) => void>>
+
+  beforeEach(() =>
+  {
+    resetComposerDraftStore()
+    originalRevokeObjectUrl = URL.revokeObjectURL
+    revokeSpy = vi.fn()
+    URL.revokeObjectURL = revokeSpy
+  })
+
+  afterEach(() =>
+  {
+    URL.revokeObjectURL = originalRevokeObjectUrl
+  })
+
+  it('moves prompt and images without revoking their preview URLs', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    store.setPrompt(sourceDraftId, 'fix the login redirect')
+    store.addImages(sourceDraftId, [makeImage({ id: 'img-move', previewUrl: 'blob:move' })])
+
+    store.moveComposerPromptAndImages(sourceDraftId, destinationDraftId)
+
+    expect(draftByKey(sourceDraftId)).toBeUndefined()
+    const destination = draftByKey(destinationDraftId)
+    expect(destination?.prompt).toBe('fix the login redirect')
+    expect(destination?.images.map((image) => image.id)).toEqual(['img-move'])
+    expect(revokeSpy).not.toHaveBeenCalled()
+  })
+
+  it('leaves session-bound contexts on the source draft', () =>
+  {
+    const sourceThreadId = ThreadId.make('thread-move-source')
+    const sourceThreadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, sourceThreadId)
+    const store = useComposerDraftStore.getState()
+    store.addTerminalContext(sourceThreadRef, makeTerminalContext({ id: 'ctx-stay' }))
+    store.setPrompt(sourceThreadRef, `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER} explain this error`)
+
+    store.moveComposerPromptAndImages(sourceThreadRef, destinationDraftId)
+
+    expect(draftFor(sourceThreadId, TEST_ENVIRONMENT_ID)?.terminalContexts).toHaveLength(1)
+    expect(draftFor(sourceThreadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(
+      INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
+    )
+    expect(draftByKey(destinationDraftId)?.prompt).toBe(' explain this error')
+  })
+
+  it('does nothing when source and destination resolve to the same draft', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    store.setPrompt(sourceDraftId, 'keep me')
+
+    store.moveComposerPromptAndImages(sourceDraftId, sourceDraftId)
+
+    expect(draftByKey(sourceDraftId)?.prompt).toBe('keep me')
+  })
+})
+
 describe('composerDraftStore syncPersistedAttachments', () =>
 {
   const threadId = ThreadId.make('thread-sync-persisted')
@@ -812,7 +875,7 @@ describe('composerDraftStore project draft thread mapping', () =>
       worktreePath: '/tmp/worktree-test',
       envMode: 'worktree',
       runtimeMode: 'full-access',
-      interactionMode: 'default',
+      collaborationMode: { baseMode: 'default', orchestrate: false },
       createdAt: '2026-01-01T00:00:00.000Z',
     })
     expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
@@ -823,8 +886,39 @@ describe('composerDraftStore project draft thread mapping', () =>
       worktreePath: '/tmp/worktree-test',
       envMode: 'worktree',
       runtimeMode: 'full-access',
-      interactionMode: 'default',
+      collaborationMode: { baseMode: 'default', orchestrate: false },
       createdAt: '2026-01-01T00:00:00.000Z',
+    })
+  })
+
+  it('persists Plan with Orchestrate in draft thread context', () =>
+  {
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
+      }
+    }
+    const { merge, partialize } = persistApi.getOptions()
+    useComposerDraftStore.getState().setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      collaborationMode: { baseMode: 'plan', orchestrate: true },
+    })
+
+    const persisted = partialize(useComposerDraftStore.getState()) as {
+      draftThreadsByThreadKey: Record<string, { interactionMode: string; orchestrate?: boolean }>
+    }
+    expect(Object.values(persisted.draftThreadsByThreadKey)).toContainEqual(
+      expect.objectContaining({ interactionMode: 'plan', orchestrate: true }),
+    )
+
+    const rehydrated = merge(persisted, useComposerDraftStore.getInitialState())
+    expect(Object.values(rehydrated.draftThreadsByThreadKey)[0]?.collaborationMode).toEqual({
+      baseMode: 'plan',
+      orchestrate: true,
     })
   })
 
@@ -961,14 +1055,17 @@ describe('composerDraftStore project draft thread mapping', () =>
     expect(store.getComposerDraft(threadRef)?.prompt).toBe('scoped access')
   })
 
-  it('does not clear composer drafts for existing server threads during promotion cleanup', () =>
+  it('does not clear composer drafts for existing server threads during single or iterable promotion cleanup', () =>
   {
     const store = useComposerDraftStore.getState()
     const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId)
     store.setPrompt(threadRef, 'keep me')
 
     markPromotedDraftThread(threadId)
+    expect(useComposerDraftStore.getState().getDraftThread(threadRef)).toBeNull()
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe('keep me')
 
+    markPromotedDraftThreads([threadId])
     expect(useComposerDraftStore.getState().getDraftThread(threadRef)).toBeNull()
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe('keep me')
   })
@@ -1014,44 +1111,24 @@ describe('composerDraftStore project draft thread mapping', () =>
     expect(draftByKey(remoteDraftId)?.prompt).toBe('remote draft')
   })
 
-  it('only marks promoted drafts for the matching environment ref', () =>
+  it('only marks promoted drafts for matching environment refs via single or iterable ByRef APIs', () =>
   {
     const store = useComposerDraftStore.getState()
     store.setProjectDraftThreadId(projectRef, draftId, { threadId })
     store.setPrompt(draftId, 'promote me')
+    const wrongEnvRef = scopeThreadRef(OTHER_TEST_ENVIRONMENT_ID, threadId)
 
-    markPromotedDraftThreadByRef(scopeThreadRef(OTHER_TEST_ENVIRONMENT_ID, threadId))
-
+    markPromotedDraftThreadByRef(wrongEnvRef)
     expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)?.threadId).toBe(
       threadId,
     )
     expect(draftByKey(draftId)?.prompt).toBe('promote me')
-  })
 
-  it('only marks iterable promotion cleanup entries for the matching environment refs', () =>
-  {
-    const store = useComposerDraftStore.getState()
-    store.setProjectDraftThreadId(projectRef, draftId, { threadId })
-    store.setPrompt(draftId, 'promote me')
-
-    markPromotedDraftThreadsByRef([scopeThreadRef(OTHER_TEST_ENVIRONMENT_ID, threadId)])
-
+    markPromotedDraftThreadsByRef([wrongEnvRef])
     expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)?.threadId).toBe(
       threadId,
     )
     expect(draftByKey(draftId)?.prompt).toBe('promote me')
-  })
-
-  it('keeps existing server-thread composer drafts during iterable promotion cleanup', () =>
-  {
-    const store = useComposerDraftStore.getState()
-    const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId)
-    store.setPrompt(threadRef, 'keep me')
-
-    markPromotedDraftThreads([threadId])
-
-    expect(useComposerDraftStore.getState().getDraftThread(threadRef)).toBeNull()
-    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe('keep me')
   })
 
   it('finalizes a promoted draft after the canonical thread route is active', () =>
@@ -1176,54 +1253,41 @@ describe('composerDraftStore project draft thread mapping', () =>
     })
   })
 
-  it('clears branch and worktree but keeps env mode when remapping a draft to another environment', () =>
+  it('clears branch and worktree but keeps env mode when moving a draft to another environment', () =>
   {
-    const store = useComposerDraftStore.getState()
-    store.setProjectDraftThreadId(projectRef, draftId, {
-      threadId,
-      branch: 'feature/local-only',
-      worktreePath: '/tmp/local-worktree',
-      envMode: 'worktree',
-      startFromOrigin: true,
-    })
-
-    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), remoteProjectRef, draftId, {
-      threadId,
-    })
-
-    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
+    const expected = {
       environmentId: OTHER_TEST_ENVIRONMENT_ID,
       projectId,
       branch: null,
       worktreePath: null,
       envMode: 'worktree',
       startFromOrigin: true,
-    })
-  })
+    }
+    const seedLocalWorktreeDraft = () =>
+    {
+      resetComposerDraftStore()
+      useComposerDraftStore.getState().setProjectDraftThreadId(projectRef, draftId, {
+        threadId,
+        branch: 'feature/local-only',
+        worktreePath: '/tmp/local-worktree',
+        envMode: 'worktree',
+        startFromOrigin: true,
+      })
+    }
 
-  it('clears branch and worktree but keeps env mode when changing a draft thread project ref', () =>
-  {
-    const store = useComposerDraftStore.getState()
-    store.setProjectDraftThreadId(projectRef, draftId, {
-      threadId,
-      branch: 'feature/local-only',
-      worktreePath: '/tmp/local-worktree',
-      envMode: 'worktree',
-      startFromOrigin: true,
-    })
+    seedLocalWorktreeDraft()
+    useComposerDraftStore
+      .getState()
+      .setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), remoteProjectRef, draftId, {
+        threadId,
+      })
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject(expected)
 
-    store.setDraftThreadContext(draftId, {
+    seedLocalWorktreeDraft()
+    useComposerDraftStore.getState().setDraftThreadContext(draftId, {
       projectRef: remoteProjectRef,
     })
-
-    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
-      environmentId: OTHER_TEST_ENVIRONMENT_ID,
-      projectId,
-      branch: null,
-      worktreePath: null,
-      envMode: 'worktree',
-      startFromOrigin: true,
-    })
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject(expected)
   })
 })
 
@@ -1734,22 +1798,28 @@ describe('composerDraftStore runtime and interaction settings', () =>
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.runtimeMode).toBe('approval-required')
   })
 
-  it('stores interaction mode overrides in the composer draft', () =>
+  it('stores base mode overrides in the composer draft', () =>
   {
     const store = useComposerDraftStore.getState()
 
-    store.setInteractionMode(threadRef, 'plan')
+    store.setInteractionMode(threadRef, { baseMode: 'plan', orchestrate: false })
 
-    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.interactionMode).toBe('plan')
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.collaborationMode).toEqual({
+      baseMode: 'plan',
+      orchestrate: false,
+    })
   })
 
-  it('stores orchestrate as the canonical interaction mode', () =>
+  it('stores Orchestrate as a modifier without replacing Plan', () =>
   {
     const store = useComposerDraftStore.getState()
 
-    store.setInteractionMode(threadRef, 'orchestrate')
+    store.setInteractionMode(threadRef, { baseMode: 'plan', orchestrate: true })
 
-    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.interactionMode).toBe('orchestrate')
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.collaborationMode).toEqual({
+      baseMode: 'plan',
+      orchestrate: true,
+    })
   })
 
   it('round-trips legacy orchestrate mode with preview annotations', () =>
@@ -1797,9 +1867,81 @@ describe('composerDraftStore runtime and interaction settings', () =>
     )
 
     expect(rehydratedState.draftsByThreadKey[threadKeyFor(threadId)]).toMatchObject({
-      interactionMode: 'orchestrate',
+      collaborationMode: { baseMode: 'default', orchestrate: true },
       previewAnnotations: [annotation],
     })
+  })
+
+  it('round-trips Plan with Orchestrate and migrates the legacy enum', () =>
+  {
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
+      }
+    }
+    const { merge, partialize } = persistApi.getOptions()
+    const store = useComposerDraftStore.getState()
+    store.setInteractionMode(threadRef, { baseMode: 'plan', orchestrate: true })
+
+    const persisted = partialize(useComposerDraftStore.getState()) as {
+      draftsByThreadKey: Record<string, { interactionMode?: string; orchestrate?: boolean }>
+    }
+    expect(persisted.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]).toMatchObject({
+      interactionMode: 'plan',
+      orchestrate: true,
+    })
+    const rehydrated = merge(persisted, useComposerDraftStore.getInitialState())
+    expect(
+      rehydrated.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]?.collaborationMode,
+    ).toEqual({
+      baseMode: 'plan',
+      orchestrate: true,
+    })
+
+    const migratedLegacyEnum = merge(
+      {
+        draftsByThreadKey: {
+          [threadKeyFor(threadId)]: {
+            prompt: '',
+            attachments: [],
+            interactionMode: 'orchestrate',
+          },
+        },
+        draftThreadsByThreadKey: {
+          'legacy-draft-session': {
+            threadId,
+            environmentId: TEST_ENVIRONMENT_ID,
+            projectId: ProjectId.make('project-settings'),
+            logicalProjectKey: 'project-settings',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            runtimeMode: 'full-access',
+            interactionMode: 'orchestrate',
+            branch: null,
+            worktreePath: null,
+            envMode: 'local',
+            startFromOrigin: false,
+          },
+        },
+        logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      },
+      useComposerDraftStore.getInitialState(),
+    )
+    expect(migratedLegacyEnum.draftsByThreadKey[threadKeyFor(threadId)]?.collaborationMode).toEqual(
+      {
+        baseMode: 'default',
+        orchestrate: true,
+      },
+    )
+    expect(Object.values(migratedLegacyEnum.draftThreadsByThreadKey)[0]?.collaborationMode).toEqual(
+      {
+        baseMode: 'default',
+        orchestrate: true,
+      },
+    )
   })
 
   it('removes empty settings-only drafts when overrides are cleared', () =>
@@ -1807,7 +1949,7 @@ describe('composerDraftStore runtime and interaction settings', () =>
     const store = useComposerDraftStore.getState()
 
     store.setRuntimeMode(threadRef, 'approval-required')
-    store.setInteractionMode(threadRef, 'plan')
+    store.setInteractionMode(threadRef, { baseMode: 'plan', orchestrate: false })
     store.setRuntimeMode(threadRef, null)
     store.setInteractionMode(threadRef, null)
 

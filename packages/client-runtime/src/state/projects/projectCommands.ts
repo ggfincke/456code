@@ -1,7 +1,12 @@
 // packages/client-runtime/src/state/projects/projectCommands.ts
 // creates environment-scoped project query & command atoms
 
-import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from '@t3tools/contracts'
+import {
+  type EnvironmentId,
+  type ProjectReadFileResult,
+  type ProposalGenerationStartInput,
+  WS_METHODS,
+} from '@t3tools/contracts'
 import * as Crypto from 'effect/Crypto'
 import { Atom } from 'effect/unstable/reactivity'
 
@@ -10,6 +15,7 @@ import {
   createEnvironmentCommand,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
 } from '../runtime.ts'
 import {
   type CreateProjectInput,
@@ -20,6 +26,18 @@ import {
   updateProject,
 } from '../../operations/commands.ts'
 import type { EnvironmentRegistry } from '../../connection/registry.ts'
+import { createDiffAnalysisEnvironmentAtoms } from '../workspace/diffAnalysis.ts'
+
+export {
+  diffAnalysisGenerationKey,
+  diffAnalysisSourceKey,
+  diffAnalysisTargetKey,
+  normalizeDiffAnalysisSource,
+  normalizeDiffAnalysisTarget,
+  shouldPollDiffAnalysisGeneration,
+  type DiffAnalysisGenerationTarget,
+  type DiffAnalysisTarget,
+} from '../workspace/diffAnalysis.ts'
 
 export type {
   CreateProjectInput,
@@ -45,6 +63,19 @@ function optimisticProjectFileKey(target: OptimisticProjectFileTarget): string
   return JSON.stringify([target.environmentId, target.cwd, target.relativePath])
 }
 
+export function proposalGenerationStartCommandKey(target: {
+  readonly environmentId: EnvironmentId
+  readonly input: ProposalGenerationStartInput
+}): string
+{
+  return JSON.stringify([
+    target.environmentId,
+    target.input.threadId,
+    target.input.proposalId,
+    target.input.revision,
+  ])
+}
+
 export function createProjectEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
 )
@@ -52,6 +83,8 @@ export function createProjectEnvironmentAtoms<R, E>(
   const projectScheduler = createAtomCommandScheduler()
   const fileScheduler = createAtomCommandScheduler()
   const proposalScheduler = createAtomCommandScheduler()
+  const projectAtlasScheduler = createAtomCommandScheduler()
+  const diffAnalysis = createDiffAnalysisEnvironmentAtoms(runtime)
   const optimisticFileFamily = Atom.family((key: string) =>
     Atom.make<OptimisticProjectFile | null>(null).pipe(
       Atom.withLabel(`environment-data:projects:optimistic-file:${key}`),
@@ -63,6 +96,7 @@ export function createProjectEnvironmentAtoms<R, E>(
       JSON.stringify([environmentId, input.projectId]),
   }
   return {
+    ...diffAnalysis,
     searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:projects:search-entries',
       tag: WS_METHODS.projectsSearchEntries,
@@ -116,6 +150,12 @@ export function createProjectEnvironmentAtoms<R, E>(
       staleTimeMs: 0,
       idleTtlMs: 5 * 60_000,
     }),
+    findProposalByOrchestrateRevision: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:proposals:find-by-orchestrate-revision',
+      tag: WS_METHODS.proposalsFindByOrchestrateRevision,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
     getProposalGeneration: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:proposals:generation',
       tag: WS_METHODS.proposalsGetGeneration,
@@ -133,6 +173,40 @@ export function createProjectEnvironmentAtoms<R, E>(
       tag: WS_METHODS.proposalsLatestImplementationAttempt,
       staleTimeMs: 0,
       idleTtlMs: 5 * 60_000,
+    }),
+    getArchitectureImpact: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:cartographer:architecture-impact',
+      tag: WS_METHODS.cartographerGetArchitectureImpact,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getRepositoryMap: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:cartographer:repository-map',
+      tag: WS_METHODS.cartographerGetRepositoryMap,
+      staleTimeMs: 30_000,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getArchitectureScope: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:cartographer:architecture-scope',
+      tag: WS_METHODS.cartographerGetArchitectureScope,
+      staleTimeMs: Number.POSITIVE_INFINITY,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getArchitectureNeighborhood: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:cartographer:architecture-neighborhood',
+      tag: WS_METHODS.cartographerGetArchitectureNeighborhood,
+      staleTimeMs: Number.POSITIVE_INFINITY,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getArchitectureSource: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:cartographer:architecture-source',
+      tag: WS_METHODS.cartographerGetArchitectureSource,
+      staleTimeMs: Number.POSITIVE_INFINITY,
+      idleTtlMs: 5 * 60_000,
+    }),
+    projectAtlasStatus: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: 'environment-data:cartographer:project-atlas-status',
+      tag: WS_METHODS.subscribeProjectAtlasStatus,
     }),
     optimisticFile: (target: OptimisticProjectFileTarget) =>
       optimisticFileFamily(optimisticProjectFileKey(target)),
@@ -170,28 +244,25 @@ export function createProjectEnvironmentAtoms<R, E>(
       scheduler: proposalScheduler,
       concurrency: {
         mode: 'latest',
-        key: ({ environmentId, input }) =>
-          JSON.stringify([environmentId, input.threadId, input.proposalId]),
+        key: proposalGenerationStartCommandKey,
       },
     }),
-    issueCartographerEmbed: createEnvironmentRpcCommand(runtime, {
-      label: 'environment-data:cartographer:issue-embed',
-      tag: WS_METHODS.cartographerIssueEmbed,
-      scheduler: proposalScheduler,
-      concurrency: {
-        mode: 'latest',
-        key: ({ environmentId, input }) =>
-          JSON.stringify([environmentId, input.threadId, input.generationId ?? null]),
-      },
-    }),
-    closeCartographerEmbed: createEnvironmentRpcCommand(runtime, {
-      label: 'environment-data:cartographer:close-embed',
-      tag: WS_METHODS.cartographerCloseEmbed,
-      scheduler: proposalScheduler,
+    ensureProjectArchitecture: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:cartographer:ensure-project-architecture',
+      tag: WS_METHODS.cartographerEnsureProjectArchitecture,
+      scheduler: projectAtlasScheduler,
       concurrency: {
         mode: 'serial',
-        key: ({ environmentId, input }) =>
-          JSON.stringify([environmentId, input.threadId, input.sessionId]),
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.projectId]),
+      },
+    }),
+    rebuildProjectAtlas: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:cartographer:rebuild-project-atlas',
+      tag: WS_METHODS.cartographerRebuildProjectAtlas,
+      scheduler: projectAtlasScheduler,
+      concurrency: {
+        mode: 'serial',
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.projectId]),
       },
     }),
   }

@@ -1,7 +1,7 @@
 // apps/web/src/components/chat/composer/ComposerFooterModeControls.tsx
 // renders composer runtime-mode and interaction-mode footer controls
 
-import type { ProviderInteractionMode, RuntimeMode } from '@t3tools/contracts'
+import type { CollaborationMode, RuntimeMode } from '@t3tools/contracts'
 import { memo } from 'react'
 import {
   BotIcon,
@@ -18,6 +18,7 @@ import { cn } from '~/lib/utils'
 import { Button } from '../../ui/button'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../../ui/select'
 import { Separator } from '../../ui/separator'
+import { Toggle } from '../../ui/toggle'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 
 const runtimeModeConfig: Record<
@@ -50,31 +51,28 @@ const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[]
 
 export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showPlanMode: boolean
-  interactionMode: ProviderInteractionMode
+  collaborationMode: CollaborationMode
   runtimeMode: RuntimeMode
   showPlanToggle: boolean
   planSidebarLabel: string
   planSidebarOpen: boolean
-  onInteractionModeChange: (mode: 'build' | 'plan' | 'orchestrate') => void
+  onInteractionModeChange: (mode: 'build' | 'plan') => void
+  onOrchestrateChange: (enabled: boolean) => void
   onRuntimeModeChange: (mode: RuntimeMode) => void
   onTogglePlanSidebar: () => void
 })
 {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode]
   const RuntimeModeIcon = runtimeModeOption.icon
-  const effectiveMode = props.interactionMode === 'default' ? 'build' : props.interactionMode
+  const effectiveMode = props.collaborationMode.baseMode === 'default' ? 'build' : 'plan'
   const interactionModeTooltip =
-    effectiveMode === 'orchestrate'
-      ? 'Orchestrate mode — coordinate bounded work through the worker broker'
-      : effectiveMode === 'plan'
-        ? 'Plan mode — explore and propose changes before building'
-        : 'Build mode — make changes directly'
-  const InteractionModeIcon =
-    effectiveMode === 'orchestrate'
-      ? WorkflowIcon
-      : effectiveMode === 'plan'
-        ? PencilRulerIcon
-        : BotIcon
+    effectiveMode === 'plan'
+      ? 'Plan mode — explore and propose changes before building'
+      : 'Build mode — make changes directly'
+  const InteractionModeIcon = effectiveMode === 'plan' ? PencilRulerIcon : BotIcon
+  const orchestrateTooltip = props.collaborationMode.orchestrate
+    ? 'Disable Orchestrate — stop coordinating work through the worker broker'
+    : 'Enable Orchestrate — coordinate bounded work through the worker broker'
   const planSidebarTooltip = props.planSidebarOpen
     ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
     : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
@@ -85,9 +83,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
       <Tooltip>
         <Select
           value={effectiveMode}
-          onValueChange={(value) =>
-            props.onInteractionModeChange(value! as 'build' | 'plan' | 'orchestrate')
-          }
+          onValueChange={(value) => props.onInteractionModeChange(value! as 'build' | 'plan')}
         >
           <TooltipTrigger
             render={
@@ -105,13 +101,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
             }
           >
             <InteractionModeIcon className="size-4" />
-            <SelectValue>
-              {effectiveMode === 'orchestrate'
-                ? 'Orchestrate'
-                : effectiveMode === 'plan'
-                  ? 'Plan'
-                  : 'Build'}
-            </SelectValue>
+            <SelectValue>{effectiveMode === 'plan' ? 'Plan' : 'Build'}</SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false} popupClassName="min-w-40">
             {/* item text is one block, and preflight makes svg display:block, so
@@ -130,15 +120,32 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
                 </span>
               </SelectItem>
             ) : null}
-            <SelectItem value="orchestrate" hideIndicator>
-              <span className="flex items-center gap-2 whitespace-nowrap">
-                <WorkflowIcon className="size-3.5" />
-                Orchestrate
-              </span>
-            </SelectItem>
           </SelectPopup>
         </Select>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Toggle
+              variant="ghost"
+              size="sm"
+              className={cn(
+                'shrink-0 px-2 sm:px-3',
+                props.collaborationMode.orchestrate
+                  ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
+                  : 'text-muted-foreground/70 hover:text-foreground/80',
+              )}
+              aria-label={orchestrateTooltip}
+              pressed={props.collaborationMode.orchestrate}
+              onPressedChange={props.onOrchestrateChange}
+            >
+              <WorkflowIcon className="size-4" />
+              <span className="sr-only sm:not-sr-only">Orchestrate</span>
+            </Toggle>
+          }
+        />
+        <TooltipPopup side="top">{orchestrateTooltip}</TooltipPopup>
       </Tooltip>
     </>
   )

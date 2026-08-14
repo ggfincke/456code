@@ -123,6 +123,7 @@ export function DraftHeroHeadline({
             const project = entry.targetProject
             void handleNewThread(scopeProjectRef(project.environmentId, project.id), {
               replace: true,
+              carryComposerContent: true,
             })
           }}
         >

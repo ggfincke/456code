@@ -7,6 +7,7 @@ import {
   scopedThreadKey,
 } from '@t3tools/client-runtime/environment'
 import {
+  type CollaborationMode,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   type EnvironmentId,
@@ -14,7 +15,6 @@ import {
   type PreviewAnnotationPayload,
   ProviderDriverKind,
   ProviderInstanceId,
-  ProviderInteractionMode,
   ProviderOptionSelection,
   RuntimeMode,
   type ScopedProjectRef,
@@ -22,6 +22,7 @@ import {
   type ServerProvider,
   ThreadId,
   defaultInstanceIdForDriver,
+  normalizeCollaborationMode,
 } from '@t3tools/contracts'
 import { UnifiedSettings } from '@t3tools/contracts/settings'
 import { createModelSelection, normalizeModelSlug } from '@t3tools/shared/model'
@@ -39,6 +40,7 @@ import {
 import {
   type TerminalContextDraft,
   ensureInlineTerminalContextPlaceholders,
+  stripInlineTerminalContextPlaceholders,
 } from '../lib/terminalContext'
 import { type ReviewCommentContext } from '../reviewCommentContext'
 
@@ -47,7 +49,6 @@ import {
   EMPTY_COMPOSER_DRAFT_MODEL_STATE,
   type EffectiveComposerModelState,
   deriveEffectiveComposerModelState,
-  isProviderInteractionMode,
   isRuntimeMode,
   normalizeModelSelection,
   normalizeProviderDriverKind,
@@ -137,7 +138,7 @@ export interface ComposerDraftStoreState
       envMode?: DraftThreadEnvMode
       startFromOrigin?: boolean
       runtimeMode?: RuntimeMode
-      interactionMode?: ProviderInteractionMode
+      collaborationMode?: CollaborationMode
     },
   ) => void
   // creates or updates the draft session tracked for a concrete project ref.
@@ -152,7 +153,7 @@ export interface ComposerDraftStoreState
       envMode?: DraftThreadEnvMode
       startFromOrigin?: boolean
       runtimeMode?: RuntimeMode
-      interactionMode?: ProviderInteractionMode
+      collaborationMode?: CollaborationMode
     },
   ) => void
   // updates mutable draft-session metadata without touching composer content.
@@ -166,7 +167,7 @@ export interface ComposerDraftStoreState
       envMode?: DraftThreadEnvMode
       startFromOrigin?: boolean
       runtimeMode?: RuntimeMode
-      interactionMode?: ProviderInteractionMode
+      collaborationMode?: CollaborationMode
     },
   ) => void
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void
@@ -216,7 +217,7 @@ export interface ComposerDraftStoreState
   ) => void
   setInteractionMode: (
     threadRef: ComposerThreadTarget,
-    interactionMode: ProviderInteractionMode | null | undefined,
+    collaborationMode: CollaborationMode | null | undefined,
   ) => void
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => void
   addImages: (threadRef: ComposerThreadTarget, images: ComposerImageAttachment[]) => void
@@ -271,6 +272,8 @@ export interface ComposerDraftStoreState
   // prompt stash, which can only round-trip text + images: clearing the
   // session-bound contexts would destroy state nothing can restore.
   clearComposerPromptAndImages: (threadRef: ComposerThreadTarget) => void
+  // moves typed text and images while leaving session-bound context behind.
+  moveComposerPromptAndImages: (from: ComposerThreadTarget, to: ComposerThreadTarget) => void
 }
 
 const composerDraftStore = create<ComposerDraftStoreState>()(
@@ -493,7 +496,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   ? existing.createdAt
                   : options.createdAt || existing.createdAt,
               runtimeMode: options.runtimeMode ?? existing.runtimeMode,
-              interactionMode: options.interactionMode ?? existing.interactionMode,
+              collaborationMode: options.collaborationMode ?? existing.collaborationMode,
               branch: nextBranch,
               worktreePath: nextWorktreePath,
               envMode:
@@ -507,7 +510,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.logicalProjectKey === existing.logicalProjectKey &&
               nextDraftThread.createdAt === existing.createdAt &&
               nextDraftThread.runtimeMode === existing.runtimeMode &&
-              nextDraftThread.interactionMode === existing.interactionMode &&
+              nextDraftThread.collaborationMode.baseMode === existing.collaborationMode.baseMode &&
+              nextDraftThread.collaborationMode.orchestrate ===
+                existing.collaborationMode.orchestrate &&
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
@@ -1031,31 +1036,34 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey }
           })
         },
-        setInteractionMode: (threadRef, interactionMode) =>
+        setInteractionMode: (threadRef, collaborationMode) =>
         {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? ''
           if (threadKey.length === 0)
           {
             return
           }
-          const nextInteractionMode = isProviderInteractionMode(interactionMode)
-            ? interactionMode
+          const nextCollaborationMode = collaborationMode
+            ? normalizeCollaborationMode(collaborationMode.baseMode, collaborationMode.orchestrate)
             : null
           set((state) =>
           {
             const existing = state.draftsByThreadKey[threadKey]
-            if (!existing && nextInteractionMode === null)
+            if (!existing && nextCollaborationMode === null)
             {
               return state
             }
             const base = existing ?? createEmptyThreadDraft()
-            if (base.interactionMode === nextInteractionMode)
+            if (
+              base.collaborationMode?.baseMode === nextCollaborationMode?.baseMode &&
+              base.collaborationMode?.orchestrate === nextCollaborationMode?.orchestrate
+            )
             {
               return state
             }
             const nextDraft: ComposerThreadDraftState = {
               ...base,
-              interactionMode: nextInteractionMode,
+              collaborationMode: nextCollaborationMode,
             }
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
             if (shouldRemoveDraft(nextDraft))
@@ -1699,6 +1707,68 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             else
             {
               nextDraftsByThreadKey[threadKey] = nextDraft
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey }
+          })
+        },
+        moveComposerPromptAndImages: (from, to) =>
+        {
+          const fromKey = resolveComposerDraftKey(get(), from) ?? ''
+          const toKey = resolveComposerDraftKey(get(), to) ?? ''
+          if (fromKey.length === 0 || toKey.length === 0 || fromKey === toKey)
+          {
+            return
+          }
+          set((state) =>
+          {
+            const source = state.draftsByThreadKey[fromKey]
+            if (!source)
+            {
+              return state
+            }
+            const destination = state.draftsByThreadKey[toKey] ?? createEmptyThreadDraft()
+            // terminal placeholders belong to contexts that stay with their source session.
+            const movedPrompt = ensureInlineTerminalContextPlaceholders(
+              stripInlineTerminalContextPlaceholders(source.prompt),
+              destination.terminalContexts.length,
+            )
+            const nextDestination: ComposerThreadDraftState = {
+              ...destination,
+              prompt: movedPrompt,
+              images: [...destination.images, ...source.images],
+              nonPersistedImageIds: [
+                ...destination.nonPersistedImageIds,
+                ...source.nonPersistedImageIds,
+              ],
+              persistedAttachments: [
+                ...destination.persistedAttachments,
+                ...source.persistedAttachments,
+              ],
+            }
+            // keep source contexts but do not revoke image URLs still owned by the destination.
+            const nextSource: ComposerThreadDraftState = {
+              ...source,
+              prompt: ensureInlineTerminalContextPlaceholders('', source.terminalContexts.length),
+              images: [],
+              nonPersistedImageIds: [],
+              persistedAttachments: [],
+            }
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
+            if (shouldRemoveDraft(nextSource))
+            {
+              delete nextDraftsByThreadKey[fromKey]
+            }
+            else
+            {
+              nextDraftsByThreadKey[fromKey] = nextSource
+            }
+            if (shouldRemoveDraft(nextDestination))
+            {
+              delete nextDraftsByThreadKey[toKey]
+            }
+            else
+            {
+              nextDraftsByThreadKey[toKey] = nextDestination
             }
             return { draftsByThreadKey: nextDraftsByThreadKey }
           })

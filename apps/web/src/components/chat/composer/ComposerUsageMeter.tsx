@@ -1,12 +1,13 @@
 // apps/web/src/components/chat/composer/ComposerUsageMeter.tsx
-// combines provider-plan and context-window usage in the composer footer meter
+// combines provider usage, context details, and manual compaction in the composer meter
 import type { ServerProviderAccountUsage } from '@t3tools/contracts'
 
 import { useClientSettings } from '~/hooks/useSettings'
 import { cn } from '~/lib/utils'
 import { type ContextWindowSnapshot, formatContextWindowTokens } from '~/lib/contextWindow'
 import type { ThreadContextWindowSelection } from './composerContextWindow'
-import { Popover, PopoverPopup, PopoverTrigger } from '../../ui/popover'
+import { Button } from '../../ui/button'
+import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from '../../ui/popover'
 import {
   formatProviderUsagePercent,
   isProviderUsageWindowDanger,
@@ -123,6 +124,8 @@ export function ComposerUsageMeter(props: {
   contextUsage: ThreadContextWindowSelection
   accountUsage?: ServerProviderAccountUsage | undefined
   providerDisplayName?: string | null
+  canCompactNow?: boolean
+  onCompactNow?: () => void
 })
 {
   const { accountUsage, contextUsage: contextSelection, providerDisplayName } = props
@@ -241,6 +244,22 @@ export function ComposerUsageMeter(props: {
             />
           ) : contextSelection.state === 'unavailable' ? (
             <EmptyContextWindowDetails providerDisplayName={providerDisplayName} />
+          ) : null}
+          {props.canCompactNow && props.onCompactNow ? (
+            <div className="border-border/65 border-t pt-2">
+              <PopoverClose
+                render={
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="w-full justify-start"
+                    onClick={props.onCompactNow}
+                  />
+                }
+              >
+                Compact now
+              </PopoverClose>
+            </div>
           ) : null}
         </div>
       </PopoverPopup>

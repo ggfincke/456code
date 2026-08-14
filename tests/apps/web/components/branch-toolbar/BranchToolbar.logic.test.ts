@@ -103,16 +103,52 @@ describe('resolvePreviousWorktreeSeed', () =>
   })
 })
 
-describe('resolvePreviousWorktreeLabel', () =>
+describe('workspace label helpers', () =>
 {
-  it('includes the branch when known', () =>
+  it.each([
+    {
+      label: 'previous worktree with branch',
+      actual: () => resolvePreviousWorktreeLabel({ branch: 't3/fix-thing', worktreePath: '/wt' }),
+      expected: 'Previous worktree (t3/fix-thing)',
+    },
+    {
+      label: 'previous worktree without branch',
+      actual: () => resolvePreviousWorktreeLabel({ branch: null, worktreePath: '/wt' }),
+      expected: 'Previous worktree',
+    },
+    {
+      label: 'env mode local',
+      actual: () => resolveEnvModeLabel('local'),
+      expected: 'Current checkout',
+    },
+    {
+      label: 'env mode worktree',
+      actual: () => resolveEnvModeLabel('worktree'),
+      expected: 'New worktree',
+    },
+    {
+      label: 'current workspace without worktree',
+      actual: () => resolveCurrentWorkspaceLabel(null),
+      expected: 'Current checkout',
+    },
+    {
+      label: 'current workspace with worktree',
+      actual: () => resolveCurrentWorkspaceLabel('/repo/.456code/worktrees/feature-a'),
+      expected: 'Current worktree',
+    },
+    {
+      label: 'locked workspace without worktree',
+      actual: () => resolveLockedWorkspaceLabel(null),
+      expected: 'Local checkout',
+    },
+    {
+      label: 'locked workspace with worktree',
+      actual: () => resolveLockedWorkspaceLabel('/repo/.456code/worktrees/feature-a'),
+      expected: 'Worktree',
+    },
+  ])('formats $label', ({ actual, expected }) =>
   {
-    expect(resolvePreviousWorktreeLabel({ branch: 't3/fix-thing', worktreePath: '/wt' })).toBe(
-      'Previous worktree (t3/fix-thing)',
-    )
-    expect(resolvePreviousWorktreeLabel({ branch: null, worktreePath: '/wt' })).toBe(
-      'Previous worktree',
-    )
+    expect(actual()).toBe(expected)
   })
 })
 
@@ -382,43 +418,6 @@ describe('resolveEffectiveEnvMode', () =>
         draftThreadEnvMode: 'worktree',
       }),
     ).toBe('worktree')
-  })
-})
-
-describe('resolveEnvModeLabel', () =>
-{
-  it('uses explicit workspace labels', () =>
-  {
-    expect(resolveEnvModeLabel('local')).toBe('Current checkout')
-    expect(resolveEnvModeLabel('worktree')).toBe('New worktree')
-  })
-})
-
-describe('resolveCurrentWorkspaceLabel', () =>
-{
-  it('describes the main repo checkout when no worktree path is active', () =>
-  {
-    expect(resolveCurrentWorkspaceLabel(null)).toBe('Current checkout')
-  })
-
-  it('describes the active checkout as a worktree when one is attached', () =>
-  {
-    expect(resolveCurrentWorkspaceLabel('/repo/.456code/worktrees/feature-a')).toBe(
-      'Current worktree',
-    )
-  })
-})
-
-describe('resolveLockedWorkspaceLabel', () =>
-{
-  it('uses a shorter label for the main repo checkout', () =>
-  {
-    expect(resolveLockedWorkspaceLabel(null)).toBe('Local checkout')
-  })
-
-  it('uses a shorter label for an attached worktree', () =>
-  {
-    expect(resolveLockedWorkspaceLabel('/repo/.456code/worktrees/feature-a')).toBe('Worktree')
   })
 })
 

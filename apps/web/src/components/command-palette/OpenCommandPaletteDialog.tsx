@@ -23,6 +23,7 @@ import {
   ArrowDownIcon,
   ArrowLeftIcon,
   ArrowUpIcon,
+  BlocksIcon,
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -82,6 +83,7 @@ import {
   resolveProjectPickerTarget,
   resolveWslProjectSelection,
 } from '../../lib/wslPaths'
+import { repositoryAtlasDisabledReason } from '../architecture/architectureAvailability'
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
@@ -121,6 +123,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 import { useComposerHandleContext } from '../chat/composer/composerHandleContext'
 import { getProjectOrderKey, selectProjectGroupingSettings } from '../../logicalProject'
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from '../../uiStateStore'
+import { useRightPanelStore } from '../../rightPanelStore'
 import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
@@ -417,9 +420,25 @@ export function OpenCommandPaletteDialog(props: {
   )
 
   const activeThreadId = activeThread?.id
-  const currentProjectEnvironmentId =
-    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null
-  const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null
+  const currentProjectEnvironmentId = activeThread?.environmentId ?? null
+  const currentProjectId = activeThread?.projectId ?? null
+  const currentThreadRef = activeThread
+    ? scopeThreadRef(activeThread.environmentId, activeThread.id)
+    : null
+  const currentProjectExists = projects.some(
+    (project) =>
+      project.environmentId === currentProjectEnvironmentId && project.id === currentProjectId,
+  )
+  const currentEnvironment =
+    environments.find((environment) => environment.environmentId === currentProjectEnvironmentId) ??
+    null
+  const architectureDisabledReason = repositoryAtlasDisabledReason({
+    hasServerThread: currentThreadRef !== null,
+    exactProject: currentProjectId !== null && currentProjectExists,
+    capability:
+      currentEnvironment?.serverConfig?.environment.capabilities.architectureImpact ?? null,
+    environmentLabel: currentEnvironment?.label,
+  })
   const currentProjectCwd = currentProjectId ? (projectCwdById.get(currentProjectId) ?? null) : null
   const currentProjectCwdForBrowse =
     browseEnvironmentId && currentProjectEnvironmentId === browseEnvironmentId
@@ -1007,6 +1026,22 @@ export function OpenCommandPaletteDialog(props: {
       },
     })
   }
+
+  actionItems.push({
+    kind: 'action',
+    value: 'action:architecture',
+    searchTerms: ['architecture', 'atlas', 'project graph', 'dependencies'],
+    title: 'Open Repository Atlas',
+    description: architectureDisabledReason ?? 'Explore this project’s architecture.',
+    disabled: architectureDisabledReason !== null,
+    icon: <BlocksIcon className={ITEM_ICON_CLASS} />,
+    run: async () =>
+    {
+      if (architectureDisabledReason !== null || currentThreadRef === null) return
+      useRightPanelStore.getState().open(currentThreadRef, 'repository-atlas-home')
+      setOpen(false)
+    },
+  })
 
   actionItems.push({
     kind: 'action',

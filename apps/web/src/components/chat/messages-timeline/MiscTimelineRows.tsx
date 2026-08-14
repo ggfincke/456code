@@ -1,5 +1,5 @@
 // apps/web/src/components/chat/messages-timeline/MiscTimelineRows.tsx
-// render turn-fold, proposed-plan, and provider-switch timeline rows
+// render turn-fold, plan, provider-switch, and worker-verdict timeline rows
 
 import { FileDiff } from '@pierre/diffs/react'
 import {
@@ -236,6 +236,27 @@ export function ProviderSwitchTimelineRow({
           </pre>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+export function WorkerVerdictTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: 'worker-verdict' }>
+})
+{
+  const { jobId, verdict } = row.workerVerdict
+  const shortJobId = jobId.length > 12 ? `${jobId.slice(0, 12)}…` : jobId
+
+  return (
+    <div className="border-b border-border/60 px-1 pb-2 pt-1 text-xs">
+      <div className="flex min-w-0 items-baseline gap-2">
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          Verdict · <span className="font-mono">{shortJobId}</span>
+        </span>
+        <span className="min-w-0 flex-1 break-words text-foreground">{verdict}</span>
+      </div>
     </div>
   )
 }

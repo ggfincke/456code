@@ -25,6 +25,7 @@ import {
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
 } from '../../../apps/web/src/session-logic'
+import { workEntryIndicatesToolRunning } from '../../../apps/web/src/session/worklog'
 
 let nextActivityId = 0
 
@@ -861,8 +862,18 @@ describe('workEntryIndicatesToolFailure', () =>
       }),
     ).toBe(false)
     expect(workEntryIndicatesToolSuccess({ ...base, tone: 'thinking', detail: '…' })).toBe(false)
+    // an in-flight row is running, not neutral: the neutral bucket is what the
+    // timeline drops, and dropping it hid every long-running tool call
     expect(
       workEntryIndicatesToolNeutralStatus({
+        ...base,
+        tone: 'tool',
+        toolLifecycleStatus: 'inProgress',
+        detail: '…',
+      }),
+    ).toBe(false)
+    expect(
+      workEntryIndicatesToolRunning({
         ...base,
         tone: 'tool',
         toolLifecycleStatus: 'inProgress',
@@ -1850,6 +1861,45 @@ describe('deriveTimelineEntries', () =>
       'work:work-z',
       'work:work-a',
     ])
+  })
+
+  it('derives a dedicated worker verdict row and omits cleared or malformed verdicts', () =>
+  {
+    const activities = [
+      makeActivity({
+        id: 'worker-verdict:run-1:job-1',
+        createdAt: '2026-02-23T00:00:01.000Z',
+        kind: 'orchestrate.worker.verdict',
+        summary: 'Worker verdict',
+        tone: 'info',
+        payload: { runId: 'run-1', jobId: 'job-1', verdict: 'approved' },
+      }),
+      makeActivity({
+        id: 'worker-verdict:run-1:job-2',
+        kind: 'orchestrate.worker.verdict',
+        summary: 'Worker verdict',
+        tone: 'info',
+        payload: { runId: 'run-1', jobId: 'job-2', verdict: '' },
+      }),
+      makeActivity({
+        id: 'unknown-activity',
+        kind: 'orchestrate.future.activity',
+        payload: { verdict: 'ignored' },
+      }),
+    ]
+
+    const entries = deriveTimelineEntries([], [], [], [], activities)
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      kind: 'worker-verdict',
+      workerVerdict: {
+        runId: 'run-1',
+        jobId: 'job-1',
+        verdict: 'approved',
+      },
+    })
+    expect(deriveWorkLogEntries(activities.slice(0, 2))).toEqual([])
   })
 })
 

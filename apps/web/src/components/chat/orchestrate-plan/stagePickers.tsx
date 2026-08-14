@@ -7,9 +7,9 @@ import { ChevronDownIcon, XIcon } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { cn } from '../../../lib/utils'
-import type { AppModelOption } from '../../../modelSelection'
 import type { ProviderInstanceEntry } from '../../../providerInstances'
 import { getProviderModelCapabilities } from '../../../providerModels'
+import { workerRunJobRows, workerRunOutcomeSummaryView } from '../../../workers/workersPanel.logic'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
 import {
@@ -26,7 +26,12 @@ import { ModelPickerContent } from '../model-picker/ModelPickerContent'
 import { ProviderInstanceIcon } from '../ProviderInstanceIcon'
 import { getTriggerDisplayModelName } from '../providerIconUtils'
 import type { OrchestrateStageSelection } from './orchestratePlanStore'
-import { type OrchestratePlanActions, type OrchestratePlanStage, type PlanRow } from './parse'
+import {
+  type OrchestratePlanActions,
+  type OrchestratePlanStage,
+  type PlanRow,
+  resolveStageModelOption,
+} from './parse'
 
 export const TERMINAL_STATUSES: ReadonlySet<WorkersJobStatus> = new Set([
   'completed',
@@ -115,16 +120,21 @@ export function StageStatusCell({
   {
     counts.set(job.status, (counts.get(job.status) ?? 0) + 1)
   }
-  const pending = Math.max(0, planned - jobs.length)
+  const outcomeSummary = workerRunOutcomeSummaryView(jobs)
+  const currentJobCount = workerRunJobRows(jobs).length
+  const pending = Math.max(0, planned - currentJobCount)
   return (
-    <span className="flex items-center gap-1 whitespace-nowrap">
+    <span className="flex flex-wrap items-center gap-1">
+      {outcomeSummary === null ? null : (
+        <span className="font-medium text-foreground">{outcomeSummary.label}</span>
+      )}
       <span className="tabular-nums text-muted-foreground">
-        {jobs.length}/{planned}
+        {currentJobCount}/{planned}
       </span>
       {[...counts.entries()].map(([status, count]) =>
       {
         const chipClassName = cn(
-          'inline-flex rounded px-1.5 py-0.5 font-medium',
+          'inline-flex rounded px-1.5 py-0.5 font-medium opacity-70',
           STATUS_CHIP_CLASSES[status],
         )
         const label = `${count > 1 ? `${count} ` : ''}${status}`
@@ -160,11 +170,6 @@ export function StageStatusCell({
                     {Option.isSome(job.failureClass) ? (
                       <p className="text-muted-foreground">
                         {job.failureClass.value.replace('_', ' ')}
-                        {Option.getOrNull(job.hasPatch) === true
-                          ? ' · patch available — salvage before relaunching'
-                          : Option.getOrNull(job.hasPatch) === false
-                            ? ' · no patch'
-                            : ''}
                       </p>
                     ) : null}
                     <p className="break-words text-muted-foreground">
@@ -256,20 +261,6 @@ const BROKER_EFFORTS: ReadonlySet<string> = new Set([
   'max',
   'ultra',
 ])
-
-// the catalog option a stage resolves to: its picked model, or the
-// instance default when the stage is left on provider defaults
-export function resolveStageModelOption(
-  entry: ProviderInstanceEntry | null,
-  options: ReadonlyArray<AppModelOption>,
-  model: string,
-): AppModelOption | undefined
-{
-  if (entry === null) return undefined
-  return model === ''
-    ? (options.find((option) => option.isDefault) ?? options[0])
-    : options.find((option) => option.slug === model)
-}
 
 // reasoning tiers the resolved model actually supports; kept unfiltered so
 // the model's own default still resolves, with broker support flagged

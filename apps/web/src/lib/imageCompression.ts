@@ -115,22 +115,25 @@ function createCanvas(width: number, height: number): Canvas2D | null
   return { canvas, context }
 }
 
-// prefers webp for smaller transparent output and falls back to jpeg
-async function encodeToDataUrl(
+// detects codec support and only materializes payloads within the budget
+async function encodeCanvas(
   canvas: OffscreenCanvas | HTMLCanvasElement,
   quality: number,
   mimeType: string,
-): Promise<{ dataUrl: string; mimeType: string } | null>
+  budgetChars: number,
+): Promise<{ dataUrl: string | null; mimeType: string } | null>
 {
   if (typeof HTMLCanvasElement !== 'undefined' && canvas instanceof HTMLCanvasElement)
   {
     const dataUrl = canvas.toDataURL(mimeType, quality)
     // unsupported encoders silently return png
     if (!dataUrl.startsWith(`data:${mimeType}`)) return null
-    return { dataUrl, mimeType }
+    return { dataUrl: dataUrl.length <= budgetChars ? dataUrl : null, mimeType }
   }
   const blob = await (canvas as OffscreenCanvas).convertToBlob({ type: mimeType, quality })
   if (blob.type && blob.type !== mimeType) return null
+  const dataUrlLength = `data:${mimeType};base64,`.length + 4 * Math.ceil(blob.size / 3)
+  if (dataUrlLength > budgetChars) return { dataUrl: null, mimeType }
   return { dataUrl: await blobToDataUrl(blob, mimeType), mimeType }
 }
 
@@ -148,7 +151,7 @@ async function encodeWithinBudget(
   if (!target) return null
 
   // probe webp before drawing because jpeg needs a white matte
-  const probe = await encodeToDataUrl(target.canvas, QUALITY_STEPS[0], 'image/webp')
+  const probe = await encodeCanvas(target.canvas, QUALITY_STEPS[0], 'image/webp', 0)
   const mimeType = probe ? 'image/webp' : 'image/jpeg'
 
   if (mimeType === 'image/jpeg')
@@ -158,21 +161,16 @@ async function encodeWithinBudget(
   }
   target.context.drawImage(bitmap, 0, 0, width, height)
 
-  let smallest: { dataUrl: string; mimeType: string } | null = null
   for (const quality of QUALITY_STEPS)
   {
-    const encoded = await encodeToDataUrl(target.canvas, quality, mimeType)
+    const encoded = await encodeCanvas(target.canvas, quality, mimeType, budgetChars)
     if (!encoded) break
-    if (smallest === null || encoded.dataUrl.length < smallest.dataUrl.length)
+    if (encoded.dataUrl !== null)
     {
-      smallest = encoded
-    }
-    if (encoded.dataUrl.length <= budgetChars)
-    {
-      return encoded
+      return { dataUrl: encoded.dataUrl, mimeType: encoded.mimeType }
     }
   }
-  return smallest
+  return null
 }
 
 type ReencodeResult =
