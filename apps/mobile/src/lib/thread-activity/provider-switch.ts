@@ -101,7 +101,7 @@ export function deriveLatestProviderSwitchOutcome(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ProviderSwitchOutcome | null
 {
-  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities)
+  const ordered = [...activities].sort(compareOrchestrationThreadActivities)
   let latest: ProviderSwitchOutcome | null = null
 
   for (const activity of ordered)

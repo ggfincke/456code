@@ -681,7 +681,7 @@ export function deriveNormalizedWorkLogEntries<
 ): T[]
 {
   const entries: T[] = []
-  for (const activity of [...activities].toSorted(compareOrchestrationThreadActivities))
+  for (const activity of [...activities].sort(compareOrchestrationThreadActivities))
   {
     if (activity.kind === 'tool.started' || activity.kind === 'context-window.updated') continue
     if (activity.kind === 'task.started' && options.includeTaskStarted !== true) continue

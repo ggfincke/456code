@@ -32,7 +32,8 @@ function upsertEntity<A extends { readonly id: string }>(
   const index = positions.get(incoming.id)
   if (index !== undefined)
   {
-    const next = entities.with(index, incoming)
+    const next = [...entities]
+    next[index] = incoming
     entityPositions.set(next, positions)
     return next
   }
