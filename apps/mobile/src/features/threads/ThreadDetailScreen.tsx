@@ -6,12 +6,12 @@ import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from '@legendapp
 import type { LegendListRef } from '@legendapp/list/react-native'
 import type {
   ApprovalRequestId,
+  CollaborationMode,
   EnvironmentId,
   MessageId,
   ModelSelection,
   OrchestrationThreadShell,
   ProviderApprovalDecision,
-  ProviderInteractionMode,
   ProviderUserInputAnswers,
   RuntimeMode,
   ServerConfig,
@@ -85,7 +85,7 @@ export interface ThreadDetailScreenProps
   readonly onReconnectEnvironment: () => void
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void
-  readonly onUpdateThreadInteractionMode: (interactionMode: ProviderInteractionMode) => void
+  readonly onUpdateThreadInteractionMode: (interactionMode: CollaborationMode) => void
   readonly onRetryProviderSwitch: () => void
   readonly onDismissProviderSwitchNotice: () => void
   readonly onRespondToApproval: (

@@ -64,6 +64,8 @@ type DesktopWindowRuntimeServices =
 export type DesktopWindowError =
   ElectronWindow.ElectronWindowCreateError | PreviewManager.PreviewManagerError
 
+export type MainWindowZoomDirection = 'in' | 'out' | 'reset'
+
 export class DesktopWindow extends Context.Service<
   DesktopWindow,
   {
@@ -90,6 +92,8 @@ export class DesktopWindow extends Context.Service<
     readonly handleBackendNotReady: Effect.Effect<void>
     readonly flushMainWindowBounds: Effect.Effect<void>
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>
+    // target main webContents because Electron zoom roles follow focused preview contents
+    readonly zoomMain: (direction: MainWindowZoomDirection) => Effect.Effect<void>
     readonly syncAppearance: Effect.Effect<void>
   }
 >()('@t3tools/desktop/window/DesktopWindow')
@@ -909,6 +913,20 @@ export const make = Effect.gen(function* ()
       }
 
       send()
+    }),
+    zoomMain: Effect.fn('desktop.window.zoomMain')(function* (direction)
+    {
+      yield* Effect.annotateCurrentSpan({ direction })
+      const window = yield* focusedMainWindow
+      if (Option.isNone(window) || window.value.isDestroyed())
+      {
+        return
+      }
+      const webContents = window.value.webContents
+      // match Electron's zoom menu role step
+      webContents.setZoomLevel(
+        direction === 'reset' ? 0 : webContents.getZoomLevel() + (direction === 'in' ? 0.5 : -0.5),
+      )
     }),
     syncAppearance: Effect.gen(function* ()
     {

@@ -17,6 +17,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
+  normalizeCollaborationMode,
   type ModelSelection as ModelSelectionType,
   type ProjectId as ProjectIdType,
   type ProviderInteractionMode as ProviderInteractionModeType,
@@ -60,6 +61,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  orchestrate: Schema.optional(Schema.Boolean),
   // present when the queued item creates a brand-new thread (pending task)
   // instead of appending a turn to an existing one.
   creation: Schema.optional(QueuedThreadCreationSchema),
@@ -95,6 +97,7 @@ export interface QueuedThreadMessage
   readonly modelSelection?: ModelSelectionType
   readonly runtimeMode?: RuntimeModeType
   readonly interactionMode?: ProviderInteractionModeType
+  readonly orchestrate?: boolean
   readonly creation?: QueuedThreadCreation
   readonly failure?: QueuedThreadFailure
   readonly deliveryAttemptCount?: number
@@ -113,25 +116,38 @@ export interface ThreadSettingsSnapshot
   readonly modelSelection: ModelSelectionType
   readonly runtimeMode: RuntimeModeType
   readonly interactionMode: ProviderInteractionModeType
+  readonly orchestrate?: boolean
 }
 
 export function resolveQueuedThreadSettings(
   message: QueuedThreadMessage,
   thread: ThreadSettingsSnapshot,
   threadStarted: boolean,
-): ThreadSettingsSnapshot
+): ThreadSettingsSnapshot & { readonly orchestrate: boolean }
 {
   const queuedModelSelection = message.modelSelection
   const providerSwitched =
     threadStarted &&
     queuedModelSelection !== undefined &&
     queuedModelSelection.instanceId !== thread.modelSelection.instanceId
+  const threadCollaborationMode = normalizeCollaborationMode(
+    thread.interactionMode,
+    thread.orchestrate,
+  )
+  const queuedCollaborationMode =
+    message.interactionMode === undefined
+      ? normalizeCollaborationMode(
+          threadCollaborationMode.baseMode,
+          message.orchestrate ?? threadCollaborationMode.orchestrate,
+        )
+      : normalizeCollaborationMode(message.interactionMode, message.orchestrate)
   return {
     modelSelection: providerSwitched
       ? thread.modelSelection
       : (queuedModelSelection ?? thread.modelSelection),
     runtimeMode: message.runtimeMode ?? thread.runtimeMode,
-    interactionMode: message.interactionMode ?? thread.interactionMode,
+    interactionMode: queuedCollaborationMode.baseMode,
+    orchestrate: queuedCollaborationMode.orchestrate,
   }
 }
 
@@ -155,14 +171,31 @@ export function encodeQueuedThreadMessage(message: QueuedThreadMessage): unknown
 {
   return encodeStoredQueuedThreadMessage({
     schemaVersion: THREAD_OUTBOX_SCHEMA_VERSION,
-    ...message,
+    ...normalizeStoredQueuedThreadMessage(message),
   })
 }
 
 export function decodeQueuedThreadMessage(value: unknown): QueuedThreadMessage
 {
   const { schemaVersion: _, ...message } = decodeStoredQueuedThreadMessage(value)
-  return message
+  return normalizeStoredQueuedThreadMessage(message)
+}
+
+function normalizeStoredQueuedThreadMessage(message: QueuedThreadMessage): QueuedThreadMessage
+{
+  if (message.interactionMode === undefined && message.orchestrate === undefined)
+  {
+    return message
+  }
+  const collaborationMode = normalizeCollaborationMode(
+    message.interactionMode ?? 'default',
+    message.orchestrate,
+  )
+  return {
+    ...message,
+    interactionMode: collaborationMode.baseMode,
+    orchestrate: collaborationMode.orchestrate,
+  }
 }
 
 export function groupQueuedThreadMessages(

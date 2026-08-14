@@ -9,6 +9,7 @@ import type {
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  normalizeCollaborationMode,
   type MessageId,
 } from '@t3tools/contracts'
 import { buildTemporaryWorktreeBranchName } from '@t3tools/shared/git'
@@ -141,7 +142,10 @@ export function useThreadOutboxDrain(): void
           attachments: queuedMessage.attachments,
           modelSelection,
           runtimeMode: queuedMessage.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-          interactionMode: queuedMessage.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+          interactionMode: normalizeCollaborationMode(
+            queuedMessage.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+            queuedMessage.orchestrate,
+          ),
           workspaceMode: creation.workspaceMode,
           branch: creation.branch,
           worktreePath: creation.worktreePath,

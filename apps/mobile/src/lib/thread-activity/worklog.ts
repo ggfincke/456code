@@ -4,6 +4,7 @@ import {
   deriveNormalizedWorkLogEntries,
   normalizeCompactToolLabel,
   workEntryIndicatesToolFailure as normalizedWorkEntryIndicatesToolFailure,
+  workEntryIndicatesToolRunning as normalizedWorkEntryIndicatesToolRunning,
   workEntryIndicatesToolSuccess as normalizedWorkEntryIndicatesToolSuccess,
   workLogEntryIsToolLike as normalizedWorkLogEntryIsToolLike,
   type NormalizedWorkLogEntry,
@@ -39,7 +40,7 @@ export interface ThreadFeedActivity
     | 'wrench'
     | 'zap'
   readonly toolLike: boolean
-  readonly status: 'success' | 'failure' | 'neutral' | null
+  readonly status: 'success' | 'failure' | 'running' | 'neutral' | null
 }
 
 type WorkLogEntry = Omit<NormalizedWorkLogEntry, 'activityKind' | 'collapseKey' | 'toolCallId'>
@@ -74,6 +75,11 @@ function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean
   return normalizedWorkEntryIndicatesToolSuccess(entry, { thinkingIsToolLike: true })
 }
 
+function workEntryIndicatesToolRunning(entry: WorkLogEntry): boolean
+{
+  return normalizedWorkEntryIndicatesToolRunning(entry, { thinkingIsToolLike: true })
+}
+
 export function workEntryStatus(entry: WorkLogEntry): ThreadFeedActivity['status']
 {
   if (!workLogEntryIsToolLike(entry))
@@ -83,6 +89,12 @@ export function workEntryStatus(entry: WorkLogEntry): ThreadFeedActivity['status
   if (workEntryIndicatesToolFailure(entry))
   {
     return 'failure'
+  }
+  // heartbeats & other in-flight frames carry no completion of their own; the
+  // check mark here claimed a tool had finished while it was still waiting
+  if (workEntryIndicatesToolRunning(entry))
+  {
+    return 'running'
   }
   if (workEntryIndicatesToolSuccess(entry))
   {
@@ -101,6 +113,16 @@ export function workEntryIcon(entry: DerivedWorkLogEntry): ThreadFeedActivity['i
     return 'message'
   }
   if (entry.activityKind === 'runtime.warning') return 'warning'
+  // an approaching plan limit reads as a warning, not as an info row that scrolls past
+  if (entry.activityKind === 'account.rate-limit.warning') return 'warning'
+  // a compaction is the runtime working on itself; both halves of the pair share one mark
+  if (
+    entry.activityKind === 'context-compaction' ||
+    entry.activityKind === 'context-compaction.started'
+  )
+  {
+    return 'zap'
+  }
   if (entry.requestKind === 'command') return 'command'
   if (entry.requestKind === 'file-read') return 'eye'
   if (entry.requestKind === 'file-change') return 'edit'

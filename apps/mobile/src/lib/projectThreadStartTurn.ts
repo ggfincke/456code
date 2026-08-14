@@ -5,9 +5,10 @@ import {
   CommandId,
   MessageId,
   ThreadId,
+  toWireInteractionMode,
+  type CollaborationMode,
   type ModelSelection,
   type ProjectId,
-  type ProviderInteractionMode,
   type RuntimeMode,
 } from '@t3tools/contracts'
 
@@ -37,7 +38,7 @@ export interface ProjectThreadStartTurnSpec
   readonly attachments: ReadonlyArray<DraftComposerImageAttachment>
   readonly modelSelection: ModelSelection
   readonly runtimeMode: RuntimeMode
-  readonly interactionMode: ProviderInteractionMode
+  readonly interactionMode: CollaborationMode
   readonly workspaceMode: 'local' | 'worktree'
   readonly branch: string | null
   readonly worktreePath: string | null
@@ -53,6 +54,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
 {
   const title = deriveThreadTitleFromPrompt(spec.text)
   const isWorktree = spec.workspaceMode === 'worktree'
+  const wireInteractionMode = toWireInteractionMode(spec.interactionMode)
   return {
     commandId: CommandId.make(spec.commandId),
     threadId: ThreadId.make(spec.threadId),
@@ -65,14 +67,14 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     modelSelection: spec.modelSelection,
     titleSeed: title,
     runtimeMode: spec.runtimeMode,
-    interactionMode: spec.interactionMode,
+    ...wireInteractionMode,
     bootstrap: {
       createThread: {
         projectId: spec.projectId,
         title,
         modelSelection: spec.modelSelection,
         runtimeMode: spec.runtimeMode,
-        interactionMode: spec.interactionMode,
+        ...wireInteractionMode,
         branch: spec.branch,
         worktreePath: isWorktree ? null : spec.worktreePath,
         createdAt: spec.createdAt,

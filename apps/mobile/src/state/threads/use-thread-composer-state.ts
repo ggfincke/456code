@@ -8,6 +8,8 @@ import { Alert } from 'react-native'
 import {
   CommandId,
   MessageId,
+  normalizeCollaborationMode,
+  type CollaborationMode,
   type EnvironmentId,
   type ModelSelection,
   type ProviderInteractionMode,
@@ -39,6 +41,7 @@ import {
   setComposerDraftText,
   updateComposerDraftSettings,
   useComposerDraft,
+  type ComposerDraft,
 } from './use-composer-drafts'
 import { setPendingConnectionError } from '../use-remote-environment-registry'
 import { useSelectedThreadDetailState } from './use-thread-detail'
@@ -48,6 +51,21 @@ import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from './thread-
 import { requiresWebImportContinuation } from './thread-outbox-model'
 import { readEnvironmentThreadState } from './threads'
 import { useThreadOutboxMessages } from './use-thread-outbox'
+
+function resolveComposerCollaborationMode(
+  draft: Pick<ComposerDraft, 'interactionMode' | 'orchestrate'> | null | undefined,
+  thread: { readonly interactionMode: ProviderInteractionMode; readonly orchestrate?: boolean },
+): CollaborationMode
+{
+  if (draft?.interactionMode !== undefined)
+  {
+    return normalizeCollaborationMode(
+      draft.interactionMode ?? thread.interactionMode,
+      draft.orchestrate,
+    )
+  }
+  return normalizeCollaborationMode(thread.interactionMode, thread.orchestrate)
+}
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId
@@ -119,7 +137,9 @@ export function useThreadComposerState()
   const selectedThread = selectedThreadDetail ?? selectedThreadShell
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null
   const runtimeMode = selectedDraft?.runtimeMode ?? selectedThread?.runtimeMode ?? null
-  const interactionMode = selectedDraft?.interactionMode ?? selectedThread?.interactionMode ?? null
+  const interactionMode = selectedThread
+    ? resolveComposerCollaborationMode(selectedDraft, selectedThread)
+    : null
 
   const selectedThreadSessionActivity = useMemo(() =>
   {
@@ -190,6 +210,7 @@ export function useThreadComposerState()
 
     const metadata = makeQueuedMessageMetadata()
     const messageId = MessageId.make(metadata.messageId)
+    const collaborationMode = resolveComposerCollaborationMode(draft, thread)
     // clear on optimistic enqueue and restore content if storage fails
     const enqueuePromise = enqueueThreadOutboxMessage({
       environmentId: selectedThreadShell.environmentId,
@@ -200,7 +221,8 @@ export function useThreadComposerState()
       attachments,
       modelSelection: draft.modelSelection ?? thread.modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
-      interactionMode: draft.interactionMode ?? thread.interactionMode,
+      interactionMode: collaborationMode.baseMode,
+      orchestrate: collaborationMode.orchestrate,
       createdAt: metadata.createdAt,
     })
     clearComposerDraftContent(threadKey)
@@ -385,13 +407,16 @@ export function useThreadComposerState()
   )
 
   const onUpdateInteractionMode = useCallback(
-    (value: ProviderInteractionMode) =>
+    (value: CollaborationMode) =>
     {
       if (!selectedThreadKey)
       {
         return
       }
-      updateComposerDraftSettings(selectedThreadKey, { interactionMode: value })
+      updateComposerDraftSettings(selectedThreadKey, {
+        interactionMode: value.baseMode,
+        orchestrate: value.orchestrate,
+      })
     },
     [selectedThreadKey],
   )

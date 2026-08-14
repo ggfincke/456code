@@ -6,8 +6,9 @@ import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
-import { AppState, Platform } from 'react-native'
-import type { EnvironmentId } from '@t3tools/contracts'
+import { AppState, Platform, type AppStateStatus } from 'react-native'
+import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
+import { buildAgentAwarenessDeepLink } from '@t3tools/shared/agentAwareness'
 import {
   type RelayDeviceRegistrationRequest,
   type RelayAgentActivitySnapshotResponse,
@@ -97,6 +98,11 @@ const ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS = 60_000
 const registeredActivityPushTokens = new Map<string, number>()
 let pushTokenSubscription: { remove: () => void } | null = null
 let appStateSubscription: { remove: () => void } | null = null
+// everything in the app that needs foreground/background transitions rides the
+// ONE native subscription below. A second AppState listener would double the
+// bridge traffic and, worse, could outlive this one on sign-out and keep a
+// timer running in the background.
+const appStateListeners = new Set<(state: AppStateStatus) => void>()
 
 // whether the relay has actually accepted this device's registration. The
 // notification/Live Activity settings toggles must reflect this rather than
@@ -200,8 +206,7 @@ export function setAgentAwarenessRelayTokenProvider(
   {
     pushTokenSubscription?.remove()
     pushTokenSubscription = null
-    appStateSubscription?.remove()
-    appStateSubscription = null
+    teardownAppStateListener()
     if (activeLiveActivityRegistrationRetry)
     {
       clearTimeout(activeLiveActivityRegistrationRetry)
@@ -250,8 +255,7 @@ export function releaseAgentAwarenessRelayTokenProvider(): void
   relayTokenProviderIdentity = null
   pushTokenSubscription?.remove()
   pushTokenSubscription = null
-  appStateSubscription?.remove()
-  appStateSubscription = null
+  teardownAppStateListener()
   if (activeLiveActivityRegistrationRetry)
   {
     clearTimeout(activeLiveActivityRegistrationRetry)
@@ -494,10 +498,18 @@ function unregisterDeviceWithRelay(input: {
 
 // arms the lock-screen card the moment the user starts agent work from this
 // phone, while the app is still foregrounded and the fresh activity's token
-// can be registered immediately. The seeded row is a best-effort placeholder;
-// the relay's registration replay repaints it with the authoritative
-// aggregate within seconds. No-ops when a card is already armed.
+// can be registered immediately. The seeded row carries the real thread
+// identity, so its tap target works from the first frame; the local publisher
+// (and, when it exists, the relay's registration replay) repaints phase and
+// model within a tick. No-ops when a card is already armed.
 export function armAgentAwarenessLiveActivityForLocalWork(input: {
+  // absent only while the thread does not exist yet: the new-task flow arms the
+  // card BEFORE the create round trip, because backgrounding the app right
+  // after submit would reject the foreground-only Activity start. There is
+  // genuinely no identity or deep link to hand over at that point, and the
+  // publisher fills both in from the first shell emission after creation.
+  readonly environmentId?: EnvironmentId | undefined
+  readonly threadId?: ThreadId | undefined
   readonly threadTitle: string
   readonly projectTitle: string
 }): void
@@ -526,6 +538,8 @@ export function armAgentAwarenessLiveActivityForLocalWork(input: {
 
 function armAgentAwarenessLiveActivityForLocalWorkNow(
   input: {
+    readonly environmentId?: EnvironmentId | undefined
+    readonly threadId?: ThreadId | undefined
     readonly threadTitle: string
     readonly projectTitle: string
   },
@@ -543,6 +557,10 @@ function armAgentAwarenessLiveActivityForLocalWorkNow(
       return
     }
     const nowIso = new Date(Date.now()).toISOString()
+    const threadRef =
+      input.environmentId !== undefined && input.threadId !== undefined
+        ? { environmentId: input.environmentId, threadId: input.threadId }
+        : null
     const activity = AgentActivity.start({
       title: '456code',
       subtitle: 'Agent work in progress',
@@ -550,15 +568,18 @@ function armAgentAwarenessLiveActivityForLocalWorkNow(
       updatedAt: nowIso,
       activities: [
         {
-          environmentId: '',
-          threadId: '',
+          environmentId: threadRef?.environmentId ?? '',
+          threadId: threadRef?.threadId ?? '',
           projectTitle: input.projectTitle,
           threadTitle: input.threadTitle,
+          // the turn has only just been queued, so there is genuinely no phase
+          // or model to report yet; the publisher fills both in from the shell
+          // as soon as the projection catches up.
           modelTitle: '',
           phase: 'starting',
           status: 'Connecting',
           updatedAt: nowIso,
-          deepLink: '/',
+          deepLink: threadRef === null ? '/' : buildAgentAwarenessDeepLink(threadRef),
         },
       ],
     })
@@ -868,6 +889,17 @@ function ensureAppStateListener(): void
 
   appStateSubscription = AppState.addEventListener('change', (state) =>
   {
+    for (const listener of appStateListeners)
+    {
+      try
+      {
+        listener(state)
+      }
+      catch (error)
+      {
+        logRegistrationError('app state listener failed', error)
+      }
+    }
     if (state !== 'active')
     {
       return
@@ -877,6 +909,35 @@ function ensureAppStateListener(): void
       'active live activity reconciliation after app foreground failed',
     )
   })
+}
+
+// the registration lifecycle owns the native subscription, so teardown has to
+// ask whether anyone else is still riding it. Without this a sign-out would
+// silently strip the local publisher of its only pause signal and leave its
+// timer running in the background.
+function teardownAppStateListener(): void
+{
+  if (appStateListeners.size > 0)
+  {
+    return
+  }
+  appStateSubscription?.remove()
+  appStateSubscription = null
+}
+
+// share the single AppState subscription with other agent-awareness workers.
+// the returned disposer only detaches the caller; the native subscription is
+// released by the registration lifecycle once nothing needs it.
+export function subscribeAgentAwarenessAppState(
+  listener: (state: AppStateStatus) => void,
+): () => void
+{
+  appStateListeners.add(listener)
+  ensureAppStateListener()
+  return () =>
+  {
+    appStateListeners.delete(listener)
+  }
 }
 
 function endLocalLiveActivities(context: string): void
@@ -933,8 +994,7 @@ export function unregisterAllAgentAwarenessConnections(): void
   environmentConnections.clear()
   pushTokenSubscription?.remove()
   pushTokenSubscription = null
-  appStateSubscription?.remove()
-  appStateSubscription = null
+  teardownAppStateListener()
   if (activeLiveActivityRegistrationRetry)
   {
     clearTimeout(activeLiveActivityRegistrationRetry)
@@ -987,8 +1047,8 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void
   environmentConnections.clear()
   pushTokenSubscription?.remove()
   pushTokenSubscription = null
-  appStateSubscription?.remove()
-  appStateSubscription = null
+  appStateListeners.clear()
+  teardownAppStateListener()
   if (activeLiveActivityRegistrationRetry)
   {
     clearTimeout(activeLiveActivityRegistrationRetry)

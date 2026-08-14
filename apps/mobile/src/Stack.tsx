@@ -19,6 +19,7 @@ import { useResolveClassNames } from 'uniwind'
 
 import { AppText as Text } from './components/AppText'
 import { ArchivedThreadsRouteScreen } from './features/archive/ArchivedThreadsRouteScreen'
+import { startAgentAwarenessLiveActivityPublisher } from './features/agent-awareness/liveActivityPublisher'
 import { useAgentNotificationNavigation } from './features/agent-awareness/notificationNavigation'
 import { ClerkSettingsSheetDetentProvider } from './features/cloud/ClerkSettingsSheetDetent'
 import { ConnectOnboardingRouteScreen } from './features/cloud/ConnectOnboardingRouteScreen'
@@ -278,6 +279,14 @@ function ThreadOutboxDrainWorker()
   return null
 }
 
+// isolate the lock-screen publisher the same way. It is a store subscription,
+// not a render memo, so exactly one runs for the whole app.
+function AgentAwarenessLiveActivityWorker()
+{
+  useEffect(() => startAgentAwarenessLiveActivityPublisher(), [])
+  return null
+}
+
 function RootStackLayout(props: {
   readonly children: React.ReactNode
   readonly state: NavigationState
@@ -317,6 +326,7 @@ function RootStackLayout(props: {
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
       <ThreadOutboxDrainWorker />
+      <AgentAwarenessLiveActivityWorker />
       <ShowcaseCaptureCoordinator pathname={pathname} />
       <ClerkSettingsSheetDetentProvider initiallyExpanded={false}>
         <AdaptiveWorkspaceLayout pathname={workspacePathname}>

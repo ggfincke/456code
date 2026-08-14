@@ -67,8 +67,10 @@ function makeFakeBrowserWindow()
 {
   const windowListeners = new Map<string, (...args: readonly unknown[]) => void>()
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>()
+  let zoomLevel = 0
   const webContents = {
     copyImageAt: vi.fn(),
+    getZoomLevel: vi.fn(() => zoomLevel),
     getURL: vi.fn(() => 'code456-dev://app/'),
     isLoadingMainFrame: vi.fn(() => false),
     on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) =>
@@ -80,6 +82,10 @@ function makeFakeBrowserWindow()
     reload: vi.fn(),
     replaceMisspelling: vi.fn(),
     send: vi.fn(),
+    setZoomLevel: vi.fn((nextZoomLevel: number) =>
+    {
+      zoomLevel = nextZoomLevel
+    }),
     setWindowOpenHandler: vi.fn(),
   }
 
@@ -126,6 +132,7 @@ function makeFakeBrowserWindow()
     reload: webContents.reload,
     send: webContents.send,
     setAutoHideCursor: window.setAutoHideCursor,
+    setZoomLevel: webContents.setZoomLevel,
     webContentsListeners,
     windowListeners,
   }
@@ -458,6 +465,31 @@ describe('DesktopWindow', () =>
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]])
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ['code456-dev://app/'])
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1)
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('zooms the real main window in fixed Electron steps', () =>
+    Effect.gen(function* ()
+    {
+      const fakeWindow = makeFakeBrowserWindow()
+      const createCount = yield* Ref.make(0)
+      const mainWindow = yield* Ref.make(Option.some(fakeWindow.window))
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      })
+
+      yield* Effect.gen(function* ()
+      {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow
+        yield* desktopWindow.zoomMain('in')
+        yield* desktopWindow.zoomMain('reset')
+        yield* desktopWindow.zoomMain('out')
+        yield* desktopWindow.zoomMain('reset')
+
+        assert.deepEqual(fakeWindow.setZoomLevel.mock.calls, [[0.5], [0], [-0.5], [0]])
       }).pipe(Effect.provide(layer))
     }),
   )

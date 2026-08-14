@@ -4,9 +4,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
+  CollaborationMode,
   EnvironmentId,
   ModelSelection,
-  ProviderInteractionMode,
   ProviderOptionSelection,
   RuntimeMode,
   ServerProviderSkill,
@@ -17,6 +17,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   MessageId,
   ThreadId,
+  normalizeCollaborationMode,
 } from '@t3tools/contracts'
 import * as Arr from 'effect/Array'
 import { pipe } from 'effect/Function'
@@ -104,7 +105,7 @@ type NewTaskFlowContextValue = {
   readonly branchesLoading: boolean
   readonly availableBranches: ReadonlyArray<VcsRef>
   readonly runtimeMode: RuntimeMode
-  readonly interactionMode: ProviderInteractionMode
+  readonly interactionMode: CollaborationMode
   readonly expandedProvider: string | null
   readonly environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId
@@ -137,7 +138,7 @@ type NewTaskFlowContextValue = {
   readonly setBranchQuery: (value: string) => void
   readonly loadBranches: () => Promise<void>
   readonly setRuntimeMode: (value: RuntimeMode) => void
-  readonly setInteractionMode: (value: ProviderInteractionMode) => void
+  readonly setInteractionMode: (value: CollaborationMode) => void
   readonly setSelectedModelOptions: (
     value: ReadonlyArray<ProviderOptionSelection> | undefined,
   ) => void
@@ -354,7 +355,14 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     selectedEnvironmentServerConfig?.settings.newWorktreesStartFromOrigin ??
     true
   const runtimeMode = selectedProjectDraft.runtimeMode ?? DEFAULT_RUNTIME_MODE
-  const interactionMode = selectedProjectDraft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE
+  const interactionMode = useMemo(
+    () =>
+      normalizeCollaborationMode(
+        selectedProjectDraft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+        selectedProjectDraft.orchestrate,
+      ),
+    [selectedProjectDraft.interactionMode, selectedProjectDraft.orchestrate],
+  )
 
   const modelOptions = useMemo(
     () =>
@@ -660,11 +668,14 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     [selectedProjectDraftKey],
   )
   const setInteractionMode = useCallback(
-    (value: ProviderInteractionMode) =>
+    (value: CollaborationMode) =>
     {
       if (selectedProjectDraftKey)
       {
-        updateComposerDraftSettings(selectedProjectDraftKey, { interactionMode: value })
+        updateComposerDraftSettings(selectedProjectDraftKey, {
+          interactionMode: value.baseMode,
+          orchestrate: value.orchestrate,
+        })
       }
     },
     [selectedProjectDraftKey],
@@ -687,6 +698,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
         modelSelection: message.modelSelection,
         runtimeMode: message.runtimeMode,
         interactionMode: message.interactionMode,
+        orchestrate: message.orchestrate,
         workspaceSelection: {
           mode: message.creation.workspaceMode,
           branch: message.creation.branch,
@@ -721,6 +733,10 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       }
       const workspaceSelection = draft.workspaceSelection
       const mode = workspaceSelection?.mode ?? 'local'
+      const collaborationMode = normalizeCollaborationMode(
+        draft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+        draft.orchestrate,
+      )
       // when the selection is the stand-in built from the queued snapshot,
       // persist the original (possibly absent) snapshot values — the
       // stand-in's placeholder title/workspaceRoot must never be written back
@@ -741,7 +757,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
         attachments: draft.attachments,
         modelSelection: draftModelSelection,
         runtimeMode: draft.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-        interactionMode: draft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+        interactionMode: collaborationMode.baseMode,
+        orchestrate: collaborationMode.orchestrate,
         creation: {
           projectId: selectedProject.id,
           ...(projectTitle !== undefined ? { projectTitle } : {}),

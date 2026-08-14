@@ -296,7 +296,8 @@ function ThreadRouteContent(
             ...selectedThread,
             modelSelection: composer.modelSelection ?? selectedThread.modelSelection,
             runtimeMode: composer.runtimeMode ?? selectedThread.runtimeMode,
-            interactionMode: composer.interactionMode ?? selectedThread.interactionMode,
+            interactionMode: composer.interactionMode?.baseMode ?? selectedThread.interactionMode,
+            orchestrate: composer.interactionMode?.orchestrate ?? selectedThread.orchestrate,
           }
         : null,
     [composer.interactionMode, composer.modelSelection, composer.runtimeMode, selectedThread],

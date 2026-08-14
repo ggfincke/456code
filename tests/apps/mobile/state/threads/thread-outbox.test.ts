@@ -2,7 +2,10 @@
 // verifies durable queued-message persistence and delivery decisions
 
 import { describe, expect, it } from '@effect/vitest'
-import type { StartThreadTurnInput } from '@t3tools/client-runtime/operations'
+import type {
+  SetThreadInteractionModeInput,
+  StartThreadTurnInput,
+} from '@t3tools/client-runtime/operations'
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 import {
   CommandId,
@@ -180,6 +183,7 @@ describe('thread outbox', () =>
       },
       runtimeMode: 'approval-required',
       interactionMode: 'plan',
+      orchestrate: true,
     } satisfies QueuedThreadMessage
 
     expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(selectedMessage))).toEqual(
@@ -192,6 +196,7 @@ describe('thread outbox', () =>
           modelSelection: selectedMessage.modelSelection,
           runtimeMode: selectedMessage.runtimeMode,
           interactionMode: selectedMessage.interactionMode,
+          orchestrate: selectedMessage.orchestrate,
         },
         false,
       ),
@@ -199,7 +204,16 @@ describe('thread outbox', () =>
       modelSelection: selectedMessage.modelSelection,
       runtimeMode: selectedMessage.runtimeMode,
       interactionMode: selectedMessage.interactionMode,
+      orchestrate: selectedMessage.orchestrate,
     })
+
+    expect(
+      decodeQueuedThreadMessage({
+        schemaVersion: 1,
+        ...legacyMessage,
+        interactionMode: 'orchestrate',
+      }),
+    ).toMatchObject({ interactionMode: 'default', orchestrate: true })
   })
 
   it('round-trips persisted delivery state while decoding schema versions one through four', () =>
@@ -262,6 +276,7 @@ describe('thread outbox', () =>
       modelSelection: currentModelSelection,
       runtimeMode: message.runtimeMode,
       interactionMode: message.interactionMode,
+      orchestrate: false,
     })
     expect(modelSelectionsEqual(settings.modelSelection, currentModelSelection)).toBe(true)
   })
@@ -279,6 +294,7 @@ describe('thread outbox', () =>
       },
       runtimeMode: 'full-access',
       interactionMode: 'default',
+      orchestrate: true,
       turnStartCreatedAt: '2026-06-08T10:00:02.000Z',
     } satisfies QueuedThreadMessage
     const thread = threadShell({
@@ -290,6 +306,10 @@ describe('thread outbox', () =>
     const startInputs: Array<{
       readonly environmentId: EnvironmentId
       readonly input: StartThreadTurnInput
+    }> = []
+    const interactionInputs: Array<{
+      readonly environmentId: EnvironmentId
+      readonly input: SetThreadInteractionModeInput
     }> = []
     let metadataUpdateCount = 0
     let removeCount = 0
@@ -315,7 +335,11 @@ describe('thread outbox', () =>
         return AsyncResult.success({ sequence: 1 })
       },
       setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
-      setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadInteractionMode: async (input) =>
+      {
+        interactionInputs.push(input)
+        return AsyncResult.success({ sequence: 1 })
+      },
       startTurn: async (input) =>
       {
         startInputs.push(input)
@@ -328,6 +352,11 @@ describe('thread outbox', () =>
     expect(removeCount).toBe(1)
     expect(persisted.turnStartCreatedAt).toBe('2026-08-02T12:00:00.000Z')
     expect(startInputs).toHaveLength(1)
+    expect(interactionInputs).toHaveLength(1)
+    expect(interactionInputs[0]?.input).toMatchObject({
+      interactionMode: 'orchestrate',
+      orchestrate: true,
+    })
     expect(startInputs[0]?.input).toMatchObject({
       commandId: message.commandId,
       threadId: message.threadId,
@@ -336,6 +365,8 @@ describe('thread outbox', () =>
         messageId: message.messageId,
         text: message.text,
       },
+      interactionMode: 'orchestrate',
+      orchestrate: true,
     })
     expect(startInputs[0]?.input).not.toHaveProperty('modelSelection')
   })

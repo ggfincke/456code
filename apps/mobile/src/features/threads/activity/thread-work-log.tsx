@@ -79,6 +79,23 @@ function workRowSymbolName(icon: ThreadFeedActivity['icon']): AppSymbolName
   }
 }
 
+// an in-flight call gets a mark of its own; it used to share the check mark,
+// which claimed a tool had finished while it was still waiting
+function workRowStatusSymbolName(status: NonNullable<ThreadFeedActivity['status']>): AppSymbolName
+{
+  switch (status)
+  {
+    case 'failure':
+      return { ios: 'xmark', android: 'close' }
+    case 'success':
+      return { ios: 'checkmark', android: 'check' }
+    case 'running':
+      return { ios: 'ellipsis', android: 'more_horiz' }
+    case 'neutral':
+      return { ios: 'minus', android: 'remove' }
+  }
+}
+
 // entering fades only for rows created moments ago: rows remount whenever the
 // list scrolls them back into view, and old rows must not replay an entrance.
 const FRESH_ROW_WINDOW_MS = 3_000
@@ -88,7 +105,8 @@ function isFreshRow(createdAt: string): boolean
   return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ROW_WINDOW_MS
 }
 
-// omit neutral tool rows that carry no visible status
+// omit neutral tool rows that carry no visible status; in-flight rows are not
+// neutral & stay, so a long-running tool call is still something to look at
 export function visibleWorkLogActivities(
   activities: ReadonlyArray<ThreadFeedActivity>,
 ): ReadonlyArray<ThreadFeedActivity>
@@ -243,13 +261,7 @@ export function ThreadWorkLog(props: {
                     <View className="h-4 w-4 items-center justify-center">
                       {row.status ? (
                         <SymbolView
-                          name={
-                            row.status === 'failure'
-                              ? { ios: 'xmark', android: 'close' }
-                              : row.status === 'success'
-                                ? { ios: 'checkmark', android: 'check' }
-                                : { ios: 'minus', android: 'remove' }
-                          }
+                          name={workRowStatusSymbolName(row.status)}
                           size={11}
                           tintColor={row.status === 'failure' ? '#e11d48' : props.iconSubtleColor}
                           type="monochrome"

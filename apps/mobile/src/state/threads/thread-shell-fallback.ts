@@ -36,6 +36,7 @@ export function threadDetailToShell(
     modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
+    orchestrate: thread.orchestrate,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     latestTurn: thread.latestTurn,

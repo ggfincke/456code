@@ -98,6 +98,11 @@ export function AgentActivity(
       case 'completed':
         // emerald-600 / emerald-300
         return isLightScheme ? '#059669' : '#6ee7b7'
+      case 'stale':
+        // amber-600 / amber-300: a run that stopped reporting is closer to
+        // needing a human than to healthy in-flight work, so it must not
+        // inherit the sky tint that says "working"
+        return isLightScheme ? '#d97706' : '#fcd34d'
       case 'starting':
       case 'running':
       default:
@@ -107,12 +112,14 @@ export function AgentActivity(
   }
 
   // order attention-first so whatever needs the user floats to the top of every
-  // presentation, then failures, then in-flight work, then finished/stale.
+  // presentation, then failures, then in-flight work, then finished. a stale
+  // run sorts with in-flight work because it has not finished — burying it
+  // under completed rows is how a stuck run stays invisible.
   const phasePriority = (phase: AgentActivityPhase): number =>
   {
     if (phase === 'waiting_for_approval' || phase === 'waiting_for_input') return 0
     if (phase === 'failed') return 1
-    if (phase === 'running' || phase === 'starting') return 2
+    if (phase === 'running' || phase === 'starting' || phase === 'stale') return 2
     return 3
   }
   const ordered = [...props.activities].sort(
