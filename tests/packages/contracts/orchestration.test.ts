@@ -93,10 +93,7 @@ it('normalizes legacy and modifier collaboration modes', () =>
 
 it('coerces unsupported runtime modes to the first advertised mode', () =>
 {
-  assert.strictEqual(
-    coerceRuntimeMode('full-access', ['approval-required']),
-    'approval-required',
-  )
+  assert.strictEqual(coerceRuntimeMode('full-access', ['approval-required']), 'approval-required')
   assert.strictEqual(
     coerceRuntimeMode('approval-required', ['approval-required']),
     'approval-required',
