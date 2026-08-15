@@ -784,7 +784,9 @@ export function parsePackedCliSmokeArgs(args: ReadonlyArray<string>): PackedCliS
 
 export async function smokePackedCli(options: PackedCliSmokeOptions): Promise<void>
 {
-  const owner = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-packed-cli-'))
+  const owner = await NodeFSP.realpath(
+    await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-packed-cli-')),
+  )
   try
   {
     const npmConsumer = await makeConsumer(owner, 'npm')
