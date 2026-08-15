@@ -153,9 +153,9 @@ def discover_paths(values: list[Path]) -> list[Path]:
             raise ValueError(f"{path} is not a file or directory")
 
         eligible = [candidate for candidate in candidates if not is_exempt(candidate)]
-        if not eligible:
-            raise ValueError(f"{path} has no supported source files")
         found.update(eligible)
+    if not found:
+        raise ValueError("selected paths have no supported source files")
     return sorted(found)
 
 
