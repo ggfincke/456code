@@ -3,6 +3,7 @@
 import { EnvironmentId, type VcsRef } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 import {
+  buildCreateAndSwitchRefInput,
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   resolveEnvironmentOptionLabel,
@@ -17,6 +18,7 @@ import {
   resolveLocalCheckoutBranchMismatch,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
+  sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
   shouldShowEnvironmentIndicator,
 } from '../../../../../apps/web/src/components/branch-toolbar/BranchToolbar.logic'
@@ -664,5 +666,41 @@ describe('shouldIncludeBranchPickerItem', () =>
         checkoutPullRequestItemValue: '__checkout_pull_request__:1359',
       }),
     ).toBe(false)
+  })
+
+  it('matches an existing ref through the sanitized query', () =>
+  {
+    expect(
+      shouldIncludeBranchPickerItem({
+        itemValue: 'hello-world',
+        normalizedQuery: 'hello w',
+        createBranchItemValue: null,
+        checkoutPullRequestItemValue: null,
+      }),
+    ).toBe(true)
+  })
+})
+
+describe('sanitizeNewRefName', () =>
+{
+  it('normalizes rejected ASCII whitespace while preserving ref structure', () =>
+  {
+    expect(sanitizeNewRefName('  Feature/new\t branch  ')).toBe('Feature/new-branch')
+    expect(sanitizeNewRefName('feature/foo--bar')).toBe('feature/foo--bar')
+  })
+
+  it('preserves non-ASCII whitespace accepted by git', () =>
+  {
+    expect(sanitizeNewRefName('new\u00a0branch')).toBe('new\u00a0branch')
+    expect(sanitizeNewRefName('\u00a0new branch\u00a0')).toBe('\u00a0new-branch\u00a0')
+  })
+
+  it('builds the create-and-switch mutation without changing boundary NBSP', () =>
+  {
+    expect(buildCreateAndSwitchRefInput('/repo', '\u00a0new branch\u00a0')).toEqual({
+      cwd: '/repo',
+      refName: '\u00a0new-branch\u00a0',
+      switchRef: true,
+    })
   })
 })

@@ -1,5 +1,5 @@
 // apps/web/src/lib/timestampFormat.ts
-// resolve timestamp format options
+// format timestamp labels with host-aware locale and calendar context
 
 import { type TimestampFormat } from '@t3tools/contracts/settings'
 
@@ -25,6 +25,32 @@ export function getTimestampFormatOptions(
   }
 }
 
+export function resolveTimestampLocale(
+  systemLocale: string | null | undefined,
+): string | undefined
+{
+  const tag = systemLocale?.trim()
+  if (!tag) return undefined
+
+  try
+  {
+    Intl.DateTimeFormat.supportedLocalesOf([tag])
+    return tag
+  }
+  catch
+  {
+    return undefined
+  }
+}
+
+function readHostSystemLocale(): string | null
+{
+  if (typeof window === 'undefined') return null
+  return window.desktopBridge?.getSystemLocale?.() ?? null
+}
+
+const timestampLocale = resolveTimestampLocale(readHostSystemLocale())
+
 const timestampFormatterCache = new Map<string, Intl.DateTimeFormat>()
 
 function getTimestampFormatter(
@@ -40,7 +66,7 @@ function getTimestampFormatter(
   }
 
   const formatter = new Intl.DateTimeFormat(
-    undefined,
+    timestampLocale,
     getTimestampFormatOptions(timestampFormat, includeSeconds),
   )
   timestampFormatterCache.set(cacheKey, formatter)
@@ -60,6 +86,7 @@ export function formatTimestamp(isoDate: string, timestampFormat: TimestampForma
   return getTimestampFormatter(timestampFormat, true).format(date)
 }
 
+// keep this english-shaped tooltip on the runtime locale until its ordinal and order are localized.
 const monthNameFormatter = new Intl.DateTimeFormat(undefined, { month: 'long' })
 
 function ordinalSuffix(day: number): string
@@ -100,6 +127,42 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
   const date = parseTimestampDate(isoDate)
   if (!date) return ''
   return getTimestampFormatter(timestampFormat, false).format(date)
+}
+
+const numericDateFormatter = new Intl.DateTimeFormat(timestampLocale, {
+  month: 'numeric',
+  day: 'numeric',
+})
+
+const numericDateWithYearFormatter = new Intl.DateTimeFormat(timestampLocale, {
+  month: 'numeric',
+  day: 'numeric',
+  year: 'numeric',
+})
+
+// show calendar context once a chat message is older than today.
+export function formatDayAwareTimestamp(
+  isoDate: string,
+  timestampFormat: TimestampFormat,
+  nowMs: number = Date.now(),
+): string
+{
+  const date = parseTimestampDate(isoDate)
+  if (!date) return ''
+
+  const time = getTimestampFormatter(timestampFormat, false).format(date)
+  const now = new Date(nowMs)
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfMessageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  // round so local calendar days stay whole across 23- and 25-hour dst shifts.
+  const dayDiff = Math.round((startOfToday - startOfMessageDay) / 86_400_000)
+
+  if (dayDiff <= 0) return time
+  if (dayDiff === 1) return `yesterday at ${time}`
+
+  const dateFormatter =
+    date.getFullYear() === now.getFullYear() ? numericDateFormatter : numericDateWithYearFormatter
+  return `${dateFormatter.format(date)} ${time}`
 }
 
 // format a relative time string from an ISO date.

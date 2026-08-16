@@ -133,7 +133,9 @@ import {
 import type { ArchitectureFileOpenTarget } from './architecture/ArchitectureScopeSurface'
 import { RepositoryAtlasBootstrap } from './architecture/RepositoryAtlasBootstrap'
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from '../previewStateStore'
+import { registerFaviconProjectForThread } from '../browser/browserFaviconStore'
 import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
+import { makeWorkspaceFileDropHandlers } from './chat/workspaceFileDrop'
 import { resolveAutoVisitTimestamp } from './Sidebar.logic'
 import { RightPanelTabs } from './RightPanelTabs'
 import { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
@@ -147,6 +149,7 @@ import {
   ChevronDownIcon,
   GitBranchIcon,
   ImportIcon,
+  PaperclipIcon,
   TriangleAlertIcon,
   WifiOffIcon,
 } from 'lucide-react'
@@ -243,7 +246,13 @@ import {
   shouldShowThreadErrorBanner,
   ThreadErrorBanner,
 } from './chat/ThreadErrorBanner'
-import { resolveThreadPr } from './ThreadStatusIndicators'
+import {
+  canRetainTerminalThreadPr,
+  nextThreadChangeRequestSnapshot,
+  resolveDisplayedThreadPr,
+  setThreadChangeRequestSnapshot,
+  threadChangeRequestSnapshotsAtom,
+} from './ThreadStatusIndicators'
 import {
   ComposerBannerStack,
   type ComposerBannerStackItem,
@@ -772,6 +781,7 @@ function ChatViewContent(props: ChatViewProps)
   const composerElementContextsRef = useRef<ElementContextDraft[]>([])
   const localComposerRef = useRef<ChatComposerHandle | null>(null)
   const composerRef = useComposerHandleContext() ?? localComposerRef
+  const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null)
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([])
@@ -792,6 +802,17 @@ function ChatViewContent(props: ChatViewProps)
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
   >([])
+  useEffect(() =>
+  {
+    setIsWorkspaceFileDragActive(false)
+  }, [draftId, routeThreadKey])
+  useEffect(() =>
+  {
+    if (!isWorkspaceFileDragActive) return
+    const clearWorkspaceFileDrag = () => setIsWorkspaceFileDragActive(false)
+    window.addEventListener('dragend', clearWorkspaceFileDrag)
+    return () => window.removeEventListener('dragend', clearWorkspaceFileDrag)
+  }, [isWorkspaceFileDragActive])
   const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
     Record<string, Record<string, PendingUserInputDraftAnswer>>
   >({})
@@ -992,6 +1013,7 @@ function ChatViewContent(props: ChatViewProps)
     [activeThreadEnvironmentId, activeThreadId],
   )
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom)
   const [timelineAnchor, setTimelineAnchor] = useState<{
     readonly threadKey: string | null
     readonly messageId: MessageId | null
@@ -1094,10 +1116,17 @@ function ChatViewContent(props: ChatViewProps)
     })
   }, [activeThreadKey, existingOpenTerminalThreadKeys, terminalUiState.terminalOpen])
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null)
-  const activeProjectRef = activeThread
-    ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
-    : null
+  const activeProjectRef = useMemo(
+    () =>
+      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
+    [activeThread?.environmentId, activeThread?.projectId],
+  )
   const activeProject = useProject(activeProjectRef)
+  useEffect(() =>
+  {
+    if (!activeThreadRef || !activeProjectRef) return
+    registerFaviconProjectForThread(activeThreadRef, activeProjectRef)
+  }, [activeProjectRef, activeThreadRef])
   const handleNewThreadInActiveProject = useCallback(() =>
   {
     startNewThreadForProject(activeProjectRef, handleNewThread)
@@ -3680,10 +3709,38 @@ function ChatViewContent(props: ChatViewProps)
   // so the banner and the sidebar row never disagree.
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null)
   const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays)
-  const activeThreadPr = resolveThreadPr({
+  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const activeThreadChangeRequestSnapshot =
+    activeThreadKey === null ? undefined : changeRequestSnapshotByKey.get(activeThreadKey)
+  const retainActiveTerminalPr = canRetainTerminalThreadPr({
+    worktreePath: activeThread?.worktreePath ?? null,
+    orchestrateRunWorktreePath: activeRunWorktreePath,
+    orchestrateRunWorktreeIsNotRepository: runWorktreeIsNotRepository,
+  })
+  const activeThreadPr = resolveDisplayedThreadPr({
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
+    snapshot: activeThreadChangeRequestSnapshot,
+    retainTerminalOnBranchMismatch: retainActiveTerminalPr,
   })
+  useEffect(() =>
+  {
+    if (activeThreadKey === null) return
+    const nextSnapshot = nextThreadChangeRequestSnapshot({
+      threadBranch: activeThread?.branch ?? null,
+      gitStatus: gitStatusQuery.data ?? null,
+      snapshot: activeThreadChangeRequestSnapshot,
+      retainTerminalOnBranchMismatch: retainActiveTerminalPr,
+    })
+    if (nextSnapshot === undefined) return
+    setThreadChangeRequestSnapshot(activeThreadKey, nextSnapshot)
+  }, [
+    activeThread?.branch,
+    activeThreadChangeRequestSnapshot,
+    activeThreadKey,
+    gitStatusQuery.data,
+    retainActiveTerminalPr,
+  ])
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true
   const nowMinute = useNowMinute()
@@ -3710,9 +3767,17 @@ function ChatViewContent(props: ChatViewProps)
     return effectiveSettled(activeThreadShell, {
       now: `${nowMinute}:00.000Z`,
       autoSettleAfterDays,
+      autoSettleOnMerge,
       changeRequestState: activeThreadPr?.state ?? null,
     })
-  }, [activeThreadPr?.state, activeThreadShell, autoSettleAfterDays, nowMinute, supportsSettlement])
+  }, [
+    activeThreadPr?.state,
+    activeThreadShell,
+    autoSettleAfterDays,
+    autoSettleOnMerge,
+    nowMinute,
+    supportsSettlement,
+  ])
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   })
@@ -4283,6 +4348,14 @@ function ChatViewContent(props: ChatViewProps)
         return
       }
 
+      if (command === 'rightPanel.toggleMaximized')
+      {
+        event.preventDefault()
+        event.stopPropagation()
+        toggleRightPanelMaximized()
+        return
+      }
+
       if (command === 'terminal.split')
       {
         event.preventDefault()
@@ -4391,6 +4464,7 @@ function ChatViewContent(props: ChatViewProps)
     keybindings,
     onToggleDiff,
     toggleRightPanel,
+    toggleRightPanelMaximized,
     toggleTerminalVisibility,
     composerRef,
   ])
@@ -5000,6 +5074,10 @@ function ChatViewContent(props: ChatViewProps)
         effort: ctxSelectedPromptEffort,
         text: implementationPrompt,
       })
+      if (composerRef.current?.validateProviderInput(outgoingImplementationPrompt) === false)
+      {
+        return
+      }
       const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown))
       const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection
 
@@ -5446,7 +5524,7 @@ function ChatViewContent(props: ChatViewProps)
     />
   )
   const panelLayoutControls = (
-    <div className="workspace-titlebar-controls z-50 gap-1 [-webkit-app-region:no-drag]">
+    <div className="workspace-titlebar-controls z-50 mr-px gap-1 [-webkit-app-region:no-drag]">
       {rightPanelOpen && !shouldUsePlanSidebarSheet ? (
         <RightPanelMaximizeControl
           maximized={rightPanelMaximized}
@@ -5646,6 +5724,11 @@ function ChatViewContent(props: ChatViewProps)
     ) : null
   ) : null
 
+  const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
+    setDragActive: setIsWorkspaceFileDragActive,
+    addFiles: (files) => composerRef.current?.addDroppedFiles(files),
+  })
+
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       {rightPanelOpen && !shouldUsePlanSidebarSheet ? panelLayoutControls : null}
@@ -5713,7 +5796,28 @@ function ChatViewContent(props: ChatViewProps)
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+            data-chat-workspace-drop-target="true"
+            onDragEnter={workspaceFileDropHandlers.onDragEnter}
+            onDragOver={workspaceFileDropHandlers.onDragOver}
+            onDragLeave={workspaceFileDropHandlers.onDragLeave}
+            onDrop={workspaceFileDropHandlers.onDrop}
+          >
+            {isWorkspaceFileDragActive ? (
+              <div
+                className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/[0.035]"
+                data-chat-workspace-drop-overlay="true"
+              >
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-4 py-2.5 text-sm font-medium text-foreground shadow-lg"
+                >
+                  <PaperclipIcon className="size-4 text-primary" aria-hidden="true" />
+                  Drop files to attach
+                </div>
+              </div>
+            ) : null}
             {/* Provider status overlays the timeline without changing its content height. */}
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <ProviderStatusBanner
@@ -6121,6 +6225,7 @@ function ChatViewContent(props: ChatViewProps)
           activeSurfaceId={activeRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
+          desktopByTabId={activePreviewState.desktopByTabId}
           terminalLabelsById={activeTerminalLabelsById}
           onActivate={activateRightPanelSurface}
           onCloseSurface={closeRightPanelSurface}
@@ -6148,11 +6253,12 @@ function ChatViewContent(props: ChatViewProps)
         <RightPanelSheet open onClose={planSidebarOpen ? closePlanSidebar : closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"
-            layoutControls={panelToggleControls}
+            layoutControls={<div className="mr-px flex items-center">{panelToggleControls}</div>}
             surfaces={rightPanelState.surfaces}
             activeSurfaceId={activeRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
+            desktopByTabId={activePreviewState.desktopByTabId}
             terminalLabelsById={activeTerminalLabelsById}
             onActivate={activateRightPanelSurface}
             onCloseSurface={closeRightPanelSurface}

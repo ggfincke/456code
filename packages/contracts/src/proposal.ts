@@ -5,6 +5,7 @@ import * as Schema from 'effect/Schema'
 
 import {
   EnvironmentId,
+  GitRefString,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -215,7 +216,7 @@ export type ProposalRevisionManifest = typeof ProposalRevisionManifest.Type
 export const ProposalBaseSnapshot = Schema.Struct({
   headCommitOid: ProposalGitObjectOid,
   workingTreeOid: ProposalGitObjectOid,
-  retainedRef: TrimmedNonEmptyString,
+  retainedRef: GitRefString,
   fileCount: NonNegativeInt,
   byteCount: NonNegativeInt,
   policy: ProposalSnapshotPolicy,
@@ -228,7 +229,7 @@ export const ProposalRevision = Schema.Struct({
   revision: PositiveInt,
   baseSnapshot: ProposalBaseSnapshot,
   proposedTreeOid: ProposalGitObjectOid,
-  proposedRetainedRef: TrimmedNonEmptyString,
+  proposedRetainedRef: GitRefString,
   manifest: ProposalRevisionManifest,
   manifestSha256: ProposalSha256,
   diffSha256: ProposalSha256,

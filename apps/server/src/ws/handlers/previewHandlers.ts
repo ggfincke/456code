@@ -100,28 +100,29 @@ export function makePreviewRpcHandlers({
       observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
         'rpc.aggregate': 'preview',
       }),
-    [WS_METHODS.subscribeDiscoveredLocalServers]: (_input) =>
+    [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
       observeRpcStream(
         WS_METHODS.subscribeDiscoveredLocalServers,
         Stream.callback<DiscoveredLocalServerList>((queue) =>
           Effect.gen(function* ()
           {
+            const configuredUrls = input.configuredUrls ?? []
             yield* portDiscovery.retain
             const setupLock = yield* Semaphore.make(1)
             const publishServers = (servers: DiscoveredLocalServerList['servers']) =>
               Effect.gen(function* ()
               {
                 const scannedAt = DateTime.formatIso(yield* DateTime.now)
-                yield* Queue.offer(queue, { servers, scannedAt })
+                yield* Queue.offer(queue, { servers, scannedAt, configuredUrlProbing: true })
               })
 
             yield* setupLock.withPermit(
               Effect.gen(function* ()
               {
-                yield* portDiscovery.subscribe((servers) =>
+                const initial = yield* portDiscovery.subscribe({ configuredUrls }, (servers) =>
                   setupLock.withPermit(publishServers(servers)),
                 )
-                yield* publishServers(yield* portDiscovery.scan())
+                yield* publishServers(initial)
               }),
             )
           }),

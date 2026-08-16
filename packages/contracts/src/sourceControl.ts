@@ -2,7 +2,7 @@
 // define source control contracts
 
 import * as Schema from 'effect/Schema'
-import { PositiveInt, TrimmedNonEmptyString } from './baseSchemas.ts'
+import { GitRefString, PositiveInt, TrimmedNonEmptyString } from './baseSchemas.ts'
 import { VcsDriverKind } from './vcs.ts'
 
 export const SourceControlProviderKind = Schema.Literals([
@@ -29,8 +29,8 @@ export const ChangeRequest = Schema.Struct({
   number: PositiveInt,
   title: TrimmedNonEmptyString,
   url: Schema.String,
-  baseRefName: TrimmedNonEmptyString,
-  headRefName: TrimmedNonEmptyString,
+  baseRefName: GitRefString,
+  headRefName: GitRefString,
   state: ChangeRequestState,
   updatedAt: Schema.Option(Schema.DateTimeUtc),
   isCrossRepository: Schema.optional(Schema.Boolean),
@@ -100,8 +100,8 @@ export const SourceControlPublishRepositoryResult = Schema.Struct({
   repository: SourceControlRepositoryInfo,
   remoteName: TrimmedNonEmptyString,
   remoteUrl: TrimmedNonEmptyString,
-  branch: TrimmedNonEmptyString,
-  upstreamBranch: Schema.optional(TrimmedNonEmptyString),
+  branch: GitRefString,
+  upstreamBranch: Schema.optional(GitRefString),
   status: SourceControlPublishStatus,
 })
 export type SourceControlPublishRepositoryResult = typeof SourceControlPublishRepositoryResult.Type

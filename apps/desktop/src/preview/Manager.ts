@@ -51,7 +51,7 @@ import * as SynchronizedRef from 'effect/SynchronizedRef'
 
 import * as DesktopEnvironment from '../app/DesktopEnvironment.ts'
 import * as BrowserSession from './BrowserSession.ts'
-import { HUMAN_INPUT_CHANNEL } from './GuestProtocol.ts'
+import { HUMAN_INPUT_CHANNEL, MOUSE_NAVIGATE_CHANNEL } from './GuestProtocol.ts'
 import {
   PreviewArtifactImageLoadError,
   PreviewArtifactPathOutsideDirectoryError,
@@ -97,6 +97,7 @@ import { playwrightInjectedRuntimeInstallExpression } from './PlaywrightInjected
 import { createAutomationOperations } from './ManagerAutomation.ts'
 import { createPickRecordingOperations } from './ManagerPickRecording.ts'
 import { createTabOperations } from './ManagerTabs.ts'
+import { captureFavicon, safeHttpOrigin, selectFaviconCandidates } from './FaviconCapture.ts'
 
 export type { PreviewNavStatus, PreviewTabState } from './ManagerTypes.ts'
 export {
@@ -339,6 +340,8 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   const annotationThemeRef = yield* Ref.make(DEFAULT_ANNOTATION_THEME)
   const mainWindowRef = yield* Ref.make<Option.Option<BrowserWindow>>(Option.none())
   const tabsRef = yield* SynchronizedRef.make<ReadonlyMap<string, PreviewTabRecord>>(new Map())
+  // webcontents ownership moves are global even when the source tabs differ
+  const attachmentTransitionSemaphore = yield* Semaphore.make(1)
   const tabLifecycleSemaphoresRef = yield* SynchronizedRef.make<
     ReadonlyMap<string, Semaphore.Semaphore>
   >(new Map())
@@ -408,6 +411,9 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         ),
       )
     }).pipe(Effect.flatMap((semaphore) => semaphore.withPermit(effect)))
+  const withAttachmentTransition = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> => attachmentTransitionSemaphore.withPermit(effect)
   const replaceMap = <K, V>(
     source: ReadonlyMap<K, V>,
     update: (copy: Map<K, V>) => void,
@@ -444,6 +450,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     zoomFactor: state.zoomFactor,
     colorScheme: state.colorScheme,
     controller: state.controller,
+    ...(state.favicon ? { favicon: state.favicon } : {}),
     updatedAt: state.updatedAt,
   })
 
@@ -456,6 +463,17 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       (listener) => deliverEvent('state-change', tabId, () => listener(tabId, publicState)),
       { discard: true },
     )
+  })
+
+  const emitIfCurrent = Effect.fn('PreviewManager.emitIfCurrent')(function* (
+    tabId: string,
+    state: PreviewTabState,
+  )
+  {
+    if ((yield* SynchronizedRef.get(tabsRef)).get(tabId) === state)
+    {
+      yield* emit(tabId, state)
+    }
   })
 
   const update = Effect.fn('PreviewManager.update')(function* (
@@ -502,7 +520,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       return yield* new PreviewWebviewNotInitializedError({ tabId })
     }
     const wc = webContents.fromId(tab.webContentsId)
-    if (!wc)
+    if (!wc || wc.isDestroyed())
     {
       return yield* new PreviewWebContentsNotFoundError({
         tabId,
@@ -1151,16 +1169,15 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
 
   const detachListeners = Effect.fn('PreviewManager.detachListeners')(function* (
     webContentsId: number,
+    attachmentToken: symbol,
   )
   {
-    const managed = yield* Ref.modify(attachedRef, (attached) => [
-      attached.get(webContentsId),
-      replaceMap(attached, (copy) =>
-      {
-        copy.delete(webContentsId)
-      }),
-    ])
-    if (managed) yield* Scope.close(managed.scope, Exit.void).pipe(Effect.ignore)
+    const managed = (yield* Ref.get(attachedRef)).get(webContentsId)
+    if (managed?.attachmentToken === attachmentToken)
+    {
+      managed.cancelFaviconCapture()
+      yield* Scope.close(managed.scope, Exit.void).pipe(Effect.ignore)
+    }
   })
 
   const isAppShortcut = (input: Electron.Input): boolean =>
@@ -1232,15 +1249,29 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   )
   {
     const scope = yield* Scope.fork(parentScope, 'sequential')
+    const attachmentToken = Symbol()
+    let documentGeneration = 0
+    let nextRequestId = 0
+    let activeCapture: {
+      readonly controller: AbortController
+      readonly documentGeneration: number
+      readonly eventKey: string
+      readonly requestId: number
+    } | null = null
+    const cancelFaviconCapture = () =>
+    {
+      documentGeneration += 1
+      activeCapture?.controller.abort()
+      activeCapture = null
+    }
     const syncState = Effect.fn('PreviewManager.syncWebContentsState')(function* (
       preserveLoadFailure: boolean,
+      confirmedNavigation = false,
     )
     {
       if (wc.isDestroyed()) return
-      const zoomFactor = yield* attempt(
-        { operation: 'syncWebContentsState.getZoomFactor', tabId, webContentsId: wc.id },
-        () => wc.getZoomFactor(),
-      ).pipe(Effect.option)
+      const managed = (yield* Ref.get(attachedRef)).get(wc.id)
+      if (managed?.attachmentToken !== attachmentToken) return
       const computedNavStatus = computeNavStatus(wc)
       const canGoBack = wc.navigationHistory.canGoBack()
       const canGoForward = wc.navigationHistory.canGoForward()
@@ -1251,7 +1282,8 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         if (
           !current ||
           current.lifecycleGeneration !== lifecycleGeneration ||
-          current.webContentsId !== wc.id
+          current.webContentsId !== wc.id ||
+          webContents.fromId(wc.id) !== wc
         )
         {
           return [Option.none<PreviewTabRecord>(), tabs] as const
@@ -1265,12 +1297,18 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           computedNavStatus.kind === 'Success'
             ? current.navStatus
             : computedNavStatus
+        const clearFavicon =
+          confirmedNavigation &&
+          current.favicon !== undefined &&
+          safeHttpOrigin(current.favicon.pageUrl) !==
+            safeHttpOrigin(navStatus.kind === 'Idle' ? wc.getURL() : navStatus.url)
+        const { favicon: _favicon, ...currentWithoutFavicon } = current
         const state: PreviewTabRecord = {
-          ...current,
+          ...(clearFavicon ? currentWithoutFavicon : current),
           navStatus,
           canGoBack,
           canGoForward,
-          ...(Option.isSome(zoomFactor) ? { zoomFactor: zoomFactor.value } : {}),
+          // preview zoom is tab state; the guest may report app-window zoom
           updatedAt,
         }
         return [
@@ -1281,10 +1319,129 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           }),
         ] as const
       })
-      if (Option.isSome(next)) yield* emit(tabId, next.value)
+      if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value)
     })
     const sync = () => runFork(syncState(true))
-    const syncNavigation = () => runFork(syncState(false))
+    const syncNavigation = () => runFork(syncState(false, true))
+    const syncInPageNavigation = () => runFork(syncState(false))
+    const navigationStarted = (
+      event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
+    ): void =>
+    {
+      if (event.isMainFrame && !event.isSameDocument) cancelFaviconCapture()
+    }
+    const publishFavicon = Effect.fn('PreviewManager.publishFavicon')(function* (input: {
+      readonly captureDocumentGeneration: number
+      readonly dataUrl: string
+      readonly pageUrl: string
+      readonly requestId: number
+    })
+    {
+      const pageOrigin = safeHttpOrigin(input.pageUrl)
+      const managed = (yield* Ref.get(attachedRef)).get(wc.id)
+      if (
+        !pageOrigin ||
+        wc.isDestroyed() ||
+        webContents.fromId(wc.id) !== wc ||
+        managed?.attachmentToken !== attachmentToken ||
+        managed.tabId !== tabId ||
+        managed.webContents !== wc ||
+        activeCapture?.documentGeneration !== input.captureDocumentGeneration ||
+        activeCapture.requestId !== input.requestId ||
+        safeHttpOrigin(wc.getURL()) !== pageOrigin
+      )
+      {
+        return
+      }
+      const capturedAt = yield* currentMillis
+      const updatedAt = yield* currentIso
+      const next = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
+      {
+        const current = tabs.get(tabId)
+        if (
+          !current ||
+          current.lifecycleGeneration !== lifecycleGeneration ||
+          current.webContentsId !== wc.id ||
+          webContents.fromId(wc.id) !== wc ||
+          activeCapture?.documentGeneration !== input.captureDocumentGeneration ||
+          activeCapture.requestId !== input.requestId
+        )
+        {
+          return [Option.none<PreviewTabRecord>(), tabs] as const
+        }
+        const state: PreviewTabRecord = {
+          ...current,
+          favicon: { dataUrl: input.dataUrl, pageUrl: pageOrigin, capturedAt },
+          updatedAt,
+        }
+        return [
+          Option.some(state),
+          replaceMap(tabs, (copy) =>
+          {
+            copy.set(tabId, state)
+          }),
+        ] as const
+      })
+      if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value)
+    })
+    const faviconUpdated = (_event: Event, rawCandidates: ReadonlyArray<string>): void =>
+    {
+      const pageUrl = wc.getURL()
+      if (!safeHttpOrigin(pageUrl)) return
+      const candidates = selectFaviconCandidates(rawCandidates)
+      if (candidates.length === 0) return
+      const eventKey = JSON.stringify([pageUrl, ...candidates])
+      if (activeCapture?.eventKey === eventKey) return
+      activeCapture?.controller.abort()
+      const captureDocumentGeneration = documentGeneration
+      const requestId = ++nextRequestId
+      const controller = new AbortController()
+      activeCapture = {
+        controller,
+        documentGeneration: captureDocumentGeneration,
+        eventKey,
+        requestId,
+      }
+      runFork(
+        Effect.tryPromise({
+          try: () =>
+            captureFavicon({ webContents: wc, pageUrl, candidates, signal: controller.signal }),
+          catch: (cause) =>
+            new PreviewOperationError({
+              operation: 'captureFavicon',
+              tabId,
+              webContentsId: wc.id,
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap((result) =>
+            result.kind === 'captured'
+              ? publishFavicon({
+                  captureDocumentGeneration,
+                  dataUrl: result.dataUrl,
+                  pageUrl,
+                  requestId,
+                })
+              : Effect.void,
+          ),
+          Effect.catch((error) =>
+            controller.signal.aborted
+              ? Effect.void
+              : Effect.logDebug('Favicon capture failed.', {
+                  error,
+                  tabId,
+                  webContentsId: wc.id,
+                }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() =>
+            {
+              if (activeCapture?.requestId === requestId) activeCapture = null
+            }),
+          ),
+        ),
+      )
+    }
     const failed = (
       _event: Event,
       code: number,
@@ -1346,6 +1503,25 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       runFork(handleHumanInput(rawSignal))
     }
+    const mouseNavigate = (_event: unknown, payload?: unknown): void =>
+    {
+      const direction =
+        typeof payload === 'object' && payload !== null && 'direction' in payload
+          ? (payload as { direction?: unknown }).direction
+          : undefined
+      if (direction !== 'back' && direction !== 'forward') return
+      runFork(
+        attempt({ operation: 'mouseNavigate', tabId, webContentsId: wc.id }, () =>
+        {
+          if (direction === 'back')
+          {
+            if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
+            return
+          }
+          if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
+        }).pipe(Effect.ignore),
+      )
+    }
     const forwardShortcut = Effect.fn('PreviewManager.forwardShortcut')(function* (
       event: Electron.Event,
       input: Electron.Input,
@@ -1374,29 +1550,69 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     }
     yield* Scope.addFinalizer(
       scope,
-      attempt({ operation: 'detachListeners', tabId, webContentsId: wc.id }, () =>
+      Effect.gen(function* ()
       {
-        wc.off('did-navigate', syncNavigation)
-        wc.off('did-navigate-in-page', syncNavigation)
-        wc.off('page-title-updated', sync)
-        wc.off('did-start-loading', sync)
-        wc.off('did-stop-loading', sync)
-        wc.off('did-fail-load', failed as never)
-        wc.off('before-input-event', beforeInput)
-        wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput)
-      }).pipe(Effect.ignore),
+        cancelFaviconCapture()
+        yield* attempt({ operation: 'detachListeners', tabId, webContentsId: wc.id }, () =>
+        {
+          wc.off('did-start-navigation', navigationStarted)
+          wc.off('did-navigate', syncNavigation)
+          wc.off('did-navigate-in-page', syncInPageNavigation)
+          wc.off('page-title-updated', sync)
+          wc.off('page-favicon-updated', faviconUpdated as never)
+          wc.off('did-start-loading', sync)
+          wc.off('did-stop-loading', sync)
+          wc.off('did-fail-load', failed as never)
+          wc.off('before-input-event', beforeInput)
+          wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput)
+          wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
+        }).pipe(Effect.ignore)
+        yield* Ref.update(attachedRef, (attached) =>
+          attached.get(wc.id)?.attachmentToken !== attachmentToken
+            ? attached
+            : replaceMap(attached, (copy) =>
+              {
+                copy.delete(wc.id)
+              }),
+        )
+      }),
     )
+    const claimed = yield* Ref.modify(attachedRef, (attached) =>
+    {
+      if (attached.has(wc.id)) return [false, attached] as const
+      return [
+        true,
+        replaceMap(attached, (copy) =>
+        {
+          copy.set(wc.id, {
+            attachmentToken,
+            cancelFaviconCapture,
+            scope,
+            tabId,
+            webContents: wc,
+          })
+        }),
+      ] as const
+    })
+    if (!claimed)
+    {
+      yield* Scope.close(scope, Exit.void).pipe(Effect.ignore)
+      return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId: wc.id })
+    }
     const install = Effect.fn('PreviewManager.installWebContentsListeners')(function* ()
     {
       yield* attempt({ operation: 'attachListeners', tabId, webContentsId: wc.id }, () =>
       {
+        wc.on('did-start-navigation', navigationStarted)
         wc.on('did-navigate', syncNavigation)
-        wc.on('did-navigate-in-page', syncNavigation)
+        wc.on('did-navigate-in-page', syncInPageNavigation)
         wc.on('page-title-updated', sync)
+        wc.on('page-favicon-updated', faviconUpdated as never)
         wc.on('did-start-loading', sync)
         wc.on('did-stop-loading', sync)
         wc.on('did-fail-load', failed as never)
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput)
+        wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
         wc.setWindowOpenHandler(({ url }) =>
         {
           runFork(
@@ -1408,14 +1624,9 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         })
         wc.on('before-input-event', beforeInput)
       })
-      yield* Ref.update(attachedRef, (attached) =>
-        replaceMap(attached, (copy) =>
-        {
-          copy.set(wc.id, { scope })
-        }),
-      )
     })
     yield* install().pipe(Effect.onError(() => Scope.close(scope, Exit.void).pipe(Effect.ignore)))
+    return attachmentToken
   })
 
   const tabOps = createTabOperations({
@@ -1438,6 +1649,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     requireWebContents,
     toPreviewTabState,
     withTabLifecycle,
+    withAttachmentTransition,
     update,
     runFork,
     ensureControlSession,
@@ -1456,6 +1668,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     openDevTools,
     setAnnotationTheme,
     applyZoom,
+    reapplyZoom,
     setColorScheme,
   } = tabOps
 
@@ -1604,6 +1817,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     openDevTools,
     pickElement,
     refresh,
+    reapplyZoom,
     registerWebview,
     resetZoom: (tabId: string) => applyZoom(tabId, () => DEFAULT_ZOOM_FACTOR),
     revealArtifact,
@@ -1641,6 +1855,7 @@ export class PreviewManager extends Context.Service<
     readonly zoomIn: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly zoomOut: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly resetZoom: (tabId: string) => Effect.Effect<void, PreviewManagerError>
+    readonly reapplyZoom: () => Effect.Effect<void>
     readonly hardReload: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly setColorScheme: (
       tabId: string,
@@ -1736,6 +1951,7 @@ export const make = Effect.gen(function* PreviewManagerMake()
     goBack: operations.goBack,
     goForward: operations.goForward,
     refresh: operations.refresh,
+    reapplyZoom: operations.reapplyZoom,
     zoomIn: operations.zoomIn,
     zoomOut: operations.zoomOut,
     resetZoom: operations.resetZoom,

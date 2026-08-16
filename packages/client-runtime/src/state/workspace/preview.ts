@@ -45,6 +45,9 @@ export function createPreviewEnvironmentAtoms<R, E>(
     discoveredServers: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: 'environment-data:preview:discovered-servers',
       tag: WS_METHODS.subscribeDiscoveredLocalServers,
+      // configured urls are part of the atom key, so stale projects must stop
+      // contributing probe candidates as soon as their consumer unmounts.
+      idleTtlMs: 0,
     }),
     automationRequests: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: 'environment-data:preview:automation-requests',

@@ -1,5 +1,5 @@
 // tests/apps/desktop/ipc/methods/window.test.ts
-// verify get local environment bootstraps behavior
+// verify desktop window ipc behavior
 
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -10,9 +10,11 @@ import type * as Electron from 'electron'
 
 import * as DesktopBackendManager from '../../../../../apps/desktop/src/backend/DesktopBackendManager.ts'
 import * as DesktopBackendPool from '../../../../../apps/desktop/src/backend/DesktopBackendPool.ts'
+import * as ElectronApp from '../../../../../apps/desktop/src/electron/ElectronApp.ts'
 import * as ElectronWindow from '../../../../../apps/desktop/src/electron/ElectronWindow.ts'
 import {
   getLocalEnvironmentBootstraps,
+  getSystemLocale,
   getWindowFullscreenState,
 } from '../../../../../apps/desktop/src/ipc/methods/window.ts'
 
@@ -168,4 +170,20 @@ describe('getWindowFullscreenState', () =>
       ),
     )
   })
+})
+
+describe('getSystemLocale', () =>
+{
+  it.effect('returns the normalized OS locale from the Electron app service', () =>
+    Effect.gen(function* ()
+    {
+      assert.strictEqual(yield* getSystemLocale.handler(), 'en-GB')
+    }).pipe(
+      Effect.provide(
+        Layer.mock(ElectronApp.ElectronApp)({
+          systemLocale: Effect.succeed('en-GB'),
+        }),
+      ),
+    ),
+  )
 })

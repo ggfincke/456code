@@ -19,7 +19,7 @@ import {
   getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,
 } from '../providerIconUtils'
-import type { ProviderInstanceEntry } from '../../../providerInstances'
+import { shouldShowInstanceBadge, type ProviderInstanceEntry } from '../../../providerInstances'
 import type { ModelSwitchCacheHint } from '../../../providerSwitchPresentation'
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -72,10 +72,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     selectedInstanceOptions[0]
   const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model
   const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model
-  const duplicateDriverCount = props.instanceEntries.filter(
-    (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
-  ).length
-  const showInstanceBadge = Boolean(activeEntry?.accentColor) || duplicateDriverCount > 1
+  const showInstanceBadge =
+    activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries)
   // the trigger shows the instance as an icon and the model as text, so without
   // a name of its own it announces a model with no provider behind it
   const triggerAriaLabel =

@@ -118,12 +118,22 @@ class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<TerminalSubpr
     cause: Schema.optional(Schema.Defect()),
     terminalPid: Schema.Number,
     command: Schema.Literals(['powershell', 'ps']),
+    exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
+    timedOut: Schema.optional(Schema.Boolean),
+    stdoutTruncated: Schema.optional(Schema.Boolean),
   },
 )
 {
   override get message(): string
   {
-    return `Failed to inspect terminal subprocesses for PID ${this.terminalPid} with ${this.command}`
+    const details = [
+      this.exitCode !== undefined && this.exitCode !== null ? `exit code ${this.exitCode}` : null,
+      this.timedOut ? 'timed out' : null,
+      this.stdoutTruncated ? 'output truncated' : null,
+    ]
+      .filter((detail) => detail !== null)
+      .join(', ')
+    return `Failed to inspect terminal subprocesses for PID ${this.terminalPid} with ${this.command}${details.length > 0 ? ` (${details})` : ''}`
   }
 }
 
@@ -363,6 +373,7 @@ function enqueueProcessEvent(
 const inspectProcessSnapshot = Effect.fn('terminal.inspectProcessSnapshot')(function* (
   terminalPids: ReadonlyArray<number>,
   platform: NodeJS.Platform,
+  posixPsCommand: string,
 ): Effect.fn.Return<
   ReadonlyMap<number, TerminalSubprocessInspectResult>,
   TerminalSubprocessCheckError,
@@ -372,7 +383,7 @@ const inspectProcessSnapshot = Effect.fn('terminal.inspectProcessSnapshot')(func
   const processRunner = yield* ProcessRunner.ProcessRunner
   const windowsCommand =
     'Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object { Write-Output "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)" }'
-  const command = platform === 'win32' ? 'powershell.exe' : 'ps'
+  const command = platform === 'win32' ? 'powershell.exe' : posixPsCommand
   const args =
     platform === 'win32'
       ? ['-NoProfile', '-NonInteractive', '-Command', windowsCommand]
@@ -382,7 +393,7 @@ const inspectProcessSnapshot = Effect.fn('terminal.inspectProcessSnapshot')(func
       command,
       args,
       timeout: '1500 millis',
-      maxOutputBytes: 262_144,
+      maxOutputBytes: platform === 'win32' ? 262_144 : 524_288,
       outputMode: 'truncate',
       timeoutBehavior: 'timedOutResult',
     })
@@ -397,15 +408,37 @@ const inspectProcessSnapshot = Effect.fn('terminal.inspectProcessSnapshot')(func
       ),
     )
 
-  if (result.code !== 0)
+  if (result.code !== 0 || result.timedOut || result.stdoutTruncated)
   {
-    return inspectProcessSnapshotRows(terminalPids, [], platform)
+    return yield* new TerminalSubprocessCheckError({
+      terminalPid: terminalPids[0] ?? 0,
+      command: platform === 'win32' ? 'powershell' : 'ps',
+      exitCode: result.code,
+      timedOut: result.timedOut,
+      stdoutTruncated: result.stdoutTruncated,
+    })
   }
   return inspectProcessSnapshotRows(
     terminalPids,
     parseProcessSnapshot(result.stdout, platform),
     platform,
   )
+})
+
+const POSIX_PS_ABSOLUTE_PATHS = ['/bin/ps', '/usr/bin/ps'] as const
+
+const resolvePosixPsCommand = Effect.fn('terminal.resolvePosixPsCommand')(function* ()
+{
+  const fileSystem = yield* FileSystem.FileSystem
+  for (const candidate of POSIX_PS_ABSOLUTE_PATHS)
+  {
+    const exists = yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false))
+    if (exists)
+    {
+      return candidate
+    }
+  }
+  return 'ps'
 })
 
 function capHistory(history: string, maxLines: number): string
@@ -821,6 +854,8 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
   const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv))
   const processRunner = yield* ProcessRunner.ProcessRunner
   const subprocessInspector = options.subprocessInspector
+  // avoid walking PATH for ps on every subprocess-poll tick
+  const posixPsCommand = platform === 'win32' ? 'ps' : yield* resolvePosixPsCommand()
   const subprocessPollIntervalMs =
     options.subprocessPollIntervalMs ?? DEFAULT_SUBPROCESS_POLL_INTERVAL_MS
   const processKillGraceMs = options.processKillGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS
@@ -1810,6 +1845,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
       : yield* inspectProcessSnapshot(
           runningSessions.map((session) => session.pid),
           platform,
+          posixPsCommand,
         ).pipe(
           Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
           Effect.map((results) =>

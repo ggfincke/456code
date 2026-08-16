@@ -18,6 +18,7 @@ import {
   ImportScanResult,
   ImportSessionsRequest,
   ImportSessionsResult,
+  isProviderSendTurnSupportedImageMimeType,
   ModelSelection,
   normalizeCollaborationMode,
   OrchestrationCommand,
@@ -62,6 +63,13 @@ const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSessi
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread)
 const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell)
 const encodeThreadCreatedPayload = Schema.encodeEffect(ThreadCreatedPayload)
+
+it('accepts only image MIME types supported by provider turn attachments', () =>
+{
+  assert.strictEqual(isProviderSendTurnSupportedImageMimeType('image/png'), true)
+  assert.strictEqual(isProviderSendTurnSupportedImageMimeType('IMAGE/JPEG'), true)
+  assert.strictEqual(isProviderSendTurnSupportedImageMimeType('image/svg+xml'), false)
+})
 
 it('normalizes legacy and modifier collaboration modes', () =>
 {

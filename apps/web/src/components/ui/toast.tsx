@@ -35,6 +35,7 @@ import { useCopyToClipboard } from '~/hooks/useCopyToClipboard'
 import { resolveThreadRouteTarget } from '~/threadRoutes'
 import {
   buildVisibleToastLayout,
+  hasVisibleToastAction,
   shouldHideCollapsedToastContent,
   shouldRenderThreadScopedToast,
 } from './toast.logic'
@@ -291,7 +292,7 @@ function deriveToastBodyDescriptor(toast: {
 {
   const Icon = toast.type ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS] : null
   const stackedActionLayout =
-    toast.actionProps !== undefined && toast.data?.actionLayout === 'stacked-end'
+    hasVisibleToastAction(toast.actionProps) && toast.data?.actionLayout === 'stacked-end'
   const actionVariant: NonNullable<ThreadToastData['actionVariant']> =
     toast.data?.actionVariant ?? 'default'
   const secondaryActionVariant: NonNullable<ThreadToastData['secondaryActionVariant']> =
@@ -304,7 +305,7 @@ function deriveToastBodyDescriptor(toast: {
   const hasSecondaryAction = toast.data?.secondaryActionProps !== undefined
   const hasTrailingControls =
     copyErrorText !== null ||
-    toast.actionProps !== undefined ||
+    hasVisibleToastAction(toast.actionProps) ||
     hasAdditionalActions ||
     hasSecondaryAction
   const inlineContentEndPad = hasTrailingControls ? 'pr-6' : 'pr-10'
@@ -406,12 +407,12 @@ function ToastBodyContent({
               type="button"
             />
           ) : null}
-          {actionProps ? (
+          {hasVisibleToastAction(actionProps) ? (
             <Toast.Action
               className={cn(buttonVariants({ size: 'xs', variant: actionVariant }), 'shrink-0')}
               data-slot="toast-action"
             >
-              {actionProps.children}
+              {actionProps?.children}
             </Toast.Action>
           ) : null}
         </div>
@@ -827,7 +828,7 @@ function AnchoredToasts()
   )
 }
 
-export { stackedThreadToast } from './toastHelpers'
+export { hiddenToastActionProps, stackedThreadToast } from './toastHelpers'
 export type { StackedThreadToastOptions } from './toastHelpers'
 
 export {

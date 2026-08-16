@@ -1700,4 +1700,93 @@ describe('OrchestrationEngine', () =>
 
     await system.dispose()
   })
+
+  it('rejects reusing an accepted command id for a different aggregate', async () =>
+  {
+    const system = await createOrchestrationSystem()
+    const { engine } = system
+    const createdAt = now()
+    const projectId = asProjectId('project-command-id-conflict')
+
+    await system.run(
+      engine.dispatch({
+        type: 'project.create',
+        commandId: CommandId.make('cmd-command-id-conflict-project'),
+        projectId,
+        title: 'Command Id Conflict',
+        workspaceRoot: '/tmp/project-command-id-conflict',
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5-codex',
+        },
+        createdAt,
+      }),
+    )
+    for (const threadId of ['thread-command-id-conflict-a', 'thread-command-id-conflict-b'])
+    {
+      await system.run(
+        engine.dispatch({
+          type: 'thread.create',
+          commandId: CommandId.make(`cmd-${threadId}-create`),
+          threadId: ThreadId.make(threadId),
+          projectId,
+          title: threadId,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        }),
+      )
+    }
+
+    const commandId = CommandId.make('cmd-command-id-conflict-turn')
+    await system.run(
+      engine.dispatch({
+        type: 'thread.turn.start',
+        commandId,
+        threadId: ThreadId.make('thread-command-id-conflict-a'),
+        message: {
+          messageId: asMessageId('message-command-id-conflict-a'),
+          role: 'user',
+          text: 'first aggregate',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt,
+      }),
+    )
+
+    await expect(
+      system.run(
+        engine.dispatch({
+          type: 'thread.turn.start',
+          commandId,
+          threadId: ThreadId.make('thread-command-id-conflict-b'),
+          message: {
+            messageId: asMessageId('message-command-id-conflict-b'),
+            role: 'user',
+            text: 'different aggregate',
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          createdAt,
+        }),
+      ),
+    ).rejects.toThrow("already used for thread 'thread-command-id-conflict-a'")
+
+    const readModel = await system.readModel()
+    const targetThread = readModel.threads.find(
+      (candidate) => candidate.id === 'thread-command-id-conflict-b',
+    )
+    expect(targetThread?.messages.filter((message) => message.role === 'user')).toHaveLength(0)
+
+    await system.dispose()
+  })
 })

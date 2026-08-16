@@ -9,6 +9,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Check
@@ -17,6 +20,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Parse PowerShell acceptance script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/windows-desktop-acceptance.ps1").Path,
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -209,3 +227,208 @@ jobs:
 
       - name: Exercise exact packed CLI through Windows shims
         run: node apps/server/scripts/cli.ts publish --dry-run --app-version 9.9.9-smoke.0 --verbose
+
+  windows_wsl_node_pty:
+    name: Windows acceptance WSL node-pty producer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Build Linux x64 node-pty for the packaged WSL tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
+          pty_dir="$(dirname "$pty_pkg")"
+          ( cd "$pty_dir" && "$GITHUB_WORKSPACE/scripts/node_modules/.bin/node-gyp" rebuild )
+          mkdir -p wsl-prebuild
+          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
+          file wsl-prebuild/pty.node
+
+      - name: Upload WSL prebuild
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-acceptance-wsl-node-pty
+          path: wsl-prebuild/pty.node
+          if-no-files-found: error
+          retention-days: 3
+
+  windows_desktop_package:
+    name: Windows unsigned NSIS acceptance producer
+    needs: [windows_wsl_node_pty]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    outputs:
+      acceptance_artifact_id: ${{ steps.upload_acceptance.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Download WSL prebuild
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-acceptance-wsl-node-pty
+          path: wsl-prebuild
+
+      - name: Build exact N and N+1 unsigned installers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          vp run dist:desktop:artifact `
+            --platform win `
+            --target nsis `
+            --arch x64 `
+            --build-version 0.0.17-nightly.20990101.1 `
+            --output-dir windows-acceptance-artifacts/n `
+            --mock-updates `
+            --mock-update-server-port 41230 `
+            --wsl-prebuild "$env:GITHUB_WORKSPACE/wsl-prebuild/pty.node" `
+            --verbose
+          vp run dist:desktop:artifact `
+            --platform win `
+            --target nsis `
+            --arch x64 `
+            --build-version 0.0.17-nightly.20990101.2 `
+            --output-dir windows-acceptance-artifacts/n1 `
+            --skip-build `
+            --mock-updates `
+            --mock-update-server-port 41230 `
+            --wsl-prebuild "$env:GITHUB_WORKSPACE/wsl-prebuild/pty.node" `
+            --verbose
+
+      - name: Verify producer artifact contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($version in @("n", "n1")) {
+            $root = "windows-acceptance-artifacts/$version"
+            $installers = @(Get-ChildItem $root -Filter "*.exe" -File)
+            $blockmaps = @(Get-ChildItem $root -Filter "*.exe.blockmap" -File)
+            $manifests = @(
+              Get-ChildItem $root -Filter "*.yml" -File |
+                Where-Object { $_.Name -notlike "builder-*" }
+            )
+            if ($installers.Count -ne 1 -or $blockmaps.Count -ne 1 -or $manifests.Count -lt 1) {
+              throw "Unexpected $version artifact set: installers=$($installers.Count), blockmaps=$($blockmaps.Count), manifests=$($manifests.Count)"
+            }
+          }
+
+      - name: Upload exact unsigned acceptance artifacts
+        id: upload_acceptance
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-unsigned-nsis-acceptance
+          path: windows-acceptance-artifacts/**/*
+          if-no-files-found: error
+          retention-days: 1
+
+  windows_desktop_acceptance:
+    name: Windows installed artifact acceptance
+    needs: [windows_desktop_package]
+    runs-on: windows-2025
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Download exact unsigned installers
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-unsigned-nsis-acceptance
+          path: windows-acceptance-artifacts
+
+      - name: Exercise digest and stale-tree lifecycle on Windows
+        run: >-
+          vp test run
+          tests/apps/desktop/wsl/DesktopWslServerTree.test.ts
+          tests/apps/server/textGeneration/ClaudeTextGeneration.test.ts
+          tests/scripts/build-desktop-artifact.test.ts
+
+      - name: Exercise installed package and updater paths
+        shell: pwsh
+        timeout-minutes: 30
+        run: >-
+          ./scripts/windows-desktop-acceptance.ps1
+          -ArtifactsRoot ./windows-acceptance-artifacts
+
+      - name: Upload acceptance evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-acceptance-failure-evidence
+          path: |
+            ${{ runner.temp }}/456code-windows-acceptance/**/*.log
+            ${{ runner.temp }}/456code-windows-acceptance/**/*.jsonl
+            ${{ runner.temp }}/456code-windows-acceptance/**/*.ndjson
+          if-no-files-found: ignore
+          retention-days: 3
+
+  windows_desktop_artifact_cleanup:
+    name: Windows acceptance artifact cleanup
+    needs: [windows_desktop_package, windows_desktop_acceptance]
+    if: >-
+      ${{
+        always() &&
+        needs.windows_desktop_package.outputs.acceptance_artifact_id != '' &&
+        (github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository)
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete exact acceptance artifact
+        env:
+          ACCEPTANCE_ARTIFACT_ID: ${{ needs.windows_desktop_package.outputs.acceptance_artifact_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          detail="$(
+            gh api \
+              --method DELETE \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts/$ACCEPTANCE_ARTIFACT_ID" 2>&1
+          )"
+          status=$?
+          set -e
+
+          if [[ "$status" -eq 0 ]]; then
+            echo "Deleted acceptance artifact $ACCEPTANCE_ARTIFACT_ID."
+            exit 0
+          fi
+          if [[ "$detail" == *"HTTP 404"* ]]; then
+            echo "Acceptance artifact $ACCEPTANCE_ARTIFACT_ID was already absent."
+            exit 0
+          fi
+          if [[ "$detail" == *"HTTP 403"* ]]; then
+            echo "::warning::Artifact deletion was not permitted; one-day retention remains the fallback."
+            exit 0
+          fi
+          echo "$detail" >&2
+          exit "$status"

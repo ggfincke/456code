@@ -1,15 +1,21 @@
 // tests/apps/web/components/preview/useDiscoveredLocalServers.test.ts
-// verify merge servers behavior
+// verify live server projection and separate preview history
 
 import type { DiscoveredLocalServer } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
-import { mergeServers } from '../../../../../apps/web/src/components/preview/useDiscoveredLocalServers'
+import {
+  mergeServers,
+  recentlySeenServers,
+} from '../../../../../apps/web/src/components/preview/useDiscoveredLocalServers'
 
-const scannerServer = (overrides: Partial<DiscoveredLocalServer>): DiscoveredLocalServer => ({
+const scannerServer = (
+  overrides: Partial<DiscoveredLocalServer & { requestedUrl: string }>,
+): DiscoveredLocalServer & { requestedUrl: string } => ({
   host: 'localhost',
   port: 5173,
-  url: 'http://localhost:5173',
+  url: 'http://localhost:5173/',
+  requestedUrl: overrides.url ?? 'http://localhost:5173/',
   processName: 'vite',
   pid: 1234,
   terminal: null,
@@ -18,99 +24,112 @@ const scannerServer = (overrides: Partial<DiscoveredLocalServer>): DiscoveredLoc
 
 describe('mergeServers', () =>
 {
-  it('returns scanner-only entries unchanged', () =>
+  it('returns only server-confirmed live entries', () =>
   {
     const result = mergeServers({
       scanner: [scannerServer({})],
-      configuredUrls: [],
-      recentlySeenUrls: [],
+      configuredUrls: ['http://localhost:8080/docs'],
+      configuredUrlProbing: true,
     })
+
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
-      host: 'localhost',
       port: 5173,
       source: 'scanner',
-      listening: true,
+      requestedUrl: 'http://localhost:5173/',
       processName: 'vite',
     })
   })
 
-  it('enriches a configured entry with live process metadata when scanner sees it', () =>
+  it('matches every loopback alias and preserves verified paths', () =>
   {
-    const result = mergeServers({
-      scanner: [scannerServer({ port: 5173, processName: 'node', pid: 9999 })],
-      configuredUrls: ['http://localhost:5173'],
-      recentlySeenUrls: [],
-    })
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({
-      port: 5173,
-      source: 'configured',
-      listening: true,
-      processName: 'node',
-      pid: 9999,
-    })
+    for (const host of ['127.0.0.1', '0.0.0.0', '[::1]'])
+    {
+      const result = mergeServers({
+        scanner: [
+          scannerServer({
+            requestedUrl: 'http://localhost:5173/dashboard?mode=test#results',
+          }),
+        ],
+        configuredUrls: [`http://${host}:5173/dashboard?mode=test#results`],
+        configuredUrlProbing: true,
+      })
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        source: 'configured',
+        requestedUrl: 'http://localhost:5173/dashboard?mode=test#results',
+      })
+    }
   })
 
-  it("keeps configured entries that the scanner doesn't see, with listening=false", () =>
+  it('overlays a configured path only for older TCP-only servers', () =>
   {
-    const result = mergeServers({
-      scanner: [],
-      configuredUrls: ['http://localhost:5173'],
-      recentlySeenUrls: [],
-    })
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({
-      source: 'configured',
-      listening: false,
-    })
+    const scanner = [scannerServer({ requestedUrl: 'http://localhost:5173/' })]
+    const configuredUrls = ['https://localhost:5173/docs?mode=test#results']
+
+    expect(
+      mergeServers({ scanner, configuredUrls, configuredUrlProbing: false })[0]?.requestedUrl,
+    ).toBe('https://localhost:5173/docs?mode=test#results')
+    expect(
+      mergeServers({ scanner, configuredUrls, configuredUrlProbing: true })[0]?.requestedUrl,
+    ).toBe('http://localhost:5173/')
   })
 
-  it('dedupes recently-seen URLs against scanner+configured entries', () =>
+  it('keeps environment-resolved navigation distinct from the requested URL', () =>
   {
     const result = mergeServers({
-      scanner: [scannerServer({ port: 5173 })],
+      scanner: [
+        scannerServer({
+          url: 'https://env-42.example.dev:5173/',
+          requestedUrl: 'http://localhost:5173/',
+        }),
+      ],
       configuredUrls: [],
-      recentlySeenUrls: ['http://localhost:5173/', 'http://localhost:8080/'],
+      configuredUrlProbing: true,
     })
-    expect(result.map((s) => s.port)).toEqual([5173, 8080])
-    expect(result.find((s) => s.port === 5173)?.source).toBe('scanner')
-    expect(result.find((s) => s.port === 8080)?.source).toBe('recent')
+
+    expect(result[0]?.url).toBe('https://env-42.example.dev:5173/')
+    expect(result[0]?.requestedUrl).toBe('http://localhost:5173/')
   })
 
-  it('ignores non-loopback URLs in configured/recent inputs', () =>
+  it('sorts configured live servers before scanner-only servers', () =>
   {
     const result = mergeServers({
-      scanner: [],
-      configuredUrls: ['https://example.com', 'ws://localhost:5173'],
-      recentlySeenUrls: ['https://api.example.com'],
+      scanner: [scannerServer({ port: 3000 }), scannerServer({ port: 8080 })],
+      configuredUrls: ['http://localhost:8080'],
+      configuredUrlProbing: true,
     })
-    expect(result).toHaveLength(0)
-  })
 
-  it('sorts: configured before scanner before recent, then by port', () =>
-  {
-    const result = mergeServers({
-      scanner: [scannerServer({ port: 8080 }), scannerServer({ port: 3000 })],
-      configuredUrls: ['http://localhost:5173'],
-      recentlySeenUrls: ['http://localhost:9000/', 'http://localhost:4321/'],
-    })
-    expect(result.map((s) => `${s.source}:${s.port}`)).toEqual([
-      'configured:5173',
+    expect(result.map((server) => `${server.source}:${server.port}`)).toEqual([
+      'configured:8080',
       'scanner:3000',
-      'scanner:8080',
-      'recent:4321',
-      'recent:9000',
     ])
   })
+})
 
-  it('dedupes by lowercased host', () =>
+describe('recentlySeenServers', () =>
+{
+  it('keeps local history separate and never duplicates a live server', () =>
   {
-    const result = mergeServers({
-      scanner: [scannerServer({ host: 'Localhost', port: 5173 })],
-      configuredUrls: ['http://localhost:5173'],
-      recentlySeenUrls: [],
+    const liveServers = mergeServers({
+      scanner: [scannerServer({})],
+      configuredUrls: [],
+      configuredUrlProbing: true,
     })
-    expect(result).toHaveLength(1)
+    const recent = recentlySeenServers({
+      urls: [
+        'http://127.0.0.1:5173/older-path',
+        'http://localhost:8080/app',
+        'https://example.com',
+      ],
+      liveServers,
+    })
+
+    expect(recent).toHaveLength(1)
+    expect(recent[0]).toMatchObject({
+      port: 8080,
+      source: 'recent',
+      requestedUrl: 'http://localhost:8080/app',
+    })
   })
 })

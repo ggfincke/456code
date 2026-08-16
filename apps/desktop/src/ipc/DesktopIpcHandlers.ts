@@ -38,10 +38,12 @@ import {
   getAppBranding,
   getLocalEnvironmentBootstraps,
   getLocalEnvironmentBearerToken,
+  getSystemLocale,
   getWindowFullscreenState,
   notifyThreadAttention,
   openExternal,
   pickFolder,
+  probeRemoteEditors,
   setMenuBarState,
   setTheme,
   showContextMenu,
@@ -55,6 +57,7 @@ export const installDesktopIpcHandlers = Effect.fn('desktop.ipc.installHandlers'
   yield* PreviewIpc.installPreviewEventForwarding()
 
   yield* ipc.handleSync(getAppBranding)
+  yield* ipc.handleSync(getSystemLocale)
   yield* ipc.handleSync(getWindowFullscreenState)
   yield* ipc.handleSync(getLocalEnvironmentBootstraps)
   yield* ipc.handle(getLocalEnvironmentBearerToken)
@@ -89,6 +92,7 @@ export const installDesktopIpcHandlers = Effect.fn('desktop.ipc.installHandlers'
   yield* ipc.handle(setTheme)
   yield* ipc.handle(showContextMenu)
   yield* ipc.handle(openExternal)
+  yield* ipc.handle(probeRemoteEditors)
   yield* ipc.handle(setMenuBarState)
   yield* ipc.handle(notifyThreadAttention)
   yield* ipc.handle(getUpdateState)

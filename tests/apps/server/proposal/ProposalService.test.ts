@@ -9,7 +9,6 @@ import type * as NodeFS from 'node:fs'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
-import * as NodeTimersPromises from 'node:timers/promises'
 import * as NodeUtil from 'node:util'
 
 import { it } from '@effect/vitest'
@@ -25,9 +24,12 @@ import {
   ThreadId,
   TurnId,
 } from '@t3tools/contracts'
+import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
+import * as Scheduler from 'effect/Scheduler'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { describe, expect } from 'vite-plus/test'
 
@@ -330,7 +332,7 @@ it.layer(TestLayer)('ProposalService', (it) =>
       }),
     )
 
-    it.effect('deletes retained refs when persistence is interrupted', () =>
+    it.effect('installs retained-ref cleanup atomically when preparation completes', () =>
       Effect.gen(function* ()
       {
         const cwd = yield* Effect.acquireRelease(
@@ -340,30 +342,76 @@ it.layer(TestLayer)('ProposalService', (it) =>
               Effect.ignore,
             ),
         )
-        const gitEngine = yield* ProposalGitEngine.make
+        const proposalId = ProposalId.make('proposal-interrupted-after-prepare')
+        const realGitEngine = yield* ProposalGitEngine.make
+        let interruptedRefToken: string | null = null
+        let shouldYieldForInterruption = false
+        const baseScheduler = new Scheduler.MixedScheduler()
+        const interruptionScheduler: Scheduler.Scheduler = {
+          executionMode: baseScheduler.executionMode,
+          shouldYield: () =>
+          {
+            const shouldYield = shouldYieldForInterruption
+            shouldYieldForInterruption = false
+            return shouldYield
+          },
+          makeDispatcher: () => baseScheduler.makeDispatcher(),
+        }
+        const interruptingGitEngine = ProposalGitEngine.ProposalGitEngine.of({
+          prepare: (input) =>
+            Effect.withFiber((fiber) =>
+              realGitEngine.prepare(input).pipe(
+                Effect.map((prepared) =>
+                {
+                  interruptedRefToken = ProposalGitEngine.proposalRetainedRefPairToken(
+                    prepared.baseRetainedRef,
+                    prepared.proposedRetainedRef,
+                  )
+                  let shouldInterrupt = true
+                  return {
+                    ...prepared,
+                    get baseRetainedRef()
+                    {
+                      if (shouldInterrupt)
+                      {
+                        shouldInterrupt = false
+                        shouldYieldForInterruption = true
+                        fiber.currentDispatcher.scheduleTask(
+                          () => fiber.interruptUnsafe(fiber.id),
+                          -1,
+                        )
+                      }
+                      return prepared.baseRetainedRef
+                    },
+                  }
+                }),
+              ),
+            ),
+          deleteRetainedRefs: realGitEngine.deleteRetainedRefs,
+        })
         const unsupportedRepositoryCall = () => Effect.die('unexpected repository call')
-        const hangingRepository = ProposalRepository.ProposalRepository.of({
-          append: () => Effect.never,
+        const rejectingRepository = ProposalRepository.ProposalRepository.of({
+          append: unsupportedRepositoryCall,
           list: unsupportedRepositoryCall,
           get: () =>
             new ProposalError({
-              operation: 'ProposalService.test.hangingRepository.get',
+              operation: 'ProposalService.test.rejectingRepository.get',
               code: 'not-found',
               detail: 'The interrupted proposal was not committed.',
-              proposalId: ProposalId.make('proposal-interrupted-append'),
+              proposalId,
             }),
           findLatestByPlan: unsupportedRepositoryCall,
           findByOrchestrateRevision: unsupportedRepositoryCall,
           readBlob: unsupportedRepositoryCall,
         })
         const service = yield* ProposalService.make.pipe(
-          Effect.provideService(ProposalGitEngine.ProposalGitEngine, gitEngine),
-          Effect.provideService(ProposalRepository.ProposalRepository, hangingRepository),
+          Effect.provideService(ProposalGitEngine.ProposalGitEngine, interruptingGitEngine),
+          Effect.provideService(ProposalRepository.ProposalRepository, rejectingRepository),
         )
         const upsertFiber = yield* service
           .upsert({
             ...scope,
-            proposalId: ProposalId.make('proposal-interrupted-append'),
+            proposalId,
             cwd,
             changes: {
               _tag: 'typed',
@@ -376,29 +424,16 @@ it.layer(TestLayer)('ProposalService', (it) =>
               ],
             },
           })
-          .pipe(Effect.forkScoped)
-
-        let retainedRefs: ReadonlyArray<string> = []
-        for (let attempt = 0; attempt < 200; attempt += 1)
-        {
-          retainedRefs = yield* Effect.promise(() => proposalRefFiles(cwd))
-          if (retainedRefs.length === 2) break
-          yield* Effect.promise(() => NodeTimersPromises.setTimeout(10))
-        }
-        expect(retainedRefs).toHaveLength(2)
+          .pipe(
+            Effect.provideService(Scheduler.Scheduler, interruptionScheduler),
+            Effect.forkScoped,
+          )
+        const upsertExit = yield* Fiber.await(upsertFiber)
+        expect(Exit.isFailure(upsertExit) && Cause.hasInterruptsOnly(upsertExit.cause)).toBe(true)
+        expect(interruptedRefToken).not.toBeNull()
         const attemptStore = yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore
-        const interruptedToken = NodePath.basename(NodePath.dirname(retainedRefs[0]!))
-        const interruptedAttempt = (yield* attemptStore.list).find(
-          (attempt) => attempt.refToken === interruptedToken,
-        )
-        expect(interruptedAttempt).toBeDefined()
-
-        yield* Fiber.interrupt(upsertFiber)
-
         expect(
-          (yield* attemptStore.list).some(
-            (attempt) => attempt.refToken === interruptedAttempt?.refToken,
-          ),
+          (yield* attemptStore.list).some((attempt) => attempt.refToken === interruptedRefToken),
         ).toBe(false)
         expect(yield* Effect.promise(() => proposalRefFiles(cwd))).toEqual([])
       }),

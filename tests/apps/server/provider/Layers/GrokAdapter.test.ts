@@ -1709,4 +1709,41 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       yield* adapter.stopSession(threadId)
     }),
   )
+
+  it.effect('keeps consuming notifications after the startSession fiber completes', () =>
+    Effect.gen(function* ()
+    {
+      const threadId = ThreadId.make('grok-consumer-outlives-start-session')
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper())
+      const adapter = yield* makeTestAdapter(wrapperPath)
+
+      const contentDelta = yield* Deferred.make<string>()
+      const eventsFiber = yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
+        event.type === 'content.delta' && String(event.threadId) === String(threadId)
+          ? Deferred.succeed(contentDelta, event.payload.delta).pipe(Effect.asVoid)
+          : Effect.void,
+      ).pipe(Effect.forkChild)
+
+      // mirror production: the request fiber finishes immediately after session creation.
+      const startFiber = yield* startAcpTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('grok'),
+        cwd: process.cwd(),
+        runtimeMode: 'full-access',
+      }).pipe(Effect.forkChild)
+      yield* Fiber.join(startFiber).pipe(Effect.timeout('10 seconds'))
+
+      const sendFiber = yield* adapter
+        .sendTurn({ threadId, input: 'hello mock', attachments: [] })
+        .pipe(Effect.forkChild)
+      assert.equal(
+        yield* Deferred.await(contentDelta).pipe(Effect.timeout('10 seconds')),
+        'hello from mock',
+      )
+      yield* Fiber.join(sendFiber).pipe(Effect.timeout('10 seconds'))
+
+      yield* Fiber.interrupt(eventsFiber)
+      yield* adapter.stopSession(threadId)
+    }).pipe(TestClock.withLive),
+  )
 })

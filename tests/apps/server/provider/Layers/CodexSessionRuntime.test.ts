@@ -10,6 +10,7 @@ import { describe } from 'vite-plus/test'
 import { DEFAULT_MODEL, ThreadId } from '@t3tools/contracts'
 import * as CodexErrors from 'effect-codex-app-server/errors'
 import * as CodexRpc from 'effect-codex-app-server/rpc'
+import * as EffectCodexSchema from 'effect-codex-app-server/schema'
 
 import {
   buildCodexDeveloperInstructions,
@@ -22,6 +23,7 @@ import {
   buildTurnStartParams,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
+  makeMemoryConsolidationNotificationFilter,
   openCodexThread,
 } from '../../../../../apps/server/src/provider/Layers/CodexSessionRuntime.ts'
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError)
@@ -425,6 +427,115 @@ describe('hasConfiguredMcpServer', () =>
     NodeAssert.equal(
       hasConfiguredMcpServer(['-c', 'mcp_servers.t3-code.url="http://127.0.0.1/mcp"']),
       true,
+    )
+  })
+})
+
+function makeThreadStartedNotification(
+  threadId: string,
+  source: EffectCodexSchema.V2ThreadStartedNotification['thread']['source'],
+  threadSource?: string,
+)
+{
+  return {
+    method: 'thread/started' as const,
+    params: {
+      thread: {
+        cliVersion: '0.0.0',
+        createdAt: 0,
+        cwd: '/tmp/project',
+        ephemeral: true,
+        id: threadId,
+        modelProvider: 'openai',
+        preview: '',
+        sessionId: threadId,
+        source,
+        status: { type: 'idle' as const },
+        ...(threadSource ? { threadSource } : {}),
+        turns: [],
+        updatedAt: 0,
+      },
+    },
+  }
+}
+
+describe('makeMemoryConsolidationNotificationFilter', () =>
+{
+  it('suppresses memory threads without hiding settlement or other subagents', () =>
+  {
+    const shouldSuppress = makeMemoryConsolidationNotificationFilter()
+
+    NodeAssert.equal(
+      shouldSuppress(
+        makeThreadStartedNotification('memory-thread', 'unknown', 'memory_consolidation'),
+      ),
+      true,
+    )
+    NodeAssert.equal(
+      shouldSuppress({
+        method: 'item/agentMessage/delta',
+        params: {
+          delta: 'internal memory update',
+          itemId: 'memory-message',
+          threadId: 'memory-thread',
+          turnId: 'memory-turn',
+        },
+      }),
+      true,
+    )
+    NodeAssert.equal(
+      shouldSuppress({
+        method: 'serverRequest/resolved',
+        params: { requestId: 'memory-approval', threadId: 'memory-thread' },
+      }),
+      false,
+    )
+    NodeAssert.equal(
+      shouldSuppress({
+        method: 'warning',
+        params: { message: 'internal warning', threadId: 'memory-thread' },
+      }),
+      true,
+    )
+    NodeAssert.equal(
+      shouldSuppress({
+        method: 'item/agentMessage/delta',
+        params: {
+          delta: 'normal reply',
+          itemId: 'root-message',
+          threadId: 'root-thread',
+          turnId: 'root-turn',
+        },
+      }),
+      false,
+    )
+    NodeAssert.equal(
+      shouldSuppress(
+        makeThreadStartedNotification('legacy-memory-thread', {
+          subAgent: 'memory_consolidation',
+        }),
+      ),
+      true,
+    )
+    NodeAssert.equal(
+      shouldSuppress(makeThreadStartedNotification('visible-subagent', { subAgent: 'review' })),
+      false,
+    )
+    NodeAssert.equal(
+      shouldSuppress({ method: 'thread/closed', params: { threadId: 'memory-thread' } }),
+      true,
+    )
+    NodeAssert.equal(
+      shouldSuppress({
+        method: 'item/agentMessage/delta',
+        params: {
+          delta: 'later message',
+          itemId: 'later-message',
+          threadId: 'memory-thread',
+          turnId: 'later-turn',
+        },
+      }),
+      false,
     )
   })
 })

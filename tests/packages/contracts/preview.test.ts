@@ -5,7 +5,11 @@ import { Schema } from 'effect'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
+  CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
+  ConfiguredLocalServerUrls,
   DiscoveredLocalServer,
+  DiscoveredLocalServerList,
+  PREVIEW_URL_MAX_LENGTH,
   PreviewEvent,
   PreviewNavStatus,
   PreviewViewportSetting,
@@ -22,6 +26,14 @@ import {
 const decodePreviewEvent = Schema.decodeUnknownSync(PreviewEvent)
 const decodeNavStatus = Schema.decodeUnknownSync(PreviewNavStatus)
 const decodeServer = Schema.decodeUnknownSync(DiscoveredLocalServer)
+const decodeServerList = Schema.decodeUnknownSync(DiscoveredLocalServerList)
+const decodeLegacyServerList = Schema.decodeUnknownSync(
+  Schema.Struct({
+    servers: Schema.Array(DiscoveredLocalServer),
+    scannedAt: Schema.String,
+  }),
+)
+const decodeConfiguredLocalServerUrls = Schema.decodeUnknownSync(ConfiguredLocalServerUrls)
 const decodeViewport = Schema.decodeUnknownSync(PreviewViewportSetting)
 const decodeResizeInput = Schema.decodeUnknownSync(PreviewAutomationResizeInput)
 const decodeOpenInput = Schema.decodeUnknownSync(PreviewAutomationOpenInput)
@@ -274,5 +286,39 @@ describe('DiscoveredLocalServer', () =>
         terminal: null,
       }),
     ).toThrow()
+  })
+})
+
+describe('preview local server discovery boundaries', () =>
+{
+  it('bounds configured probe payloads and keeps the capability marker backward compatible', () =>
+  {
+    expect(() =>
+      decodeConfiguredLocalServerUrls(
+        Array.from(
+          { length: CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS + 1 },
+          (_, index) => `http://localhost:${3_000 + index}`,
+        ),
+      ),
+    ).toThrow()
+    expect(() =>
+      decodeConfiguredLocalServerUrls([`http://localhost/${'a'.repeat(PREVIEW_URL_MAX_LENGTH)}`]),
+    ).toThrow()
+
+    const legacy = decodeServerList({ servers: [], scannedAt: '2026-08-16T00:00:00.000Z' })
+    const current = decodeServerList({
+      servers: [],
+      scannedAt: '2026-08-16T00:00:00.000Z',
+      configuredUrlProbing: true,
+    })
+    expect(legacy.configuredUrlProbing).toBeUndefined()
+    expect(current.configuredUrlProbing).toBe(true)
+    expect(
+      decodeLegacyServerList({
+        servers: [],
+        scannedAt: '2026-08-16T00:00:00.000Z',
+        configuredUrlProbing: true,
+      }),
+    ).toEqual({ servers: [], scannedAt: '2026-08-16T00:00:00.000Z' })
   })
 })

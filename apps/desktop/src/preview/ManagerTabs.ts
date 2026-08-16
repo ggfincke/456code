@@ -48,12 +48,12 @@ export interface ManagerTabsDeps
   readonly computeNavStatus: (wc: Electron.WebContents) => PreviewNavStatus
   readonly currentIso: Effect.Effect<string>
   readonly detachControlSession: (webContentsId: number) => Effect.Effect<void, PreviewManagerError>
-  readonly detachListeners: (webContentsId: number) => Effect.Effect<void>
+  readonly detachListeners: (webContentsId: number, attachmentToken: symbol) => Effect.Effect<void>
   readonly attachListeners: (
     tabId: string,
     wc: Electron.WebContents,
     lifecycleGeneration: number,
-  ) => Effect.Effect<void, PreviewManagerError>
+  ) => Effect.Effect<symbol, PreviewManagerError>
   readonly emit: (tabId: string, state: PreviewTabState) => Effect.Effect<void>
   readonly nextCounter: (ref: Ref.Ref<number>) => Effect.Effect<number>
   readonly replaceMap: <K, V>(
@@ -66,6 +66,9 @@ export interface ManagerTabsDeps
   readonly toPreviewTabState: (state: PreviewTabState) => PreviewTabState
   readonly withTabLifecycle: <A, E, R>(
     tabId: string,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>
+  readonly withAttachmentTransition: <A, E, R>(
     effect: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E, R>
   readonly update: (
@@ -101,6 +104,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     requireWebContents,
     toPreviewTabState,
     withTabLifecycle,
+    withAttachmentTransition,
     update,
     runFork,
     ensureControlSession,
@@ -111,6 +115,18 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
   )
   {
     yield* Ref.set(mainWindowRef, Option.some(window))
+  })
+
+  // read both owners at call time so an attach race cannot restore stale zoom
+  const assertTabZoom = Effect.fn('PreviewManager.assertTabZoom')(function* (tabId: string)
+  {
+    const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+    if (!tab || tab.webContentsId === null) return
+    const wc = webContents.fromId(tab.webContentsId)
+    if (!wc || wc.isDestroyed()) return
+    yield* attempt({ operation: 'assertTabZoom', tabId, webContentsId: wc.id }, () =>
+      wc.setZoomFactor(tab.zoomFactor),
+    ).pipe(Effect.ignore)
   })
 
   const createTabUnlocked = Effect.fn('PreviewManager.createTab')(function* (tabId: string)
@@ -152,14 +168,22 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     yield* cancelPickElement(tabId)
     if (tab.webContentsId != null)
     {
+      const attachment = (yield* Ref.get(attachedRef)).get(tab.webContentsId)
+      const ownsWebContents = attachment === undefined || attachment.tabId === tabId
       yield* Effect.all(
-        [detachControlSession(tab.webContentsId), detachListeners(tab.webContentsId)],
+        [
+          ownsWebContents ? detachControlSession(tab.webContentsId) : Effect.void,
+          attachment?.tabId === tabId
+            ? detachListeners(tab.webContentsId, attachment.attachmentToken)
+            : Effect.void,
+        ],
         { concurrency: 2, discard: true },
       )
     }
     const updatedAt = yield* currentIso
+    const { favicon: _favicon, ...tabWithoutFavicon } = tab
     const closed: PreviewTabState = {
-      ...tab,
+      ...tabWithoutFavicon,
       webContentsId: null,
       navStatus: { kind: 'Idle' },
       canGoBack: false,
@@ -192,6 +216,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     const mainWindow = yield* Ref.get(mainWindowRef)
     if (
       !wc ||
+      wc.isDestroyed() ||
       wc.getType() !== 'webview' ||
       (Option.isSome(mainWindow) && wc.hostWebContents !== mainWindow.value.webContents)
     )
@@ -200,46 +225,91 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     }
     const attached = yield* Ref.get(attachedRef)
     const annotationTheme = yield* Ref.get(annotationThemeRef)
-    if (tab.webContentsId === webContentsId && attached.has(webContentsId))
+    const currentAttachment = attached.get(webContentsId)
+    if (currentAttachment && currentAttachment.tabId !== tabId)
     {
-      const zoomFactor = yield* attempt(
-        { operation: 'registerWebview.getZoomFactor', tabId, webContentsId },
-        () => wc.getZoomFactor(),
-      )
-      yield* update(tabId, { zoomFactor })
+      return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId })
+    }
+    if (
+      tab.webContentsId === webContentsId &&
+      currentAttachment?.tabId === tabId &&
+      currentAttachment.webContents === wc
+    )
+    {
+      // chromium may have just copied the embedder's zoom onto this guest
+      yield* assertTabZoom(tabId)
       yield* attempt({ operation: 'registerWebview.sendTheme', tabId, webContentsId }, () =>
         wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
       )
       return
     }
-    const replacedWebContentsId =
-      tab.webContentsId != null && tab.webContentsId !== webContentsId ? tab.webContentsId : null
-    if (replacedWebContentsId !== null)
+    if (currentAttachment && tab.webContentsId !== webContentsId)
     {
-      yield* Effect.all(
-        [
-          detachControlSession(replacedWebContentsId),
-          detachListeners(replacedWebContentsId),
-          cancelPickElement(tabId),
-        ],
-        { concurrency: 3, discard: true },
-      )
+      return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId })
     }
-    const zoomFactor =
-      replacedWebContentsId !== null
-        ? yield* attempt(
-            { operation: 'registerWebview.restoreZoomFactor', tabId, webContentsId },
-            () =>
-              {
-              wc.setZoomFactor(tab.zoomFactor)
-              return tab.zoomFactor
-            },
-          )
-        : yield* attempt({ operation: 'registerWebview.getZoomFactor', tabId, webContentsId }, () =>
-            wc.getZoomFactor(),
-          )
+    const replacedWebContentsId =
+      tab.webContentsId != null &&
+      (tab.webContentsId !== webContentsId || currentAttachment?.webContents !== wc)
+        ? tab.webContentsId
+        : null
+    // a new guest inherits the app window zoom, never the preview tab zoom
+    yield* attempt({ operation: 'registerWebview.restoreZoomFactor', tabId, webContentsId }, () =>
+      wc.setZoomFactor(tab.zoomFactor),
+    )
     const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
-    yield* attachListeners(tabId, wc, lifecycleGeneration)
+    // once the source is released, failure leaves the tab explicitly unattached
+    const detachFailedTransition = Effect.gen(function* ()
+    {
+      const updatedAt = yield* currentIso
+      const detached = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
+      {
+        const current = tabs.get(tabId)
+        if (!current || current.webContentsId !== tab.webContentsId)
+        {
+          return [Option.none<PreviewTabRecord>(), tabs] as const
+        }
+        const { favicon: _favicon, ...currentWithoutFavicon } = current
+        const next: PreviewTabRecord = {
+          ...currentWithoutFavicon,
+          webContentsId: null,
+          navStatus:
+            current.navStatus.kind === 'Loading' ? current.navStatus : { kind: 'Idle' as const },
+          canGoBack: false,
+          canGoForward: false,
+          controller: 'none',
+          updatedAt,
+          lifecycleGeneration,
+        }
+        return [
+          Option.some(next),
+          replaceMap(tabs, (copy) =>
+          {
+            copy.set(tabId, next)
+          }),
+        ] as const
+      })
+      if (Option.isSome(detached)) yield* emit(tabId, detached.value)
+    })
+    const attachmentToken = yield* Effect.gen(function* ()
+    {
+      if (replacedWebContentsId !== null)
+      {
+        const replacedAttachment = attached.get(replacedWebContentsId)
+        const ownsReplacedWebContents =
+          replacedAttachment === undefined || replacedAttachment.tabId === tabId
+        yield* Effect.all(
+          [
+            ownsReplacedWebContents ? detachControlSession(replacedWebContentsId) : Effect.void,
+            replacedAttachment?.tabId === tabId
+              ? detachListeners(replacedWebContentsId, replacedAttachment.attachmentToken)
+              : Effect.void,
+            cancelPickElement(tabId),
+          ],
+          { concurrency: 3, discard: true },
+        )
+      }
+      return yield* attachListeners(tabId, wc, lifecycleGeneration)
+    }).pipe(Effect.onError(() => detachFailedTransition))
     const registeredAt = yield* currentIso
     const registration = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
     {
@@ -252,13 +322,13 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         ] as const
       }
       const pendingUrl = current.navStatus.kind === 'Loading' ? current.navStatus.url : null
+      const { favicon: _favicon, ...currentWithoutFavicon } = current
       const next: PreviewTabRecord = {
-        ...current,
+        ...currentWithoutFavicon,
         webContentsId,
         navStatus: pendingUrl === null ? computeNavStatus(wc) : current.navStatus,
         canGoBack: wc.navigationHistory.canGoBack(),
         canGoForward: wc.navigationHistory.canGoForward(),
-        zoomFactor,
         updatedAt: registeredAt,
         lifecycleGeneration,
       }
@@ -275,13 +345,15 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     })
     if (Option.isNone(registration))
     {
-      yield* Effect.all([detachControlSession(wc.id), detachListeners(wc.id)], {
+      yield* Effect.all([detachControlSession(wc.id), detachListeners(wc.id, attachmentToken)], {
         concurrency: 2,
         discard: true,
       })
       return yield* new PreviewTabNotFoundError({ tabId })
     }
     const { state: registered, pendingUrl } = registration.value
+    // a zoom action may have landed while the replacement attached
+    yield* assertTabZoom(tabId)
     runFork(restoreControlSession(tabId, wc))
     yield* emit(tabId, registered)
     yield* attempt({ operation: 'registerWebview.sendTheme', tabId, webContentsId }, () =>
@@ -329,6 +401,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         zoomFactor: current?.zoomFactor ?? DEFAULT_ZOOM_FACTOR,
         colorScheme: current?.colorScheme ?? 'system',
         controller: current?.controller ?? 'none',
+        ...(current?.favicon ? { favicon: current.favicon } : {}),
         updatedAt,
         lifecycleGeneration: current?.lifecycleGeneration ?? lifecycleGeneration,
       }
@@ -342,19 +415,55 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     })
     yield* emit(tabId, pending)
     if (pending.webContentsId == null) return
-    const wc = webContents.fromId(pending.webContentsId)
-    if (!wc)
+    const webContentsId = pending.webContentsId
+    const wc = webContents.fromId(webContentsId)
+    if (!wc || wc.isDestroyed())
     {
-      const detached = { ...pending, webContentsId: null }
-      yield* SynchronizedRef.update(tabsRef, (tabs) =>
-        tabs.get(tabId)?.webContentsId !== pending.webContentsId
-          ? tabs
-          : replaceMap(tabs, (copy) =>
+      yield* withAttachmentTransition(
+        Effect.gen(function* ()
+        {
+          const expectedAttachment = (yield* Ref.get(attachedRef)).get(webContentsId)
+          const currentTab = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+          const currentWebContents = webContents.fromId(webContentsId)
+          if (
+            currentTab?.webContentsId !== webContentsId ||
+            (currentWebContents && !currentWebContents.isDestroyed())
+          )
+          {
+            return
+          }
+          yield* Effect.all(
+            [
+              expectedAttachment === undefined || expectedAttachment.tabId === tabId
+                ? detachControlSession(webContentsId)
+                : Effect.void,
+              expectedAttachment?.tabId === tabId
+                ? detachListeners(webContentsId, expectedAttachment.attachmentToken)
+                : Effect.void,
+              cancelPickElement(tabId),
+            ],
+            { concurrency: 3, discard: true },
+          )
+          const detached = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
+          {
+            const current = tabs.get(tabId)
+            if (current?.webContentsId !== webContentsId)
             {
-              copy.set(tabId, detached)
-            }),
+              return [Option.none<PreviewTabRecord>(), tabs] as const
+            }
+            const { favicon: _favicon, ...currentWithoutFavicon } = current
+            const next: PreviewTabRecord = { ...currentWithoutFavicon, webContentsId: null }
+            return [
+              Option.some(next),
+              replaceMap(tabs, (copy) =>
+              {
+                copy.set(tabId, next)
+              }),
+            ] as const
+          })
+          if (Option.isSome(detached)) yield* emit(tabId, detached.value)
+        }),
       )
-      yield* emit(tabId, detached)
       return
     }
     if (wc.getURL() === url)
@@ -370,9 +479,10 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
   })
 
   const createTab = (tabId: string) => withTabLifecycle(tabId, createTabUnlocked(tabId))
-  const closeTab = (tabId: string) => withTabLifecycle(tabId, closeTabUnlocked(tabId))
+  const closeTab = (tabId: string) =>
+    withTabLifecycle(tabId, withAttachmentTransition(closeTabUnlocked(tabId)))
   const registerWebview = (tabId: string, webContentsId: number) =>
-    withTabLifecycle(tabId, registerWebviewUnlocked(tabId, webContentsId))
+    withTabLifecycle(tabId, withAttachmentTransition(registerWebviewUnlocked(tabId, webContentsId)))
   const navigate = (tabId: string, rawUrl: string) =>
     withTabLifecycle(tabId, navigateUnlocked(tabId, rawUrl))
 
@@ -473,6 +583,12 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     yield* update(tabId, { zoomFactor: next })
   })
 
+  const reapplyZoom = Effect.fn('PreviewManager.reapplyZoom')(function* ()
+  {
+    const tabIds = Array.from((yield* SynchronizedRef.get(tabsRef)).keys())
+    yield* Effect.forEach(tabIds, assertTabZoom, { discard: true })
+  })
+
   // emulated media lives on the CDP debugger session, not the WebContents, so
   // it is lost whenever the session detaches (webview swap, DevTools
   // open/close) and must be re-applied after every (re)attach.
@@ -566,6 +682,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     openDevTools,
     setAnnotationTheme,
     applyZoom,
+    reapplyZoom,
     setColorScheme,
     withWebContents,
   }

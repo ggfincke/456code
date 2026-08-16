@@ -39,6 +39,7 @@ import * as DesktopConfig from '../../../../apps/desktop/src/app/DesktopConfig.t
 import * as DesktopEnvironment from '../../../../apps/desktop/src/app/DesktopEnvironment.ts'
 import * as DesktopState from '../../../../apps/desktop/src/app/DesktopState.ts'
 import * as DesktopAppSettings from '../../../../apps/desktop/src/settings/DesktopAppSettings.ts'
+import * as ElectronApp from '../../../../apps/desktop/src/electron/ElectronApp.ts'
 import * as ElectronMenu from '../../../../apps/desktop/src/electron/ElectronMenu.ts'
 import * as ElectronShell from '../../../../apps/desktop/src/electron/ElectronShell.ts'
 import * as ElectronTheme from '../../../../apps/desktop/src/electron/ElectronTheme.ts'
@@ -174,6 +175,10 @@ const electronThemeLayer = Layer.succeed(ElectronTheme.ElectronTheme, {
   onUpdated: () => Effect.void,
 } satisfies ElectronTheme.ElectronTheme['Service'])
 
+const electronAppLayer = Layer.mock(ElectronApp.ElectronApp)({
+  quit: Effect.void,
+})
+
 const desktopEnvironmentLayer = DesktopEnvironment.layer(environmentInput).pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -203,6 +208,7 @@ function makeTestLayer(input: {
   ) => Effect.Effect<void>
   readonly openedExternalUrls?: unknown[]
   readonly beforeWindowCreate?: Effect.Effect<void>
+  readonly previewZoomReapplies?: number[]
 })
 {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS
@@ -270,6 +276,7 @@ function makeTestLayer(input: {
         desktopAppSettingsLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
+        electronAppLayer,
         electronMenuLayer,
         Layer.succeed(ElectronShell.ElectronShell, {
           openExternal: (url) =>
@@ -287,6 +294,11 @@ function makeTestLayer(input: {
           setMainWindow: () => Effect.void,
           isBrowserPartition: (partition) => partition.startsWith('persist:456code-preview-'),
           getBrowserPartition: () => Effect.succeed('persist:456code-preview-test'),
+          reapplyZoom: () =>
+            Effect.sync(() =>
+            {
+              input.previewZoomReapplies?.push(input.window.webContents.getZoomLevel())
+            }),
         }),
       ),
     ),
@@ -373,6 +385,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           desktopEnvironmentLayer,
           DesktopAppSettings.layerTest(),
           desktopServerExposureLayer,
+          electronAppLayer,
           electronMenuLayer,
           Layer.succeed(ElectronShell.ElectronShell, {
             openExternal: () => Effect.succeed(true),
@@ -475,10 +488,12 @@ describe('DesktopWindow', () =>
       const fakeWindow = makeFakeBrowserWindow()
       const createCount = yield* Ref.make(0)
       const mainWindow = yield* Ref.make(Option.some(fakeWindow.window))
+      const previewZoomReapplies: number[] = []
       const layer = makeTestLayer({
         window: fakeWindow.window,
         createCount,
         mainWindow,
+        previewZoomReapplies,
       })
 
       yield* Effect.gen(function* ()
@@ -490,6 +505,54 @@ describe('DesktopWindow', () =>
         yield* desktopWindow.zoomMain('reset')
 
         assert.deepEqual(fakeWindow.setZoomLevel.mock.calls, [[0.5], [0], [-0.5], [0]])
+        assert.deepEqual(previewZoomReapplies, [0.5, 0, -0.5, 0])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('attaches the host quit handler directly to preview guests', () =>
+    Effect.gen(function* ()
+    {
+      const fakeWindow = makeFakeBrowserWindow()
+      const createCount = yield* Ref.make(0)
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none())
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+      })
+
+      yield* Effect.gen(function* ()
+      {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow
+        yield* desktopWindow.handleBackendReady(new URL('http://127.0.0.1:3773'))
+
+        const hostQuitHandler = fakeWindow.webContentsListeners.get('before-input-event')
+        const didAttachWebview = fakeWindow.webContentsListeners.get('did-attach-webview')
+        if (!hostQuitHandler || !didAttachWebview)
+        {
+          return yield* Effect.die('quit shortcut listeners were not registered')
+        }
+
+        const guestListeners = new Map<string, (...args: readonly unknown[]) => void>()
+        const guestOff = vi.fn()
+        const guest = {
+          on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) =>
+          {
+            guestListeners.set(eventName, listener)
+          }),
+          once: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) =>
+          {
+            guestListeners.set(eventName, listener)
+          }),
+          off: guestOff,
+        } as unknown as Electron.WebContents
+
+        didAttachWebview({}, guest)
+
+        assert.strictEqual(guestListeners.get('before-input-event'), hostQuitHandler)
+        guestListeners.get('destroyed')?.()
+        assert.deepEqual(guestOff.mock.calls, [['before-input-event', hostQuitHandler]])
       }).pipe(Effect.provide(layer))
     }),
   )

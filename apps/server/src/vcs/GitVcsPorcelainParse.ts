@@ -342,8 +342,9 @@ export function isNonRepositoryGitStderr(stderr: string): boolean
 
 export function isUnbornHeadStderr(stderr: string): boolean
 {
+  const normalized = stderr.toLowerCase()
   return (
-    stderr.toLowerCase().includes('unknown revision') &&
-    stderr.toLowerCase().includes('path not in the working tree')
+    normalized.includes("bad revision 'head'") ||
+    (normalized.includes('unknown revision') && normalized.includes('path not in the working tree'))
   )
 }

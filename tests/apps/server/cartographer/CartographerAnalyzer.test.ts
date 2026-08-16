@@ -17,6 +17,7 @@ import * as Option from 'effect/Option'
 import { afterEach, describe, expect } from 'vite-plus/test'
 
 import * as CartographerAnalyzer from '../../../../apps/server/src/cartographer/CartographerAnalyzer.ts'
+import { createCartographerAnalyzerIdentifier as createPackagedCartographerAnalyzerIdentifier } from '../../../../apps/server/src/bin.ts'
 import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 
 const temporaryRoots = new Set<string>()
@@ -83,6 +84,32 @@ afterEach(async () =>
 
 describe('CartographerAnalyzer', () =>
 {
+  it.effect('exports the packaged identifier with its content-aware memo contract', () =>
+    Effect.gen(function* ()
+    {
+      const fixture = yield* Effect.promise(() => makePackage())
+      const identify = createPackagedCartographerAnalyzerIdentifier({
+        resolvePackageJson: () => fixture.packageJsonPath,
+      })
+      const first = yield* Effect.promise(identify)
+      const cached = yield* Effect.promise(identify)
+      expect(cached).toBe(first)
+      expect(first.cliPath).toBe(yield* Effect.promise(() => NodeFSP.realpath(fixture.cliPath)))
+      expect(first.fingerprint).toMatch(
+        /^@t3tools\/cartographer-core@0\.1\.0-test:dist-sha256:[0-9a-f]{64}$/u,
+      )
+
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          NodePath.join(NodePath.dirname(fixture.cliPath), '..', 'runtime.js'),
+          'runtime-v2-expanded\n',
+        ),
+      )
+      const changed = yield* Effect.promise(identify)
+      expect(changed.fingerprint).not.toBe(first.fingerprint)
+    }),
+  )
+
   it.effect('advertises native architecture only when the CLI is present', () =>
     Effect.gen(function* ()
     {

@@ -15,11 +15,17 @@ import {
   TriangleAlertIcon,
 } from 'lucide-react'
 import {
+  canRetainTerminalThreadPr,
   ChangeRequestStatusIcon,
+  nextThreadChangeRequestSnapshot,
   prStatusIndicator,
   PrStatusTooltipContent,
-  resolveThreadPr,
+  resolveDisplayedThreadPr,
+  resolveDisplayedThreadPrProvider,
+  setThreadChangeRequestSnapshot,
   terminalStatusFromRunningIds,
+  threadChangeRequestSnapshotsAtom,
+  type ThreadChangeRequestSnapshot,
   ThreadStatusLabel,
   ThreadWorktreeIndicator,
 } from './ThreadStatusIndicators'
@@ -59,6 +65,7 @@ import {
   scopeThreadRef,
 } from '@t3tools/client-runtime/environment'
 import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
+import { resolveThreadChangeRoot } from '@t3tools/shared/threadChangeRoot'
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -317,6 +324,7 @@ function buildThreadJumpLabelMap(input: {
 interface SidebarThreadRowProps
 {
   thread: SidebarThreadSummary
+  changeRequestSnapshot: ThreadChangeRequestSnapshot | null
   projectCwd: string | null
   orderedProjectThreadKeys: readonly string[]
   isActive: boolean
@@ -379,6 +387,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     attemptArchiveThread,
     openPrLink,
     thread,
+    changeRequestSnapshot,
   } = props
   const threadRef = scopeThreadRef(thread.environmentId, thread.id)
   const threadKey = scopedThreadKey(threadRef)
@@ -421,9 +430,28 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     ),
   )
   const threadProjectCwd = threadProject?.workspaceRoot ?? null
-  const gitCwd = thread.worktreePath ?? threadProjectCwd ?? props.projectCwd
+  const runWorktreePath = thread.orchestrateRunWorktreePath ?? null
+  // keep this probe pinned so a pruned adopted root cannot flap against the
+  // fallback checkout.
+  const runWorktreeStatus = useEnvironmentQuery(
+    runWorktreePath === null
+      ? null
+      : vcsEnvironment.status({
+          environmentId: thread.environmentId,
+          input: { cwd: runWorktreePath },
+        }),
+  )
+  const runWorktreeIsNotRepository = runWorktreeStatus.data?.isRepo === false
+  const effectiveRunWorktreePath = runWorktreeIsNotRepository ? null : runWorktreePath
+  const gitCwd = resolveThreadChangeRoot({
+    orchestrateRunWorktreePath: runWorktreePath,
+    worktreePath: thread.worktreePath,
+    workspaceRoot: threadProjectCwd ?? props.projectCwd,
+    orchestrateRunWorktreeIsNotRepository: runWorktreeIsNotRepository,
+  })
   const gitStatus = useEnvironmentQuery(
-    thread.branch != null && gitCwd !== null
+    (thread.branch != null || thread.worktreePath !== null || effectiveRunWorktreePath !== null) &&
+      gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -467,11 +495,41 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       lastVisitedAt,
     },
   })
-  const pr = resolveThreadPr({
+  const retainTerminalOnBranchMismatch = canRetainTerminalThreadPr({
+    worktreePath: thread.worktreePath,
+    orchestrateRunWorktreePath: runWorktreePath,
+    orchestrateRunWorktreeIsNotRepository: runWorktreeIsNotRepository,
+  })
+  const pr = resolveDisplayedThreadPr({
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
+    snapshot: changeRequestSnapshot,
+    retainTerminalOnBranchMismatch,
   })
-  const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider)
+  const prProvider = resolveDisplayedThreadPrProvider({
+    threadBranch: thread.branch,
+    gitStatus: gitStatus.data,
+    snapshot: changeRequestSnapshot,
+    retainTerminalOnBranchMismatch,
+  })
+  const prStatus = prStatusIndicator(pr, prProvider)
+  useEffect(() =>
+  {
+    const nextSnapshot = nextThreadChangeRequestSnapshot({
+      threadBranch: thread.branch,
+      gitStatus: gitStatus.data,
+      snapshot: changeRequestSnapshot,
+      retainTerminalOnBranchMismatch,
+    })
+    if (nextSnapshot === undefined) return
+    setThreadChangeRequestSnapshot(threadKey, nextSnapshot)
+  }, [
+    changeRequestSnapshot,
+    gitStatus.data,
+    retainTerminalOnBranchMismatch,
+    thread.branch,
+    threadKey,
+  ])
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds)
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning
   const threadMetaClassName = isConfirmingArchive
@@ -625,6 +683,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     (event: React.KeyboardEvent<HTMLInputElement>) =>
     {
       event.stopPropagation()
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return
       if (event.key === 'Enter')
       {
         event.preventDefault()
@@ -937,6 +996,7 @@ interface SidebarProjectThreadListProps
   hiddenThreadStatus: ThreadStatusPill | null
   orderedProjectThreadKeys: readonly string[]
   renderedThreads: readonly SidebarThreadSummary[]
+  changeRequestSnapshotByKey: ReadonlyMap<string, ThreadChangeRequestSnapshot>
   showEmptyThreadState: boolean
   shouldShowThreadPanel: boolean
   isThreadListExpanded: boolean
@@ -989,6 +1049,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hiddenThreadStatus,
     orderedProjectThreadKeys,
     renderedThreads,
+    changeRequestSnapshotByKey,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -1044,6 +1105,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             <SidebarThreadRow
               key={threadKey}
               thread={thread}
+              changeRequestSnapshot={changeRequestSnapshotByKey.get(threadKey) ?? null}
               projectCwd={projectCwd}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
@@ -1227,6 +1289,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
   })
   const openPrLink = useOpenPrLink()
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom)
   const sidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs)
   const sidebarThreadByKey = useMemo(
     () =>
@@ -2502,6 +2565,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
         renderedThreads={renderedThreads}
+        changeRequestSnapshotByKey={changeRequestSnapshotByKey}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}

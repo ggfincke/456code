@@ -24,6 +24,7 @@ import { useClientSettings } from '~/hooks/useSettings'
 import { getLocalStorageItem, setLocalStorageItem } from '~/hooks/useLocalStorage'
 import { useTheme } from '~/hooks/useTheme'
 import { useSyntaxThemeName } from '~/hooks/useSyntaxThemeName'
+import { useRemoteOpenState } from '~/lib/remoteOpen'
 import { cn } from '~/lib/utils'
 import { isPreviewSupportedInRuntime } from '~/previewStateStore'
 import { resolvePathLinkTarget } from '~/terminal-links'
@@ -146,6 +147,7 @@ export default function FilePreviewPanel({
   const syntaxThemeName = useSyntaxThemeName()
   const wordWrap = useClientSettings((settings) => settings.wordWrap)
   const primaryEnvironmentId = usePrimaryEnvironmentId()
+  const remoteOpenState = useRemoteOpenState(environmentId)
   const serverConfigs = useServerConfigs()
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId)
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -387,7 +389,8 @@ export default function FilePreviewPanel({
               ))}
             </div>
           </ScrollArea>
-          {absolutePath && environmentId === primaryEnvironmentId ? (
+          {absolutePath &&
+          (environmentId === primaryEnvironmentId || remoteOpenState.mode !== 'local-exec') ? (
             <OpenInPicker
               environmentId={environmentId}
               keybindings={keybindings}

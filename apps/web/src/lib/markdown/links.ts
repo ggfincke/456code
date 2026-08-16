@@ -195,8 +195,9 @@ export function resolveMarkdownFileLinkTarget(
 
 function basenameOfPath(path: string): string
 {
-  const separatorIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path
+  const trimmed = path.replace(/[/\\]+$/, '') || path
+  const separatorIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  return separatorIndex >= 0 ? trimmed.slice(separatorIndex + 1) : trimmed
 }
 
 function workspaceRelativePath(path: string, workspaceRoot: string | undefined): string | null

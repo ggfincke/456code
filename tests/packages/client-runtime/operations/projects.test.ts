@@ -16,6 +16,9 @@ import {
   canCreateProjectInEnvironment,
   findExistingAddProject,
   getAddProjectInitialQuery,
+  getCloneDestinationBrowsePath,
+  getCloneDestinationPath,
+  getCloneDirectoryName,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
 } from '../../../../packages/client-runtime/src/operations/projects.ts'
@@ -38,6 +41,71 @@ describe('add project shared logic', () =>
     expect(getAddProjectInitialQuery('')).toBe('~/')
     expect(getAddProjectInitialQuery('/work')).toBe('/work/')
     expect(getAddProjectInitialQuery('C:\\work')).toBe('C:\\work\\')
+  })
+
+  it.each([
+    ['owner/repo', 'repo'],
+    ['org/project/repo/', 'repo'],
+    ['repo', 'repo'],
+    ['', ''],
+    [null, ''],
+    ['https://github.com/owner/repo.git', 'repo'],
+    ['https://github.com/owner/repo/', 'repo'],
+    ['https://user@bitbucket.org/owner/repo.git', 'repo'],
+    ['https://github.com/owner/repo.git?ref=main#readme', 'repo'],
+    ['https://dev.azure.com/org/project/_git/repo', 'repo'],
+    ['ssh://git@github.com:22/owner/repo.git', 'repo'],
+    ['ssh://git@host/123', '123'],
+    ['https://github.com/acme/123.git', '123'],
+    ['file:///repo.git', 'repo'],
+    ['git@github.com:owner/repo.git', 'repo'],
+    ['git@github.com:repo.git', 'repo'],
+    ['git@host:22', '22'],
+    ['/srv/git/repo.git', 'repo'],
+    ['C:\\src\\repo.git', 'repo'],
+    ['/tmp/repo#one.git', 'repo#one'],
+    ['/tmp/repo?one.git', 'repo?one'],
+    ['repo.GIT', 'repo.GIT'],
+    ['  https://github.com/owner/repo.git  ', 'repo'],
+    ['https://github.com/', ''],
+    ['https://github.com', ''],
+    ['https://', ''],
+    ['ssh://git@github.com:22', ''],
+    ['ssh://git@[::1]:22', ''],
+    ['git@github.com:', ''],
+  ] as const)('derives clone folder %j as %j', (source, expected) =>
+  {
+    expect(getCloneDirectoryName(source)).toBe(expected)
+  })
+
+  it('pins clone destinations without duplicating an existing folder', () =>
+  {
+    expect(getCloneDestinationPath('~/Projects', 'repo')).toBe('~/Projects/repo')
+    expect(getCloneDestinationPath('~/Projects/', '')).toBe('~/Projects/')
+    expect(
+      getCloneDestinationBrowsePath({
+        browseDirectoryPath: '~/Projects/',
+        selectedDirectoryName: 'work',
+        cloneDirectoryName: 'repo',
+        caseSensitive: true,
+      }),
+    ).toBe('~/Projects/work/repo')
+    expect(
+      getCloneDestinationBrowsePath({
+        browseDirectoryPath: '~/Projects/',
+        selectedDirectoryName: 'repo',
+        cloneDirectoryName: 'repo',
+        caseSensitive: true,
+      }),
+    ).toBe('~/Projects/repo/')
+    expect(
+      getCloneDestinationBrowsePath({
+        browseDirectoryPath: 'C:\\Projects\\',
+        selectedDirectoryName: 'Repo',
+        cloneDirectoryName: 'repo',
+        caseSensitive: false,
+      }),
+    ).toBe('C:\\Projects\\Repo\\')
   })
 
   it('rejects unsupported windows paths on non-windows environments', () =>

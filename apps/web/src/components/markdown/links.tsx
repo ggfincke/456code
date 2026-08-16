@@ -12,7 +12,6 @@ import React, {
   Children,
   memo,
   useCallback,
-  useMemo,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -20,19 +19,25 @@ import React, {
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from '../chat/FileTagChip'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 import { stackedThreadToast, toastManager } from '../ui/toast'
+import { isBrowserPreviewFile } from '../../browser/openFileInPreview'
 import {
   looksLikeInlineCodeFilePath,
   normalizeMarkdownLinkDestination,
   rewriteMarkdownFileUriHref,
 } from '../../lib/markdown/links'
+import {
+  resolveWorkspaceFilePrimaryAction,
+  type WorkspaceFileActionSource,
+  type WorkspaceFileActionTarget,
+} from '../../lib/workspaceBasenameLookup'
 import { readLocalApi } from '../../localApi'
 import { cn } from '../../lib/utils'
-import { useRightPanelStore } from '../../rightPanelStore'
 import { reportMarkdownActionFailure } from './actionFailure'
 
 export interface MarkdownFileLinkProps
 {
   href: string
+  filePath: string
   targetPath: string
   iconPath: string
   displayPath: string
@@ -43,7 +48,9 @@ export interface MarkdownFileLinkProps
   theme: 'light' | 'dark'
   threadRef?: ScopedThreadRef | undefined
   onOpen: (targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>
-  onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined
+  onResolveTarget: (source: WorkspaceFileActionSource) => Promise<WorkspaceFileActionTarget | null>
+  onOpenInPanel: (workspaceRelativePath: string, line: number | undefined) => void
+  onOpenInBrowser?: ((filePath: string) => Promise<AtomCommandResult<unknown, unknown>>) | undefined
   className?: string | undefined
 }
 
@@ -360,6 +367,7 @@ export function MarkdownExternalLinkContent({
 
 export const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
+  filePath,
   targetPath,
   iconPath,
   displayPath,
@@ -370,23 +378,28 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   theme,
   threadRef,
   onOpen,
+  onResolveTarget,
+  onOpenInPanel,
   onOpenInBrowser,
   className,
 }: MarkdownFileLinkProps)
 {
-  const handleOpenInEditor = useCallback(() =>
-  {
-    void (async () =>
+  const resolveTarget = useCallback(
+    () => onResolveTarget({ filePath, targetPath, workspaceRelativePath }),
+    [filePath, onResolveTarget, targetPath, workspaceRelativePath],
+  )
+  const openResolvedTargetInEditor = useCallback(
+    async (resolvedTargetPath: string) =>
     {
       try
       {
-        const result = await onOpen(targetPath)
+        const result = await onOpen(resolvedTargetPath)
         if (result._tag === 'Success' || isAtomCommandInterrupted(result))
         {
           return
         }
         reportMarkdownActionFailure(
-          { operation: 'open-file-in-editor', target: targetPath },
+          { operation: 'open-file-in-editor', target: resolvedTargetPath },
           result.cause,
         )
         const error = squashAtomCommandFailure(result)
@@ -400,7 +413,10 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
       }
       catch (cause)
       {
-        reportMarkdownActionFailure({ operation: 'open-file-in-editor', target: targetPath }, cause)
+        reportMarkdownActionFailure(
+          { operation: 'open-file-in-editor', target: resolvedTargetPath },
+          cause,
+        )
         toastManager.add(
           stackedThreadToast({
             type: 'error',
@@ -409,18 +425,120 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
           }),
         )
       }
-    })()
-  }, [onOpen, targetPath])
-
-  const handleOpenInFilePreview = useCallback(() =>
-  {
-    if (!threadRef || !workspaceRelativePath)
+    },
+    [onOpen],
+  )
+  const openResolvedFileInBrowser = useCallback(
+    async (resolvedFilePath: string) =>
     {
-      handleOpenInEditor()
-      return
-    }
-    useRightPanelStore.getState().openFile(threadRef, workspaceRelativePath, line)
-  }, [handleOpenInEditor, line, threadRef, workspaceRelativePath])
+      if (!onOpenInBrowser) return
+      try
+      {
+        const result = await onOpenInBrowser(resolvedFilePath)
+        if (result._tag === 'Success' || isAtomCommandInterrupted(result))
+        {
+          return
+        }
+        reportMarkdownActionFailure(
+          { operation: 'open-file-in-browser', target: resolvedFilePath },
+          result.cause,
+        )
+        const error = squashAtomCommandFailure(result)
+        toastManager.add(
+          stackedThreadToast({
+            type: 'error',
+            title: 'Unable to open file in browser',
+            description: error instanceof Error ? error.message : 'An error occurred.',
+          }),
+        )
+      }
+      catch (cause)
+      {
+        reportMarkdownActionFailure(
+          { operation: 'open-file-in-browser', target: resolvedFilePath },
+          cause,
+        )
+        toastManager.add(
+          stackedThreadToast({
+            type: 'error',
+            title: 'Unable to open file in browser',
+            description: cause instanceof Error ? cause.message : 'An error occurred.',
+          }),
+        )
+      }
+    },
+    [onOpenInBrowser],
+  )
+  const reportResolutionFailure = useCallback(
+    (cause: unknown) =>
+    {
+      reportMarkdownActionFailure({ operation: 'resolve-file-target', target: targetPath }, cause)
+      toastManager.add(
+        stackedThreadToast({
+          type: 'error',
+          title: 'Unable to open file',
+          description: cause instanceof Error ? cause.message : 'An error occurred.',
+        }),
+      )
+    },
+    [targetPath],
+  )
+  const handleOpenInEditor = useCallback(() =>
+  {
+    void (async () =>
+    {
+      try
+      {
+        const target = await resolveTarget()
+        if (target) await openResolvedTargetInEditor(target.targetPath)
+      }
+      catch (cause)
+      {
+        reportResolutionFailure(cause)
+      }
+    })()
+  }, [openResolvedTargetInEditor, reportResolutionFailure, resolveTarget])
+
+  const handleOpenPrimary = useCallback(() =>
+  {
+    void (async () =>
+    {
+      try
+      {
+        const action = await resolveWorkspaceFilePrimaryAction({
+          resolveTarget,
+          hasThreadContext: Boolean(threadRef),
+          canOpenInBrowser: (resolvedFilePath) =>
+            Boolean(onOpenInBrowser) && isBrowserPreviewFile(resolvedFilePath),
+        })
+        if (!action) return
+        if (action.kind === 'editor')
+        {
+          await openResolvedTargetInEditor(action.targetPath)
+          return
+        }
+        if (action.kind === 'browser')
+        {
+          await openResolvedFileInBrowser(action.filePath)
+          return
+        }
+        onOpenInPanel(action.workspaceRelativePath, line)
+      }
+      catch (cause)
+      {
+        reportResolutionFailure(cause)
+      }
+    })()
+  }, [
+    line,
+    onOpenInBrowser,
+    onOpenInPanel,
+    openResolvedFileInBrowser,
+    openResolvedTargetInEditor,
+    reportResolutionFailure,
+    resolveTarget,
+    threadRef,
+  ])
 
   const handleOpenInBrowser = useCallback(() =>
   {
@@ -432,40 +550,18 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     {
       try
       {
-        const result = await onOpenInBrowser()
-        if (result._tag === 'Success' || isAtomCommandInterrupted(result))
+        const target = await resolveTarget()
+        if (target && isBrowserPreviewFile(target.filePath))
         {
-          return
+          await openResolvedFileInBrowser(target.filePath)
         }
-        reportMarkdownActionFailure(
-          { operation: 'open-file-in-browser', target: targetPath },
-          result.cause,
-        )
-        const error = squashAtomCommandFailure(result)
-        toastManager.add(
-          stackedThreadToast({
-            type: 'error',
-            title: 'Unable to open file in browser',
-            description: error instanceof Error ? error.message : 'An error occurred.',
-          }),
-        )
       }
       catch (cause)
       {
-        reportMarkdownActionFailure(
-          { operation: 'open-file-in-browser', target: targetPath },
-          cause,
-        )
-        toastManager.add(
-          stackedThreadToast({
-            type: 'error',
-            title: 'Unable to open file in browser',
-            description: cause instanceof Error ? cause.message : 'An error occurred.',
-          }),
-        )
+        reportResolutionFailure(cause)
       }
     })()
-  }, [onOpenInBrowser, targetPath])
+  }, [onOpenInBrowser, openResolvedFileInBrowser, reportResolutionFailure, resolveTarget])
 
   const handleCopy = useCallback(
     (value: string, title: string) =>
@@ -524,7 +620,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         const clicked = await api.contextMenu.show(
           [
             { id: 'open', label: 'Open in editor' },
-            ...(onOpenInBrowser
+            ...(onOpenInBrowser && isBrowserPreviewFile(filePath)
               ? ([{ id: 'open-in-browser', label: 'Open in integrated browser' }] as const)
               : []),
             { id: 'copy-relative', label: 'Copy relative path' },
@@ -561,7 +657,15 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         )
       }
     },
-    [displayPath, handleCopy, handleOpenInBrowser, handleOpenInEditor, onOpenInBrowser, targetPath],
+    [
+      displayPath,
+      filePath,
+      handleCopy,
+      handleOpenInBrowser,
+      handleOpenInEditor,
+      onOpenInBrowser,
+      targetPath,
+    ],
   )
 
   return (
@@ -576,12 +680,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             {
               event.preventDefault()
               event.stopPropagation()
-              if (onOpenInBrowser)
-              {
-                handleOpenInBrowser()
-                return
-              }
-              handleOpenInFilePreview()
+              handleOpenPrimary()
             }}
             onContextMenu={handleContextMenu}
           >
@@ -608,6 +707,7 @@ function areMarkdownFileLinkPropsEqual(
 {
   return (
     previous.href === next.href &&
+    previous.filePath === next.filePath &&
     previous.targetPath === next.targetPath &&
     previous.iconPath === next.iconPath &&
     previous.displayPath === next.displayPath &&
@@ -618,6 +718,8 @@ function areMarkdownFileLinkPropsEqual(
     previous.theme === next.theme &&
     previous.threadRef === next.threadRef &&
     previous.onOpen === next.onOpen &&
+    previous.onResolveTarget === next.onResolveTarget &&
+    previous.onOpenInPanel === next.onOpenInPanel &&
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.className === next.className
   )

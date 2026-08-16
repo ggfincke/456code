@@ -34,6 +34,7 @@ const environmentInput = {
 const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
   metadata: Effect.die('unexpected metadata read'),
   name: Effect.succeed('456code'),
+  systemLocale: Effect.die('unexpected system locale read'),
   whenReady: Effect.void,
   quit: Effect.void,
   exit: () => Effect.void,

@@ -50,6 +50,8 @@ export const discovery = {
   executable: 'az',
   versionArgs: ['--version'],
   authArgs: ['account', 'show', '--query', 'user.name', '-o', 'tsv'],
+  // az starts Python for each invocation and commonly exceeds the default budget on Windows
+  probeTimeoutMs: 20_000,
   parseAuth: parseAzureAuth,
   installHint:
     'Install the Azure command-line tools (`az`), then enable Azure DevOps support with `az extension add --name azure-devops`.',

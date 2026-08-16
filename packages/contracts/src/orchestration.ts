@@ -14,6 +14,7 @@ import {
   CheckpointRef,
   CommandId,
   EventId,
+  GitRefString,
   IsoDateTime,
   MessageId,
   NonNegativeInt,
@@ -263,6 +264,21 @@ export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+export const PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES = [
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+] as const
+const PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPE_SET = new Set<string>(
+  PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES,
+)
+
+export function isProviderSendTurnSupportedImageMimeType(mimeType: string): boolean
+{
+  return PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPE_SET.has(mimeType.toLowerCase())
+}
+
 const PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS = 14_000_000
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128
 // correlation id is command id by design in this model.
@@ -457,7 +473,7 @@ export const OrchestrateRunExecutionJob = Schema.Struct({
   baseOid: TrimmedNonEmptyString,
   headOid: Schema.NullOr(TrimmedNonEmptyString),
   worktreeRoot: Schema.NullOr(TrimmedNonEmptyString),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   boundAt: IsoDateTime,
 })
 export type OrchestrateRunExecutionJob = typeof OrchestrateRunExecutionJob.Type
@@ -476,7 +492,7 @@ export const OrchestrateRunExecution = Schema.Struct({
   availability: OrchestrateRunExecutionAvailability,
   integrationRoot: Schema.NullOr(TrimmedNonEmptyString),
   integrationCommonDir: Schema.NullOr(TrimmedNonEmptyString),
-  integrationBranch: Schema.NullOr(TrimmedNonEmptyString),
+  integrationBranch: Schema.NullOr(GitRefString),
   integrationOid: Schema.NullOr(TrimmedNonEmptyString),
   observedHeadOid: Schema.NullOr(TrimmedNonEmptyString),
   finalHeadOid: Schema.NullOr(TrimmedNonEmptyString),
@@ -659,14 +675,14 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   orchestrate: Schema.optional(Schema.Boolean),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   // the tree and branch the thread's active orchestrate run integrates into.
   // a run can live in a worktree the thread itself never had, and without these
   // the app shows the thread's own (empty) tree and reports that the run changed
   // nothing. optional so payloads from pre-integration servers still decode
   orchestrateRunWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  orchestrateRunBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  orchestrateRunBranch: Schema.optional(Schema.NullOr(GitRefString)),
   // authoritative current execution for new servers. optional distinguishes
   // an older server from a new server whose thread has no admitted execution
   orchestrateRunExecution: Schema.optional(Schema.NullOr(OrchestrateRunExecution)),
@@ -743,13 +759,13 @@ export const OrchestrationThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   orchestrate: Schema.optional(Schema.Boolean),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   // projected onto the shell as well as the detail because the sidebar reads
   // only the shell, and the sidebar is the surface that shows nothing at all for
   // a thread whose run lives in another worktree
   orchestrateRunWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  orchestrateRunBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  orchestrateRunBranch: Schema.optional(Schema.NullOr(GitRefString)),
   orchestrateRunExecution: Schema.optional(Schema.NullOr(OrchestrateRunExecution)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   providerSwitch: Schema.NullOr(OrchestrationProviderSwitch).pipe(
@@ -893,7 +909,7 @@ const ThreadCreateCommand = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   orchestrate: Schema.optional(Schema.Boolean),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   origin: Schema.optional(ThreadOrigin),
   createdAt: IsoDateTime,
@@ -911,7 +927,7 @@ const ClientThreadCreateCommand = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   orchestrate: Schema.optional(Schema.Boolean),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 })
@@ -977,8 +993,8 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   threadId: ThreadId,
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
-  branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  branch: Schema.optional(Schema.NullOr(GitRefString)),
+  expectedBranch: Schema.optional(Schema.NullOr(GitRefString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 })
 
@@ -1030,15 +1046,15 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   orchestrate: Schema.optional(Schema.Boolean),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 })
 
 const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
   projectCwd: TrimmedNonEmptyString,
-  baseBranch: TrimmedNonEmptyString,
-  branch: Schema.optional(TrimmedNonEmptyString),
+  baseBranch: GitRefString,
+  branch: Schema.optional(GitRefString),
   startFromOrigin: Schema.optional(Schema.Boolean),
 })
 
@@ -1319,7 +1335,7 @@ const ThreadOrchestrateRunIntegrationSetCommand = Schema.Struct({
   // the reactor dispatches it once the recorded tree stops resolving as a
   // worktree of its own, and once the thread's own tree records a turn again
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   createdAt: IsoDateTime,
 })
 
@@ -1517,7 +1533,7 @@ export const ThreadCreatedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   orchestrate: Schema.optional(Schema.Boolean),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   origin: Schema.NullOr(ThreadOrigin).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   createdAt: IsoDateTime,
@@ -1576,7 +1592,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
-  branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  branch: Schema.optional(Schema.NullOr(GitRefString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   updatedAt: IsoDateTime,
 })
@@ -1588,7 +1604,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
 export const ThreadOrchestrateRunIntegrationSetPayload = Schema.Struct({
   threadId: ThreadId,
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
 })
 
 export const ThreadOrchestrateRunExecutionAdmittedPayload = Schema.Struct({
@@ -2198,7 +2214,7 @@ export type OrchestrationGetRunDiffInput = typeof OrchestrationGetRunDiffInput.T
 export const OrchestrationGetRunDiffResult = Schema.Struct({
   threadId: ThreadId,
   diff: Schema.String,
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   baseSha: Schema.NullOr(TrimmedNonEmptyString),
   headSha: Schema.NullOr(TrimmedNonEmptyString),
   truncated: Schema.optionalKey(Schema.Boolean),
@@ -2219,7 +2235,7 @@ export const OrchestrationGetRunExecutionDiffV1Result = Schema.Struct({
   lifecycle: OrchestrateRunExecutionLifecycle,
   availability: OrchestrateRunExecutionAvailability,
   diff: Schema.String,
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(GitRefString),
   baseSha: TrimmedNonEmptyString,
   headSha: TrimmedNonEmptyString,
   finalized: Schema.Boolean,
@@ -2242,6 +2258,7 @@ const ImportSourcePath = TrimmedNonEmptyString.check(
 )
 const ImportTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(IMPORT_TITLE_MAX_CHARS))
 const ImportMetadata = TrimmedNonEmptyString.check(Schema.isMaxLength(IMPORT_METADATA_MAX_CHARS))
+const ImportGitBranch = GitRefString.check(Schema.isMaxLength(IMPORT_METADATA_MAX_CHARS))
 const ImportWorkspaceRoot = TrimmedNonEmptyString.check(
   Schema.isMaxLength(IMPORT_WORKSPACE_ROOT_MAX_CHARS),
 )
@@ -2256,7 +2273,7 @@ export const ImportScanCandidate = Schema.Struct({
   nativeSessionId: Schema.NullOr(ImportMetadata),
   title: Schema.NullOr(ImportTitle),
   cwd: Schema.NullOr(ImportWorkspaceRoot),
-  gitBranch: Schema.NullOr(ImportMetadata),
+  gitBranch: Schema.NullOr(ImportGitBranch),
   model: Schema.NullOr(ImportMetadata),
   messageCount: Schema.NullOr(NonNegativeInt),
   modifiedAt: Schema.NullOr(IsoDateTime),

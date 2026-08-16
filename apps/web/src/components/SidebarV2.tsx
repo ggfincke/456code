@@ -122,9 +122,17 @@ import {
 } from './Sidebar.logic'
 import { resolveLocalCheckoutBranchMismatch } from './BranchToolbar.logic'
 import {
+  canRetainTerminalThreadPr,
+  nextThreadChangeRequestSnapshot,
+  nextTerminalChangeRequestObservation,
   prStatusIndicator,
-  resolveThreadPr,
+  resolveDisplayedThreadPr,
+  resolveDisplayedThreadPrProvider,
+  setThreadChangeRequestSnapshot,
   settledPrHoverColorClass,
+  threadChangeRequestSnapshotsAtom,
+  type TerminalChangeRequestObservation,
+  type ThreadChangeRequestSnapshot,
 } from './ThreadStatusIndicators'
 import {
   resolveSnoozePresets,
@@ -135,7 +143,11 @@ import {
 import { ProjectFavicon } from './ProjectFavicon'
 import { ProviderInstanceIcon } from './chat/ProviderInstanceIcon'
 import { getTriggerDisplayModelLabel } from './chat/providerIconUtils'
-import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from '../providerInstances'
+import {
+  deriveProviderInstanceEntries,
+  shouldShowInstanceBadge,
+  type ProviderInstanceEntry,
+} from '../providerInstances'
 import { primaryServerProvidersAtom } from '../state/server'
 import { stackedThreadToast, toastManager } from './ui/toast'
 import { CommandDialogTrigger } from './ui/command'
@@ -168,6 +180,7 @@ const SETTLED_TAIL_PAGE_COUNT = 25
 const SIDEBAR_V2_LIST_CONTENT_STYLE = { gap: 1 }
 const SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION = { data: true, size: false }
 type SidebarV2ThreadSection = 'active' | 'imported' | 'snoozed' | 'settled'
+
 type SidebarV2Shelf = Exclude<SidebarV2ThreadSection, 'active'>
 
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
@@ -353,7 +366,8 @@ function SidebarV2ThreadTooltip({
   projectTitle,
   projectCwd,
   environmentLabel,
-  driverKind,
+  providerEntry,
+  showInstanceBadge,
   modelInstanceId,
   modelLabel,
   branchMismatch,
@@ -362,7 +376,8 @@ function SidebarV2ThreadTooltip({
   projectTitle: string | null
   projectCwd: string | null
   environmentLabel: string | null
-  driverKind: ProviderInstanceEntry['driverKind'] | null
+  providerEntry: ProviderInstanceEntry | null
+  showInstanceBadge: boolean
   modelInstanceId: string
   modelLabel: string
   branchMismatch: {
@@ -371,6 +386,7 @@ function SidebarV2ThreadTooltip({
   } | null
 })
 {
+  const driverKind = providerEntry?.driverKind ?? null
   return (
     <TooltipPopup
       side="right"
@@ -419,10 +435,20 @@ function SidebarV2ThreadTooltip({
             <div className="flex min-w-0 items-center gap-2">
               <ProviderInstanceIcon
                 driverKind={driverKind}
-                displayName={thread.session?.providerName ?? modelInstanceId}
+                displayName={
+                  providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
+                }
+                accentColor={providerEntry?.accentColor}
+                showBadge={showInstanceBadge && providerEntry?.accentColor !== undefined}
+                badgeContent="none"
+                badgeClassName="h-2 min-w-2 px-0"
                 iconClassName="size-4 shrink-0"
               />
-              <div className="min-w-0 wrap-break-word text-foreground/90">{modelLabel}</div>
+              <div className="min-w-0 wrap-break-word text-foreground/90">
+                {showInstanceBadge && providerEntry
+                  ? `${modelLabel} · ${providerEntry.displayName}`
+                  : modelLabel}
+              </div>
             </div>
           ) : null}
           {thread.origin ? (
@@ -544,13 +570,15 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   onUnsettle: (threadRef: ScopedThreadRef) => void
   onSnooze: (threadRef: ScopedThreadRef, preset: SnoozePreset) => void
   onUnsnooze: (threadRef: ScopedThreadRef) => void
-  onChangeRequestState:
-    ((threadKey: string, state: 'open' | 'closed' | 'merged' | null) => void) | null
+  changeRequestSnapshot: ThreadChangeRequestSnapshot | null
+  onTerminalChangeRequestObservation:
+    ((threadKey: string, observation: TerminalChangeRequestObservation | null) => void) | null
 })
 {
   const {
     isRenaming,
-    onChangeRequestState,
+    changeRequestSnapshot,
+    onTerminalChangeRequestObservation,
     onCancelRename,
     onCommitRename,
     onContextMenu,
@@ -728,23 +756,63 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     activeThreadBranch: thread.branch,
     currentGitBranch: gitStatus.data?.refName ?? null,
   })
-  const pr = resolveThreadPr({
+  const retainTerminalOnBranchMismatch = canRetainTerminalThreadPr({
+    worktreePath: thread.worktreePath,
+    orchestrateRunWorktreePath: runWorktreePath,
+    orchestrateRunWorktreeIsNotRepository: runWorktreeIsNotRepository,
+  })
+  const pr = resolveDisplayedThreadPr({
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
+    snapshot: changeRequestSnapshot,
+    retainTerminalOnBranchMismatch,
   })
-  const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider)
+  const prProvider = resolveDisplayedThreadPrProvider({
+    threadBranch: thread.branch,
+    gitStatus: gitStatus.data,
+    snapshot: changeRequestSnapshot,
+    retainTerminalOnBranchMismatch,
+  })
+  const prStatus = prStatusIndicator(pr, prProvider)
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined
-  // non-imported rows report PR state so merged/closed work can auto-settle;
-  // imported rows keep the badge local because their shelf ignores this map
-  const prState = pr?.state ?? null
   useEffect(() =>
   {
-    onChangeRequestState?.(threadKey, prState)
-  }, [onChangeRequestState, prState, threadKey])
+    const nextSnapshot = nextThreadChangeRequestSnapshot({
+      threadBranch: thread.branch,
+      gitStatus: gitStatus.data,
+      snapshot: changeRequestSnapshot,
+      retainTerminalOnBranchMismatch,
+    })
+    if (nextSnapshot !== undefined)
+    {
+      setThreadChangeRequestSnapshot(threadKey, nextSnapshot)
+    }
+    const nextObservation = nextTerminalChangeRequestObservation({
+      threadBranch: thread.branch,
+      gitStatus: gitStatus.data,
+      displayedPr: pr,
+      retainOnBranchMismatch: retainTerminalOnBranchMismatch,
+    })
+    if (nextObservation !== undefined)
+    {
+      onTerminalChangeRequestObservation?.(threadKey, nextObservation)
+    }
+  }, [
+    changeRequestSnapshot,
+    gitStatus.data,
+    onTerminalChangeRequestObservation,
+    pr,
+    retainTerminalOnBranchMismatch,
+    thread.branch,
+    threadKey,
+  ])
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null
   const driverKind = providerEntry?.driverKind ?? null
+  const showInstanceBadge =
+    providerEntry !== null &&
+    shouldShowInstanceBadge(providerEntry, props.providerEntryByInstanceId.values())
   const selectedModel = providerEntry?.models.find(
     (model) => model.slug === thread.modelSelection.model,
   )
@@ -779,7 +847,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
       projectTitle={props.projectTitle}
       projectCwd={props.projectCwd}
       environmentLabel={props.environmentLabel}
-      driverKind={driverKind}
+      providerEntry={providerEntry}
+      showInstanceBadge={showInstanceBadge}
       modelInstanceId={modelInstanceId}
       modelLabel={modelLabel}
       branchMismatch={branchMismatch}
@@ -833,6 +902,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     (event: ReactKeyboardEvent<HTMLInputElement>) =>
     {
       event.stopPropagation()
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return
       if (event.key === 'Enter')
       {
         event.preventDefault()
@@ -1253,11 +1323,18 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                   </span>
                 ) : null}
                 {driverKind ? (
-                  <span className="inline-flex shrink-0 items-center opacity-60">
+                  <span className="inline-flex shrink-0 items-center">
                     <ProviderInstanceIcon
                       driverKind={driverKind}
-                      displayName={thread.session?.providerName ?? modelInstanceId}
-                      iconClassName="size-3.5"
+                      displayName={
+                        providerEntry?.displayName ??
+                        thread.session?.providerName ??
+                        modelInstanceId
+                      }
+                      accentColor={providerEntry?.accentColor}
+                      showBadge={showInstanceBadge}
+                      iconClassName="size-3.5 opacity-60"
+                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
                     />
                   </span>
                 ) : null}
@@ -1291,6 +1368,7 @@ export default function SidebarV2()
   const { isMobile, setOpenMobile } = useSidebar()
   const keybindings = useAtomValue(primaryServerKeybindingsAtom)
   const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays)
+  const autoSettleOnMerge = useClientSettings((s) => s.sidebarAutoSettleOnMerge)
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete)
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder)
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings)
@@ -1439,31 +1517,39 @@ export default function SidebarV2()
   // fresh clock whenever it recomputes.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0)
 
-  // PR states stream in per-row (rows own the VCS subscriptions); a merged or
-  // closed PR auto-settles its thread on the next partition.
-  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
-    ReadonlyMap<string, 'open' | 'closed' | 'merged'>
-  >(() => new Map())
-  const handleChangeRequestState = useCallback(
-    (threadKey: string, state: 'open' | 'closed' | 'merged' | null) =>
+  // terminal PR states stream in per-row because rows own the VCS probes;
+  // pending remounts preserve, while authoritative open/no-PR results clear.
+  const [terminalChangeRequestObservationByKey, setTerminalChangeRequestObservationByKey] =
+    useState<ReadonlyMap<string, TerminalChangeRequestObservation>>(() => new Map())
+  const handleTerminalChangeRequestObservation = useCallback(
+    (threadKey: string, observation: TerminalChangeRequestObservation | null) =>
     {
-      setChangeRequestStateByKey((current) =>
+      setTerminalChangeRequestObservationByKey((current) =>
       {
-        if ((current.get(threadKey) ?? null) === state) return current
-        const next = new Map(current)
-        if (state === null)
+        const existing = current.get(threadKey)
+        if (observation === null)
         {
+          if (existing === undefined) return current
+          const next = new Map(current)
           next.delete(threadKey)
+          return next
         }
-        else
+        if (
+          existing?.state === observation.state &&
+          existing.branch === observation.branch &&
+          existing.retainOnBranchMismatch === observation.retainOnBranchMismatch
+        )
         {
-          next.set(threadKey, state)
+          return current
         }
+        const next = new Map(current)
+        next.set(threadKey, observation)
         return next
       })
     },
     [],
   )
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom)
 
   // project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
@@ -1738,7 +1824,24 @@ export default function SidebarV2()
         const supportsSnooze =
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
         const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
-        const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null
+        const snapshot = changeRequestSnapshotByKey.get(threadKey)
+        const observation = terminalChangeRequestObservationByKey.get(threadKey)
+        const observedTerminalState =
+          thread.branch !== null &&
+          observation !== undefined &&
+          (observation.retainOnBranchMismatch || observation.branch === thread.branch)
+            ? observation.state
+            : null
+        // raw adopted paths stay conservative until their row's pinned probe
+        // proves the path is gone; that terminal-only observation then wins.
+        const cachedTerminalState =
+          thread.branch !== null &&
+          snapshot !== undefined &&
+          thread.worktreePath === null &&
+          thread.orchestrateRunWorktreePath == null
+            ? snapshot.pr.state
+            : null
+        const changeRequestState = observedTerminalState ?? cachedTerminalState
         // snooze outranks settled classification: an explicitly snoozed thread
         // belongs to the shelf even if it would also auto-settle (the shelf's
         // wake time is a stronger statement about when it matters again).
@@ -1748,7 +1851,12 @@ export default function SidebarV2()
         }
         else if (
           supportsSettlement &&
-          effectiveSettled(thread, { now, autoSettleAfterDays, changeRequestState })
+          effectiveSettled(thread, {
+            now,
+            autoSettleAfterDays,
+            autoSettleOnMerge,
+            changeRequestState,
+          })
         )
         {
           settled.push(thread)
@@ -1775,7 +1883,9 @@ export default function SidebarV2()
       }
     }, [
       autoSettleAfterDays,
-      changeRequestStateByKey,
+      autoSettleOnMerge,
+      changeRequestSnapshotByKey,
+      terminalChangeRequestObservationByKey,
       nowMinute,
       scopedProjectKeys,
       serverConfigs,
@@ -2691,7 +2801,10 @@ export default function SidebarV2()
           onUnsettle={attemptUnsettle}
           onSnooze={attemptSnooze}
           onUnsnooze={attemptUnsnooze}
-          onChangeRequestState={section === 'imported' ? null : handleChangeRequestState}
+          changeRequestSnapshot={changeRequestSnapshotByKey.get(threadKey) ?? null}
+          onTerminalChangeRequestObservation={
+            section === 'imported' ? null : handleTerminalChangeRequestObservation
+          }
         />
       )
     },
@@ -2702,8 +2815,9 @@ export default function SidebarV2()
       attemptUnsnooze,
       cancelThreadRename,
       commitThreadRename,
+      changeRequestSnapshotByKey,
       environmentLabelById,
-      handleChangeRequestState,
+      handleTerminalChangeRequestObservation,
       handleThreadClick,
       handleThreadContextMenu,
       jumpLabelByKey,

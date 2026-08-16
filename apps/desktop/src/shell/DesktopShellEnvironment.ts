@@ -78,6 +78,9 @@ export class DesktopShellEnvironment extends Context.Service<
 
 const LOGIN_SHELL_ENV_NAMES = [
   'PATH',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
   'SSH_AUTH_SOCK',
   'HOMEBREW_PREFIX',
   'HOMEBREW_CELLAR',
@@ -86,6 +89,8 @@ const LOGIN_SHELL_ENV_NAMES = [
   'XDG_DATA_HOME',
 ] as const
 const WINDOWS_PROFILE_ENV_NAMES = ['PATH', 'FNM_DIR', 'FNM_MULTISHELL_PATH'] as const
+const LOCALE_ENV_NAMES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const
+const FALLBACK_LC_CTYPE = 'en_US.UTF-8'
 const WINDOWS_SHELL_CANDIDATES = ['pwsh.exe', 'powershell.exe'] as const
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5)
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2)
@@ -419,6 +424,30 @@ const installPosixEnvironment = Effect.fn('desktop.shellEnvironment.installPosix
     if (!config.env.SSH_AUTH_SOCK && shellEnvironment.SSH_AUTH_SOCK)
     {
       config.env.SSH_AUTH_SOCK = shellEnvironment.SSH_AUTH_SOCK
+    }
+
+    // locale variables are one precedence group, so never mix shell values
+    // into a locale the Electron process already inherited
+    if (
+      config.platform === 'darwin' &&
+      LOCALE_ENV_NAMES.every((name) => Option.isNone(trimNonEmpty(config.env[name])))
+    )
+    {
+      for (const name of LOCALE_ENV_NAMES)
+      {
+        const value = trimNonEmpty(shellEnvironment[name])
+        if (Option.isSome(value))
+        {
+          config.env[name] = value.value
+        }
+      }
+
+      // GUI launches often have no locale; use an older-macOS-compatible
+      // UTF-8 character type without changing collation or output formatting
+      if (LOCALE_ENV_NAMES.every((name) => Option.isNone(trimNonEmpty(config.env[name]))))
+      {
+        config.env.LC_CTYPE = FALLBACK_LC_CTYPE
+      }
     }
 
     for (const name of [

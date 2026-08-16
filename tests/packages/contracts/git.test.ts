@@ -4,13 +4,44 @@
 import { describe, expect, it } from 'vite-plus/test'
 import * as Schema from 'effect/Schema'
 
+import { GitRefString } from '../../../packages/contracts/src/baseSchemas.ts'
 import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
+  VcsCreateRefInput,
 } from '../../../packages/contracts/src/git.ts'
 
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput)
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult)
+const decodeCreateRefInput = Schema.decodeUnknownSync(VcsCreateRefInput)
+const encodeCreateRefInput = Schema.encodeSync(VcsCreateRefInput)
+const decodeGitRefString = Schema.decodeUnknownSync(GitRefString)
+const encodeGitRefString = Schema.encodeSync(GitRefString)
+
+describe('Git ref strings', () =>
+{
+  it('round-trips boundary NBSP while trimming only ASCII boundary whitespace', () =>
+  {
+    const decoded = decodeCreateRefInput({
+      cwd: '/repo',
+      refName: ' \t\u00a0feature/new\u00a0\r\n',
+      switchRef: true,
+    })
+
+    expect(decoded.refName).toBe('\u00a0feature/new\u00a0')
+    expect(encodeCreateRefInput(decoded)).toEqual({
+      cwd: '/repo',
+      refName: '\u00a0feature/new\u00a0',
+      switchRef: true,
+    })
+  })
+
+  it('rejects ASCII-only whitespace on both decode and encode', () =>
+  {
+    expect(() => decodeGitRefString(' \t\r\n')).toThrow()
+    expect(() => encodeGitRefString(' \t\r\n')).toThrow()
+  })
+})
 
 describe('GitRunStackedActionInput', () =>
 {

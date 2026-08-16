@@ -26,6 +26,7 @@ import { ORCHESTRATION_PROJECTOR_NAMES } from '../../../../../apps/server/src/or
 import {
   COMMAND_THREAD_ACTIVITY_QUERY_SQL,
   OrchestrationProjectionSnapshotQueryLive,
+  THREAD_DETAIL_ACTIVITY_QUERY_SQL,
 } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 
@@ -39,6 +40,7 @@ const clearProjectionTables = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* ()
   {
     yield* sql`DELETE FROM projection_checkpoint_identities`
+    yield* sql`DELETE FROM projection_pending_approvals`
     yield* sql`DELETE FROM projection_thread_messages`
     yield* sql`DELETE FROM projection_thread_activities`
     yield* sql`DELETE FROM projection_thread_proposed_plans`
@@ -1659,6 +1661,247 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
         },
       ])
     }),
+  )
+
+  it.effect(
+    'bounds detail activity hydration while pinning unresolved requests and import state',
+    () =>
+      Effect.gen(function* ()
+      {
+        const snapshotQuery = yield* ProjectionSnapshotQuery
+        const sql = yield* SqlClient.SqlClient
+
+        yield* clearProjectionTables(sql)
+        yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-bounded-detail',
+          'Bounded detail',
+          '/tmp/project-bounded-detail',
+          '{"instanceId":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-08-16T00:00:00.000Z',
+          '2026-08-16T00:00:01.000Z',
+          NULL
+        )
+      `
+        yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-bounded-detail',
+          'project-bounded-detail',
+          'Bounded detail',
+          '{"instanceId":"codex","model":"gpt-5-codex"}',
+          'approval-required',
+          'default',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          1,
+          1,
+          0,
+          '2026-08-16T00:00:02.000Z',
+          '2026-08-16T00:00:03.000Z',
+          NULL
+        )
+      `
+        yield* sql`
+        INSERT INTO projection_pending_approvals (
+          request_id,
+          thread_id,
+          turn_id,
+          status,
+          decision,
+          created_at,
+          resolved_at
+        )
+        VALUES (
+          'approval-bounded-detail',
+          'thread-bounded-detail',
+          NULL,
+          'pending',
+          NULL,
+          '2026-08-16T00:00:04.000Z',
+          NULL
+        )
+      `
+        yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-bounded-import-marker',
+            'thread-bounded-detail',
+            NULL,
+            'info',
+            'task.completed',
+            'Continuation marker',
+            '{"type":"import.continuation"}',
+            0,
+            '2026-08-16T00:00:04.000Z'
+          ),
+          (
+            'activity-bounded-approval',
+            'thread-bounded-detail',
+            NULL,
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-bounded-detail"}',
+            1,
+            '2026-08-16T00:00:05.000Z'
+          ),
+          (
+            'activity-bounded-user-input',
+            'thread-bounded-detail',
+            NULL,
+            'info',
+            'user-input.requested',
+            'User input requested',
+            '{"requestId":"input-bounded-detail"}',
+            2,
+            '2026-08-16T00:00:06.000Z'
+          )
+      `
+        yield* sql`
+        WITH RECURSIVE activity_numbers(value) AS (
+          SELECT 1
+          UNION ALL
+          SELECT value + 1
+          FROM activity_numbers
+          WHERE value < 501
+        )
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        SELECT
+          'activity-bounded-note-' || printf('%03d', value),
+          'thread-bounded-detail',
+          NULL,
+          'info',
+          'runtime.note',
+          'Later activity',
+          '{}',
+          value + 2,
+          printf('2026-08-16T01:%02d:%02d.000Z', value / 60, value % 60)
+        FROM activity_numbers
+      `
+
+        const planRows = yield* sql.unsafe<{
+          readonly id: number
+          readonly parent: number
+          readonly detail: string
+        }>(`EXPLAIN QUERY PLAN ${THREAD_DETAIL_ACTIVITY_QUERY_SQL}`, [
+          'thread-bounded-detail',
+          'thread-bounded-detail',
+          'thread-bounded-detail',
+          'thread-bounded-detail',
+        ])
+        const plan = planRows.map((row) => row.detail).join('\n')
+
+        assert.match(
+          plan,
+          /SEARCH recent USING INDEX idx_projection_thread_activities_command_window \(thread_id=\?\)/u,
+        )
+        assert.match(
+          plan,
+          /SEARCH marker USING INDEX idx_projection_thread_activities_import_continuation \(thread_id=\?\)/u,
+        )
+        assert.match(
+          plan,
+          /SEARCH pending USING INDEX idx_projection_pending_approvals_thread_status \(thread_id=\? AND status=\?\)/u,
+        )
+        assert.equal(
+          planRows.filter((row) =>
+            row.detail.includes(
+              'SEARCH activity USING INDEX idx_projection_thread_activities_command_relevant (thread_id=?)',
+            ),
+          ).length,
+          2,
+        )
+        assert.notMatch(plan, /\bSCAN (?:recent|marker|activity)(?:\s|$)/u)
+
+        // merge and final-order sorts are bounded by the selected rows; the
+        // two source windows must never sort full thread history themselves
+        const historyWindowIds = new Set(
+          planRows
+            .filter(
+              (row) =>
+                row.detail === 'CO-ROUTINE recent_activity_ids' ||
+                row.detail === 'CO-ROUTINE latest_import_marker',
+            )
+            .map((row) => row.id),
+        )
+        assert.equal(historyWindowIds.size, 2)
+        assert.isFalse(
+          planRows.some(
+            (row) =>
+              historyWindowIds.has(row.parent) && row.detail === 'USE TEMP B-TREE FOR ORDER BY',
+          ),
+        )
+
+        const detail = yield* snapshotQuery.getThreadDetailById(
+          ThreadId.make('thread-bounded-detail'),
+        )
+        assert.equal(detail._tag, 'Some')
+        if (detail._tag === 'Some')
+        {
+          const activityIds = detail.value.activities.map((activity) => activity.id)
+          assert.equal(activityIds.length, 503)
+          assert.deepEqual(activityIds.slice(0, 3), [
+            asEventId('activity-bounded-import-marker'),
+            asEventId('activity-bounded-approval'),
+            asEventId('activity-bounded-user-input'),
+          ])
+          assert.isFalse(activityIds.includes(asEventId('activity-bounded-note-001')))
+          assert.isTrue(activityIds.includes(asEventId('activity-bounded-note-002')))
+          assert.isTrue(activityIds.includes(asEventId('activity-bounded-note-501')))
+        }
+      }),
   )
 
   it.effect(

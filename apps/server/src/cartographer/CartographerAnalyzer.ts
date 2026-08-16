@@ -204,6 +204,71 @@ async function fingerprintDist(distRoot: string): Promise<string>
   return digest.digest('hex')
 }
 
+// shared by the server service and installed-artifact acceptance so the package
+// metadata, asar fs traversal, and memoized fingerprint contract stay identical
+export function createCartographerAnalyzerIdentifier(
+  options: CartographerAnalyzerOptions = {},
+): () => Promise<CartographerAnalyzerIdentity>
+{
+  const resolvePackageJson = options.resolvePackageJson ?? resolveWorkspacePackageJson
+  let identifiedAnalyzer: {
+    readonly signature: string
+    readonly version: string
+    readonly identity: CartographerAnalyzerIdentity
+  } | null = null
+
+  return async () =>
+  {
+    const packageJsonPath = NodePath.resolve(await resolvePackageJson())
+    const packageJsonStat = await NodeFSP.lstat(packageJsonPath)
+    if (!packageJsonStat.isFile() || packageJsonStat.isSymbolicLink())
+    {
+      throw new Error('Cartographer package.json is not a regular file')
+    }
+    const packageRoot = await NodeFSP.realpath(NodePath.dirname(packageJsonPath))
+    const packageJson = decodePackageJsonText(
+      await NodeFSP.readFile(packageJsonPath, 'utf8'),
+    ) as CartographerPackageJson
+    const bin = cartographerBin(packageJson)
+    if (
+      packageJson.name !== CARTOGRAPHER_PACKAGE_NAME ||
+      typeof packageJson.version !== 'string' ||
+      packageJson.version.length === 0 ||
+      bin !== `./${CARTOGRAPHER_CLI_ENTRY}`
+    )
+    {
+      throw new Error('Cartographer package metadata is incompatible')
+    }
+    const cliPath = NodePath.join(packageRoot, CARTOGRAPHER_CLI_ENTRY)
+    const cliStat = await NodeFSP.lstat(cliPath)
+    if (!cliStat.isFile() || cliStat.isSymbolicLink())
+    {
+      throw new Error('Cartographer CLI entry is not a regular file')
+    }
+    const distRoot = NodePath.join(packageRoot, 'dist')
+    const signature = await distSignature(distRoot)
+    const memoized = identifiedAnalyzer
+    // the fingerprint embeds the package version, which lives outside dist and
+    // therefore has to remain part of the memo key
+    if (
+      memoized !== null &&
+      memoized.signature === signature &&
+      memoized.version === packageJson.version &&
+      memoized.identity.cliPath === cliPath
+    )
+    {
+      return memoized.identity
+    }
+    const distDigest = await fingerprintDist(distRoot)
+    const identity: CartographerAnalyzerIdentity = {
+      cliPath,
+      fingerprint: `${CARTOGRAPHER_PACKAGE_NAME}@${packageJson.version}:dist-sha256:${distDigest}`,
+    }
+    identifiedAnalyzer = { signature, version: packageJson.version, identity }
+    return identity
+  }
+}
+
 function awaitAbort(signal: AbortSignal): Effect.Effect<never, CartographerError>
 {
   return Effect.tryPromise({
@@ -243,67 +308,10 @@ export const make = Effect.fn('CartographerAnalyzer.make')(function* (
 {
   const processRunner = yield* ProcessRunner.ProcessRunner
   const buildSemaphore = yield* Semaphore.make(1)
-  const resolvePackageJson = options.resolvePackageJson ?? resolveWorkspacePackageJson
-
-  // fingerprinting reads and hashes every dist file, and every analysis entry point needs the
-  // identity, so a computed fingerprint is reused while the dist signature is unchanged
-  let identifiedAnalyzer: {
-    readonly signature: string
-    readonly version: string
-    readonly identity: CartographerAnalyzerIdentity
-  } | null = null
+  const identifyAnalyzer = createCartographerAnalyzerIdentifier(options)
 
   const identify: CartographerAnalyzerShape['identify'] = Effect.tryPromise({
-    try: async () =>
-    {
-      const packageJsonPath = NodePath.resolve(await resolvePackageJson())
-      const packageJsonStat = await NodeFSP.lstat(packageJsonPath)
-      if (!packageJsonStat.isFile() || packageJsonStat.isSymbolicLink())
-      {
-        throw new Error('Cartographer package.json is not a regular file')
-      }
-      const packageRoot = await NodeFSP.realpath(NodePath.dirname(packageJsonPath))
-      const packageJson = decodePackageJsonText(
-        await NodeFSP.readFile(packageJsonPath, 'utf8'),
-      ) as CartographerPackageJson
-      const bin = cartographerBin(packageJson)
-      if (
-        packageJson.name !== CARTOGRAPHER_PACKAGE_NAME ||
-        typeof packageJson.version !== 'string' ||
-        packageJson.version.length === 0 ||
-        bin !== `./${CARTOGRAPHER_CLI_ENTRY}`
-      )
-      {
-        throw new Error('Cartographer package metadata is incompatible')
-      }
-      const cliPath = NodePath.join(packageRoot, CARTOGRAPHER_CLI_ENTRY)
-      const cliStat = await NodeFSP.lstat(cliPath)
-      if (!cliStat.isFile() || cliStat.isSymbolicLink())
-      {
-        throw new Error('Cartographer CLI entry is not a regular file')
-      }
-      const distRoot = NodePath.join(packageRoot, 'dist')
-      const signature = await distSignature(distRoot)
-      const memoized = identifiedAnalyzer
-      // the fingerprint embeds the package version, which lives outside dist and so is invisible to
-      // the signature; every input to the fingerprint has to be part of the memo key
-      if (
-        memoized !== null &&
-        memoized.signature === signature &&
-        memoized.version === packageJson.version &&
-        memoized.identity.cliPath === cliPath
-      )
-      {
-        return memoized.identity
-      }
-      const distDigest = await fingerprintDist(distRoot)
-      const identity: CartographerAnalyzerIdentity = {
-        cliPath,
-        fingerprint: `${CARTOGRAPHER_PACKAGE_NAME}@${packageJson.version}:dist-sha256:${distDigest}`,
-      }
-      identifiedAnalyzer = { signature, version: packageJson.version, identity }
-      return identity
-    },
+    try: identifyAnalyzer,
     catch: (cause) => ({
       cause,
       error: publicError(

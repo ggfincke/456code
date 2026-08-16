@@ -20,11 +20,13 @@ import {
   staticAndDevRouteLayer,
   browserApiCorsLayer,
 } from './http.ts'
+import { guardHttpResponseWriteErrors } from './httpResponseErrorGuard.ts'
 import { fixPath } from './os-jank.ts'
 import { websocketRpcRouteLayer } from './ws.ts'
 import { ImportContinuationLive } from './import/continuation/continuation.ts'
 import * as ImportRuntime from './import/importRuntime.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
+import * as RemoteOpenTargets from './environment/RemoteOpenTargets.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from './persistence/Layers/Sqlite.ts'
 import { ImportReplacementIntentRepositoryLive } from './persistence/Layers/ImportReplacementIntents.ts'
 import { DiffAnalysisGenerationRepositoryLive } from './persistence/Layers/DiffAnalysisGenerations.ts'
@@ -169,7 +171,7 @@ const HttpServerLive = Layer.unwrap(
         Effect.promise(() => import('@effect/platform-node/NodeHttpServer')),
         Effect.promise(() => import('node:http')),
       ])
-      return NodeHttpServer.layer(() => NodeHttp.createServer(), {
+      return NodeHttpServer.layer(() => guardHttpResponseWriteErrors(NodeHttp.createServer()), {
         host: config.host ?? '127.0.0.1',
         port: config.port,
         gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
@@ -478,6 +480,7 @@ const RuntimeDependenciesLive = ImportRuntimeLayerLive.pipe(
   Layer.provideMerge(WorkersStatusBroadcaster.layer.pipe(Layer.provide(WorkerBrokerStore.layer))),
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
+  Layer.provideMerge(RemoteOpenTargets.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
 )

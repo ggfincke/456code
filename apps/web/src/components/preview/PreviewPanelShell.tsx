@@ -1,7 +1,7 @@
 // apps/web/src/components/preview/PreviewPanelShell.tsx
 // render preview panel shell
 
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { isElectron } from '~/env'
 import { useResizableWidth } from '~/hooks/useResizableWidth'
@@ -16,10 +16,14 @@ const PREVIEW_PANEL_MIN_WIDTH = 360
 // fraction of the viewport allowed, preserving the remaining space for chat.
 const PREVIEW_PANEL_MAX_WIDTH_FRACTION = 0.7
 const PREVIEW_PANEL_DEFAULT_WIDTH = 540
+const SIBLING_COLUMN_MIN_WIDTH = 360
 
-export function getPreviewPanelMaxWidth(viewportWidth: number): number
+export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: number): number
 {
-  return Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION)
+  const fractionCap = Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION)
+  const containerCap =
+    containerWidth === undefined ? Infinity : Math.floor(containerWidth) - SIBLING_COLUMN_MIN_WIDTH
+  return Math.max(PREVIEW_PANEL_MIN_WIDTH, Math.min(fractionCap, containerCap))
 }
 
 // shell for the preview panel. In inline mode the panel is user-resizable
@@ -33,7 +37,8 @@ export function PreviewPanelShell(props: {
 {
   const useDragRegion = isElectron && props.mode !== 'sheet' && props.mode !== 'embedded'
   const isInline = props.mode === 'inline'
-  const maxWidth = useViewportClampedMaxWidth()
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const maxWidth = useClampedMaxWidth(hostRef, isInline && !props.maximized)
   const { width, handlers } = useResizableWidth({
     storageKey: PREVIEW_PANEL_WIDTH_STORAGE_KEY,
     defaultWidth: PREVIEW_PANEL_DEFAULT_WIDTH,
@@ -44,8 +49,9 @@ export function PreviewPanelShell(props: {
 
   return (
     <div
+      ref={hostRef}
       className={cn(
-        'relative flex h-full min-h-0 min-w-0 flex-col self-stretch bg-background',
+        'relative flex h-full min-h-0 min-w-0 max-w-full flex-col self-stretch bg-background',
         isInline
           ? props.maximized
             ? 'flex-1 border-l border-border'
@@ -63,12 +69,11 @@ export function PreviewPanelShell(props: {
   )
 }
 
-// track viewport width to derive a sensible upper bound for the panel.
-// resize-aware so dragging the OS window narrower re-clamps the stored
-// width on the next render (the hook's clamp picks this up automatically).
-function useViewportClampedMaxWidth(): number
+// track the viewport and flex row so the sibling column keeps a usable width.
+function useClampedMaxWidth(hostRef: RefObject<HTMLDivElement | null>, enabled: boolean): number
 {
   const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth))
+  const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined)
   useEffect(() =>
   {
     if (typeof window === 'undefined') return
@@ -90,5 +95,17 @@ function useViewportClampedMaxWidth(): number
       if (frame !== 0) window.cancelAnimationFrame(frame)
     }
   }, [])
-  return getPreviewPanelMaxWidth(vw)
+  useLayoutEffect(() =>
+  {
+    if (!enabled) return
+    const parent = hostRef.current?.parentElement
+    if (!parent) return
+    const measure = () => setContainerWidth(parent.clientWidth)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(parent)
+    return () => observer.disconnect()
+  }, [enabled, hostRef])
+  return getPreviewPanelMaxWidth(vw, containerWidth)
 }

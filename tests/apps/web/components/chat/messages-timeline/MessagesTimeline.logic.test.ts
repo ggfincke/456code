@@ -8,7 +8,21 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  shouldPreserveAssistantLineBreaks,
 } from '../../../../../../apps/web/src/components/chat/messages-timeline/MessagesTimeline.logic'
+
+describe('shouldPreserveAssistantLineBreaks', () =>
+{
+  it('preserves Claude insight formatting without changing regular markdown', () =>
+  {
+    expect(
+      shouldPreserveAssistantLineBreaks(
+        '★ Insight ─────────\nFirst observation\nSecond observation',
+      ),
+    ).toBe(true)
+    expect(shouldPreserveAssistantLineBreaks('A normal\nmarkdown paragraph')).toBe(false)
+  })
+})
 
 describe('computeMessageDurationStart', () =>
 {

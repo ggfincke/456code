@@ -64,7 +64,7 @@ import {
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
 } from '../../../session-logic'
-import { formatChatTimestampTooltip, formatShortTimestamp } from '../../../timestampFormat'
+import { formatChatTimestampTooltip, formatDayAwareTimestamp } from '../../../timestampFormat'
 import { type TurnDiffSummary } from '../../../types'
 import ChatMarkdown from '../../ChatMarkdown'
 import { Button } from '../../ui/button'
@@ -230,7 +230,7 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>
             <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-              {formatShortTimestamp(row.message.createdAt, ctx.timestampFormat)}
+              {formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
             </TooltipTrigger>
             <TooltipPopup>
               {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
@@ -478,6 +478,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
             skills={props.skills}
             className="text-foreground"
             lineBreaks
+            parseRawHtml={false}
           />
         ) : null}
         {trailingWhitespace ? <span aria-hidden="true">{trailingWhitespace}</span> : null}
@@ -501,6 +502,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
                   skills={props.skills}
                   className="text-foreground"
                   lineBreaks
+                  parseRawHtml={false}
                 />
               </div>
             ) : null
@@ -598,6 +600,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
           skills={props.skills}
           className="text-foreground"
           lineBreaks
+          parseRawHtml={false}
         />,
       )
     }
@@ -626,6 +629,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       skills={props.skills}
       className="text-foreground"
       lineBreaks
+      parseRawHtml={false}
     />
   )
 })
@@ -662,6 +666,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           threadRef={ctx.threadRef ?? undefined}
           skills={ctx.skills}
           className="text-foreground"
+          parseRawHtml={false}
         />
       )}
       {renderablePatch?.kind === 'files' &&

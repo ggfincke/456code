@@ -36,6 +36,21 @@ function wrapInlineMarker(content: string, marker: string): string
   return `${match?.[1] ?? ''}${marker}${core}${marker}${match?.[3] ?? ''}`
 }
 
+// highlighted or multiline code remains block content even when the copied
+// range excludes its surrounding pre element.
+function isBlockCodeElement(element: Element, content: string): boolean
+{
+  if (content.includes('\n')) return true
+  for (const child of element.childNodes)
+  {
+    if (child.nodeType === Node.ELEMENT_NODE && (child as Element).classList.contains('line'))
+    {
+      return true
+    }
+  }
+  return false
+}
+
 function wrapInlineCode(code: string): string
 {
   const longestRun = [...(code.match(/`+/g) ?? [])].reduce(
@@ -222,7 +237,10 @@ function serializeNode(node: Node): string
     case 'PRE':
       return serializeCodeBlock(element)
     case 'CODE':
-      return wrapInlineCode(element.textContent ?? '')
+    {
+      const content = element.textContent ?? ''
+      return isBlockCodeElement(element, content) ? content : wrapInlineCode(content)
+    }
     case 'STRONG':
     case 'B':
       return wrapInlineMarker(serializeChildren(element), '**')
@@ -342,6 +360,19 @@ export function chatMarkdownClipboardPayload(
     if (range.collapsed) continue
     const container = document.createElement('div')
     container.appendChild(range.cloneContents())
+    const ancestor = range.commonAncestorContainer
+    const ancestorElement =
+      ancestor.nodeType === Node.ELEMENT_NODE ? (ancestor as Element) : ancestor.parentElement
+    if (ancestorElement?.closest('pre'))
+    {
+      const text = range.toString()
+      if (text)
+      {
+        texts.push(text)
+        htmls.push(sanitizedHtmlFrom(container))
+      }
+      continue
+    }
     const text = serializeRenderedMarkdownFragment(container)
     if (!text) continue
     texts.push(text)

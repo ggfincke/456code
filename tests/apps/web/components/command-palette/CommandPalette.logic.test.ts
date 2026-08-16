@@ -5,11 +5,72 @@ import { describe, expect, it, vi } from 'vite-plus/test'
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
 import type { Thread } from '../../../../../apps/web/src/types'
 import {
+  browseInputEndPaddingClass,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
+  filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   type CommandPaletteGroup,
 } from '../../../../../apps/web/src/components/command-palette/CommandPalette.logic'
+
+describe('browseInputEndPaddingClass', () =>
+{
+  it.each([
+    {
+      input: { willCreateProjectPath: true, hasHighlightedBrowseItem: false },
+      expected: '*:data-[slot=autocomplete-input]:pe-38!',
+    },
+    {
+      input: { willCreateProjectPath: false, hasHighlightedBrowseItem: true },
+      expected: '*:data-[slot=autocomplete-input]:pe-30!',
+    },
+    {
+      input: { willCreateProjectPath: false, hasHighlightedBrowseItem: false },
+      expected: '*:data-[slot=autocomplete-input]:pe-24!',
+    },
+  ])('reserves end padding for the browse action', ({ input, expected }) =>
+  {
+    expect(browseInputEndPaddingClass(input)).toBe(expected)
+  })
+})
+
+describe('filterPinnedBrowseEntries', () =>
+{
+  it('keeps sibling folders visible and matches the pinned folder using platform casing', () =>
+  {
+    const posixEntries = [
+      { name: 'repo', fullPath: '/projects/repo' },
+      { name: 'work', fullPath: '/projects/work' },
+    ]
+    expect(
+      filterPinnedBrowseEntries({
+        browseEntries: posixEntries,
+        browseFilterQuery: 'repo',
+        highlightedItemValue: 'browse:/projects/work',
+        pinnedDirectoryName: 'repo',
+        caseSensitive: true,
+      }),
+    ).toMatchObject({
+      filteredEntries: posixEntries,
+      exactEntry: posixEntries[0],
+      highlightedEntry: posixEntries[1],
+    })
+
+    const windowsEntries = [
+      { name: 'Repo', fullPath: 'C:\\projects\\Repo' },
+      { name: 'work', fullPath: 'C:\\projects\\work' },
+    ]
+    expect(
+      filterPinnedBrowseEntries({
+        browseEntries: windowsEntries,
+        browseFilterQuery: 'repo',
+        highlightedItemValue: null,
+        pinnedDirectoryName: 'repo',
+        caseSensitive: false,
+      }),
+    ).toMatchObject({ filteredEntries: windowsEntries, exactEntry: windowsEntries[0] })
+  })
+})
 
 describe('enumerateCommandPaletteItems', () =>
 {

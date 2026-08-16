@@ -15,6 +15,7 @@ import type {
 } from '@t3tools/contracts'
 import {
   CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
+  isProviderSendTurnSupportedImageMimeType,
   normalizeCollaborationMode,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -128,6 +129,7 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from '../Expande
 import { basenameOfPath } from '../../../pierre-icons'
 import { cn, randomUUID } from '~/lib/utils'
 import { Separator } from '../../ui/separator'
+import { getProviderInputLengthValidationMessage } from './composerSubmission'
 
 import { Button } from '../../ui/button'
 import {
@@ -764,6 +766,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false)
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false)
   const [isComposerFocused, setIsComposerFocused] = useState(false)
+  const [providerInputSubmissionError, setProviderInputSubmissionError] = useState<string | null>(
+    null,
+  )
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null)
   const [isStashMenuOpen, setIsStashMenuOpen] = useState(false)
   const [compactConfirmationSource, setCompactConfirmationSource] = useState<
@@ -780,6 +785,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null)
   const composerFormRef = useRef<HTMLFormElement>(null)
   const composerSurfaceRef = useRef<HTMLDivElement>(null)
+  const providerInputRejectedRef = useRef(false)
   const composerSelectLockRef = useRef(false)
   const composerMenuOpenRef = useRef(false)
   const composerMenuItemsRef = useRef<ComposerCommandItem[]>([])
@@ -788,7 +794,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandFrameRef = useRef<number | null>(null)
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null)
   const mobileComposerExpandInFlightRef = useRef(false)
-  const dragDepthRef = useRef(0)
   const stashPulseKeyRef = useRef(0)
   const stashPulseTimeoutRef = useRef<number | null>(null)
   // snapshots currently being encoded, keyed by target+prompt+image ids.
@@ -1167,6 +1172,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef.current = composerElementContexts
   }, [composerElementContexts, composerElementContextsRef])
 
+  // a failed preflight remains visible until an input that contributes to the
+  // final provider text changes; the next submit will validate the whole text.
+  useEffect(() =>
+  {
+    setProviderInputSubmissionError(null)
+  }, [
+    activeProposedPlan?.planMarkdown,
+    collaborationMode.baseMode,
+    collaborationMode.orchestrate,
+    composerElementContexts,
+    composerImages,
+    composerPreviewAnnotations,
+    composerReviewComments,
+    composerTerminalContexts,
+    draftId,
+    prompt,
+    selectedModel,
+    selectedPromptEffort,
+    selectedProvider,
+  ])
+
   // composer menu highlight sync
   useEffect(() =>
   {
@@ -1242,7 +1268,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setComposerHighlightedItemId(null)
     setComposerCursor(collapseExpandedComposerCursor(promptRef.current, promptRef.current.length))
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length))
-    dragDepthRef.current = 0
     setIsDragOverComposer(false)
   }, [draftId, activeThreadId, promptRef])
 
@@ -1748,7 +1773,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         setCompactConfirmationSource('composer')
         return
       }
+      providerInputRejectedRef.current = false
       onSend(event)
+      if (providerInputRejectedRef.current)
+      {
+        return
+      }
       if (shouldBlurMobileComposerOnSubmit())
       {
         blurMobileComposerAfterSend()
@@ -2303,6 +2333,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         error = `Unsupported file type for '${file.name}'. Please attach image files only.`
         continue
       }
+      if (!isProviderSendTurnSupportedImageMimeType(file.type))
+      {
+        error = `'${file.name}' is not a supported image type. Attach GIF, JPEG, PNG, or WebP images.`
+        continue
+      }
       if (reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS)
       {
         error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`
@@ -2388,46 +2423,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     void addComposerImages(imageFiles)
   }
 
-  const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) =>
-  {
-    if (!event.dataTransfer.types.includes('Files')) return
-    event.preventDefault()
-    dragDepthRef.current += 1
-    setIsDragOverComposer(true)
-  }
-
-  const onComposerDragOver = (event: React.DragEvent<HTMLDivElement>) =>
-  {
-    if (!event.dataTransfer.types.includes('Files')) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-    setIsDragOverComposer(true)
-  }
-
-  const onComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) =>
-  {
-    if (!event.dataTransfer.types.includes('Files')) return
-    event.preventDefault()
-    const nextTarget = event.relatedTarget
-    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
-    if (dragDepthRef.current === 0)
-    {
-      setIsDragOverComposer(false)
-    }
-  }
-
-  const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) =>
-  {
-    if (!event.dataTransfer.types.includes('Files')) return
-    event.preventDefault()
-    dragDepthRef.current = 0
-    setIsDragOverComposer(false)
-    const files = Array.from(event.dataTransfer.files)
-    void addComposerImages(files)
-    focusComposer()
-  }
-
   const insertComposerTextAtEnd = (
     text: string,
     options?: { ensureLeadingBoundary?: boolean },
@@ -2487,7 +2482,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (!isDragOverComposer) return
     const onWindowDragEnd = () =>
     {
-      dragDepthRef.current = 0
       setIsDragOverComposer(false)
     }
     window.addEventListener('dragend', onWindowDragEnd)
@@ -2579,6 +2573,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       {
         composerEditorRef.current?.focusAt(cursor)
       },
+      addDroppedFiles: (files: File[]) =>
+      {
+        if (isSendBusy || isConnecting || providerSwitch !== null) return
+        void addComposerImages(files)
+        focusComposer()
+      },
       insertTextAtEnd: insertComposerTextAtEnd,
       openModelPicker: () =>
       {
@@ -2649,6 +2649,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor)
         })
       },
+      validateProviderInput: (providerInput: string) =>
+      {
+        const validationMessage = getProviderInputLengthValidationMessage(providerInput)
+        providerInputRejectedRef.current = validationMessage !== null
+        setProviderInputSubmissionError(validationMessage)
+        return validationMessage === null
+      },
       getSendContext: () => ({
         prompt: promptRef.current,
         images: composerImagesRef.current,
@@ -2672,11 +2679,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }),
     [
       activeThread,
+      addComposerImages,
       composerDraftTarget,
       composerCursor,
       composerTerminalContexts,
+      focusComposer,
       insertComposerDraftTerminalContext,
+      isSendBusy,
       promptRef,
+      providerSwitch,
       composerImagesRef,
       composerTerminalContextsRef,
       composerElementContextsRef,
@@ -2715,10 +2726,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           'group rounded-[22px] p-px transition-colors duration-200',
           composerProviderState.composerFrameClassName,
         )}
-        onDragEnter={onComposerDragEnter}
-        onDragOver={onComposerDragOver}
-        onDragLeave={onComposerDragLeave}
-        onDrop={onComposerDrop}
         onDragEnterCapture={composerMentionDragHandlers.onDragEnter}
         onDragOverCapture={composerMentionDragHandlers.onDragOver}
         onDragLeaveCapture={onComposerMentionDragLeaveCapture}
@@ -3172,9 +3179,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             </div>
           </div>
 
+          {providerInputSubmissionError ? (
+            <p
+              role="alert"
+              data-chat-composer-validation="prompt-length"
+              className="px-3 pb-2 text-xs text-destructive sm:px-4"
+            >
+              {providerInputSubmissionError}
+            </p>
+          ) : null}
+
           {/* Bottom toolbar */}
           {isComposerCollapsedMobile ? null : activePendingApproval ? (
-            <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
+            <div className="flex flex-wrap items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
               <ComposerPendingApprovalActions
                 requestId={activePendingApproval.requestId}
                 isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}

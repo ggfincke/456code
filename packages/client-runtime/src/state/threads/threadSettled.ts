@@ -7,6 +7,15 @@ import { isThreadAwarenessStale } from '@t3tools/shared/agentAwareness'
 
 export type ChangeRequestStateLike = 'open' | 'closed' | 'merged'
 
+// closed change requests always settle; merged ones honor the user preference.
+export function changeRequestAutoSettles(
+  state: ChangeRequestStateLike | null | undefined,
+  autoSettleOnMerge = true,
+): boolean
+{
+  return state === 'closed' || (state === 'merged' && autoSettleOnMerge)
+}
+
 const DAY_MS = 24 * 60 * 60 * 1_000
 
 export function hasBlockingApprovalOutcome(
@@ -314,8 +323,8 @@ export function threadWokeAt(
   return wakeAtMs <= Date.parse(options.now) ? shell.snoozedUntil : null
 }
 
-// a merged/closed change request settles its thread only once the thread has
-// been idle this long. Without the idle guard the merge signal is permanent:
+// an eligible terminal change request settles its thread only once the thread
+// has been idle this long. Without the idle guard the terminal signal persists:
 // sending a message to a merged-PR thread would un-settle the row only until
 // its turn completed, then the still-merged PR would snap it straight back
 // into the settled tail. An hour keeps the follow-up conversation visible
@@ -331,15 +340,16 @@ export const CHANGE_REQUEST_SETTLE_IDLE_MS = 60 * 60 * 1_000
 // queued turn) are checked first and hold a thread active regardless of any
 // override. Past the blockers, the explicit user override (thread.settle /
 // thread.unsettle commands, projected into settledOverride + settledAt)
-// wins in both directions; without one, a thread auto-settles on a
-// merged/closed PR (once idle) or inactivity past the window. The server
-// un-settles on real activity (user message, session start, approval/
+// wins in both directions; without one, a thread auto-settles on a closed PR,
+// an enabled merged-PR signal (both once idle), or inactivity past the window.
+// the server un-settles on real activity (user message, session start, approval/
 // user-input request), so an override never goes stale silently.
 export function effectiveSettled(
   shell: OrchestrationThreadShell,
   options: {
     readonly now: string
     readonly autoSettleAfterDays: number | null
+    readonly autoSettleOnMerge?: boolean
     readonly changeRequestState?: ChangeRequestStateLike | null
   },
 ): boolean
@@ -371,7 +381,7 @@ export function effectiveSettled(
   // "active" is the explicit keep-active pin: it suppresses auto-settle
   // until real activity clears it server-side.
   if (shell.settledOverride === 'active') return false
-  if (options.changeRequestState === 'merged' || options.changeRequestState === 'closed')
+  if (changeRequestAutoSettles(options.changeRequestState, options.autoSettleOnMerge))
   {
     // only an idle thread settles on the merge signal: the signal itself
     // never clears, so without this guard fresh activity (a message sent in

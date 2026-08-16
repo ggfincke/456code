@@ -179,9 +179,11 @@ it.effect('reports implemented tools separately from locally available executabl
 
 it.effect('probes provider authentication without exposing token details', () =>
 {
+  const processInputs: VcsProcess.VcsProcessInput[] = []
   const processMock = {
     run: (input: VcsProcess.VcsProcessInput) =>
     {
+      processInputs.push(input)
       if (input.args[0] === '--version')
       {
         return Effect.succeed(processOutput(`${input.command} version test\n`))
@@ -294,5 +296,14 @@ Logged in to gitlab.com as gitlab-user
         },
       ],
     )
+
+    const timeoutFor = (command: string, args: ReadonlyArray<string>) =>
+      processInputs.find(
+        (input) => input.command === command && input.args.join(' ') === args.join(' '),
+      )?.timeoutMs
+    assert.equal(timeoutFor('gh', ['--version']), 5_000)
+    assert.equal(timeoutFor('gh', ['auth', 'status', '--json', 'hosts']), 5_000)
+    assert.equal(timeoutFor('az', ['--version']), 20_000)
+    assert.equal(timeoutFor('az', ['account', 'show', '--query', 'user.name', '-o', 'tsv']), 20_000)
   }).pipe(Effect.provide(testLayer))
 })

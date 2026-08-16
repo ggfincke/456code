@@ -15,8 +15,10 @@ const showContextMenuFallbackMock =
       position?: { x: number; y: number },
     ) => Promise<T | null>
   >()
+const dismissContextMenuMock = vi.fn<() => void>()
 
 vi.mock('../../../apps/web/src/lib/contextMenuFallback', () => ({
+  dismissContextMenu: dismissContextMenuMock,
   showContextMenuFallback: showContextMenuFallbackMock,
 }))
 
@@ -94,6 +96,9 @@ describe('LocalApi', () =>
 
     await expect(createLocalApi().contextMenu.show(items, { x: 4, y: 5 })).resolves.toBe('rename')
     expect(showContextMenuFallbackMock).toHaveBeenCalledWith(items, { x: 4, y: 5 })
+
+    await createLocalApi().contextMenu.close()
+    expect(dismissContextMenuMock).toHaveBeenCalledOnce()
   })
 
   it('delegates host capabilities and persistence to the desktop bridge', async () =>
@@ -114,11 +119,13 @@ describe('LocalApi', () =>
     const items = [{ id: 'delete', label: 'Delete' }] as const
 
     await expect(api.contextMenu.show(items)).resolves.toBe('delete')
+    await api.contextMenu.close()
     await expect(api.dialogs.pickFolder({ initialPath: '/tmp' })).resolves.toBe('/tmp/project')
     await expect(api.persistence.getClientSettings()).resolves.toEqual(DEFAULT_CLIENT_SETTINGS)
     await api.persistence.setClientSettings(DEFAULT_CLIENT_SETTINGS)
 
     expect(showContextMenu).toHaveBeenCalledWith(items, undefined)
+    expect(dismissContextMenuMock).not.toHaveBeenCalled()
     expect(pickFolder).toHaveBeenCalledWith({ initialPath: '/tmp' })
     expect(getClientSettings).toHaveBeenCalledTimes(1)
     expect(setClientSettings).toHaveBeenCalledWith(DEFAULT_CLIENT_SETTINGS)

@@ -5,6 +5,7 @@ import * as Schema from 'effect/Schema'
 
 import {
   IsoDateTime,
+  GitRefString,
   NonNegativeInt,
   ProjectId,
   ThreadId,
@@ -40,7 +41,7 @@ export const DiffAnalysisSource = Schema.Union([
     sourceKind: Schema.Literal('review'),
     cwd: TrimmedNonEmptyString,
     kind: ReviewDiffPreviewSourceKind,
-    baseRef: Schema.optionalKey(TrimmedNonEmptyString),
+    baseRef: Schema.optionalKey(GitRefString),
   }),
   Schema.Struct({
     sourceKind: Schema.Literal('tree-pair'),

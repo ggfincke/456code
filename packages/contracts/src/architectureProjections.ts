@@ -4,6 +4,7 @@
 import * as Schema from 'effect/Schema'
 
 import {
+  GitRefString,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -218,7 +219,7 @@ export const CartographerGetRepositoryMapResult = Schema.Struct({
   repo: Schema.Struct({
     name: Schema.String.check(Schema.isNonEmpty()),
     scope: Schema.String.check(Schema.isNonEmpty()),
-    gitRef: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty())),
+    gitRef: Schema.optionalKey(GitRefString),
   }),
   counts: ArchitectureRepositoryCounts,
   health: ArchitectureRepositoryHealth,

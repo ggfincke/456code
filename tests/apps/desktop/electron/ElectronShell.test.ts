@@ -29,26 +29,43 @@ describe('ElectronShell', () =>
     writeTextMock.mockReset()
   })
 
-  it.effect('opens safe external URLs', () =>
+  it.effect('opens web and remote editor URLs', () =>
     Effect.gen(function* ()
     {
       openExternalMock.mockResolvedValue(undefined)
 
       const electronShell = yield* ElectronShell.ElectronShell
-      const result = yield* electronShell.openExternal('https://example.com/path')
+      const urls = [
+        'http://example.com/path',
+        'https://example.com/path',
+        'cursor://vscode-remote/ssh-remote+dev/home/user/project',
+        'vscode://vscode-remote/ssh-remote+dev/home/user/project',
+        'vscode-insiders://vscode-remote/ssh-remote+dev/home/user/project',
+        'vscodium://vscode-remote/ssh-remote+dev/home/user/project',
+      ]
+      const results = yield* Effect.forEach(urls, electronShell.openExternal)
 
-      assert.equal(result, true)
-      assert.deepEqual(openExternalMock.mock.calls, [['https://example.com/path']])
+      assert.deepEqual(
+        results,
+        urls.map(() => true),
+      )
+      assert.deepEqual(
+        openExternalMock.mock.calls,
+        urls.map((url) => [url]),
+      )
     }).pipe(Effect.provide(ElectronShell.layer)),
   )
 
-  it.effect('does not open unsafe external URLs', () =>
+  it.effect('does not open unapproved external URLs', () =>
     Effect.gen(function* ()
     {
       const electronShell = yield* ElectronShell.ElectronShell
-      const result = yield* electronShell.openExternal('file:///etc/passwd')
+      const results = yield* Effect.forEach(
+        ['file:///etc/passwd', 'javascript:alert(1)', 'zed://ssh-remote/dev/project'],
+        electronShell.openExternal,
+      )
 
-      assert.equal(result, false)
+      assert.deepEqual(results, [false, false, false])
       assert.equal(openExternalMock.mock.calls.length, 0)
     }).pipe(Effect.provide(ElectronShell.layer)),
   )

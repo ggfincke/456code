@@ -2,7 +2,13 @@
 // read-model contract for the workers dashboard over local worker-broker state
 
 import * as Schema from 'effect/Schema'
-import { IsoDateTime, NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from './baseSchemas.ts'
+import {
+  GitRefString,
+  IsoDateTime,
+  NonNegativeInt,
+  PositiveInt,
+  TrimmedNonEmptyString,
+} from './baseSchemas.ts'
 
 // broker statuses plus "unknown" so newer broker records degrade instead of failing decode
 export const WorkersJobStatus = Schema.Literals([
@@ -82,7 +88,7 @@ export const WorkersJobSummary = Schema.Struct({
   provider: TrimmedNonEmptyString,
   mode: TrimmedNonEmptyString,
   repo: TrimmedNonEmptyString,
-  branch: Schema.Option(TrimmedNonEmptyString),
+  branch: Schema.Option(GitRefString),
   stage: Schema.Option(TrimmedNonEmptyString),
   workflow: Schema.Option(TrimmedNonEmptyString),
   run: Schema.Option(TrimmedNonEmptyString),
@@ -119,7 +125,7 @@ export const WorkersJobDetail = Schema.Struct({
   ...WorkersJobSummary.fields,
   task: Schema.String,
   allowedPaths: Schema.Array(TrimmedNonEmptyString),
-  baseRef: Schema.Option(TrimmedNonEmptyString),
+  baseRef: Schema.Option(GitRefString),
   baseSha: Schema.Option(TrimmedNonEmptyString),
   headSha: Schema.Option(TrimmedNonEmptyString),
   worktree: Schema.Option(TrimmedNonEmptyString),

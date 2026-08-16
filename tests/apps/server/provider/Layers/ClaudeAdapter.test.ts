@@ -11,6 +11,7 @@ import type {
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
+  PermissionUpdate,
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
@@ -27,6 +28,7 @@ import {
 import { createModelSelection } from '@t3tools/shared/model'
 import { assert, describe, it } from '@effect/vitest'
 import * as Context from 'effect/Context'
+import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
@@ -34,6 +36,7 @@ import * as Random from 'effect/Random'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
+import { vi } from 'vite-plus/test'
 
 import { attachmentRelativePath } from '../../../../../apps/server/src/attachments/attachmentStore.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
@@ -233,6 +236,7 @@ function makeHarness(config?: {
   readonly baseDir?: string
   readonly claudeConfig?: Partial<ClaudeSettings>
   readonly instanceId?: ProviderInstanceId
+  readonly crypto?: Crypto.Crypto
 })
 {
   const queries: Array<FakeClaudeQuery> = []
@@ -261,6 +265,9 @@ function makeHarness(config?: {
         }
       : {}),
   }
+  const nodeServicesLayer = config?.crypto
+    ? Layer.merge(NodeServices.layer, Layer.succeed(Crypto.Crypto, config.crypto))
+    : NodeServices.layer
 
   return {
     layer: Layer.effect(
@@ -278,7 +285,7 @@ function makeHarness(config?: {
         ),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(nodeServicesLayer),
     ),
     get query()
     {
@@ -307,6 +314,61 @@ function makeDeterministicRandomService(seed = 0x1234_5678): {
   return {
     nextIntUnsafe,
     nextDoubleUnsafe: () => nextIntUnsafe() / 0x1_0000_0000,
+  }
+}
+
+function makeControlledUuidCrypto()
+{
+  let nextUuidIndex = 0
+  let uuidCallsBeforeBlock: number | undefined
+  let markBlocked: () => void = () => undefined
+  let blocked = Promise.resolve()
+  let releaseBlocked: () => void = () => undefined
+  let released = Promise.resolve()
+  const baseCrypto = Crypto.make({
+    randomBytes: (size) => new Uint8Array(size),
+    digest: (_algorithm, data) => Effect.succeed(data),
+  })
+
+  return {
+    crypto: {
+      ...baseCrypto,
+      randomUUIDv4: Effect.suspend(() =>
+      {
+        nextUuidIndex += 1
+        const uuid = `00000000-0000-4000-8000-${nextUuidIndex.toString(16).padStart(12, '0')}`
+        if (uuidCallsBeforeBlock === undefined)
+        {
+          return Effect.succeed(uuid)
+        }
+        if (uuidCallsBeforeBlock > 0)
+        {
+          uuidCallsBeforeBlock -= 1
+          return Effect.succeed(uuid)
+        }
+
+        uuidCallsBeforeBlock = undefined
+        markBlocked()
+        return Effect.promise(() => released).pipe(Effect.as(uuid))
+      }),
+    } satisfies Crypto.Crypto,
+    blockAfter(uuidCalls: number): Promise<void>
+    {
+      uuidCallsBeforeBlock = uuidCalls
+      blocked = new Promise<void>((resolve) =>
+      {
+        markBlocked = resolve
+      })
+      released = new Promise<void>((resolve) =>
+      {
+        releaseBlocked = resolve
+      })
+      return blocked
+    },
+    release(): void
+    {
+      releaseBlocked()
+    },
   }
 }
 
@@ -3087,6 +3149,109 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
+  it.effect('keeps accept-for-session permissions scoped and synthesizes missing MCP rules', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'approval-required',
+      })
+
+      yield* Stream.take(unwrapClaudeRuntimeEvents(adapter), 3).pipe(Stream.runDrain)
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool
+      assert.equal(typeof canUseTool, 'function')
+      if (!canUseTool)
+      {
+        return
+      }
+
+      const scenarios: ReadonlyArray<{
+        readonly toolName: string
+        readonly suggestions?: Array<PermissionUpdate>
+        readonly expected: Array<PermissionUpdate>
+      }> = [
+        {
+          toolName: 'Bash',
+          suggestions: [
+            {
+              type: 'addRules' as const,
+              rules: [{ toolName: 'Bash', ruleContent: 'git status' }],
+              behavior: 'allow' as const,
+              destination: 'localSettings' as const,
+            },
+          ],
+          expected: [
+            {
+              type: 'addRules',
+              rules: [{ toolName: 'Bash', ruleContent: 'git status' }],
+              behavior: 'allow',
+              destination: 'session',
+            },
+          ],
+        },
+        {
+          toolName: 'mcp__example__lookup',
+          expected: [
+            {
+              type: 'addRules',
+              rules: [{ toolName: 'mcp__example__lookup' }],
+              behavior: 'allow',
+              destination: 'session',
+            },
+          ],
+        },
+      ]
+
+      for (const [index, scenario] of scenarios.entries())
+      {
+        const permissionPromise = canUseTool(
+          scenario.toolName,
+          { query: 'status' },
+          {
+            signal: new AbortController().signal,
+            ...(scenario.suggestions ? { suggestions: scenario.suggestions } : {}),
+            toolUseID: `tool-session-${index}`,
+            requestId: `request-session-${index}`,
+          },
+        )
+        const requested = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
+        assert.equal(requested._tag, 'Some')
+        if (requested._tag !== 'Some' || requested.value.type !== 'request.opened')
+        {
+          assert.fail('Expected request.opened event')
+        }
+
+        const requestId = requested.value.requestId
+        if (typeof requestId !== 'string')
+        {
+          assert.fail('Expected request.opened event to include a request id')
+        }
+        yield* adapter.respondToRequest(
+          session.threadId,
+          ApprovalRequestId.make(requestId),
+          'acceptForSession',
+        )
+        const resolved = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
+        assert.equal(resolved._tag, 'Some')
+        assert.equal(resolved._tag === 'Some' ? resolved.value.type : undefined, 'request.resolved')
+
+        const result = yield* Effect.promise(() => permissionPromise)
+        if (result === null || result.behavior !== 'allow')
+        {
+          assert.fail('Expected an allow permission result')
+        }
+        assert.deepEqual(result.updatedPermissions, scenario.expected)
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
   it.effect('classifies Agent tools and read-only Claude tools correctly for approvals', () =>
   {
     const harness = makeHarness()
@@ -4238,8 +4403,11 @@ describe('ClaudeAdapterLive', () =>
         ],
       }
 
+      const controller = new AbortController()
+      const addListener = vi.spyOn(controller.signal, 'addEventListener')
+      const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
       const permissionPromise = canUseTool('AskUserQuestion', askInput, {
-        signal: new AbortController().signal,
+        signal: controller.signal,
         toolUseID: 'tool-ask-1',
         requestId: 'req-ask-1',
       })
@@ -4271,6 +4439,12 @@ describe('ClaudeAdapterLive', () =>
       yield* adapter.respondToUserInput(session.threadId, ApprovalRequestId.make(requestId!), {
         'Which framework?': 'React',
       })
+      const duplicateResponseError = yield* Effect.flip(
+        adapter.respondToUserInput(session.threadId, ApprovalRequestId.make(requestId!), {
+          'Which framework?': 'Vue',
+        }),
+      )
+      assert.equal(duplicateResponseError._tag, 'ProviderAdapterRequestError')
 
       // the adapter should emit a user-input.resolved event.
       const resolvedEvent = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
@@ -4299,6 +4473,27 @@ describe('ClaudeAdapterLive', () =>
       assert.deepEqual(updatedInput.answers, { 'Which framework?': 'React' })
       // original questions should be passed through.
       assert.deepEqual(updatedInput.questions, askInput.questions)
+
+      const addAbortCalls = addListener.mock.calls.filter(([type]) => type === 'abort')
+      const removeAbortCalls = removeListener.mock.calls.filter(([type]) => type === 'abort')
+      assert.equal(addAbortCalls.length, 1)
+      assert.equal(removeAbortCalls.length, 1)
+      assert.strictEqual(removeAbortCalls[0]?.[1], addAbortCalls[0]?.[1])
+
+      const lateEvents: Array<ProviderRuntimeEvent> = []
+      const lateEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() =>
+          {
+            lateEvents.push(event)
+          }),
+        ),
+        Effect.forkChild,
+      )
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(lateEventsFiber)
+      assert.deepEqual(lateEvents, [])
 
       // compatibility check for #2388: the answers shape we hand to the SDK
       // must produce a non-empty rendered tool_result on BOTH SDK iteration
@@ -4407,14 +4602,14 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
-  it.effect('denies AskUserQuestion when the waiting turn is aborted', () =>
+  it.effect('denies AskUserQuestion when the waiting turn is already aborted', () =>
   {
     const harness = makeHarness()
     return Effect.gen(function* ()
     {
       const adapter = yield* ClaudeAdapter
 
-      const session = yield* startClaudeTestSession(adapter, {
+      yield* startClaudeTestSession(adapter, {
         threadId: THREAD_ID,
         provider: ProviderDriverKind.make('claudeAgent'),
         runtimeMode: 'approval-required',
@@ -4424,6 +4619,148 @@ describe('ClaudeAdapterLive', () =>
 
       const createInput = harness.getLastCreateQueryInput()
       const canUseTool = createInput?.options.canUseTool
+      assert.equal(typeof canUseTool, 'function')
+      if (!canUseTool)
+      {
+        return
+      }
+
+      const controller = new AbortController()
+      controller.abort()
+      const permissionPromise = canUseTool(
+        'AskUserQuestion',
+        {
+          questions: [
+            {
+              question: 'Continue?',
+              header: 'Continue',
+              options: [{ label: 'Yes', description: 'Proceed' }],
+              multiSelect: false,
+            },
+          ],
+        },
+        {
+          signal: controller.signal,
+          toolUseID: 'tool-ask-abort',
+          requestId: 'req-ask-abort',
+        },
+      )
+
+      const permissionResult = yield* Effect.promise(() => permissionPromise)
+      assert.deepEqual(permissionResult, {
+        behavior: 'deny',
+        message: 'User cancelled tool execution.',
+      } satisfies PermissionResult)
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('settles AskUserQuestion before a blocked requested-event stamp is released', () =>
+  {
+    const uuidGate = makeControlledUuidCrypto()
+    const harness = makeHarness({ crypto: uuidGate.crypto })
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'approval-required',
+      })
+
+      yield* Stream.take(unwrapClaudeRuntimeEvents(adapter), 3).pipe(Stream.runDrain)
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool
+      assert.equal(typeof canUseTool, 'function')
+      if (!canUseTool)
+      {
+        return
+      }
+
+      // request id generation completes; requested-event id generation pauses.
+      const publicationBlocked = uuidGate.blockAfter(1)
+      const controller = new AbortController()
+      const permissionPromise = canUseTool(
+        'AskUserQuestion',
+        {
+          questions: [
+            {
+              question: 'Continue?',
+              header: 'Continue',
+              options: [{ label: 'Yes', description: 'Proceed' }],
+              multiSelect: false,
+            },
+          ],
+        },
+        {
+          signal: controller.signal,
+          toolUseID: 'tool-ask-stop-requested',
+          requestId: 'request-ask-stop-requested',
+        },
+      )
+
+      yield* Effect.promise(() => publicationBlocked).pipe(
+        Effect.timeout('1 second'),
+        TestClock.withLive,
+      )
+      controller.abort()
+      const stopFiber = yield* adapter.stopSession(session.threadId).pipe(Effect.forkChild)
+
+      // cancellation and stop must finish while UUID generation is still blocked.
+      const result = yield* Effect.promise(() => permissionPromise).pipe(
+        Effect.timeout('1 second'),
+        TestClock.withLive,
+      )
+      yield* Fiber.join(stopFiber).pipe(Effect.timeout('1 second'), TestClock.withLive)
+      assert.deepEqual(result, {
+        behavior: 'deny',
+        message: 'User cancelled tool execution.',
+      } satisfies PermissionResult)
+
+      const exited = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter)).pipe(
+        Effect.timeout('1 second'),
+        TestClock.withLive,
+      )
+      assert.equal(exited._tag === 'Some' ? exited.value.type : undefined, 'session.exited')
+
+      const lateEvents: Array<ProviderRuntimeEvent> = []
+      const lateEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() =>
+          {
+            lateEvents.push(event)
+          }),
+        ),
+        Effect.forkChild,
+      )
+      uuidGate.release()
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(lateEventsFiber)
+      assert.deepEqual(lateEvents, [])
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => uuidGate.release())),
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('settles AskUserQuestion before a blocked resolved-event stamp is released', () =>
+  {
+    const uuidGate = makeControlledUuidCrypto()
+    const harness = makeHarness({ crypto: uuidGate.crypto })
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'approval-required',
+      })
+
+      yield* Stream.take(unwrapClaudeRuntimeEvents(adapter), 3).pipe(Stream.runDrain)
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool
       assert.equal(typeof canUseTool, 'function')
       if (!canUseTool)
       {
@@ -4445,37 +4782,67 @@ describe('ClaudeAdapterLive', () =>
         },
         {
           signal: controller.signal,
-          toolUseID: 'tool-ask-abort',
-          requestId: 'req-ask-abort',
+          toolUseID: 'tool-ask-stop-resolved',
+          requestId: 'request-ask-stop-resolved',
         },
       )
-
-      const requestedEvent = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
-      assert.equal(requestedEvent._tag, 'Some')
-      if (requestedEvent._tag !== 'Some' || requestedEvent.value.type !== 'user-input.requested')
+      const requested = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
+      if (requested._tag !== 'Some' || requested.value.type !== 'user-input.requested')
       {
         assert.fail('Expected user-input.requested event')
-        return
       }
-      assert.equal(requestedEvent.value.threadId, session.threadId)
-
-      controller.abort()
-
-      const resolvedEvent = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
-      assert.equal(resolvedEvent._tag, 'Some')
-      if (resolvedEvent._tag !== 'Some' || resolvedEvent.value.type !== 'user-input.resolved')
+      if (typeof requested.value.requestId !== 'string')
       {
-        assert.fail('Expected user-input.resolved event')
-        return
+        assert.fail('Expected user-input.requested event to include a request id')
       }
-      assert.deepEqual(resolvedEvent.value.payload.answers, {})
 
-      const permissionResult = yield* Effect.promise(() => permissionPromise)
-      assert.deepEqual(permissionResult, {
+      const publicationBlocked = uuidGate.blockAfter(0)
+      yield* adapter.respondToUserInput(
+        session.threadId,
+        ApprovalRequestId.make(requested.value.requestId),
+        { 'Continue?': 'Yes' },
+      )
+      yield* Effect.promise(() => publicationBlocked).pipe(
+        Effect.timeout('1 second'),
+        TestClock.withLive,
+      )
+      controller.abort()
+      const stopFiber = yield* adapter.stopSession(session.threadId).pipe(Effect.forkChild)
+
+      // cancellation and stop must finish while UUID generation is still blocked.
+      const result = yield* Effect.promise(() => permissionPromise).pipe(
+        Effect.timeout('1 second'),
+        TestClock.withLive,
+      )
+      yield* Fiber.join(stopFiber).pipe(Effect.timeout('1 second'), TestClock.withLive)
+      assert.deepEqual(result, {
         behavior: 'deny',
         message: 'User cancelled tool execution.',
       } satisfies PermissionResult)
+
+      const exited = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter)).pipe(
+        Effect.timeout('1 second'),
+        TestClock.withLive,
+      )
+      assert.equal(exited._tag === 'Some' ? exited.value.type : undefined, 'session.exited')
+
+      const lateEvents: Array<ProviderRuntimeEvent> = []
+      const lateEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() =>
+          {
+            lateEvents.push(event)
+          }),
+        ),
+        Effect.forkChild,
+      )
+      uuidGate.release()
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(lateEventsFiber)
+      assert.deepEqual(lateEvents, [])
     }).pipe(
+      Effect.ensuring(Effect.sync(() => uuidGate.release())),
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     )

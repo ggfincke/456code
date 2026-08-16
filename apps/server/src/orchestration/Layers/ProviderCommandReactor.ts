@@ -83,6 +83,7 @@ import {
   ProviderCommandReactor,
   type ProviderCommandReactorShape,
 } from '../Services/ProviderCommandReactor.ts'
+import { canReplaceThreadTitle } from '../threadTitles.ts'
 import {
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
@@ -289,7 +290,6 @@ function mapProviderSessionStatusToOrchestrationStatus(
 }
 
 const DEFAULT_RUNTIME_MODE: RuntimeMode = 'full-access'
-const DEFAULT_THREAD_TITLE = 'New thread'
 const REACTOR_ID = 'provider-command' as const
 const OPERATION_VERSION = 1
 
@@ -412,20 +412,6 @@ export function providerErrorLabelFromInstanceHint(input: {
   return providerErrorLabel(
     input.instanceId ?? input.modelSelectionInstanceId ?? input.sessionProvider,
   )
-}
-
-function canReplaceThreadTitle(currentTitle: string, titleSeed?: string): boolean
-{
-  const trimmedCurrentTitle = currentTitle.trim()
-  if (trimmedCurrentTitle === DEFAULT_THREAD_TITLE)
-  {
-    return true
-  }
-
-  const trimmedTitleSeed = titleSeed?.trim()
-  return trimmedTitleSeed !== undefined && trimmedTitleSeed.length > 0
-    ? trimmedCurrentTitle === trimmedTitleSeed
-    : false
 }
 
 function findProviderAdapterRequestError(
@@ -1199,6 +1185,7 @@ const make = Effect.gen(function* ()
               provider: preferredProvider,
               providerInstanceId: desiredInstanceId,
               ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+              ...(thread.title ? { title: thread.title } : {}),
               modelSelection: desiredModelSelection,
               ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
               runtimeMode: desiredRuntimeMode,

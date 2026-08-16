@@ -16,6 +16,7 @@ import * as Option from 'effect/Option'
 import * as Order from 'effect/Order'
 
 import {
+  appendBrowsePathSegment,
   ensureBrowseDirectoryPath,
   findProjectByPath,
   inferProjectTitleFromPath,
@@ -191,6 +192,68 @@ export function getAddProjectInitialQuery(baseDirectory: string | null | undefin
 {
   const trimmed = baseDirectory?.trim() ?? ''
   return trimmed.length === 0 ? '~/' : ensureBrowseDirectoryPath(trimmed)
+}
+
+// derive the folder name git clone would choose from a provider path or remote url.
+export function getCloneDirectoryName(repositoryOrRemoteUrl: string | null | undefined): string
+{
+  const source = repositoryOrRemoteUrl?.trim() ?? ''
+  if (source.length === 0) return ''
+
+  let repositoryPath = source
+  const isWindowsLocalPath = /^[a-zA-Z]:[\\/]/.test(source)
+  if (!isWindowsLocalPath && /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(source))
+  {
+    try
+    {
+      repositoryPath = new URL(source).pathname
+    }
+    catch
+    {
+      return ''
+    }
+  }
+  else if (!isWindowsLocalPath)
+  {
+    const scpRemote = /^(?:[^/\\:]+@)?(?:\[[^\]]+\]|[^/\\:]+):(.*)$/.exec(source)
+    if (scpRemote) repositoryPath = scpRemote[1] ?? ''
+  }
+
+  const lastSegment = repositoryPath
+    .split(/[/\\]+/)
+    .findLast((segment) => segment.trim().length > 0)
+    ?.trim()
+  if (!lastSegment) return ''
+  return lastSegment.endsWith('.git') ? lastSegment.slice(0, -4) : lastSegment
+}
+
+// pin the clone folder below the directory selected by the user.
+export function getCloneDestinationPath(
+  directoryPath: string,
+  directoryName: string | null | undefined,
+): string
+{
+  const name = directoryName?.trim() ?? ''
+  return name.length === 0 ? directoryPath : `${ensureBrowseDirectoryPath(directoryPath)}${name}`
+}
+
+export function getCloneDestinationBrowsePath(input: {
+  readonly browseDirectoryPath: string
+  readonly selectedDirectoryName: string
+  readonly cloneDirectoryName: string
+  readonly caseSensitive: boolean
+}): string
+{
+  const selectedDirectoryPath = appendBrowsePathSegment(
+    input.browseDirectoryPath,
+    input.selectedDirectoryName,
+  )
+  const selectedDirectoryMatches = input.caseSensitive
+    ? input.selectedDirectoryName === input.cloneDirectoryName
+    : input.selectedDirectoryName.toLowerCase() === input.cloneDirectoryName.toLowerCase()
+  return selectedDirectoryMatches
+    ? selectedDirectoryPath
+    : getCloneDestinationPath(selectedDirectoryPath, input.cloneDirectoryName)
 }
 
 export function resolveAddProjectPath(input: {

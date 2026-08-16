@@ -2,6 +2,7 @@
 // open diff file primary action
 
 import type { ScopedThreadRef } from '@t3tools/contracts'
+import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from '@t3tools/shared/path'
 
 import { useRightPanelStore } from '../rightPanelStore'
 import { resolvePathLinkTarget } from './terminal-links'
@@ -11,21 +12,110 @@ interface OpenDiffFilePrimaryActionInput
   readonly threadRef: ScopedThreadRef | null
   readonly filePath: string
   readonly activeCwd: string | undefined
+  readonly filePreviewCwd?: string | undefined
+  readonly repositoryRoot?: string | undefined
   readonly openInEditor: (targetPath: string) => void
+}
+
+function normalizedRelativePathSegments(
+  filePath: string,
+  workspaceRoot: string | undefined,
+): ReadonlyArray<string> | null
+{
+  const windowsWorkspace = workspaceRoot ? isWindowsAbsolutePath(workspaceRoot) : false
+  if (
+    filePath.startsWith('/') ||
+    (windowsWorkspace &&
+      (filePath.startsWith('\\') || isWindowsAbsolutePath(filePath) || /^[a-zA-Z]:/.test(filePath)))
+  )
+  {
+    return null
+  }
+
+  const normalizedPath = windowsWorkspace ? filePath.replaceAll('\\', '/') : filePath
+  const segments = normalizedPath
+    .split('/')
+    .filter((segment) => segment.length > 0 && segment !== '.')
+  return segments.length === 0 || segments.includes('..') ? null : segments
+}
+
+function repositoryRelativeWorkspaceSegments(
+  workspaceRoot: string | undefined,
+  repositoryRoot: string | undefined,
+): ReadonlyArray<string> | null
+{
+  if (!workspaceRoot || !repositoryRoot) return null
+
+  const normalizedWorkspaceRoot = normalizeProjectPathForComparison(workspaceRoot)
+  const normalizedRepositoryRoot = normalizeProjectPathForComparison(repositoryRoot)
+  if (normalizedWorkspaceRoot === normalizedRepositoryRoot) return []
+
+  const separator = normalizedRepositoryRoot.includes('\\') ? '\\' : '/'
+  const repositoryPrefix = normalizedRepositoryRoot.endsWith(separator)
+    ? normalizedRepositoryRoot
+    : `${normalizedRepositoryRoot}${separator}`
+  if (!normalizedWorkspaceRoot.startsWith(repositoryPrefix)) return null
+
+  return normalizedWorkspaceRoot
+    .slice(repositoryPrefix.length)
+    .split(/[\\/]+/)
+    .filter(Boolean)
+}
+
+export function resolveDiffPathForWorkspace(input: {
+  readonly filePath: string
+  readonly workspaceRoot: string | undefined
+  readonly repositoryRoot: string | undefined
+}): string | null
+{
+  const fileSegments = normalizedRelativePathSegments(input.filePath, input.workspaceRoot)
+  if (!fileSegments) return null
+
+  const workspaceSegments = repositoryRelativeWorkspaceSegments(
+    input.workspaceRoot,
+    input.repositoryRoot,
+  )
+  if (!workspaceSegments || workspaceSegments.length === 0)
+  {
+    return fileSegments.join('/')
+  }
+
+  const caseInsensitive = input.repositoryRoot ? isWindowsAbsolutePath(input.repositoryRoot) : false
+  const belongsToWorkspace = workspaceSegments.every((segment, index) =>
+  {
+    const candidate = fileSegments[index]
+    if (candidate === undefined) return false
+    return caseInsensitive ? candidate.toLowerCase() === segment : candidate === segment
+  })
+  if (!belongsToWorkspace) return null
+
+  const relativeSegments = fileSegments.slice(workspaceSegments.length)
+  return relativeSegments.length > 0 ? relativeSegments.join('/') : null
 }
 
 export function openDiffFilePrimaryAction({
   threadRef,
   filePath,
   activeCwd,
+  filePreviewCwd,
+  repositoryRoot,
   openInEditor,
 }: OpenDiffFilePrimaryActionInput): void
 {
-  if (threadRef)
+  const workspaceFilePath = resolveDiffPathForWorkspace({
+    filePath,
+    workspaceRoot: activeCwd,
+    repositoryRoot,
+  })
+  if (!workspaceFilePath) return
+
+  const activeRoot = activeCwd ? normalizeProjectPathForComparison(activeCwd) : null
+  const previewRoot = filePreviewCwd ? normalizeProjectPathForComparison(filePreviewCwd) : null
+  if (threadRef && activeRoot === previewRoot)
   {
-    useRightPanelStore.getState().openFile(threadRef, filePath)
+    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath)
     return
   }
 
-  openInEditor(activeCwd ? resolvePathLinkTarget(filePath, activeCwd) : filePath)
+  openInEditor(activeCwd ? resolvePathLinkTarget(workspaceFilePath, activeCwd) : workspaceFilePath)
 }

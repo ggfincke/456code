@@ -150,7 +150,14 @@ function makeNpmGlobalProviderMaintenanceCapabilities(
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: 'npm',
-    updateArgs: ['install', '-g', `${definition.npmPackageName}@latest`],
+    // npm 12 can skip postinstall scripts while still reporting success.
+    // allow only the provider package whose global install we requested.
+    updateArgs: [
+      'install',
+      '-g',
+      `--allow-scripts=${definition.npmPackageName}`,
+      `${definition.npmPackageName}@latest`,
+    ],
     updateLockKey: 'npm-global',
   })
 }

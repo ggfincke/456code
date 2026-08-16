@@ -247,7 +247,7 @@ jobs:
           # node-pty's own dependency tree, so node-gyp has everything it needs.
           pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
           pty_dir="$(dirname "$pty_pkg")"
-          ( cd "$pty_dir" && npx --yes node-gyp rebuild )
+          ( cd "$pty_dir" && "$GITHUB_WORKSPACE/scripts/node_modules/.bin/node-gyp" rebuild )
           mkdir -p wsl-prebuild
           cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
           file wsl-prebuild/pty.node

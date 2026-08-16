@@ -39,12 +39,14 @@ vi.mock('~/previewStateStore', () => ({
     activeTabId: 'tab-1',
     desktopByTabId: {
       'tab-1': {
+        hasWebContents: true,
         canGoBack: false,
         canGoForward: false,
         loading: false,
         zoomFactor: 1,
         colorScheme: 'system',
         controller: 'none',
+        favicon: null,
       },
     },
     recentlySeenUrls: [],
@@ -110,7 +112,10 @@ vi.mock('../../../../../apps/web/src/components/preview/PreviewChromeRow', () =>
 }))
 
 vi.mock('../../../../../apps/web/src/components/preview/PreviewEmptyState', () => ({
-  PreviewEmptyState: (props: { onOpenUrl: (url: string) => void }) =>
+  PreviewEmptyState: (props: {
+    threadRef: { readonly environmentId: string; readonly threadId: string }
+    onOpenUrl: (url: string) => void
+  }) =>
   {
     mocks.emptyStateUrl = props.onOpenUrl
     return null

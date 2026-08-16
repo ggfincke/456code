@@ -50,6 +50,17 @@ const makeSuccessfulProcess = (stdout: string) =>
   })
 }
 
+const makeDelayedSuccessfulProcess = (stdout: string, delayMs: number) =>
+{
+  const process = makeSuccessfulProcess(stdout)
+  return ChildProcessSpawner.makeHandle({
+    ...process,
+    exitCode: Effect.sleep(Duration.millis(delayMs)).pipe(
+      Effect.as(ChildProcessSpawner.ExitCode(0)),
+    ),
+  })
+}
+
 const makeRunningProcess = (onKill: () => void) =>
 {
   let finish: ((exitCode: ChildProcessSpawner.ExitCode) => void) | null = null
@@ -89,6 +100,7 @@ const hangingHttpClient = HttpClient.make(() => Effect.never)
 const testNetService = NetService.NetService.of({
   canListenOnHost: () => Effect.succeed(true),
   isPortAvailableOnLoopback: () => Effect.succeed(true),
+  hasListenerOnHost: () => Effect.succeed(false),
   reserveLoopbackPort: () => Effect.succeed(41_773),
   findAvailablePort: (preferred) => Effect.succeed(preferred),
 })
@@ -109,6 +121,13 @@ describe('ssh tunnel scripts', () =>
     assert.include(script, 'exec npx --yes \'456code@latest\' "$@"')
     assert.include(script, 'exec npm exec --yes \'456code@latest\' -- "$@"')
     assert.include(script, "could not install '456code@latest'")
+    assert.include(script, "require_installed_456code_cli npx --yes --package '456code@latest'")
+    assert.include(
+      script,
+      "require_installed_456code_cli npm exec --yes --package '456code@latest'",
+    )
+    assert.include(script, 'npm produced no 456code executable')
+    assert.include(script, 'Install a C toolchain on the remote host')
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"')
     assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`)
     assert.include(script, 'remote_node_satisfies_engine()')
@@ -139,6 +158,10 @@ describe('ssh tunnel scripts', () =>
 
     assert.include(script, 'exec npx --yes \'t3@nightly; touch /tmp/t3-owned\' "$@"')
     assert.include(script, 'exec npm exec --yes \'t3@nightly; touch /tmp/t3-owned\' -- "$@"')
+    assert.include(
+      script,
+      "require_installed_456code_cli npx --yes --package 't3@nightly; touch /tmp/t3-owned'",
+    )
     assert.notInclude(script, 'exec npx --yes t3@nightly; touch /tmp/t3-owned')
   })
 
@@ -185,6 +208,9 @@ describe('ssh tunnel scripts', () =>
     assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"')
     assert.notInclude(buildRemoteLaunchScript(), 'server-home')
     assert.include(buildRemoteLaunchScript(), 'Remote 456code server did not become ready')
+    assert.include(buildRemoteLaunchScript(), 'wait_ready "60000"')
+    assert.include(buildRemoteLaunchScript(), 'if [ -s "$LOG_FILE" ]; then')
+    assert.include(buildRemoteLaunchScript(), 'It wrote nothing to %s')
     assert.include(buildRemoteLaunchScript({ packageSpec: '456code@nightly' }), '456code@nightly')
     assert.include(
       buildRemotePairingScript(target),
@@ -255,6 +281,31 @@ describe('ssh tunnel scripts', () =>
     return Effect.gen(function* ()
     {
       const result = yield* launchOrReuseRemoteServer(target)
+      assert.equal(result.remotePort, 3774)
+    }).pipe(Effect.provide(processLayer))
+  })
+
+  it.effect('allows cold remote launches to exceed the default SSH command timeout', () =>
+  {
+    const target = {
+      alias: 'devbox',
+      hostname: 'devbox.example.com',
+      username: 'julius',
+      port: 2222,
+    } as const
+    const spawner = ChildProcessSpawner.make(() =>
+      Effect.succeed(makeDelayedSuccessfulProcess('{"remotePort":3774}\n', 75_000)),
+    )
+    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)
+    const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer, TestClock.layer())
+
+    return Effect.gen(function* ()
+    {
+      const fiber = yield* Effect.forkChild(launchOrReuseRemoteServer(target))
+      yield* Effect.yieldNow
+      yield* TestClock.adjust(Duration.seconds(75))
+
+      const result = yield* Fiber.join(fiber)
       assert.equal(result.remotePort, 3774)
     }).pipe(Effect.provide(processLayer))
   })

@@ -19,6 +19,7 @@ export interface ChatComposerHandle
 {
   focusAtEnd: () => void
   focusAt: (cursor: number) => void
+  addDroppedFiles: (files: File[]) => void
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean
   openModelPicker: () => void
   toggleModelPicker: () => void
@@ -37,6 +38,8 @@ export interface ChatComposerHandle
   }) => void
   // insert a terminal context from the terminal drawer.
   addTerminalContext: (selection: TerminalContextSelection) => void
+  // validate the final provider input before any dispatch state changes.
+  validateProviderInput: (providerInput: string) => boolean
   // get the current prompt/effort/model state for use in send.
   getSendContext: () => {
     prompt: string

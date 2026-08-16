@@ -187,7 +187,8 @@ it.layer(NodeServices.layer)('providerMaintenance', (it) =>
       status: 'behind_latest',
       currentVersion: '2.1.110',
       latestVersion: '2.1.117',
-      updateCommand: 'npm install -g @example/native-package-tool@latest',
+      updateCommand:
+        'npm install -g --allow-scripts=@example/native-package-tool @example/native-package-tool@latest',
       canUpdate: true,
       message: 'Install the update now or review provider settings.',
     })
@@ -503,11 +504,17 @@ it.layer(NodeServices.layer)('providerMaintenance', (it) =>
         provider: driver('packageTool'),
         packageName: '@example/package-tool',
         update: {
-          command: 'npm install -g @example/package-tool@latest',
+          command:
+            'npm install -g --allow-scripts=@example/package-tool @example/package-tool@latest',
 
           executable: 'npm',
 
-          args: ['install', '-g', '@example/package-tool@latest'],
+          args: [
+            'install',
+            '-g',
+            '--allow-scripts=@example/package-tool',
+            '@example/package-tool@latest',
+          ],
 
           lockKey: 'npm-global',
         },

@@ -70,6 +70,7 @@ describe('DesktopEnvironment', () =>
       assert.equal(environment.browserArtifactsDir, '/tmp/t3/userdata/browser-artifacts')
       assert.equal(environment.rootDir, '/repo')
       assert.equal(environment.appRoot, '/repo')
+      assert.equal(environment.serverRoot, '/repo')
       assert.equal(environment.backendEntryPath, '/repo/apps/server/dist/bin.mjs')
       assert.equal(environment.backendCwd, '/repo')
       assert.equal(environment.appUserModelId, 'com.ggfincke.456code.dev')
@@ -101,6 +102,24 @@ describe('DesktopEnvironment', () =>
       assert.equal(environment.logDir, '/tmp/t3/userdata/logs')
       assert.equal(environment.browserArtifactsDir, '/tmp/t3/userdata/browser-artifacts')
       assert.equal(environment.serverSettingsPath, '/tmp/t3/userdata/settings.json')
+    }),
+  )
+
+  it.effect('routes packaged Windows backends through the server asar sidecar', () =>
+    Effect.gen(function* ()
+    {
+      const environment = yield* makeEnvironment({
+        platform: 'win32',
+        isPackaged: true,
+        resourcesPath: 'C:\\Program Files\\456code\\resources',
+        appPath: 'C:\\Program Files\\456code\\resources\\app.asar',
+      })
+
+      assert.equal(environment.serverRoot, 'C:\\Program Files\\456code\\resources/server.asar')
+      assert.equal(
+        environment.backendEntryPath,
+        'C:\\Program Files\\456code\\resources/server.asar/apps/server/dist/bin.mjs',
+      )
     }),
   )
 

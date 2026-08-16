@@ -592,6 +592,28 @@ export type DesktopPreviewColorScheme = 'system' | 'light' | 'dark'
 export const DesktopPreviewColorSchemeSchema: Schema.Codec<DesktopPreviewColorScheme> =
   Schema.Literals(['system', 'light', 'dark'])
 
+export const FAVICON_DATA_URL_MAX_LENGTH = 8_192
+export const FAVICON_CAPTURED_AT_MAX = 8_640_000_000_000_000
+
+export interface DesktopPreviewFavicon
+{
+  dataUrl: string
+  pageUrl: string
+  capturedAt: number
+}
+
+export const DesktopPreviewFaviconSchema: Schema.Codec<DesktopPreviewFavicon> = Schema.Struct({
+  dataUrl: Schema.String.check(
+    Schema.isMaxLength(FAVICON_DATA_URL_MAX_LENGTH),
+    Schema.isPattern(/^data:image\/png;base64,[a-z0-9+/]+={0,2}$/i),
+  ),
+  pageUrl: Schema.String.check(Schema.isMaxLength(2_048)),
+  capturedAt: Schema.Finite.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(FAVICON_CAPTURED_AT_MAX),
+  ),
+})
+
 export interface DesktopPreviewTabState
 {
   tabId: string
@@ -603,6 +625,7 @@ export interface DesktopPreviewTabState
   zoomFactor: number
   colorScheme: DesktopPreviewColorScheme
   controller: 'human' | 'agent' | 'none'
+  favicon?: DesktopPreviewFavicon
   updatedAt: string
 }
 
@@ -640,6 +663,7 @@ export const DesktopPreviewTabStateSchema: Schema.Codec<DesktopPreviewTabState> 
   zoomFactor: Schema.Number,
   colorScheme: DesktopPreviewColorSchemeSchema,
   controller: Schema.Literals(['human', 'agent', 'none']),
+  favicon: Schema.optionalKey(DesktopPreviewFaviconSchema),
   updatedAt: Schema.String,
 })
 
@@ -1061,6 +1085,8 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
 export interface DesktopBridge
 {
   getAppBranding: () => DesktopAppBranding | null
+  // packaged chromium cannot reliably expose the os locale to the renderer.
+  getSystemLocale?: () => string | null
   // one bootstrap per pool instance currently registered with bootstrap
   // info (omits instances whose backend hasn't produced a config yet).
   // the primary backend is identified by id === PRIMARY_LOCAL_ENVIRONMENT_ID.
@@ -1108,11 +1134,15 @@ export interface DesktopBridge
     position?: { x: number; y: number },
   ) => Promise<T | null>
   openExternal: (url: string) => Promise<boolean>
+  // optional while renderer releases catch up with desktop editor probing.
+  probeRemoteEditors?: () => Promise<readonly EditorId[]>
   setMenuBarState?: (state: DesktopMenuBarState) => Promise<void>
   // desktop-only, so optional: web builds have no bridge and the renderer
   // feature-detects before calling.
   notifyThreadAttention?: (attention: DesktopThreadAttention) => Promise<void>
   onMenuAction: (listener: (action: string) => void) => () => void
+  // optional while renderer releases catch up with the desktop hold gesture
+  onQuitShortcut?: (listener: (state: 'down' | 'up') => void) => () => void
   getWindowFullscreenState: () => boolean
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void
   getUpdateState: () => Promise<DesktopUpdateState>
@@ -1213,6 +1243,7 @@ export interface LocalApi
       items: readonly ContextMenuItem<T>[],
       position?: { x: number; y: number },
     ) => Promise<T | null>
+    close: () => Promise<void>
   }
   persistence: {
     getClientSettings: () => Promise<ClientSettings | null>

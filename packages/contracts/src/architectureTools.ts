@@ -4,6 +4,7 @@
 import * as Schema from 'effect/Schema'
 
 import {
+  GitRefString,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -369,7 +370,7 @@ export type ArchitectureProposePatchInput = typeof ArchitectureProposePatchInput
 
 export const ArchitectureGraphMetadata = Schema.Struct({
   generatedAt: IsoDateTime,
-  gitRef: Schema.optionalKey(TrimmedNonEmptyString),
+  gitRef: Schema.optionalKey(GitRefString),
 })
 export type ArchitectureGraphMetadata = typeof ArchitectureGraphMetadata.Type
 
@@ -534,12 +535,12 @@ export type ArchitecturePatchStalenessReason = typeof ArchitecturePatchStaleness
 
 export const ArchitecturePatchBaseline = Schema.Struct({
   generatedAt: Schema.optionalKey(IsoDateTime),
-  gitRef: Schema.optionalKey(TrimmedNonEmptyString),
+  gitRef: Schema.optionalKey(GitRefString),
 })
 export type ArchitecturePatchBaseline = typeof ArchitecturePatchBaseline.Type
 
 export const ArchitectureWorkingTreeState = Schema.Struct({
-  gitRef: TrimmedNonEmptyString,
+  gitRef: GitRefString,
   dirty: Schema.Boolean,
 })
 export type ArchitectureWorkingTreeState = typeof ArchitectureWorkingTreeState.Type

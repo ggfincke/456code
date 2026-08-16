@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     }
     return result as ReturnType<DesktopBridge['getAppBranding']>
   },
+  getSystemLocale: () =>
+  {
+    const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL)
+    return typeof result === 'string' ? result : null
+  },
   getLocalEnvironmentBootstraps: () =>
   {
     const result = ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL)
@@ -114,6 +119,7 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       ...(position === undefined ? {} : { position }),
     }),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
+  probeRemoteEditors: () => ipcRenderer.invoke(IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL, undefined),
   setMenuBarState: (state) => ipcRenderer.invoke(IpcChannels.SET_MENU_BAR_STATE_CHANNEL, state),
   notifyThreadAttention: (attention) =>
     ipcRenderer.invoke(IpcChannels.NOTIFY_THREAD_ATTENTION_CHANNEL, attention),
@@ -129,6 +135,20 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     return () =>
     {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener)
+    }
+  },
+  onQuitShortcut: (listener) =>
+  {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) =>
+    {
+      if (state !== 'down' && state !== 'up') return
+      listener(state)
+    }
+
+    ipcRenderer.on(IpcChannels.QUIT_SHORTCUT_CHANNEL, wrappedListener)
+    return () =>
+    {
+      ipcRenderer.removeListener(IpcChannels.QUIT_SHORTCUT_CHANNEL, wrappedListener)
     }
   },
   getWindowFullscreenState: () =>

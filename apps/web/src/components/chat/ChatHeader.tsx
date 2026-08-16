@@ -17,6 +17,7 @@ import ProjectScriptsControl, {
   type ProjectScriptActionResult,
 } from '../ProjectScriptsControl'
 import { OpenInPicker } from './OpenInPicker'
+import { type RemoteOpenMode, useRemoteOpenState } from '../../lib/remoteOpen'
 import { usePrimaryEnvironmentId } from '../../state/environments'
 import { useProjectFileScripts } from '~/hooks/useProjectFileScripts'
 import { ProjectFavicon } from '../ProjectFavicon'
@@ -56,13 +57,18 @@ export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined
   readonly activeThreadEnvironmentId: EnvironmentId
   readonly primaryEnvironmentId: EnvironmentId | null
+  readonly remoteOpenMode: RemoteOpenMode
 }): boolean
 {
-  return (
-    Boolean(input.activeProjectName) &&
+  if (!input.activeProjectName) return false
+  if (
     input.primaryEnvironmentId !== null &&
     input.activeThreadEnvironmentId === input.primaryEnvironmentId
   )
+  {
+    return true
+  }
+  return input.remoteOpenMode !== 'local-exec'
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -93,10 +99,12 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     activeProjectScripts ? activeProjectCwd : null,
   )
+  const remoteOpenState = useRemoteOpenState(activeThreadEnvironmentId)
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
     primaryEnvironmentId,
+    remoteOpenMode: remoteOpenState.mode,
   })
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3">

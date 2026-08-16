@@ -3,6 +3,7 @@
 
 import type {
   DesktopPreviewColorScheme,
+  DesktopPreviewFavicon,
   DesktopPreviewPointerEvent,
   DesktopPreviewRecordingFrame,
   PreviewAutomationConsoleEntry,
@@ -34,6 +35,7 @@ export interface PreviewTabState
   zoomFactor: number
   colorScheme: DesktopPreviewColorScheme
   controller: 'human' | 'agent' | 'none'
+  favicon?: DesktopPreviewFavicon
   updatedAt: string
 }
 
@@ -52,7 +54,11 @@ export type PreviewInputSignal =
 
 export interface ManagedListeners
 {
+  readonly attachmentToken: symbol
+  readonly cancelFaviconCapture: () => void
   readonly scope: Scope.Closeable
+  readonly tabId: string
+  readonly webContents: Electron.WebContents
 }
 
 export interface PickSession

@@ -4,7 +4,12 @@
 'use client'
 
 import { scopeProjectRef, scopeThreadRef } from '@t3tools/client-runtime/environment'
-import { canCreateProjectInEnvironment } from '@t3tools/client-runtime/operations/projects'
+import {
+  canCreateProjectInEnvironment,
+  getCloneDestinationBrowsePath,
+  getCloneDestinationPath,
+  getCloneDirectoryName,
+} from '@t3tools/client-runtime/operations/projects'
 import { connectionStatusText } from '@t3tools/client-runtime/connection'
 import {
   isAtomCommandInterrupted,
@@ -86,6 +91,7 @@ import {
 import { repositoryAtlasDisabledReason } from '../architecture/architectureAvailability'
 import {
   ADDON_ICON_CLASS,
+  browseInputEndPaddingClass,
   buildBrowseGroups,
   buildProjectActionItems,
   buildRootGroups,
@@ -96,6 +102,7 @@ import {
   type CommandPaletteView,
   filterBrowseEntries,
   filterCommandPaletteGroups,
+  filterPinnedBrowseEntries,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
@@ -389,6 +396,12 @@ export function OpenCommandPaletteDialog(props: {
   )
   const isRemoteProjectCloneFlow = addProjectCloneFlow !== null
   const isRemoteProjectRepositoryStep = addProjectCloneFlow?.step === 'repository'
+  const pinnedCloneDirectoryName =
+    addProjectCloneFlow?.step === 'confirm'
+      ? getCloneDirectoryName(
+          addProjectCloneFlow.repository?.nameWithOwner ?? addProjectCloneFlow.remoteUrl,
+        )
+      : ''
   const isBrowsing =
     !isRemoteProjectRepositoryStep && isFilesystemBrowseQuery(query, browseEnvironmentPlatform)
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing })
@@ -467,8 +480,23 @@ export function OpenCommandPaletteDialog(props: {
   const isBrowsePending = browseQuery.isPending
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES
   const { filteredEntries: filteredBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
-    () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
-    [browseEntries, browseFilterQuery, highlightedItemValue],
+    () =>
+      pinnedCloneDirectoryName
+        ? filterPinnedBrowseEntries({
+            browseEntries,
+            browseFilterQuery,
+            highlightedItemValue,
+            pinnedDirectoryName: pinnedCloneDirectoryName,
+            caseSensitive: !isWindowsPlatform(browseEnvironmentPlatform),
+          })
+        : filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
+    [
+      browseEntries,
+      browseEnvironmentPlatform,
+      browseFilterQuery,
+      highlightedItemValue,
+      pinnedCloneDirectoryName,
+    ],
   )
 
   const openProjectFromSearch = useMemo(
@@ -1287,7 +1315,10 @@ export function OpenCommandPaletteDialog(props: {
       const provider = remoteProjectSourceProvider(addProjectCloneFlow.source)
       if (!provider)
       {
-        const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId)
+        const destinationPath = getCloneDestinationPath(
+          getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
+          getCloneDirectoryName(rawRepository),
+        )
         setAddProjectCloneFlow({
           step: 'confirm',
           environmentId: addProjectCloneFlow.environmentId,
@@ -1326,7 +1357,10 @@ export function OpenCommandPaletteDialog(props: {
         return
       }
       const repository = lookupResult.value
-      const destinationPath = getDefaultCloneParentPath(addProjectCloneFlow.environmentId)
+      const destinationPath = getCloneDestinationPath(
+        getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
+        getCloneDirectoryName(repository.nameWithOwner),
+      )
       setAddProjectCloneFlow({
         step: 'confirm',
         environmentId: addProjectCloneFlow.environmentId,
@@ -1408,7 +1442,14 @@ export function OpenCommandPaletteDialog(props: {
 
   function browseTo(name: string): void
   {
-    const nextQuery = appendBrowsePathSegment(query, name)
+    const nextQuery = pinnedCloneDirectoryName
+      ? getCloneDestinationBrowsePath({
+          browseDirectoryPath,
+          selectedDirectoryName: name,
+          cloneDirectoryName: pinnedCloneDirectoryName,
+          caseSensitive: !isWindowsPlatform(browseEnvironmentPlatform),
+        })
+      : appendBrowsePathSegment(query, name)
     setHighlightedItemValue(null)
     setQuery(nextQuery)
     setBrowseGeneration((generation) => generation + 1)
@@ -1416,14 +1457,14 @@ export function OpenCommandPaletteDialog(props: {
 
   function browseUp(): void
   {
-    const parentPath = getBrowseParentPath(query)
+    const parentPath = getBrowseParentPath(pinnedCloneDirectoryName ? browseDirectoryPath : query)
     if (parentPath === null)
     {
       return
     }
 
     setHighlightedItemValue(null)
-    setQuery(parentPath)
+    setQuery(getCloneDestinationPath(parentPath, pinnedCloneDirectoryName))
     setBrowseGeneration((generation) => generation + 1)
   }
 
@@ -1803,13 +1844,15 @@ export function OpenCommandPaletteDialog(props: {
       >
         <div className="relative">
           <CommandInput
+            // the overlaid submit action needs space inside the actual input.
             className={
               addProjectCloneFlow?.step === 'repository'
-                ? 'pe-32'
+                ? '*:data-[slot=autocomplete-input]:pe-32!'
                 : isBrowsing
-                  ? willCreateProjectPath
-                    ? 'pe-36'
-                    : 'pe-16'
+                  ? browseInputEndPaddingClass({
+                      willCreateProjectPath,
+                      hasHighlightedBrowseItem,
+                    })
                   : undefined
             }
             placeholder={inputPlaceholder}

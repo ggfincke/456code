@@ -32,6 +32,10 @@ const dependencies = [
   PreviewAutomationBroker.PreviewAutomationBroker,
 ]
 
+const PreviewActionResult = Schema.Record(Schema.String, Schema.Never).annotate({
+  description: 'The preview action completed successfully.',
+})
+
 const browserTool = <T extends Tool.Any>(tool: T): T =>
   tool.annotate(Tool.OpenWorld, true).annotate(Tool.Destructive, true) as T
 
@@ -120,7 +124,7 @@ export const PreviewClickTool = browserTool(
     description:
       "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together.",
     parameters: PreviewAutomationClickInput,
-    success: Schema.Null,
+    success: PreviewActionResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, 'Click preview page'),
@@ -131,7 +135,7 @@ export const PreviewTypeTool = browserTool(
     description:
       "Insert literal text into one input in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; set clear=true to replace existing text.",
     parameters: PreviewAutomationTypeInput,
-    success: Schema.Null,
+    success: PreviewActionResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, 'Type into preview page'),
@@ -142,7 +146,7 @@ export const PreviewPressTool = browserTool(
     description:
       "Press one keyboard key in the tab selected by tabId, or this agent session's current tab when omitted. Examples: {key:'Enter'}, {key:'Escape'}, or {key:'a',modifiers:['Meta']}.",
     parameters: PreviewAutomationPressInput,
-    success: Schema.Null,
+    success: PreviewActionResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, 'Press key in preview page'),
@@ -153,7 +157,7 @@ export const PreviewScrollTool = safeBrowserTool(
     description:
       "Scroll the tab selected by tabId, or this agent session's current tab when omitted. Positive deltaY scrolls down and positive deltaX scrolls right; a locator/selector targets a container.",
     parameters: PreviewAutomationScrollInput,
-    success: Schema.Null,
+    success: PreviewActionResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, 'Scroll preview page'),
@@ -175,7 +179,7 @@ export const PreviewWaitForTool = readonlyBrowserTool(
     description:
       "Wait in the tab selected by tabId, or this agent session's current tab when omitted, until all supplied locator, selector, text, and URL conditions match.",
     parameters: PreviewAutomationWaitForInput,
-    success: Schema.Null,
+    success: PreviewActionResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, 'Wait for preview page condition'),

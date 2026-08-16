@@ -62,6 +62,44 @@ Local desktop packaging is intentionally less strict. If neither `--wsl-prebuild
 `T3CODE_DESKTOP_WSL_PREBUILD=<path>` is supplied, the packager logs a warning and continues. The
 resulting Windows package does not contain the Linux `pty.node` required by its WSL backend.
 
+Windows packages keep the desktop main process in `app.asar` and the complete server runtime in
+`resources/server.asar`. The sidecar includes the bundled server, Cartographer, its production
+dependency closure, and both Windows and same-architecture Linux native packages. Only native
+modules, shared libraries, and helper executables are emitted into `server.asar.unpacked`.
+`server.asar.sha256` identifies the actual payload bytes; packaged WSL extraction is keyed by this
+digest rather than the app version, so repeated local builds with the same version cannot reuse a
+different stale tree. Packaging rejects sidecar links and more than 256 loose files in the unpacked
+application, guarding both safe WSL traversal and the fast-install topology.
+
+## Hosted Windows acceptance
+
+Every pull request and main-branch update runs the public-repository acceptance chain in
+`.github/workflows/ci.yml` using only GitHub-hosted `ubuntu-24.04` and `windows-2025` runners. It
+does not use release signing secrets, Blacksmith, self-hosted hardware, or paid external services.
+The producer builds two exact unsigned x64 NSIS artifacts and uploads them; a separate Windows job
+downloads those artifacts before testing them. Standard GitHub-hosted runner minutes are free for
+public repositories. A separate no-checkout job runs for pushes and trusted same-repository pull
+requests, receives only `actions: write` and `contents: read`, and deletes the exact producer
+artifact by ID after acceptance. One-day retention is the fallback for workflow cancellation, fork
+pull requests, or unavailable deletion.
+
+The hosted consumer physically proves:
+
+- a clean silent install and packaged primary-backend HTTP readiness;
+- `server.asar` digest integrity, fff native loading, a real `node-pty` command, and Cartographer
+  metadata/dist fingerprinting plus a real CLI graph build through the installed Electron runtime;
+- an N to N+1 local-feed update using both blockmaps and HTTP range responses;
+- the updater's full-installer fallback after the old blockmap becomes unavailable;
+- stale updater-cache cleanup, observation of the updater-triggered N+1 process relaunch, an
+  authoritative bridge version check after restart, and silent uninstall/install-directory cleanup;
+- the digest-keyed WSL extraction and stale-tree lifecycle through focused Windows-hosted tests.
+
+GitHub-hosted Windows Server runners do not provide a deterministic, reboot-safe WSL2 environment.
+The workflow therefore does not claim to boot a real WSL2 distro or validate its networking. WSL2
+remains a dormant manual release target: before a Windows release that materially changes WSL
+startup, run the installed x64 package on a WSL2 workstation and verify both dual-backend and
+WSL-only startup, PTY interaction, repository file search, update/restart, and stale-tree removal.
+
 ## Hosted web app release deployment
 
 The hosted app is intentionally not deployed by Vercel's Git integration. The

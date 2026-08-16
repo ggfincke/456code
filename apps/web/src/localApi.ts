@@ -4,7 +4,7 @@
 import type { ContextMenuItem, LocalApi } from '@t3tools/contracts'
 
 import { resetRequestLatencyStateForTests } from './rpc/requestLatencyState'
-import { showContextMenuFallback } from './lib/contextMenuFallback'
+import { dismissContextMenu, showContextMenuFallback } from './lib/contextMenuFallback'
 import {
   readBrowserClientSettings,
   writeBrowserClientSettings,
@@ -63,6 +63,13 @@ function createBrowserLocalApi(): LocalApi
           return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>
         }
         return showContextMenuFallback(items, position)
+      },
+      close: async () =>
+      {
+        if (!window.desktopBridge)
+        {
+          dismissContextMenu()
+        }
       },
     },
     persistence: {

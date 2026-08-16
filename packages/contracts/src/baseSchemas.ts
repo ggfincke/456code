@@ -16,6 +16,20 @@ export const TrimmedString = Schema.String.pipe(
 )
 export const TrimmedNonEmptyString = TrimmedString.check(Schema.isNonEmpty())
 
+// git accepts non-ASCII whitespace in ref names, so only remove ASCII input
+// padding from ref values and ref-name search queries.
+const GitRefNonEmptyString = Schema.String.check(Schema.isNonEmpty())
+export const GitRefString = GitRefNonEmptyString.pipe(
+  Schema.decodeTo(
+    GitRefNonEmptyString,
+    SchemaTransformation.transformOrFail({
+      decode: (value) => Effect.succeed(value.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '')),
+      encode: (value) => Effect.succeed(value.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '')),
+    }),
+  ),
+)
+export type GitRefString = typeof GitRefString.Type
+
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 export const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))

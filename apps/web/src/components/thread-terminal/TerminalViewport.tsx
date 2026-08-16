@@ -46,8 +46,15 @@ import { useAtomCommand } from '../../state/use-atom-command'
 
 import {
   getTerminalSelectionRect,
+  readTerminalClipboardText,
+  resolveTerminalClipboardShortcut,
   resolveTerminalSelectionActionPosition,
+  shouldClearTerminalSelectionAction,
   shouldHandleTerminalSelectionMouseUp,
+  shouldSuppressTerminalContextMenu,
+  terminalContextMenuItems,
+  type TerminalContextMenuAction,
+  terminalSelectionMenuItems,
   terminalSelectionActionDelayForClickCount,
 } from './selectionHelpers'
 
@@ -282,7 +289,7 @@ export function TerminalViewport({
   const selectionPointerRef = useRef<{ x: number; y: number } | null>(null)
   const selectionGestureActiveRef = useRef(false)
   const selectionActionRequestIdRef = useRef(0)
-  const selectionActionMenuOpenRef = useRef(false)
+  const openSelectionMenuRequestIdRef = useRef<number | null>(null)
   const selectionActionTimerRef = useRef<number | null>(null)
   const keybindingsRef = useRef(keybindings)
   const runtimeEnvKey = useMemo(() => runtimeEnvSignature(runtimeEnv), [runtimeEnv])
@@ -362,14 +369,22 @@ export function TerminalViewport({
       error: null,
       version: 0,
     }
+    let clipboardRequestId = 0
+    let clearSelectionAfterNativeCopyRequestId: number | null = null
 
     const clearSelectionAction = () =>
     {
+      const openMenuRequestId = openSelectionMenuRequestIdRef.current
+      openSelectionMenuRequestIdRef.current = null
       selectionActionRequestIdRef.current += 1
       if (selectionActionTimerRef.current !== null)
       {
         window.clearTimeout(selectionActionTimerRef.current)
         selectionActionTimerRef.current = null
+      }
+      if (openMenuRequestId !== null)
+      {
+        void localApi?.contextMenu.close()
       }
     }
 
@@ -418,6 +433,163 @@ export function TerminalViewport({
       }
     }
 
+    const addSelectionToChat = (selection: TerminalContextSelection) =>
+    {
+      handleAddTerminalContext(selection)
+      terminalRef.current?.clearSelection()
+      terminalRef.current?.focus()
+    }
+
+    const reportIfCurrent = (requestId: number, error: unknown, fallback: string) =>
+    {
+      if (requestId !== selectionActionRequestIdRef.current) return
+      const activeTerminal = terminalRef.current
+      if (activeTerminal)
+      {
+        writeSystemMessage(activeTerminal, error instanceof Error ? error.message : fallback)
+      }
+    }
+
+    const focusIfCurrent = (requestId: number) =>
+    {
+      if (requestId === selectionActionRequestIdRef.current)
+      {
+        terminalRef.current?.focus()
+      }
+    }
+
+    const copySelection = async (text: string, requestId: number, clearOnSuccess = false) =>
+    {
+      const activeTerminal = terminalRef.current
+      if (!activeTerminal) return
+      const requestClipboardId = ++clipboardRequestId
+      clearSelectionAfterNativeCopyRequestId = clearOnSuccess ? requestClipboardId : null
+      // let xterm's native copy event claim the gesture before the async fallback writes
+      await Promise.resolve()
+      if (
+        requestClipboardId !== clipboardRequestId ||
+        requestId !== selectionActionRequestIdRef.current ||
+        terminalRef.current !== activeTerminal
+      )
+      {
+        return
+      }
+      let didCopy = false
+      try
+      {
+        didCopy = await writeTextToClipboard(text, 'terminal selection')
+      }
+      catch (error)
+      {
+        if (requestClipboardId === clipboardRequestId)
+        {
+          clearSelectionAfterNativeCopyRequestId = null
+          reportIfCurrent(requestId, error, 'Unable to copy terminal selection')
+          focusIfCurrent(requestId)
+        }
+        return
+      }
+      if (
+        !didCopy ||
+        requestClipboardId !== clipboardRequestId ||
+        requestId !== selectionActionRequestIdRef.current ||
+        terminalRef.current !== activeTerminal
+      )
+      {
+        return
+      }
+      clearSelectionAfterNativeCopyRequestId = null
+      if (
+        clearOnSuccess &&
+        activeTerminal.hasSelection() &&
+        activeTerminal.getSelection() === text
+      )
+      {
+        activeTerminal.clearSelection()
+      }
+      activeTerminal.focus()
+    }
+
+    const pasteFromClipboard = async (requestId: number) =>
+    {
+      const activeTerminal = terminalRef.current
+      if (!activeTerminal) return
+      const requestClipboardId = ++clipboardRequestId
+      let text: string
+      try
+      {
+        text = await readTerminalClipboardText()
+      }
+      catch (error)
+      {
+        if (requestClipboardId === clipboardRequestId)
+        {
+          reportIfCurrent(requestId, error, 'Unable to read the clipboard')
+          focusIfCurrent(requestId)
+        }
+        return
+      }
+      if (
+        requestClipboardId !== clipboardRequestId ||
+        requestId !== selectionActionRequestIdRef.current ||
+        terminalRef.current !== activeTerminal
+      )
+      {
+        return
+      }
+      if (text.length > 0)
+      {
+        // xterm owns line-ending normalization and bracketed-paste encoding
+        activeTerminal.paste(text)
+      }
+      activeTerminal.focus()
+    }
+
+    const showTerminalContextMenu = async (event: MouseEvent) =>
+    {
+      if (!localApi || !terminalRef.current) return
+      event.preventDefault()
+      clearSelectionAction()
+      const selectionAction = readSelectionAction()
+      const requestId = selectionActionRequestIdRef.current
+      let clicked: TerminalContextMenuAction | null
+      try
+      {
+        clicked = await localApi.contextMenu.show(
+          terminalContextMenuItems({ hasSelection: selectionAction !== null }),
+          { x: event.clientX, y: event.clientY },
+        )
+      }
+      catch (error)
+      {
+        reportIfCurrent(requestId, error, 'Unable to open the terminal context menu')
+        focusIfCurrent(requestId)
+        return
+      }
+      if (requestId !== selectionActionRequestIdRef.current || clicked === null)
+      {
+        return
+      }
+      switch (clicked)
+      {
+        case 'add-to-chat':
+          if (selectionAction)
+          {
+            addSelectionToChat(selectionAction.selection)
+          }
+          return
+        case 'copy':
+          if (selectionAction)
+          {
+            await copySelection(selectionAction.clipboardText, requestId)
+          }
+          return
+        case 'paste':
+          await pasteFromClipboard(requestId)
+          return
+      }
+    }
+
     const showSelectionAction = async () =>
     {
       if (!localApi)
@@ -425,7 +597,7 @@ export function TerminalViewport({
         clearSelectionAction()
         return
       }
-      if (selectionActionMenuOpenRef.current)
+      if (openSelectionMenuRequestIdRef.current !== null)
       {
         return
       }
@@ -436,18 +608,15 @@ export function TerminalViewport({
         return
       }
       const requestId = ++selectionActionRequestIdRef.current
-      selectionActionMenuOpenRef.current = true
+      openSelectionMenuRequestIdRef.current = requestId
       const clicked = await localApi.contextMenu
-        .show(
-          [
-            { id: 'add-to-chat', label: 'Add to chat' },
-            { id: 'copy', label: 'Copy' },
-          ],
-          nextAction.position,
-        )
+        .show(terminalSelectionMenuItems(), nextAction.position)
         .finally(() =>
         {
-          selectionActionMenuOpenRef.current = false
+          if (openSelectionMenuRequestIdRef.current === requestId)
+          {
+            openSelectionMenuRequestIdRef.current = null
+          }
         })
       if (requestId !== selectionActionRequestIdRef.current || clicked === null)
       {
@@ -456,34 +625,10 @@ export function TerminalViewport({
       switch (clicked)
       {
         case 'add-to-chat':
-          handleAddTerminalContext(nextAction.selection)
-          terminalRef.current?.clearSelection()
-          terminalRef.current?.focus()
+          addSelectionToChat(nextAction.selection)
           return
         case 'copy':
-          try
-          {
-            await writeTextToClipboard(nextAction.clipboardText, 'terminal selection')
-          }
-          catch (error)
-          {
-            if (requestId !== selectionActionRequestIdRef.current)
-            {
-              return
-            }
-            const activeTerminal = terminalRef.current
-            if (activeTerminal)
-            {
-              writeSystemMessage(
-                activeTerminal,
-                error instanceof Error ? error.message : 'Unable to copy terminal selection',
-              )
-            }
-          }
-          if (requestId === selectionActionRequestIdRef.current)
-          {
-            terminalRef.current?.focus()
-          }
+          await copySelection(nextAction.clipboardText, requestId)
           return
       }
     }
@@ -531,6 +676,41 @@ export function TerminalViewport({
         event.preventDefault()
         event.stopPropagation()
         void sendTerminalInput(deleteData, 'Failed to delete terminal input')
+        return false
+      }
+
+      const clipboardAction = resolveTerminalClipboardShortcut(
+        event,
+        terminalRef.current?.hasSelection() ?? false,
+      )
+      if (clipboardAction !== null)
+      {
+        // keep the native clipboard event alive as the permission-free fallback
+        event.stopPropagation()
+        clearSelectionAction()
+        const requestId = selectionActionRequestIdRef.current
+        if (clipboardAction === 'copy')
+        {
+          const selection = terminalRef.current?.getSelection() ?? ''
+          const copyPromise = copySelection(selection, requestId, event.ctrlKey && !event.shiftKey)
+          if (event.shiftKey)
+          {
+            event.preventDefault()
+            try
+            {
+              document.execCommand('copy')
+            }
+            catch
+            {
+              // the async Clipboard API remains the fallback
+            }
+          }
+          void copyPromise
+        }
+        else
+        {
+          void pasteFromClipboard(requestId)
+        }
         return false
       }
 
@@ -638,6 +818,7 @@ export function TerminalViewport({
 
     const inputDisposable = terminal.onData((data) =>
     {
+      clipboardRequestId += 1
       void (async () =>
       {
         const result = await writeTerminal(data)
@@ -655,11 +836,21 @@ export function TerminalViewport({
 
     const selectionDisposable = terminal.onSelectionChange(() =>
     {
+      clipboardRequestId += 1
       if (terminalRef.current?.hasSelection())
       {
         return
       }
-      clearSelectionAction()
+      if (
+        shouldClearTerminalSelectionAction({
+          timerPending: selectionActionTimerRef.current !== null,
+          openMenuRequestId: openSelectionMenuRequestIdRef.current,
+          currentRequestId: selectionActionRequestIdRef.current,
+        })
+      )
+      {
+        clearSelectionAction()
+      }
     })
 
     const handleMouseUp = (event: MouseEvent) =>
@@ -686,11 +877,33 @@ export function TerminalViewport({
     }
     const handlePointerDown = (event: PointerEvent) =>
     {
+      clipboardRequestId += 1
       clearSelectionAction()
       selectionGestureActiveRef.current = event.button === 0
     }
+    const handleContextMenu = (event: MouseEvent) =>
+    {
+      if (shouldSuppressTerminalContextMenu(terminal.modes.mouseTrackingMode !== 'none', event))
+      {
+        event.preventDefault()
+        return
+      }
+      void showTerminalContextMenu(event)
+    }
+    const handleNativeCopy = () =>
+    {
+      const shouldClearSelection = clearSelectionAfterNativeCopyRequestId === clipboardRequestId
+      clearSelectionAfterNativeCopyRequestId = null
+      clipboardRequestId += 1
+      if (shouldClearSelection)
+      {
+        terminalRef.current?.clearSelection()
+      }
+    }
     window.addEventListener('mouseup', handleMouseUp)
     mount.addEventListener('pointerdown', handlePointerDown)
+    mount.addEventListener('contextmenu', handleContextMenu)
+    mount.addEventListener('copy', handleNativeCopy)
 
     const themeObserver = new MutationObserver(() =>
     {
@@ -721,6 +934,9 @@ export function TerminalViewport({
 
     return () =>
     {
+      clipboardRequestId += 1
+      clearSelectionAction()
+      openSelectionMenuRequestIdRef.current = null
       window.clearTimeout(fitTimer)
       inputDisposable.dispose()
       selectionDisposable.dispose()
@@ -731,6 +947,8 @@ export function TerminalViewport({
       }
       window.removeEventListener('mouseup', handleMouseUp)
       mount.removeEventListener('pointerdown', handlePointerDown)
+      mount.removeEventListener('contextmenu', handleContextMenu)
+      mount.removeEventListener('copy', handleNativeCopy)
       themeObserver.disconnect()
       terminalRef.current = null
       fitAddonRef.current = null

@@ -4,6 +4,7 @@
 import { ClaudeSettings, ProviderInstanceId } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
+import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -28,47 +29,79 @@ function makeFakeClaudeBinary(dir: string)
   {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
+    const isWindows = (yield* HostProcessPlatform) === 'win32'
     const binDir = path.join(dir, 'bin')
-    const claudePath = path.join(binDir, 'claude')
+    const stubPath = path.join(binDir, 'claude-stub.mjs')
     yield* fs.makeDirectory(binDir, { recursive: true })
 
+    // keep the fake behavior in Node so Windows and POSIX wrappers exercise the
+    // same deterministic implementation without finding a real Claude CLI
     yield* fs.writeFileString(
-      claudePath,
+      stubPath,
       [
-        '#!/bin/sh',
-        'args="$*"',
-        'stdin_content="$(cat)"',
-        'if [ -n "$T3_FAKE_CLAUDE_ARGS_MUST_CONTAIN" ]; then',
-        '  printf "%s" "$args" | grep -F -- "$T3_FAKE_CLAUDE_ARGS_MUST_CONTAIN" >/dev/null || {',
-        '    printf "%s\\n" "args missing expected content" >&2',
-        '    exit 2',
+        'const args = process.argv.slice(2).join(" ");',
+        '',
+        'function fail(message, code) {',
+        '  process.stderr.write(message + "\\n");',
+        '  process.exit(code);',
+        '}',
+        '',
+        'let stdinContent = "";',
+        'if (!process.stdin.isTTY) {',
+        '  const chunks = [];',
+        '  for await (const chunk of process.stdin) {',
+        '    chunks.push(chunk);',
         '  }',
-        'fi',
-        'if [ -n "$T3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN" ]; then',
-        '  if printf "%s" "$args" | grep -F -- "$T3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN" >/dev/null; then',
-        '    printf "%s\\n" "args contained forbidden content" >&2',
-        '    exit 3',
-        '  fi',
-        'fi',
-        'if [ -n "$T3_FAKE_CLAUDE_STDIN_MUST_CONTAIN" ]; then',
-        '  printf "%s" "$stdin_content" | grep -F -- "$T3_FAKE_CLAUDE_STDIN_MUST_CONTAIN" >/dev/null || {',
-        '    printf "%s\\n" "stdin missing expected content" >&2',
-        '    exit 4',
-        '  }',
-        'fi',
-        'if [ -n "$T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE" ] && [ "$CLAUDE_CONFIG_DIR" != "$T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE" ]; then',
-        '  printf "%s\\n" "CLAUDE_CONFIG_DIR was $CLAUDE_CONFIG_DIR" >&2',
-        '  exit 5',
-        'fi',
-        'if [ -n "$T3_FAKE_CLAUDE_STDERR" ]; then',
-        '  printf "%s\\n" "$T3_FAKE_CLAUDE_STDERR" >&2',
-        'fi',
-        'printf "%s" "$T3_FAKE_CLAUDE_OUTPUT"',
-        'exit "${T3_FAKE_CLAUDE_EXIT_CODE:-0}"',
+        '  stdinContent = Buffer.concat(chunks).toString("utf8");',
+        '}',
+        '',
+        'const argsMustContain = process.env.T3_FAKE_CLAUDE_ARGS_MUST_CONTAIN;',
+        'if (argsMustContain && !args.includes(argsMustContain)) {',
+        '  fail("args missing expected content", 2);',
+        '}',
+        '',
+        'const argsMustNotContain = process.env.T3_FAKE_CLAUDE_ARGS_MUST_NOT_CONTAIN;',
+        'if (argsMustNotContain && args.includes(argsMustNotContain)) {',
+        '  fail("args contained forbidden content", 3);',
+        '}',
+        '',
+        'const stdinMustContain = process.env.T3_FAKE_CLAUDE_STDIN_MUST_CONTAIN;',
+        'if (stdinMustContain && !stdinContent.includes(stdinMustContain)) {',
+        '  fail("stdin missing expected content", 4);',
+        '}',
+        '',
+        'const configDirMustBe = process.env.T3_FAKE_CLAUDE_CONFIG_DIR_MUST_BE;',
+        'if (configDirMustBe && process.env.CLAUDE_CONFIG_DIR !== configDirMustBe) {',
+        '  fail("CLAUDE_CONFIG_DIR was " + (process.env.CLAUDE_CONFIG_DIR ?? ""), 5);',
+        '}',
+        '',
+        'const stderrText = process.env.T3_FAKE_CLAUDE_STDERR;',
+        'if (stderrText) {',
+        '  process.stderr.write(stderrText + "\\n");',
+        '}',
+        '',
+        'process.stdout.write(process.env.T3_FAKE_CLAUDE_OUTPUT ?? "");',
+        'process.exitCode = Number(process.env.T3_FAKE_CLAUDE_EXIT_CODE ?? 0);',
         '',
       ].join('\n'),
     )
-    yield* fs.chmod(claudePath, 0o755)
+
+    if (isWindows)
+    {
+      yield* fs.writeFileString(
+        path.join(binDir, 'claude.cmd'),
+        ['@echo off', 'node "%~dp0claude-stub.mjs" %*', 'exit /b %ERRORLEVEL%', ''].join('\r\n'),
+      )
+    }
+    else
+    {
+      const claudePath = path.join(binDir, 'claude')
+      yield* fs.writeFileString(
+        claudePath,
+        ['#!/bin/sh', 'exec node "$(dirname "$0")/claude-stub.mjs" "$@"', ''].join('\n'),
+      )
+      yield* fs.chmod(claudePath, 0o755)
+    }
     return binDir
   })
 }
@@ -92,6 +125,7 @@ function withFakeClaudeEnv<A, E, R>(
     const fs = yield* FileSystem.FileSystem
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: 't3code-claude-text-' })
     const binDir = yield* makeFakeClaudeBinary(tempDir)
+    const pathDelimiter = (yield* HostProcessPlatform) === 'win32' ? ';' : ':'
     const previousPath = process.env.PATH
     const previousOutput = process.env.T3_FAKE_CLAUDE_OUTPUT
     const previousExitCode = process.env.T3_FAKE_CLAUDE_EXIT_CODE
@@ -104,7 +138,7 @@ function withFakeClaudeEnv<A, E, R>(
     yield* Effect.acquireRelease(
       Effect.sync(() =>
       {
-        process.env.PATH = `${binDir}:${previousPath ?? ''}`
+        process.env.PATH = `${binDir}${pathDelimiter}${previousPath ?? ''}`
         process.env.T3_FAKE_CLAUDE_OUTPUT = input.output
 
         if (input.exitCode !== undefined)
@@ -315,6 +349,7 @@ it.layer(ClaudeTextGenerationTestLayer)('ClaudeTextGeneration', (it) =>
               '  "Reconnect failures after restart because the session state does not recover"  ',
           },
         }),
+        stdinMustContain: 'Please investigate reconnect failures after restarting the session.',
       },
       (textGeneration) =>
         Effect.gen(function* ()

@@ -1,6 +1,6 @@
 // apps/web/src/components/branch-toolbar/BranchToolbar.logic.ts
 // derives branch toolbar state and branch actions
-import type { EnvironmentId, VcsRef, ProjectId } from '@t3tools/contracts'
+import type { EnvironmentId, ProjectId, VcsCreateRefInput, VcsRef } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 import { toSortableTimestamp } from '../../lib/threadSort'
 export {
@@ -240,6 +240,27 @@ export function resolveBranchSelectionTarget(input: {
   }
 }
 
+export function trimAsciiRefWhitespace(rawName: string): string
+{
+  return rawName.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '')
+}
+
+// replace only ASCII whitespace rejected by git; preserve case, slashes,
+// existing dashes, and non-ASCII whitespace accepted in ref names.
+export function sanitizeNewRefName(rawName: string): string
+{
+  return trimAsciiRefWhitespace(rawName).replace(/[ \t\n\r\f\v]+/g, '-')
+}
+
+export function buildCreateAndSwitchRefInput(cwd: string, rawName: string): VcsCreateRefInput
+{
+  return {
+    cwd,
+    refName: sanitizeNewRefName(rawName),
+    switchRef: true,
+  }
+}
+
 export function shouldIncludeBranchPickerItem(input: {
   itemValue: string
   normalizedQuery: string
@@ -264,5 +285,16 @@ export function shouldIncludeBranchPickerItem(input: {
     return true
   }
 
-  return itemValue.toLowerCase().includes(normalizedQuery)
+  const lowerItemValue = itemValue.toLowerCase()
+  if (lowerItemValue.includes(normalizedQuery))
+  {
+    return true
+  }
+
+  const sanitizedQuery = sanitizeNewRefName(normalizedQuery)
+  return (
+    sanitizedQuery.length > 0 &&
+    sanitizedQuery !== normalizedQuery &&
+    lowerItemValue.includes(sanitizedQuery)
+  )
 }

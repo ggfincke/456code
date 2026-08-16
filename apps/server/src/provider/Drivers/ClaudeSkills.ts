@@ -3,12 +3,11 @@
 
 // ClaudeSkills — filesystem discovery of Claude Code skills for the `$` picker.
 //
-// claude Code loads skills from `<config dir>/skills` (user scope) and
-// `<cwd>/.claude/skills` (project scope), one directory per skill with a
-// `SKILL.md` carrying YAML frontmatter. The Agent SDK init handshake surfaces
-// skills only as slash commands without their filesystem paths, so the
-// provider snapshot scans the same locations directly, mirroring how the
-// codex app-server reports its skills.
+// claude Code loads skills from `<config dir>/skills` (user scope), then
+// `<cwd>/.agents/skills` and `<cwd>/.claude/skills` (project scope). Later
+// roots win on name collisions. The Agent SDK init handshake surfaces skills
+// only as slash commands without their filesystem paths, so the provider
+// snapshot scans the same locations directly.
 //
 // @module provider/Drivers/ClaudeSkills
 import * as NodeOS from 'node:os'
@@ -94,11 +93,9 @@ const resolveClaudeConfigDirPath = Effect.fn('resolveClaudeConfigDirPath')(funct
   return path.join(resolvedHome, '.claude')
 })
 
-// enumerate Claude Code skills from the user config dir and the workspace.
-// discovery is best-effort: unreadable roots and malformed skill entries are
-// skipped so a broken skill never degrades the provider snapshot. On name
-// collisions the project-scoped skill wins, matching Claude Code's
-// most-specific-wins resolution.
+// enumerate skills in user -> .agents -> .claude precedence order.
+// discovery is best-effort so unreadable or malformed entries cannot degrade
+// the provider snapshot.
 export const discoverClaudeSkills = Effect.fn('discoverClaudeSkills')(function* (
   config: Pick<ClaudeSettings, 'homePath'>,
   cwd?: string,
@@ -111,7 +108,12 @@ export const discoverClaudeSkills = Effect.fn('discoverClaudeSkills')(function* 
 
   const roots: ReadonlyArray<{ directory: string; scope: ClaudeSkillScope }> = [
     { directory: path.join(configDirPath, 'skills'), scope: 'user' },
-    ...(cwd ? [{ directory: path.join(cwd, '.claude', 'skills'), scope: 'project' as const }] : []),
+    ...(cwd
+      ? [
+          { directory: path.join(cwd, '.agents', 'skills'), scope: 'project' as const },
+          { directory: path.join(cwd, '.claude', 'skills'), scope: 'project' as const },
+        ]
+      : []),
   ]
 
   const skillsByName = new Map<string, ServerProviderSkill>()

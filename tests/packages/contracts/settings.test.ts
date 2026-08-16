@@ -62,11 +62,15 @@ describe('ClientSettings glass opacity', () =>
 
 describe('ClientSettings sidebar v2', () =>
 {
-  it('defaults the beta off with a three-day auto-settle threshold', () =>
+  it('defaults the beta off with a three-day threshold and merged-PR settling on', () =>
   {
     const settings = decodeClientSettings({})
     expect(settings.sidebarV2Enabled).toBe(false)
     expect(settings.sidebarAutoSettleAfterDays).toBe(3)
+    expect(settings.sidebarAutoSettleOnMerge).toBe(true)
+    expect(decodeClientSettingsPatch({ sidebarAutoSettleOnMerge: false })).toEqual({
+      sidebarAutoSettleOnMerge: false,
+    })
   })
 
   it.each([

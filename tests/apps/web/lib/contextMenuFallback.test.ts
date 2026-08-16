@@ -3,7 +3,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
-import { showContextMenuFallback } from '../../../../apps/web/src/lib/contextMenuFallback'
+import {
+  dismissContextMenu,
+  showContextMenuFallback,
+} from '../../../../apps/web/src/lib/contextMenuFallback'
 
 type FakeListener = (event: FakeDomEvent) => void
 
@@ -219,6 +222,7 @@ beforeEach(() =>
 
 afterEach(() =>
 {
+  dismissContextMenu()
   vi.unstubAllGlobals()
 })
 
@@ -279,5 +283,20 @@ describe('showContextMenuFallback', () =>
     childButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await expect(selectionPromise).resolves.toBe('rename:project-b')
+  })
+
+  it('dismisses the prior menu and exposes an explicit close for the active menu', async () =>
+  {
+    const firstPromise = showContextMenuFallback([{ id: 'first', label: 'First' }])
+    const secondPromise = showContextMenuFallback([{ id: 'second', label: 'Second' }])
+
+    await expect(firstPromise).resolves.toBeNull()
+    expect(findButton('First')).toBeUndefined()
+    expect(findButton('Second')).toBeTruthy()
+
+    dismissContextMenu()
+
+    await expect(secondPromise).resolves.toBeNull()
+    expect(findButton('Second')).toBeUndefined()
   })
 })

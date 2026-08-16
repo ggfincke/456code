@@ -57,6 +57,7 @@ import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestr
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { ProviderRuntimeIngestionLive } from '../../../../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts'
+import { DEFAULT_THREAD_TITLE } from '../../../../../apps/server/src/orchestration/threadTitles.ts'
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -344,6 +345,7 @@ describe('ProviderRuntimeIngestion', () =>
 
   async function createHarness(options?: {
     serverSettings?: Partial<ServerSettings>
+    threadTitle?: string
     beforeDispatchInternal?: (
       command: Parameters<OrchestrationEngineShape['dispatchInternal']>[0],
       authority: Parameters<OrchestrationEngineShape['dispatchInternal']>[1],
@@ -445,7 +447,7 @@ describe('ProviderRuntimeIngestion', () =>
         commandId: CommandId.make('cmd-thread-create'),
         threadId: ThreadId.make('thread-1'),
         projectId: asProjectId('project-1'),
-        title: 'Thread',
+        title: options?.threadTitle ?? 'Thread',
         modelSelection: {
           instanceId: ProviderInstanceId.make('codex'),
           model: 'gpt-5-codex',
@@ -3011,7 +3013,7 @@ describe('ProviderRuntimeIngestion', () =>
     const thread = await waitForThread(
       harness.readModel,
       (entry) =>
-        entry.title === 'Renamed by provider' &&
+        entry.title === 'Thread' &&
         entry.activities.some(
           (activity: ProviderRuntimeTestActivity) => activity.kind === 'turn.plan.updated',
         ) &&
@@ -3026,7 +3028,7 @@ describe('ProviderRuntimeIngestion', () =>
         ),
     )
 
-    expect(thread.title).toBe('Renamed by provider')
+    expect(thread.title).toBe('Thread')
 
     const planActivity = thread.activities.find(
       (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-turn-plan-updated',
@@ -3067,6 +3069,28 @@ describe('ProviderRuntimeIngestion', () =>
     expect(checkpoint?.checkpointRef).toBe('provider-diff:evt-turn-diff-updated')
   })
 
+  it('mirrors a provider title while the thread still has the default title', async () =>
+  {
+    const harness = await createHarness({ threadTitle: DEFAULT_THREAD_TITLE })
+    harness.emit({
+      type: 'thread.metadata.updated',
+      eventId: asEventId('evt-thread-metadata-default'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      threadId: asThreadId('thread-1'),
+      payload: {
+        name: 'Renamed by provider',
+        metadata: { source: 'provider' },
+      },
+    })
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.title === 'Renamed by provider',
+    )
+    expect(thread.title).toBe('Renamed by provider')
+  })
+
   effectIt.effect(
     'settles lagged provider metadata at the revert inbox high-water without self-blocking',
     () =>
@@ -3076,7 +3100,8 @@ describe('ProviderRuntimeIngestion', () =>
         const releaseDispatch = yield* Deferred.make<void>()
         const harness = yield* Effect.promise(() =>
           createHarness({
-            beforeDispatchInternal: (command, authority) =>
+            threadTitle: DEFAULT_THREAD_TITLE,
+            beforeDispatchInternal: (command, _authority) =>
               command.type === 'thread.meta.update' &&
               command.title === 'Causally prior provider title'
                 ? Deferred.succeed(dispatchStarted, undefined).pipe(

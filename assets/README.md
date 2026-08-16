@@ -10,7 +10,7 @@ Each project uses `text.svg` for the 456 mark and `background.svg` when the back
 
 The mark is DM Sans Variable at weight 700 with -4.5% tracking, converted to outlines, sized so the digits cover 87.5% of the finished icon width. DM Sans is the app's own brand face (`@fontsource-variable/dm-sans`), so the icon and the UI wordmark stay in step.
 
-Run `vp run icons:export` from the repository root to regenerate the tracked iOS, Linux, Windows, and web assets. The development web exports are also copied to `apps/web/public` for the browser favicon and splash screen. Run `vp run icons:check` to verify that the generated assets and public copies match their sources without changing files.
+Run `vp run icons:export` from the repository root to regenerate the tracked iOS, Linux, Windows, and web assets. The development web exports are also copied to `apps/web/public` for the browser favicon, installable manifest, and splash screen. Run `vp run icons:check` to verify that the generated assets and public copies match their sources without changing files.
 
 Exporting requires Icon Composer 2 or newer on macOS. The script selects the newest compatible exporter from Xcode or a standalone Icon Composer installation and pins design generation 26. Set `ICON_COMPOSER_TOOL` to the full path of `Icon Composer.app/Contents/Executables/ictool` to override automatic discovery.
 

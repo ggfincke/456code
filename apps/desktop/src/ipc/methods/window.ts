@@ -1,5 +1,5 @@
 // apps/desktop/src/ipc/methods/window.ts
-// resolve app branding
+// handle desktop window and environment ipc methods
 
 import {
   ContextMenuItemSchema,
@@ -8,10 +8,14 @@ import {
   DesktopMenuBarStateSchema,
   DesktopThemeSchema,
   DesktopThreadAttentionSchema,
+  EDITORS,
+  EditorId,
   PickFolderOptionsSchema,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
+  REMOTE_CAPABLE_EDITOR_IDS,
   type DesktopEnvironmentBootstrap,
 } from '@t3tools/contracts'
+import { isCommandAvailable } from '@t3tools/shared/shell'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
@@ -22,6 +26,7 @@ import * as DesktopEnvironment from '../../app/DesktopEnvironment.ts'
 import * as DesktopAppSettings from '../../settings/DesktopAppSettings.ts'
 import * as DesktopWslBackend from '../../wsl/DesktopWslBackend.ts'
 import * as DesktopWslEnvironment from '../../wsl/DesktopWslEnvironment.ts'
+import * as ElectronApp from '../../electron/ElectronApp.ts'
 import * as ElectronDialog from '../../electron/ElectronDialog.ts'
 import * as ElectronMenu from '../../electron/ElectronMenu.ts'
 import * as ElectronShell from '../../electron/ElectronShell.ts'
@@ -61,6 +66,16 @@ export const getAppBranding = DesktopIpc.makeSyncIpcMethod({
   {
     const environment = yield* DesktopEnvironment.DesktopEnvironment
     return environment.branding
+  }),
+})
+
+export const getSystemLocale = DesktopIpc.makeSyncIpcMethod({
+  channel: IpcChannels.GET_SYSTEM_LOCALE_CHANNEL,
+  result: Schema.String,
+  handler: Effect.fn('desktop.ipc.window.getSystemLocale')(function* ()
+  {
+    const electronApp = yield* ElectronApp.ElectronApp
+    return yield* electronApp.systemLocale
   }),
 })
 
@@ -317,5 +332,30 @@ export const openExternal = DesktopIpc.makeIpcMethod({
   {
     const shell = yield* ElectronShell.ElectronShell
     return yield* shell.openExternal(url)
+  }),
+})
+
+export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Array(EditorId),
+  // probe the viewing machine, not the selected backend's path.
+  handler: Effect.fn('desktop.ipc.window.probeRemoteEditors')(function* ()
+  {
+    const available: Array<EditorId> = []
+    for (const editorId of REMOTE_CAPABLE_EDITOR_IDS)
+    {
+      const commands = EDITORS.find((editor) => editor.id === editorId)?.commands
+      if (!commands) continue
+      for (const command of commands)
+      {
+        if (yield* isCommandAvailable(command, { env: process.env }))
+        {
+          available.push(editorId)
+          break
+        }
+      }
+    }
+    return available
   }),
 })

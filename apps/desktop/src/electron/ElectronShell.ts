@@ -1,6 +1,7 @@
 // apps/desktop/src/electron/ElectronShell.ts
 // parse safe external url
 
+import { REMOTE_CAPABLE_EDITOR_IDS, remoteSchemeForEditor } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -8,7 +9,15 @@ import * as Option from 'effect/Option'
 
 import * as Electron from 'electron'
 
-const SAFE_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:'])
+const SAFE_EXTERNAL_PROTOCOLS = new Set([
+  'http:',
+  'https:',
+  ...REMOTE_CAPABLE_EDITOR_IDS.flatMap((editorId) =>
+  {
+    const scheme = remoteSchemeForEditor(editorId)
+    return scheme === undefined ? [] : [`${scheme}:`]
+  }),
+])
 
 export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string>
 {

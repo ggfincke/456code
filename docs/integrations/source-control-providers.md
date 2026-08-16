@@ -83,7 +83,9 @@ That's it—you can now clone, publish, and create pull requests.
 
 Bitbucket uses API tokens instead of a CLI tool:
 
-1. Create an API token in your Atlassian account with read/write access to pull requests and repositories
+1. Create an API token in your Atlassian account with read/write access to pull requests and
+   repositories, plus read access to your user account (`read:user:bitbucket`, used to verify the
+   connection)
 2. Add these environment variables to the environment running 456code:
    ```bash
    export T3CODE_BITBUCKET_EMAIL="you@example.com"

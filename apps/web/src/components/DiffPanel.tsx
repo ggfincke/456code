@@ -186,6 +186,11 @@ export default function DiffPanel({
     workspaceRoot: activeProject?.workspaceRoot ?? null,
     orchestrateRunWorktreeIsNotRepository: runWorktreeStatusQuery.data?.isRepo === false,
   })
+  const filePreviewCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? undefined
+  const activeRepositoryRoot =
+    activeCwd === activeProject?.workspaceRoot
+      ? (activeProject.repositoryIdentity?.rootPath ?? undefined)
+      : undefined
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   )
@@ -569,6 +574,8 @@ export default function DiffPanel({
         threadRef: routeThreadRef,
         filePath,
         activeCwd: activeCwd ?? undefined,
+        filePreviewCwd,
+        repositoryRoot: activeRepositoryRoot,
         openInEditor: (targetPath) =>
         {
           void (async () =>
@@ -591,7 +598,7 @@ export default function DiffPanel({
         },
       })
     },
-    [activeCwd, openInPreferredEditor, routeThreadRef],
+    [activeCwd, activeRepositoryRoot, filePreviewCwd, openInPreferredEditor, routeThreadRef],
   )
   const openArchitectureFile = useCallback(
     (source: ArchitectureFileSource, relativePath: string, line?: number): void =>

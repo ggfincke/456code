@@ -108,6 +108,15 @@ function isNodeWithinMenuStack(target: EventTarget | null, menuStack: readonly H
   return false
 }
 
+// track the one renderer fallback menu so state changes can dismiss it
+let activeContextMenuDismiss: (() => void) | null = null
+
+export function dismissContextMenu(): void
+{
+  activeContextMenuDismiss?.()
+  activeContextMenuDismiss = null
+}
+
 // imperative DOM-based context menu for non-Electron environments.
 // supports nested submenus and resolves with the clicked leaf item id.
 export function showContextMenuFallback<T extends string>(
@@ -121,6 +130,8 @@ export function showContextMenuFallback<T extends string>(
     let isDisposed = false
     let canDismissFromPointer = false
 
+    const dismiss = () => cleanup(null)
+
     const cleanup = (result: T | null) =>
     {
       if (isDisposed)
@@ -128,6 +139,10 @@ export function showContextMenuFallback<T extends string>(
         return
       }
       isDisposed = true
+      if (activeContextMenuDismiss === dismiss)
+      {
+        activeContextMenuDismiss = null
+      }
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('pointerdown', onPointerDown, true)
       document.removeEventListener('contextmenu', onContextMenu, true)
@@ -339,6 +354,8 @@ export function showContextMenuFallback<T extends string>(
     document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('contextmenu', onContextMenu, true)
     openMenu(items, position?.x ?? 0, position?.y ?? 0, 0)
+    activeContextMenuDismiss?.()
+    activeContextMenuDismiss = dismiss
 
     requestAnimationFrame(() =>
     {
