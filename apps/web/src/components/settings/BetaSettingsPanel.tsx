@@ -63,6 +63,9 @@ export function BetaSettingsPanel()
   const sidebarAutoSettleAfterDays = useClientSettings(
     (settings) => settings.sidebarAutoSettleAfterDays,
   )
+  const sidebarAutoSettleOnMerge = useClientSettings(
+    (settings) => settings.sidebarAutoSettleOnMerge,
+  )
   const updateSettings = useUpdateClientSettings()
 
   return (
@@ -82,8 +85,21 @@ export function BetaSettingsPanel()
         {sidebarV2Enabled ? (
           <>
             <SettingsRow
+              title="Auto-settle merged threads"
+              description="Settle a thread after its pull request merges and the thread has been idle for an hour. Closed pull requests remain eligible when this is off."
+              control={
+                <Switch
+                  checked={sidebarAutoSettleOnMerge}
+                  onCheckedChange={(checked) =>
+                    updateSettings({ sidebarAutoSettleOnMerge: Boolean(checked) })
+                  }
+                  aria-label="Auto-settle merged threads"
+                />
+              }
+            />
+            <SettingsRow
               title="Auto-settle inactive threads"
-              description="Threads with no activity for this long settle automatically. Threads on merged or closed PRs always settle."
+              description="Threads with no activity for this long settle automatically."
               control={
                 <Switch
                   checked={sidebarAutoSettleAfterDays !== null}

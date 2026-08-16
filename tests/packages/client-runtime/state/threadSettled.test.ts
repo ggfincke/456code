@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vite-plus/test'
 
 import {
   canSettle,
+  changeRequestAutoSettles,
   effectiveSettled,
   hasQueuedTurnStart,
   threadLastActivityAt,
@@ -22,6 +23,19 @@ import {
 const NOW = '2026-04-10T00:00:00.000Z'
 const FRESH = '2026-04-09T00:00:00.000Z'
 const STALE = '2026-04-06T23:59:59.999Z'
+
+describe('changeRequestAutoSettles', () =>
+{
+  it.each([
+    ['open', true, false],
+    ['merged', true, true],
+    ['merged', false, false],
+    ['closed', false, true],
+  ] as const)('state=%s autoSettleOnMerge=%s returns %s', (state, enabled, expected) =>
+  {
+    expect(changeRequestAutoSettles(state, enabled)).toBe(expected)
+  })
+})
 
 function makeShell(input: {
   readonly settledOverride?: 'settled' | 'active' | null
@@ -299,6 +313,15 @@ describe('effectiveSettled', () =>
 
     expect(effectiveSettled(shell, { ...options, now: NOW })).toBe(false)
     expect(effectiveSettled(shell, { ...options, now: '2026-04-10T00:30:00.001Z' })).toBe(true)
+  })
+
+  it('can keep an idle merged PR active without disabling closed-PR settling', () =>
+  {
+    const idle = makeShell({ activityAt: '2026-04-09T22:59:59.999Z' })
+    const options = { now: NOW, autoSettleAfterDays: null, autoSettleOnMerge: false }
+
+    expect(effectiveSettled(idle, { ...options, changeRequestState: 'merged' })).toBe(false)
+    expect(effectiveSettled(idle, { ...options, changeRequestState: 'closed' })).toBe(true)
   })
 
   it('never settles a starting session, even with a settled override', () =>

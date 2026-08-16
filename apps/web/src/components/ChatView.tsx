@@ -246,7 +246,13 @@ import {
   shouldShowThreadErrorBanner,
   ThreadErrorBanner,
 } from './chat/ThreadErrorBanner'
-import { resolveThreadPr } from './ThreadStatusIndicators'
+import {
+  canRetainTerminalThreadPr,
+  nextThreadChangeRequestSnapshot,
+  resolveDisplayedThreadPr,
+  setThreadChangeRequestSnapshot,
+  threadChangeRequestSnapshotsAtom,
+} from './ThreadStatusIndicators'
 import {
   ComposerBannerStack,
   type ComposerBannerStackItem,
@@ -1007,6 +1013,7 @@ function ChatViewContent(props: ChatViewProps)
     [activeThreadEnvironmentId, activeThreadId],
   )
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom)
   const [timelineAnchor, setTimelineAnchor] = useState<{
     readonly threadKey: string | null
     readonly messageId: MessageId | null
@@ -3702,10 +3709,38 @@ function ChatViewContent(props: ChatViewProps)
   // so the banner and the sidebar row never disagree.
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null)
   const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays)
-  const activeThreadPr = resolveThreadPr({
+  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const activeThreadChangeRequestSnapshot =
+    activeThreadKey === null ? undefined : changeRequestSnapshotByKey.get(activeThreadKey)
+  const retainActiveTerminalPr = canRetainTerminalThreadPr({
+    worktreePath: activeThread?.worktreePath ?? null,
+    orchestrateRunWorktreePath: activeRunWorktreePath,
+    orchestrateRunWorktreeIsNotRepository: runWorktreeIsNotRepository,
+  })
+  const activeThreadPr = resolveDisplayedThreadPr({
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
+    snapshot: activeThreadChangeRequestSnapshot,
+    retainTerminalOnBranchMismatch: retainActiveTerminalPr,
   })
+  useEffect(() =>
+  {
+    if (activeThreadKey === null) return
+    const nextSnapshot = nextThreadChangeRequestSnapshot({
+      threadBranch: activeThread?.branch ?? null,
+      gitStatus: gitStatusQuery.data ?? null,
+      snapshot: activeThreadChangeRequestSnapshot,
+      retainTerminalOnBranchMismatch: retainActiveTerminalPr,
+    })
+    if (nextSnapshot === undefined) return
+    setThreadChangeRequestSnapshot(activeThreadKey, nextSnapshot)
+  }, [
+    activeThread?.branch,
+    activeThreadChangeRequestSnapshot,
+    activeThreadKey,
+    gitStatusQuery.data,
+    retainActiveTerminalPr,
+  ])
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true
   const nowMinute = useNowMinute()
@@ -3732,9 +3767,17 @@ function ChatViewContent(props: ChatViewProps)
     return effectiveSettled(activeThreadShell, {
       now: `${nowMinute}:00.000Z`,
       autoSettleAfterDays,
+      autoSettleOnMerge,
       changeRequestState: activeThreadPr?.state ?? null,
     })
-  }, [activeThreadPr?.state, activeThreadShell, autoSettleAfterDays, nowMinute, supportsSettlement])
+  }, [
+    activeThreadPr?.state,
+    activeThreadShell,
+    autoSettleAfterDays,
+    autoSettleOnMerge,
+    nowMinute,
+    supportsSettlement,
+  ])
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   })

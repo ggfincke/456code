@@ -357,6 +357,13 @@ export function useSettingsRestore(onRestored?: () => void)
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ['Project Grouping']
         : []),
+      ...(settings.sidebarAutoSettleAfterDays !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
+        ? ['Auto-settle inactive threads']
+        : []),
+      ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
+        ? ['Auto-settle merged threads']
+        : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ['Word wrap'] : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ['Diff whitespace changes']
@@ -415,6 +422,8 @@ export function useSettingsRestore(onRestored?: () => void)
       settings.architectureAutoAnalysis,
       settings.enableAssistantStreaming,
       settings.enableProviderUpdateChecks,
+      settings.sidebarAutoSettleAfterDays,
+      settings.sidebarAutoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.providerUsageDisplayMode,
@@ -444,6 +453,8 @@ export function useSettingsRestore(onRestored?: () => void)
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+      sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
+      sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       desktopNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
