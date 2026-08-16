@@ -1113,6 +1113,8 @@ export interface DesktopBridge
   // feature-detects before calling.
   notifyThreadAttention?: (attention: DesktopThreadAttention) => Promise<void>
   onMenuAction: (listener: (action: string) => void) => () => void
+  // optional while renderer releases catch up with the desktop hold gesture
+  onQuitShortcut?: (listener: (state: 'down' | 'up') => void) => () => void
   getWindowFullscreenState: () => boolean
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void
   getUpdateState: () => Promise<DesktopUpdateState>

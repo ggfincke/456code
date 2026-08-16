@@ -13,14 +13,20 @@ import * as Electron from 'electron'
 import * as DesktopAssets from '../app/DesktopAssets.ts'
 import * as DesktopEnvironment from '../app/DesktopEnvironment.ts'
 import { makeComponentLogger } from '../app/DesktopObservability.ts'
+import * as ElectronApp from '../electron/ElectronApp.ts'
 import * as ElectronMenu from '../electron/ElectronMenu.ts'
 import { getDesktopUrl } from '../electron/ElectronProtocol.ts'
 import * as ElectronShell from '../electron/ElectronShell.ts'
 import * as ElectronTheme from '../electron/ElectronTheme.ts'
 import * as ElectronWindow from '../electron/ElectronWindow.ts'
-import { MENU_ACTION_CHANNEL, WINDOW_FULLSCREEN_STATE_CHANNEL } from '../ipc/channels.ts'
+import {
+  MENU_ACTION_CHANNEL,
+  QUIT_SHORTCUT_CHANNEL,
+  WINDOW_FULLSCREEN_STATE_CHANNEL,
+} from '../ipc/channels.ts'
 import * as PreviewManager from '../preview/Manager.ts'
 import * as DesktopAppSettings from '../settings/DesktopAppSettings.ts'
+import { defaultQuitHoldEnabled, makeQuitHoldHandler } from './QuitHold.ts'
 
 const TITLEBAR_HEIGHT = 40
 // #00000000 does not work correctly on Linux
@@ -55,6 +61,7 @@ type DesktopWindowRuntimeServices =
   | DesktopEnvironment.DesktopEnvironment
   | DesktopAssets.DesktopAssets
   | DesktopAppSettings.DesktopAppSettings
+  | ElectronApp.ElectronApp
   | ElectronMenu.ElectronMenu
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
@@ -282,6 +289,7 @@ export const make = Effect.gen(function* ()
   const electronShell = yield* ElectronShell.ElectronShell
   const electronTheme = yield* ElectronTheme.ElectronTheme
   const electronWindow = yield* ElectronWindow.ElectronWindow
+  const electronApp = yield* ElectronApp.ElectronApp
   const previewManager = yield* PreviewManager.PreviewManager
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings
   // window-side latch for the primary backend's readiness. Set by
@@ -490,6 +498,28 @@ export const make = Effect.gen(function* ()
     flushMainWindowBounds = flushBoundsPersist
 
     yield* previewManager.setMainWindow(window)
+    const quitHoldHandler = makeQuitHoldHandler({
+      platform: environment.platform,
+      enabled: defaultQuitHoldEnabled(environment.platform),
+      notify: (state) =>
+      {
+        if (!window.isDestroyed()) window.webContents.send(QUIT_SHORTCUT_CHANNEL, state)
+      },
+      quit: () =>
+      {
+        void runPromise(electronApp.quit)
+      },
+    })
+    window.webContents.on('before-input-event', quitHoldHandler)
+    window.webContents.on('did-attach-webview', (_event, guest) =>
+    {
+      // focused guests receive native key events before the host does
+      guest.on('before-input-event', quitHoldHandler)
+      guest.once('destroyed', () =>
+      {
+        guest.off('before-input-event', quitHoldHandler)
+      })
+    })
     window.webContents.on('will-attach-webview', (event, webPreferences, params) =>
     {
       if (
@@ -927,6 +957,8 @@ export const make = Effect.gen(function* ()
       webContents.setZoomLevel(
         direction === 'reset' ? 0 : webContents.getZoomLevel() + (direction === 'in' ? 0.5 : -0.5),
       )
+      // chromium copies embedder zoom to guests; restore each preview tab
+      yield* previewManager.reapplyZoom()
     }),
     syncAppearance: Effect.gen(function* ()
     {

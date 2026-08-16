@@ -132,6 +132,7 @@ describe('DesktopShellEnvironment', () =>
           commands.push(command)
           return envOutput({
             PATH: '/opt/homebrew/bin:/usr/bin',
+            LANG: 'de_DE.UTF-8',
             SSH_AUTH_SOCK: '/tmp/secretive.sock',
             HOMEBREW_PREFIX: '/opt/homebrew',
           })
@@ -141,6 +142,7 @@ describe('DesktopShellEnvironment', () =>
       assert.equal(commands.length, 1)
       assert.equal(commands[0]?._tag === 'StandardCommand' ? commands[0].command : '', '/bin/zsh')
       assert.equal(env.PATH, '/opt/homebrew/bin:/usr/bin:/Users/test/.local/bin')
+      assert.equal(env.LANG, 'de_DE.UTF-8')
       assert.equal(env.SSH_AUTH_SOCK, '/tmp/secretive.sock')
       assert.equal(env.HOMEBREW_PREFIX, '/opt/homebrew')
     }),
@@ -152,6 +154,7 @@ describe('DesktopShellEnvironment', () =>
       const env: NodeJS.ProcessEnv = {
         SHELL: '/bin/zsh',
         PATH: '/usr/bin',
+        LANG: 'en_US.UTF-8',
         SSH_AUTH_SOCK: '/tmp/inherited.sock',
       }
 
@@ -161,11 +164,14 @@ describe('DesktopShellEnvironment', () =>
         handler: () =>
           envOutput({
             PATH: '/opt/homebrew/bin:/usr/bin',
+            LC_ALL: 'de_DE.UTF-8',
             SSH_AUTH_SOCK: '/tmp/login-shell.sock',
           }),
       })
 
       assert.equal(env.PATH, '/opt/homebrew/bin:/usr/bin')
+      assert.equal(env.LANG, 'en_US.UTF-8')
+      assert.equal(env.LC_ALL, undefined)
       assert.equal(env.SSH_AUTH_SOCK, '/tmp/inherited.sock')
     }),
   )
@@ -184,12 +190,34 @@ describe('DesktopShellEnvironment', () =>
         handler: () =>
           envOutput({
             PATH: '/home/linuxbrew/.linuxbrew/bin:/usr/bin',
+            LANG: 'de_DE.UTF-8',
             SSH_AUTH_SOCK: '/tmp/secretive.sock',
           }),
       })
 
       assert.equal(env.PATH, '/home/linuxbrew/.linuxbrew/bin:/usr/bin')
+      assert.equal(env.LANG, undefined)
       assert.equal(env.SSH_AUTH_SOCK, '/tmp/secretive.sock')
+    }),
+  )
+
+  it.effect('falls back to a UTF-8 character locale on macOS', () =>
+    Effect.gen(function* ()
+    {
+      const env: NodeJS.ProcessEnv = {
+        SHELL: '/bin/zsh',
+        PATH: '/usr/bin',
+      }
+
+      yield* runShellEnvironment({
+        env,
+        platform: 'darwin',
+        handler: () => envOutput({ PATH: '/opt/homebrew/bin:/usr/bin' }),
+      })
+
+      assert.equal(env.LANG, undefined)
+      assert.equal(env.LC_ALL, undefined)
+      assert.equal(env.LC_CTYPE, 'en_US.UTF-8')
     }),
   )
 

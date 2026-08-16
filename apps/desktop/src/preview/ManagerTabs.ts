@@ -113,6 +113,18 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     yield* Ref.set(mainWindowRef, Option.some(window))
   })
 
+  // read both owners at call time so an attach race cannot restore stale zoom
+  const assertTabZoom = Effect.fn('PreviewManager.assertTabZoom')(function* (tabId: string)
+  {
+    const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+    if (!tab || tab.webContentsId === null) return
+    const wc = webContents.fromId(tab.webContentsId)
+    if (!wc || wc.isDestroyed()) return
+    yield* attempt({ operation: 'assertTabZoom', tabId, webContentsId: wc.id }, () =>
+      wc.setZoomFactor(tab.zoomFactor),
+    ).pipe(Effect.ignore)
+  })
+
   const createTabUnlocked = Effect.fn('PreviewManager.createTab')(function* (tabId: string)
   {
     const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
@@ -202,11 +214,8 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     const annotationTheme = yield* Ref.get(annotationThemeRef)
     if (tab.webContentsId === webContentsId && attached.has(webContentsId))
     {
-      const zoomFactor = yield* attempt(
-        { operation: 'registerWebview.getZoomFactor', tabId, webContentsId },
-        () => wc.getZoomFactor(),
-      )
-      yield* update(tabId, { zoomFactor })
+      // chromium may have just copied the embedder's zoom onto this guest
+      yield* assertTabZoom(tabId)
       yield* attempt({ operation: 'registerWebview.sendTheme', tabId, webContentsId }, () =>
         wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
       )
@@ -225,19 +234,10 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         { concurrency: 3, discard: true },
       )
     }
-    const zoomFactor =
-      replacedWebContentsId !== null
-        ? yield* attempt(
-            { operation: 'registerWebview.restoreZoomFactor', tabId, webContentsId },
-            () =>
-              {
-              wc.setZoomFactor(tab.zoomFactor)
-              return tab.zoomFactor
-            },
-          )
-        : yield* attempt({ operation: 'registerWebview.getZoomFactor', tabId, webContentsId }, () =>
-            wc.getZoomFactor(),
-          )
+    // a new guest inherits the app window zoom, never the preview tab zoom
+    yield* attempt({ operation: 'registerWebview.restoreZoomFactor', tabId, webContentsId }, () =>
+      wc.setZoomFactor(tab.zoomFactor),
+    )
     const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
     yield* attachListeners(tabId, wc, lifecycleGeneration)
     const registeredAt = yield* currentIso
@@ -258,7 +258,6 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         navStatus: pendingUrl === null ? computeNavStatus(wc) : current.navStatus,
         canGoBack: wc.navigationHistory.canGoBack(),
         canGoForward: wc.navigationHistory.canGoForward(),
-        zoomFactor,
         updatedAt: registeredAt,
         lifecycleGeneration,
       }
@@ -282,6 +281,8 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
       return yield* new PreviewTabNotFoundError({ tabId })
     }
     const { state: registered, pendingUrl } = registration.value
+    // a zoom action may have landed while the replacement attached
+    yield* assertTabZoom(tabId)
     runFork(restoreControlSession(tabId, wc))
     yield* emit(tabId, registered)
     yield* attempt({ operation: 'registerWebview.sendTheme', tabId, webContentsId }, () =>
@@ -473,6 +474,12 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     yield* update(tabId, { zoomFactor: next })
   })
 
+  const reapplyZoom = Effect.fn('PreviewManager.reapplyZoom')(function* ()
+  {
+    const tabIds = Array.from((yield* SynchronizedRef.get(tabsRef)).keys())
+    yield* Effect.forEach(tabIds, assertTabZoom, { discard: true })
+  })
+
   // emulated media lives on the CDP debugger session, not the WebContents, so
   // it is lost whenever the session detaches (webview swap, DevTools
   // open/close) and must be re-applied after every (re)attach.
@@ -566,6 +573,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     openDevTools,
     setAnnotationTheme,
     applyZoom,
+    reapplyZoom,
     setColorScheme,
     withWebContents,
   }

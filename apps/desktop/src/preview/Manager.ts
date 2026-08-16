@@ -51,7 +51,7 @@ import * as SynchronizedRef from 'effect/SynchronizedRef'
 
 import * as DesktopEnvironment from '../app/DesktopEnvironment.ts'
 import * as BrowserSession from './BrowserSession.ts'
-import { HUMAN_INPUT_CHANNEL } from './GuestProtocol.ts'
+import { HUMAN_INPUT_CHANNEL, MOUSE_NAVIGATE_CHANNEL } from './GuestProtocol.ts'
 import {
   PreviewArtifactImageLoadError,
   PreviewArtifactPathOutsideDirectoryError,
@@ -1237,10 +1237,6 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     )
     {
       if (wc.isDestroyed()) return
-      const zoomFactor = yield* attempt(
-        { operation: 'syncWebContentsState.getZoomFactor', tabId, webContentsId: wc.id },
-        () => wc.getZoomFactor(),
-      ).pipe(Effect.option)
       const computedNavStatus = computeNavStatus(wc)
       const canGoBack = wc.navigationHistory.canGoBack()
       const canGoForward = wc.navigationHistory.canGoForward()
@@ -1270,7 +1266,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           navStatus,
           canGoBack,
           canGoForward,
-          ...(Option.isSome(zoomFactor) ? { zoomFactor: zoomFactor.value } : {}),
+          // preview zoom is tab state; the guest may report app-window zoom
           updatedAt,
         }
         return [
@@ -1346,6 +1342,25 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       runFork(handleHumanInput(rawSignal))
     }
+    const mouseNavigate = (_event: unknown, payload?: unknown): void =>
+    {
+      const direction =
+        typeof payload === 'object' && payload !== null && 'direction' in payload
+          ? (payload as { direction?: unknown }).direction
+          : undefined
+      if (direction !== 'back' && direction !== 'forward') return
+      runFork(
+        attempt({ operation: 'mouseNavigate', tabId, webContentsId: wc.id }, () =>
+        {
+          if (direction === 'back')
+          {
+            if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
+            return
+          }
+          if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
+        }).pipe(Effect.ignore),
+      )
+    }
     const forwardShortcut = Effect.fn('PreviewManager.forwardShortcut')(function* (
       event: Electron.Event,
       input: Electron.Input,
@@ -1384,6 +1399,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         wc.off('did-fail-load', failed as never)
         wc.off('before-input-event', beforeInput)
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput)
+        wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
       }).pipe(Effect.ignore),
     )
     const install = Effect.fn('PreviewManager.installWebContentsListeners')(function* ()
@@ -1397,6 +1413,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         wc.on('did-stop-loading', sync)
         wc.on('did-fail-load', failed as never)
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput)
+        wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
         wc.setWindowOpenHandler(({ url }) =>
         {
           runFork(
@@ -1456,6 +1473,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     openDevTools,
     setAnnotationTheme,
     applyZoom,
+    reapplyZoom,
     setColorScheme,
   } = tabOps
 
@@ -1604,6 +1622,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     openDevTools,
     pickElement,
     refresh,
+    reapplyZoom,
     registerWebview,
     resetZoom: (tabId: string) => applyZoom(tabId, () => DEFAULT_ZOOM_FACTOR),
     revealArtifact,
@@ -1641,6 +1660,7 @@ export class PreviewManager extends Context.Service<
     readonly zoomIn: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly zoomOut: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly resetZoom: (tabId: string) => Effect.Effect<void, PreviewManagerError>
+    readonly reapplyZoom: () => Effect.Effect<void>
     readonly hardReload: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly setColorScheme: (
       tabId: string,
@@ -1736,6 +1756,7 @@ export const make = Effect.gen(function* PreviewManagerMake()
     goBack: operations.goBack,
     goForward: operations.goForward,
     refresh: operations.refresh,
+    reapplyZoom: operations.reapplyZoom,
     zoomIn: operations.zoomIn,
     zoomOut: operations.zoomOut,
     resetZoom: operations.resetZoom,

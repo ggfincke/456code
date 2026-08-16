@@ -23,6 +23,7 @@ import {
   CANCEL_PICK_CHANNEL,
   ELEMENT_PICKED_CHANNEL,
   HUMAN_INPUT_CHANNEL,
+  MOUSE_NAVIGATE_CHANNEL,
   START_PICK_CHANNEL,
 } from './GuestProtocol.ts'
 import {
@@ -86,6 +87,36 @@ const reportHumanKeyInput = (event: KeyboardEvent): void =>
 
 window.addEventListener('pointerdown', reportHumanPointerInput, true)
 window.addEventListener('keydown', reportHumanKeyInput, true)
+
+const navigationDirectionForButton = (button: number): 'back' | 'forward' | null =>
+{
+  if (button === 3) return 'back'
+  if (button === 4) return 'forward'
+  return null
+}
+
+// chromium sends thumb navigation to whichever contents has focus, which may
+// be the app instead of the preview under the pointer
+const suppressNavigationButton = (event: MouseEvent): void =>
+{
+  if (!event.isTrusted || navigationDirectionForButton(event.button) === null) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+}
+
+const requestNavigationForButton = (event: MouseEvent): void =>
+{
+  if (!event.isTrusted) return
+  const direction = navigationDirectionForButton(event.button)
+  if (direction === null) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  ipcRenderer.send(MOUSE_NAVIGATE_CHANNEL, { direction })
+}
+
+window.addEventListener('mousedown', suppressNavigationButton, true)
+window.addEventListener('mouseup', requestNavigationForButton, true)
+window.addEventListener('auxclick', suppressNavigationButton, true)
 
 const nextId = (prefix: string): string =>
 {
