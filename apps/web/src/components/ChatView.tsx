@@ -135,6 +135,7 @@ import { RepositoryAtlasBootstrap } from './architecture/RepositoryAtlasBootstra
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from '../previewStateStore'
 import { registerFaviconProjectForThread } from '../browser/browserFaviconStore'
 import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
+import { makeWorkspaceFileDropHandlers } from './chat/workspaceFileDrop'
 import { resolveAutoVisitTimestamp } from './Sidebar.logic'
 import { RightPanelTabs } from './RightPanelTabs'
 import { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
@@ -148,6 +149,7 @@ import {
   ChevronDownIcon,
   GitBranchIcon,
   ImportIcon,
+  PaperclipIcon,
   TriangleAlertIcon,
   WifiOffIcon,
 } from 'lucide-react'
@@ -773,6 +775,7 @@ function ChatViewContent(props: ChatViewProps)
   const composerElementContextsRef = useRef<ElementContextDraft[]>([])
   const localComposerRef = useRef<ChatComposerHandle | null>(null)
   const composerRef = useComposerHandleContext() ?? localComposerRef
+  const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null)
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([])
@@ -793,6 +796,17 @@ function ChatViewContent(props: ChatViewProps)
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
   >([])
+  useEffect(() =>
+  {
+    setIsWorkspaceFileDragActive(false)
+  }, [draftId, routeThreadKey])
+  useEffect(() =>
+  {
+    if (!isWorkspaceFileDragActive) return
+    const clearWorkspaceFileDrag = () => setIsWorkspaceFileDragActive(false)
+    window.addEventListener('dragend', clearWorkspaceFileDrag)
+    return () => window.removeEventListener('dragend', clearWorkspaceFileDrag)
+  }, [isWorkspaceFileDragActive])
   const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
     Record<string, Record<string, PendingUserInputDraftAnswer>>
   >({})
@@ -5667,6 +5681,11 @@ function ChatViewContent(props: ChatViewProps)
     ) : null
   ) : null
 
+  const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
+    setDragActive: setIsWorkspaceFileDragActive,
+    addFiles: (files) => composerRef.current?.addDroppedFiles(files),
+  })
+
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       {rightPanelOpen && !shouldUsePlanSidebarSheet ? panelLayoutControls : null}
@@ -5734,7 +5753,28 @@ function ChatViewContent(props: ChatViewProps)
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+            data-chat-workspace-drop-target="true"
+            onDragEnter={workspaceFileDropHandlers.onDragEnter}
+            onDragOver={workspaceFileDropHandlers.onDragOver}
+            onDragLeave={workspaceFileDropHandlers.onDragLeave}
+            onDrop={workspaceFileDropHandlers.onDrop}
+          >
+            {isWorkspaceFileDragActive ? (
+              <div
+                className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/[0.035]"
+                data-chat-workspace-drop-overlay="true"
+              >
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-4 py-2.5 text-sm font-medium text-foreground shadow-lg"
+                >
+                  <PaperclipIcon className="size-4 text-primary" aria-hidden="true" />
+                  Drop files to attach
+                </div>
+              </div>
+            ) : null}
             {/* Provider status overlays the timeline without changing its content height. */}
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <ProviderStatusBanner

@@ -19,6 +19,7 @@ export interface ChatComposerHandle
 {
   focusAtEnd: () => void
   focusAt: (cursor: number) => void
+  addDroppedFiles: (files: File[]) => void
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean
   openModelPicker: () => void
   toggleModelPicker: () => void
