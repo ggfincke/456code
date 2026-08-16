@@ -441,13 +441,68 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
         ) ?? []
       const totalBudget = /\$script:AcceptanceTimeoutSeconds = (\d+)/u.exec(acceptanceScript)
       const cimQueries = acceptanceScript.match(/^.*Get-CimInstance Win32_Process.*$/gmu) ?? []
+      const activePortFunction = acceptanceScript.slice(
+        acceptanceScript.indexOf('function Wait-ForDevToolsActivePort {'),
+        acceptanceScript.indexOf('function Connect-DesktopBridge {'),
+      )
+      const bridgeFunction = acceptanceScript.slice(
+        acceptanceScript.indexOf('function Connect-DesktopBridge {'),
+        acceptanceScript.indexOf('function Invoke-BridgeJson {'),
+      )
+      const startAppFunction = acceptanceScript.slice(
+        acceptanceScript.indexOf('function Start-AcceptanceApp {'),
+        acceptanceScript.indexOf('function Wait-ForUpdateStatus {'),
+      )
+      const activePortPollOrder = [
+        activePortFunction.indexOf('if (Test-Path $ActivePortPath)'),
+        activePortFunction.indexOf('Get-Content $ActivePortPath -ErrorAction Stop'),
+        activePortFunction.indexOf('[int]::TryParse('),
+        activePortFunction.indexOf('if ($Process.HasExited)'),
+      ]
+      const appLaunchOrder = [
+        startAppFunction.indexOf('Remove-Item $activePortPath'),
+        startAppFunction.indexOf('$process = Start-Process'),
+        startAppFunction.indexOf('Wait-ForDevToolsActivePort $process $activePortPath $deadline'),
+        startAppFunction.indexOf('Connect-DesktopBridge $activePort.Port $deadline $process'),
+      ]
 
       assert.deepStrictEqual(numericSeparators, [])
       assert.equal(Number(totalBudget?.[1]), 1_500)
       assert.notInclude(acceptanceScript, '[Threading.CancellationToken]::None')
       assert.notMatch(acceptanceScript, /(?:^|\s)-Wait\b/gu)
+      assert.notMatch(acceptanceScript, /\b933[123]\b/gu)
       assert.isAbove(cimQueries.length, 0)
       assert.isTrue(cimQueries.every((query) => query.includes('-OperationTimeoutSec')))
+      assert.include(acceptanceScript, '$userDataDir = Join-Path $appDataDir "456code"')
+      assert.lengthOf(acceptanceScript.match(/= Start-AcceptanceApp `/gu) ?? [], 3)
+      assert.isTrue(activePortPollOrder.every((index) => index >= 0))
+      assert.deepStrictEqual(
+        [...activePortPollOrder].sort((left, right) => left - right),
+        activePortPollOrder,
+      )
+      assert.include(activePortFunction, '$port -lt 1 -or $port -gt 65535')
+      assert.include(activePortFunction, '$lines.Count -lt 2')
+      assert.include(activePortFunction, '[string]::IsNullOrWhiteSpace($browserWebSocketPath)')
+      assert.include(activePortFunction, 'BrowserWebSocketPath = $browserWebSocketPath')
+      assert.include(activePortFunction, 'Last port-file error: $lastError')
+      assert.isTrue(appLaunchOrder.every((index) => index >= 0))
+      assert.deepStrictEqual(
+        [...appLaunchOrder].sort((left, right) => left - right),
+        appLaunchOrder,
+      )
+      assert.include(startAppFunction, 'Join-Path $UserDataDirectory "DevToolsActivePort"')
+      assert.include(startAppFunction, '$runId = [Guid]::NewGuid().ToString("N")')
+      assert.include(startAppFunction, '"desktop-$RunName-$runId.stdout.log"')
+      assert.include(startAppFunction, '"desktop-$RunName-$runId.stderr.log"')
+      assert.include(startAppFunction, '"--remote-debugging-port=0"')
+      assert.include(startAppFunction, '-RedirectStandardOutput $stdoutPath')
+      assert.include(startAppFunction, '-RedirectStandardError $stderrPath')
+      assert.include(startAppFunction, 'Get-ProcessOutputEvidence $stdoutPath $stderrPath')
+      assert.include(bridgeFunction, 'Last HTTP error: $lastHttpError')
+      assert.include(bridgeFunction, 'last WebSocket error: $lastWebSocketError')
+      assert.include(bridgeFunction, 'last evaluation error: $lastEvaluationError')
+      assert.include(bridgeFunction, 'last target error: $lastTargetError')
+      assert.include(bridgeFunction, 'last target summary: $lastTargetSummary')
       assert.include(updateFeed, 'NodeStreamPromises.pipeline(')
       assert.include(updateFeed, 'AbortSignal.timeout(RESPONSE_TIMEOUT_MS)')
       assert.include(updateFeed, 'server.setTimeout(')
@@ -456,6 +511,7 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
         ciWorkflow,
         /- name: Exercise installed package and updater paths\s+shell: pwsh\s+timeout-minutes: 30/u,
       )
+      assert.include(ciWorkflow, '${{ runner.temp }}/456code-windows-acceptance/**/*.ndjson')
     }),
   )
 

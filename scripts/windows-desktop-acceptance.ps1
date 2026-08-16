@@ -175,7 +175,7 @@ function Invoke-BoundedProcess {
   }
 }
 
-function Get-PackagedSmokeOutputEvidence {
+function Get-ProcessOutputEvidence {
   param([string]$StdoutPath, [string]$StderrPath)
   $stdout = if (Test-Path $StdoutPath) {
     [string](Get-Content $StdoutPath -Raw -ErrorAction SilentlyContinue)
@@ -282,23 +282,23 @@ function Invoke-PackagedSmoke {
           Assert-PackagedSmokePayload $payload $ExpectedDigest
         } catch {
           Stop-ProcessTree $process
-          $evidence = Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath
+          $evidence = Get-ProcessOutputEvidence $StdoutPath $StderrPath
           throw "Packaged native/Cartographer smoke wrote an invalid success marker: $($_.Exception.Message)`n$evidence"
         }
         Stop-ProcessTree $process
         Assert-Condition $process.HasExited "Packaged native/Cartographer smoke did not stop after its validated marker."
-        Write-Host (Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath)
+        Write-Host (Get-ProcessOutputEvidence $StdoutPath $StderrPath)
         return $payload
       }
 
       if ($process.HasExited) {
         $exitCode = [int]$process.ExitCode
-        $evidence = Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath
+        $evidence = Get-ProcessOutputEvidence $StdoutPath $StderrPath
         throw "Packaged native/Cartographer smoke exited $exitCode before writing a valid success marker.`n$evidence"
       }
       if ([DateTime]::UtcNow -ge $deadline) {
         Stop-ProcessTree $process
-        $evidence = Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath
+        $evidence = Get-ProcessOutputEvidence $StdoutPath $StderrPath
         throw "Packaged native/Cartographer smoke exceeded its $TimeoutSeconds-second process deadline before writing a valid success marker.`n$evidence"
       }
       Start-Sleep -Milliseconds 200
@@ -382,48 +382,155 @@ function Invoke-CdpExpression {
   }
 }
 
-function Connect-DesktopBridge {
-  param([int]$Port, [int]$TimeoutSeconds = 180)
-  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-  if ($deadline -gt $script:AcceptanceDeadline) {
-    $deadline = $script:AcceptanceDeadline
-  }
-  do {
-    Get-BoundedTimeoutMilliseconds 1 | Out-Null
-    try {
-      $targets = @(Invoke-RestMethod "http://127.0.0.1:$Port/json/list" -TimeoutSec 3)
-      foreach ($target in $targets) {
-        $debuggerUrlProperty = $target.PSObject.Properties["webSocketDebuggerUrl"]
-        if ($null -eq $debuggerUrlProperty -or -not $debuggerUrlProperty.Value) {
-          continue
+function Wait-ForDevToolsActivePort {
+  param(
+    [System.Diagnostics.Process]$Process,
+    [string]$ActivePortPath,
+    [DateTime]$Deadline
+  )
+  $lastError = "DevToolsActivePort has not been created at $ActivePortPath."
+  while ($true) {
+    if (Test-Path $ActivePortPath) {
+      try {
+        $lines = @(Get-Content $ActivePortPath -ErrorAction Stop)
+        if ($lines.Count -lt 2) {
+          throw "DevToolsActivePort is incomplete."
         }
-        $socket = [System.Net.WebSockets.ClientWebSocket]::new()
-        $connectTimeoutSource = New-BoundedCancellationSource 10
-        try {
-          $socket.ConnectAsync(
-            [Uri]$debuggerUrlProperty.Value,
-            $connectTimeoutSource.Token
-          ).GetAwaiter().GetResult() | Out-Null
-          $bridgeType = Invoke-CdpExpression $socket "typeof window.desktopBridge" $false 15
-          if ($bridgeType -eq "object") {
-            return $socket
-          }
-        } catch {
-          $socket.Dispose()
-          continue
-        } finally {
-          $connectTimeoutSource.Dispose()
+        $port = 0
+        $hasPort = [int]::TryParse(([string]$lines[0]).Trim(), [ref]$port)
+        if (-not $hasPort -or $port -lt 1 -or $port -gt 65535) {
+          throw "DevToolsActivePort has an invalid port line '$($lines[0])'."
         }
-        $socket.Dispose()
-      }
-    } catch {
-      if ([DateTime]::UtcNow -ge $deadline) {
-        throw
+        $browserWebSocketPath = ([string]$lines[1]).Trim()
+        if ([string]::IsNullOrWhiteSpace($browserWebSocketPath)) {
+          throw "DevToolsActivePort has an empty browser WebSocket path."
+        }
+        return @{ Port = $port; BrowserWebSocketPath = $browserWebSocketPath }
+      } catch {
+        $lastError = $_.Exception.Message
       }
     }
+
+    if ($Process.HasExited) {
+      throw "Desktop process exited $([int]$Process.ExitCode) before publishing a valid DevToolsActivePort. Last port-file error: $lastError"
+    }
+    if ([DateTime]::UtcNow -ge $Deadline) {
+      throw "Timed out waiting for a valid DevToolsActivePort. Last port-file error: $lastError"
+    }
+    Start-Sleep -Milliseconds 200
+  }
+}
+
+function Connect-DesktopBridge {
+  param(
+    [int]$Port,
+    [DateTime]$Deadline,
+    [System.Diagnostics.Process]$Process
+  )
+  $lastHttpError = "<none observed>"
+  $lastWebSocketError = "<none observed>"
+  $lastEvaluationError = "<none observed>"
+  $lastTargetError = "<none observed>"
+  $lastTargetSummary = "<none observed>"
+  $terminationReason = "Timed out waiting for the packaged desktop bridge on CDP port $Port."
+
+  while ([DateTime]::UtcNow -lt $Deadline) {
+    if ($Process.HasExited) {
+      $terminationReason = "Desktop process exited $([int]$Process.ExitCode) while waiting for the packaged desktop bridge on CDP port $Port."
+      break
+    }
+    $remainingSeconds = [Math]::Max(
+      1,
+      [Math]::Ceiling(($Deadline - [DateTime]::UtcNow).TotalSeconds)
+    )
+    $httpTimeoutSeconds = [int]([Math]::Min(3, $remainingSeconds))
+    try {
+      $targets = @(
+        Invoke-RestMethod "http://127.0.0.1:$Port/json/list" -TimeoutSec $httpTimeoutSeconds
+      )
+    } catch {
+      $lastHttpError = $_.Exception.Message
+      Start-Sleep -Milliseconds 500
+      continue
+    }
+
+    $lastTargetSummary = if ($targets.Count -eq 0) {
+      "<no targets>"
+    } else {
+      [string](
+        $targets |
+          Select-Object id, type, title, url, webSocketDebuggerUrl |
+          ConvertTo-Json -Depth 3 -Compress
+      )
+    }
+    if ($targets.Count -eq 0) {
+      $lastTargetError = "CDP returned no targets."
+    }
+
+    $targetIndex = 0
+    foreach ($target in $targets) {
+      if ([DateTime]::UtcNow -ge $Deadline) {
+        break
+      }
+      $debuggerUrlProperty = $target.PSObject.Properties["webSocketDebuggerUrl"]
+      if ($null -eq $debuggerUrlProperty -or -not $debuggerUrlProperty.Value) {
+        $lastTargetError = "CDP target $targetIndex did not expose a WebSocket debugger URL."
+        $targetIndex += 1
+        continue
+      }
+
+      $socket = [System.Net.WebSockets.ClientWebSocket]::new()
+      $connectTimeoutSeconds = [int]([Math]::Min(
+        10,
+        [Math]::Max(1, [Math]::Ceiling(($Deadline - [DateTime]::UtcNow).TotalSeconds))
+      ))
+      $connectTimeoutSource = New-BoundedCancellationSource $connectTimeoutSeconds
+      try {
+        $socket.ConnectAsync(
+          [Uri]$debuggerUrlProperty.Value,
+          $connectTimeoutSource.Token
+        ).GetAwaiter().GetResult() | Out-Null
+      } catch {
+        $lastWebSocketError = "Target ${targetIndex}: $($_.Exception.Message)"
+        $socket.Dispose()
+        $targetIndex += 1
+        continue
+      } finally {
+        $connectTimeoutSource.Dispose()
+      }
+
+      if ([DateTime]::UtcNow -ge $Deadline) {
+        $socket.Dispose()
+        break
+      }
+      $evaluationTimeoutSeconds = [int]([Math]::Min(
+        15,
+        [Math]::Max(1, [Math]::Ceiling(($Deadline - [DateTime]::UtcNow).TotalSeconds))
+      ))
+      try {
+        $bridgeType = Invoke-CdpExpression `
+          $socket `
+          "typeof window.desktopBridge" `
+          $false `
+          $evaluationTimeoutSeconds
+      } catch {
+        $lastEvaluationError = "Target ${targetIndex}: $($_.Exception.Message)"
+        $socket.Dispose()
+        $targetIndex += 1
+        continue
+      }
+      if ($bridgeType -eq "object") {
+        return $socket
+      }
+
+      $lastEvaluationError = "Target $targetIndex returned desktopBridge type '$bridgeType'."
+      $socket.Dispose()
+      $targetIndex += 1
+    }
     Start-Sleep -Milliseconds 500
-  } while ([DateTime]::UtcNow -lt $deadline)
-  throw "Timed out waiting for the packaged desktop bridge on CDP port $Port."
+  }
+
+  throw "$terminationReason Last HTTP error: $lastHttpError; last WebSocket error: $lastWebSocketError; last evaluation error: $lastEvaluationError; last target error: $lastTargetError; last target summary: $lastTargetSummary"
 }
 
 function Invoke-BridgeJson {
@@ -455,19 +562,51 @@ function Invoke-BridgeJson {
 }
 
 function Start-AcceptanceApp {
-  param([string]$ExecutablePath, [int]$DebugPort, [string]$UserDataDirectory)
-  $process = Start-Process -FilePath $ExecutablePath -ArgumentList @(
-    "--remote-debugging-port=$DebugPort",
-    "--user-data-dir=$UserDataDirectory",
-    "--disable-gpu"
-  ) -PassThru
+  param(
+    [string]$ExecutablePath,
+    [string]$UserDataDirectory,
+    [string]$LogDirectory,
+    [string]$RunName,
+    [int]$TimeoutSeconds = 180
+  )
+  $activePortPath = Join-Path $UserDataDirectory "DevToolsActivePort"
+  $runId = [Guid]::NewGuid().ToString("N")
+  $stdoutPath = Join-Path $LogDirectory "desktop-$RunName-$runId.stdout.log"
+  $stderrPath = Join-Path $LogDirectory "desktop-$RunName-$runId.stderr.log"
+  New-Item -ItemType Directory -Force -Path $UserDataDirectory, $LogDirectory | Out-Null
+  Remove-Item $activePortPath, $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  if ($deadline -gt $script:AcceptanceDeadline) {
+    $deadline = $script:AcceptanceDeadline
+  }
+  $process = Start-Process `
+    -FilePath $ExecutablePath `
+    -ArgumentList @(
+      "--remote-debugging-port=0",
+      "--user-data-dir=$UserDataDirectory",
+      "--disable-gpu"
+    ) `
+    -RedirectStandardOutput $stdoutPath `
+    -RedirectStandardError $stderrPath `
+    -PassThru
   try {
-    $socket = Connect-DesktopBridge $DebugPort
-    return @{ Process = $process; Socket = $socket }
+    $activePort = Wait-ForDevToolsActivePort $process $activePortPath $deadline
+    $socket = Connect-DesktopBridge $activePort.Port $deadline $process
+    return @{
+      Process = $process
+      Socket = $socket
+      DebugPort = $activePort.Port
+      BrowserWebSocketPath = $activePort.BrowserWebSocketPath
+      StdoutPath = $stdoutPath
+      StderrPath = $stderrPath
+    }
   } catch {
+    $failureMessage = $_.Exception.Message
     Stop-ProcessTree $process
+    $evidence = Get-ProcessOutputEvidence $stdoutPath $stderrPath
     $process.Dispose()
-    throw
+    throw "Acceptance app '$RunName' failed within its $TimeoutSeconds-second startup deadline: $failureMessage`n$evidence"
   }
 }
 
@@ -511,8 +650,8 @@ $feedLog = Join-Path $acceptanceRoot "feed-requests.jsonl"
 $feedStdout = Join-Path $acceptanceRoot "feed.stdout.log"
 $feedStderr = Join-Path $acceptanceRoot "feed.stderr.log"
 $stateDir = Join-Path $acceptanceRoot "state"
-$userDataDir = Join-Path $acceptanceRoot "electron-user-data"
 $appDataDir = Join-Path $acceptanceRoot "appdata"
+$userDataDir = Join-Path $appDataDir "456code"
 $localAppDataDir = Join-Path $acceptanceRoot "localappdata"
 $smokeRunId = [Guid]::NewGuid().ToString("N")
 $smokeSuccessMarker = Join-Path $acceptanceRoot "packaged-smoke-$smokeRunId.success.json"
@@ -606,7 +745,11 @@ try {
 
   Set-Content $feedLog ""
   Write-AcceptancePhase "differential-update"
-  $firstRun = Start-AcceptanceApp $appExe.FullName 9331 $userDataDir
+  $firstRun = Start-AcceptanceApp `
+    -ExecutablePath $appExe.FullName `
+    -UserDataDirectory $userDataDir `
+    -LogDirectory $acceptanceRoot `
+    -RunName "differential-update"
   try {
     $bootstraps = Invoke-BridgeJson $firstRun.Socket "window.desktopBridge.getLocalEnvironmentBootstraps()" 30
     $primary = @($bootstraps | Where-Object { $_.id -eq "local" -or $_.httpBaseUrl }) | Select-Object -First 1
@@ -644,7 +787,11 @@ try {
   Set-Content $feedLog ""
 
   Write-AcceptancePhase "full-update-fallback"
-  $fallbackRun = Start-AcceptanceApp $appExe.FullName 9332 $userDataDir
+  $fallbackRun = Start-AcceptanceApp `
+    -ExecutablePath $appExe.FullName `
+    -UserDataDirectory $userDataDir `
+    -LogDirectory $acceptanceRoot `
+    -RunName "full-update-fallback"
   try {
     $check = Invoke-BridgeJson $fallbackRun.Socket "await window.desktopBridge.checkForUpdate()" 60
     Assert-Condition $check.checked "The fallback update check was not executed."
@@ -686,7 +833,11 @@ try {
   Stop-InstalledAppProcesses $installDir
 
   Write-AcceptancePhase "verify-n1"
-  $updatedRun = Start-AcceptanceApp $appExe.FullName 9333 $userDataDir
+  $updatedRun = Start-AcceptanceApp `
+    -ExecutablePath $appExe.FullName `
+    -UserDataDirectory $userDataDir `
+    -LogDirectory $acceptanceRoot `
+    -RunName "verify-n1"
   try {
     $state = Invoke-BridgeJson $updatedRun.Socket "await window.desktopBridge.getUpdateState()" 30
     Assert-Condition ($state.currentVersion -eq $VersionN1) "Relaunched app reports $($state.currentVersion), expected $VersionN1."

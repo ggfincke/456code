@@ -384,6 +384,7 @@ jobs:
           path: |
             ${{ runner.temp }}/456code-windows-acceptance/**/*.log
             ${{ runner.temp }}/456code-windows-acceptance/**/*.jsonl
+            ${{ runner.temp }}/456code-windows-acceptance/**/*.ndjson
           if-no-files-found: ignore
           retention-days: 3
 
