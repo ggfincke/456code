@@ -371,6 +371,7 @@ jobs:
 
       - name: Exercise installed package and updater paths
         shell: pwsh
+        timeout-minutes: 30
         run: >-
           ./scripts/windows-desktop-acceptance.ps1
           -ArtifactsRoot ./windows-acceptance-artifacts

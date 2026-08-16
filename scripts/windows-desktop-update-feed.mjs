@@ -5,6 +5,9 @@ import * as NodeFS from 'node:fs'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeHttp from 'node:http'
 import * as NodePath from 'node:path'
+import * as NodeStreamPromises from 'node:stream/promises'
+
+const RESPONSE_TIMEOUT_MS = 120_000
 
 function readArgument(name)
 {
@@ -26,6 +29,14 @@ async function logRequest(entry)
     logPath,
     `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
   )
+}
+
+async function finishResponse(response, body)
+{
+  response.end(body)
+  await NodeStreamPromises.finished(response, {
+    signal: AbortSignal.timeout(RESPONSE_TIMEOUT_MS),
+  })
 }
 
 function resolveRequestPath(requestUrl)
@@ -65,6 +76,7 @@ const server = NodeHttp.createServer(async (request, response) =>
 {
   const requestPath = new URL(request.url ?? '/', `http://127.0.0.1:${port}`).pathname
   const rangeHeader = typeof request.headers.range === 'string' ? request.headers.range : undefined
+  response.setTimeout(RESPONSE_TIMEOUT_MS, () => response.destroy())
   try
   {
     const filePath = resolveRequestPath(request.url ?? '/')
@@ -72,7 +84,7 @@ const server = NodeHttp.createServer(async (request, response) =>
     if (!filePath || !info?.isFile())
     {
       response.writeHead(404, { 'Cache-Control': 'no-store' })
-      response.end('Not Found')
+      await finishResponse(response, 'Not Found')
       await logRequest({
         method: request.method,
         path: requestPath,
@@ -90,7 +102,7 @@ const server = NodeHttp.createServer(async (request, response) =>
         'Content-Range': `bytes */${String(info.size)}`,
         'Cache-Control': 'no-store',
       })
-      response.end()
+      await finishResponse(response)
       await logRequest({
         method: request.method,
         path: requestPath,
@@ -117,11 +129,15 @@ const server = NodeHttp.createServer(async (request, response) =>
     response.writeHead(status, headers)
     if (request.method === 'HEAD' || info.size === 0)
     {
-      response.end()
+      await finishResponse(response)
     }
     else
     {
-      NodeFS.createReadStream(filePath, { start, end }).pipe(response)
+      await NodeStreamPromises.pipeline(
+        NodeFS.createReadStream(filePath, { start, end }),
+        response,
+        { signal: AbortSignal.timeout(RESPONSE_TIMEOUT_MS) },
+      )
     }
     await logRequest({
       method: request.method,
@@ -133,8 +149,18 @@ const server = NodeHttp.createServer(async (request, response) =>
   }
   catch (error)
   {
-    response.writeHead(500, { 'Cache-Control': 'no-store' })
-    response.end('Internal Server Error')
+    if (!response.destroyed)
+    {
+      if (!response.headersSent)
+      {
+        response.writeHead(500, { 'Cache-Control': 'no-store' })
+        await finishResponse(response, 'Internal Server Error').catch(() => response.destroy())
+      }
+      else
+      {
+        response.destroy()
+      }
+    }
     await logRequest({
       method: request.method,
       path: requestPath,
@@ -144,6 +170,10 @@ const server = NodeHttp.createServer(async (request, response) =>
     })
   }
 })
+server.headersTimeout = 15_000
+server.requestTimeout = RESPONSE_TIMEOUT_MS
+server.keepAliveTimeout = 5_000
+server.setTimeout(RESPONSE_TIMEOUT_MS, (socket) => socket.destroy())
 
 await new Promise((resolveListen, rejectListen) =>
 {
@@ -152,6 +182,16 @@ await new Promise((resolveListen, rejectListen) =>
 })
 console.log(`READY http://localhost:${String(port)}`)
 
-const close = () => server.close(() => process.exit(0))
+const close = () =>
+{
+  const forceExit = setTimeout(() => process.exit(1), 5_000)
+  forceExit.unref()
+  server.close((error) =>
+  {
+    clearTimeout(forceExit)
+    process.exit(error ? 1 : 0)
+  })
+  server.closeAllConnections()
+}
 process.once('SIGINT', close)
 process.once('SIGTERM', close)

@@ -421,18 +421,41 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   )
 
-  it.effect('avoids numeric separators unsupported by PowerShell', () =>
+  it.effect('keeps the Windows acceptance script portable and bounded', () =>
     Effect.gen(function* ()
     {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const script = yield* fs.readFileString(
+      const acceptanceScript = yield* fs.readFileString(
         path.resolve(import.meta.dirname, '../../scripts/windows-desktop-acceptance.ps1'),
       )
+      const updateFeed = yield* fs.readFileString(
+        path.resolve(import.meta.dirname, '../../scripts/windows-desktop-update-feed.mjs'),
+      )
+      const ciWorkflow = yield* fs.readFileString(
+        path.resolve(import.meta.dirname, '../../.github/workflows/ci.yml'),
+      )
       const numericSeparators =
-        script.match(/\b(?:0[xX][\dA-Fa-f]+|0[bB][01]+|0[oO][0-7]+|\d+)_[\dA-Fa-f_]+\b/gu) ?? []
+        acceptanceScript.match(
+          /\b(?:0[xX][\dA-Fa-f]+|0[bB][01]+|0[oO][0-7]+|\d+)_[\dA-Fa-f_]+\b/gu,
+        ) ?? []
+      const totalBudget = /\$script:AcceptanceTimeoutSeconds = (\d+)/u.exec(acceptanceScript)
+      const cimQueries = acceptanceScript.match(/^.*Get-CimInstance Win32_Process.*$/gmu) ?? []
 
       assert.deepStrictEqual(numericSeparators, [])
+      assert.equal(Number(totalBudget?.[1]), 1_500)
+      assert.notInclude(acceptanceScript, '[Threading.CancellationToken]::None')
+      assert.notMatch(acceptanceScript, /(?:^|\s)-Wait\b/gu)
+      assert.isAbove(cimQueries.length, 0)
+      assert.isTrue(cimQueries.every((query) => query.includes('-OperationTimeoutSec')))
+      assert.include(updateFeed, 'NodeStreamPromises.pipeline(')
+      assert.include(updateFeed, 'AbortSignal.timeout(RESPONSE_TIMEOUT_MS)')
+      assert.include(updateFeed, 'server.setTimeout(')
+      assert.include(updateFeed, 'server.closeAllConnections()')
+      assert.match(
+        ciWorkflow,
+        /- name: Exercise installed package and updater paths\s+shell: pwsh\s+timeout-minutes: 30/u,
+      )
     }),
   )
 
