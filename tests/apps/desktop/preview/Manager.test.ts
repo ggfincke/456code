@@ -111,6 +111,119 @@ const withManager = <A>(
     return yield* use(manager)
   }).pipe(Effect.provide(layer), Effect.scoped)
 
+const TEST_FAVICON = 'data:image/png;base64,cG5n'
+
+const makeSourcePng = (): Buffer =>
+{
+  const buffer = Buffer.alloc(24)
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(buffer)
+  buffer.writeUInt32BE(1, 16)
+  buffer.writeUInt32BE(1, 20)
+  return buffer
+}
+
+const makeFaviconWebContents = (options?: {
+  readonly fetch?: (url: string, init?: RequestInit) => Promise<Response>
+  readonly id?: number
+  readonly rasterize?: (code: string) => Promise<unknown>
+  readonly url?: string
+}) =>
+{
+  type Listener = (...args: Array<unknown>) => void
+  const listeners = new Map<string, Set<Listener>>()
+  let currentUrl = options?.url ?? 'http://localhost:3200/'
+  let destroyed = false
+  let loading = false
+  const fetch = vi.fn(
+    options?.fetch ??
+      (async () =>
+        new Response(new Uint8Array(makeSourcePng()), {
+          headers: { 'content-type': 'image/png' },
+        })),
+  )
+  const executeJavaScriptInIsolatedWorld = vi.fn(
+    async (_worldId: number, scripts: ReadonlyArray<{ readonly code: string }>) =>
+      options?.rasterize ? options.rasterize(scripts[0]?.code ?? '') : TEST_FAVICON,
+  )
+  const reload = vi.fn()
+  const loadURL = vi.fn(async (url: string) =>
+  {
+    currentUrl = url
+  })
+  const off = vi.fn((event: string, listener: Listener) =>
+  {
+    const registered = listeners.get(event)
+    registered?.delete(listener)
+    if (registered?.size === 0) listeners.delete(event)
+  })
+  const webContents = {
+    id: options?.id ?? 42,
+    isDestroyed: () => destroyed,
+    getType: () => 'webview',
+    getURL: () => currentUrl,
+    getTitle: () => 'Preview',
+    isLoading: () => loading,
+    isDevToolsOpened: () => false,
+    getZoomFactor: () => 1,
+    setZoomFactor: vi.fn(),
+    reload,
+    reloadIgnoringCache: vi.fn(),
+    loadURL,
+    on: vi.fn((event: string, listener: Listener) =>
+    {
+      const registered = listeners.get(event) ?? new Set<Listener>()
+      registered.add(listener)
+      listeners.set(event, registered)
+    }),
+    off,
+    ipc: { on: vi.fn(), off: vi.fn() },
+    send: webviewSend,
+    session: { fetch },
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    setWindowOpenHandler: vi.fn(),
+    executeJavaScriptInIsolatedWorld,
+    debugger: {
+      isAttached: () => false,
+      attach: vi.fn(),
+      sendCommand: vi.fn(async () => undefined),
+      on: vi.fn(),
+      off: vi.fn(),
+    },
+  }
+  return {
+    emit: (event: string, ...args: Array<unknown>) =>
+    {
+      for (const listener of listeners.get(event) ?? []) listener(...args)
+    },
+    fetch,
+    listenerCount: (event: string) => listeners.get(event)?.size ?? 0,
+    listeners,
+    off,
+    reload,
+    setDestroyed: (value: boolean) =>
+    {
+      destroyed = value
+    },
+    setLoading: (value: boolean) =>
+    {
+      loading = value
+    },
+    setUrl: (url: string) =>
+    {
+      currentUrl = url
+    },
+    webContents: webContents as never,
+  }
+}
+
+const settle = function* (until: () => boolean)
+{
+  for (let attempt = 0; attempt < 30 && !until(); attempt += 1)
+  {
+    yield* Effect.promise(() => Promise.resolve())
+  }
+}
+
 describe('PreviewManager', () =>
 {
   beforeEach(() =>
@@ -125,6 +238,255 @@ describe('PreviewManager', () =>
     createFromPath.mockClear()
     webviewSend.mockClear()
   })
+
+  effectIt.effect('publishes one canonical favicon while the document is loading', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        const preview = makeFaviconWebContents({
+          url: `http://localhost:3200/${'x'.repeat(3_000)}`,
+        })
+        preview.setLoading(true)
+        fromId.mockReturnValue(preview.webContents)
+        const states: PreviewManager.PreviewTabState[] = []
+        yield* manager.subscribeStateChanges((_tabId, state) =>
+          Effect.sync(() =>
+          {
+            states.push(state)
+          }),
+        )
+        yield* manager.createTab('tab_favicon_loading')
+        yield* manager.registerWebview('tab_favicon_loading', 42)
+
+        preview.emit('page-favicon-updated', {}, ['http://localhost:3200/favicon.png'])
+        preview.emit('page-favicon-updated', {}, ['http://localhost:3200/favicon.png'])
+        yield* settle(() => states.at(-1)?.favicon !== undefined)
+
+        expect(preview.fetch).toHaveBeenCalledOnce()
+        expect(states.at(-1)?.favicon).toMatchObject({
+          dataUrl: TEST_FAVICON,
+          pageUrl: 'http://localhost:3200',
+        })
+        expect(states.at(-1)?.favicon?.capturedAt).toEqual(expect.any(Number))
+      }),
+    ),
+  )
+
+  effectIt.effect('invalidates in-flight captures on navigation and close', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        let resolveFetch!: (response: Response) => void
+        const preview = makeFaviconWebContents({
+          fetch: () =>
+            new Promise<Response>((resolve) =>
+            {
+              resolveFetch = resolve
+            }),
+        })
+        fromId.mockReturnValue(preview.webContents)
+        const states: PreviewManager.PreviewTabState[] = []
+        yield* manager.subscribeStateChanges((_tabId, state) =>
+          Effect.sync(() =>
+          {
+            states.push(state)
+          }),
+        )
+        yield* manager.createTab('tab_favicon_navigation')
+        yield* manager.registerWebview('tab_favicon_navigation', 42)
+        preview.emit('page-favicon-updated', {}, ['http://localhost:3200/favicon.png'])
+        yield* settle(() => preview.fetch.mock.calls.length === 1)
+
+        preview.emit('did-start-navigation', {
+          isMainFrame: true,
+          isSameDocument: false,
+        })
+        resolveFetch(
+          new Response(new Uint8Array(makeSourcePng()), {
+            headers: { 'content-type': 'image/png' },
+          }),
+        )
+        yield* settle(() => false)
+
+        expect(states.some((state) => state.favicon !== undefined)).toBe(false)
+
+        preview.emit('page-favicon-updated', {}, ['http://localhost:3200/retry.png'])
+        yield* settle(() => preview.fetch.mock.calls.length === 2)
+        yield* manager.closeTab('tab_favicon_navigation')
+        resolveFetch(
+          new Response(new Uint8Array(makeSourcePng()), {
+            headers: { 'content-type': 'image/png' },
+          }),
+        )
+        yield* settle(() => false)
+        expect(states.at(-1)?.navStatus).toEqual({ kind: 'Idle' })
+        expect(states.at(-1)?.favicon).toBeUndefined()
+      }),
+    ),
+  )
+
+  effectIt.effect(
+    'retains a favicon through reload and failure but clears confirmed new origins',
+    () =>
+      withManager((manager) =>
+        Effect.gen(function* ()
+        {
+          const preview = makeFaviconWebContents()
+          fromId.mockReturnValue(preview.webContents)
+          const states: PreviewManager.PreviewTabState[] = []
+          yield* manager.subscribeStateChanges((_tabId, state) =>
+            Effect.sync(() =>
+            {
+              states.push(state)
+            }),
+          )
+          yield* manager.createTab('tab_favicon_retention')
+          yield* manager.registerWebview('tab_favicon_retention', 42)
+          preview.emit('page-favicon-updated', {}, ['http://localhost:3200/favicon.png'])
+          yield* settle(() => states.at(-1)?.favicon !== undefined)
+
+          yield* manager.navigate('tab_favicon_retention', 'http://localhost:3200/')
+          expect(preview.reload).toHaveBeenCalledOnce()
+          expect(states.at(-1)?.favicon?.dataUrl).toBe(TEST_FAVICON)
+
+          preview.setUrl('http://localhost:3200/next')
+          preview.emit('did-navigate', {})
+          yield* settle(() =>
+          {
+            const navStatus = states.at(-1)?.navStatus
+            return navStatus?.kind === 'Success' && navStatus.url === 'http://localhost:3200/next'
+          })
+          expect(states.at(-1)?.favicon?.dataUrl).toBe(TEST_FAVICON)
+
+          preview.emit(
+            'did-fail-load',
+            {},
+            -105,
+            'Name not resolved',
+            'https://unreachable.example/',
+            true,
+          )
+          yield* settle(() => states.at(-1)?.navStatus.kind === 'LoadFailed')
+          expect(states.at(-1)?.favicon?.dataUrl).toBe(TEST_FAVICON)
+
+          preview.setUrl('https://example.com/')
+          preview.emit('did-navigate', {})
+          yield* settle(() => states.at(-1)?.navStatus.kind === 'Success')
+          expect(states.at(-1)?.favicon).toBeUndefined()
+        }),
+      ),
+  )
+
+  effectIt.effect('rejects stale captures and clears state when a WebContents id is reused', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        let resolveSecond!: (response: Response) => void
+        const initial = makeFaviconWebContents({
+          fetch: (url) =>
+            url.endsWith('first.png')
+              ? Promise.resolve(
+                  new Response(new Uint8Array(makeSourcePng()), {
+                    headers: { 'content-type': 'image/png' },
+                  }),
+                )
+              : new Promise<Response>((resolve) =>
+                {
+                  resolveSecond = resolve
+                }),
+        })
+        const replacement = makeFaviconWebContents({ id: 42 })
+        let active = initial.webContents
+        fromId.mockImplementation(() => active)
+        const states: PreviewManager.PreviewTabState[] = []
+        yield* manager.subscribeStateChanges((_tabId, state) =>
+          Effect.sync(() =>
+          {
+            states.push(state)
+          }),
+        )
+        yield* manager.createTab('tab_favicon_reused_id')
+        yield* manager.registerWebview('tab_favicon_reused_id', 42)
+        initial.emit('page-favicon-updated', {}, ['http://localhost:3200/first.png'])
+        yield* settle(() => states.at(-1)?.favicon !== undefined)
+        initial.emit('page-favicon-updated', {}, ['http://localhost:3200/second.png'])
+        yield* settle(() => initial.fetch.mock.calls.length === 2)
+
+        active = replacement.webContents
+        yield* manager.registerWebview('tab_favicon_reused_id', 42)
+        expect(states.at(-1)?.favicon).toBeUndefined()
+        expect(initial.off).toHaveBeenCalled()
+        expect(replacement.listeners.has('page-favicon-updated')).toBe(true)
+
+        resolveSecond(
+          new Response(new Uint8Array(makeSourcePng()), {
+            headers: { 'content-type': 'image/png' },
+          }),
+        )
+        yield* settle(() => false)
+        expect(states.at(-1)?.favicon).toBeUndefined()
+      }),
+    ),
+  )
+
+  effectIt.effect('serializes concurrent cross-tab WebContents transfers', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        const firstSource = makeFaviconWebContents({ id: 41 })
+        const secondSource = makeFaviconWebContents({ id: 42 })
+        const target = makeFaviconWebContents({ id: 43 })
+        const allWebContents = new Map([
+          [41, firstSource.webContents],
+          [42, secondSource.webContents],
+          [43, target.webContents],
+        ])
+        fromId.mockImplementation((id?: number) =>
+          id === undefined ? null : (allWebContents.get(id) ?? null),
+        )
+        yield* manager.createTab('tab_first')
+        yield* manager.createTab('tab_second')
+        yield* manager.registerWebview('tab_first', 41)
+        yield* manager.registerWebview('tab_second', 42)
+
+        const [firstTransfer, secondTransfer] = yield* Effect.all(
+          [
+            Effect.exit(manager.registerWebview('tab_first', 43)),
+            Effect.exit(manager.registerWebview('tab_second', 43)),
+          ],
+          { concurrency: 2 },
+        )
+        expect([firstTransfer, secondTransfer].filter(Exit.isSuccess)).toHaveLength(1)
+
+        const firstWon = Exit.isSuccess(firstTransfer)
+        const winnerTabId = firstWon ? 'tab_first' : 'tab_second'
+        const loserTabId = firstWon ? 'tab_second' : 'tab_first'
+        const loserSourceId = firstWon ? 42 : 41
+        const winnerSource = firstWon ? firstSource : secondSource
+        const loserSource = firstWon ? secondSource : firstSource
+        const losingTransfer = firstWon ? secondTransfer : firstTransfer
+        expect(Exit.isFailure(losingTransfer)).toBe(true)
+        if (Exit.isFailure(losingTransfer))
+        {
+          expect(Option.getOrThrow(Cause.findErrorOption(losingTransfer.cause))).toMatchObject({
+            _tag: 'PreviewWebContentsNotFoundError',
+            webContentsId: 43,
+          })
+        }
+        expect(target.listenerCount('page-favicon-updated')).toBe(1)
+        expect(winnerSource.listenerCount('page-favicon-updated')).toBe(0)
+        expect(loserSource.listenerCount('page-favicon-updated')).toBe(1)
+
+        yield* manager.closeTab(winnerTabId)
+        expect(target.listenerCount('page-favicon-updated')).toBe(0)
+        expect(loserSource.listenerCount('page-favicon-updated')).toBe(1)
+        yield* manager.registerWebview(loserTabId, loserSourceId)
+        expect(loserSource.listenerCount('page-favicon-updated')).toBe(1)
+        yield* manager.closeTab(loserTabId)
+        expect(loserSource.listenerCount('page-favicon-updated')).toBe(0)
+      }),
+    ),
+  )
 
   effectIt.effect('reports an unregistered webview as temporarily unavailable', () =>
     withManager((manager) =>
