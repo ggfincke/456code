@@ -5,11 +5,33 @@ import { describe, expect, it, vi } from 'vite-plus/test'
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
 import type { Thread } from '../../../../../apps/web/src/types'
 import {
+  browseInputEndPaddingClass,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   filterCommandPaletteGroups,
   type CommandPaletteGroup,
 } from '../../../../../apps/web/src/components/command-palette/CommandPalette.logic'
+
+describe('browseInputEndPaddingClass', () =>
+{
+  it.each([
+    {
+      input: { willCreateProjectPath: true, hasHighlightedBrowseItem: false },
+      expected: '*:data-[slot=autocomplete-input]:pe-38!',
+    },
+    {
+      input: { willCreateProjectPath: false, hasHighlightedBrowseItem: true },
+      expected: '*:data-[slot=autocomplete-input]:pe-30!',
+    },
+    {
+      input: { willCreateProjectPath: false, hasHighlightedBrowseItem: false },
+      expected: '*:data-[slot=autocomplete-input]:pe-24!',
+    },
+  ])('reserves end padding for the browse action', ({ input, expected }) =>
+  {
+    expect(browseInputEndPaddingClass(input)).toBe(expected)
+  })
+})
 
 describe('enumerateCommandPaletteItems', () =>
 {

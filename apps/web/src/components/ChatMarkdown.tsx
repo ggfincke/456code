@@ -21,7 +21,7 @@ import React, {
   useMemo,
   type ReactNode,
 } from 'react'
-import type { Components, Options as ReactMarkdownOptions } from 'react-markdown'
+import type { Components, ExtraProps, Options as ReactMarkdownOptions } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
 import { defaultUrlTransform } from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
@@ -152,6 +152,31 @@ function findTaskListMarkerOffset(markdown: string, listItemStart: number): numb
   const match = firstLine.match(/^(?:\s*(?:[-+*]|\d+[.)])\s+)(\[[ xX]\])/)
   if (!match?.[1]) return null
   return listItemStart + firstLine.indexOf(match[1])
+}
+
+// widen only lists whose final decimal marker no longer fits the default gutter.
+export function orderedListGutterStyle(
+  itemCount: number,
+  start: number | undefined,
+): { '--list-gutter': string } | undefined
+{
+  const firstNumber = typeof start === 'number' && Number.isFinite(start) ? start : 1
+  const lastNumber = firstNumber + Math.max(itemCount - 1, 0)
+  const digits = String(Math.abs(lastNumber)).length
+  return digits > 2 ? { '--list-gutter': `${digits + 1}ch` } : undefined
+}
+
+function MarkdownOrderedList({
+  node,
+  start,
+  style,
+  ...props
+}: ComponentPropsWithoutRef<'ol'> & ExtraProps)
+{
+  const itemCount =
+    node?.children.filter((child) => child.type === 'element' && child.tagName === 'li').length ?? 0
+  const gutterStyle = orderedListGutterStyle(itemCount, start)
+  return <ol {...props} start={start} style={gutterStyle ? { ...style, ...gutterStyle } : style} />
 }
 
 type MarkdownAstNode = {
@@ -447,6 +472,7 @@ function ChatMarkdown({
       {
         return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>
       },
+      ol: MarkdownOrderedList,
       li({ node, children, ...props })
       {
         const listItemStart = node?.position?.start.offset

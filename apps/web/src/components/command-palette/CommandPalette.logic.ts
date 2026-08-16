@@ -18,6 +18,22 @@ export const RECENT_THREAD_LIMIT = 12
 export const ITEM_ICON_CLASS = 'size-4 text-muted-foreground/80'
 export const ADDON_ICON_CLASS = 'size-4'
 
+export function browseInputEndPaddingClass(input: {
+  readonly willCreateProjectPath: boolean
+  readonly hasHighlightedBrowseItem: boolean
+}): string
+{
+  if (input.willCreateProjectPath)
+  {
+    return '*:data-[slot=autocomplete-input]:pe-38!'
+  }
+  if (input.hasHighlightedBrowseItem)
+  {
+    return '*:data-[slot=autocomplete-input]:pe-30!'
+  }
+  return '*:data-[slot=autocomplete-input]:pe-24!'
+}
+
 export interface CommandPaletteItem
 {
   readonly kind: 'action' | 'submenu'

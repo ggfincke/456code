@@ -86,6 +86,7 @@ import {
 import { repositoryAtlasDisabledReason } from '../architecture/architectureAvailability'
 import {
   ADDON_ICON_CLASS,
+  browseInputEndPaddingClass,
   buildBrowseGroups,
   buildProjectActionItems,
   buildRootGroups,
@@ -1803,13 +1804,15 @@ export function OpenCommandPaletteDialog(props: {
       >
         <div className="relative">
           <CommandInput
+            // the overlaid submit action needs space inside the actual input.
             className={
               addProjectCloneFlow?.step === 'repository'
-                ? 'pe-32'
+                ? '*:data-[slot=autocomplete-input]:pe-32!'
                 : isBrowsing
-                  ? willCreateProjectPath
-                    ? 'pe-36'
-                    : 'pe-16'
+                  ? browseInputEndPaddingClass({
+                      willCreateProjectPath,
+                      hasHighlightedBrowseItem,
+                    })
                   : undefined
             }
             placeholder={inputPlaceholder}

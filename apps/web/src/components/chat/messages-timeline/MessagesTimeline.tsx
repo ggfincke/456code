@@ -457,7 +457,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           />
           <TimelineMinimap
             items={minimapItems}
-            bottomInset={contentInsetEndAdjustment}
             hasPersistentGutter={minimapHasPersistentGutter}
             hitStripWidth={minimapHitStripWidth}
             stripMap={minimapStripMap}

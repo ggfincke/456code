@@ -3,7 +3,10 @@
 import type { OrchestratePlanRevision } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
 
-import { resolveChatMarkdownOrchestrateFence } from '../../../../apps/web/src/components/ChatMarkdown'
+import {
+  orderedListGutterStyle,
+  resolveChatMarkdownOrchestrateFence,
+} from '../../../../apps/web/src/components/ChatMarkdown'
 import { parseOrchestratePlanResult } from '../../../../apps/web/src/components/chat/OrchestratePlanCard'
 
 const VALID_PLAN = {
@@ -45,6 +48,18 @@ const persistedRevision = {
   createdAt: '2026-08-13T12:00:00.000Z',
   updatedAt: '2026-08-13T12:00:00.000Z',
 } satisfies OrchestratePlanRevision
+
+describe('orderedListGutterStyle', () =>
+{
+  it.each([
+    { itemCount: 99, start: undefined, expected: undefined },
+    { itemCount: 100, start: undefined, expected: { '--list-gutter': '4ch' } },
+    { itemCount: 9, start: 95, expected: { '--list-gutter': '4ch' } },
+  ])('sizes the gutter from the final marker', ({ itemCount, start, expected }) =>
+  {
+    expect(orderedListGutterStyle(itemCount, start)).toEqual(expected)
+  })
+})
 
 describe('parseOrchestratePlanResult', () =>
 {

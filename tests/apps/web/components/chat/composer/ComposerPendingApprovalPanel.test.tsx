@@ -11,7 +11,7 @@ describe('ComposerPendingApprovalPanel', () =>
 {
   it('renders complete multiline command details without hover or truncation', () =>
   {
-    const detail = `bun run release -- ${'long-argument '.repeat(20)}\nsecond line`
+    const detail = `bun run release -- ${'x'.repeat(500)}\nsecond line`
     const markup = renderToStaticMarkup(
       <ComposerPendingApprovalPanel
         approval={{
@@ -29,5 +29,8 @@ describe('ComposerPendingApprovalPanel', () =>
     expect(markup).toContain(detail)
     expect(markup).not.toContain('truncate')
     expect(markup).not.toContain('line-clamp')
+    expect(markup).toContain('min-w-0')
+    expect(markup).toContain('max-w-full')
+    expect(markup).toContain('[overflow-wrap:anywhere]')
   })
 })

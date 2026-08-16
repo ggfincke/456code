@@ -269,6 +269,35 @@ function buildAssistantTimelineEntry(text: string)
 
 describe('MessagesTimeline', () =>
 {
+  it('keeps the composer inset on the list without shrinking the minimap', () =>
+  {
+    const timelineEntries = Array.from({ length: 5 }, (_, index) =>
+    {
+      const entry = buildUserTimelineEntry(`Prompt ${index + 1}`)
+      return {
+        ...entry,
+        id: `entry-${index + 1}`,
+        message: {
+          ...entry.message,
+          id: MessageId.make(`message-${index + 1}`),
+        },
+      }
+    })
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        contentInsetEndAdjustment={144}
+        timelineEntries={timelineEntries}
+      />,
+    )
+
+    expect(markup).toContain('data-content-inset-end="144"')
+    expect(markup).toMatch(
+      /class="[^"]*inset-y-0[^"]*" data-testid="timeline-minimap" data-persistent-gutter="false"/,
+    )
+    expect(markup).not.toContain('style="bottom:144px"')
+  })
+
   it('uses the larger leading inset only when the top fade is enabled', () =>
   {
     const timelineEntries = [buildUserTimelineEntry('Hello')]
