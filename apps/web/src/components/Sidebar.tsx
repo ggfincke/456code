@@ -625,6 +625,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     (event: React.KeyboardEvent<HTMLInputElement>) =>
     {
       event.stopPropagation()
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return
       if (event.key === 'Enter')
       {
         event.preventDefault()

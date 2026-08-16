@@ -81,9 +81,12 @@ function normalizeEventKey(key: string): string
 
 function resolveEventKeys(event: ShortcutEventLike): Set<string>
 {
-  const keys = new Set([normalizeEventKey(event.key)])
+  const layoutKey = normalizeEventKey(event.key)
+  const keys = new Set([layoutKey])
+  // the physical-position fallback is for non-Latin layouts and modified
+  // symbols; a Latin layout key must not trigger a second letter shortcut.
   const letterCode = event.code?.match(/^Key([A-Z])$/)?.[1]
-  if (letterCode)
+  if (letterCode && !/^[a-z]$/.test(layoutKey))
   {
     keys.add(letterCode.toLowerCase())
   }

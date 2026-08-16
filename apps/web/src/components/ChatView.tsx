@@ -5000,6 +5000,10 @@ function ChatViewContent(props: ChatViewProps)
         effort: ctxSelectedPromptEffort,
         text: implementationPrompt,
       })
+      if (composerRef.current?.validateProviderInput(outgoingImplementationPrompt) === false)
+      {
+        return
+      }
       const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown))
       const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection
 

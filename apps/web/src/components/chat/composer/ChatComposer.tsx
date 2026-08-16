@@ -128,6 +128,7 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from '../Expande
 import { basenameOfPath } from '../../../pierre-icons'
 import { cn, randomUUID } from '~/lib/utils'
 import { Separator } from '../../ui/separator'
+import { getProviderInputLengthValidationMessage } from './composerSubmission'
 
 import { Button } from '../../ui/button'
 import {
@@ -764,6 +765,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false)
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false)
   const [isComposerFocused, setIsComposerFocused] = useState(false)
+  const [providerInputSubmissionError, setProviderInputSubmissionError] = useState<string | null>(
+    null,
+  )
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null)
   const [isStashMenuOpen, setIsStashMenuOpen] = useState(false)
   const [compactConfirmationSource, setCompactConfirmationSource] = useState<
@@ -780,6 +784,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null)
   const composerFormRef = useRef<HTMLFormElement>(null)
   const composerSurfaceRef = useRef<HTMLDivElement>(null)
+  const providerInputRejectedRef = useRef(false)
   const composerSelectLockRef = useRef(false)
   const composerMenuOpenRef = useRef(false)
   const composerMenuItemsRef = useRef<ComposerCommandItem[]>([])
@@ -1166,6 +1171,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   {
     composerElementContextsRef.current = composerElementContexts
   }, [composerElementContexts, composerElementContextsRef])
+
+  // a failed preflight remains visible until an input that contributes to the
+  // final provider text changes; the next submit will validate the whole text.
+  useEffect(() =>
+  {
+    setProviderInputSubmissionError(null)
+  }, [
+    activeProposedPlan?.planMarkdown,
+    collaborationMode.baseMode,
+    collaborationMode.orchestrate,
+    composerElementContexts,
+    composerImages,
+    composerPreviewAnnotations,
+    composerReviewComments,
+    composerTerminalContexts,
+    draftId,
+    prompt,
+    selectedModel,
+    selectedPromptEffort,
+    selectedProvider,
+  ])
 
   // composer menu highlight sync
   useEffect(() =>
@@ -1748,7 +1774,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         setCompactConfirmationSource('composer')
         return
       }
+      providerInputRejectedRef.current = false
       onSend(event)
+      if (providerInputRejectedRef.current)
+      {
+        return
+      }
       if (shouldBlurMobileComposerOnSubmit())
       {
         blurMobileComposerAfterSend()
@@ -2649,6 +2680,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor)
         })
       },
+      validateProviderInput: (providerInput: string) =>
+      {
+        const validationMessage = getProviderInputLengthValidationMessage(providerInput)
+        providerInputRejectedRef.current = validationMessage !== null
+        setProviderInputSubmissionError(validationMessage)
+        return validationMessage === null
+      },
       getSendContext: () => ({
         prompt: promptRef.current,
         images: composerImagesRef.current,
@@ -3171,6 +3209,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ) : null}
             </div>
           </div>
+
+          {providerInputSubmissionError ? (
+            <p
+              role="alert"
+              data-chat-composer-validation="prompt-length"
+              className="px-3 pb-2 text-xs text-destructive sm:px-4"
+            >
+              {providerInputSubmissionError}
+            </p>
+          ) : null}
 
           {/* Bottom toolbar */}
           {isComposerCollapsedMobile ? null : activePendingApproval ? (

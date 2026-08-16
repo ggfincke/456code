@@ -833,6 +833,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     (event: ReactKeyboardEvent<HTMLInputElement>) =>
     {
       event.stopPropagation()
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return
       if (event.key === 'Enter')
       {
         event.preventDefault()

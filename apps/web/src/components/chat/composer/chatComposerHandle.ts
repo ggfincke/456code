@@ -37,6 +37,8 @@ export interface ChatComposerHandle
   }) => void
   // insert a terminal context from the terminal drawer.
   addTerminalContext: (selection: TerminalContextSelection) => void
+  // validate the final provider input before any dispatch state changes.
+  validateProviderInput: (providerInput: string) => boolean
   // get the current prompt/effort/model state for use in send.
   getSendContext: () => {
     prompt: string

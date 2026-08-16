@@ -1036,6 +1036,17 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         currentMode: collaborationModeForSend,
         ...(options.planImplementVariant ? { implementVariant: options.planImplementVariant } : {}),
       })
+      const outgoingFollowUpText = formatOutgoingPrompt({
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+        models: ctxSelectedProviderModels,
+        effort: ctxSelectedPromptEffort,
+        text: followUp.text.trim(),
+      })
+      if (send.composerRef.current?.validateProviderInput(outgoingFollowUpText) === false)
+      {
+        return false
+      }
       send.promptRef.current = ''
       send.clearComposerDraftContent(send.composerDraftTarget)
       send.composerRef.current?.resetCursorState()
@@ -1111,28 +1122,6 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       return false
     }
 
-    send.sendInFlightRef.current = true
-    if (send.isDraftHeroState && send.activeThreadKey)
-    {
-      let resolveDockStarted: (() => void) | undefined
-      const dockStarted = new Promise<void>((resolve) =>
-      {
-        resolveDockStarted = resolve
-      })
-      const dockTransition = send.runMobileComposerTransition(() =>
-      {
-        flushSync(() =>
-        {
-          send.captureDraftHeroComposerRect()
-          send.setDockedDraftHeroThreadKey(send.activeThreadKey)
-        })
-        resolveDockStarted?.()
-      })
-      void dockTransition.catch(() => resolveDockStarted?.())
-      await dockStarted
-    }
-    send.beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) })
-
     const composerImagesSnapshot = [...composerImages]
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts]
     const composerElementContextsSnapshot = [...composerElementContexts]
@@ -1165,8 +1154,6 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         composerReviewCommentsSnapshot,
       )
     }
-    const messageIdForSend = newMessageId()
-    const messageCreatedAt = new Date().toISOString()
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
@@ -1176,6 +1163,35 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       providerSlashCommands: ctxSelectedProviderSlashCommands,
       hasAttachmentsOrContext,
     })
+    if (send.composerRef.current?.validateProviderInput(outgoingMessageText) === false)
+    {
+      return false
+    }
+
+    send.sendInFlightRef.current = true
+    if (send.isDraftHeroState && send.activeThreadKey)
+    {
+      let resolveDockStarted: (() => void) | undefined
+      const dockStarted = new Promise<void>((resolve) =>
+      {
+        resolveDockStarted = resolve
+      })
+      const dockTransition = send.runMobileComposerTransition(() =>
+      {
+        flushSync(() =>
+        {
+          send.captureDraftHeroComposerRect()
+          send.setDockedDraftHeroThreadKey(send.activeThreadKey)
+        })
+        resolveDockStarted?.()
+      })
+      void dockTransition.catch(() => resolveDockStarted?.())
+      await dockStarted
+    }
+    send.beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) })
+
+    const messageIdForSend = newMessageId()
+    const messageCreatedAt = new Date().toISOString()
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({
         type: 'image' as const,

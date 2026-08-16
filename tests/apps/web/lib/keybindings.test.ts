@@ -658,6 +658,35 @@ describe('resolveShortcutCommand', () =>
       'rightPanel.toggle',
     )
   })
+
+  it('matches non-Latin layout letters using the physical key code', () =>
+  {
+    const keybindings = compile([{ shortcut: modShortcut('d'), command: 'diff.toggle' }])
+
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: 'в', code: 'KeyD', metaKey: true }), keybindings, {
+        platform: 'MacIntel',
+      }),
+      'diff.toggle',
+    )
+  })
+
+  it('does not use the physical key when a layout produces another Latin letter', () =>
+  {
+    const keybindings = compile([{ shortcut: modShortcut('d'), command: 'diff.toggle' }])
+
+    assert.isNull(
+      resolveShortcutCommand(event({ key: 'a', code: 'KeyD', metaKey: true }), keybindings, {
+        platform: 'MacIntel',
+      }),
+    )
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: 'd', code: 'KeyL', metaKey: true }), keybindings, {
+        platform: 'MacIntel',
+      }),
+      'diff.toggle',
+    )
+  })
 })
 
 describe('formatShortcutLabel', () =>
