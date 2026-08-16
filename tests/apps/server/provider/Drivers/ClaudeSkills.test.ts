@@ -46,6 +46,11 @@ it.layer(NodeServices.layer)('discoverClaudeSkills', (it) =>
         ].join('\n'),
       )
       yield* writeSkill(
+        path.join(workspace, '.agents', 'skills'),
+        'review',
+        ['---', 'name: review', 'description: Review the changes.', '---'].join('\n'),
+      )
+      yield* writeSkill(
         path.join(workspace, '.claude', 'skills'),
         'deploy',
         ['---', 'name: deploy', 'description: Deploy the app.', '---', '', '# Deploy'].join('\n'),
@@ -68,11 +73,18 @@ it.layer(NodeServices.layer)('discoverClaudeSkills', (it) =>
           scope: 'project',
           description: 'Deploy the app.',
         },
+        {
+          name: 'review',
+          path: path.join(workspace, '.agents', 'skills', 'review', 'SKILL.md'),
+          enabled: true,
+          scope: 'project',
+          description: 'Review the changes.',
+        },
       ])
     }),
   )
 
-  it.effect('prefers project skills over user skills on name collisions', () =>
+  it.effect('applies user then .agents then .claude skill precedence', () =>
     Effect.gen(function* ()
     {
       const fs = yield* FileSystem.FileSystem
@@ -87,16 +99,35 @@ it.layer(NodeServices.layer)('discoverClaudeSkills', (it) =>
         ['---', 'name: deploy', 'description: User deploy.', '---'].join('\n'),
       )
       yield* writeSkill(
-        path.join(workspace, '.claude', 'skills'),
+        path.join(configDir, 'skills'),
+        'review',
+        ['---', 'name: review', 'description: User review.', '---'].join('\n'),
+      )
+      yield* writeSkill(
+        path.join(workspace, '.agents', 'skills'),
         'deploy',
-        ['---', 'name: deploy', 'description: Project deploy.', '---'].join('\n'),
+        ['---', 'name: deploy', 'description: Agents deploy.', '---'].join('\n'),
+      )
+      yield* writeSkill(
+        path.join(workspace, '.agents', 'skills'),
+        'review',
+        ['---', 'name: review', 'description: Agents review.', '---'].join('\n'),
+      )
+      yield* writeSkill(
+        path.join(workspace, '.claude', 'skills'),
+        'review',
+        ['---', 'name: review', 'description: Claude review.', '---'].join('\n'),
       )
 
       const skills = yield* discoverClaudeSkills({ homePath: configDir }, workspace)
 
-      assert.equal(skills.length, 1)
-      assert.equal(skills[0]?.scope, 'project')
-      assert.equal(skills[0]?.description, 'Project deploy.')
+      assert.deepEqual(
+        skills.map(({ name, description }) => ({ name, description })),
+        [
+          { name: 'deploy', description: 'Agents deploy.' },
+          { name: 'review', description: 'Claude review.' },
+        ],
+      )
     }),
   )
 

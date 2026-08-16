@@ -1597,12 +1597,21 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     }),
   )
 
-  it.effect('lets OpenCode own session title generation and emits title metadata updates', () =>
+  it.effect('passes the thread title and ignores OpenCode placeholder title updates', () =>
     Effect.gen(function* ()
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-title-sync')
       runtimeMock.state.subscribedEvents = [
+        {
+          type: 'session.updated',
+          properties: {
+            info: {
+              id: 'http://127.0.0.1:9999/session',
+              title: 'New session - 2026-08-09T10:20:30.456Z',
+            },
+          },
+        },
         {
           type: 'session.updated',
           properties: {
@@ -1625,17 +1634,21 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         provider: ProviderDriverKind.make('opencode'),
         threadId,
         runtimeMode: 'full-access',
+        title: 'Investigate OpenCode title sync',
       })
 
       const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout('1 second')))
       NodeAssert.equal(runtimeMock.state.sessionCreateInputs.length, 1)
-      NodeAssert.equal('title' in (runtimeMock.state.sessionCreateInputs[0] ?? {}), false)
+      NodeAssert.equal(
+        runtimeMock.state.sessionCreateInputs[0]?.title,
+        'Investigate OpenCode title sync',
+      )
 
-      const metadataUpdated = events.find((event) => event.type === 'thread.metadata.updated')
-      NodeAssert.ok(metadataUpdated)
-      if (metadataUpdated.type === 'thread.metadata.updated')
+      const metadataUpdated = events.filter((event) => event.type === 'thread.metadata.updated')
+      NodeAssert.equal(metadataUpdated.length, 1)
+      if (metadataUpdated[0]?.type === 'thread.metadata.updated')
       {
-        NodeAssert.equal(metadataUpdated.payload.name, 'Investigate OpenCode title sync')
+        NodeAssert.equal(metadataUpdated[0].payload.name, 'Investigate OpenCode title sync')
       }
     }),
   )

@@ -56,6 +56,7 @@ import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
+import * as Semaphore from 'effect/Semaphore'
 import * as Stream from 'effect/Stream'
 import { CLAUDE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
@@ -204,10 +205,47 @@ interface PendingApproval
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>
 }
 
+// keep "accept for session" inside the current session even when Claude
+// suggests a persistent settings destination. MCP tools often supply no
+// suggestion, so synthesize a whole-tool session rule in that case.
+function toSessionPermissionUpdates(
+  toolName: string,
+  suggestions: ReadonlyArray<PermissionUpdate> | undefined,
+): Array<PermissionUpdate>
+{
+  const sessionScoped = (suggestions ?? []).map((suggestion): PermissionUpdate => ({
+    ...suggestion,
+    destination: 'session',
+  }))
+  if (sessionScoped.length > 0)
+  {
+    return sessionScoped
+  }
+  return [
+    {
+      type: 'addRules',
+      rules: [{ toolName }],
+      behavior: 'allow',
+      destination: 'session',
+    },
+  ]
+}
+
+type PendingUserInputSettlement =
+  | {
+      readonly _tag: 'answered'
+      readonly answers: ProviderUserInputAnswers
+    }
+  | {
+      readonly _tag: 'cancelled'
+    }
+
 interface PendingUserInput
 {
   readonly questions: ReadonlyArray<UserInputQuestion>
-  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>
+  readonly result: Deferred.Deferred<PendingUserInputSettlement>
+  readonly settle: (settlement: PendingUserInputSettlement) => Effect.Effect<boolean>
+  readonly cancel: Effect.Effect<void>
 }
 
 interface ToolInFlight
@@ -267,6 +305,8 @@ interface ClaudeSessionContext
   orchestrateSystemPromptActive: boolean
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>
+  readonly userInputEventGate: Semaphore.Semaphore
+  readonly sessionStopped: Deferred.Deferred<void>
   readonly turns: Array<{
     id: TurnId
     items: Array<unknown>
@@ -3216,9 +3256,21 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     options?: { readonly emitExitEvent?: boolean },
   )
   {
-    if (context.stopped) return
-
-    context.stopped = true
+    const startedStopping = yield* context.userInputEventGate.withPermit(
+      Effect.uninterruptible(
+        Effect.gen(function* ()
+        {
+          if (context.stopped)
+          {
+            return false
+          }
+          context.stopped = true
+          yield* Deferred.succeed(context.sessionStopped, undefined)
+          return true
+        }),
+      ),
+    )
+    if (!startedStopping) return
 
     for (const [requestId, pending] of context.pendingApprovals)
     {
@@ -3240,6 +3292,12 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       })
     }
     context.pendingApprovals.clear()
+
+    // requests cannot be answered after teardown, so release every SDK waiter.
+    for (const pending of context.pendingUserInputs.values())
+    {
+      yield* pending.cancel
+    }
 
     if (context.turnState)
     {
@@ -3378,6 +3436,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
       const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>()
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>()
+      const userInputEventGate = yield* Semaphore.make(1)
+      const sessionStopped = yield* Deferred.make<void>()
       const inFlightTools = new Map<number, ToolInFlight>()
       const claudeTasks = new Map<string, ClaudeTaskState>()
       const nativeTaskTools = new Map<string, ClaudeNativeTaskTool>()
@@ -3419,88 +3479,177 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           }),
         )
 
-        const answersDeferred = yield* Deferred.make<ProviderUserInputAnswers>()
-        let aborted = false
+        const resultDeferred = yield* Deferred.make<PendingUserInputSettlement>()
+        const requestCancelled = yield* Deferred.make<void>()
+        const settle = (settlement: PendingUserInputSettlement) =>
+          Effect.uninterruptible(
+            Effect.gen(function* ()
+            {
+              if (pendingUserInputs.get(requestId)?.result !== resultDeferred)
+              {
+                return false
+              }
+              pendingUserInputs.delete(requestId)
+              yield* Deferred.succeed(resultDeferred, settlement)
+              return true
+            }),
+          )
+        const settleAsCancelled = Effect.uninterruptible(
+          Effect.gen(function* ()
+          {
+            yield* Deferred.succeed(requestCancelled, undefined)
+            yield* settle({ _tag: 'cancelled' })
+          }),
+        )
         const pendingInput: PendingUserInput = {
           questions,
-          answers: answersDeferred,
+          result: resultDeferred,
+          settle,
+          cancel: settleAsCancelled,
         }
 
-        // emit user-input.requested so the UI can present the questions.
-        const requestedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent(context, {
-          type: 'user-input.requested',
-          eventId: requestedStamp.eventId,
-          provider: PROVIDER,
-          createdAt: requestedStamp.createdAt,
-          threadId: context.session.threadId,
-          ...(context.turnState
-            ? {
-                turnId: asCanonicalTurnId(context.turnState.turnId),
-              }
-            : {}),
-          requestId: asRuntimeRequestId(requestId),
-          payload: { questions },
-          providerRefs: nativeProviderRefs(context, {
-            providerItemId: callbackOptions.toolUseID,
-          }),
-          raw: {
-            source: 'claude.sdk.permission',
-            method: 'canUseTool/AskUserQuestion',
-            payload: {
-              toolName: 'AskUserQuestion',
-              input: toolInput,
-            },
-          },
-        })
-
-        pendingUserInputs.set(requestId, pendingInput)
-
-        // handle abort (e.g. turn interrupted while waiting for user input).
+        // register teardown before event publication can yield to stop or abort.
         const onAbort = () =>
         {
-          if (!pendingUserInputs.has(requestId))
-          {
-            return
-          }
-          aborted = true
-          pendingUserInputs.delete(requestId)
-          runFork(Deferred.succeed(answersDeferred, {} as ProviderUserInputAnswers))
+          runFork(settleAsCancelled)
         }
+        pendingUserInputs.set(requestId, pendingInput)
         callbackOptions.signal.addEventListener('abort', onAbort, {
           once: true,
         })
-
-        // block until the user provides answers.
-        const answers = yield* Deferred.await(answersDeferred)
-        pendingUserInputs.delete(requestId)
-
-        // emit user-input.resolved so the UI knows the interaction completed.
-        const resolvedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent(context, {
-          type: 'user-input.resolved',
-          eventId: resolvedStamp.eventId,
-          provider: PROVIDER,
-          createdAt: resolvedStamp.createdAt,
-          threadId: context.session.threadId,
-          ...(context.turnState
-            ? {
-                turnId: asCanonicalTurnId(context.turnState.turnId),
+        const cleanupPendingInput = Effect.sync(() =>
+        {
+          callbackOptions.signal.removeEventListener('abort', onAbort)
+        })
+        const cancellation = Effect.raceFirst(
+          Deferred.await(requestCancelled),
+          Deferred.await(context.sessionStopped),
+        )
+        const cancellableEventStamp = Effect.suspend(() =>
+        {
+          if (
+            callbackOptions.signal.aborted ||
+            context.stopped ||
+            Deferred.isDoneUnsafe(requestCancelled)
+          )
+          {
+            return Effect.succeed(Option.none())
+          }
+          return Effect.raceFirst(
+            makeEventStamp().pipe(Effect.map(Option.some)),
+            cancellation.pipe(Effect.as(Option.none())),
+          )
+        })
+        const publishIfActive = Effect.fn('publishUserInputEventIfActive')(function* (
+          event: ProviderRuntimeEvent,
+        )
+        {
+          return yield* context.userInputEventGate.withPermit(
+            Effect.gen(function* ()
+            {
+              if (
+                context.stopped ||
+                callbackOptions.signal.aborted ||
+                Deferred.isDoneUnsafe(requestCancelled)
+              )
+              {
+                return false
               }
-            : {}),
-          requestId: asRuntimeRequestId(requestId),
-          payload: { answers },
-          providerRefs: nativeProviderRefs(context, {
-            providerItemId: callbackOptions.toolUseID,
-          }),
-          raw: {
-            source: 'claude.sdk.permission',
-            method: 'canUseTool/AskUserQuestion/resolved',
-            payload: { answers },
-          },
+              yield* offerRuntimeEvent(context, event)
+              return true
+            }),
+          )
         })
 
-        if (aborted)
+        const runUserInputLifecycle = Effect.gen(function* ()
+        {
+          if (callbackOptions.signal.aborted || context.stopped)
+          {
+            yield* settleAsCancelled
+            return { _tag: 'cancelled' } as const
+          }
+
+          // emit user-input.requested so the UI can present the questions.
+          const requestedStamp = yield* cancellableEventStamp
+          if (Option.isNone(requestedStamp))
+          {
+            yield* settleAsCancelled
+            return { _tag: 'cancelled' } as const
+          }
+          const requestedPublished = yield* publishIfActive({
+            type: 'user-input.requested',
+            eventId: requestedStamp.value.eventId,
+            provider: PROVIDER,
+            createdAt: requestedStamp.value.createdAt,
+            threadId: context.session.threadId,
+            ...(context.turnState
+              ? {
+                  turnId: asCanonicalTurnId(context.turnState.turnId),
+                }
+              : {}),
+            requestId: asRuntimeRequestId(requestId),
+            payload: { questions },
+            providerRefs: nativeProviderRefs(context, {
+              providerItemId: callbackOptions.toolUseID,
+            }),
+            raw: {
+              source: 'claude.sdk.permission',
+              method: 'canUseTool/AskUserQuestion',
+              payload: {
+                toolName: 'AskUserQuestion',
+                input: toolInput,
+              },
+            },
+          })
+          if (!requestedPublished)
+          {
+            yield* settleAsCancelled
+            return { _tag: 'cancelled' } as const
+          }
+
+          // block until the user provides answers.
+          const settlement = yield* Deferred.await(resultDeferred)
+          if (settlement._tag === 'cancelled')
+          {
+            return settlement
+          }
+
+          // a published request gets one resolved event unless teardown wins.
+          const resolvedStamp = yield* cancellableEventStamp
+          if (Option.isNone(resolvedStamp))
+          {
+            return { _tag: 'cancelled' } as const
+          }
+          const resolvedPublished = yield* publishIfActive({
+            type: 'user-input.resolved',
+            eventId: resolvedStamp.value.eventId,
+            provider: PROVIDER,
+            createdAt: resolvedStamp.value.createdAt,
+            threadId: context.session.threadId,
+            ...(context.turnState
+              ? {
+                  turnId: asCanonicalTurnId(context.turnState.turnId),
+                }
+              : {}),
+            requestId: asRuntimeRequestId(requestId),
+            payload: { answers: settlement.answers },
+            providerRefs: nativeProviderRefs(context, {
+              providerItemId: callbackOptions.toolUseID,
+            }),
+            raw: {
+              source: 'claude.sdk.permission',
+              method: 'canUseTool/AskUserQuestion/resolved',
+              payload: { answers: settlement.answers },
+            },
+          })
+          return resolvedPublished ? settlement : ({ _tag: 'cancelled' } as const)
+        })
+
+        const settlement = yield* runUserInputLifecycle.pipe(
+          Effect.ensuring(settleAsCancelled),
+          Effect.ensuring(cleanupPendingInput),
+        )
+        if (settlement._tag === 'cancelled')
         {
           return {
             behavior: 'deny',
@@ -3514,7 +3663,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           behavior: 'allow',
           updatedInput: {
             questions: toolInput.questions,
-            answers,
+            answers: settlement.answers,
           },
         } satisfies PermissionResult
       })
@@ -3666,9 +3815,12 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           return {
             behavior: 'allow',
             updatedInput: toolInput,
-            ...(decision === 'acceptForSession' && pendingApproval.suggestions
+            ...(decision === 'acceptForSession'
               ? {
-                  updatedPermissions: [...pendingApproval.suggestions],
+                  updatedPermissions: toSessionPermissionUpdates(
+                    toolName,
+                    pendingApproval.suggestions,
+                  ),
                 }
               : {}),
           } satisfies PermissionResult
@@ -3851,6 +4003,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         orchestrateSystemPromptActive: false,
         pendingApprovals,
         pendingUserInputs,
+        userInputEventGate,
+        sessionStopped,
         turns: [],
         inFlightTools,
         claudeTasks,
@@ -4103,8 +4257,18 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       })
     }
 
-    context.pendingUserInputs.delete(requestId)
-    yield* Deferred.succeed(pending.answers, answers)
+    const settled = yield* pending.settle({
+      _tag: 'answered',
+      answers,
+    })
+    if (!settled)
+    {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: 'item/tool/respondToUserInput',
+        detail: `Unknown pending user-input request: ${requestId}`,
+      })
+    }
   })
 
   const stopSession: ClaudeAdapterShape['stopSession'] = Effect.fn('stopSession')(

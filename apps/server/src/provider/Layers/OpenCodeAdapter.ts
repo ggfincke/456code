@@ -234,8 +234,17 @@ function openCodeEventSessionTitle(event: OpenCodeSubscribedEvent): string | und
     return undefined
   }
 
-  return trimText(event.properties.info.title)
+  const title = trimText(event.properties.info.title)
+  // ignore OpenCode's timestamp placeholder so it cannot overwrite a real title.
+  if (!title || OPENCODE_DEFAULT_TITLE_PATTERN.test(title))
+  {
+    return undefined
+  }
+  return title
 }
+
+const OPENCODE_DEFAULT_TITLE_PATTERN =
+  /^(New session - |Child session - )\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 interface OpenCodeSessionContext
 {
@@ -1505,6 +1514,7 @@ export function makeOpenCodeAdapter(
                 }
                 const createdSession = yield* runOpenCodeSdk('session.create', () =>
                   client.session.create({
+                    ...(input.title ? { title: input.title } : {}),
                     permission: buildOpenCodePermissionRules(input.runtimeMode),
                   }),
                 )

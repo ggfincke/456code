@@ -692,6 +692,7 @@ describe('ProviderCommandReactor', () =>
     expect(harness.startSession.mock.calls[0]?.[0]).toEqual(ThreadId.make('thread-1'))
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
       cwd: '/tmp/provider-project',
+      title: 'Thread',
       modelSelection: {
         instanceId: ProviderInstanceId.make('codex'),
         model: 'gpt-5-codex',

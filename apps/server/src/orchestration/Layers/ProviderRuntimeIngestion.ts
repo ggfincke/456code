@@ -41,6 +41,7 @@ import type {
 } from '../../persistence/Services/ProviderRuntimeInbox.ts'
 import { ServerSettingsService } from '../../serverSettings.ts'
 import { proposedPlanIdForTurn } from '../proposedPlanIdentity.ts'
+import { canReplaceThreadTitle } from '../threadTitles.ts'
 import { isHiddenTurnRuntimeEvent } from '../../provider/HiddenTurnRegistry.ts'
 import {
   runtimeEventMatchesThreadProviderInstance,
@@ -1451,25 +1452,28 @@ const make = Effect.gen(function* ()
 
       if (event.type === 'thread.metadata.updated' && event.payload.name)
       {
-        const sourceSequence = activeRecord?.sequence
-        if (sourceSequence === undefined)
+        if (canReplaceThreadTitle(thread.title))
         {
-          return yield* new ProviderRuntimeIngestionReplayError({
-            detail: 'provider metadata settlement requires an admitted inbox record',
-          })
+          const sourceSequence = activeRecord?.sequence
+          if (sourceSequence === undefined)
+          {
+            return yield* new ProviderRuntimeIngestionReplayError({
+              detail: 'provider metadata settlement requires an admitted inbox record',
+            })
+          }
+          yield* orchestrationEngine.dispatchInternal(
+            {
+              type: 'thread.meta.update',
+              commandId: yield* providerCommandId(event, 'thread-meta-update'),
+              threadId: thread.id,
+              title: event.payload.name,
+            },
+            {
+              sourceKind: 'provider-runtime',
+              sourceSequence,
+            },
+          )
         }
-        yield* orchestrationEngine.dispatchInternal(
-          {
-            type: 'thread.meta.update',
-            commandId: yield* providerCommandId(event, 'thread-meta-update'),
-            threadId: thread.id,
-            title: event.payload.name,
-          },
-          {
-            sourceKind: 'provider-runtime',
-            sourceSequence,
-          },
-        )
       }
 
       if (event.type === 'turn.diff.updated')
