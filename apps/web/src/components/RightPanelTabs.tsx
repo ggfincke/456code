@@ -26,10 +26,10 @@ import {
   useEffect,
   useId,
   useRef,
-  useState,
 } from 'react'
 
 import { isElectron } from '~/env'
+import type { DesktopPreviewOverlay } from '~/previewStateStore'
 import type { RightPanelSurface } from '~/rightPanelStore'
 import { cn } from '~/lib/utils'
 import { readLocalApi } from '~/localApi'
@@ -41,6 +41,7 @@ import { useTheme } from '~/hooks/useTheme'
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/lib/workspaceTitlebar'
 
 import { PreviewPanelShell, type PreviewPanelMode } from './preview/PreviewPanelShell'
+import { FaviconImage } from './preview/PreviewFaviconIcon'
 import { PierreEntryIcon } from './chat/PierreEntryIcon'
 
 interface RightPanelTabsProps
@@ -52,6 +53,7 @@ interface RightPanelTabsProps
   activeSurfaceId: string | null
   pendingSurfaceIds: ReadonlySet<string>
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>
+  desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>
   terminalLabelsById: ReadonlyMap<string, string>
   onActivate: (surface: RightPanelSurface) => void
   onCloseSurface: (surface: RightPanelSurface) => void
@@ -357,19 +359,26 @@ function surfaceTooltip(title: string, surface: RightPanelSurface): string
   }
 }
 
-function PreviewFavicon({ url }: { url: string | null })
+const httpOrigin = (url: string): string | null =>
 {
-  const faviconUrl = faviconUrlForOrigin(url)
-  const [failedUrl, setFailedUrl] = useState<string | null>(null)
-  if (!faviconUrl || failedUrl === faviconUrl) return <Globe2 className="size-3.5 shrink-0" />
+  try
+  {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.origin : null
+  }
+  catch
+  {
+    return null
+  }
+}
+
+function PreviewFavicon(props: { capturedUrl: string | null; url: string | null })
+{
   return (
-    <img
-      src={faviconUrl}
-      alt=""
-      aria-hidden
-      draggable={false}
-      className="size-3.5 shrink-0 rounded-sm"
-      onError={() => setFailedUrl(faviconUrl)}
+    <FaviconImage
+      sources={[props.capturedUrl, faviconUrlForOrigin(props.url)]}
+      fallback={<Globe2 className="size-3.5 shrink-0" />}
+      className="size-3.5 shrink-0 rounded-sm object-contain"
     />
   )
 }
@@ -377,10 +386,12 @@ function PreviewFavicon({ url }: { url: string | null })
 function SurfaceIcon({
   surface,
   sessions,
+  desktopByTabId,
   theme,
 }: {
   surface: RightPanelSurface
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>
+  desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>
   theme: 'light' | 'dark'
 })
 {
@@ -390,7 +401,13 @@ function SurfaceIcon({
     {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null
       const url = !snapshot || snapshot.navStatus._tag === 'Idle' ? null : snapshot.navStatus.url
-      return <PreviewFavicon url={url} />
+      const favicon = snapshot ? (desktopByTabId[snapshot.tabId]?.favicon ?? null) : null
+      const origin = url ? httpOrigin(url) : null
+      const capturedUrl =
+        favicon && origin !== null && httpOrigin(favicon.pageUrl) === origin
+          ? favicon.dataUrl
+          : null
+      return <PreviewFavicon capturedUrl={capturedUrl} url={url} />
     }
     case 'diff':
       return <FileDiff className="size-3.5 shrink-0" />
@@ -636,6 +653,7 @@ export function RightPanelTabs(props: RightPanelTabsProps)
                           <SurfaceIcon
                             surface={surface}
                             sessions={props.previewSessions}
+                            desktopByTabId={props.desktopByTabId}
                             theme={resolvedTheme}
                           />
                           <span className="truncate">{title}</span>

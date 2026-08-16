@@ -702,6 +702,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
         ) : null}
         {showEmptyState ? (
           <PreviewEmptyState
+            threadRef={threadRef}
             environmentId={threadRef.environmentId}
             configuredUrls={configuredUrls}
             recentlySeenUrls={previewState.recentlySeenUrls}

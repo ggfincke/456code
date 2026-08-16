@@ -1,7 +1,7 @@
 // apps/web/src/components/preview/PreviewEmptyState.tsx
 // render preview empty state
 
-import type { EnvironmentId } from '@t3tools/contracts'
+import type { EnvironmentId, ScopedThreadRef } from '@t3tools/contracts'
 import { Globe, RadioTower } from 'lucide-react'
 
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from '~/components/ui/empty'
@@ -11,6 +11,7 @@ import { useDiscoveredLocalServers } from './useDiscoveredLocalServers'
 
 interface Props
 {
+  threadRef: ScopedThreadRef
   environmentId: EnvironmentId
   configuredUrls?: ReadonlyArray<string> | undefined
   recentlySeenUrls?: ReadonlyArray<string> | undefined
@@ -18,6 +19,7 @@ interface Props
 }
 
 export function PreviewEmptyState({
+  threadRef,
   environmentId,
   configuredUrls,
   recentlySeenUrls,
@@ -57,6 +59,7 @@ export function PreviewEmptyState({
           {servers.map((server) => (
             <PreviewLocalServerCard
               key={`${server.host}:${server.port}`}
+              threadRef={threadRef}
               server={server}
               onOpen={() => onOpenUrl(server.url)}
             />

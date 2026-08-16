@@ -133,6 +133,7 @@ import {
 import type { ArchitectureFileOpenTarget } from './architecture/ArchitectureScopeSurface'
 import { RepositoryAtlasBootstrap } from './architecture/RepositoryAtlasBootstrap'
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from '../previewStateStore'
+import { registerFaviconProjectForThread } from '../browser/browserFaviconStore'
 import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
 import { resolveAutoVisitTimestamp } from './Sidebar.logic'
 import { RightPanelTabs } from './RightPanelTabs'
@@ -1094,10 +1095,17 @@ function ChatViewContent(props: ChatViewProps)
     })
   }, [activeThreadKey, existingOpenTerminalThreadKeys, terminalUiState.terminalOpen])
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null)
-  const activeProjectRef = activeThread
-    ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
-    : null
+  const activeProjectRef = useMemo(
+    () =>
+      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
+    [activeThread?.environmentId, activeThread?.projectId],
+  )
   const activeProject = useProject(activeProjectRef)
+  useEffect(() =>
+  {
+    if (!activeThreadRef || !activeProjectRef) return
+    registerFaviconProjectForThread(activeThreadRef, activeProjectRef)
+  }, [activeProjectRef, activeThreadRef])
   const handleNewThreadInActiveProject = useCallback(() =>
   {
     startNewThreadForProject(activeProjectRef, handleNewThread)
@@ -6125,6 +6133,7 @@ function ChatViewContent(props: ChatViewProps)
           activeSurfaceId={activeRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
+          desktopByTabId={activePreviewState.desktopByTabId}
           terminalLabelsById={activeTerminalLabelsById}
           onActivate={activateRightPanelSurface}
           onCloseSurface={closeRightPanelSurface}
@@ -6157,6 +6166,7 @@ function ChatViewContent(props: ChatViewProps)
             activeSurfaceId={activeRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
+            desktopByTabId={activePreviewState.desktopByTabId}
             terminalLabelsById={activeTerminalLabelsById}
             onActivate={activateRightPanelSurface}
             onCloseSurface={closeRightPanelSurface}

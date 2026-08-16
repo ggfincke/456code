@@ -6,6 +6,7 @@
 import type {
   ArchitectureGenerationId,
   ArchitectureGraphDigest,
+  DesktopPreviewFavicon,
   PreviewSessionSnapshot,
   ProjectId,
   ProposalGenerationId,
@@ -13,13 +14,14 @@ import type {
 } from '@t3tools/contracts'
 import { act, useState, type ReactNode, type Ref } from 'react'
 import { createRoot } from 'react-dom/client'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
+import type { DesktopPreviewOverlay } from '../../../../apps/web/src/browser/previewStateStore'
 import type { RightPanelSurface } from '../../../../apps/web/src/stores/rightPanelStore'
 
 vi.mock('~/env', () => ({ isElectron: false }))
 vi.mock('~/localApi', () => ({ readLocalApi: () => null }))
-vi.mock('~/lib/favicon', () => ({ faviconUrlForOrigin: () => null }))
 vi.mock('~/hooks/useTheme', () => ({ useTheme: () => ({ resolvedTheme: 'dark' }) }))
 vi.mock('~/lib/workspaceTitlebar', () => ({ COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS: '' }))
 vi.mock('~/lib/utils', () => ({
@@ -99,6 +101,63 @@ const initialSurfaces: readonly RightPanelSurface[] = [
   atlasSurface,
 ]
 
+const previewSurface = {
+  id: 'browser:tab-private',
+  kind: 'preview',
+  resourceId: 'tab-private',
+} satisfies RightPanelSurface
+const previewUrl = 'http://192.168.1.20:5173/app'
+const previewSessions: Readonly<Record<string, PreviewSessionSnapshot>> = {
+  'tab-private': {
+    threadId: 'thread-right-panel' as ThreadId,
+    tabId: 'tab-private',
+    navStatus: { _tag: 'Success', url: previewUrl, title: 'Private preview' },
+    canGoBack: false,
+    canGoForward: false,
+    updatedAt: '2026-08-16T00:00:00.000Z',
+  },
+}
+
+const previewOverlay = (favicon: DesktopPreviewFavicon | null): DesktopPreviewOverlay => ({
+  hasWebContents: true,
+  canGoBack: false,
+  canGoForward: false,
+  loading: false,
+  zoomFactor: 1,
+  colorScheme: 'system',
+  controller: 'none',
+  favicon,
+})
+
+const renderPreviewTab = (favicon: DesktopPreviewFavicon | null): string =>
+  renderToStaticMarkup(
+    <RightPanelTabs
+      mode="embedded"
+      surfaces={[previewSurface]}
+      activeSurfaceId={previewSurface.id}
+      pendingSurfaceIds={new Set()}
+      previewSessions={previewSessions}
+      desktopByTabId={{ 'tab-private': previewOverlay(favicon) }}
+      terminalLabelsById={new globalThis.Map()}
+      onActivate={() => undefined}
+      onCloseSurface={() => undefined}
+      onCloseOtherSurfaces={() => undefined}
+      onCloseSurfacesToRight={() => undefined}
+      onCloseAllSurfaces={() => undefined}
+      onCopyFilePath={() => undefined}
+      onAddBrowser={() => undefined}
+      onAddTerminal={() => undefined}
+      onAddDiff={() => undefined}
+      onAddFiles={() => undefined}
+      onAddWorkers={() => undefined}
+      browserAvailable
+      diffAvailable
+      filesAvailable
+    >
+      <div>Private preview</div>
+    </RightPanelTabs>,
+  )
+
 function Harness()
 {
   const [surfaces, setSurfaces] = useState(initialSurfaces)
@@ -111,6 +170,7 @@ function Harness()
       activeSurfaceId={activeSurfaceId}
       pendingSurfaceIds={new Set()}
       previewSessions={{} as Readonly<Record<string, PreviewSessionSnapshot>>}
+      desktopByTabId={{}}
       terminalLabelsById={new globalThis.Map()}
       onActivate={(surface) => setActiveSurfaceId(surface.id)}
       onCloseSurface={(surface) =>
@@ -179,5 +239,26 @@ describe('RightPanelTabs', () =>
 
     act(() => root.unmount())
     container.remove()
+  })
+
+  it('prefers a current capture and keeps stale private-origin fallback first-party', () =>
+  {
+    const captured = renderPreviewTab({
+      dataUrl: 'data:image/png;base64,AAAA',
+      pageUrl: 'http://192.168.1.20:5173/dashboard',
+      capturedAt: 1,
+    })
+    expect(captured).toContain('src="data:image/png;base64,AAAA"')
+    expect(captured).not.toContain('google')
+
+    const stale = renderPreviewTab({
+      dataUrl: 'data:image/png;base64,BBBB',
+      pageUrl: 'https://example.com/',
+      capturedAt: 2,
+    })
+    expect(stale).not.toContain('data:image/png;base64,BBBB')
+    expect(stale).toContain('src="http://192.168.1.20:5173/favicon.ico"')
+    expect(stale).not.toContain('google')
+    expect(stale).not.toContain('s2/favicons')
   })
 })
