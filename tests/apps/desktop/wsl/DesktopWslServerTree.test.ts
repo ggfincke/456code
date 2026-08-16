@@ -139,6 +139,7 @@ describe('DesktopWslServerTree', () =>
     withTempDir((tempDir) =>
       Effect.gen(function* ()
       {
+        const path = yield* Path.Path
         const result = yield* ensureWith({
           baseDir: tempDir,
           resourcesPath: tempDir,
@@ -146,7 +147,10 @@ describe('DesktopWslServerTree', () =>
         })
 
         assert.isTrue(result.ok)
-        assert.equal(result.ok ? result.root : '', '/repo')
+        assert.equal(
+          result.ok ? result.root : '',
+          path.resolve('/repo/apps/desktop/src', '../../..'),
+        )
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   )
