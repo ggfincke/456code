@@ -445,8 +445,9 @@ function Connect-DesktopBridge {
     )
     $httpTimeoutSeconds = [int]([Math]::Min(3, $remainingSeconds))
     try {
+      # parenthesize so PowerShell enumerates Invoke-RestMethod's JSON array
       $targets = @(
-        Invoke-RestMethod "http://127.0.0.1:$Port/json/list" -TimeoutSec $httpTimeoutSeconds
+        (Invoke-RestMethod "http://127.0.0.1:$Port/json/list" -TimeoutSec $httpTimeoutSeconds)
       )
     } catch {
       $lastHttpError = $_.Exception.Message

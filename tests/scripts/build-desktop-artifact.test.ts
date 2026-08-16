@@ -503,6 +503,10 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
       assert.include(bridgeFunction, 'last evaluation error: $lastEvaluationError')
       assert.include(bridgeFunction, 'last target error: $lastTargetError')
       assert.include(bridgeFunction, 'last target summary: $lastTargetSummary')
+      assert.match(
+        bridgeFunction,
+        /\$targets = @\(\s+\(Invoke-RestMethod "http:\/\/127\.0\.0\.1:\$Port\/json\/list" -TimeoutSec \$httpTimeoutSeconds\)\s+\)/u,
+      )
       assert.include(updateFeed, 'NodeStreamPromises.pipeline(')
       assert.include(updateFeed, 'AbortSignal.timeout(RESPONSE_TIMEOUT_MS)')
       assert.include(updateFeed, 'server.setTimeout(')
