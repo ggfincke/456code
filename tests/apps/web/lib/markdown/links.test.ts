@@ -151,3 +151,16 @@ describe('resolveMarkdownFileLinkTarget', () =>
     expect(resolveMarkdownFileLinkTarget('/chat/settings')).toBeNull()
   })
 })
+
+describe('directory path labels', () =>
+{
+  it('keeps the final directory segment after POSIX or Windows trailing separators', () =>
+  {
+    expect(resolveMarkdownFileLinkMeta('/tmp/favicons/', '/repo/project')?.basename).toBe(
+      'favicons',
+    )
+    expect(
+      resolveMarkdownFileLinkMeta('C:\\Users\\kelchm\\.claude\\', '/repo/project')?.basename,
+    ).toBe('.claude')
+  })
+})

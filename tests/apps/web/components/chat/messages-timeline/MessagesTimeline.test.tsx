@@ -255,6 +255,18 @@ function buildUserTimelineEntry(text: string)
   }
 }
 
+function buildAssistantTimelineEntry(text: string)
+{
+  const entry = buildUserTimelineEntry(text)
+  return {
+    ...entry,
+    message: {
+      ...entry.message,
+      role: 'assistant' as const,
+    },
+  }
+}
+
 describe('MessagesTimeline', () =>
 {
   it('uses the larger leading inset only when the top fade is enabled', () =>
@@ -475,6 +487,40 @@ describe('MessagesTimeline', () =>
     expect(markup).not.toContain('Show full message')
     expect(markup).toContain('data-user-message-collapsible="false"')
     expect(markup).toContain('rounded-2xl bg-accent p-3')
+  })
+
+  it('preserves XML-like tags as inert source text in user messages', () =>
+  {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          buildUserTimelineEntry(
+            '<global-agent scope="workspace"><nested>inside</nested></global-agent>',
+          ),
+        ]}
+      />,
+    )
+
+    expect(markup).toContain(
+      '&lt;global-agent scope=&quot;workspace&quot;&gt;&lt;nested&gt;inside&lt;/nested&gt;&lt;/global-agent&gt;',
+    )
+    expect(markup).not.toMatch(/<global-agent(?:\s|>)/i)
+  })
+
+  it('continues to render sanitized supported HTML in assistant messages', () =>
+  {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          buildAssistantTimelineEntry('<details><summary>More</summary>Details</details>'),
+        ]}
+      />,
+    )
+
+    expect(markup).toContain('data-markdown-details=""')
+    expect(markup).not.toContain('&lt;details&gt;')
   })
 
   it('renders inline terminal labels with the composer chip UI', () =>

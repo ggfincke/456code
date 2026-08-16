@@ -15,6 +15,7 @@ import { AsyncResult } from 'effect/unstable/reactivity'
 import React, {
   Suspense,
   type ClipboardEvent as ReactClipboardEvent,
+  type ComponentPropsWithoutRef,
   useCallback,
   memo,
   useMemo,
@@ -48,9 +49,16 @@ import { chatMarkdownClipboardPayload } from '../lib/markdown/clipboard'
 import { remarkLinkInlineCodePaths } from '../lib/markdown/inline-code-paths'
 import { remarkNormalizeListItemIndentation } from '../lib/markdown/list-indentation'
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from '../lib/markdown/links'
+import {
+  resolveWorkspaceFileActionTarget,
+  WORKSPACE_BASENAME_LOOKUP_LIMIT,
+  type WorkspaceFileActionSource,
+} from '../lib/workspaceBasenameLookup'
 import { readLocalApi } from '../localApi'
 import { cn } from '../lib/utils'
+import { useRightPanelStore } from '../rightPanelStore'
 import { useActiveEnvironmentId } from '../state/entities'
+import { projectEnvironment } from '../state/projects'
 import { serverEnvironment } from '../state/server'
 import { assetEnvironment } from '../state/assets'
 import { usePreparedConnection } from '../state/session'
@@ -60,7 +68,6 @@ import { useAtomQueryRunner } from '../state/use-atom-query-runner'
 import { writeTextToClipboard } from '../hooks/useCopyToClipboard'
 import { isPreviewSupportedInRuntime } from '../previewStateStore'
 import {
-  isBrowserPreviewFile,
   openFileInPreview,
   openUrlInPreview,
   BrowserPreviewUnavailableError,
@@ -128,6 +135,8 @@ interface ChatMarkdownProps
   className?: string
   // treat single newlines as hard breaks — chat-style user input.
   lineBreaks?: boolean
+  // parse sanitized raw HTML; user-authored messages disable this.
+  parseRawHtml?: boolean
   orchestratePlanActions?: OrchestratePlanActions | undefined
 }
 
@@ -242,6 +251,7 @@ const MarkdownDocument = memo(function MarkdownDocument(props: {
   readonly text: string
   readonly components: Components
   readonly lineBreaks: boolean
+  readonly parseRawHtml: boolean
   readonly urlTransform: NonNullable<ReactMarkdownOptions['urlTransform']>
 })
 {
@@ -250,7 +260,8 @@ const MarkdownDocument = memo(function MarkdownDocument(props: {
       remarkPlugins={
         props.lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS
       }
-      rehypePlugins={CHAT_MARKDOWN_REHYPE_PLUGINS}
+      rehypePlugins={props.parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+      skipHtml={false}
       components={props.components}
       urlTransform={props.urlTransform}
     >
@@ -258,6 +269,15 @@ const MarkdownDocument = memo(function MarkdownDocument(props: {
     </ReactMarkdown>
   )
 })
+
+function MarkdownImage({
+  node: _node,
+  title: _title,
+  ...props
+}: ComponentPropsWithoutRef<'img'> & { readonly node?: unknown })
+{
+  return <img {...props} />
+}
 
 function ChatMarkdown({
   text,
@@ -268,6 +288,7 @@ function ChatMarkdown({
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
   lineBreaks = false,
+  parseRawHtml = true,
   orchestratePlanActions,
 }: ChatMarkdownProps)
 {
@@ -281,6 +302,9 @@ function ChatMarkdown({
   )
   const { resolvedTheme } = useTheme()
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
+    reportFailure: false,
+  })
+  const searchProjectEntries = useAtomQueryRunner(projectEnvironment.searchEntries, {
     reportFailure: false,
   })
   const openPreview = useAtomCommand(previewEnvironment.open, {
@@ -386,6 +410,37 @@ function ChatMarkdown({
     },
     [createAssetUrl, openPreview, preparedConnection, threadRef],
   )
+  const resolveMarkdownFileActionTarget = useCallback(
+    (source: WorkspaceFileActionSource) =>
+    {
+      return resolveWorkspaceFileActionTarget({
+        source,
+        cwd,
+        searchEntries: async (basename) =>
+        {
+          if (!threadRef || !cwd) return []
+          const result = await searchProjectEntries({
+            environmentId: threadRef.environmentId,
+            input: {
+              cwd,
+              query: basename,
+              limit: WORKSPACE_BASENAME_LOOKUP_LIMIT,
+            },
+          })
+          return result._tag === 'Success' ? result.value.entries : []
+        },
+      })
+    },
+    [cwd, searchProjectEntries, threadRef],
+  )
+  const openFileInPanel = useCallback(
+    (workspaceRelativePath: string, line: number | undefined) =>
+    {
+      if (!threadRef) return
+      useRightPanelStore.getState().openFile(threadRef, workspaceRelativePath, line)
+    },
+    [threadRef],
+  )
   const createMarkdownComponents = useCallback(
     (sourceText: string, sourceOffset: number, segmentIsStreaming: boolean): Components => ({
       p({ node: _node, children, ...props })
@@ -442,7 +497,7 @@ function ChatMarkdown({
           />
         )
       },
-      a({ node, href, children, ...props })
+      a({ node, href, children, title: _title, ...props })
       {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : ''
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null
@@ -546,6 +601,7 @@ function ChatMarkdown({
         return (
           <MarkdownFileLink
             href={fileLinkMeta.targetPath}
+            filePath={fileLinkMeta.filePath}
             targetPath={fileLinkMeta.targetPath}
             iconPath={fileLinkMeta.filePath}
             displayPath={fileLinkMeta.displayPath}
@@ -560,12 +616,10 @@ function ChatMarkdown({
             theme={resolvedTheme}
             threadRef={threadRef}
             onOpen={openInPreferredEditor}
+            onResolveTarget={resolveMarkdownFileActionTarget}
+            onOpenInPanel={openFileInPanel}
             onOpenInBrowser={
-              threadRef &&
-              isPreviewSupportedInRuntime() &&
-              isBrowserPreviewFile(fileLinkMeta.filePath)
-                ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
-                : undefined
+              threadRef && isPreviewSupportedInRuntime() ? openMarkdownFileInPreview : undefined
             }
             className={props.className}
           />
@@ -575,6 +629,7 @@ function ChatMarkdown({
       {
         return <MarkdownTable {...props} />
       },
+      img: MarkdownImage,
       details({ node: _node, children, open: detailsOpen })
       {
         return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>
@@ -648,9 +703,11 @@ function ChatMarkdown({
       markdownFileLinkMetaByHref,
       onTaskListChange,
       orchestratePlanActions,
+      openFileInPanel,
       openInPreferredEditor,
       openExternalLinkInPreview,
       openMarkdownFileInPreview,
+      resolveMarkdownFileActionTarget,
       resolvedTheme,
       skills,
       threadRef,
@@ -688,6 +745,7 @@ function ChatMarkdown({
           text={streamingSegments.completedPrefix}
           components={completedMarkdownComponents}
           lineBreaks={lineBreaks}
+          parseRawHtml={parseRawHtml}
           urlTransform={markdownUrlTransform}
         />
       ) : null}
@@ -696,6 +754,7 @@ function ChatMarkdown({
           text={streamingSegments.activeTail}
           components={activeMarkdownComponents}
           lineBreaks={lineBreaks}
+          parseRawHtml={parseRawHtml}
           urlTransform={markdownUrlTransform}
         />
       ) : null}

@@ -1,0 +1,154 @@
+// tests/apps/web/components/markdown/links.test.tsx
+// verify mounted markdown file-link routing and lookup races
+
+// @vitest-environment happy-dom
+
+import { scopeThreadRef } from '@t3tools/client-runtime/environment'
+import { EnvironmentId, ThreadId } from '@t3tools/contracts'
+import { AsyncResult } from 'effect/unstable/reactivity'
+import { act, type ReactNode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { describe, expect, it, vi } from 'vite-plus/test'
+
+import {
+  resolveWorkspaceFileActionTarget,
+  type WorkspaceEntryCandidate,
+  type WorkspaceFileActionSource,
+} from '../../../../../apps/web/src/lib/workspaceBasenameLookup'
+
+vi.mock('../../../../../apps/web/src/components/ui/tooltip', () => ({
+  Tooltip: (props: { readonly children: ReactNode }) => <>{props.children}</>,
+  TooltipTrigger: (props: { readonly render: ReactNode }) => props.render,
+  TooltipPopup: (props: { readonly children: ReactNode }) => <span>{props.children}</span>,
+}))
+vi.mock('../../../../../apps/web/src/components/chat/FileTagChip', () => ({
+  CHAT_FILE_TAG_CHIP_CLASS_NAME: 'file-chip',
+  FileTagChipContent: (props: { readonly label: string }) => <span>{props.label}</span>,
+}))
+vi.mock('../../../../../apps/web/src/components/ui/toast', () => ({
+  stackedThreadToast: (toast: unknown) => toast,
+  toastManager: { add: vi.fn() },
+}))
+vi.mock('../../../../../apps/web/src/browser/openFileInPreview', () => ({
+  isBrowserPreviewFile: (path: string) => /\.(?:html?|pdf)$/i.test(path),
+}))
+
+import { MarkdownFileLink } from '../../../../../apps/web/src/components/markdown/links'
+
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+
+const THREAD_REF = scopeThreadRef(
+  EnvironmentId.make('environment-markdown-links'),
+  ThreadId.make('thread-markdown-links'),
+)
+
+function deferred<T>()
+{
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((complete) =>
+  {
+    resolve = complete
+  })
+  return { promise, resolve }
+}
+
+async function flushMicrotasks(): Promise<void>
+{
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+describe('MarkdownFileLink', () =>
+{
+  it('awaits bare preview resolution and prevents an older click from winning', async () =>
+  {
+    const firstSearch = deferred<ReadonlyArray<WorkspaceEntryCandidate>>()
+    const openInBrowser = vi.fn(async () => AsyncResult.success(undefined))
+    const openInEditor = vi.fn(async () => AsyncResult.success(undefined))
+    const openInPanel = vi.fn()
+    const resolveTarget = (source: WorkspaceFileActionSource) =>
+      resolveWorkspaceFileActionTarget({
+        source,
+        cwd: '/repo',
+        searchEntries: (basename) =>
+          basename === 'index.html'
+            ? firstSearch.promise
+            : Promise.resolve([{ path: 'docs/report.pdf', kind: 'file' as const }]),
+      })
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    try
+    {
+      await act(async () =>
+      {
+        root.render(
+          <>
+            <MarkdownFileLink
+              href="/repo/index.html"
+              filePath="/repo/index.html"
+              targetPath="/repo/index.html"
+              iconPath="/repo/index.html"
+              displayPath="index.html"
+              workspaceRelativePath="index.html"
+              label="index.html"
+              copyMarkdown="[index.html](index.html)"
+              theme="dark"
+              threadRef={THREAD_REF}
+              onOpen={openInEditor}
+              onResolveTarget={resolveTarget}
+              onOpenInPanel={openInPanel}
+              onOpenInBrowser={openInBrowser}
+            />
+            <MarkdownFileLink
+              href="/repo/report.pdf"
+              filePath="/repo/report.pdf"
+              targetPath="/repo/report.pdf"
+              iconPath="/repo/report.pdf"
+              displayPath="report.pdf"
+              workspaceRelativePath="report.pdf"
+              label="report.pdf"
+              copyMarkdown="[report.pdf](report.pdf)"
+              theme="dark"
+              threadRef={THREAD_REF}
+              onOpen={openInEditor}
+              onResolveTarget={resolveTarget}
+              onOpenInPanel={openInPanel}
+              onOpenInBrowser={openInBrowser}
+            />
+          </>,
+        )
+      })
+      const links = container.querySelectorAll<HTMLAnchorElement>('a')
+
+      act(() => links[0]?.click())
+      await flushMicrotasks()
+      expect(openInBrowser).not.toHaveBeenCalled()
+
+      await act(async () =>
+      {
+        links[1]?.click()
+        await flushMicrotasks()
+      })
+      expect(openInBrowser).toHaveBeenCalledTimes(1)
+      expect(openInBrowser).toHaveBeenCalledWith('/repo/docs/report.pdf')
+
+      await act(async () =>
+      {
+        firstSearch.resolve([{ path: 'stale/index.html', kind: 'file' }])
+        await flushMicrotasks()
+      })
+      expect(openInBrowser).toHaveBeenCalledTimes(1)
+      expect(openInPanel).not.toHaveBeenCalled()
+      expect(openInEditor).not.toHaveBeenCalled()
+    }
+    finally
+    {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+})

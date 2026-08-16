@@ -478,6 +478,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
             skills={props.skills}
             className="text-foreground"
             lineBreaks
+            parseRawHtml={false}
           />
         ) : null}
         {trailingWhitespace ? <span aria-hidden="true">{trailingWhitespace}</span> : null}
@@ -501,6 +502,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
                   skills={props.skills}
                   className="text-foreground"
                   lineBreaks
+                  parseRawHtml={false}
                 />
               </div>
             ) : null
@@ -598,6 +600,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
           skills={props.skills}
           className="text-foreground"
           lineBreaks
+          parseRawHtml={false}
         />,
       )
     }
@@ -626,6 +629,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       skills={props.skills}
       className="text-foreground"
       lineBreaks
+      parseRawHtml={false}
     />
   )
 })
@@ -662,6 +666,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           threadRef={ctx.threadRef ?? undefined}
           skills={ctx.skills}
           className="text-foreground"
+          parseRawHtml={false}
         />
       )}
       {renderablePatch?.kind === 'files' &&

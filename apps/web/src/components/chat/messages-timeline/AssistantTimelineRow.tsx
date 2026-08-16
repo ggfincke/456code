@@ -76,6 +76,7 @@ import { MessageCopyButton } from '../MessageCopyButton'
 import {
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  shouldPreserveAssistantLineBreaks,
   type MessagesTimelineRow,
 } from './MessagesTimeline.logic'
 import type { OrchestratePlanActions } from '../OrchestratePlanCard'
@@ -116,6 +117,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
           cwd={ctx.markdownCwd}
           threadRef={ctx.threadRef ?? undefined}
           isStreaming={Boolean(row.message.streaming)}
+          lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
           skills={ctx.skills}
           orchestratePlanActions={ctx.orchestratePlanActions}
         />
