@@ -57,6 +57,8 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `terminal.split`: split terminal (in focused terminal context by default)
 - `terminal.new`: create new terminal (in focused terminal context by default)
 - `terminal.close`: close/kill the focused terminal (in focused terminal context by default)
+- `rightPanel.toggle`: open or close the right panel
+- `rightPanel.toggleMaximized`: maximize or restore the open right panel (unbound by default)
 - `preview.toggle`: open/close the in-app browser preview panel (desktop app only)
 - `preview.refresh`: reload the active preview tab (in focused preview context by default)
 - `preview.focusUrl`: focus the URL input of the preview panel (in focused preview context by default)

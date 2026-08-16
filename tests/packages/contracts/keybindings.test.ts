@@ -8,6 +8,7 @@ import * as Effect from 'effect/Effect'
 import {
   KeybindingRule,
   ResolvedKeybindingRule,
+  STATIC_KEYBINDING_COMMANDS,
 } from '../../../packages/contracts/src/keybindings.ts'
 
 const decode = <S extends Schema.Top>(
@@ -30,6 +31,18 @@ it.effect('parses keybinding rules', () =>
       command: 'terminal.toggle',
     })
     assert.strictEqual(parsed.command, 'terminal.toggle')
+  }),
+)
+
+it.effect('catalogs unbound static commands as valid rules', () =>
+  Effect.gen(function* ()
+  {
+    assert.include(STATIC_KEYBINDING_COMMANDS, 'rightPanel.toggleMaximized')
+    const parsed = yield* decode(KeybindingRule, {
+      key: 'mod+shift+m',
+      command: 'rightPanel.toggleMaximized',
+    })
+    assert.strictEqual(parsed.command, 'rightPanel.toggleMaximized')
   }),
 )
 

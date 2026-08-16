@@ -659,6 +659,23 @@ describe('resolveShortcutCommand', () =>
     )
   })
 
+  it('resolves a custom right panel maximize binding', () =>
+  {
+    const keybindings = compile([
+      {
+        shortcut: modShortcut('m', { shiftKey: true }),
+        command: 'rightPanel.toggleMaximized',
+      },
+    ])
+
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: 'm', metaKey: true, shiftKey: true }), keybindings, {
+        platform: 'MacIntel',
+      }),
+      'rightPanel.toggleMaximized',
+    )
+  })
+
   it('matches non-Latin layout letters using the physical key code', () =>
   {
     const keybindings = compile([{ shortcut: modShortcut('d'), command: 'diff.toggle' }])
