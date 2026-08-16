@@ -21,6 +21,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Parse PowerShell acceptance script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/windows-desktop-acceptance.ps1").Path,
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:

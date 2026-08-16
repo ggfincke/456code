@@ -421,6 +421,21 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   )
 
+  it.effect('avoids numeric separators unsupported by PowerShell', () =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const script = yield* fs.readFileString(
+        path.resolve(import.meta.dirname, '../../scripts/windows-desktop-acceptance.ps1'),
+      )
+      const numericSeparators =
+        script.match(/\b(?:0[xX][\dA-Fa-f]+|0[bB][01]+|0[oO][0-7]+|\d+)_[\dA-Fa-f_]+\b/gu) ?? []
+
+      assert.deepStrictEqual(numericSeparators, [])
+    }),
+  )
+
   it.effect('packs a digest-addressed Windows server sidecar with exact native unpacking', () =>
     Effect.scoped(
       Effect.gen(function* ()

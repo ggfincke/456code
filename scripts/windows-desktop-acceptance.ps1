@@ -98,7 +98,7 @@ function Invoke-CdpExpression {
     $stream = [IO.MemoryStream]::new()
     try {
       do {
-        $buffer = [byte[]]::new(65_536)
+        $buffer = [byte[]]::new(65536)
         $receiveSegment = [ArraySegment[byte]]::new($buffer)
         $received = $Socket.ReceiveAsync(
           $receiveSegment,
@@ -114,16 +114,20 @@ function Invoke-CdpExpression {
       $stream.Dispose()
     }
     $response = $responseText | ConvertFrom-Json -Depth 20
-    if ($response.id -ne $messageId) {
+    $idProperty = $response.PSObject.Properties["id"]
+    if ($null -eq $idProperty -or $idProperty.Value -ne $messageId) {
       continue
     }
-    if ($response.error) {
-      throw "CDP error: $($response.error | ConvertTo-Json -Compress)"
+    $errorProperty = $response.PSObject.Properties["error"]
+    if ($null -ne $errorProperty) {
+      throw "CDP error: $($errorProperty.Value | ConvertTo-Json -Compress)"
     }
-    if ($response.result.exceptionDetails) {
-      throw "Renderer exception: $($response.result.exceptionDetails | ConvertTo-Json -Depth 10 -Compress)"
+    $result = $response.result
+    $exceptionProperty = $result.PSObject.Properties["exceptionDetails"]
+    if ($null -ne $exceptionProperty) {
+      throw "Renderer exception: $($exceptionProperty.Value | ConvertTo-Json -Depth 10 -Compress)"
     }
-    return $response.result.result.value
+    return $result.result.value
   }
 }
 
@@ -134,13 +138,14 @@ function Connect-DesktopBridge {
     try {
       $targets = @(Invoke-RestMethod "http://127.0.0.1:$Port/json/list" -TimeoutSec 3)
       foreach ($target in $targets) {
-        if (-not $target.webSocketDebuggerUrl) {
+        $debuggerUrlProperty = $target.PSObject.Properties["webSocketDebuggerUrl"]
+        if ($null -eq $debuggerUrlProperty -or -not $debuggerUrlProperty.Value) {
           continue
         }
         $socket = [System.Net.WebSockets.ClientWebSocket]::new()
         try {
           $socket.ConnectAsync(
-            [Uri]$target.webSocketDebuggerUrl,
+            [Uri]$debuggerUrlProperty.Value,
             [Threading.CancellationToken]::None
           ).GetAwaiter().GetResult()
           $bridgeType = Invoke-CdpExpression $socket "typeof window.desktopBridge" $false
@@ -362,7 +367,12 @@ try {
 
   $fallbackLog = Read-FeedLog $feedLog
   Assert-Condition (@($fallbackLog | Where-Object { $_.path -eq "/$($blockmapN.Name)" -and $_.status -eq 404 }).Count -gt 0) "Fallback path did not observe the missing N blockmap."
-  Assert-Condition (@($fallbackLog | Where-Object { $_.path -eq "/$($installerN1.Name)" -and $_.status -eq 200 -and -not $_.range }).Count -gt 0) "Fallback path did not download the complete installer."
+  Assert-Condition (@($fallbackLog | Where-Object {
+    $rangeProperty = $_.PSObject.Properties["range"]
+    $_.path -eq "/$($installerN1.Name)" -and
+      $_.status -eq 200 -and
+      ($null -eq $rangeProperty -or -not $rangeProperty.Value)
+  }).Count -gt 0) "Fallback path did not download the complete installer."
 
   Wait-Until -Description "updater-triggered N+1 relaunch" -TimeoutSeconds 180 -Probe {
     $currentProcessIds = @(Get-InstalledExecutableProcessIds $appExe.FullName)
