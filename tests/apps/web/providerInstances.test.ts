@@ -12,6 +12,7 @@ import {
   resolveDefaultProviderModelSelection,
   resolveSelectableProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
+  shouldShowInstanceBadge,
 } from '../../../apps/web/src/providerInstances'
 
 function provider(input: {
@@ -20,6 +21,7 @@ function provider(input: {
   enabled?: boolean
   availability?: ServerProvider['availability']
   displayName?: string
+  accentColor?: string
   status?: ServerProvider['status']
   models?: ServerProvider['models']
 }): ServerProvider
@@ -28,6 +30,7 @@ function provider(input: {
     instanceId: ProviderInstanceId.make(input.instanceId),
     driver: input.provider,
     ...(input.displayName ? { displayName: input.displayName } : {}),
+    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     enabled: input.enabled ?? true,
     installed: true,
     version: null,
@@ -90,6 +93,53 @@ describe('isProviderInstancePickerVisible', () =>
 
     expect(enabledEntry && isProviderInstancePickerVisible(enabledEntry)).toBe(true)
     expect(disabledEntry && isProviderInstancePickerVisible(disabledEntry)).toBe(false)
+  })
+})
+
+describe('shouldShowInstanceBadge', () =>
+{
+  it.each([
+    {
+      name: 'one unaccented instance',
+      providers: [provider({ provider: ProviderDriverKind.make('codex'), instanceId: 'codex' })],
+      expected: false,
+    },
+    {
+      name: 'one accented instance',
+      providers: [
+        provider({
+          provider: ProviderDriverKind.make('codex'),
+          instanceId: 'codex',
+          accentColor: '#123456',
+        }),
+      ],
+      expected: true,
+    },
+    {
+      name: 'two instances sharing a driver',
+      providers: [
+        provider({ provider: ProviderDriverKind.make('codex'), instanceId: 'codex' }),
+        provider({ provider: ProviderDriverKind.make('codex'), instanceId: 'codex_work' }),
+      ],
+      expected: true,
+    },
+    {
+      name: 'instances using distinct drivers',
+      providers: [
+        provider({ provider: ProviderDriverKind.make('codex'), instanceId: 'codex' }),
+        provider({
+          provider: ProviderDriverKind.make('claudeAgent'),
+          instanceId: 'claudeAgent',
+        }),
+      ],
+      expected: false,
+    },
+  ])('$name follows the shared badge policy', ({ providers, expected }) =>
+  {
+    const entries = deriveProviderInstanceEntries(providers)
+    const entry = entries[0]
+
+    expect(entry && shouldShowInstanceBadge(entry, entries)).toBe(expected)
   })
 })
 

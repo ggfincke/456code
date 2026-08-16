@@ -106,6 +106,22 @@ function driverKindLabel(driverKind: ProviderDriverKind): string
   return PROVIDER_DISPLAY_NAMES[driverKind] ?? formatProviderDriverKindLabel(driverKind)
 }
 
+// show an account badge when an accent is configured or the provider glyph
+// alone cannot distinguish multiple instances backed by the same driver.
+export function shouldShowInstanceBadge(
+  entry: ProviderInstanceEntry,
+  entries: Iterable<ProviderInstanceEntry>,
+): boolean
+{
+  if (entry.accentColor) return true
+  let sharedDriverCount = 0
+  for (const candidate of entries)
+  {
+    if (candidate.driverKind === entry.driverKind && ++sharedDriverCount > 1) return true
+  }
+  return false
+}
+
 export function normalizeProviderAccentColor(value: string | undefined): string | undefined
 {
   const trimmed = value?.trim()

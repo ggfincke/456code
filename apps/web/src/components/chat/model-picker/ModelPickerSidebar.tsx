@@ -2,13 +2,14 @@
 // render model picker sidebar
 
 import { type ProviderInstanceId } from '@t3tools/contracts'
-import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useLayoutEffect, useRef, useState } from 'react'
 import { SparklesIcon, StarIcon } from 'lucide-react'
 import { ProviderInstanceIcon } from '../ProviderInstanceIcon'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { cn } from '~/lib/utils'
 import {
   isProviderInstancePickerReady,
+  shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from '../../../providerInstances'
 
@@ -70,15 +71,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   const [hoveredInstanceId, setHoveredInstanceId] = useState<ProviderInstanceId | null>(null)
   const sidebarContentRef = useRef<HTMLDivElement>(null)
   const [selectedIndicatorTop, setSelectedIndicatorTop] = useState<number | null>(null)
-  const duplicateDriverCounts = useMemo(() =>
-  {
-    const counts = new Map<string, number>()
-    for (const entry of props.instanceEntries)
-    {
-      counts.set(entry.driverKind, (counts.get(entry.driverKind) ?? 0) + 1)
-    }
-    return counts
-  }, [props.instanceEntries])
 
   useLayoutEffect(() =>
   {
@@ -168,8 +160,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             const isSelected = props.selectedInstanceId === entry.instanceId
             const isHovered = hoveredInstanceId === entry.instanceId
             const showNewBadge = props.newBadgeInstanceIds?.has(entry.instanceId) ?? false
-            const showInstanceBadge =
-              Boolean(entry.accentColor) || (duplicateDriverCounts.get(entry.driverKind) ?? 0) > 1
+            const showInstanceBadge = shouldShowInstanceBadge(entry, props.instanceEntries)
 
             const tooltip = isUnavailable
               ? describeUnavailableInstance(entry)

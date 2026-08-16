@@ -135,7 +135,11 @@ import {
 import { ProjectFavicon } from './ProjectFavicon'
 import { ProviderInstanceIcon } from './chat/ProviderInstanceIcon'
 import { getTriggerDisplayModelLabel } from './chat/providerIconUtils'
-import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from '../providerInstances'
+import {
+  deriveProviderInstanceEntries,
+  shouldShowInstanceBadge,
+  type ProviderInstanceEntry,
+} from '../providerInstances'
 import { primaryServerProvidersAtom } from '../state/server'
 import { stackedThreadToast, toastManager } from './ui/toast'
 import { CommandDialogTrigger } from './ui/command'
@@ -353,7 +357,8 @@ function SidebarV2ThreadTooltip({
   projectTitle,
   projectCwd,
   environmentLabel,
-  driverKind,
+  providerEntry,
+  showInstanceBadge,
   modelInstanceId,
   modelLabel,
   branchMismatch,
@@ -362,7 +367,8 @@ function SidebarV2ThreadTooltip({
   projectTitle: string | null
   projectCwd: string | null
   environmentLabel: string | null
-  driverKind: ProviderInstanceEntry['driverKind'] | null
+  providerEntry: ProviderInstanceEntry | null
+  showInstanceBadge: boolean
   modelInstanceId: string
   modelLabel: string
   branchMismatch: {
@@ -371,6 +377,7 @@ function SidebarV2ThreadTooltip({
   } | null
 })
 {
+  const driverKind = providerEntry?.driverKind ?? null
   return (
     <TooltipPopup
       side="right"
@@ -419,10 +426,20 @@ function SidebarV2ThreadTooltip({
             <div className="flex min-w-0 items-center gap-2">
               <ProviderInstanceIcon
                 driverKind={driverKind}
-                displayName={thread.session?.providerName ?? modelInstanceId}
+                displayName={
+                  providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
+                }
+                accentColor={providerEntry?.accentColor}
+                showBadge={showInstanceBadge && providerEntry?.accentColor !== undefined}
+                badgeContent="none"
+                badgeClassName="h-2 min-w-2 px-0"
                 iconClassName="size-4 shrink-0"
               />
-              <div className="min-w-0 wrap-break-word text-foreground/90">{modelLabel}</div>
+              <div className="min-w-0 wrap-break-word text-foreground/90">
+                {showInstanceBadge && providerEntry
+                  ? `${modelLabel} · ${providerEntry.displayName}`
+                  : modelLabel}
+              </div>
             </div>
           ) : null}
           {thread.origin ? (
@@ -745,6 +762,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null
   const driverKind = providerEntry?.driverKind ?? null
+  const showInstanceBadge =
+    providerEntry !== null &&
+    shouldShowInstanceBadge(providerEntry, props.providerEntryByInstanceId.values())
   const selectedModel = providerEntry?.models.find(
     (model) => model.slug === thread.modelSelection.model,
   )
@@ -779,7 +799,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
       projectTitle={props.projectTitle}
       projectCwd={props.projectCwd}
       environmentLabel={props.environmentLabel}
-      driverKind={driverKind}
+      providerEntry={providerEntry}
+      showInstanceBadge={showInstanceBadge}
       modelInstanceId={modelInstanceId}
       modelLabel={modelLabel}
       branchMismatch={branchMismatch}
@@ -1254,11 +1275,18 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                   </span>
                 ) : null}
                 {driverKind ? (
-                  <span className="inline-flex shrink-0 items-center opacity-60">
+                  <span className="inline-flex shrink-0 items-center">
                     <ProviderInstanceIcon
                       driverKind={driverKind}
-                      displayName={thread.session?.providerName ?? modelInstanceId}
-                      iconClassName="size-3.5"
+                      displayName={
+                        providerEntry?.displayName ??
+                        thread.session?.providerName ??
+                        modelInstanceId
+                      }
+                      accentColor={providerEntry?.accentColor}
+                      showBadge={showInstanceBadge}
+                      iconClassName="size-3.5 opacity-60"
+                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
                     />
                   </span>
                 ) : null}
