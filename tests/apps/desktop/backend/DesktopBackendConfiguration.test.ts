@@ -20,6 +20,7 @@ import * as DesktopConfig from '../../../../apps/desktop/src/app/DesktopConfig.t
 import * as DesktopServerExposure from '../../../../apps/desktop/src/backend/DesktopServerExposure.ts'
 import * as DesktopAppSettings from '../../../../apps/desktop/src/settings/DesktopAppSettings.ts'
 import * as DesktopWslEnvironment from '../../../../apps/desktop/src/wsl/DesktopWslEnvironment.ts'
+import * as DesktopWslServerTree from '../../../../apps/desktop/src/wsl/DesktopWslServerTree.ts'
 
 const PersistedServerObservabilitySettingsDocument = Schema.Struct({
   observability: Schema.Struct({
@@ -62,7 +63,7 @@ function makeEnvironmentLayer(
   },
 )
 {
-  return DesktopEnvironment.layer({
+  const environmentLayer = DesktopEnvironment.layer({
     dirname: '/repo/apps/desktop/src',
     homeDirectory: baseDir,
     platform: options?.platform ?? 'darwin',
@@ -86,6 +87,8 @@ function makeEnvironmentLayer(
       ),
     ),
   )
+
+  return DesktopWslServerTree.layerTest().pipe(Layer.provideMerge(environmentLayer))
 }
 
 const restoreEnv = (name: string, value: string | undefined) =>
@@ -185,7 +188,7 @@ describe('DesktopBackendConfiguration', () =>
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: 't3-desktop-backend-config-test-',
       })
-      const entryPath = path.join(baseDir, 'app.asar.unpacked/apps/server/dist/bin.mjs')
+      const entryPath = path.join(baseDir, 'apps/server/dist/bin.mjs')
       yield* fileSystem.makeDirectory(path.dirname(entryPath), { recursive: true })
       yield* fileSystem.writeFileString(entryPath, '')
 
@@ -251,7 +254,7 @@ describe('DesktopBackendConfiguration', () =>
         const baseDir = yield* fileSystem.makeTempDirectoryScoped({
           prefix: 't3-desktop-backend-config-test-',
         })
-        const entryPath = path.join(baseDir, 'app.asar.unpacked/apps/server/dist/bin.mjs')
+        const entryPath = path.join(baseDir, 'apps/server/dist/bin.mjs')
         yield* fileSystem.makeDirectory(path.dirname(entryPath), { recursive: true })
         yield* fileSystem.writeFileString(entryPath, '')
 

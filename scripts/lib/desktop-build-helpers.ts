@@ -32,6 +32,7 @@ export interface StageWorkspaceConfig
   readonly allowBuilds?: Record<string, boolean>
   readonly patchedDependencies?: Record<string, string>
   readonly overrides?: Record<string, string>
+  readonly nodeLinker?: 'hoisted'
 }
 
 export function resolveFffNativeDependencies(
@@ -69,15 +70,17 @@ export function createStageWorkspaceConfig(input: {
   readonly allowBuilds?: Record<string, boolean>
   readonly patchedDependencies?: Record<string, string>
   readonly overrides?: Record<string, string>
+  // the Windows sidecar is also extracted for WSL, so it needs one physical
+  // dependency tree containing both win32 and Linux native packages
+  readonly linuxServerBackend?: boolean
 }): StageWorkspaceConfig
 {
-  const { platform, arch, allowBuilds, patchedDependencies, overrides } = input
+  const { platform, arch, allowBuilds, patchedDependencies, overrides, linuxServerBackend } = input
   const hostOs = platform === 'mac' ? 'darwin' : platform === 'win' ? 'win32' : 'linux'
   const hostCpu = arch === 'universal' ? ['arm64', 'x64'] : [arch]
-  // linux AppImages and Windows WSL backends both execute a Linux/glibc Node
-  // process that loads Linux-native optional deps at runtime (e.g.
-  // @yuuang/ffi-rs-linux-x64-gnu). Keep libc explicit so pnpm includes those
-  // optional packages in the staged production install.
+  // linux AppImages execute a Linux/glibc Node process that loads Linux-native
+  // optional deps at runtime. The ordinary Windows app stage stays win32-only;
+  // its separate server stage opts into the dual-platform tree below.
   const supportedArchitectures =
     platform === 'linux'
       ? {
@@ -85,7 +88,7 @@ export function createStageWorkspaceConfig(input: {
           cpu: hostCpu,
           libc: ['glibc'],
         }
-      : platform === 'win'
+      : linuxServerBackend
         ? {
             os: Array.from(new Set([hostOs, 'linux'])),
             cpu: hostCpu,
@@ -103,6 +106,7 @@ export function createStageWorkspaceConfig(input: {
       ? { patchedDependencies }
       : {}),
     ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
+    ...(linuxServerBackend ? { nodeLinker: 'hoisted' as const } : {}),
   }
 }
 

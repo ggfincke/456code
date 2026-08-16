@@ -55,6 +55,8 @@ export class DesktopEnvironment extends Context.Service<
     readonly browserArtifactsDir: string
     readonly rootDir: string
     readonly appRoot: string
+    // root containing apps/server/dist and the server runtime dependencies
+    readonly serverRoot: string
     readonly backendEntryPath: string
     readonly backendCwd: string
     readonly preloadPath: string
@@ -162,6 +164,10 @@ const make = Effect.fn('desktop.environment.make')(function* (
   const baseDir = Option.getOrElse(configuredBaseDir, () => path.join(homeDirectory, '.456code'))
   const rootDir = path.resolve(input.dirname, '../../..')
   const appRoot = input.isPackaged ? input.appPath : rootDir
+  const serverRoot =
+    input.isPackaged && input.platform === 'win32'
+      ? path.join(input.resourcesPath, 'server.asar')
+      : appRoot
   const branding = resolveDesktopAppBranding({
     isDevelopment,
     appVersion: input.appVersion,
@@ -196,7 +202,8 @@ const make = Effect.fn('desktop.environment.make')(function* (
     browserArtifactsDir: path.join(stateDir, 'browser-artifacts'),
     rootDir,
     appRoot,
-    backendEntryPath: path.join(appRoot, 'apps/server/dist/bin.mjs'),
+    serverRoot,
+    backendEntryPath: path.join(serverRoot, 'apps/server/dist/bin.mjs'),
     backendCwd: input.isPackaged ? homeDirectory : appRoot,
     preloadPath: path.join(input.dirname, 'preload.cjs'),
     appUpdateYmlPath: input.isPackaged

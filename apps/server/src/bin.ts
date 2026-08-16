@@ -15,6 +15,8 @@ import { projectCommand } from './cli/project.ts'
 import { runServerCommand, serveCommand, startCommand } from './cli/server.ts'
 import { serviceCommand } from './cli/service.ts'
 
+export { createCartographerAnalyzerIdentifier } from './cartographer/CartographerAnalyzer.ts'
+
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer)
 
 export const makeCli = () =>

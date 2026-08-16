@@ -5,8 +5,10 @@ import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
+import * as Path from 'effect/Path'
 import * as Sink from 'effect/Sink'
 import * as Stream from 'effect/Stream'
 import { ChildProcessSpawner } from 'effect/unstable/process'
@@ -16,7 +18,9 @@ import {
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
   createBuildConfig,
+  DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_ASAR_UNPACK,
+  hashFileSha256,
   InvalidMockUpdateServerPortError,
   LinuxIconResizeError,
   resolveDesktopRuntimeDependencies,
@@ -31,6 +35,14 @@ import {
   resolveMockUpdateServerUrl,
   resolvePackageManagerUserAgent,
   stageLinuxIconSize,
+  packWindowsServerAsar,
+  validateWindowsPackagedPayload,
+  validateWindowsServerSidecar,
+  WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
+  WINDOWS_SERVER_ASAR_RESOURCE,
+  WINDOWS_SERVER_EXTRA_RESOURCES,
+  WINDOWS_SERVER_PAYLOAD_DIGEST_RESOURCE,
+  WINDOWS_SERVER_REQUIRED_ENTRIES,
 } from '../../scripts/build-desktop-artifact.ts'
 import { BRAND_ASSET_PATHS } from '../../scripts/lib/brand-assets.ts'
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
@@ -74,6 +86,29 @@ function iconResizeSpawnerLayer(
     }),
   )
 }
+
+const stageWindowsServerFixture = Effect.fn('test.stageWindowsServerFixture')(function* (
+  sourceDir: string,
+)
+{
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  for (const entry of WINDOWS_SERVER_REQUIRED_ENTRIES)
+  {
+    const entryPath = path.join(sourceDir, ...entry.split('/'))
+    yield* fs.makeDirectory(path.dirname(entryPath), { recursive: true })
+    yield* fs.writeFileString(
+      entryPath,
+      entry.endsWith('bin.mjs') ? "console.log('fixture-version')\n" : '{}\n',
+    )
+  }
+  const nativePath = path.join(sourceDir, 'node_modules/node-pty/build/Release/pty.node')
+  yield* fs.makeDirectory(path.dirname(nativePath), { recursive: true })
+  yield* fs.writeFileString(nativePath, 'native-fixture')
+  yield* fs.makeDirectory(path.join(sourceDir, 'node_modules/.bin'), { recursive: true })
+  yield* fs.writeFileString(path.join(sourceDir, 'node_modules/.bin/unused'), 'ignored')
+  return nativePath
+})
 
 it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
 {
@@ -220,17 +255,27 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
         libc: ['glibc'],
       },
     })
-    // windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
-    // staged install must fetch its native optional deps (e.g. ffi-rs) too.
+    // the app stage is win32-only; the server sidecar separately opts into a
+    // physical dual-platform dependency tree for the primary and WSL backends
     for (const arch of ['x64', 'arm64'] as const)
     {
       assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'win', arch }), {
         supportedArchitectures: {
-          os: ['win32', 'linux'],
+          os: ['win32'],
           cpu: [arch],
-          libc: ['glibc'],
         },
       })
+      assert.deepStrictEqual(
+        createStageWorkspaceConfig({ platform: 'win', arch, linuxServerBackend: true }),
+        {
+          supportedArchitectures: {
+            os: ['win32', 'linux'],
+            cpu: [arch],
+            libc: ['glibc'],
+          },
+          nodeLinker: 'hoisted',
+        },
+      )
     }
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'mac', arch: 'universal' }), {
       supportedArchitectures: {
@@ -352,6 +397,9 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
 
       const mac = config.mac as Record<string, unknown>
       assert.equal(config.appId, 'com.ggfincke.456code')
+      assert.deepStrictEqual(config.files, DESKTOP_FILE_EXCLUSIONS)
+      assert.deepStrictEqual(config.asarUnpack, DESKTOP_ASAR_UNPACK)
+      assert.notProperty(config, 'extraResources')
       assert.deepStrictEqual(mac.protocols, [
         { name: '456code', schemes: ['code456', 'code456-dev'] },
       ])
@@ -367,7 +415,111 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
       assert.equal(win.icon, 'icon.ico')
       assert.equal(win.signAndEditExecutable, true)
       assert.notProperty(win, 'azureSignOptions')
+      assert.notProperty(config, 'asarUnpack')
+      assert.deepStrictEqual(config.extraResources, WINDOWS_SERVER_EXTRA_RESOURCES)
+      assert.deepStrictEqual(config.nsis, { differentialPackage: true })
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  )
+
+  it.effect('packs a digest-addressed Windows server sidecar with exact native unpacking', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const tempDir = yield* fs.makeTempDirectoryScoped({
+          prefix: '456code-windows-sidecar-test-',
+        })
+        const sourceDir = path.join(tempDir, 'source')
+        const asarPath = path.join(tempDir, WINDOWS_SERVER_ASAR_RESOURCE)
+        const digestPath = path.join(tempDir, WINDOWS_SERVER_PAYLOAD_DIGEST_RESOURCE)
+        yield* stageWindowsServerFixture(sourceDir)
+
+        const packed = yield* packWindowsServerAsar({ sourceDir, asarPath, digestPath })
+        assert.match(packed.payloadDigest, /^[0-9a-f]{64}$/u)
+        assert.equal((yield* fs.readFileString(digestPath)).trim(), packed.payloadDigest)
+        assert.equal(yield* hashFileSha256(asarPath), packed.payloadDigest)
+        assert.deepStrictEqual(packed.unpackedFiles, [
+          'node_modules/node-pty/build/Release/pty.node',
+        ])
+        assert.isTrue(
+          yield* fs.exists(
+            path.join(`${asarPath}.unpacked`, 'node_modules/node-pty/build/Release/pty.node'),
+          ),
+        )
+
+        yield* fs.writeFileString(digestPath, `${'b'.repeat(64)}\n`)
+        const digestError = yield* validateWindowsServerSidecar({ asarPath, digestPath }).pipe(
+          Effect.flip,
+        )
+        assert.include(digestError.message, 'payload digest mismatch')
+
+        yield* fs.writeFileString(digestPath, `${packed.payloadDigest}\n`)
+        yield* fs.remove(
+          path.join(`${asarPath}.unpacked`, 'node_modules/node-pty/build/Release/pty.node'),
+        )
+        const nativeError = yield* validateWindowsServerSidecar({ asarPath, digestPath }).pipe(
+          Effect.flip,
+        )
+        assert.include(nativeError.message, 'unpacked native files are missing')
+      }),
+    ),
+  )
+
+  it.effect('rejects links in the Windows server sidecar contract', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const tempDir = yield* fs.makeTempDirectoryScoped({
+          prefix: '456code-windows-sidecar-link-test-',
+        })
+        const sourceDir = path.join(tempDir, 'source')
+        yield* stageWindowsServerFixture(sourceDir)
+        yield* fs.symlink('zod', path.join(sourceDir, 'node_modules/zod-link'))
+
+        const error = yield* packWindowsServerAsar({
+          sourceDir,
+          asarPath: path.join(tempDir, WINDOWS_SERVER_ASAR_RESOURCE),
+        }).pipe(Effect.flip)
+        assert.include(error.message, 'unsupported link entries')
+        assert.include(error.message, 'node_modules/zod-link')
+      }),
+    ),
+  )
+
+  it.effect('rejects a packaged Windows payload above the loose-file budget', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const tempDir = yield* fs.makeTempDirectoryScoped({
+          prefix: '456code-windows-payload-limit-test-',
+        })
+        const packagedAppDir = path.join(tempDir, 'dist/win-unpacked')
+        const resourcesDir = path.join(packagedAppDir, 'resources')
+        const sourceDir = path.join(tempDir, 'source')
+        yield* stageWindowsServerFixture(sourceDir)
+        yield* packWindowsServerAsar({
+          sourceDir,
+          asarPath: path.join(resourcesDir, WINDOWS_SERVER_ASAR_RESOURCE),
+        })
+        yield* fs.writeFileString(path.join(resourcesDir, 'app.asar'), 'fixture')
+        yield* fs.writeFileString(path.join(packagedAppDir, '456code.exe'), 'fixture')
+
+        const error = yield* validateWindowsPackagedPayload({
+          stageDistDir: path.join(tempDir, 'dist'),
+          appExecutableName: '456code.exe',
+          targetArch: 'x64',
+          fileLimit: 1,
+        }).pipe(Effect.flip)
+        assert.include(error.message, 'loose files')
+        assert.include(error.message, '1-file install-speed budget')
+        assert.equal(WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT, 256)
+      }),
+    ),
   )
 
   it('promotes target fff binaries to direct staged dependencies', () =>

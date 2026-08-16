@@ -824,6 +824,9 @@ export const make = Effect.gen(function* ()
         yield* electronUpdater.setFeedURL({
           provider: 'generic',
           url: `http://localhost:${config.mockUpdateServerPort}`,
+          // the deterministic local acceptance feed supports ordinary range
+          // requests without multipart responses
+          useMultipleRangeRequest: false,
         } as ElectronUpdater.ElectronUpdaterFeedUrl)
       }
 

@@ -3,7 +3,7 @@
 // build desktop artifact
 
 import { fromYaml } from '@t3tools/shared/schemaYaml'
-import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
+import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import { resolveSpawnCommand } from '@t3tools/shared/shell'
 import rootPackageJson from '../package.json' with { type: 'json' }
 import desktopPackageJson from '../apps/desktop/package.json' with { type: 'json' }
@@ -35,9 +35,18 @@ import {
 import { getDefaultBuildArch } from './lib/build-target-arch.ts'
 import { resolveCatalogDependencies } from './lib/resolve-catalog.ts'
 
+import { createHash } from 'node:crypto'
+import {
+  createPackageWithOptions,
+  extractAll,
+  getRawHeader,
+  statFile,
+  type DirectoryRecord,
+} from '@electron/asar'
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Config from 'effect/Config'
+import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -71,6 +80,48 @@ export function resolveDesktopProductName(version: string): string
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const
 const DESKTOP_APP_ID = 'com.ggfincke.456code'
+export const WINDOWS_SERVER_ASAR_RESOURCE = 'server.asar'
+export const WINDOWS_SERVER_PAYLOAD_DIGEST_RESOURCE = 'server.asar.sha256'
+export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = 'apps/desktop/prod-resources/windows-server'
+export const WINDOWS_SERVER_ASAR_UNPACK_GLOB =
+  '{**/*.node,**/*.dll,**/*.exe,**/*.so,**/*.so.*,**/*.dylib}'
+export const WINDOWS_SERVER_ASAR_IGNORE_GLOBS = [
+  '**/node_modules/@anthropic-ai/claude-agent-sdk-*',
+  '**/node_modules/@anthropic-ai/claude-agent-sdk-*/**',
+  '**/node_modules/.bin',
+  '**/node_modules/.bin/**',
+] as const
+// electron itself and the bounded native sidecars stay loose; a broad
+// node_modules unpack would exceed this by an order of magnitude
+export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 256
+export const WINDOWS_SERVER_REQUIRED_ENTRIES = [
+  'apps/server/dist/bin.mjs',
+  'node_modules/@t3tools/cartographer-core/package.json',
+  'node_modules/@t3tools/cartographer-core/dist/cli/index.js',
+  'node_modules/@t3tools/cartographer-core/dist/server.js',
+  'node_modules/@modelcontextprotocol/sdk/package.json',
+  'node_modules/dependency-cruiser/package.json',
+  'node_modules/typescript/package.json',
+  'node_modules/zod/package.json',
+] as const
+export const WINDOWS_SERVER_EXTRA_RESOURCES = [
+  {
+    from: WINDOWS_SERVER_RESOURCE_SOURCE_DIR,
+    to: '.',
+    filter: [
+      WINDOWS_SERVER_ASAR_RESOURCE,
+      WINDOWS_SERVER_PAYLOAD_DIGEST_RESOURCE,
+      `${WINDOWS_SERVER_ASAR_RESOURCE}.unpacked/**/*`,
+    ],
+  },
+] as const
+export const DESKTOP_FILE_EXCLUSIONS = [
+  '!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*',
+  `!${WINDOWS_SERVER_RESOURCE_SOURCE_DIR}`,
+  `!${WINDOWS_SERVER_RESOURCE_SOURCE_DIR}/**/*`,
+] as const
+const WINDOWS_SERVER_SELF_CHECK_TIMEOUT = Duration.seconds(120)
+const WINDOWS_PRIMARY_NATIVE_PROBE_TIMEOUT = Duration.seconds(30)
 const CARTOGRAPHER_CORE_REQUIRED_BUILD_FILES = [
   'server.js',
   'cli/index.js',
@@ -98,6 +149,7 @@ const StageWorkspaceConfig = Schema.Struct({
   allowBuilds: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   patchedDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  nodeLinker: Schema.optional(Schema.Literal('hoisted')),
 })
 type StageWorkspaceConfig = typeof StageWorkspaceConfig.Type
 
@@ -416,6 +468,55 @@ export class WslNodePtyManifestReadError extends Schema.TaggedErrorClass<WslNode
   override get message(): string
   {
     return `Could not read node-pty version from ${this.manifestPath}.`
+  }
+}
+
+const WindowsServerSidecarOperation = Schema.Literals(['pack', 'hash', 'extract', 'validate'])
+
+export class WindowsServerSidecarError extends Schema.TaggedErrorClass<WindowsServerSidecarError>()(
+  'WindowsServerSidecarError',
+  {
+    operation: WindowsServerSidecarOperation,
+    archivePath: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optionalKey(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Could not ${this.operation} the Windows server sidecar at ${this.archivePath}: ${this.detail}`
+  }
+}
+
+export class WindowsPrimaryNativeProbeError extends Schema.TaggedErrorClass<WindowsPrimaryNativeProbeError>()(
+  'WindowsPrimaryNativeProbeError',
+  {
+    executablePath: Schema.String,
+    exitCode: Schema.Finite,
+    output: Schema.String,
+  },
+)
+{
+  override get message(): string
+  {
+    return `The packaged Windows primary could not load fff from server.asar (exit ${this.exitCode}). Output:\n${this.output}`
+  }
+}
+
+export class WindowsPackagedPayloadValidationError extends Schema.TaggedErrorClass<WindowsPackagedPayloadValidationError>()(
+  'WindowsPackagedPayloadValidationError',
+  {
+    packagedAppDir: Schema.String,
+    detail: Schema.String,
+    missingFiles: Schema.optionalKey(Schema.Array(Schema.String)),
+    cause: Schema.optionalKey(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Windows packaged payload validation failed at ${this.packagedAppDir}: ${this.detail}`
   }
 }
 
@@ -1074,23 +1175,15 @@ export const createBuildConfig = Effect.fn('createBuildConfig')(function* (
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
     artifactName: '456code-${version}-${arch}.${ext}',
+    files: [...DESKTOP_FILE_EXCLUSIONS],
     directories: {
       buildResources: 'apps/desktop/resources',
     },
-    // the Windows primary backend runs the server bundle through
-    // ELECTRON_RUN_AS_NODE (asar-aware), so it reads bin.mjs straight out of
-    // app.asar. The WSL backend instead launches plain `wsl.exe -- node`, which
-    // cannot read inside an asar archive, so everything it loads must be on the
-    // real filesystem. The server bundle externalizes its runtime dependencies
-    // (effect, @effect/*, node-pty, ...) to node_modules rather than inlining
-    // them, so unpacking just the bundle + node-pty isn't enough — the Linux Node
-    // fails with ERR_MODULE_NOT_FOUND (e.g. "Cannot find package 'effect'") before
-    // it even reaches node-pty. Unpack the server bundle AND the whole
-    // node_modules tree so every import resolves (this also covers the fff native
-    // binaries in DESKTOP_ASAR_UNPACK). The Windows primary keeps reading the same
-    // files through the asar (transparently redirected to the unpacked copy), so
-    // there's no duplication.
-    asarUnpack: [...DESKTOP_ASAR_UNPACK, 'apps/server/dist/**', '**/node_modules/**'],
+    // windows carries the server in one hand-packed sidecar so NSIS does not
+    // install thousands of dependency files; other platforms retain the fork's
+    // existing exact fff unpack rule inside app.asar.
+    ...(platform === 'win' ? {} : { asarUnpack: [...DESKTOP_ASAR_UNPACK] }),
+    ...(platform === 'win' ? { extraResources: [...WINDOWS_SERVER_EXTRA_RESOURCES] } : {}),
   }
   const updateChannel = resolveDesktopUpdateChannel(version)
   const publishConfig = yield* resolveGitHubPublishConfig(updateChannel)
@@ -1141,6 +1234,7 @@ export const createBuildConfig = Effect.fn('createBuildConfig')(function* (
   if (platform === 'win')
   {
     buildConfig.npmRebuild = false
+    buildConfig.nsis = { differentialPackage: true }
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: 'icon.ico',
@@ -1256,6 +1350,577 @@ const stageWslNodePtyPrebuild = Effect.fn('stageWslNodePtyPrebuild')(function* (
   yield* Effect.log(
     `[desktop-artifact] Staged WSL node-pty prebuild (linux-${linuxArch}, node-pty ${nodePtyVersion}).`,
   )
+})
+
+export const hashFileSha256 = Effect.fn('desktopArtifact.hashFileSha256')(function* (
+  filePath: string,
+)
+{
+  const fs = yield* FileSystem.FileSystem
+  const hash = createHash('sha256')
+  yield* fs.stream(filePath).pipe(
+    Stream.runForEach((chunk) => Effect.sync(() => hash.update(chunk))),
+    Effect.mapError(
+      (cause) =>
+        new WindowsServerSidecarError({
+          operation: 'hash',
+          archivePath: filePath,
+          detail: 'SHA-256 calculation failed',
+          cause,
+        }),
+    ),
+  )
+  return hash.digest('hex')
+})
+
+function collectWindowsAsarMetadata(
+  directory: DirectoryRecord,
+  parentPath = '',
+  unpackedFiles: string[] = [],
+  linkEntries: string[] = [],
+): { readonly unpackedFiles: ReadonlyArray<string>; readonly linkEntries: ReadonlyArray<string> }
+{
+  for (const [name, entry] of Object.entries(directory.files))
+  {
+    const entryPath = parentPath.length === 0 ? name : `${parentPath}/${name}`
+    if ('link' in entry)
+    {
+      linkEntries.push(entryPath)
+    }
+    else if ('files' in entry)
+    {
+      collectWindowsAsarMetadata(entry, entryPath, unpackedFiles, linkEntries)
+    }
+    else if (entry.unpacked)
+    {
+      unpackedFiles.push(entryPath)
+    }
+  }
+  return { unpackedFiles, linkEntries }
+}
+
+export const validateWindowsServerSidecar = Effect.fn(
+  'desktopArtifact.validateWindowsServerSidecar',
+)(function* (input: { readonly asarPath: string; readonly digestPath?: string })
+{
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const digestPath = input.digestPath ?? `${input.asarPath}.sha256`
+
+  const expectedDigest = yield* fs.readFileString(digestPath).pipe(
+    Effect.map((value) => value.trim()),
+    Effect.mapError(
+      (cause) =>
+        new WindowsServerSidecarError({
+          operation: 'validate',
+          archivePath: input.asarPath,
+          detail: `payload digest is missing at ${digestPath}`,
+          cause,
+        }),
+    ),
+  )
+  if (!/^[0-9a-f]{64}$/.test(expectedDigest))
+  {
+    return yield* new WindowsServerSidecarError({
+      operation: 'validate',
+      archivePath: input.asarPath,
+      detail: `payload digest at ${digestPath} is not a lowercase SHA-256 value`,
+    })
+  }
+
+  const actualDigest = yield* hashFileSha256(input.asarPath)
+  if (actualDigest !== expectedDigest)
+  {
+    return yield* new WindowsServerSidecarError({
+      operation: 'validate',
+      archivePath: input.asarPath,
+      detail: `payload digest mismatch (expected ${expectedDigest}, received ${actualDigest})`,
+    })
+  }
+
+  const header = yield* Effect.try({
+    try: () => getRawHeader(input.asarPath).header,
+    catch: (cause) =>
+      new WindowsServerSidecarError({
+        operation: 'validate',
+        archivePath: input.asarPath,
+        detail: 'archive header is invalid',
+        cause,
+      }),
+  })
+  const missingEntries: string[] = []
+  for (const entry of WINDOWS_SERVER_REQUIRED_ENTRIES)
+  {
+    const present = yield* Effect.try({
+      try: () =>
+      {
+        statFile(input.asarPath, path.join(...entry.split('/')))
+        return true
+      },
+      catch: () => false,
+    }).pipe(Effect.orElseSucceed(() => false))
+    if (!present)
+    {
+      missingEntries.push(entry)
+    }
+  }
+  if (missingEntries.length > 0)
+  {
+    return yield* new WindowsServerSidecarError({
+      operation: 'validate',
+      archivePath: input.asarPath,
+      detail: `required runtime entries are missing: ${missingEntries.join(', ')}`,
+    })
+  }
+
+  const metadata = collectWindowsAsarMetadata(header)
+  if (metadata.linkEntries.length > 0)
+  {
+    return yield* new WindowsServerSidecarError({
+      operation: 'validate',
+      archivePath: input.asarPath,
+      detail: `archive contains unsupported link entries: ${metadata.linkEntries.join(', ')}`,
+    })
+  }
+
+  const unpackedFiles = [...metadata.unpackedFiles].sort()
+  if (unpackedFiles.length === 0)
+  {
+    return yield* new WindowsServerSidecarError({
+      operation: 'validate',
+      archivePath: input.asarPath,
+      detail: 'archive does not declare any unpacked native files',
+    })
+  }
+
+  const missingUnpackedFiles: string[] = []
+  for (const unpackedFile of unpackedFiles)
+  {
+    const physicalPath = path.join(`${input.asarPath}.unpacked`, ...unpackedFile.split('/'))
+    const stat = yield* fs.stat(physicalPath).pipe(Effect.orElseSucceed(() => null))
+    if (stat?.type !== 'File')
+    {
+      missingUnpackedFiles.push(unpackedFile)
+    }
+  }
+  if (missingUnpackedFiles.length > 0)
+  {
+    return yield* new WindowsServerSidecarError({
+      operation: 'validate',
+      archivePath: input.asarPath,
+      detail: `unpacked native files are missing: ${missingUnpackedFiles.join(', ')}`,
+    })
+  }
+
+  return { payloadDigest: actualDigest, unpackedFiles } as const
+})
+
+export const packWindowsServerAsar = Effect.fn('desktopArtifact.packWindowsServerAsar')(
+  function* (input: {
+    readonly sourceDir: string
+    readonly asarPath: string
+    readonly digestPath?: string
+  })
+  {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const digestPath = input.digestPath ?? `${input.asarPath}.sha256`
+    yield* fs.makeDirectory(path.dirname(input.asarPath), { recursive: true })
+    yield* fs.remove(input.asarPath, { force: true })
+    yield* fs.remove(`${input.asarPath}.unpacked`, { recursive: true, force: true })
+
+    yield* Effect.tryPromise({
+      try: () =>
+        createPackageWithOptions(input.sourceDir, input.asarPath, {
+          dot: true,
+          unpack: WINDOWS_SERVER_ASAR_UNPACK_GLOB,
+          globOptions: { ignore: [...WINDOWS_SERVER_ASAR_IGNORE_GLOBS] },
+        }),
+      catch: (cause) =>
+        new WindowsServerSidecarError({
+          operation: 'pack',
+          archivePath: input.asarPath,
+          detail: 'asar creation failed',
+          cause,
+        }),
+    })
+
+    const payloadDigest = yield* hashFileSha256(input.asarPath)
+    yield* fs.writeFileString(digestPath, `${payloadDigest}\n`)
+    return yield* validateWindowsServerSidecar({ asarPath: input.asarPath, digestPath })
+  },
+)
+
+const stageWindowsServerSidecar = Effect.fn('desktopArtifact.stageWindowsServerSidecar')(
+  function* (input: {
+    readonly stageRoot: string
+    readonly repoRoot: string
+    readonly serverDistDir: string
+    readonly cartographerPackageArchive: string
+    readonly arch: typeof BuildArch.Type
+    readonly appVersion: string
+    readonly serverDependencies: Record<string, string>
+    readonly fffNodeVersion: string
+    readonly allowBuilds: Record<string, boolean>
+    readonly patchedDependencies: Record<string, string>
+    readonly overrides: Record<string, string>
+    readonly wslPrebuildPath: string | undefined
+    readonly asarPath: string
+    readonly verbose: boolean
+  })
+  {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const serverStageDir = path.join(input.stageRoot, 'server')
+    const cartographerVendorDir = path.join(serverStageDir, 'vendor/cartographer-core')
+    const cartographerArchiveName = path.basename(input.cartographerPackageArchive)
+
+    yield* fs.makeDirectory(path.join(serverStageDir, 'apps/server'), { recursive: true })
+    yield* fs.copy(input.serverDistDir, path.join(serverStageDir, 'apps/server/dist'))
+    yield* fs.makeDirectory(cartographerVendorDir, { recursive: true })
+    yield* fs.copyFile(
+      input.cartographerPackageArchive,
+      path.join(cartographerVendorDir, cartographerArchiveName),
+    )
+
+    const sidecarDependencies = {
+      ...input.serverDependencies,
+      ...resolveFffNativeDependencies('win', input.arch, input.fffNodeVersion),
+      ...resolveFffNativeDependencies('linux', input.arch, input.fffNodeVersion),
+      [cartographerCorePackageJson.name]: `file:./vendor/cartographer-core/${cartographerArchiveName}`,
+    }
+    const sidecarPatchedDependencies = createStagePatchedDependencies(
+      input.patchedDependencies,
+      sidecarDependencies,
+    )
+    const packageJsonString = yield* encodeJsonString({
+      name: '456code-server',
+      version: input.appVersion,
+      private: true,
+      packageManager: rootPackageJson.packageManager,
+      dependencies: sidecarDependencies,
+    })
+    yield* fs.writeFileString(path.join(serverStageDir, 'package.json'), `${packageJsonString}\n`)
+
+    const workspaceConfigString = yield* encodeStageWorkspaceConfig(
+      createStageWorkspaceConfig({
+        platform: 'win',
+        arch: input.arch,
+        allowBuilds: input.allowBuilds,
+        patchedDependencies: sidecarPatchedDependencies,
+        overrides: input.overrides,
+        linuxServerBackend: true,
+      }),
+    )
+    yield* fs.writeFileString(
+      path.join(serverStageDir, 'pnpm-workspace.yaml'),
+      workspaceConfigString,
+    )
+    if (Object.keys(sidecarPatchedDependencies).length > 0)
+    {
+      yield* fs.copy(path.join(input.repoRoot, 'patches'), path.join(serverStageDir, 'patches'))
+    }
+
+    yield* Effect.log('[desktop-artifact] Installing Windows server sidecar dependencies...')
+    const installCommand = yield* resolveSpawnCommand('vp', [...STAGE_INSTALL_ARGS])
+    yield* runCommand(
+      ChildProcess.make(installCommand.command, installCommand.args, {
+        cwd: serverStageDir,
+        shell: installCommand.shell,
+      }),
+      { label: 'vp install --prod (Windows server sidecar)', verbose: input.verbose },
+    )
+    // the file dependency is now a physical node_modules package; do not pack
+    // its source tarball a second time into the runtime sidecar
+    yield* fs.remove(path.join(serverStageDir, 'vendor'), { recursive: true, force: true })
+    yield* stageWslNodePtyPrebuild({
+      stageAppDir: serverStageDir,
+      arch: input.arch,
+      prebuildPath: input.wslPrebuildPath,
+    })
+
+    yield* Effect.log('[desktop-artifact] Packing Windows server.asar...')
+    const result = yield* packWindowsServerAsar({
+      sourceDir: serverStageDir,
+      asarPath: input.asarPath,
+    })
+    yield* Effect.log(
+      `[desktop-artifact] Packed server.asar (${result.payloadDigest}, ${String(result.unpackedFiles.length)} unpacked natives).`,
+    )
+  },
+)
+
+export const verifyWindowsServerBundleLoads = Effect.fn(
+  'desktopArtifact.verifyWindowsServerBundleLoads',
+)(function* (input: { readonly asarPath: string; readonly verbose?: boolean })
+{
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const extractedRoot = yield* fs.makeTempDirectoryScoped({
+    prefix: '456code-windows-server-selfcheck-',
+  })
+
+  yield* Effect.try({
+    try: () => extractAll(input.asarPath, extractedRoot),
+    catch: (cause) =>
+      new WindowsServerSidecarError({
+        operation: 'extract',
+        archivePath: input.asarPath,
+        detail: 'isolated self-check extraction failed',
+        cause,
+      }),
+  })
+
+  const entryPoint = path.join(extractedRoot, 'apps/server/dist/bin.mjs')
+  yield* runCommand(
+    ChildProcess.make(process.execPath, ['--no-global-search-paths', entryPoint, '--version'], {
+      cwd: extractedRoot,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, NODE_PATH: '' },
+    }),
+    {
+      label: 'Windows server sidecar self-check (node bin.mjs --version)',
+      verbose: input.verbose ?? false,
+    },
+  ).pipe(
+    Effect.timeout(WINDOWS_SERVER_SELF_CHECK_TIMEOUT),
+    Effect.catchTags({
+      TimeoutError: () =>
+        Effect.fail(
+          new WindowsServerSidecarError({
+            operation: 'validate',
+            archivePath: input.asarPath,
+            detail: `server load exceeded ${String(Duration.toSeconds(WINDOWS_SERVER_SELF_CHECK_TIMEOUT))} seconds`,
+          }),
+        ),
+      BuildCommandFailedError: (error) =>
+        Effect.fail(
+          new WindowsServerSidecarError({
+            operation: 'validate',
+            archivePath: input.asarPath,
+            detail: `isolated server load failed: ${error.stderrTail ?? error.stdoutTail ?? error.message}`,
+            cause: error,
+          }),
+        ),
+    }),
+  )
+})
+
+const WINDOWS_PRIMARY_FFF_PROBE_SOURCE = `
+const { join } = await import("node:path");
+const { pathToFileURL } = await import("node:url");
+const { FileFinder } = await import(pathToFileURL(process.argv[1]).href);
+const probeRoot = process.argv[2];
+const result = FileFinder.create({
+  basePath: probeRoot,
+  frecencyDbPath: join(probeRoot, "frecency.mdb"),
+  historyDbPath: join(probeRoot, "history.mdb"),
+  disableWatch: true,
+  disableMmapCache: true,
+  disableContentIndexing: true,
+});
+if (!result.ok) throw new Error(result.error);
+result.value.destroy();
+`
+
+export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
+  'desktopArtifact.verifyWindowsPrimaryFffNativeLoad',
+)(function* (input: {
+  readonly packagedAppDir: string
+  readonly asarPath: string
+  readonly appExecutableName: string
+  readonly targetArch: typeof BuildArch.Type
+  readonly verbose?: boolean
+})
+{
+  const hostPlatform = yield* HostProcessPlatform
+  const hostArchitecture = yield* HostProcessArchitecture
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const executablePath = path.join(input.packagedAppDir, input.appExecutableName)
+  const executableStat = yield* fs.stat(executablePath).pipe(Effect.orElseSucceed(() => null))
+  if (executableStat?.type !== 'File')
+  {
+    return yield* new WindowsPrimaryNativeProbeError({
+      executablePath,
+      exitCode: -1,
+      output: 'The unpacked application does not contain its expected primary executable.',
+    })
+  }
+  if (hostPlatform !== 'win32' || hostArchitecture !== input.targetArch) return
+
+  const probeRoot = yield* fs.makeTempDirectoryScoped({
+    prefix: '456code-windows-primary-native-probe-',
+  })
+  const fffEntryPath = path.join(input.asarPath, 'node_modules/@ff-labs/fff-node/dist/src/index.js')
+  const probeEnv = { ...process.env }
+  delete probeEnv.ELECTRON_NO_ASAR
+  delete probeEnv.NODE_OPTIONS
+
+  yield* runCommand(
+    ChildProcess.make(
+      executablePath,
+      [
+        '--no-global-search-paths',
+        '--input-type=module',
+        '--eval',
+        WINDOWS_PRIMARY_FFF_PROBE_SOURCE,
+        fffEntryPath,
+        probeRoot,
+      ],
+      {
+        cwd: input.packagedAppDir,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          ...probeEnv,
+          ELECTRON_RUN_AS_NODE: '1',
+          NODE_PATH: '',
+        },
+      },
+    ),
+    { label: 'Windows primary fff native-load probe', verbose: input.verbose ?? false },
+  ).pipe(
+    Effect.timeout(WINDOWS_PRIMARY_NATIVE_PROBE_TIMEOUT),
+    Effect.catchTags({
+      TimeoutError: () =>
+        Effect.fail(
+          new WindowsPrimaryNativeProbeError({
+            executablePath,
+            exitCode: -1,
+            output: `The probe exceeded ${String(Duration.toSeconds(WINDOWS_PRIMARY_NATIVE_PROBE_TIMEOUT))} seconds.`,
+          }),
+        ),
+      BuildCommandFailedError: (error) =>
+        Effect.fail(
+          new WindowsPrimaryNativeProbeError({
+            executablePath,
+            exitCode: error.exitCode,
+            output: `${error.stderrTail ?? ''}${error.stdoutTail ?? ''}`.trim(),
+          }),
+        ),
+    }),
+  )
+})
+
+export const countPayloadFiles = Effect.fn('desktopArtifact.countPayloadFiles')(function* (
+  root: string,
+)
+{
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const pendingDirectories = [root]
+  let count = 0
+
+  while (pendingDirectories.length > 0)
+  {
+    const directory = pendingDirectories.pop()
+    if (directory === undefined) break
+    const entries = yield* fs.readDirectory(directory)
+    for (const entry of entries)
+    {
+      const entryPath = path.join(directory, entry)
+      const stat = yield* fs.stat(entryPath)
+      if (stat.type === 'Directory')
+      {
+        pendingDirectories.push(entryPath)
+      }
+      else if (stat.type === 'File')
+      {
+        count += 1
+      }
+    }
+  }
+
+  return count
+})
+
+export const validateWindowsPackagedPayload = Effect.fn(
+  'desktopArtifact.validateWindowsPackagedPayload',
+)(function* (input: {
+  readonly stageDistDir: string
+  readonly appExecutableName: string
+  readonly targetArch: typeof BuildArch.Type
+  readonly fileLimit?: number
+  readonly verbose?: boolean
+})
+{
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const fileLimit = input.fileLimit ?? WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT
+  const stageEntries = yield* fs.readDirectory(input.stageDistDir)
+  let packagedAppDir: string | undefined
+
+  for (const entry of stageEntries)
+  {
+    if (!entry.endsWith('-unpacked')) continue
+    const candidate = path.join(input.stageDistDir, entry)
+    const stat = yield* fs.stat(candidate).pipe(Effect.orElseSucceed(() => null))
+    if (stat?.type === 'Directory')
+    {
+      packagedAppDir = candidate
+      break
+    }
+  }
+  if (packagedAppDir === undefined)
+  {
+    return yield* new WindowsPackagedPayloadValidationError({
+      packagedAppDir: path.join(input.stageDistDir, 'win-unpacked'),
+      detail: 'electron-builder did not produce an unpacked application directory',
+    })
+  }
+
+  const resourcesDir = path.join(packagedAppDir, 'resources')
+  const asarPath = path.join(resourcesDir, WINDOWS_SERVER_ASAR_RESOURCE)
+  const digestPath = path.join(resourcesDir, WINDOWS_SERVER_PAYLOAD_DIGEST_RESOURCE)
+  yield* validateWindowsServerSidecar({ asarPath, digestPath }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new WindowsPackagedPayloadValidationError({
+          packagedAppDir,
+          detail: cause.message,
+          cause,
+        }),
+    ),
+  )
+
+  const appAsarPath = path.join(resourcesDir, 'app.asar')
+  const serverDuplicatedInAppAsar = yield* Effect.try({
+    try: () =>
+    {
+      statFile(appAsarPath, path.join('apps', 'server', 'dist', 'bin.mjs'))
+      return true
+    },
+    catch: () => false,
+  }).pipe(Effect.orElseSucceed(() => false))
+  if (serverDuplicatedInAppAsar)
+  {
+    return yield* new WindowsPackagedPayloadValidationError({
+      packagedAppDir,
+      detail: 'apps/server/dist/bin.mjs is duplicated inside app.asar',
+    })
+  }
+
+  const fileCount = yield* countPayloadFiles(packagedAppDir)
+  if (fileCount > fileLimit)
+  {
+    return yield* new WindowsPackagedPayloadValidationError({
+      packagedAppDir,
+      detail: `packaged payload contains ${String(fileCount)} loose files, exceeding the ${String(fileLimit)}-file install-speed budget`,
+    })
+  }
+
+  yield* verifyWindowsServerBundleLoads({ asarPath, verbose: input.verbose ?? false })
+  yield* verifyWindowsPrimaryFffNativeLoad({
+    packagedAppDir,
+    asarPath,
+    appExecutableName: input.appExecutableName,
+    targetArch: input.targetArch,
+    verbose: input.verbose ?? false,
+  })
+  yield* Effect.log('[desktop-artifact] Validated packed Windows server payload and natives.')
+  return { packagedAppDir, asarPath, digestPath } as const
 })
 
 const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
@@ -1415,12 +2080,18 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry))
 
   yield* fs.makeDirectory(path.join(stageAppDir, 'apps/desktop'), { recursive: true })
-  yield* fs.makeDirectory(path.join(stageAppDir, 'apps/server'), { recursive: true })
+  if (options.platform !== 'win')
+  {
+    yield* fs.makeDirectory(path.join(stageAppDir, 'apps/server'), { recursive: true })
+  }
 
   yield* Effect.log('[desktop-artifact] Staging release app...')
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, 'apps/desktop/dist-electron'))
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir)
-  yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, 'apps/server/dist'))
+  if (options.platform !== 'win')
+  {
+    yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, 'apps/server/dist'))
+  }
 
   yield* assertPlatformBuildResources(
     options.platform,
@@ -1434,7 +2105,8 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
   )
 
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
-  yield* fs.copy(stageResourcesDir, path.join(stageAppDir, 'apps/desktop/prod-resources'))
+  const stageProdResourcesDir = path.join(stageAppDir, 'apps/desktop/prod-resources')
+  yield* fs.copy(stageResourcesDir, stageProdResourcesDir)
 
   const cartographerPackageRoot = yield* fs.makeTempDirectoryScoped({
     prefix: '456code-cartographer-core-package-',
@@ -1470,7 +2142,7 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
     path.join(cartographerPackageRoot, 'LICENSE'),
   )
 
-  const cartographerPackDirectory = path.join(stageAppDir, 'vendor/cartographer-core')
+  const cartographerPackDirectory = path.join(stageRoot, 'cartographer-package')
   yield* fs.makeDirectory(cartographerPackDirectory, { recursive: true })
   const cartographerPackCommand = yield* resolveSpawnCommand('pnpm', [
     'pack',
@@ -1494,33 +2166,53 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
       archiveFiles: cartographerPackageArchives,
     })
   }
-  const cartographerCoreDependency = `file:./vendor/cartographer-core/${cartographerPackageArchives[0]}`
-
-  const stageDependencies = {
-    ...resolvedServerDependencies,
-    ...resolvedDesktopRuntimeDependencies,
-    ...resolveFffNativeDependencies(
-      options.platform,
-      options.arch,
-      serverPackageJson.dependencies['@ff-labs/fff-node'],
-    ),
-    // windows artifacts also bundle the same-architecture WSL Linux backend, which loads the
-    // fff native binary through ffi-rs. The platform fff binary above is the
-    // host's (win32), so promote the matching Linux fff binaries too; without
-    // them file-finding in WSL fails to load its Linux native package.
-    ...(options.platform === 'win'
-      ? resolveFffNativeDependencies(
-          'linux',
-          options.arch,
-          serverPackageJson.dependencies['@ff-labs/fff-node'],
-        )
-      : {}),
-    [cartographerCorePackageJson.name]: cartographerCoreDependency,
+  const cartographerPackageArchiveName = cartographerPackageArchives[0]
+  if (cartographerPackageArchiveName === undefined)
+  {
+    return yield* new CartographerCorePackOutputError({
+      packDirectory: cartographerPackDirectory,
+      archiveFiles: cartographerPackageArchives,
+    })
   }
+  const cartographerPackageArchive = path.join(
+    cartographerPackDirectory,
+    cartographerPackageArchiveName,
+  )
+  const cartographerCoreDependency = `file:./vendor/cartographer-core/${cartographerPackageArchiveName}`
+  if (options.platform !== 'win')
+  {
+    const appCartographerVendorDir = path.join(stageAppDir, 'vendor/cartographer-core')
+    yield* fs.makeDirectory(appCartographerVendorDir, { recursive: true })
+    yield* fs.copyFile(
+      cartographerPackageArchive,
+      path.join(appCartographerVendorDir, cartographerPackageArchiveName),
+    )
+  }
+
+  // windows splits the desktop main process from the server process; the app
+  // stage only installs desktop externals; the complete server dependency tree
+  // and Cartographer package are installed into server.asar below.
+  const stageDependencies =
+    options.platform === 'win'
+      ? { ...resolvedDesktopRuntimeDependencies }
+      : {
+          ...resolvedServerDependencies,
+          ...resolvedDesktopRuntimeDependencies,
+          ...resolveFffNativeDependencies(
+            options.platform,
+            options.arch,
+            serverPackageJson.dependencies['@ff-labs/fff-node'],
+          ),
+          [cartographerCorePackageJson.name]: cartographerCoreDependency,
+        }
   const stagePatchedDependencies = createStagePatchedDependencies(
     workspacePatchedDependencies,
     stageDependencies,
   )
+  const windowsServerAsarPath =
+    options.platform === 'win'
+      ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
+      : undefined
   const stagePackageJson: StagePackageJson = {
     name: '456code',
     version: appVersion,
@@ -1575,14 +2267,25 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
     { label: 'vp install --prod', verbose: options.verbose },
   )
 
-  // WSL is Windows-only, so only the Windows artifact carries the Linux backend
-  // binary; other platforms ignore the prebuild input.
-  if (options.platform === 'win')
+  // windows carries the complete server and WSL runtime in one sidecar; the app
+  // stage stays win32-only and never duplicates the server dependency tree.
+  if (options.platform === 'win' && windowsServerAsarPath)
   {
-    yield* stageWslNodePtyPrebuild({
-      stageAppDir,
+    yield* stageWindowsServerSidecar({
+      stageRoot,
+      repoRoot,
+      serverDistDir: distDirs.serverDist,
+      cartographerPackageArchive,
       arch: options.arch,
-      prebuildPath: options.wslPrebuild,
+      appVersion,
+      serverDependencies: resolvedServerDependencies,
+      fffNodeVersion: serverPackageJson.dependencies['@ff-labs/fff-node'],
+      allowBuilds: workspaceAllowBuilds,
+      patchedDependencies: workspacePatchedDependencies,
+      overrides: resolvedOverrides,
+      wslPrebuildPath: options.wslPrebuild,
+      asarPath: windowsServerAsarPath,
+      verbose: options.verbose,
     })
   }
 
@@ -1665,6 +2368,16 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
       distPath: stageDistDir,
       platform: options.platform,
       arch: options.arch,
+    })
+  }
+
+  if (options.platform === 'win')
+  {
+    yield* validateWindowsPackagedPayload({
+      stageDistDir,
+      appExecutableName: `${resolveDesktopProductName(appVersion)}.exe`,
+      targetArch: options.arch,
+      verbose: options.verbose,
     })
   }
 
