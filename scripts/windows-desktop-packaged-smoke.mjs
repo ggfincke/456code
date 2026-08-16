@@ -29,6 +29,32 @@ async function writeStandardOutput(output)
   })
 }
 
+async function writeSuccessMarker(successMarkerPath, payload)
+{
+  const successMarkerTempPath = `${successMarkerPath}.tmp`
+  try
+  {
+    await NodeFSP.writeFile(successMarkerTempPath, payload, {
+      encoding: 'utf8',
+      flag: 'wx',
+    })
+    await NodeFSP.rename(successMarkerTempPath, successMarkerPath)
+  }
+  catch (error)
+  {
+    await NodeFSP.rm(successMarkerTempPath, { force: true })
+    throw error
+  }
+}
+
+async function waitForParentShutdown()
+{
+  await new Promise(() =>
+  {
+    setInterval(() => Date.now(), 60_000)
+  })
+}
+
 async function exerciseCartographerCli(cliPath)
 {
   const fixtureRoot = await NodeFSP.mkdtemp(
@@ -122,9 +148,12 @@ async function exerciseCartographerCli(cliPath)
 }
 
 const appDir = process.argv[2]
-if (!appDir)
+const successMarkerPath = process.argv[3]
+if (!appDir || !successMarkerPath)
 {
-  throw new Error('Usage: windows-desktop-packaged-smoke.mjs <installed-app-directory>')
+  throw new Error(
+    'Usage: windows-desktop-packaged-smoke.mjs <installed-app-directory> <success-marker-path>',
+  )
 }
 
 const resourcesDir = NodePath.join(appDir, 'resources')
@@ -210,15 +239,11 @@ if (!ptyOutput.includes('456code-pty-ok'))
   throw new Error(`node-pty smoke did not return its marker: ${ptyOutput}`)
 }
 
-const { FileFinder, closeLibrary } = await import(
+const { FileFinder } = await import(
   NodeURL.pathToFileURL(
     NodePath.join(serverAsarPath, 'node_modules/@ff-labs/fff-node/dist/src/index.js'),
   ).href
 )
-if (typeof closeLibrary !== 'function')
-{
-  throw new Error('fff-node did not expose its closeLibrary function')
-}
 const probeRoot = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-fff-smoke-'))
 let fileFinder
 try
@@ -245,14 +270,7 @@ finally
   }
   finally
   {
-    try
-    {
-      closeLibrary()
-    }
-    finally
-    {
-      await NodeFSP.rm(probeRoot, { recursive: true, force: true })
-    }
+    await NodeFSP.rm(probeRoot, { recursive: true, force: true })
   }
 }
 
@@ -267,4 +285,5 @@ const successPayload = `${JSON.stringify({
   fff: 'ok',
 })}\n`
 await writeStandardOutput(successPayload)
-process.exit(0)
+await writeSuccessMarker(successMarkerPath, successPayload)
+await waitForParentShutdown()

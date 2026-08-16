@@ -459,7 +459,7 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
     }),
   )
 
-  it.effect('flushes packaged Windows smoke success after native cleanup', () =>
+  it.effect('keeps packaged Windows smoke success parent-owned and marker-backed', () =>
     Effect.gen(function* ()
     {
       const fs = yield* FileSystem.FileSystem
@@ -467,22 +467,89 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
       const packagedSmoke = yield* fs.readFileString(
         path.resolve(import.meta.dirname, '../../scripts/windows-desktop-packaged-smoke.mjs'),
       )
-      const shutdownOrder = [
+      const acceptanceScript = yield* fs.readFileString(
+        path.resolve(import.meta.dirname, '../../scripts/windows-desktop-acceptance.ps1'),
+      )
+      const smokeSuccessOrder = [
         packagedSmoke.indexOf('fileFinder?.destroy()'),
-        packagedSmoke.indexOf('closeLibrary()'),
+        packagedSmoke.indexOf('await NodeFSP.rm(probeRoot, { recursive: true, force: true })'),
         packagedSmoke.indexOf('const successPayload ='),
         packagedSmoke.indexOf('await writeStandardOutput(successPayload)'),
-        packagedSmoke.indexOf('process.exit(0)'),
+        packagedSmoke.indexOf('await writeSuccessMarker(successMarkerPath, successPayload)'),
+        packagedSmoke.indexOf('await waitForParentShutdown()'),
+      ]
+      const atomicMarkerOrder = [
+        packagedSmoke.indexOf('await NodeFSP.writeFile(successMarkerTempPath, payload'),
+        packagedSmoke.indexOf('await NodeFSP.rename(successMarkerTempPath, successMarkerPath)'),
+      ]
+      const packagedSmokeContract = acceptanceScript.slice(
+        acceptanceScript.indexOf('function Assert-PackagedSmokePayload {'),
+        acceptanceScript.indexOf('$script:CdpMessageId = 0'),
+      )
+      const packagedSmokeFunction = acceptanceScript.slice(
+        acceptanceScript.indexOf('function Invoke-PackagedSmoke {'),
+        acceptanceScript.indexOf('$script:CdpMessageId = 0'),
+      )
+      const markerCheckIndex = packagedSmokeFunction.indexOf('if (Test-Path $SuccessMarkerPath)')
+      const prematureExitCheckIndex = packagedSmokeFunction.indexOf('if ($process.HasExited)')
+      const parentSuccessOrder = [
+        markerCheckIndex,
+        packagedSmokeFunction.indexOf('ConvertFrom-Json -Depth 10', markerCheckIndex),
+        packagedSmokeFunction.indexOf(
+          'Assert-PackagedSmokePayload $payload $ExpectedDigest',
+          markerCheckIndex,
+        ),
+        packagedSmokeFunction.indexOf(
+          'Stop-ProcessTree $process\n        Assert-Condition $process.HasExited',
+          markerCheckIndex,
+        ),
       ]
 
-      assert.include(packagedSmoke, 'const { FileFinder, closeLibrary }')
+      assert.include(packagedSmoke, 'const successMarkerPath = process.argv[3]')
       assert.include(packagedSmoke, 'process.stdout.write(output, (error) =>')
-      assert.isTrue(shutdownOrder.every((index) => index >= 0))
-      assert.deepStrictEqual(
-        [...shutdownOrder].sort((left, right) => left - right),
-        shutdownOrder,
+      assert.include(packagedSmoke, "flag: 'wx'")
+      assert.include(
+        packagedSmoke,
+        'await NodeFSP.rename(successMarkerTempPath, successMarkerPath)',
       )
-      assert.lengthOf(packagedSmoke.match(/process\.exit\(/gu) ?? [], 1)
+      assert.notInclude(packagedSmoke, 'closeLibrary')
+      assert.notMatch(packagedSmoke, /process\.exit\(/gu)
+      assert.isTrue(atomicMarkerOrder.every((index) => index >= 0))
+      assert.deepStrictEqual(
+        [...atomicMarkerOrder].sort((left, right) => left - right),
+        atomicMarkerOrder,
+      )
+      assert.isTrue(smokeSuccessOrder.every((index) => index >= 0))
+      assert.deepStrictEqual(
+        [...smokeSuccessOrder].sort((left, right) => left - right),
+        smokeSuccessOrder,
+      )
+
+      assert.include(acceptanceScript, '$smokeRunId = [Guid]::NewGuid().ToString("N")')
+      assert.include(packagedSmokeFunction, '$successMarkerTempPath = "$SuccessMarkerPath.tmp"')
+      assert.include(
+        packagedSmokeFunction,
+        '$SuccessMarkerPath, $successMarkerTempPath, $StdoutPath, $StderrPath',
+      )
+      assert.include(packagedSmokeFunction, '-ErrorAction SilentlyContinue')
+      assert.include(packagedSmokeFunction, '-RedirectStandardOutput $StdoutPath')
+      assert.include(packagedSmokeFunction, '-RedirectStandardError $StderrPath')
+      assert.include(packagedSmokeFunction, '[int]$TimeoutSeconds = 300')
+      assert.isTrue(parentSuccessOrder.every((index) => index >= 0))
+      assert.deepStrictEqual(
+        [...parentSuccessOrder].sort((left, right) => left - right),
+        parentSuccessOrder,
+      )
+      assert.isAbove(prematureExitCheckIndex, markerCheckIndex)
+      assert.include(packagedSmokeContract, '"serverAsarDigest", "cartographer", "pty", "fff"')
+      assert.include(packagedSmokeContract, '"fingerprint", "exports", "graph"')
+      assert.include(packagedSmokeContract, '"nodes", "edges"')
+      assert.include(packagedSmokeContract, '$Payload.serverAsarDigest -eq $ExpectedDigest')
+      assert.include(packagedSmokeContract, '$hasExportCount -and $exportCount -gt 0')
+      assert.include(packagedSmokeContract, '$hasNodeCount -and $nodeCount -ge 2')
+      assert.include(packagedSmokeContract, '$hasEdgeCount -and $edgeCount -ge 1')
+      assert.include(packagedSmokeContract, '$Payload.pty -eq "ok"')
+      assert.include(packagedSmokeContract, '$Payload.fff -eq "ok"')
     }),
   )
 

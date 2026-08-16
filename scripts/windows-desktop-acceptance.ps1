@@ -175,6 +175,140 @@ function Invoke-BoundedProcess {
   }
 }
 
+function Get-PackagedSmokeOutputEvidence {
+  param([string]$StdoutPath, [string]$StderrPath)
+  $stdout = if (Test-Path $StdoutPath) {
+    [string](Get-Content $StdoutPath -Raw -ErrorAction SilentlyContinue)
+  } else {
+    "<missing>"
+  }
+  $stderr = if (Test-Path $StderrPath) {
+    [string](Get-Content $StderrPath -Raw -ErrorAction SilentlyContinue)
+  } else {
+    "<missing>"
+  }
+  return "stdout:`n$stdout`nstderr:`n$stderr"
+}
+
+function Assert-ExactJsonProperties {
+  param([psobject]$Value, [string[]]$PropertyNames, [string]$Description)
+  Assert-Condition ($null -ne $Value) "$Description is missing."
+  $differences = @(
+    Compare-Object -ReferenceObject $PropertyNames -DifferenceObject @(
+      $Value.PSObject.Properties.Name
+    )
+  )
+  Assert-Condition ($differences.Count -eq 0) "$Description has unexpected or missing fields."
+}
+
+function Assert-PackagedSmokePayload {
+  param([psobject]$Payload, [string]$ExpectedDigest)
+  Assert-ExactJsonProperties $Payload @(
+    "serverAsarDigest", "cartographer", "pty", "fff"
+  ) "Packaged smoke payload"
+  Assert-ExactJsonProperties $Payload.cartographer @(
+    "fingerprint", "exports", "graph"
+  ) "Packaged smoke Cartographer payload"
+  Assert-ExactJsonProperties $Payload.cartographer.graph @(
+    "nodes", "edges"
+  ) "Packaged smoke Cartographer graph"
+
+  Assert-Condition (
+    $Payload.serverAsarDigest -eq $ExpectedDigest
+  ) "Packaged smoke server.asar digest did not match the installed digest."
+  Assert-Condition (
+    -not [string]::IsNullOrWhiteSpace([string]$Payload.cartographer.fingerprint)
+  ) "Packaged smoke Cartographer fingerprint is missing."
+
+  $exportCount = 0
+  $nodeCount = 0
+  $edgeCount = 0
+  $hasExportCount = [int]::TryParse([string]$Payload.cartographer.exports, [ref]$exportCount)
+  $hasNodeCount = [int]::TryParse([string]$Payload.cartographer.graph.nodes, [ref]$nodeCount)
+  $hasEdgeCount = [int]::TryParse([string]$Payload.cartographer.graph.edges, [ref]$edgeCount)
+  Assert-Condition (
+    $hasExportCount -and $exportCount -gt 0
+  ) "Packaged smoke Cartographer export count is invalid."
+  Assert-Condition (
+    $hasNodeCount -and $nodeCount -ge 2
+  ) "Packaged smoke Cartographer graph has fewer than two nodes."
+  Assert-Condition (
+    $hasEdgeCount -and $edgeCount -ge 1
+  ) "Packaged smoke Cartographer graph has no dependency edge."
+  Assert-Condition ($Payload.pty -eq "ok") "Packaged smoke PTY result is invalid."
+  Assert-Condition ($Payload.fff -eq "ok") "Packaged smoke fff result is invalid."
+}
+
+function Invoke-PackagedSmoke {
+  param(
+    [string]$ExecutablePath,
+    [string]$InstalledDirectory,
+    [string]$SmokeScriptPath,
+    [string]$SuccessMarkerPath,
+    [string]$StdoutPath,
+    [string]$StderrPath,
+    [string]$ExpectedDigest,
+    [int]$TimeoutSeconds = 300
+  )
+  $successMarkerTempPath = "$SuccessMarkerPath.tmp"
+  Remove-Item `
+    $SuccessMarkerPath, $successMarkerTempPath, $StdoutPath, $StderrPath `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+  $process = Start-Process `
+    -FilePath $ExecutablePath `
+    -ArgumentList @(
+      "--no-global-search-paths",
+      $SmokeScriptPath,
+      $InstalledDirectory,
+      $SuccessMarkerPath
+    ) `
+    -RedirectStandardOutput $StdoutPath `
+    -RedirectStandardError $StderrPath `
+    -NoNewWindow `
+    -Environment @{ ELECTRON_RUN_AS_NODE = "1" } `
+    -PassThru
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  if ($deadline -gt $script:AcceptanceDeadline) {
+    $deadline = $script:AcceptanceDeadline
+  }
+
+  try {
+    while ($true) {
+      if (Test-Path $SuccessMarkerPath) {
+        try {
+          $payload = Get-Content $SuccessMarkerPath -Raw | ConvertFrom-Json -Depth 10
+          Assert-PackagedSmokePayload $payload $ExpectedDigest
+        } catch {
+          Stop-ProcessTree $process
+          $evidence = Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath
+          throw "Packaged native/Cartographer smoke wrote an invalid success marker: $($_.Exception.Message)`n$evidence"
+        }
+        Stop-ProcessTree $process
+        Assert-Condition $process.HasExited "Packaged native/Cartographer smoke did not stop after its validated marker."
+        Write-Host (Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath)
+        return $payload
+      }
+
+      if ($process.HasExited) {
+        $exitCode = [int]$process.ExitCode
+        $evidence = Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath
+        throw "Packaged native/Cartographer smoke exited $exitCode before writing a valid success marker.`n$evidence"
+      }
+      if ([DateTime]::UtcNow -ge $deadline) {
+        Stop-ProcessTree $process
+        $evidence = Get-PackagedSmokeOutputEvidence $StdoutPath $StderrPath
+        throw "Packaged native/Cartographer smoke exceeded its $TimeoutSeconds-second process deadline before writing a valid success marker.`n$evidence"
+      }
+      Start-Sleep -Milliseconds 200
+    }
+  } finally {
+    Stop-ProcessTree $process
+    $process.Dispose()
+  }
+}
+
 $script:CdpMessageId = 0
 
 function Invoke-CdpExpression {
@@ -380,6 +514,10 @@ $stateDir = Join-Path $acceptanceRoot "state"
 $userDataDir = Join-Path $acceptanceRoot "electron-user-data"
 $appDataDir = Join-Path $acceptanceRoot "appdata"
 $localAppDataDir = Join-Path $acceptanceRoot "localappdata"
+$smokeRunId = [Guid]::NewGuid().ToString("N")
+$smokeSuccessMarker = Join-Path $acceptanceRoot "packaged-smoke-$smokeRunId.success.json"
+$smokeStdout = Join-Path $acceptanceRoot "packaged-smoke-$smokeRunId.stdout.log"
+$smokeStderr = Join-Path $acceptanceRoot "packaged-smoke-$smokeRunId.stderr.log"
 
 if (Test-Path $acceptanceRoot) {
   Remove-Item $acceptanceRoot -Recurse -Force
@@ -446,18 +584,19 @@ try {
   Assert-Condition (Test-Path (Join-Path $resourcesDir "server.asar.sha256")) "Installed server.asar digest is missing."
 
   Write-AcceptancePhase "packaged-smoke"
-  $smokeExitCode = Invoke-BoundedProcess `
-    -FilePath $appExe.FullName `
-    -ArgumentList @(
-      "--no-global-search-paths",
-      (Join-Path $PSScriptRoot "windows-desktop-packaged-smoke.mjs"),
-      $installDir
-    ) `
-    -Description "Packaged native/Cartographer smoke" `
-    -TimeoutSeconds 300 `
-    -NoNewWindow `
-    -Environment @{ ELECTRON_RUN_AS_NODE = "1" }
-  Assert-Condition ($smokeExitCode -eq 0) "Packaged native/Cartographer smoke exited $smokeExitCode."
+  $expectedServerAsarDigest = (
+    Get-Content (Join-Path $resourcesDir "server.asar.sha256") -Raw
+  ).Trim()
+  $smokePayload = Invoke-PackagedSmoke `
+    -ExecutablePath $appExe.FullName `
+    -InstalledDirectory $installDir `
+    -SmokeScriptPath (Join-Path $PSScriptRoot "windows-desktop-packaged-smoke.mjs") `
+    -SuccessMarkerPath $smokeSuccessMarker `
+    -StdoutPath $smokeStdout `
+    -StderrPath $smokeStderr `
+    -ExpectedDigest $expectedServerAsarDigest `
+    -TimeoutSeconds 300
+  Write-Host "Packaged native/Cartographer smoke validated server.asar $($smokePayload.serverAsarDigest)."
 
   $appUpdateYml = Get-Content (Join-Path $resourcesDir "app-update.yml") -Raw
   $cacheMatch = [regex]::Match($appUpdateYml, "(?m)^updaterCacheDirName:\s*(.+?)\s*$")
