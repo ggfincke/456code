@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('desktopBridge', {
     }
     return result as ReturnType<DesktopBridge['getAppBranding']>
   },
+  getSystemLocale: () =>
+  {
+    const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL)
+    return typeof result === 'string' ? result : null
+  },
   getLocalEnvironmentBootstraps: () =>
   {
     const result = ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL)

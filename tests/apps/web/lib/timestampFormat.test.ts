@@ -1,14 +1,107 @@
 // tests/apps/web/lib/timestampFormat.test.ts
-// verify relative expiry labels behavior
+// verify timestamp formatting behavior
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import {
+  formatDayAwareTimestamp,
   formatElapsedDurationLabel,
   formatExpiresInLabel,
   formatRelativeTimeUntilLabel,
+  formatShortTimestamp,
   getRelativeTimeState,
+  resolveTimestampLocale,
 } from '../../../../apps/web/src/lib/timestampFormat'
+
+describe('resolveTimestampLocale', () =>
+{
+  it('uses valid host tags and falls back for missing or invalid tags', () =>
+  {
+    expect(resolveTimestampLocale(' en-GB ')).toBe('en-GB')
+    expect(resolveTimestampLocale(null)).toBeUndefined()
+    expect(resolveTimestampLocale('   ')).toBeUndefined()
+    expect(resolveTimestampLocale('not a locale')).toBeUndefined()
+    expect(resolveTimestampLocale('en_GB')).toBeUndefined()
+  })
+})
+
+describe('formatDayAwareTimestamp', () =>
+{
+  // local-time constructors keep these calendar boundaries stable in every test timezone.
+  const iso = (year: number, month: number, day: number, hour: number, minute: number) =>
+    new Date(year, month, day, hour, minute).toISOString()
+  const shortTime = (isoDate: string) => formatShortTimestamp(isoDate, '12-hour')
+  const now = new Date(2026, 7, 14, 12).getTime()
+
+  const today = iso(2026, 7, 14, 9, 30)
+  const yesterday = iso(2026, 7, 13, 23, 30)
+  const sameYear = iso(2026, 7, 12, 12, 34)
+  const priorYear = iso(2025, 11, 31, 18, 0)
+
+  it.each([
+    {
+      label: 'today as time only',
+      isoDate: today,
+      nowMs: now,
+      expected: shortTime(today),
+    },
+    {
+      label: 'the previous calendar day just after midnight',
+      isoDate: yesterday,
+      nowMs: new Date(2026, 7, 14, 0, 30).getTime(),
+      expected: `yesterday at ${shortTime(yesterday)}`,
+    },
+    {
+      label: 'an older date in the same year',
+      isoDate: sameYear,
+      nowMs: now,
+      expected: `${new Intl.DateTimeFormat(undefined, {
+        month: 'numeric',
+        day: 'numeric',
+      }).format(new Date(sameYear))} ${shortTime(sameYear)}`,
+    },
+    {
+      label: 'a date in another year',
+      isoDate: priorYear,
+      nowMs: now,
+      expected: `${new Intl.DateTimeFormat(undefined, {
+        month: 'numeric',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(new Date(priorYear))} ${shortTime(priorYear)}`,
+    },
+    {
+      label: 'invalid input as an empty label',
+      isoDate: 'not-a-date',
+      nowMs: now,
+      expected: '',
+    },
+  ])('formats $label', ({ isoDate, nowMs, expected }) =>
+  {
+    expect(formatDayAwareTimestamp(isoDate, '12-hour', nowMs)).toBe(expected)
+  })
+
+  it('uses the host locale for both the numeric date and time', async () =>
+  {
+    vi.stubGlobal('window', {
+      desktopBridge: { getSystemLocale: () => 'en-GB' },
+    })
+    vi.resetModules()
+
+    try
+    {
+      const { formatDayAwareTimestamp: formatWithHostLocale } =
+        await import('../../../../apps/web/src/lib/timestampFormat')
+      const messageAt = iso(2026, 7, 12, 15, 44)
+
+      expect(formatWithHostLocale(messageAt, 'locale', now)).toBe('12/08 15:44')
+    }
+    finally
+    {
+      vi.unstubAllGlobals()
+    }
+  })
+})
 
 describe('relative expiry labels', () =>
 {

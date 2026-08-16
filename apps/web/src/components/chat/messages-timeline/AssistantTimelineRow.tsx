@@ -64,7 +64,7 @@ import {
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
 } from '../../../session-logic'
-import { formatChatTimestampTooltip, formatShortTimestamp } from '../../../timestampFormat'
+import { formatChatTimestampTooltip, formatDayAwareTimestamp } from '../../../timestampFormat'
 import { type TurnDiffSummary } from '../../../types'
 import ChatMarkdown from '../../ChatMarkdown'
 import { Button } from '../../ui/button'
@@ -135,7 +135,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                 <TooltipTrigger
                   render={<p className="text-muted-foreground text-xs tabular-nums" />}
                 >
-                  {formatShortTimestamp(row.message.updatedAt, ctx.timestampFormat)}
+                  {formatDayAwareTimestamp(row.message.updatedAt, ctx.timestampFormat)}
                 </TooltipTrigger>
                 <TooltipPopup>
                   {formatChatTimestampTooltip(row.message.updatedAt, ctx.timestampFormat)}

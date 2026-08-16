@@ -1,5 +1,5 @@
 // apps/desktop/src/electron/ElectronApp.ts
-// define electron app metadata
+// wrap electron app lifecycle and metadata access
 
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -51,6 +51,8 @@ export class ElectronApp extends Context.Service<
   {
     readonly metadata: Effect.Effect<ElectronAppMetadata, ElectronAppMetadataReadError>
     readonly name: Effect.Effect<string>
+    // packaged chromium cannot reliably expose the os locale to the renderer.
+    readonly systemLocale: Effect.Effect<string>
     readonly whenReady: Effect.Effect<void, ElectronAppWhenReadyError>
     readonly quit: Effect.Effect<void>
     readonly exit: (code: number) => Effect.Effect<void>
@@ -127,6 +129,8 @@ export const make = ElectronApp.of({
     }
   }),
   name: Effect.sync(() => Electron.app.name),
+  // normalize posix-style locale identifiers before intl sees them in the renderer.
+  systemLocale: Effect.sync(() => Electron.app.getSystemLocale().replace(/_/g, '-')),
   whenReady: Effect.gen(function* ()
   {
     const isPackaged = Electron.app.isPackaged

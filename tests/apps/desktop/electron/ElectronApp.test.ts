@@ -9,6 +9,7 @@ const {
   appendSwitchMock,
   exitMock,
   getAppPathMock,
+  getSystemLocaleMock,
   getVersionMock,
   isDefaultProtocolClientMock,
   onMock,
@@ -28,6 +29,7 @@ const {
   appendSwitchMock: vi.fn(),
   exitMock: vi.fn(),
   getAppPathMock: vi.fn(() => '/app'),
+  getSystemLocaleMock: vi.fn(() => 'en-US'),
   getVersionMock: vi.fn(() => '1.2.3'),
   isDefaultProtocolClientMock: vi.fn(() => false),
   onMock: vi.fn(),
@@ -54,6 +56,7 @@ vi.mock('electron', () => ({
       setIcon: setDockIconMock,
     },
     getAppPath: getAppPathMock,
+    getSystemLocale: getSystemLocaleMock,
     getVersion: getVersionMock,
     isDefaultProtocolClient: isDefaultProtocolClientMock,
     isPackaged: true,
@@ -83,12 +86,23 @@ describe('ElectronApp', () =>
   {
     appendSwitchMock.mockClear()
     exitMock.mockClear()
+    getSystemLocaleMock.mockClear()
     onMock.mockClear()
     quitMock.mockClear()
     relaunchMock.mockClear()
     removeListenerMock.mockClear()
     setPathMock.mockClear()
   })
+
+  it.effect('normalizes POSIX-style OS locale identifiers', () =>
+    Effect.gen(function* ()
+    {
+      getSystemLocaleMock.mockImplementationOnce(() => 'en_GB')
+      const electronApp = yield* ElectronApp.ElectronApp
+
+      assert.strictEqual(yield* electronApp.systemLocale, 'en-GB')
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  )
 
   it.effect('reports which app metadata property failed', () =>
     Effect.gen(function* ()
