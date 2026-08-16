@@ -130,6 +130,32 @@ export function filterBrowseEntries(input: {
   return { filteredEntries, highlightedEntry, exactEntry }
 }
 
+export function filterPinnedBrowseEntries(input: {
+  browseEntries: ReadonlyArray<FilesystemBrowseEntry>
+  browseFilterQuery: string
+  highlightedItemValue: string | null
+  pinnedDirectoryName: string
+  caseSensitive: boolean
+}): ReturnType<typeof filterBrowseEntries>
+{
+  const namesMatch = (left: string, right: string) =>
+    input.caseSensitive ? left === right : left.toLowerCase() === right.toLowerCase()
+  const visibleFilterQuery = namesMatch(input.browseFilterQuery, input.pinnedDirectoryName)
+    ? ''
+    : input.browseFilterQuery
+  const filtered = filterBrowseEntries({
+    browseEntries: input.browseEntries,
+    browseFilterQuery: visibleFilterQuery,
+    highlightedItemValue: input.highlightedItemValue,
+  })
+  const exactEntry =
+    input.browseFilterQuery.length > 0
+      ? (input.browseEntries.find((entry) => namesMatch(entry.name, input.browseFilterQuery)) ??
+        null)
+      : null
+  return { ...filtered, exactEntry }
+}
+
 export function normalizeSearchText(value: string): string
 {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
