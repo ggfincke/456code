@@ -146,6 +146,14 @@ export function getChangeRequestTerminologyForKind(
   }
 }
 
+const SCP_SSH_REMOTE_PATTERN = /^[a-zA-Z0-9._-]+@([^:/]+):/u
+
+export function isSshRemoteUrl(remoteUrl: string): boolean
+{
+  const trimmed = remoteUrl.trim()
+  return SCP_SSH_REMOTE_PATTERN.test(trimmed) || trimmed.toLowerCase().startsWith('ssh://')
+}
+
 function parseRemoteHost(remoteUrl: string): string | null
 {
   const trimmed = remoteUrl.trim()
@@ -193,14 +201,19 @@ function toBaseUrl(host: string): string
   return `https://${host}`
 }
 
+function hasDnsLabel(host: string, label: string): boolean
+{
+  return host.split('.').includes(label)
+}
+
 function isGitHubHost(host: string): boolean
 {
-  return host === 'github.com' || host.includes('github')
+  return host === 'github.com' || hasDnsLabel(host, 'github')
 }
 
 function isGitLabHost(host: string): boolean
 {
-  return host === 'gitlab.com' || host.includes('gitlab')
+  return host === 'gitlab.com' || hasDnsLabel(host, 'gitlab')
 }
 
 function isAzureDevOpsHost(host: string): boolean
@@ -215,7 +228,7 @@ function isAzureDevOpsHost(host: string): boolean
 
 function isBitbucketHost(host: string): boolean
 {
-  return host === 'bitbucket.org' || host.includes('bitbucket')
+  return host === 'bitbucket.org' || hasDnsLabel(host, 'bitbucket')
 }
 
 export function detectSourceControlProviderFromRemoteUrl(

@@ -615,7 +615,7 @@ it.effect('preserves Bitbucket response body read failures as their immediate ca
   }).pipe(Effect.provide(layer))
 })
 
-it.effect('checks out same-repository pull requests with the existing Bitbucket remote', () =>
+it.effect('checks out same-repository pull requests with an arbitrary-user SSH remote', () =>
 {
   const { git, layer } = makeLayer({
     response: () =>
@@ -643,7 +643,7 @@ it.effect('checks out same-repository pull requests with the existing Bitbucket 
           baseUrl: 'https://bitbucket.org',
         },
         remoteName: 'origin',
-        remoteUrl: 'git@bitbucket.org:pingdotgg/t3code.git',
+        remoteUrl: 'deploy@bitbucket.org:pingdotgg/t3code.git',
       },
       reference: '42',
       force: true,
@@ -748,6 +748,10 @@ it.effect('checks out fork pull requests through an ensured fork remote', () =>
           },
         },
       })
+    },
+    git: {
+      readConfigValue: () =>
+        Effect.succeed<string | null>('deploy@bitbucket.org:pingdotgg/t3code.git'),
     },
   })
 

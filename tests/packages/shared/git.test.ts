@@ -47,6 +47,16 @@ describe('normalizeGitRemoteUrl', () =>
       'gitlab.company.com/team/project',
     )
   })
+
+  it('normalizes SCP-like remotes with arbitrary SSH usernames', () =>
+  {
+    expect(normalizeGitRemoteUrl('gitlab@gitlab.example.com:group/project.git')).toBe(
+      'gitlab.example.com/group/project',
+    )
+    expect(normalizeGitRemoteUrl('deploy@bitbucket.org:workspace/repo.git')).toBe(
+      'bitbucket.org/workspace/repo',
+    )
+  })
 })
 
 describe('parseGitHubRepositoryNameWithOwnerFromRemoteUrl', () =>

@@ -18,7 +18,10 @@ import {
 } from '@t3tools/contracts'
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
 import { sanitizeBranchFragment } from '@t3tools/shared/git'
-import { detectSourceControlProviderFromRemoteUrl } from '@t3tools/shared/sourceControl'
+import {
+  detectSourceControlProviderFromRemoteUrl,
+  isSshRemoteUrl,
+} from '@t3tools/shared/sourceControl'
 
 import {
   BitbucketPullRequestListSchema,
@@ -396,10 +399,10 @@ function requireRepositoryLocator(
 function parseBitbucketRemoteUrl(remoteUrl: string): BitbucketRepositoryLocator | null
 {
   const trimmed = remoteUrl.trim()
-  if (trimmed.startsWith('git@'))
+  const scpMatch = /^[a-zA-Z0-9._-]+@[^:/]+:(.+)$/u.exec(trimmed)
+  if (scpMatch?.[1])
   {
-    const pathStart = trimmed.indexOf(':')
-    return pathStart < 0 ? null : parseBitbucketRepositorySlug(trimmed.slice(pathStart + 1))
+    return parseBitbucketRepositorySlug(scpMatch[1])
   }
 
   try
@@ -451,8 +454,8 @@ function defaultChangeRequestTargetBranch(input: {
 
 function shouldPreferSshRemote(originRemoteUrl: string | null): boolean
 {
-  const trimmed = originRemoteUrl?.trim() ?? ''
-  return trimmed.startsWith('git@') || trimmed.startsWith('ssh://')
+  if (!originRemoteUrl) return false
+  return isSshRemoteUrl(originRemoteUrl)
 }
 
 function selectCloneUrl(input: {

@@ -7,6 +7,7 @@ import * as Order from 'effect/Order'
 
 import { type ChangeRequest, type GitCommandError } from '@t3tools/contracts'
 import { sanitizeBranchFragment } from '@t3tools/shared/git'
+import { isSshRemoteUrl } from '@t3tools/shared/sourceControl'
 
 export function isNotGitRepositoryError(error: GitCommandError): boolean
 {
@@ -345,8 +346,7 @@ export function toResolvedPullRequest(pr: {
 export function shouldPreferSshRemote(url: string | null): boolean
 {
   if (!url) return false
-  const trimmed = url.trim()
-  return trimmed.startsWith('git@') || trimmed.startsWith('ssh://')
+  return isSshRemoteUrl(url)
 }
 
 export function toPullRequestHeadRemoteInfo(pr: {

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import {
   detectSourceControlProviderFromRemoteUrl,
   getChangeRequestTerminologyForKind,
+  isSshRemoteUrl,
   resolveChangeRequestPresentation,
 } from '../../../packages/shared/src/sourceControl.ts'
 
@@ -101,5 +102,61 @@ describe('detectSourceControlProviderFromRemoteUrl', () =>
       name: 'self-hosted.example.test:8443',
       baseUrl: 'https://self-hosted.example.test:8443',
     })
+  })
+
+  it('matches self-hosted providers only by complete DNS labels', () =>
+  {
+    expect(
+      detectSourceControlProviderFromRemoteUrl('https://github.example.com/owner/repo.git')?.kind,
+    ).toBe('github')
+    expect(
+      detectSourceControlProviderFromRemoteUrl('https://gitlab.example.com/group/repo.git')?.kind,
+    ).toBe('gitlab')
+    expect(
+      detectSourceControlProviderFromRemoteUrl('https://bitbucket.example.com/workspace/repo.git')
+        ?.kind,
+    ).toBe('bitbucket')
+
+    expect(
+      detectSourceControlProviderFromRemoteUrl('https://notgithub.example.com/owner/repo.git')
+        ?.kind,
+    ).toBe('unknown')
+    expect(
+      detectSourceControlProviderFromRemoteUrl('https://notgitlab.example.com/group/repo.git')
+        ?.kind,
+    ).toBe('unknown')
+    expect(
+      detectSourceControlProviderFromRemoteUrl(
+        'https://notbitbucket.example.com/workspace/repo.git',
+      )?.kind,
+    ).toBe('unknown')
+  })
+
+  it('detects SSH remotes with arbitrary SSH usernames', () =>
+  {
+    expect(
+      detectSourceControlProviderFromRemoteUrl('gitlab@gitlab.example.com:group/project.git'),
+    ).toEqual({
+      kind: 'gitlab',
+      name: 'GitLab Self-Hosted',
+      baseUrl: 'https://gitlab.example.com',
+    })
+    expect(detectSourceControlProviderFromRemoteUrl('deploy@github.com:owner/repo.git')?.kind).toBe(
+      'github',
+    )
+  })
+})
+
+describe('isSshRemoteUrl', () =>
+{
+  it('recognizes SCP-like and ssh protocol remotes without misclassifying other paths', () =>
+  {
+    expect(isSshRemoteUrl('git@github.com:owner/repo.git')).toBe(true)
+    expect(isSshRemoteUrl('gitlab@gitlab.example.com:group/project.git')).toBe(true)
+    expect(isSshRemoteUrl('deploy@bitbucket.org:workspace/repo.git')).toBe(true)
+    expect(isSshRemoteUrl('SSH://git@gitlab.example.com/group/project.git')).toBe(true)
+    expect(isSshRemoteUrl('https://gitlab.example.com/group/project.git')).toBe(false)
+    expect(isSshRemoteUrl('/home/user/repos/project')).toBe(false)
+    expect(isSshRemoteUrl('deploy@github.com/project/repo')).toBe(false)
   })
 })

@@ -26,6 +26,8 @@ import {
   type RemoteT3RunnerOptions,
 } from './remoteScripts.ts'
 
+const REMOTE_LAUNCH_TIMEOUT_MS = 90_000
+
 export function sshTargetLogFields(target: DesktopSshEnvironmentTarget)
 {
   return {
@@ -115,6 +117,7 @@ export const launchOrReuseRemoteServer = Effect.fn('ssh/tunnel.launchOrReuseRemo
     const result = yield* runSshCommand(target, {
       remoteCommandArgs: ['sh', '-s', '--', remoteStateKey(target)],
       stdin: buildRemoteLaunchScript(runner),
+      timeoutMs: REMOTE_LAUNCH_TIMEOUT_MS,
       ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
       ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
       ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
