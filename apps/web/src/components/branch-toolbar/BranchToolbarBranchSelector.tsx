@@ -38,13 +38,16 @@ import { parsePullRequestReference } from '../../pullRequestReference'
 import { getSourceControlPresentation } from '../../lib/sourceControlPresentation'
 import { resolveSourceControlIcon } from '../sourceControlIcons'
 import {
+  buildCreateAndSwitchRefInput,
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchToolbarPrBranch,
   resolveBranchSelectionTarget,
   resolveBranchToolbarValue,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
+  sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
+  trimAsciiRefWhitespace,
 } from './BranchToolbar.logic'
 import {
   ChangeRequestStatusIcon,
@@ -238,15 +241,16 @@ export function BranchToolbarBranchSelector({
           input: { cwd: branchCwd },
         }),
   )
-  const trimmedBranchQuery = branchQuery.trim()
-  const deferredTrimmedBranchQuery = deferredBranchQuery.trim()
+  const trimmedBranchQuery = trimAsciiRefWhitespace(branchQuery)
+  const deferredTrimmedBranchQuery = trimAsciiRefWhitespace(deferredBranchQuery)
+  const branchRefQuery = sanitizeNewRefName(deferredTrimmedBranchQuery)
   const branchRefTarget = useMemo(
     () => ({
       environmentId,
       cwd: branchCwd,
-      query: deferredTrimmedBranchQuery,
+      query: branchRefQuery,
     }),
-    [branchCwd, deferredTrimmedBranchQuery, environmentId],
+    [branchCwd, branchRefQuery, environmentId],
   )
   const branchRefState = usePaginatedBranches(branchRefTarget)
   const refs = branchRefState.refs
@@ -279,7 +283,8 @@ export function BranchToolbarBranchSelector({
   const checkoutPullRequestItemValue =
     prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null
   const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0
-  const hasExactBranchMatch = branchByName.has(trimmedBranchQuery)
+  const newRefName = sanitizeNewRefName(trimmedBranchQuery)
+  const hasExactBranchMatch = branchByName.has(newRefName)
   const createBranchItemValue = canCreateBranch
     ? `__create_new_branch__:${trimmedBranchQuery}`
     : null
@@ -453,8 +458,10 @@ export function BranchToolbarBranchSelector({
 
   const createRef = (rawName: string) =>
   {
-    const name = rawName.trim()
-    if (!branchCwd || !name || isBranchActionPending) return
+    if (!branchCwd || isBranchActionPending) return
+    const input = buildCreateAndSwitchRefInput(branchCwd, rawName)
+    const name = input.refName
+    if (!name) return
 
     setIsBranchMenuOpen(false)
     onComposerFocusRequest?.()
@@ -465,11 +472,7 @@ export function BranchToolbarBranchSelector({
       setOptimisticBranch(name)
       const createBranchResult = await createRefMutation({
         environmentId,
-        input: {
-          cwd: branchCwd,
-          refName: name,
-          switchRef: true,
-        },
+        input,
       })
       if (createBranchResult._tag === 'Success')
       {
@@ -692,7 +695,7 @@ export function BranchToolbarBranchSelector({
           className="pe-1.5"
           onClick={() => createRef(trimmedBranchQuery)}
         >
-          <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
+          <span className="truncate">Create new ref &quot;{newRefName}&quot;</span>
         </ComboboxItem>
       )
     }

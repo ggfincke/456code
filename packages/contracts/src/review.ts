@@ -2,13 +2,13 @@
 // define review contracts
 
 import * as Schema from 'effect/Schema'
-import { TrimmedNonEmptyString } from './baseSchemas.ts'
+import { GitRefString, TrimmedNonEmptyString } from './baseSchemas.ts'
 import { GitCommandError } from './git.ts'
 import { VcsError } from './vcs.ts'
 
 export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
-  baseRef: Schema.optional(TrimmedNonEmptyString),
+  baseRef: Schema.optional(GitRefString),
   ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
 })
 export type ReviewDiffPreviewInput = typeof ReviewDiffPreviewInput.Type
@@ -20,8 +20,8 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   id: TrimmedNonEmptyString,
   kind: ReviewDiffPreviewSourceKind,
   title: TrimmedNonEmptyString,
-  baseRef: Schema.NullOr(TrimmedNonEmptyString),
-  headRef: Schema.NullOr(TrimmedNonEmptyString),
+  baseRef: Schema.NullOr(GitRefString),
+  headRef: Schema.NullOr(GitRefString),
   diff: Schema.String,
   diffHash: TrimmedNonEmptyString,
   truncated: Schema.Boolean,
