@@ -3,6 +3,16 @@
 
 import type { ScopedThreadRef, ThreadId } from '@t3tools/contracts'
 
+export function hasVisibleToastAction(actionProps: unknown): boolean
+{
+  if (actionProps === null || typeof actionProps !== 'object' || !('children' in actionProps))
+  {
+    return false
+  }
+  const children = actionProps.children
+  return children !== null && children !== undefined && children !== false && children !== ''
+}
+
 export function shouldHideCollapsedToastContent(
   visibleToastIndex: number,
   visibleToastCount: number,

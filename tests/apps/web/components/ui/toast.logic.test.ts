@@ -6,9 +6,11 @@ import type { ServerConfigStreamEvent } from '@t3tools/contracts'
 import { assert, describe, expect, it } from 'vite-plus/test'
 import {
   buildVisibleToastLayout,
+  hasVisibleToastAction,
   shouldHideCollapsedToastContent,
   shouldRenderThreadScopedToast,
 } from '../../../../../apps/web/src/components/ui/toast.logic'
+import { hiddenToastActionProps } from '../../../../../apps/web/src/components/ui/toastHelpers'
 import {
   createKeybindingsUpdateToastController,
   KEYBINDINGS_SUCCESS_TOAST_COOLDOWN_MS,
@@ -28,6 +30,17 @@ function keybindingsEvent(
     ...overrides,
   }
 }
+
+describe('hasVisibleToastAction', () =>
+{
+  it('distinguishes a labeled action from the defined empty update payload', () =>
+  {
+    expect(hasVisibleToastAction({ children: 'Update' })).toBe(true)
+    expect(hiddenToastActionProps.children).toBeNull()
+    expect(hasVisibleToastAction(hiddenToastActionProps)).toBe(false)
+    expect(hasVisibleToastAction(undefined)).toBe(false)
+  })
+})
 
 describe('shouldHideCollapsedToastContent', () =>
 {

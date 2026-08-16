@@ -20,6 +20,12 @@ export type StackedThreadToastOptions = {
   data?: Omit<ThreadToastData, 'actionLayout'>
 }
 
+// base UI omits undefined fields when updating a toast, so a defined empty
+// action is required to replace a stale CTA.
+export const hiddenToastActionProps = {
+  children: null,
+} as const satisfies Pick<ComponentPropsWithoutRef<'button'>, 'children'>
+
 // thread toast using the stacked body + bottom action row (copy for errors, CTA on its own row).
 export function stackedThreadToast(
   options: StackedThreadToastOptions,
