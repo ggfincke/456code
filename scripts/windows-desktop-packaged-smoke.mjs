@@ -3,12 +3,12 @@
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeCrypto from 'node:crypto'
-import * as NodeFS from 'node:fs'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 import * as NodeURL from 'node:url'
 import * as NodeUtil from 'node:util'
+import * as ElectronOriginalFS from 'original-fs'
 
 const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile)
 const CARTOGRAPHER_CLI_TIMEOUT_MS = 120_000
@@ -117,7 +117,7 @@ const expectedDigest = (
   await NodeFSP.readFile(NodePath.join(resourcesDir, 'server.asar.sha256'), 'utf8')
 ).trim()
 const digest = NodeCrypto.createHash('sha256')
-for await (const chunk of NodeFS.createReadStream(serverAsarPath))
+for await (const chunk of ElectronOriginalFS.createReadStream(serverAsarPath))
 {
   digest.update(chunk)
 }
