@@ -53,6 +53,8 @@ interface VariantOutputs
   readonly appleTouch: string
   readonly favicon16: string
   readonly favicon32: string
+  readonly webIcon192: string
+  readonly webIcon512: string
   readonly faviconIco: string
   readonly windowsIco: string
 }
@@ -236,6 +238,8 @@ const ICON_VARIANTS = [
       appleTouch: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
       favicon16: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
+      webIcon192: BRAND_ASSET_PATHS.developmentWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.developmentWebIcon512Png,
       faviconIco: BRAND_ASSET_PATHS.developmentWebFaviconIco,
       windowsIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
     },
@@ -250,6 +254,8 @@ const ICON_VARIANTS = [
       appleTouch: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng,
       favicon16: BRAND_ASSET_PATHS.nightlyWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.nightlyWebFavicon32Png,
+      webIcon192: BRAND_ASSET_PATHS.nightlyWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.nightlyWebIcon512Png,
       faviconIco: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
       windowsIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
     },
@@ -264,6 +270,8 @@ const ICON_VARIANTS = [
       appleTouch: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
       favicon16: BRAND_ASSET_PATHS.productionWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.productionWebFavicon32Png,
+      webIcon192: BRAND_ASSET_PATHS.productionWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.productionWebIcon512Png,
       faviconIco: BRAND_ASSET_PATHS.productionWebFaviconIco,
       windowsIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
     },
@@ -641,6 +649,8 @@ const renderVariant = Effect.fn('iconExport.renderVariant')(function* (
     [variant.outputs.appleTouch, yield* render('iOS', 180)],
     [variant.outputs.favicon16, yield* render('iOS', 16)],
     [variant.outputs.favicon32, yield* render('iOS', 32)],
+    [variant.outputs.webIcon192, yield* render('iOS', 192)],
+    [variant.outputs.webIcon512, yield* render('iOS', 512)],
     [variant.outputs.faviconIco, ico],
     [variant.outputs.windowsIco, ico],
   ])
