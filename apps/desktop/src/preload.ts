@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       ...(position === undefined ? {} : { position }),
     }),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
+  probeRemoteEditors: () => ipcRenderer.invoke(IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL, undefined),
   setMenuBarState: (state) => ipcRenderer.invoke(IpcChannels.SET_MENU_BAR_STATE_CHANNEL, state),
   notifyThreadAttention: (attention) =>
     ipcRenderer.invoke(IpcChannels.NOTIFY_THREAD_ATTENTION_CHANNEL, attention),

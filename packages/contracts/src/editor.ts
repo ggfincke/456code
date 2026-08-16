@@ -13,20 +13,40 @@ type EditorDefinition = {
   readonly commands: readonly [string, ...string[]] | null
   readonly baseArgs?: readonly string[]
   readonly launchStyle: EditorLaunchStyle
+  readonly remoteScheme?: string
 }
 
 export const EDITORS = [
-  { id: 'cursor', label: 'Cursor', commands: ['cursor'], launchStyle: 'goto' },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    commands: ['cursor'],
+    launchStyle: 'goto',
+    remoteScheme: 'cursor',
+  },
   { id: 'trae', label: 'Trae', commands: ['trae'], launchStyle: 'goto' },
   { id: 'kiro', label: 'Kiro', commands: ['kiro'], baseArgs: ['ide'], launchStyle: 'goto' },
-  { id: 'vscode', label: 'VS Code', commands: ['code'], launchStyle: 'goto' },
+  {
+    id: 'vscode',
+    label: 'VS Code',
+    commands: ['code'],
+    launchStyle: 'goto',
+    remoteScheme: 'vscode',
+  },
   {
     id: 'vscode-insiders',
     label: 'VS Code Insiders',
     commands: ['code-insiders'],
     launchStyle: 'goto',
+    remoteScheme: 'vscode-insiders',
   },
-  { id: 'vscodium', label: 'VSCodium', commands: ['codium'], launchStyle: 'goto' },
+  {
+    id: 'vscodium',
+    label: 'VSCodium',
+    commands: ['codium'],
+    launchStyle: 'goto',
+    remoteScheme: 'vscodium',
+  },
   { id: 'zed', label: 'Zed', commands: ['zed', 'zeditor'], launchStyle: 'direct-path' },
   { id: 'antigravity', label: 'Antigravity', commands: ['agy'], launchStyle: 'goto' },
   { id: 'idea', label: 'IntelliJ IDEA', commands: ['idea'], launchStyle: 'line-column' },
@@ -52,6 +72,46 @@ export const LaunchEditorInput = Schema.Struct({
   editor: EditorId,
 })
 export type LaunchEditorInput = typeof LaunchEditorInput.Type
+
+const remoteSchemeOf = (editor: EditorDefinition): string | undefined => editor.remoteScheme
+
+export const REMOTE_CAPABLE_EDITOR_IDS: ReadonlyArray<EditorId> = EDITORS.flatMap((editor) =>
+  remoteSchemeOf(editor) === undefined ? [] : [editor.id],
+)
+
+export const remoteSchemeForEditor = (id: EditorId): string | undefined =>
+{
+  const editor = EDITORS.find((candidate) => candidate.id === id)
+  return editor === undefined ? undefined : remoteSchemeOf(editor)
+}
+
+export const buildRemoteOpenUrl = (input: {
+  readonly editor: EditorId
+  readonly host: string
+  readonly absolutePath: string
+}): string | undefined =>
+{
+  const scheme = remoteSchemeForEditor(input.editor)
+  if (scheme === undefined)
+  {
+    return undefined
+  }
+
+  // vscode-remote URIs represent windows paths as /C:/path.
+  const posixPath = input.absolutePath.replaceAll('\\', '/')
+  const rootedPath = posixPath.startsWith('/') ? posixPath : `/${posixPath}`
+  const encodedPath = rootedPath.split('/').map(encodeURIComponent).join('/')
+  return `${scheme}://vscode-remote/ssh-remote+${encodeURIComponent(input.host)}${encodedPath}`
+}
+
+export const RemoteOpenTargetKind = Schema.Literals(['tailscale', 'mdns'])
+export type RemoteOpenTargetKind = typeof RemoteOpenTargetKind.Type
+
+export const RemoteOpenTarget = Schema.Struct({
+  kind: RemoteOpenTargetKind,
+  host: TrimmedNonEmptyString,
+})
+export type RemoteOpenTarget = typeof RemoteOpenTarget.Type
 
 export class ExternalLauncherUnknownEditorError extends Schema.TaggedErrorClass<ExternalLauncherUnknownEditorError>()(
   'ExternalLauncherUnknownEditorError',

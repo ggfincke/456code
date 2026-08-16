@@ -34,6 +34,9 @@ export interface NetServiceShape
   // checks loopback availability on both IPv4 and IPv6 localhost addresses.
   readonly isPortAvailableOnLoopback: (port: number) => Effect.Effect<boolean>
 
+  // returns true when a TCP connection succeeds for {host, port}.
+  readonly hasListenerOnHost: (port: number, host: string) => Effect.Effect<boolean>
+
   // reserve an ephemeral loopback port and release it immediately.
   readonly reserveLoopbackPort: (host?: string) => Effect.Effect<number, NetError>
 
@@ -67,7 +70,7 @@ export const make = () =>
 
       server.unref()
 
-      server.once('error', (cause) =>
+      server.once('error', (_cause) =>
       {
         settle(false)
       })
@@ -187,6 +190,7 @@ export const make = () =>
   return {
     canListenOnHost,
     isPortAvailableOnLoopback,
+    hasListenerOnHost,
     reserveLoopbackPort,
     findAvailablePort: (preferred) =>
       Effect.gen(function* ()

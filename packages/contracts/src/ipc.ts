@@ -1134,6 +1134,8 @@ export interface DesktopBridge
     position?: { x: number; y: number },
   ) => Promise<T | null>
   openExternal: (url: string) => Promise<boolean>
+  // optional while renderer releases catch up with desktop editor probing.
+  probeRemoteEditors?: () => Promise<readonly EditorId[]>
   setMenuBarState?: (state: DesktopMenuBarState) => Promise<void>
   // desktop-only, so optional: web builds have no bridge and the renderer
   // feature-detects before calling.

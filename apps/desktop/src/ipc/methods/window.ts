@@ -8,10 +8,14 @@ import {
   DesktopMenuBarStateSchema,
   DesktopThemeSchema,
   DesktopThreadAttentionSchema,
+  EDITORS,
+  EditorId,
   PickFolderOptionsSchema,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
+  REMOTE_CAPABLE_EDITOR_IDS,
   type DesktopEnvironmentBootstrap,
 } from '@t3tools/contracts'
+import { isCommandAvailable } from '@t3tools/shared/shell'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
@@ -328,5 +332,30 @@ export const openExternal = DesktopIpc.makeIpcMethod({
   {
     const shell = yield* ElectronShell.ElectronShell
     return yield* shell.openExternal(url)
+  }),
+})
+
+export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Array(EditorId),
+  // probe the viewing machine, not the selected backend's path.
+  handler: Effect.fn('desktop.ipc.window.probeRemoteEditors')(function* ()
+  {
+    const available: Array<EditorId> = []
+    for (const editorId of REMOTE_CAPABLE_EDITOR_IDS)
+    {
+      const commands = EDITORS.find((editor) => editor.id === editorId)?.commands
+      if (!commands) continue
+      for (const command of commands)
+      {
+        if (yield* isCommandAvailable(command, { env: process.env }))
+        {
+          available.push(editorId)
+          break
+        }
+      }
+    }
+    return available
   }),
 })

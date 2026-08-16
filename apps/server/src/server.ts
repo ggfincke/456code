@@ -26,6 +26,7 @@ import { websocketRpcRouteLayer } from './ws.ts'
 import { ImportContinuationLive } from './import/continuation/continuation.ts'
 import * as ImportRuntime from './import/importRuntime.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
+import * as RemoteOpenTargets from './environment/RemoteOpenTargets.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from './persistence/Layers/Sqlite.ts'
 import { ImportReplacementIntentRepositoryLive } from './persistence/Layers/ImportReplacementIntents.ts'
 import { DiffAnalysisGenerationRepositoryLive } from './persistence/Layers/DiffAnalysisGenerations.ts'
@@ -479,6 +480,7 @@ const RuntimeDependenciesLive = ImportRuntimeLayerLive.pipe(
   Layer.provideMerge(WorkersStatusBroadcaster.layer.pipe(Layer.provide(WorkerBrokerStore.layer))),
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
+  Layer.provideMerge(RemoteOpenTargets.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
 )

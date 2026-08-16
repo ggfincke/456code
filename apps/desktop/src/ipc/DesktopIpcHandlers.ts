@@ -43,6 +43,7 @@ import {
   notifyThreadAttention,
   openExternal,
   pickFolder,
+  probeRemoteEditors,
   setMenuBarState,
   setTheme,
   showContextMenu,
@@ -91,6 +92,7 @@ export const installDesktopIpcHandlers = Effect.fn('desktop.ipc.installHandlers'
   yield* ipc.handle(setTheme)
   yield* ipc.handle(showContextMenu)
   yield* ipc.handle(openExternal)
+  yield* ipc.handle(probeRemoteEditors)
   yield* ipc.handle(setMenuBarState)
   yield* ipc.handle(notifyThreadAttention)
   yield* ipc.handle(getUpdateState)

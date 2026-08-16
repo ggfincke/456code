@@ -18,7 +18,7 @@ import {
   KeybindingWhen,
   ResolvedKeybindingsConfig,
 } from './keybindings.ts'
-import { EditorId } from './editor.ts'
+import { EditorId, RemoteOpenTarget } from './editor.ts'
 import { ModelCapabilities } from './model.ts'
 import { ProviderDriverKind, ProviderInstanceId } from './providerInstance.ts'
 import { ProviderRuntimeCapabilities } from './provider.ts'
@@ -454,6 +454,8 @@ export const ServerConfig = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviders,
   availableEditors: Schema.Array(EditorId),
+  // absent on older servers; empty when this environment has no advertised ssh route.
+  remoteOpenTargets: Schema.optionalKey(Schema.Array(RemoteOpenTarget)),
   observability: ServerObservability,
   settings: ServerSettings,
   // whether shell subscriptions can emit an opt-in catch-up completion marker.

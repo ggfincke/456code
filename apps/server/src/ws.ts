@@ -49,6 +49,7 @@ import * as CheckpointDiffQuery from './orchestration/Services/CheckpointDiffQue
 import * as ServerConfig from './config.ts'
 import * as Keybindings from './keybindings.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
+import * as RemoteOpenTargets from './environment/RemoteOpenTargets.ts'
 import * as OrchestrationEngine from './orchestration/Services/OrchestrationEngine.ts'
 import * as ProjectionSnapshotQuery from './orchestration/Services/ProjectionSnapshotQuery.ts'
 import {
@@ -214,6 +215,7 @@ const makeWsRpcLayer = (
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery
       const keybindings = yield* Keybindings.Keybindings
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher
+      const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService
       const review = yield* ReviewService.ReviewService
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService
@@ -707,6 +709,9 @@ const makeWsRpcLayer = (
           providers,
           availableEditors: yield* resolveAvailableEditorsForConfig(
             externalLauncher.resolveAvailableEditors(),
+          ),
+          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
+            remoteOpenTargets.resolveTargets(),
           ),
           observability: {
             logsDirectoryPath: config.logsDir,

@@ -102,6 +102,7 @@ import * as GitManager from '../../../apps/server/src/git/GitManager.ts'
 import * as GitStatusReaderLive from '../../../apps/server/src/git/GitStatusReaderLive.ts'
 import * as Keybindings from '../../../apps/server/src/keybindings.ts'
 import * as ExternalLauncher from '../../../apps/server/src/process/externalLauncher.ts'
+import * as RemoteOpenTargets from '../../../apps/server/src/environment/RemoteOpenTargets.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
 import { OrchestrationListenerCallbackError } from '../../../apps/server/src/orchestration/Errors.ts'
 import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
@@ -651,10 +652,15 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ExternalLauncher.ExternalLauncher)({
-          resolveAvailableEditors: () => Effect.succeed([]),
-          ...options?.layers?.externalLauncher,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ExternalLauncher.ExternalLauncher)({
+            resolveAvailableEditors: () => Effect.succeed([]),
+            ...options?.layers?.externalLauncher,
+          }),
+          Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
+            resolveTargets: () => Effect.succeed([]),
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProcessDiagnostics.ProcessDiagnostics)({
@@ -2687,6 +2693,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(response.environment.environmentId, testEnvironmentDescriptor.environmentId)
       assert.equal(response.auth.policy, 'desktop-managed-local')
+      assert.deepEqual(response.remoteOpenTargets, [])
       assert.equal(response.shellResumeCompletionMarker, true)
       assert.equal(response.threadResumeCompletionMarker, true)
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),

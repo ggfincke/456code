@@ -1,10 +1,22 @@
 // apps/web/src/components/chat/OpenInPicker.tsx
 // render open in picker
 
-import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from '@t3tools/contracts'
+import {
+  buildRemoteOpenUrl,
+  EditorId,
+  type EnvironmentId,
+  type ResolvedKeybindingsConfig,
+} from '@t3tools/contracts'
 import { memo, useCallback, useEffect, useMemo } from 'react'
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from '../../keybindings'
 import { usePreferredEditor } from '../../lib/editorPreferences'
+import {
+  openRemoteEditorUrl,
+  useRemoteCapableEditors,
+  useRemoteOpenHint,
+  useRemoteOpenState,
+} from '../../lib/remoteOpen'
+import { useEnvironment } from '../../state/environments'
 import { ChevronDownIcon, FolderClosedIcon } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Group, GroupSeparator } from '../ui/group'
@@ -205,10 +217,20 @@ export const OpenInPicker = memo(function OpenInPicker({
 })
 {
   const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, 'open in editor')
-  const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors)
+  const remote = useRemoteOpenState(environmentId)
+  const remoteCapableEditors = useRemoteCapableEditors(remote.mode === 'remote-links')
+  const [remoteHintSeen, markRemoteHintSeen] = useRemoteOpenHint()
+  const environmentLabel = useEnvironment(environmentId)?.label ?? 'this machine'
+  const effectiveEditors =
+    remote.mode === 'local-exec'
+      ? availableEditors
+      : remote.mode === 'remote-links'
+        ? remoteCapableEditors
+        : []
+  const [preferredEditor, setPreferredEditor] = usePreferredEditor(effectiveEditors)
   const options = useMemo(
-    () => resolveOptions(navigator.platform, availableEditors),
-    [availableEditors],
+    () => resolveOptions(navigator.platform, effectiveEditors),
+    [effectiveEditors],
   )
   const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null
 
@@ -218,6 +240,23 @@ export const OpenInPicker = memo(function OpenInPicker({
       if (!openInCwd) return
       const editor = editorId ?? preferredEditor
       if (!editor) return
+      if (remote.mode === 'remote-unavailable') return
+      if (remote.mode === 'remote-links')
+      {
+        const url = buildRemoteOpenUrl({
+          editor,
+          host: remote.host.host,
+          absolutePath: openInCwd,
+        })
+        if (url === undefined) return
+        void openRemoteEditorUrl(url).then((opened) =>
+        {
+          if (!opened) return
+          markRemoteHintSeen()
+          setPreferredEditor(editor)
+        })
+        return
+      }
       const result = openInEditorMutation({
         environmentId,
         input: {
@@ -228,7 +267,15 @@ export const OpenInPicker = memo(function OpenInPicker({
       setPreferredEditor(editor)
       return result
     },
-    [environmentId, openInCwd, openInEditorMutation, preferredEditor, setPreferredEditor],
+    [
+      environmentId,
+      markRemoteHintSeen,
+      openInCwd,
+      openInEditorMutation,
+      preferredEditor,
+      remote,
+      setPreferredEditor,
+    ],
   )
 
   const openFavoriteEditorShortcutLabel = useMemo(
@@ -244,19 +291,14 @@ export const OpenInPicker = memo(function OpenInPicker({
       if (!isOpenFavoriteEditorShortcut(e, keybindings)) return
       if (!openInCwd) return
       if (!preferredEditor) return
+      if (remote.mode === 'remote-unavailable') return
 
       e.preventDefault()
-      void openInEditorMutation({
-        environmentId,
-        input: {
-          cwd: openInCwd,
-          editor: preferredEditor,
-        },
-      })
+      void openInEditor(preferredEditor)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [enableShortcut, environmentId, keybindings, openInCwd, openInEditorMutation, preferredEditor])
+  }, [enableShortcut, keybindings, openInCwd, openInEditor, preferredEditor, remote.mode])
 
   return (
     <Group aria-label="Open in editor">
@@ -264,7 +306,7 @@ export const OpenInPicker = memo(function OpenInPicker({
         aria-label={compact ? 'Open file in preferred editor' : undefined}
         size="xs"
         variant="outline"
-        disabled={!preferredEditor || !openInCwd}
+        disabled={!preferredEditor || !openInCwd || remote.mode === 'remote-unavailable'}
         onClick={() => openInEditor(preferredEditor)}
       >
         {primaryOption?.Icon && (
@@ -297,16 +339,25 @@ export const OpenInPicker = memo(function OpenInPicker({
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>
         <MenuPopup align="end">
-          {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
-          {options.map(({ label, Icon, value, kind }) => (
-            <MenuItem key={value} onClick={() => openInEditor(value)}>
-              <Icon aria-hidden="true" className={getOpenInIconClass(kind)} />
-              {label}
-              {value === preferredEditor && openFavoriteEditorShortcutLabel && (
-                <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
+          {remote.mode === 'remote-unavailable' ? (
+            <MenuItem disabled>No SSH route to {environmentLabel}</MenuItem>
+          ) : (
+            <>
+              {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
+              {options.map(({ label, Icon, value, kind }) => (
+                <MenuItem key={value} onClick={() => openInEditor(value)}>
+                  <Icon aria-hidden="true" className={getOpenInIconClass(kind)} />
+                  {label}
+                  {value === preferredEditor && openFavoriteEditorShortcutLabel && (
+                    <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
+                  )}
+                </MenuItem>
+              ))}
+              {remote.mode === 'remote-links' && !remoteHintSeen && (
+                <MenuItem disabled>Opens over SSH. Needs your key on {environmentLabel}</MenuItem>
               )}
-            </MenuItem>
-          ))}
+            </>
+          )}
         </MenuPopup>
       </Menu>
     </Group>
