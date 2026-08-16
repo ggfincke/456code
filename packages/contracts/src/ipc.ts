@@ -1215,6 +1215,7 @@ export interface LocalApi
       items: readonly ContextMenuItem<T>[],
       position?: { x: number; y: number },
     ) => Promise<T | null>
+    close: () => Promise<void>
   }
   persistence: {
     getClientSettings: () => Promise<ClientSettings | null>

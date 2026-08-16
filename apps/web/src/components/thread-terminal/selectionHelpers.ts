@@ -1,5 +1,9 @@
 // apps/web/src/components/thread-terminal/selectionHelpers.ts
-// position and gate terminal selection action chrome
+// derive terminal selection and clipboard interactions
+
+import { type ContextMenuItem } from '@t3tools/contracts'
+
+import { isMacPlatform } from '../../lib/utils'
 
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260
 
@@ -79,4 +83,94 @@ export function shouldHandleTerminalSelectionMouseUp(
 ): boolean
 {
   return selectionGestureActive && button === 0
+}
+
+type TerminalClipboardKeyboardEvent = Pick<
+  KeyboardEvent,
+  'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey' | 'type'
+>
+
+export type TerminalClipboardShortcutAction = 'copy' | 'paste'
+export type TerminalContextMenuAction = 'add-to-chat' | 'copy' | 'paste'
+
+export function resolveTerminalClipboardShortcut(
+  event: TerminalClipboardKeyboardEvent,
+  hasSelection: boolean,
+  platform = navigator.platform,
+): TerminalClipboardShortcutAction | null
+{
+  if (event.type !== 'keydown' || event.altKey)
+  {
+    return null
+  }
+
+  const key = event.key.toLowerCase()
+  const isMac = isMacPlatform(platform)
+  const isCopy =
+    key === 'c' && (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)
+  if (isCopy)
+  {
+    return hasSelection ? 'copy' : null
+  }
+
+  const isPaste =
+    (key === 'insert' && !isMac && event.shiftKey && !event.ctrlKey && !event.metaKey) ||
+    (key === 'v' &&
+      (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && event.shiftKey && !event.metaKey))
+  return isPaste ? 'paste' : null
+}
+
+export function terminalSelectionMenuItems(): ContextMenuItem<'add-to-chat' | 'copy'>[]
+{
+  return [
+    { id: 'add-to-chat', label: 'Add to chat' },
+    { id: 'copy', label: 'Copy' },
+  ]
+}
+
+export function terminalContextMenuItems(options: {
+  hasSelection: boolean
+}): ContextMenuItem<TerminalContextMenuAction>[]
+{
+  return [
+    ...terminalSelectionMenuItems().map((item) => ({
+      ...item,
+      disabled: !options.hasSelection,
+    })),
+    { id: 'paste', label: 'Paste' },
+  ]
+}
+
+export function shouldClearTerminalSelectionAction(options: {
+  timerPending: boolean
+  openMenuRequestId: number | null
+  currentRequestId: number
+}): boolean
+{
+  return options.timerPending || options.openMenuRequestId === options.currentRequestId
+}
+
+export function shouldSuppressTerminalContextMenu(
+  mouseTracking: boolean,
+  event: Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>,
+): boolean
+{
+  return mouseTracking && !event.shiftKey && !event.ctrlKey && !event.metaKey
+}
+
+export async function readTerminalClipboardText(): Promise<string>
+{
+  if (typeof navigator === 'undefined' || typeof navigator.clipboard?.readText !== 'function')
+  {
+    throw new Error('Clipboard API is unavailable while reading terminal input.')
+  }
+
+  try
+  {
+    return await navigator.clipboard.readText()
+  }
+  catch
+  {
+    throw new Error('Failed to read terminal input from the clipboard.')
+  }
 }

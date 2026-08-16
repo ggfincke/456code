@@ -1,5 +1,5 @@
 // tests/apps/web/components/ThreadTerminalDrawer.test.ts
-// verify resolve terminal selection action position behavior
+// verify terminal selection and clipboard interaction behavior
 
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -7,6 +7,12 @@ import {
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalSelectionMouseUp,
 } from '../../../../apps/web/src/components/ThreadTerminalDrawer'
+import {
+  resolveTerminalClipboardShortcut,
+  shouldClearTerminalSelectionAction,
+  terminalContextMenuItems,
+  terminalSelectionMenuItems,
+} from '../../../../apps/web/src/components/thread-terminal/selectionHelpers'
 
 describe('resolveTerminalSelectionActionPosition', () =>
 {
@@ -72,5 +78,78 @@ describe('resolveTerminalSelectionActionPosition', () =>
     expect(shouldHandleTerminalSelectionMouseUp(true, 0)).toBe(true)
     expect(shouldHandleTerminalSelectionMouseUp(false, 0)).toBe(false)
     expect(shouldHandleTerminalSelectionMouseUp(true, 1)).toBe(false)
+  })
+})
+
+describe('terminal clipboard interactions', () =>
+{
+  it('copies only a selection while leaving unselected Ctrl+C to the terminal', () =>
+  {
+    const windowsCtrlC = {
+      type: 'keydown',
+      key: 'c',
+      altKey: false,
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+    }
+    expect(resolveTerminalClipboardShortcut(windowsCtrlC, true, 'Win32')).toBe('copy')
+    expect(resolveTerminalClipboardShortcut(windowsCtrlC, false, 'Win32')).toBeNull()
+    expect(
+      resolveTerminalClipboardShortcut({ ...windowsCtrlC, type: 'keyup' }, true, 'Win32'),
+    ).toBeNull()
+    expect(
+      resolveTerminalClipboardShortcut(
+        { ...windowsCtrlC, ctrlKey: false, metaKey: true },
+        true,
+        'MacIntel',
+      ),
+    ).toBe('copy')
+    expect(
+      resolveTerminalClipboardShortcut(
+        { ...windowsCtrlC, key: 'Insert', ctrlKey: false, shiftKey: true },
+        false,
+        'Win32',
+      ),
+    ).toBe('paste')
+    expect(
+      resolveTerminalClipboardShortcut(
+        { ...windowsCtrlC, key: 'v', shiftKey: true },
+        false,
+        'Win32',
+      ),
+    ).toBe('paste')
+  })
+
+  it('keeps selection actions while making Paste available for every right click', () =>
+  {
+    expect(terminalSelectionMenuItems()).toEqual([
+      { id: 'add-to-chat', label: 'Add to chat' },
+      { id: 'copy', label: 'Copy' },
+    ])
+    expect(terminalContextMenuItems({ hasSelection: false })).toEqual([
+      { id: 'add-to-chat', label: 'Add to chat', disabled: true },
+      { id: 'copy', label: 'Copy', disabled: true },
+      { id: 'paste', label: 'Paste' },
+    ])
+    expect(terminalContextMenuItems({ hasSelection: true })).toEqual([
+      { id: 'add-to-chat', label: 'Add to chat', disabled: false },
+      { id: 'copy', label: 'Copy', disabled: false },
+      { id: 'paste', label: 'Paste' },
+    ])
+    expect(
+      shouldClearTerminalSelectionAction({
+        timerPending: false,
+        openMenuRequestId: 3,
+        currentRequestId: 4,
+      }),
+    ).toBe(false)
+    expect(
+      shouldClearTerminalSelectionAction({
+        timerPending: false,
+        openMenuRequestId: 4,
+        currentRequestId: 4,
+      }),
+    ).toBe(true)
   })
 })
