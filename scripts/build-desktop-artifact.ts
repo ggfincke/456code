@@ -35,7 +35,7 @@ import {
 import { getDefaultBuildArch } from './lib/build-target-arch.ts'
 import { resolveCatalogDependencies } from './lib/resolve-catalog.ts'
 
-import { createHash } from 'node:crypto'
+import * as NodeCrypto from 'node:crypto'
 import {
   createPackageWithOptions,
   extractAll,
@@ -1357,7 +1357,7 @@ export const hashFileSha256 = Effect.fn('desktopArtifact.hashFileSha256')(functi
 )
 {
   const fs = yield* FileSystem.FileSystem
-  const hash = createHash('sha256')
+  const hash = NodeCrypto.createHash('sha256')
   yield* fs.stream(filePath).pipe(
     Stream.runForEach((chunk) => Effect.sync(() => hash.update(chunk))),
     Effect.mapError(

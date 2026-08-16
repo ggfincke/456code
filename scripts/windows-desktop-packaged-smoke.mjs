@@ -1,36 +1,38 @@
 // scripts/windows-desktop-packaged-smoke.mjs
 // smoke-test native and Cartographer modules from an installed Windows sidecar
 
-import { createHash } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { createReadStream } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
+import * as NodeChildProcess from 'node:child_process'
+import * as NodeCrypto from 'node:crypto'
+import * as NodeFS from 'node:fs'
+import * as NodeFSP from 'node:fs/promises'
+import * as NodeOS from 'node:os'
+import * as NodePath from 'node:path'
+import * as NodeURL from 'node:url'
+import * as NodeUtil from 'node:util'
 
-const execFileAsync = promisify(execFile)
+const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile)
 const CARTOGRAPHER_CLI_TIMEOUT_MS = 120_000
 
 async function exerciseCartographerCli(cliPath)
 {
-  const fixtureRoot = await mkdtemp(join(tmpdir(), '456code-cartographer-smoke-'))
+  const fixtureRoot = await NodeFSP.mkdtemp(
+    NodePath.join(NodeOS.tmpdir(), '456code-cartographer-smoke-'),
+  )
   try
   {
-    const sourceDir = join(fixtureRoot, 'src')
-    const outputDir = join(fixtureRoot, 'cartographer-output')
-    await mkdir(sourceDir)
-    await writeFile(
-      join(sourceDir, 'index.ts'),
+    const sourceDir = NodePath.join(fixtureRoot, 'src')
+    const outputDir = NodePath.join(fixtureRoot, 'cartographer-output')
+    await NodeFSP.mkdir(sourceDir)
+    await NodeFSP.writeFile(
+      NodePath.join(sourceDir, 'index.ts'),
       "// src/index.ts\n// exercise the installed Cartographer dependency graph\n\nimport { answer } from './value.js'\n\nexport const doubled = answer * 2\n",
     )
-    await writeFile(
-      join(sourceDir, 'value.ts'),
+    await NodeFSP.writeFile(
+      NodePath.join(sourceDir, 'value.ts'),
       '// src/value.ts\n// provide the imported fixture value\n\nexport const answer = 42\n',
     )
-    await writeFile(
-      join(fixtureRoot, 'tsconfig.json'),
+    await NodeFSP.writeFile(
+      NodePath.join(fixtureRoot, 'tsconfig.json'),
       `${JSON.stringify(
         {
           compilerOptions: {
@@ -83,7 +85,7 @@ async function exerciseCartographerCli(cliPath)
       })
     }
 
-    const graph = JSON.parse(await readFile(join(outputDir, 'graph.json'), 'utf8'))
+    const graph = JSON.parse(await NodeFSP.readFile(NodePath.join(outputDir, 'graph.json'), 'utf8'))
     if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges))
     {
       throw new Error('Installed Cartographer CLI produced an invalid graph.json')
@@ -99,7 +101,7 @@ async function exerciseCartographerCli(cliPath)
   }
   finally
   {
-    await rm(fixtureRoot, { recursive: true, force: true })
+    await NodeFSP.rm(fixtureRoot, { recursive: true, force: true })
   }
 }
 
@@ -109,11 +111,13 @@ if (!appDir)
   throw new Error('Usage: windows-desktop-packaged-smoke.mjs <installed-app-directory>')
 }
 
-const resourcesDir = join(appDir, 'resources')
-const serverAsarPath = join(resourcesDir, 'server.asar')
-const expectedDigest = (await readFile(join(resourcesDir, 'server.asar.sha256'), 'utf8')).trim()
-const digest = createHash('sha256')
-for await (const chunk of createReadStream(serverAsarPath))
+const resourcesDir = NodePath.join(appDir, 'resources')
+const serverAsarPath = NodePath.join(resourcesDir, 'server.asar')
+const expectedDigest = (
+  await NodeFSP.readFile(NodePath.join(resourcesDir, 'server.asar.sha256'), 'utf8')
+).trim()
+const digest = NodeCrypto.createHash('sha256')
+for await (const chunk of NodeFS.createReadStream(serverAsarPath))
 {
   digest.update(chunk)
 }
@@ -125,16 +129,19 @@ if (actualDigest !== expectedDigest)
   )
 }
 
-const cartographerPackageRoot = join(serverAsarPath, 'node_modules/@t3tools/cartographer-core')
+const cartographerPackageRoot = NodePath.join(
+  serverAsarPath,
+  'node_modules/@t3tools/cartographer-core',
+)
 const cartographer = await import(
-  pathToFileURL(join(cartographerPackageRoot, 'dist/server.js')).href
+  NodeURL.pathToFileURL(NodePath.join(cartographerPackageRoot, 'dist/server.js')).href
 )
 if (Object.keys(cartographer).length === 0)
 {
   throw new Error('Cartographer server module loaded without exports')
 }
 const serverBundle = await import(
-  pathToFileURL(join(serverAsarPath, 'apps/server/dist/bin.mjs')).href
+  NodeURL.pathToFileURL(NodePath.join(serverAsarPath, 'apps/server/dist/bin.mjs')).href
 )
 if (typeof serverBundle.createCartographerAnalyzerIdentifier !== 'function')
 {
@@ -145,7 +152,7 @@ const cartographerIdentity = await identifyCartographer()
 const cartographerGraph = await exerciseCartographerCli(cartographerIdentity.cliPath)
 
 const nodePty = await import(
-  pathToFileURL(join(serverAsarPath, 'node_modules/node-pty/lib/index.js')).href
+  NodeURL.pathToFileURL(NodePath.join(serverAsarPath, 'node_modules/node-pty/lib/index.js')).href
 )
 const spawnPty = nodePty.spawn ?? nodePty.default?.spawn
 if (typeof spawnPty !== 'function')
@@ -188,15 +195,17 @@ if (!ptyOutput.includes('456code-pty-ok'))
 }
 
 const { FileFinder } = await import(
-  pathToFileURL(join(serverAsarPath, 'node_modules/@ff-labs/fff-node/dist/src/index.js')).href
+  NodeURL.pathToFileURL(
+    NodePath.join(serverAsarPath, 'node_modules/@ff-labs/fff-node/dist/src/index.js'),
+  ).href
 )
-const probeRoot = await mkdtemp(join(tmpdir(), '456code-fff-smoke-'))
+const probeRoot = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-fff-smoke-'))
 try
 {
   const result = FileFinder.create({
     basePath: probeRoot,
-    frecencyDbPath: join(probeRoot, 'frecency.mdb'),
-    historyDbPath: join(probeRoot, 'history.mdb'),
+    frecencyDbPath: NodePath.join(probeRoot, 'frecency.mdb'),
+    historyDbPath: NodePath.join(probeRoot, 'history.mdb'),
     disableWatch: true,
     disableMmapCache: true,
     disableContentIndexing: true,
@@ -209,7 +218,7 @@ try
 }
 finally
 {
-  await rm(probeRoot, { recursive: true, force: true })
+  await NodeFSP.rm(probeRoot, { recursive: true, force: true })
 }
 
 console.log(

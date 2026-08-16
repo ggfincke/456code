@@ -1,10 +1,10 @@
 // scripts/windows-desktop-update-feed.mjs
 // serve a range-capable local Electron update feed with request evidence
 
-import { createReadStream } from 'node:fs'
-import { appendFile, realpath, stat } from 'node:fs/promises'
-import { createServer } from 'node:http'
-import { extname, relative, resolve, sep } from 'node:path'
+import * as NodeFS from 'node:fs'
+import * as NodeFSP from 'node:fs/promises'
+import * as NodeHttp from 'node:http'
+import * as NodePath from 'node:path'
 
 function readArgument(name)
 {
@@ -12,8 +12,8 @@ function readArgument(name)
   return index === -1 ? undefined : process.argv[index + 1]
 }
 
-const root = await realpath(readArgument('--root') ?? '')
-const logPath = resolve(readArgument('--log') ?? '')
+const root = await NodeFSP.realpath(readArgument('--root') ?? '')
+const logPath = NodePath.resolve(readArgument('--log') ?? '')
 const port = Number(readArgument('--port') ?? '')
 if (!Number.isInteger(port) || port < 1 || port > 65_535)
 {
@@ -22,17 +22,23 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535)
 
 async function logRequest(entry)
 {
-  await appendFile(logPath, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`)
+  await NodeFSP.appendFile(
+    logPath,
+    `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
+  )
 }
 
 function resolveRequestPath(requestUrl)
 {
   const pathname = decodeURIComponent(new URL(requestUrl, `http://127.0.0.1:${port}`).pathname)
-  const filePath = resolve(root, `.${pathname.startsWith('/') ? pathname : `/${pathname}`}`)
-  const relativePath = relative(root, filePath)
+  const filePath = NodePath.resolve(
+    root,
+    `.${pathname.startsWith('/') ? pathname : `/${pathname}`}`,
+  )
+  const relativePath = NodePath.relative(root, filePath)
   if (
     relativePath === '..' ||
-    relativePath.startsWith(`..${sep}`) ||
+    relativePath.startsWith(`..${NodePath.sep}`) ||
     relativePath.startsWith('/')
   )
   {
@@ -55,14 +61,14 @@ function parseRange(value, size)
   return { start, end }
 }
 
-const server = createServer(async (request, response) =>
+const server = NodeHttp.createServer(async (request, response) =>
 {
   const requestPath = new URL(request.url ?? '/', `http://127.0.0.1:${port}`).pathname
   const rangeHeader = typeof request.headers.range === 'string' ? request.headers.range : undefined
   try
   {
     const filePath = resolveRequestPath(request.url ?? '/')
-    const info = filePath ? await stat(filePath).catch(() => undefined) : undefined
+    const info = filePath ? await NodeFSP.stat(filePath).catch(() => undefined) : undefined
     if (!filePath || !info?.isFile())
     {
       response.writeHead(404, { 'Cache-Control': 'no-store' })
@@ -101,7 +107,7 @@ const server = createServer(async (request, response) =>
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-store',
       'Content-Length': String(Math.max(0, end - start + 1)),
-      'Content-Type': ['.yml', '.yaml'].includes(extname(filePath))
+      'Content-Type': ['.yml', '.yaml'].includes(NodePath.extname(filePath))
         ? 'text/yaml; charset=utf-8'
         : 'application/octet-stream',
       ...(range
@@ -115,7 +121,7 @@ const server = createServer(async (request, response) =>
     }
     else
     {
-      createReadStream(filePath, { start, end }).pipe(response)
+      NodeFS.createReadStream(filePath, { start, end }).pipe(response)
     }
     await logRequest({
       method: request.method,
