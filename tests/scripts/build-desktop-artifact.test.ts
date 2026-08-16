@@ -459,6 +459,33 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
     }),
   )
 
+  it.effect('flushes packaged Windows smoke success after native cleanup', () =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const packagedSmoke = yield* fs.readFileString(
+        path.resolve(import.meta.dirname, '../../scripts/windows-desktop-packaged-smoke.mjs'),
+      )
+      const shutdownOrder = [
+        packagedSmoke.indexOf('fileFinder?.destroy()'),
+        packagedSmoke.indexOf('closeLibrary()'),
+        packagedSmoke.indexOf('const successPayload ='),
+        packagedSmoke.indexOf('await writeStandardOutput(successPayload)'),
+        packagedSmoke.indexOf('process.exit(0)'),
+      ]
+
+      assert.include(packagedSmoke, 'const { FileFinder, closeLibrary }')
+      assert.include(packagedSmoke, 'process.stdout.write(output, (error) =>')
+      assert.isTrue(shutdownOrder.every((index) => index >= 0))
+      assert.deepStrictEqual(
+        [...shutdownOrder].sort((left, right) => left - right),
+        shutdownOrder,
+      )
+      assert.lengthOf(packagedSmoke.match(/process\.exit\(/gu) ?? [], 1)
+    }),
+  )
+
   it.effect('packs a digest-addressed Windows server sidecar with exact native unpacking', () =>
     Effect.scoped(
       Effect.gen(function* ()

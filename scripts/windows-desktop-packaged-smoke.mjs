@@ -13,6 +13,22 @@ import * as ElectronOriginalFS from 'original-fs'
 const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile)
 const CARTOGRAPHER_CLI_TIMEOUT_MS = 120_000
 
+async function writeStandardOutput(output)
+{
+  await new Promise((resolve, reject) =>
+  {
+    process.stdout.write(output, (error) =>
+    {
+      if (error)
+      {
+        reject(error)
+        return
+      }
+      resolve()
+    })
+  })
+}
+
 async function exerciseCartographerCli(cliPath)
 {
   const fixtureRoot = await NodeFSP.mkdtemp(
@@ -194,12 +210,17 @@ if (!ptyOutput.includes('456code-pty-ok'))
   throw new Error(`node-pty smoke did not return its marker: ${ptyOutput}`)
 }
 
-const { FileFinder } = await import(
+const { FileFinder, closeLibrary } = await import(
   NodeURL.pathToFileURL(
     NodePath.join(serverAsarPath, 'node_modules/@ff-labs/fff-node/dist/src/index.js'),
   ).href
 )
+if (typeof closeLibrary !== 'function')
+{
+  throw new Error('fff-node did not expose its closeLibrary function')
+}
 const probeRoot = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-fff-smoke-'))
+let fileFinder
 try
 {
   const result = FileFinder.create({
@@ -214,22 +235,36 @@ try
   {
     throw new Error(result.error)
   }
-  result.value.destroy()
+  fileFinder = result.value
 }
 finally
 {
-  await NodeFSP.rm(probeRoot, { recursive: true, force: true })
+  try
+  {
+    fileFinder?.destroy()
+  }
+  finally
+  {
+    try
+    {
+      closeLibrary()
+    }
+    finally
+    {
+      await NodeFSP.rm(probeRoot, { recursive: true, force: true })
+    }
+  }
 }
 
-console.log(
-  JSON.stringify({
-    serverAsarDigest: actualDigest,
-    cartographer: {
-      fingerprint: cartographerIdentity.fingerprint,
-      exports: Object.keys(cartographer).length,
-      graph: cartographerGraph,
-    },
-    pty: 'ok',
-    fff: 'ok',
-  }),
-)
+const successPayload = `${JSON.stringify({
+  serverAsarDigest: actualDigest,
+  cartographer: {
+    fingerprint: cartographerIdentity.fingerprint,
+    exports: Object.keys(cartographer).length,
+    graph: cartographerGraph,
+  },
+  pty: 'ok',
+  fff: 'ok',
+})}\n`
+await writeStandardOutput(successPayload)
+process.exit(0)
