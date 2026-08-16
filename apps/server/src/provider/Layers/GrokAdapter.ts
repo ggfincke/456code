@@ -982,7 +982,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             Effect.catch((cause) =>
               Effect.logError('Failed to process Grok runtime notification.', { cause }),
             ),
-            Effect.forkChild,
+            // session consumers outlive the request fiber that called startSession.
+            Effect.forkIn(ctx.scope),
           )
 
           ctx.notificationFiber = nf
@@ -991,7 +992,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
           yield* Stream.runForEach(Stream.take(acp.getTerminationEvents(), 1), (cause) =>
             finalizeSession(ctx, classifyAcpTermination(cause)),
-          ).pipe(Effect.forkChild)
+          ).pipe(Effect.forkIn(ctx.scope))
 
           yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'session.started',

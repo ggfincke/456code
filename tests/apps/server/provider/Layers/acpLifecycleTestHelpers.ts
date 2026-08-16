@@ -152,12 +152,14 @@ export function assertAbnormalChildExitFinalizesOnce(
   {
     const { events, requestOpened } = yield* forkEventCollector(adapter)
 
-    yield* startAcpTestSession(adapter, {
+    // mirror production: the request fiber finishes immediately after session creation.
+    const startFiber = yield* startAcpTestSession(adapter, {
       threadId: input.threadId,
       provider: input.provider,
       cwd: process.cwd(),
       runtimeMode: 'approval-required',
-    })
+    }).pipe(Effect.forkChild)
+    yield* Fiber.join(startFiber)
     const turnFiber = yield* adapter
       .sendTurn({ threadId: input.threadId, input: 'trigger exit', attachments: [] })
       .pipe(Effect.ignore, Effect.forkChild)

@@ -977,7 +977,8 @@ export function makeCursorAdapter(
             Effect.catch((cause) =>
               Effect.logError('Failed to process Cursor runtime notification.', { cause }),
             ),
-            Effect.forkChild,
+            // session consumers outlive the request fiber that called startSession.
+            Effect.forkIn(ctx.scope),
           )
 
           ctx.notificationFiber = nf
@@ -986,7 +987,7 @@ export function makeCursorAdapter(
 
           yield* Stream.runForEach(Stream.take(acp.getTerminationEvents(), 1), (cause) =>
             finalizeSession(ctx, classifyAcpTermination(cause)),
-          ).pipe(Effect.forkChild)
+          ).pipe(Effect.forkIn(ctx.scope))
 
           yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'session.started',

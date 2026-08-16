@@ -630,6 +630,8 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
     pathToClaudeCodeExecutable: input.executablePath,
     abortController: input.abortController,
     settingSources: [...CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES],
+    // keep settings discovery while preventing periodic probes from running user hooks.
+    settings: { disableAllHooks: true },
     allowedTools: [],
     // ignore MCP definitions from every filesystem setting source above. The
     // SDK combines this empty explicit map with --strict-mcp-config.
