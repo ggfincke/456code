@@ -359,7 +359,7 @@ function surfaceTooltip(title: string, surface: RightPanelSurface): string
 
 function PreviewFavicon({ url }: { url: string | null })
 {
-  const faviconUrl = faviconUrlForOrigin(url, 32)
+  const faviconUrl = faviconUrlForOrigin(url)
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
   if (!faviconUrl || failedUrl === faviconUrl) return <Globe2 className="size-3.5 shrink-0" />
   return (

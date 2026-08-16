@@ -298,12 +298,14 @@ describe('previewStateStore (single-tab)', () =>
       snapshot,
     })
     applyPreviewDesktopState(ref, snapshot.tabId, {
+      hasWebContents: true,
       canGoBack: true,
       canGoForward: false,
       loading: false,
       zoomFactor: 1,
       colorScheme: 'system',
       controller: 'none',
+      favicon: null,
     })
     const state = readThreadPreviewState(ref)
     expect(state.desktopOverlay?.canGoBack).toBe(true)
@@ -317,12 +319,14 @@ describe('previewStateStore (single-tab)', () =>
     applyPreviewServerSnapshot(ref, first)
     applyPreviewServerSnapshot(ref, second)
     applyPreviewDesktopState(ref, first.tabId, {
+      hasWebContents: true,
       canGoBack: true,
       canGoForward: false,
       loading: false,
       zoomFactor: 1,
       colorScheme: 'system',
       controller: 'none',
+      favicon: null,
     })
     setActivePreviewTab(ref, first.tabId)
 
@@ -365,12 +369,14 @@ describe('previewStateStore (single-tab)', () =>
     applyPreviewServerSnapshot(ref, stale)
     applyPreviewServerSnapshot(ref, active)
     applyPreviewDesktopState(ref, stale.tabId, {
+      hasWebContents: true,
       canGoBack: false,
       canGoForward: false,
       loading: false,
       zoomFactor: 1,
       colorScheme: 'system',
       controller: 'none',
+      favicon: null,
     })
 
     reconcilePreviewServerSessions(ref, [active])
