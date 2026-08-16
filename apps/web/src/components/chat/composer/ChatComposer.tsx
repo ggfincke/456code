@@ -15,6 +15,7 @@ import type {
 } from '@t3tools/contracts'
 import {
   CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
+  isProviderSendTurnSupportedImageMimeType,
   normalizeCollaborationMode,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -2332,6 +2333,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!file.type.startsWith('image/'))
       {
         error = `Unsupported file type for '${file.name}'. Please attach image files only.`
+        continue
+      }
+      if (!isProviderSendTurnSupportedImageMimeType(file.type))
+      {
+        error = `'${file.name}' is not a supported image type. Attach GIF, JPEG, PNG, or WebP images.`
         continue
       }
       if (reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS)
