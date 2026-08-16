@@ -72,6 +72,13 @@ describe('ComposerPendingUserInputPanel', () =>
         '[data-pending-user-input-toggle="expanded"]',
       )
       expect(expandedToggle?.getAttribute('aria-expanded')).toBe('true')
+      expect(expandedToggle?.className).toContain('motion-reduce:transition-none')
+      expect(
+        expandedToggle?.querySelector('.lucide-chevron-down')?.getAttribute('class'),
+      ).toContain('motion-reduce:transition-none')
+      expect(
+        container.querySelector('[data-slot="collapsible-panel"]')?.getAttribute('class'),
+      ).toContain('motion-reduce:transition-none')
 
       await act(async () =>
       {

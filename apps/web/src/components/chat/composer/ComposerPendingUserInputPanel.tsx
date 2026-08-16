@@ -217,7 +217,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
             isCollapsed ? 'Show the question and its options' : 'Hide the question and its options'
           }
           data-pending-user-input-toggle={isCollapsed ? 'collapsed' : 'expanded'}
-          className="group -my-1 flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left outline-none transition-colors duration-150 hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-primary/25"
+          className="group -my-1 flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left outline-none transition-colors duration-150 motion-reduce:transition-none hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-primary/25"
         >
           <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/55 uppercase group-hover:text-foreground">
             {activeQuestion.header}
@@ -235,13 +235,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           <ChevronDownIcon
             aria-hidden="true"
             className={cn(
-              'ml-auto size-3.5 shrink-0 text-muted-foreground/65 transition-transform duration-150 group-hover:text-foreground',
+              'ml-auto size-3.5 shrink-0 text-muted-foreground/65 transition-transform duration-150 motion-reduce:transition-none group-hover:text-foreground',
               isCollapsed && 'rotate-180',
             )}
           />
         </CollapsibleTrigger>
       </div>
-      <CollapsiblePanel className="px-4 sm:px-5">
+      <CollapsiblePanel className="px-4 motion-reduce:transition-none sm:px-5">
         <div className="pt-2 pb-0.5">
           <p className="text-sm text-foreground/90">{activeQuestion.question}</p>
           {activeQuestion.multiSelect ? (
