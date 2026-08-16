@@ -42,6 +42,7 @@ import { ProjectionTurnRepository } from '../../persistence/Services/ProjectionT
 import { ProviderRuntimeInbox } from '../../persistence/Services/ProviderRuntimeInbox.ts'
 import { checkpointRefForThreadTurn } from '../../checkpointing/Utils.ts'
 import {
+  OrchestrationCommandIdConflictError,
   OrchestrationCommandInvariantError,
   OrchestrationCommandPreviouslyRejectedError,
   type OrchestrationDispatchError,
@@ -62,6 +63,7 @@ import { ThreadArchiveLifecyclePermitLive } from './ThreadArchiveLifecyclePermit
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 )
+const isOrchestrationCommandIdConflictError = Schema.is(OrchestrationCommandIdConflictError)
 const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
 // external commands that can change the selected tree or provider lifecycle
 // stay fenced from request acceptance through cleanup/manual resolution.
@@ -222,6 +224,20 @@ const makeOrchestrationEngine = Effect.gen(function* ()
         })
         if (Option.isSome(existingReceipt))
         {
+          // a receipt proves only the command accepted for this exact aggregate
+          if (
+            existingReceipt.value.aggregateKind !== aggregateRef.aggregateKind ||
+            existingReceipt.value.aggregateId !== aggregateRef.aggregateId
+          )
+          {
+            return yield* new OrchestrationCommandIdConflictError({
+              commandId: envelope.command.commandId,
+              receiptAggregateKind: existingReceipt.value.aggregateKind,
+              receiptAggregateId: existingReceipt.value.aggregateId,
+              commandAggregateKind: aggregateRef.aggregateKind,
+              commandAggregateId: aggregateRef.aggregateId,
+            })
+          }
           if (existingReceipt.value.status === 'accepted')
           {
             return {
@@ -459,7 +475,10 @@ const makeOrchestrationEngine = Effect.gen(function* ()
           }
 
           const error = Cause.squash(exit.cause) as OrchestrationDispatchError
-          if (!isOrchestrationCommandPreviouslyRejectedError(error))
+          if (
+            !isOrchestrationCommandPreviouslyRejectedError(error) &&
+            !isOrchestrationCommandIdConflictError(error)
+          )
           {
             yield* reconcileReadModelAfterDispatchFailure.pipe(
               Effect.catch(() =>

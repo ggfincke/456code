@@ -100,8 +100,13 @@ const fixtures = [
   makeActivity('command', 'command_execution', {
     item: {
       command: ['bash', '-lc', 'pnpm test'],
+      aggregatedOutput: 'first accumulated output\nsecond accumulated output',
       input: { command: 'fallback input', ignored: 'input bulk' },
-      result: { command: 'fallback result', aggregatedOutput: 'x'.repeat(10_000) },
+      result: {
+        command: 'fallback result',
+        content: 'first result output\nsecond result output',
+        aggregatedOutput: 'x'.repeat(10_000),
+      },
       commandActions: [{ type: 'unknown', output: 'y'.repeat(5_000) }],
     },
     command: 'fallback data',
@@ -148,8 +153,9 @@ describe('projectActivityPayload', () =>
       data: {
         item: {
           command: ['bash', '-lc', 'pnpm test'],
+          aggregatedOutput: 'first accumulated output',
           input: { command: 'fallback input' },
-          result: { command: 'fallback result' },
+          result: { command: 'fallback result', content: 'first result output' },
         },
         command: 'fallback data',
         toolCallId: 'tool-command',
@@ -163,11 +169,41 @@ describe('projectActivityPayload', () =>
         files: [{ path: 'src/new.ts' }, { path: 'src/old.ts' }, { path: 'src/second.ts' }],
       },
     })
+
+    expect(
+      projectActivityPayload(
+        makeActivity('direct-output', 'command_execution', {
+          rawOutput: 'direct output\nsecond line',
+        }),
+      ).payload,
+    ).toMatchObject({ data: { rawOutput: { content: 'direct output' } } })
+    expect(
+      projectActivityPayload(
+        makeActivity('acp-output', 'command_execution', {
+          content: [
+            { type: 'content', content: { type: 'text', text: 'ACP output\nsecond line' } },
+          ],
+        }),
+      ).payload,
+    ).toMatchObject({ data: { rawOutput: { content: 'ACP output' } } })
   })
 
-  it('passes MCP tool data through unchanged', () =>
+  it('retains rendered MCP fields while bounding its result payload', () =>
   {
-    expect(projectActivityPayload(fixtures[2]!)).toBe(fixtures[2])
+    expect(projectActivityPayload(fixtures[2]!).payload).toEqual({
+      itemType: 'mcp_tool_call',
+      title: 'mcp_tool_call',
+      detail: 'mcp_tool_call detail',
+      status: 'completed',
+      requestKind: 'command',
+      data: {
+        item: {
+          server: 'repository',
+          tool: 'search',
+          arguments: { query: 'activity projection' },
+        },
+      },
+    })
   })
 
   it('projects snapshot and event transports without mutating their sources', () =>
@@ -276,7 +312,11 @@ describe('context-window snapshot dedup', () =>
     const latestA = makeContextWindowActivity('ctx-2', 2_000, 'turn-a')
     const latestB = makeContextWindowActivity('ctx-3', 3_000, 'turn-b')
     const tool = fixtures[0]!
-    const nonContext = fixtures[2]!
+    const nonContext: OrchestrationThreadActivity = {
+      ...fixtures[2]!,
+      kind: 'runtime.note',
+      payload: { stage: 'complete' },
+    }
 
     const projected = projectThreadDetailSnapshot({
       snapshotSequence: 7,

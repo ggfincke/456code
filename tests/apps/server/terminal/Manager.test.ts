@@ -29,6 +29,7 @@ import * as Ref from 'effect/Ref'
 import * as Schedule from 'effect/Schedule'
 import * as Scope from 'effect/Scope'
 import * as TestClock from 'effect/testing/TestClock'
+import { ChildProcessSpawner } from 'effect/unstable/process'
 import { expect } from 'vite-plus/test'
 
 import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
@@ -1021,6 +1022,66 @@ it.layer(
         Effect.sync(() => checks > 0),
         '1200 millis',
       )
+    }),
+  )
+
+  it.effect('keeps last known subprocess state when process snapshots are not authoritative', () =>
+    Effect.gen(function* ()
+    {
+      type SnapshotMode = 'valid' | 'nonzero' | 'timed-out' | 'truncated'
+      let mode: SnapshotMode = 'valid'
+      let invalidCalls = 0
+      const processRunner: ProcessRunner.ProcessRunner['Service'] = {
+        run: () =>
+          Effect.sync(() =>
+          {
+            if (mode !== 'valid')
+            {
+              invalidCalls += 1
+            }
+            return {
+              stdout: mode === 'valid' ? '  100  9000 vim' : '',
+              stderr: '',
+              code: ChildProcessSpawner.ExitCode(mode === 'nonzero' ? 1 : 0),
+              timedOut: mode === 'timed-out',
+              stdoutTruncated: mode === 'truncated',
+              stderrTruncated: false,
+            }
+          }),
+      }
+      const { manager, getEvents } = yield* createManager(5, {
+        subprocessPollIntervalMs: 20,
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        Effect.provide(withHostPlatform('linux')),
+      )
+
+      yield* manager.open(openInput())
+      yield* waitFor(
+        Effect.map(getEvents, (events) =>
+          events.some(
+            (event) =>
+              event.type === 'activity' &&
+              event.hasRunningSubprocess === true &&
+              event.label === 'vim',
+          ),
+        ),
+        '1200 millis',
+      )
+
+      for (const invalidMode of ['nonzero', 'timed-out', 'truncated'] as const)
+      {
+        const callsBefore = invalidCalls
+        mode = invalidMode
+        yield* waitFor(
+          Effect.sync(() => invalidCalls >= callsBefore + 2),
+          '1200 millis',
+        )
+      }
+
+      const activityEvents = (yield* getEvents).filter((event) => event.type === 'activity')
+      expect(activityEvents.length).toBeGreaterThan(0)
+      expect(activityEvents.every((event) => event.hasRunningSubprocess === true)).toBe(true)
     }),
   )
 

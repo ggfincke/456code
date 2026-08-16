@@ -27,6 +27,7 @@ function makeReadModel(
   session: OrchestrationSession | null = null,
   activities: OrchestrationThread['activities'] = [],
   messages: OrchestrationThread['messages'] = [],
+  snoozedUntil: string | null = null,
 ): OrchestrationReadModel
 {
   return {
@@ -50,6 +51,8 @@ function makeReadModel(
         origin: null,
         settledOverride,
         settledAt: settledOverride === 'settled' ? SETTLED_AT : null,
+        snoozedUntil,
+        snoozedAt: snoozedUntil === null ? null : SETTLED_AT,
         deletedAt: null,
         messages,
         proposedPlans: [],
@@ -116,6 +119,24 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
         // updatedAt must NOT rewind to the historical settledAt: sorting and
         // relative-time labels key on it.
         expect(reEmitEvents[0].payload.updatedAt).not.toBe(SETTLED_AT)
+      }
+
+      const snoozed = yield* decideOrchestrationCommand({
+        command: {
+          type: 'thread.settle',
+          commandId: CommandId.make('cmd-settle-snoozed'),
+          threadId: ThreadId.make('thread-1'),
+        },
+        readModel: makeReadModel(null, null, null, [], [], '2099-01-01T00:00:00.000Z'),
+      })
+      const snoozedEvents = Array.isArray(snoozed) ? snoozed : [snoozed]
+      expect(snoozedEvents.map((entry) => entry.type)).toEqual([
+        'thread.settled',
+        'thread.unsnoozed',
+      ])
+      if (snoozedEvents[1]?.type === 'thread.unsnoozed')
+      {
+        expect(snoozedEvents[1].payload.reason).toBe('user')
       }
     }),
   )

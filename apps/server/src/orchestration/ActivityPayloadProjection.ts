@@ -111,6 +111,16 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
     projectedItem.command = item.command
   }
 
+  const aggregatedOutput = asTrimmedString(item.aggregatedOutput)
+  if (aggregatedOutput)
+  {
+    const summary = summarizeToolTextOutput(aggregatedOutput)
+    if (summary)
+    {
+      projectedItem.aggregatedOutput = summary
+    }
+  }
+
   const input = asRecord(item.input)
   if (input && 'command' in input)
   {
@@ -118,9 +128,26 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   }
 
   const result = asRecord(item.result)
-  if (result && 'command' in result)
+  if (result)
   {
-    projectedItem.result = { command: result.command }
+    const projectedResult: Record<string, unknown> = {}
+    if ('command' in result)
+    {
+      projectedResult.command = result.command
+    }
+    const content = asTrimmedString(result.content)
+    if (content)
+    {
+      const summary = summarizeToolTextOutput(content)
+      if (summary)
+      {
+        projectedResult.content = summary
+      }
+    }
+    if (Object.keys(projectedResult).length > 0)
+    {
+      projectedItem.result = projectedResult
+    }
   }
 
   return Object.keys(projectedItem).length > 0 ? projectedItem : undefined
@@ -175,8 +202,123 @@ function summarizeToolTextOutput(value: string): string | null
   return null
 }
 
+const MCP_ITEM_KEPT_FIELDS = [
+  'type',
+  'id',
+  'tool',
+  'server',
+  'status',
+  'arguments',
+  'appContext',
+  'error',
+  'durationMs',
+] as const
+
+function extractMcpResultText(result: unknown): string | null
+{
+  const record = asRecord(result)
+  if (!record)
+  {
+    return typeof result === 'string' ? result : null
+  }
+  if (typeof record.content === 'string')
+  {
+    return record.content
+  }
+  if (!Array.isArray(record.content))
+  {
+    return null
+  }
+
+  const texts: string[] = []
+  for (const entry of record.content)
+  {
+    const text = asRecord(entry)?.text
+    if (typeof text === 'string' && text.trim().length > 0)
+    {
+      texts.push(text)
+    }
+  }
+  return texts.length > 0 ? texts.join('\n') : null
+}
+
+function summarizeMcpResult(result: unknown): Record<string, unknown> | undefined
+{
+  if (result === undefined || result === null)
+  {
+    return undefined
+  }
+  const text = extractMcpResultText(result)
+  const summary = text ? summarizeToolTextOutput(text) : null
+  return summary ? { content: summary } : undefined
+}
+
+// retain MCP fields rendered by both clients while bounding full tool results
+function projectMcpToolCallData(data: Record<string, unknown>): Record<string, unknown>
+{
+  const projectedData: Record<string, unknown> = {}
+  const item = asRecord(data.item)
+  if (item)
+  {
+    const projectedItem: Record<string, unknown> = {}
+    for (const key of MCP_ITEM_KEPT_FIELDS)
+    {
+      if (key in item)
+      {
+        projectedItem[key] = item[key]
+      }
+    }
+    const result = summarizeMcpResult(item.result)
+    if (result)
+    {
+      projectedItem.result = result
+    }
+    projectedData.item = projectedItem
+  }
+
+  if ('toolName' in data)
+  {
+    projectedData.toolName = data.toolName
+  }
+  if ('input' in data)
+  {
+    projectedData.input = data.input
+  }
+  if (!item)
+  {
+    const result = summarizeMcpResult(data.result)
+    if (result)
+    {
+      projectedData.result = result
+    }
+  }
+  if ('toolCallId' in data)
+  {
+    projectedData.toolCallId = data.toolCallId
+  }
+  if ('kind' in data)
+  {
+    projectedData.kind = data.kind
+  }
+
+  const changedFiles: string[] = []
+  collectChangedFiles(data, changedFiles, new Set<string>(), 0)
+  if (changedFiles.length > 0)
+  {
+    projectedData.files = changedFiles.map((path) => ({ path }))
+  }
+  return projectedData
+}
+
 function projectRawOutput(value: unknown): Record<string, unknown> | undefined
 {
+  const direct = asTrimmedString(value)
+  if (direct)
+  {
+    const summary = summarizeToolTextOutput(direct)
+    return summary ? { content: summary } : undefined
+  }
+
   const rawOutput = asRecord(value)
   if (!rawOutput)
   {
@@ -205,19 +347,58 @@ function projectRawOutput(value: unknown): Record<string, unknown> | undefined
     return summary ? { content: summary } : undefined
   }
 
+  const stderr = asTrimmedString(rawOutput.stderr)
+  if (stderr)
+  {
+    const summary = summarizeToolTextOutput(stderr)
+    return summary ? { content: summary } : undefined
+  }
+
   return undefined
 }
 
-// removes client-unused fields while persistence retains the full payload
+function projectAcpContent(value: unknown): Record<string, unknown> | undefined
+{
+  if (!Array.isArray(value))
+  {
+    return undefined
+  }
+
+  const text = value
+    .map((entryValue) =>
+    {
+      const entry = asRecord(entryValue)
+      const content = asRecord(entry?.content)
+      return entry?.type === 'content' && content?.type === 'text'
+        ? asTrimmedString(content.text)
+        : null
+    })
+    .filter((entry): entry is string => entry !== null)
+    .join('\n')
+  const summary = summarizeToolTextOutput(text)
+  return summary ? { content: summary } : undefined
+}
+
+// removes client-unused fields for transport and bounded streaming persistence
 export function projectActivityPayload(
   activity: OrchestrationThreadActivity,
 ): OrchestrationThreadActivity
 {
   const payload = asRecord(activity.payload)
   const data = asRecord(payload?.data)
-  if (!payload || !data || payload.itemType === 'mcp_tool_call')
+  if (!payload || !data)
   {
     return activity
+  }
+  if (payload.itemType === 'mcp_tool_call')
+  {
+    return {
+      ...activity,
+      payload: {
+        ...payload,
+        data: projectMcpToolCallData(data),
+      },
+    }
   }
 
   const projectedData: Record<string, unknown> = {}
@@ -248,7 +429,7 @@ export function projectActivityPayload(
     projectedData.kind = data.kind
   }
 
-  const rawOutput = projectRawOutput(data.rawOutput)
+  const rawOutput = projectRawOutput(data.rawOutput) ?? projectAcpContent(data.content)
   if (rawOutput)
   {
     projectedData.rawOutput = rawOutput

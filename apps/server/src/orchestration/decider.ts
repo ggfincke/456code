@@ -779,7 +779,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       // settledAt: the engine rejects zero-event commands, and bulk-settle /
       // double-click must stay silent no-ops rather than surface errors.
       const alreadySettled = thread.settledOverride === 'settled' && thread.settledAt !== null
-      return {
+      const settledEvent = {
         ...(yield* withEventBase({
           aggregateKind: 'thread',
           aggregateId: command.threadId,
@@ -795,7 +795,30 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           // settle stamps the command time.
           updatedAt: alreadySettled ? thread.updatedAt : occurredAt,
         },
+      } satisfies PlannedOrchestrationEvent
+      if (thread.snoozedUntil == null)
+      {
+        return settledEvent
       }
+      // settling is an immediate "done" action, so stale snooze state must
+      // not keep the row parked until its former wake time
+      return [
+        settledEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: 'thread',
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: 'thread.unsnoozed',
+          payload: {
+            threadId: command.threadId,
+            reason: 'user',
+            updatedAt: occurredAt,
+          },
+        } satisfies PlannedOrchestrationEvent,
+      ]
     }
 
     case 'thread.unsettle':

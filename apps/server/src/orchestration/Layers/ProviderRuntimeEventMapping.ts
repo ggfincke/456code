@@ -13,6 +13,8 @@ import {
 } from '@t3tools/contracts'
 import { isToolLifecycleItemType } from '@t3tools/shared/toolActivity'
 
+import { projectActivityPayload } from '../ActivityPayloadProjection.ts'
+
 export function matchesProviderInstanceFence(
   expectedProviderInstanceId: ProviderInstanceId,
   actualProviderInstanceId: ProviderInstanceId | undefined,
@@ -650,7 +652,7 @@ export function runtimeEventToActivities(
       }
       const data = withToolCallId(event.payload.data, event.itemId)
       return [
-        {
+        projectActivityPayload({
           id: event.eventId,
           createdAt: event.createdAt,
           tone: 'tool',
@@ -664,7 +666,7 @@ export function runtimeEventToActivities(
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
-        },
+        }),
       ]
     }
 

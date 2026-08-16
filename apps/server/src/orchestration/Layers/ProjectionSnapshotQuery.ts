@@ -35,6 +35,7 @@ import {
   type ProjectionRepositoryError,
 } from '../../persistence/Errors.ts'
 import * as RepositoryIdentityResolver from '../../project/RepositoryIdentityResolver.ts'
+import { COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS } from '../activityPolicy.ts'
 import { ORCHESTRATION_PROJECTOR_NAMES } from './ProjectionPipeline.ts'
 import {
   CheckpointIdentityLookupInput,
@@ -92,6 +93,171 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel)
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot)
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread)
+const THREAD_DETAIL_ACTIVITY_LIMIT = 500
+const THREAD_DETAIL_COMMAND_ACTIVITY_SQL_LIST = COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS.map(
+  (kind) => `'${kind}'`,
+).join(',\n        ')
+
+// keep the 500-row history window on the purpose-built partial indexes
+export const THREAD_DETAIL_ACTIVITY_QUERY_SQL = `
+  WITH recent_activity_ids AS (
+    SELECT recent.activity_id
+    FROM projection_thread_activities AS recent
+      INDEXED BY idx_projection_thread_activities_command_window
+    WHERE recent.thread_id = ?
+      AND (
+        json_valid(recent.payload_json) = 0
+        OR COALESCE(json_extract(recent.payload_json, '$.type'), '')
+          <> ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
+      )
+    ORDER BY
+      CASE WHEN recent.turn_id IS NULL AND recent.sequence IS NOT NULL THEN 0 ELSE 1 END DESC,
+      CASE
+        WHEN recent.turn_id IS NULL AND recent.sequence IS NOT NULL THEN recent.sequence
+        ELSE NULL
+      END DESC,
+      recent.created_at DESC,
+      CASE WHEN recent.sequence IS NULL THEN 1 ELSE 0 END DESC,
+      recent.sequence DESC,
+      CASE
+        WHEN substr(recent.kind, -8) = '.started' OR recent.kind = 'tool.started' THEN 0
+        WHEN substr(recent.kind, -10) = '.completed'
+          OR substr(recent.kind, -9) = '.resolved'
+          THEN 2
+        ELSE 1
+      END DESC,
+      recent.activity_id DESC
+    LIMIT ${THREAD_DETAIL_ACTIVITY_LIMIT}
+  ),
+  latest_import_marker AS (
+    SELECT marker.activity_id
+    FROM projection_thread_activities AS marker
+      INDEXED BY idx_projection_thread_activities_import_continuation
+    WHERE marker.thread_id = ?
+      AND json_valid(marker.payload_json) = 1
+      AND json_extract(marker.payload_json, '$.type')
+        = ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
+    ORDER BY
+      CASE WHEN marker.turn_id IS NULL AND marker.sequence IS NOT NULL THEN 0 ELSE 1 END DESC,
+      CASE
+        WHEN marker.turn_id IS NULL AND marker.sequence IS NOT NULL THEN marker.sequence
+        ELSE NULL
+      END DESC,
+      marker.created_at DESC,
+      CASE WHEN marker.sequence IS NULL THEN 1 ELSE 0 END DESC,
+      marker.sequence DESC,
+      CASE
+        WHEN substr(marker.kind, -8) = '.started' OR marker.kind = 'tool.started' THEN 0
+        WHEN substr(marker.kind, -10) = '.completed'
+          OR substr(marker.kind, -9) = '.resolved'
+          THEN 2
+        ELSE 1
+      END DESC,
+      marker.activity_id DESC
+    LIMIT 1
+  ),
+  pending_approval_activities AS (
+    SELECT
+      activity.activity_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY pending.request_id
+        ORDER BY activity.created_at DESC, activity.activity_id DESC
+      ) AS request_order
+    FROM projection_pending_approvals AS pending
+      INDEXED BY idx_projection_pending_approvals_thread_status
+    INNER JOIN projection_thread_activities AS activity
+      INDEXED BY idx_projection_thread_activities_command_relevant
+      ON activity.thread_id = pending.thread_id
+    WHERE pending.thread_id = ?
+      AND pending.status = 'pending'
+      AND activity.kind IN (
+        ${THREAD_DETAIL_COMMAND_ACTIVITY_SQL_LIST}
+      )
+      AND activity.kind = 'approval.requested'
+      AND json_valid(activity.payload_json) = 1
+      AND json_extract(activity.payload_json, '$.requestId') = pending.request_id
+  ),
+  user_input_lifecycle AS (
+    SELECT
+      activity.activity_id,
+      activity.kind,
+      ROW_NUMBER() OVER (
+        PARTITION BY json_extract(activity.payload_json, '$.requestId')
+        ORDER BY activity.created_at DESC, activity.activity_id DESC
+      ) AS request_order
+    FROM projection_threads AS thread
+    INNER JOIN projection_thread_activities AS activity
+      INDEXED BY idx_projection_thread_activities_command_relevant
+      ON activity.thread_id = thread.thread_id
+    WHERE thread.thread_id = ?
+      AND thread.pending_user_input_count > 0
+      AND activity.kind IN (
+        ${THREAD_DETAIL_COMMAND_ACTIVITY_SQL_LIST}
+      )
+      AND json_valid(activity.payload_json) = 1
+      AND (
+        activity.kind IN ('user-input.requested', 'user-input.resolved')
+        OR (
+          activity.kind = 'provider.user-input.respond.failed'
+          AND (
+            lower(COALESCE(json_extract(activity.payload_json, '$.detail'), ''))
+              LIKE '%stale pending user-input request%'
+            OR lower(COALESCE(json_extract(activity.payload_json, '$.detail'), ''))
+              LIKE '%unknown pending user-input request%'
+            OR lower(COALESCE(json_extract(activity.payload_json, '$.detail'), ''))
+              LIKE '%unknown pending user input request%'
+            OR lower(COALESCE(json_extract(activity.payload_json, '$.detail'), ''))
+              LIKE '%unknown pending codex user input request%'
+          )
+        )
+      )
+      AND json_extract(activity.payload_json, '$.requestId') IS NOT NULL
+  ),
+  selected_activity_ids AS (
+    SELECT activity_id FROM recent_activity_ids
+    UNION
+    SELECT activity_id FROM latest_import_marker
+    UNION
+    SELECT activity_id
+    FROM pending_approval_activities
+    WHERE request_order = 1
+    UNION
+    SELECT activity_id
+    FROM user_input_lifecycle
+    WHERE request_order = 1
+      AND kind = 'user-input.requested'
+  )
+  SELECT
+    activity.activity_id AS "activityId",
+    activity.thread_id AS "threadId",
+    activity.turn_id AS "turnId",
+    activity.tone,
+    activity.kind,
+    activity.summary,
+    activity.payload_json AS "payload",
+    activity.sequence,
+    activity.created_at AS "createdAt"
+  FROM selected_activity_ids AS selected
+  INNER JOIN projection_thread_activities AS activity
+    ON activity.activity_id = selected.activity_id
+  ORDER BY
+    CASE WHEN activity.turn_id IS NULL AND activity.sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
+    CASE
+      WHEN activity.turn_id IS NULL AND activity.sequence IS NOT NULL THEN activity.sequence
+      ELSE NULL
+    END ASC,
+    activity.created_at ASC,
+    CASE WHEN activity.sequence IS NULL THEN 1 ELSE 0 END ASC,
+    activity.sequence ASC,
+    CASE
+      WHEN substr(activity.kind, -8) = '.started' OR activity.kind = 'tool.started' THEN 0
+      WHEN substr(activity.kind, -10) = '.completed'
+        OR substr(activity.kind, -9) = '.resolved'
+        THEN 2
+      ELSE 1
+    END ASC,
+    activity.activity_id ASC
+`
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -1124,34 +1290,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
     Request: ThreadIdLookupInput,
     Result: ProjectionThreadActivityDbRowSchema,
     execute: ({ threadId }) =>
-      sql`
-        SELECT
-          activity_id AS "activityId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          tone,
-          kind,
-          summary,
-          payload_json AS "payload",
-          sequence,
-          created_at AS "createdAt"
-        FROM projection_thread_activities
-        WHERE thread_id = ${threadId}
-        ORDER BY
-          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
-          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END ASC,
-          created_at ASC,
-          CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
-          sequence ASC,
-          CASE
-            WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
-            WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
-            ELSE 1
-          END ASC,
-          activity_id ASC
-      `,
+      sql.unsafe(THREAD_DETAIL_ACTIVITY_QUERY_SQL, [threadId, threadId, threadId, threadId]),
   })
-
   const getThreadSessionRowByThread = SqlSchema.findOneOption({
     Request: ThreadIdLookupInput,
     Result: ProjectionThreadSessionDbRowSchema,
