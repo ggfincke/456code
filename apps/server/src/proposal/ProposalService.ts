@@ -157,78 +157,94 @@ export const make = Effect.gen(function* ()
           proposalId,
         )
       }
-      const prepared = yield* gitEngine.prepare({
-        cwd: input.cwd,
-        proposalId,
-        revisionId,
-        changes: input.changes,
-      })
-      const deletePreparedRefs = gitEngine.deleteRetainedRefs({
-        cwd: prepared.worktree.rootPath,
-        baseRetainedRef: prepared.baseRetainedRef,
-        proposedRetainedRef: prepared.proposedRetainedRef,
-      })
-      const refToken = ProposalGitEngine.proposalRetainedRefPairToken(
-        prepared.baseRetainedRef,
-        prepared.proposedRetainedRef,
-      )
-      if (refToken === null)
-      {
-        return yield* proposalError(
-          'ProposalService.upsert',
-          'persistence-failed',
-          'Prepared proposal retained refs did not form a canonical pair.',
-          proposalId,
-        )
-      }
-      const deletePreparedRefsAndAttempt = deletePreparedRefs.pipe(
-        Effect.ensuring(attemptStore.remove(refToken).pipe(Effect.ignore)),
-      )
-      const deletePreparedRefsIfUncommitted = repository.get(proposalId).pipe(
-        Effect.matchEffect({
-          onFailure: (error) =>
-            error.code === 'not-found' ? deletePreparedRefsAndAttempt : Effect.void,
-          onSuccess: (stored) =>
-            stored.revisions.some((revision) => revision.revisionId === revisionId)
-              ? Effect.void
-              : deletePreparedRefsAndAttempt,
+      const stored = yield* Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const prepared = yield* Effect.acquireRelease(
+            gitEngine.prepare({
+              cwd: input.cwd,
+              proposalId,
+              revisionId,
+              changes: input.changes,
+            }),
+            (prepared, exit) =>
+            {
+              if (Exit.isSuccess(exit)) return Effect.void
+              const refToken = ProposalGitEngine.proposalRetainedRefPairToken(
+                prepared.baseRetainedRef,
+                prepared.proposedRetainedRef,
+              )
+              const deletePreparedRefsAndAttempt = gitEngine
+                .deleteRetainedRefs({
+                  cwd: prepared.worktree.rootPath,
+                  baseRetainedRef: prepared.baseRetainedRef,
+                  proposedRetainedRef: prepared.proposedRetainedRef,
+                })
+                .pipe(
+                  Effect.ensuring(
+                    refToken === null
+                      ? Effect.void
+                      : attemptStore.remove(refToken).pipe(Effect.ignore),
+                  ),
+                )
+              return repository.get(proposalId).pipe(
+                Effect.matchEffect({
+                  onFailure: (error) =>
+                    error.code === 'not-found' ? deletePreparedRefsAndAttempt : Effect.void,
+                  onSuccess: (stored) =>
+                    stored.revisions.some((revision) => revision.revisionId === revisionId)
+                      ? Effect.void
+                      : deletePreparedRefsAndAttempt,
+                }),
+              )
+            },
+            { interruptible: true },
+          )
+          const refToken = ProposalGitEngine.proposalRetainedRefPairToken(
+            prepared.baseRetainedRef,
+            prepared.proposedRetainedRef,
+          )
+          if (refToken === null)
+          {
+            return yield* proposalError(
+              'ProposalService.upsert',
+              'persistence-failed',
+              'Prepared proposal retained refs did not form a canonical pair.',
+              proposalId,
+            )
+          }
+          const createdAt = DateTime.formatIso(yield* DateTime.now)
+          const appended = yield* repository.append({
+            proposalId,
+            revisionId,
+            environmentId: input.environmentId,
+            projectId: input.projectId,
+            sourceThreadId: input.sourceThreadId,
+            producer: input.producer,
+            prepared,
+            ...(narrative === undefined ? {} : { narrative }),
+            ...(input.planId === undefined ? {} : { planId: input.planId }),
+            ...(input.planMarkdownSha256 === undefined
+              ? {}
+              : { planMarkdownSha256: input.planMarkdownSha256 }),
+            ...(input.orchestratePlan === undefined
+              ? {}
+              : { orchestratePlan: input.orchestratePlan }),
+            createdAt,
+          })
+          yield* attemptStore
+            .finalize({ refToken, durableAt: DateTime.formatIso(yield* DateTime.now) })
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning('failed to finalize a durable proposal retained-ref attempt', {
+                  refToken,
+                  cause,
+                }),
+              ),
+            )
+          return appended
         }),
       )
-      const createdAt = DateTime.formatIso(yield* DateTime.now)
-      const stored = yield* repository
-        .append({
-          proposalId,
-          revisionId,
-          environmentId: input.environmentId,
-          projectId: input.projectId,
-          sourceThreadId: input.sourceThreadId,
-          producer: input.producer,
-          prepared,
-          ...(narrative === undefined ? {} : { narrative }),
-          ...(input.planId === undefined ? {} : { planId: input.planId }),
-          ...(input.planMarkdownSha256 === undefined
-            ? {}
-            : { planMarkdownSha256: input.planMarkdownSha256 }),
-          ...(input.orchestratePlan === undefined
-            ? {}
-            : { orchestratePlan: input.orchestratePlan }),
-          createdAt,
-        })
-        .pipe(
-          Effect.onExit((exit) =>
-            Exit.isFailure(exit) ? deletePreparedRefsIfUncommitted : Effect.void,
-          ),
-        )
-      yield* attemptStore
-        .finalize({ refToken, durableAt: DateTime.formatIso(yield* DateTime.now) })
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning('failed to finalize a durable proposal retained-ref attempt', {
-              refToken,
-              cause,
-            }),
-          ),
-        )
       return stored.revision
     },
   )
