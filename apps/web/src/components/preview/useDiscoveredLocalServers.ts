@@ -7,115 +7,84 @@ import { useMemo } from 'react'
 
 import type { EnvironmentId } from '@t3tools/contracts'
 import { resolveDiscoveredServerUrl } from '~/browser/browserTargetResolver'
-import { useDiscoveredPorts } from '~/lib/portDiscoveryState'
+import { useDiscoveredPortsState } from '~/lib/portDiscoveryState'
 
 export interface PreviewableServer extends DiscoveredLocalServer
 {
-  source: 'scanner' | 'configured' | 'recent'
-  // true when the port scanner currently sees this server listening. A
-  // `configured` entry can also be `listening` when the scan enriched it.
-  listening: boolean
+  source: 'scanner' | 'configured'
+  // keep the server-side loopback url distinct from the environment-resolved
+  // navigation target so verified paths survive remote environment mapping.
+  requestedUrl: string
+}
+
+export interface RecentlySeenPreviewServer extends DiscoveredLocalServer
+{
+  source: 'recent'
+  requestedUrl: string
 }
 
 interface UseDiscoveredLocalServersInput
 {
   environmentId: EnvironmentId
   configuredUrls?: ReadonlyArray<string> | undefined
-  recentlySeenUrls?: ReadonlyArray<string> | undefined
 }
 
-// merge the environment-level port snapshot with configured / recently-seen
-// URLs and return a stable sorted list.
+// enrich the environment-level live snapshot with matching configured urls.
 export function useDiscoveredLocalServers(
   input: UseDiscoveredLocalServersInput,
 ): ReadonlyArray<PreviewableServer>
 {
-  const scannerSnapshot = useDiscoveredPorts(input.environmentId)
+  const scannerState = useDiscoveredPortsState(input.environmentId, input.configuredUrls)
 
   return useMemo(
     () =>
       mergeServers({
-        scanner: scannerSnapshot.map((server) => ({
+        scanner: scannerState.servers.map((server) => ({
           ...server,
           url: resolveDiscoveredServerUrl(input.environmentId, server.url),
+          requestedUrl: server.url,
         })),
         configuredUrls: input.configuredUrls ?? [],
-        recentlySeenUrls: input.recentlySeenUrls ?? [],
+        configuredUrlProbing: scannerState.configuredUrlProbing,
       }),
-    [input.environmentId, scannerSnapshot, input.configuredUrls, input.recentlySeenUrls],
+    [input.configuredUrls, input.environmentId, scannerState],
   )
 }
 
 export function mergeServers(input: {
-  scanner: ReadonlyArray<DiscoveredLocalServer>
+  scanner: ReadonlyArray<DiscoveredLocalServer & { readonly requestedUrl: string }>
   configuredUrls: ReadonlyArray<string>
-  recentlySeenUrls: ReadonlyArray<string>
+  configuredUrlProbing?: boolean
 }): ReadonlyArray<PreviewableServer>
 {
-  const seen = new Map<string, PreviewableServer>()
+  const configuredByServer = new Map<string, { host: string; port: number; url: string }>()
 
   for (const url of input.configuredUrls)
   {
     const parsed = parseLocalUrl(url)
     if (!parsed) continue
     const key = canonicalKey(parsed.host, parsed.port)
-    if (seen.has(key)) continue
-    seen.set(key, {
-      host: parsed.host,
-      port: parsed.port,
-      url: parsed.url,
-      processName: null,
-      pid: null,
-      terminal: null,
-      source: 'configured',
-      listening: false,
-    })
+    if (!configuredByServer.has(key)) configuredByServer.set(key, parsed)
   }
 
+  const live: PreviewableServer[] = []
   for (const server of input.scanner)
   {
     const key = canonicalKey(server.host, server.port)
-    const existing = seen.get(key)
-    if (existing)
-    {
-      // enrich a configured entry with live process metadata; flip
-      // `listening` so it pulses green like a scanner-discovered entry.
-      seen.set(key, {
-        ...existing,
-        processName: server.processName ?? existing.processName,
-        pid: server.pid ?? existing.pid,
-        terminal: server.terminal ?? existing.terminal,
-        listening: true,
-      })
-      continue
-    }
-    seen.set(key, { ...server, source: 'scanner', listening: true })
-  }
-
-  for (const url of input.recentlySeenUrls)
-  {
-    const parsed = parseLocalUrl(url)
-    if (!parsed) continue
-    const key = canonicalKey(parsed.host, parsed.port)
-    if (seen.has(key)) continue
-    seen.set(key, {
-      host: parsed.host,
-      port: parsed.port,
-      url: parsed.url,
-      processName: null,
-      pid: null,
-      terminal: null,
-      source: 'recent',
-      listening: false,
+    const configured = configuredByServer.get(key)
+    live.push({
+      ...server,
+      requestedUrl:
+        configured && input.configuredUrlProbing === false ? configured.url : server.requestedUrl,
+      source: configured ? 'configured' : 'scanner',
     })
   }
 
-  return Array.from(seen.values()).toSorted((a, b) =>
+  return live.toSorted((a, b) =>
   {
     const sourceOrder: Record<PreviewableServer['source'], number> = {
       configured: 0,
       scanner: 1,
-      recent: 2,
     }
     if (sourceOrder[a.source] !== sourceOrder[b.source])
     {
@@ -125,9 +94,36 @@ export function mergeServers(input: {
   })
 }
 
+export function recentlySeenServers(input: {
+  urls: ReadonlyArray<string>
+  liveServers: ReadonlyArray<PreviewableServer>
+}): ReadonlyArray<RecentlySeenPreviewServer>
+{
+  const seen = new Set(input.liveServers.map((server) => canonicalKey(server.host, server.port)))
+  const recent: RecentlySeenPreviewServer[] = []
+  for (const raw of input.urls)
+  {
+    const parsed = parseLocalUrl(raw)
+    if (!parsed) continue
+    const key = canonicalKey(parsed.host, parsed.port)
+    if (seen.has(key)) continue
+    seen.add(key)
+    recent.push({
+      ...parsed,
+      requestedUrl: parsed.url,
+      processName: null,
+      pid: null,
+      terminal: null,
+      source: 'recent',
+    })
+  }
+  return recent.slice(0, 8)
+}
+
 function canonicalKey(host: string, port: number): string
 {
-  return `${host.toLowerCase()}:${port}`
+  const normalizedHost = host.toLowerCase()
+  return `${isLoopbackHost(normalizedHost) ? 'loopback' : normalizedHost}:${port}`
 }
 
 function parseLocalUrl(raw: string): { host: string; port: number; url: string } | null

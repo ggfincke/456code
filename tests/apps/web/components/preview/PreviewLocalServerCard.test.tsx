@@ -26,11 +26,11 @@ const server: PreviewableServer = {
   host: 'localhost',
   port: 5173,
   url: 'http://localhost:5173/app',
+  requestedUrl: 'http://localhost:5173/app',
   processName: 'vite',
   pid: 1234,
   terminal: null,
   source: 'scanner',
-  listening: true,
 }
 
 beforeEach(() =>

@@ -4,12 +4,12 @@
 import type { ScopedThreadRef } from '@t3tools/contracts'
 
 import { PreviewFaviconIcon } from './PreviewFaviconIcon'
-import type { PreviewableServer } from './useDiscoveredLocalServers'
+import type { PreviewableServer, RecentlySeenPreviewServer } from './useDiscoveredLocalServers'
 
 interface Props
 {
   threadRef: ScopedThreadRef
-  server: PreviewableServer
+  server: PreviewableServer | RecentlySeenPreviewServer
   onOpen: () => void
 }
 
@@ -29,17 +29,15 @@ export function PreviewLocalServerCard({ threadRef, server, onOpen }: Props)
           {server.host}:{server.port}
         </span>
       </div>
-      {server.listening ? <PulsingDot /> : <DimDot />}
+      {server.source === 'recent' ? <DimDot /> : <PulsingDot />}
     </button>
   )
 }
 
-function describeServer(server: PreviewableServer): string
+function describeServer(server: PreviewableServer | RecentlySeenPreviewServer): string
 {
   if (server.processName) return server.processName
-  if (server.listening) return 'Listening'
-  if (server.source === 'configured') return 'Configured'
-  return 'Recently seen'
+  return server.source === 'recent' ? 'Recently seen' : 'Listening'
 }
 
 function PulsingDot()
