@@ -195,6 +195,7 @@ import {
   ThreadStatusPill,
 } from './Sidebar.logic'
 import { sortThreads } from '../lib/threadSort'
+import { buildThreadActionMenuItems } from './threadActionMenu.logic'
 import { SidebarChromeFooter, SidebarChromeHeader } from './sidebar/SidebarChrome'
 import { useCopyToClipboard } from '~/hooks/useCopyToClipboard'
 import { useIsMobile } from '~/hooks/useMediaQuery'
@@ -1288,6 +1289,28 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       )
     },
   })
+  const { copyToClipboard: copyBranchToClipboard } = useCopyToClipboard<{
+    branch: string
+  }>({
+    onCopy: ({ branch }) =>
+    {
+      toastManager.add({
+        type: 'success',
+        title: 'Branch copied',
+        description: branch,
+      })
+    },
+    onError: (error) =>
+    {
+      toastManager.add(
+        stackedThreadToast({
+          type: 'error',
+          title: 'Failed to copy branch',
+          description: error instanceof Error ? error.message : 'An error occurred.',
+        }),
+      )
+    },
+  })
   const openPrLink = useOpenPrLink()
   const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom)
   const sidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs)
@@ -2339,16 +2362,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const threadWorkspacePath =
         thread.worktreePath ?? threadProject?.workspaceRoot ?? project.workspaceRoot ?? null
       const clicked = await api.contextMenu.show(
-        [
-          ...(thread.branch
-            ? [{ id: 'new-thread-on-branch', label: `New thread on ${thread.branch}` }]
-            : []),
-          { id: 'rename', label: 'Rename thread' },
-          { id: 'mark-unread', label: 'Mark unread' },
-          { id: 'copy-path', label: 'Copy Path' },
-          { id: 'copy-thread-id', label: 'Copy Thread ID' },
-          { id: 'delete', label: 'Delete', destructive: true, icon: 'trash' },
-        ],
+        buildThreadActionMenuItems({
+          branch: thread.branch,
+          isPinned: false,
+          isSettled: false,
+          isSnoozed: false,
+          canSnoozeNow: false,
+          isRegeneratingTitle: false,
+          isRunning: thread.session?.status === 'running' && thread.session.activeTurnId != null,
+          supports: {
+            settlement: false,
+            snooze: false,
+            pinning: false,
+            titleRegeneration: false,
+          },
+          snoozePresets: [],
+        }),
         position,
       )
 
@@ -2405,9 +2434,24 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         copyPathToClipboard(threadWorkspacePath, { path: threadWorkspacePath })
         return
       }
+      if (clicked === 'copy-branch' && thread.branch)
+      {
+        copyBranchToClipboard(thread.branch, { branch: thread.branch })
+        return
+      }
       if (clicked === 'copy-thread-id')
       {
         copyThreadIdToClipboard(thread.id, { threadId: thread.id })
+        return
+      }
+      if (clicked === 'archive')
+      {
+        if (appSettingsConfirmThreadArchive)
+        {
+          const confirmed = await api.dialogs.confirm(`Archive thread "${thread.title}"?`)
+          if (!confirmed) return
+        }
+        await attemptArchiveThread(threadRef)
         return
       }
       if (clicked !== 'delete') return
@@ -2439,6 +2483,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
     [
       appSettingsConfirmThreadDelete,
+      appSettingsConfirmThreadArchive,
+      attemptArchiveThread,
+      copyBranchToClipboard,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,

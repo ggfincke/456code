@@ -11,6 +11,7 @@ import {
   HammerIcon,
   MessageCircleIcon,
   MinusIcon,
+  SearchIcon,
   SquarePenIcon,
   TerminalIcon,
   WrenchIcon,
@@ -21,14 +22,18 @@ import { memo, use, useEffect, useMemo, useRef, useState, type KeyboardEvent } f
 import { cn } from '~/lib/utils'
 import {
   formatDuration,
-  workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
 } from '../../../session-logic'
-import { workEntryIndicatesToolRunning, workEntryRunningSince } from '../../../session/worklog'
+import {
+  workEntryDisplayIndicatesToolFailure,
+  workEntryIndicatesToolRunning,
+  workEntryRunningSince,
+} from '../../../session/worklog'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { normalizeCompactToolLabel, type MessagesTimelineRow } from './MessagesTimeline.logic'
+import { toolGroupAction, workEntryIsVisibleInGroup } from './grouping'
 import { formatWorkspaceRelativePath } from '../../../lib/filePathDisplay'
 import {
   TimelineRowActivityCtx,
@@ -57,6 +62,11 @@ export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
           )}
         </span>
       </div>
+      {row.showThinking ? (
+        <div className="mt-1">
+          <ThinkingActivityRow />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -97,14 +107,17 @@ function WorkingTimer({ createdAt }: { createdAt: string })
 // renders one or more already-derived work log rows. Overflow expansion is modeled as LegendList data.
 export const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
+  isExpandedToolGroupEntry,
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: 'work' }>['groupedEntries']
+  isExpandedToolGroupEntry: boolean
 })
 {
   const { workspaceRoot } = use(TimelineRowCtx)
   const nonEmptyEntries = useMemo(
-    () => groupedEntries.filter((entry) => !workEntryIndicatesToolNeutralStatus(entry)),
-    [groupedEntries],
+    () =>
+      groupedEntries.filter((entry) => workEntryIsVisibleInGroup(entry, isExpandedToolGroupEntry)),
+    [groupedEntries, isExpandedToolGroupEntry],
   )
   const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry))
   const groupLabel = onlyToolEntries
@@ -116,7 +129,10 @@ export const WorkGroupSection = memo(function WorkGroupSection({
   if (nonEmptyEntries.length === 0) return null
 
   return (
-    <section className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label={groupLabel}>
+    <section
+      className={cn('-mx-1 px-1', isExpandedToolGroupEntry ? 'py-0' : 'space-y-0.5 py-0.5')}
+      aria-label={isExpandedToolGroupEntry ? undefined : groupLabel}
+    >
       {!onlyToolEntries && (
         <p className="px-0.5 pb-0.5 font-medium text-[11px] text-muted-foreground/65">
           {groupLabel}
@@ -135,25 +151,102 @@ export const WorkGroupSection = memo(function WorkGroupSection({
   )
 })
 
-export function WorkGroupToggleTimelineRow({
+function LiveActivityRow({
+  label,
+  iconName,
+  failed = false,
+}: {
+  label: string
+  iconName?: WorkEntryIconName
+  failed?: boolean
+})
+{
+  return (
+    <span className="relative block min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed">
+      <LiveActivityContent
+        label={label}
+        iconName={iconName}
+        failed={failed}
+        announceFailure={failed}
+      />
+      <span
+        aria-hidden
+        className="live-activity-focus pointer-events-none absolute inset-y-0 block select-none"
+      >
+        <span className="live-activity-focus-counter block">
+          <span className="live-activity-focus-aligned block">
+            <LiveActivityContent label={label} iconName={iconName} failed={failed} highlighted />
+          </span>
+        </span>
+      </span>
+    </span>
+  )
+}
+
+function ThinkingActivityRow()
+{
+  return <LiveActivityRow label="Thinking" />
+}
+
+function LiveActivityContent({
+  label,
+  iconName,
+  failed = false,
+  announceFailure = false,
+  highlighted = false,
+}: {
+  label: string
+  iconName: WorkEntryIconName | undefined
+  failed?: boolean
+  announceFailure?: boolean
+  highlighted?: boolean
+})
+{
+  const resolvedIconName = failed ? 'x' : iconName
+
+  return (
+    <span
+      className={cn(
+        'flex min-h-6 min-w-0 items-center gap-1.5 py-0.5',
+        resolvedIconName ? 'px-0.5' : 'px-1',
+        highlighted ? 'text-foreground' : 'text-muted-foreground/70',
+      )}
+    >
+      {resolvedIconName ? (
+        <span
+          className={cn(
+            'flex size-6 shrink-0 items-center justify-center',
+            failed ? 'text-destructive' : highlighted ? 'text-foreground' : 'text-muted-foreground',
+          )}
+          role={announceFailure ? 'img' : undefined}
+          aria-label={announceFailure ? 'Tool call failed' : undefined}
+        >
+          <WorkEntryIconSvg
+            name={resolvedIconName}
+            className={cn('block size-4 shrink-0 stroke-[1.8]', !highlighted && 'opacity-70')}
+          />
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </span>
+  )
+}
+
+export function LiveWorkEntryTimelineRow({
   row,
 }: {
-  row: Extract<TimelineRow, { kind: 'work-toggle' }>
+  row: Extract<TimelineRow, { kind: 'work-live' }>
 })
 {
   const ctx = use(TimelineRowCtx)
-  const labelNoun = row.onlyToolEntries
-    ? row.hiddenCount === 1
-      ? 'tool call'
-      : 'tool calls'
-    : row.hiddenCount === 1
-      ? 'log entry'
-      : 'log entries'
+  const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot)
+  const failed = row.hasFailure
 
   return (
     <button
       type="button"
-      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      aria-label={failed ? `${label}, tool call failed` : undefined}
       aria-expanded={row.expanded}
       onClick={(event) =>
       {
@@ -162,13 +255,120 @@ export function WorkGroupToggleTimelineRow({
         ctx.onToggleWorkGroup(row.groupId, anchorElement)
       }}
     >
-      <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
-        <ChevronDownIcon
+      <LiveActivityRow label={label} iconName={workEntryIconName(row.entry)} failed={failed} />
+    </button>
+  )
+}
+
+function toolGroupSummaryIconName(
+  kind: Extract<TimelineRow, { kind: 'work-toggle' }>['summaryKind'],
+): WorkEntryIconName
+{
+  switch (kind)
+  {
+    case 'read':
+      return 'eye'
+    case 'edit':
+      return 'square-pen'
+    case 'command':
+      return 'terminal'
+    case 'search':
+      return 'globe'
+    case 'code-search':
+      return 'search'
+    case 'other':
+      return 'wrench'
+    case 'dynamic-tool':
+      return 'hammer'
+    case 'agent-tool':
+      return 'bot'
+    case 'tone-tool':
+      return 'zap'
+    case 'mixed':
+    case null:
+      return 'hammer'
+  }
+}
+
+export function WorkGroupToggleTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: 'work-toggle' }>
+})
+{
+  const ctx = use(TimelineRowCtx)
+  if (row.onlyToolEntries && row.summary)
+  {
+    return (
+      <button
+        type="button"
+        className="group/tool-group flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        aria-label={row.hasFailure ? `${row.summary}, tool call failed` : undefined}
+        aria-expanded={row.expanded}
+        onClick={(event) =>
+        {
+          const anchorElement =
+            event.currentTarget.closest<HTMLElement>('[data-timeline-row-id]') ??
+            event.currentTarget
+          ctx.onToggleWorkGroup(row.groupId, anchorElement)
+        }}
+      >
+        <span
           className={cn(
-            'size-3.5 shrink-0 opacity-70 transition-transform duration-200',
-            row.expanded && 'rotate-180',
+            'flex size-6 shrink-0 items-center justify-center',
+            row.hasFailure ? 'text-destructive' : 'text-muted-foreground',
           )}
-        />
+          role={row.hasFailure ? 'img' : undefined}
+          aria-label={row.hasFailure ? 'Tool call failed' : undefined}
+        >
+          <WorkEntryIconSvg
+            name={row.hasFailure ? 'x' : toolGroupSummaryIconName(row.summaryKind)}
+            className="size-4 shrink-0 stroke-[1.8] opacity-70"
+          />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground/70">{row.summary}</span>
+      </button>
+    )
+  }
+  const labelNoun = row.onlyToolEntries
+    ? row.hiddenCount === 1
+      ? 'tool call'
+      : 'tool calls'
+    : row.hiddenCount === 1
+      ? 'log entry'
+      : 'log entries'
+  const showHiddenFailure = row.hasFailure && !row.expanded
+
+  return (
+    <button
+      type="button"
+      className="flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      aria-expanded={row.expanded}
+      onClick={(event) =>
+      {
+        const anchorElement =
+          event.currentTarget.closest<HTMLElement>('[data-timeline-row-id]') ?? event.currentTarget
+        ctx.onToggleWorkGroup(row.groupId, anchorElement)
+      }}
+    >
+      <span
+        className={cn(
+          'flex size-5 shrink-0 items-center justify-center text-muted-foreground/65',
+          showHiddenFailure && 'text-destructive',
+        )}
+        role={showHiddenFailure ? 'img' : undefined}
+        aria-label={showHiddenFailure ? 'Hidden work includes a failure' : undefined}
+      >
+        {showHiddenFailure ? (
+          <WorkEntryIconSvg name="x" className="size-3.5 shrink-0 stroke-[1.8] opacity-70" />
+        ) : (
+          <ChevronDownIcon
+            className={cn(
+              'size-3.5 shrink-0 opacity-70 transition-transform duration-200',
+              row.expanded && 'rotate-180',
+            )}
+          />
+        )}
       </span>
       {row.expanded ? (
         <span className="font-medium text-foreground/82">
@@ -226,6 +426,7 @@ type WorkEntryIconName =
   | 'globe'
   | 'hammer'
   | 'message-circle'
+  | 'search'
   | 'square-pen'
   | 'terminal'
   | 'wrench'
@@ -250,6 +451,8 @@ function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; classN
       return <HammerIcon className={className} aria-hidden />
     case 'message-circle':
       return <MessageCircleIcon className={className} aria-hidden />
+    case 'search':
+      return <SearchIcon className={className} aria-hidden />
     case 'square-pen':
       return <SquarePenIcon className={className} aria-hidden />
     case 'terminal':
@@ -323,6 +526,129 @@ function workEntryRawCommand(
   return rawCommand === workEntry.command.trim() ? null : rawCommand
 }
 
+const COMMAND_WRAPPER_OPTIONS_WITH_VALUE = new Set([
+  '-C',
+  '--chdir',
+  '-D',
+  '-g',
+  '--group',
+  '-S',
+  '--split-string',
+  '-u',
+  '--unset',
+  '--user',
+])
+
+function tokenizeShellCommand(command: string): string[] | null
+{
+  const tokens: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  let escaping = false
+  let tokenStarted = false
+
+  for (const character of command.trim())
+  {
+    if (escaping)
+    {
+      current += character
+      escaping = false
+      tokenStarted = true
+      continue
+    }
+    if (character === '\\' && quote !== "'")
+    {
+      escaping = true
+      tokenStarted = true
+      continue
+    }
+    if (quote !== null)
+    {
+      if (character === quote) quote = null
+      else current += character
+      tokenStarted = true
+      continue
+    }
+    if (character === '"' || character === "'")
+    {
+      quote = character
+      tokenStarted = true
+      continue
+    }
+    if (/\s/u.test(character))
+    {
+      if (tokenStarted)
+      {
+        tokens.push(current)
+        current = ''
+        tokenStarted = false
+      }
+      continue
+    }
+    current += character
+    tokenStarted = true
+  }
+
+  if (quote !== null || escaping) return null
+  if (tokenStarted) tokens.push(current)
+  return tokens
+}
+
+function commandProgramName(command: string): string | null
+{
+  const tokens = tokenizeShellCommand(command)
+  if (!tokens) return null
+
+  let index = 0
+  let wrapper: 'env' | 'sudo' | null = null
+  while (index < tokens.length)
+  {
+    const token = tokens[index]
+    if (!token) return null
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token))
+    {
+      index += 1
+      continue
+    }
+    const basename = token.split(/[\\/]/).at(-1) ?? ''
+    if (basename === 'env' || basename === 'sudo')
+    {
+      wrapper = basename
+      index += 1
+      continue
+    }
+    if (wrapper !== null && token === '--')
+    {
+      wrapper = null
+      index += 1
+      continue
+    }
+    if (wrapper !== null && token.startsWith('-'))
+    {
+      const option = token.includes('=') ? token.slice(0, token.indexOf('=')) : token
+      const consumesNext = !token.includes('=') && COMMAND_WRAPPER_OPTIONS_WITH_VALUE.has(option)
+      index += consumesNext ? 2 : 1
+      continue
+    }
+    return basename || null
+  }
+  return null
+}
+
+function liveWorkEntryLabel(
+  workEntry: TimelineWorkEntry,
+  workspaceRoot: string | undefined,
+): string
+{
+  const command = workEntry.command?.trim()
+  if (command)
+  {
+    const program = commandProgramName(command)
+    return program ? `Running ${program}` : 'Running command'
+  }
+  return workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry)
+}
+
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
@@ -376,23 +702,8 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName
   {
     return 'zap'
   }
-  if (workEntry.requestKind === 'command') return 'terminal'
-  if (workEntry.requestKind === 'file-read') return 'eye'
-  if (workEntry.requestKind === 'file-change') return 'square-pen'
-
-  if (workEntry.itemType === 'command_execution' || workEntry.command)
-  {
-    return 'terminal'
-  }
-  if (workEntry.itemType === 'file_change' || (workEntry.changedFiles?.length ?? 0) > 0)
-  {
-    return 'square-pen'
-  }
-  if (workEntry.itemType === 'repository_search' || workEntry.itemType === 'web_search')
-  {
-    return 'globe'
-  }
-  if (workEntry.itemType === 'image_view') return 'eye'
+  const action = toolGroupAction(workEntry)
+  if (action !== 'other') return toolGroupSummaryIconName(action)
 
   switch (workEntry.itemType)
   {
@@ -491,7 +802,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const metadataParts = taskMetadataParts(workEntry)
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot)
   const canExpand = expandedBody !== null
-  const showFailedIndicator = workEntryIndicatesToolFailure(workEntry)
+  const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry)
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntry.sourceActivityKind === 'runtime.error' || !workLogEntryIsToolLike(workEntry))

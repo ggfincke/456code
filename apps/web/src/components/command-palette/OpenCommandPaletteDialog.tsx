@@ -33,6 +33,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   MessageSquareIcon,
+  ServerIcon,
   SettingsIcon,
   SquarePenIcon,
 } from 'lucide-react'
@@ -158,17 +159,11 @@ import {
 import type { CommandPaletteOpenIntent } from './uiState'
 
 export function CommandPaletteDialog(props: {
-  readonly open: boolean
   readonly openIntent: CommandPaletteOpenIntent | null
   readonly setOpen: (open: boolean) => void
   readonly clearOpenIntent: () => void
 })
 {
-  if (!props.open)
-  {
-    return null
-  }
-
   return (
     <OpenCommandPaletteDialog
       openIntent={props.openIntent}
@@ -228,6 +223,28 @@ export function OpenCommandPaletteDialog(props: {
     () =>
       new Map(
         environments.map((environment) => [environment.environmentId, environment.label] as const),
+      ),
+    [environments],
+  )
+  const projectEnvironmentLocationById = useMemo(
+    () =>
+      new Map(
+        environments.map((environment) =>
+        {
+          const isPrimary = environment.entry.target._tag === 'PrimaryConnectionTarget'
+          const isLocal = isPrimary || isDesktopLocalConnectionTarget(environment.entry.target)
+          return [
+            environment.environmentId,
+            {
+              kind: isLocal ? ('local' as const) : ('remote' as const),
+              label: isPrimary
+                ? 'Local'
+                : isLocal
+                  ? `${environment.label} (Local)`
+                  : environment.label,
+            },
+          ] as const
+        }),
       ),
     [environments],
   )
@@ -579,8 +596,30 @@ export function OpenCommandPaletteDialog(props: {
           searchTerms: (project) =>
           {
             const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`)
+            const location = projectEnvironmentLocationById.get(project.environmentId)
+            return [
+              ...(group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ??
+                []),
+              ...(location ? [location.label] : []),
+            ]
+          },
+          renderDescription: (project) =>
+          {
+            const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
+              kind: 'remote',
+              label: 'Remote',
+            }
             return (
-              group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ?? []
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  {location.kind === 'remote' ? (
+                    <ServerIcon aria-hidden className="size-3 shrink-0 text-muted-foreground/70" />
+                  ) : null}
+                  <span className="truncate">{location.label}</span>
+                </span>
+                <span className="shrink-0 text-muted-foreground/50">·</span>
+                <span className="truncate">{project.workspaceRoot}</span>
+              </span>
             )
           },
           icon: (project) => (
@@ -608,7 +647,13 @@ export function OpenCommandPaletteDialog(props: {
           },
         }),
       ),
-    [contextualProjectRef, handleNewThread, pickerProjects, projectGroupByTargetKey],
+    [
+      contextualProjectRef,
+      handleNewThread,
+      pickerProjects,
+      projectEnvironmentLocationById,
+      projectGroupByTargetKey,
+    ],
   )
 
   const allThreadItems = useMemo(

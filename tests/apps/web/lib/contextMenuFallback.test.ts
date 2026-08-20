@@ -37,7 +37,9 @@ class FakeElement
   className = ''
   disabled = false
   type = ''
+  isConnected = true
   private textValue = ''
+  private readonly attributes = new Map<string, string>()
   private readonly listeners = new Map<string, FakeListener[]>()
 
   constructor(readonly tagName: string)
@@ -70,6 +72,19 @@ class FakeElement
     existing.push(listener)
     this.listeners.set(type, existing)
   }
+
+  setAttribute(name: string, value: string)
+  {
+    this.attributes.set(name, value)
+  }
+
+  getAttribute(name: string)
+  {
+    return this.attributes.get(name) ?? null
+  }
+
+  focus()
+  {}
 
   dispatchEvent(event: FakeDomEvent)
   {
@@ -145,9 +160,15 @@ class FakeBody extends FakeElement
 class FakeDocument
 {
   body = new FakeBody()
+  activeElement: FakeElement | null = null
   private readonly listeners = new Map<string, FakeListener[]>()
 
   createElement(tagName: string)
+  {
+    return new FakeElement(tagName)
+  }
+
+  createElementNS(_namespace: string, tagName: string)
   {
     return new FakeElement(tagName)
   }
@@ -283,6 +304,22 @@ describe('showContextMenuFallback', () =>
     childButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await expect(selectionPromise).resolves.toBe('rename:project-b')
+  })
+
+  it('renders section separators before grouped actions', () =>
+  {
+    const selectionPromise = showContextMenuFallback([
+      { id: 'rename', label: 'Rename' },
+      { id: 'archive', label: 'Archive', separatorBefore: true },
+    ])
+
+    const separators = (document as unknown as FakeDocument)
+      .querySelectorAll('div')
+      .filter((element) => element.dataset.contextMenuSeparator === 'true')
+    expect(separators).toHaveLength(1)
+
+    dismissContextMenu()
+    return expect(selectionPromise).resolves.toBeNull()
   })
 
   it('dismisses the prior menu and exposes an explicit close for the active menu', async () =>

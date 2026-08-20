@@ -184,7 +184,7 @@ export function ComposerUsageMeter(props: {
             <span className="relative flex size-5 items-center justify-center">
               <svg
                 viewBox="0 0 24 24"
-                className="-rotate-90 absolute inset-0 size-full transform-gpu"
+                className="-rotate-90 absolute inset-0 mx-0! size-full transform-gpu"
                 aria-hidden="true"
               >
                 <circle

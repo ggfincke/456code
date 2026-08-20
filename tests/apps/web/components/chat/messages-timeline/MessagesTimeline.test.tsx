@@ -646,7 +646,7 @@ describe('MessagesTimeline', () =>
     expect(markup).toContain('Work Log')
   })
 
-  it('formats changed file paths from the workspace root', () =>
+  it('summarizes changed files in one line', () =>
   {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -669,8 +669,158 @@ describe('MessagesTimeline', () =>
       />,
     )
 
-    expect(markup).toContain('t3code/apps/web/src/session-logic.ts')
+    expect(markup).toContain('Changed 1 file')
     expect(markup).not.toContain('C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts')
+  })
+
+  it('renders the animated one-line label for a live tool group', () =>
+  {
+    const turnId = TurnId.make('turn-live')
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        activeTurnInProgress
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        latestTurn={{
+          turnId,
+          state: 'running',
+          startedAt: MESSAGE_CREATED_AT,
+          completedAt: null,
+        }}
+        runningTurnId={turnId}
+        timelineEntries={[
+          {
+            id: 'entry-live',
+            kind: 'work',
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: 'work-live',
+              createdAt: MESSAGE_CREATED_AT,
+              turnId,
+              toolCallId: 'call-live',
+              label: 'Run tests',
+              tone: 'tool',
+              itemType: 'command_execution',
+              command: 'pnpm test',
+              toolLifecycleStatus: 'inProgress',
+            },
+          },
+        ]}
+      />,
+    )
+
+    expect(markup).toContain('Working for')
+    expect(markup).toContain('Running pnpm')
+    expect(markup).toContain('live-activity-focus')
+    const liveButtonMarkup = markup.match(
+      /<button[^>]*group\/live-work[^>]*>[\s\S]*?<\/button>/,
+    )?.[0]
+    expect(liveButtonMarkup).toBeDefined()
+    expect(liveButtonMarkup).not.toContain('<div')
+    expect(liveButtonMarkup).toContain('<span')
+  })
+
+  it('keeps an earlier tool failure visible while the next grouped tool is running', () =>
+  {
+    const turnId = TurnId.make('turn-live-failure')
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        activeTurnInProgress
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        latestTurn={{
+          turnId,
+          state: 'running',
+          startedAt: MESSAGE_CREATED_AT,
+          completedAt: null,
+        }}
+        runningTurnId={turnId}
+        timelineEntries={[
+          {
+            id: 'entry-failed',
+            kind: 'work',
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: 'work-failed',
+              createdAt: MESSAGE_CREATED_AT,
+              turnId,
+              toolCallId: 'call-failed',
+              label: 'Lint failed',
+              tone: 'tool',
+              itemType: 'command_execution',
+              command: 'pnpm lint',
+              toolLifecycleStatus: 'failed',
+            },
+          },
+          {
+            id: 'entry-running',
+            kind: 'work',
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: 'work-running',
+              createdAt: MESSAGE_CREATED_AT,
+              turnId,
+              toolCallId: 'call-running',
+              label: 'Run tests',
+              tone: 'tool',
+              itemType: 'command_execution',
+              command: 'vp test run',
+              toolLifecycleStatus: 'inProgress',
+            },
+          },
+        ]}
+      />,
+    )
+
+    expect(markup).toContain('Running vp')
+    expect(markup).toContain('aria-label="Running vp, tool call failed"')
+    expect(markup).toContain('aria-label="Tool call failed"')
+  })
+
+  it('shows compact Thinking only while active work has no visible content', () =>
+  {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        timelineEntries={[]}
+      />,
+    )
+
+    expect(markup).toContain('Working for')
+    expect(markup).toContain('Thinking')
+    expect(markup).toContain('live-activity-focus')
+  })
+
+  it('does not infer rendered failure chrome from command text alone', () =>
+  {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: 'entry-command-text',
+            kind: 'work',
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: 'work-command-text',
+              createdAt: MESSAGE_CREATED_AT,
+              label: 'Ran command',
+              tone: 'tool',
+              itemType: 'command_execution',
+              command: 'printf "exit code 1"',
+              toolLifecycleStatus: 'completed',
+            },
+          },
+        ]}
+      />,
+    )
+
+    expect(markup).toContain('Ran 1 command')
+    expect(markup).not.toContain('tool call failed')
   })
 
   it('renders review comment contexts as structured cards instead of raw tags', () =>
