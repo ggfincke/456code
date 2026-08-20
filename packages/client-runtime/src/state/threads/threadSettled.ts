@@ -7,13 +7,25 @@ import { isThreadAwarenessStale } from '@t3tools/shared/agentAwareness'
 
 export type ChangeRequestStateLike = 'open' | 'closed' | 'merged'
 
+export interface ChangeRequestSettleSource
+{
+  readonly state: ChangeRequestStateLike
+  readonly updatedAt?: string | null | undefined
+}
+
 // closed change requests always settle; merged ones honor the user preference.
 export function changeRequestAutoSettles(
-  state: ChangeRequestStateLike | null | undefined,
-  autoSettleOnMerge = true,
+  changeRequest: ChangeRequestSettleSource | null | undefined,
+  options: {
+    readonly autoSettleOnMerge?: boolean | undefined
+  } = {},
 ): boolean
 {
-  return state === 'closed' || (state === 'merged' && autoSettleOnMerge)
+  if (changeRequest == null) return false
+  return (
+    changeRequest.state === 'closed' ||
+    (changeRequest.state === 'merged' && options.autoSettleOnMerge !== false)
+  )
 }
 
 const DAY_MS = 24 * 60 * 60 * 1_000
@@ -350,6 +362,7 @@ export function effectiveSettled(
     readonly now: string
     readonly autoSettleAfterDays: number | null
     readonly autoSettleOnMerge?: boolean
+    readonly changeRequest?: ChangeRequestSettleSource | null
     readonly changeRequestState?: ChangeRequestStateLike | null
   },
 ): boolean
@@ -381,7 +394,14 @@ export function effectiveSettled(
   // "active" is the explicit keep-active pin: it suppresses auto-settle
   // until real activity clears it server-side.
   if (shell.settledOverride === 'active') return false
-  if (changeRequestAutoSettles(options.changeRequestState, options.autoSettleOnMerge))
+  const changeRequest =
+    options.changeRequest ??
+    (options.changeRequestState == null ? null : { state: options.changeRequestState })
+  if (
+    changeRequestAutoSettles(changeRequest, {
+      autoSettleOnMerge: options.autoSettleOnMerge,
+    })
+  )
   {
     // only an idle thread settles on the merge signal: the signal itself
     // never clears, so without this guard fresh activity (a message sent in
@@ -395,6 +415,7 @@ export function effectiveSettled(
       return true
     }
   }
+  if (changeRequest?.state === 'open') return false
   if (options.autoSettleAfterDays === null) return false
 
   const lastActivityAt = threadLastActivityAt(shell)

@@ -521,11 +521,24 @@ export const make = Effect.gen(function* ()
         prLookupEpochByCwd.set(cacheKey, prLookupEpoch(cacheKey) + 1)
       }),
     )
-  // cache keys are NUL-joined [cwd, branch, upstreamRef, epoch] — none of the
+  // cache keys are NUL-joined [cwd, branch, upstreamRef, defaultBranch, epoch] — none of the
   // segments can contain a NUL byte, and refs are never empty, so "" decodes
-  // back to a null upstreamRef.
-  const prLookupCacheKey = (cwd: string, details: { branch: string; upstreamRef: string | null }) =>
-    [cwd, details.branch, details.upstreamRef ?? '', String(prLookupEpoch(cwd))].join('\u0000')
+  // back to a null ref.
+  const prLookupCacheKey = (
+    cwd: string,
+    details: {
+      branch: string
+      upstreamRef: string | null
+      defaultBranch: string | null
+    },
+  ) =>
+    [
+      cwd,
+      details.branch,
+      details.upstreamRef ?? '',
+      details.defaultBranch ?? '',
+      String(prLookupEpoch(cwd)),
+    ].join('\u0000')
   // track failures per branch cache key so a throttled provider is retried progressively slower
   const prLookupFailureStreakByKey = new Map<string, number>()
   const nextPrLookupFailureTtl = (key: string) =>
@@ -548,14 +561,28 @@ export const make = Effect.gen(function* ()
   const prLookupCache = yield* Cache.makeWith(
     (key: string) =>
     {
-      const [cwd = '', branch = '', upstreamRef = ''] = key.split('\u0000')
+      const [cwd = '', branch = '', upstreamRef = '', defaultBranch = ''] = key.split('\u0000')
       const details = {
         branch,
         upstreamRef: upstreamRef.length > 0 ? upstreamRef : null,
+        defaultBranch: defaultBranch.length > 0 ? defaultBranch : null,
       }
       return Effect.gen(function* ()
       {
         const headContext = yield* resolveBranchHeadContext(cwd, details)
+        const upstreamHeadIsDefault =
+          headContext.headBranch === details.defaultBranch ||
+          (details.defaultBranch === null &&
+            (headContext.headBranch === 'main' || headContext.headBranch === 'master'))
+        // a base upstream is not the feature branch's published PR head.
+        if (
+          headContext.headBranch !== details.branch &&
+          upstreamHeadIsDefault &&
+          !headContext.isCrossRepository
+        )
+        {
+          return { latest: null, headContext }
+        }
         const latest = yield* findLatestPrForHeadContext(cwd, headContext)
         return { latest, headContext }
       })
@@ -641,7 +668,12 @@ export const make = Effect.gen(function* ()
   }
   const lookupStatusPr = Effect.fn('lookupStatusPr')(function* (
     cwd: string,
-    details: { branch: string; upstreamRef: string | null; isDefaultBranch: boolean },
+    details: {
+      branch: string
+      upstreamRef: string | null
+      defaultBranch: string | null
+      isDefaultBranch: boolean
+    },
   )
   {
     // keyed by (cwd, branch) only: the upstream ref changing (e.g. a first
@@ -712,6 +744,7 @@ export const make = Effect.gen(function* ()
         ? yield* lookupStatusPr(cwd, {
             branch: details.branch,
             upstreamRef: details.upstreamRef,
+            defaultBranch: details.defaultBranch,
             isDefaultBranch: details.isDefaultBranch,
           })
         : null

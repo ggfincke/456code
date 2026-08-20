@@ -177,13 +177,17 @@ export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
   runtime: CodexRuntimeInfo,
   orchestrate?: boolean,
+  browserToolsAvailable = true,
 ): string
 {
   const mode = normalizeCollaborationMode(interactionMode, orchestrate)
-  const base =
+  const baseWithBrowser =
     mode.baseMode === 'plan'
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
       : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS
+  const base = browserToolsAvailable
+    ? baseWithBrowser
+    : baseWithBrowser.replace(`\n${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}`, '')
   const orchestrateInstructions =
     mode.orchestrate && mode.baseMode === 'plan'
       ? CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS.replace(

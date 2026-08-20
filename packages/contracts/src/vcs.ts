@@ -63,6 +63,7 @@ export type VcsListRemotesResult = typeof VcsListRemotesResult.Type
 
 export const VcsProcessExitFailureKind = Schema.Literals([
   'authentication',
+  'rate-limited',
   'not-found',
   'command-failed',
 ])

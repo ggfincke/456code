@@ -73,6 +73,17 @@ function parseGitHubAuth(input: SourceControlAuthProbeInput)
     })
   }
 
+  // gh added auth status --json in 2.81.0; older CLIs reject the flag.
+  if (input.exitCode !== 0 && output.includes('unknown flag: --json'))
+  {
+    return providerAuth({
+      status: 'unknown',
+      host,
+      detail:
+        'GitHub CLI is too old to report sign-in status. Update `gh` to 2.81.0 or newer (for example `brew upgrade gh`) and rescan.',
+    })
+  }
+
   if (input.exitCode !== 0)
   {
     return providerAuth({

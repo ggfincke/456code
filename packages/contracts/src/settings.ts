@@ -7,7 +7,19 @@ import * as SchemaTransformation from 'effect/SchemaTransformation'
 import { TrimmedNonEmptyString, TrimmedString } from './baseSchemas.ts'
 import { DEFAULT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from './model.ts'
 import { ModelSelection } from './orchestration.ts'
-import { ProviderInstanceConfig, ProviderInstanceId } from './providerInstance.ts'
+import {
+  DEFAULT_PREVIEW_APPEARANCE,
+  DEFAULT_PREVIEW_ZOOM_FACTOR,
+  FILL_PREVIEW_VIEWPORT,
+  PreviewAppearancePreference,
+  PreviewViewportSetting,
+  PreviewZoomFactor,
+} from './preview.ts'
+import {
+  ProviderInstanceConfig,
+  ProviderInstanceId,
+  type ProviderDriverKind,
+} from './providerInstance.ts'
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -64,9 +76,23 @@ export const GlassOpacity = Schema.Int.check(
 )
 export type GlassOpacity = typeof GlassOpacity.Type
 export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80
+export const DEFAULT_BROWSER_VIEWPORT: PreviewViewportSetting = FILL_PREVIEW_VIEWPORT
+export const DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW = true
 
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  browserDefaultViewport: PreviewViewportSetting.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_VIEWPORT)),
+  ),
+  browserDefaultZoomFactor: PreviewZoomFactor.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PREVIEW_ZOOM_FACTOR)),
+  ),
+  browserDefaultAppearance: PreviewAppearancePreference.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PREVIEW_APPEARANCE)),
+  ),
+  browserAutoShowFloatingPreview: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW)),
+  ),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // opt-out rather than opt-in: the failure this notification exists to prevent
@@ -340,7 +366,7 @@ export type CursorSettings = typeof CursorSettings.Type
 export const GrokSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting('grok').pipe(
@@ -406,7 +432,7 @@ export type CoralSettings = typeof CoralSettings.Type
 export const OpenCodeSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting('opencode').pipe(
@@ -486,6 +512,7 @@ export const DEFAULT_ARCHITECTURE_AUTO_ANALYSIS: ArchitectureAutoAnalysis = 'on-
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   automaticGitFetchInterval: Schema.DurationFromMillis.pipe(
     Schema.withDecodingDefault(
       Effect.succeed(Duration.toMillis(DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL)),
@@ -543,6 +570,37 @@ export const ServerSettings = Schema.Struct({
 export type ServerSettings = typeof ServerSettings.Type
 
 export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerSettings)({})
+
+export function providerInstanceConfigEnabledFlag(config: unknown): boolean | undefined
+{
+  if (config === null || typeof config !== 'object' || Array.isArray(config))
+  {
+    return undefined
+  }
+  const enabled = (config as { readonly enabled?: unknown }).enabled
+  return typeof enabled === 'boolean' ? enabled : undefined
+}
+
+export function defaultEnabledForDriver(driver: ProviderDriverKind): boolean
+{
+  const legacyDefaults = DEFAULT_SERVER_SETTINGS.providers as Record<
+    string,
+    { readonly enabled?: boolean } | undefined
+  >
+  return legacyDefaults[driver]?.enabled ?? true
+}
+
+export function resolveProviderInstanceEnabled(
+  instance: Pick<ProviderInstanceConfig, 'driver' | 'enabled' | 'config'>,
+): boolean
+{
+  const configEnabled = providerInstanceConfigEnabledFlag(instance.config)
+  if (instance.enabled === false || configEnabled === false)
+  {
+    return false
+  }
+  return instance.enabled ?? configEnabled ?? defaultEnabledForDriver(instance.driver)
+}
 
 export const ServerSettingsOperation = Schema.Literals([
   'normalize',
@@ -645,6 +703,7 @@ export const ServerSettingsPatch = Schema.Struct({
   // server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
+  enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
   architectureAutoAnalysis: Schema.optionalKey(ArchitectureAutoAnalysis),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
@@ -685,6 +744,10 @@ export type ServerSettingsPatch = typeof ServerSettingsPatch.Type
 
 export const ClientSettingsPatch = Schema.Struct({
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
+  browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
+  browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
+  browserDefaultAppearance: Schema.optionalKey(PreviewAppearancePreference),
+  browserAutoShowFloatingPreview: Schema.optionalKey(Schema.Boolean),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   desktopNotificationsEnabled: Schema.optionalKey(Schema.Boolean),

@@ -206,6 +206,50 @@ describe('projectActivityPayload', () =>
     })
   })
 
+  it('normalizes provider-specific command inputs before slimming tool data', () =>
+  {
+    const claude = projectActivityPayload({
+      ...makeActivity('claude-command', 'command_execution', {
+        toolName: 'Bash',
+        input: { command: 'vp test run' },
+        result: { content: 'x'.repeat(5_000) },
+      }),
+      payload: {
+        itemType: 'command_execution',
+        toolCallId: 'claude-call-1',
+        data: {
+          toolName: 'Bash',
+          input: { command: 'vp test run' },
+          result: { content: 'x'.repeat(5_000) },
+        },
+      },
+    })
+    const openCode = projectActivityPayload({
+      ...makeActivity('opencode-command', 'command_execution', {}),
+      payload: {
+        itemType: 'command_execution',
+        toolCallId: 'opencode-call-1',
+        data: {
+          tool: 'bash',
+          state: {
+            status: 'running',
+            input: { command: 'vp lint' },
+            output: 'x'.repeat(5_000),
+          },
+        },
+      },
+    })
+
+    expect(claude.payload).toMatchObject({
+      toolCallId: 'claude-call-1',
+      data: { command: 'vp test run' },
+    })
+    expect(openCode.payload).toMatchObject({
+      toolCallId: 'opencode-call-1',
+      data: { command: 'vp lint' },
+    })
+  })
+
   it('projects snapshot and event transports without mutating their sources', () =>
   {
     const activity = fixtures[0]!

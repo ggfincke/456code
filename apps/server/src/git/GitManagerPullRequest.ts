@@ -305,6 +305,7 @@ export function toStatusPr(pr: PullRequestInfo): {
   baseRef: string
   headRef: string
   state: 'open' | 'closed' | 'merged'
+  updatedAt: string | null
 }
 {
   return {
@@ -314,6 +315,10 @@ export function toStatusPr(pr: PullRequestInfo): {
     baseRef: pr.baseRefName,
     headRef: pr.headRefName,
     state: pr.state,
+    updatedAt: Option.match(pr.updatedAt, {
+      onNone: () => null,
+      onSome: DateTime.formatIso,
+    }),
   }
 }
 

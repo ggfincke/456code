@@ -73,6 +73,41 @@ it.layer(PreviewManager.layer)('PreviewManager', (it) =>
     }),
   )
 
+  it.effect('orders list snapshots and events within one server epoch', () =>
+    Effect.gen(function* ()
+    {
+      const threadId = freshThreadId()
+      const manager = yield* PreviewManager.PreviewManager
+      const collector = yield* collectEvents
+      const before = yield* manager.list({ threadId })
+
+      const opened = yield* manager.open({ threadId, url: 'http://localhost:5173' })
+      yield* manager.navigate({
+        threadId,
+        tabId: opened.tabId,
+        url: 'http://localhost:5173/ready',
+      })
+
+      const events = yield* collector.drain
+      const listed = yield* manager.list({ threadId })
+      expect(events).toHaveLength(2)
+      expect(events.every((event) => event.serverEpoch === listed.serverEpoch)).toBe(true)
+      expect(events[0]!.revision).toBeGreaterThan(before.revision)
+      expect(events[1]!.revision).toBeGreaterThan(events[0]!.revision)
+      expect(listed.revision).toBe(events[1]!.revision)
+    }),
+  )
+
+  it.effect('creates the session at the requested initial viewport', () =>
+    Effect.gen(function* ()
+    {
+      const manager = yield* PreviewManager.PreviewManager
+      const viewport = { _tag: 'freeform' as const, width: 1280, height: 800 }
+      const snapshot = yield* manager.open({ threadId: freshThreadId(), viewport })
+      expect(snapshot.viewport).toEqual(viewport)
+    }),
+  )
+
   it.effect('treats bare hosts as https', () =>
     Effect.gen(function* ()
     {

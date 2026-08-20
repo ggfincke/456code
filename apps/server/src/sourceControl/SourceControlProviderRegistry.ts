@@ -18,6 +18,7 @@ import * as BitbucketSourceControlProvider from './Bitbucket/BitbucketSourceCont
 import * as GitHubSourceControlProvider from './GitHub/GitHubSourceControlProvider.ts'
 import * as GitLabSourceControlProvider from './GitLab/GitLabSourceControlProvider.ts'
 import * as SourceControlProvider from './SourceControlProvider.ts'
+import * as SourceControlRateLimit from './SourceControlRateLimit.ts'
 import {
   probeSourceControlProvider,
   refineUnknownRemoteProvider,
@@ -204,12 +205,160 @@ function bindProviderContext(
   })
 }
 
+interface ProviderRateLimitInfo
+{
+  readonly retryAt?: number | undefined
+}
+
+function providerRateLimitInfo(
+  error: unknown,
+  depth = 0,
+  seen = new Set<object>(),
+): ProviderRateLimitInfo | null
+{
+  if (depth > 8 || typeof error !== 'object' || error === null || seen.has(error)) return null
+  seen.add(error)
+  const value = error as Record<string, unknown>
+  if (value._tag === 'VcsProcessExitError' && value.failureKind === 'rate-limited') return {}
+  if (value._tag === 'BitbucketResponseError' && value.status === 429)
+  {
+    return typeof value.retryAt === 'number' ? { retryAt: value.retryAt } : {}
+  }
+  return providerRateLimitInfo(value.cause, depth + 1, seen)
+}
+
+const defaultProviderHost = (kind: SourceControlProviderKind): string =>
+{
+  switch (kind)
+  {
+    case 'github':
+      return 'github.com'
+    case 'gitlab':
+      return 'gitlab.com'
+    case 'azure-devops':
+      return 'dev.azure.com'
+    case 'bitbucket':
+      return 'bitbucket.org'
+    case 'unknown':
+      return 'unknown'
+  }
+}
+
+function providerHost(
+  kind: SourceControlProviderKind,
+  context: SourceControlProvider.SourceControlProviderContext | null,
+): string
+{
+  try
+  {
+    return context ? new URL(context.provider.baseUrl).host : defaultProviderHost(kind)
+  }
+  catch
+  {
+    return defaultProviderHost(kind)
+  }
+}
+
+function bindProviderRateLimit(
+  provider: SourceControlProvider.SourceControlProvider['Service'],
+  context: SourceControlProvider.SourceControlProviderContext | null,
+  limits: SourceControlRateLimit.SourceControlRateLimit['Service'],
+): SourceControlProvider.SourceControlProvider['Service']
+{
+  const key = { provider: provider.kind, host: providerHost(provider.kind, context) }
+  const run = <A>(input: {
+    readonly operation: string
+    readonly cwd: string
+    readonly allowPaused: boolean
+    readonly effect: Effect.Effect<A, SourceControlProviderError>
+  }): Effect.Effect<A, SourceControlProviderError> =>
+    Effect.gen(function* ()
+    {
+      const lease = yield* limits.check(key, { allowPaused: input.allowPaused }).pipe(
+        Effect.mapError(
+          (error) =>
+            new SourceControlProviderError({
+              provider: provider.kind,
+              operation: input.operation,
+              cwd: input.cwd,
+              detail: error.detail,
+              cause: error,
+            }),
+        ),
+      )
+      return yield* input.effect.pipe(
+        Effect.tap(() => limits.recordSuccess({ ...key, lease })),
+        Effect.tapError((error) =>
+        {
+          const rateLimit = providerRateLimitInfo(error)
+          return rateLimit === null
+            ? Effect.void
+            : limits.recordRateLimit({ ...key, lease, ...rateLimit })
+        }),
+      )
+    })
+
+  return SourceControlProvider.SourceControlProvider.of({
+    kind: provider.kind,
+    listChangeRequests: (input) =>
+      run({
+        operation: 'listChangeRequests',
+        cwd: input.cwd,
+        allowPaused: false,
+        effect: provider.listChangeRequests(input),
+      }),
+    getChangeRequest: (input) =>
+      run({
+        operation: 'getChangeRequest',
+        cwd: input.cwd,
+        allowPaused: false,
+        effect: provider.getChangeRequest(input),
+      }),
+    createChangeRequest: (input) =>
+      run({
+        operation: 'createChangeRequest',
+        cwd: input.cwd,
+        allowPaused: true,
+        effect: provider.createChangeRequest(input),
+      }),
+    getRepositoryCloneUrls: (input) =>
+      run({
+        operation: 'getRepositoryCloneUrls',
+        cwd: input.cwd,
+        allowPaused: true,
+        effect: provider.getRepositoryCloneUrls(input),
+      }),
+    createRepository: (input) =>
+      run({
+        operation: 'createRepository',
+        cwd: input.cwd,
+        allowPaused: true,
+        effect: provider.createRepository(input),
+      }),
+    getDefaultBranch: (input) =>
+      run({
+        operation: 'getDefaultBranch',
+        cwd: input.cwd,
+        allowPaused: false,
+        effect: provider.getDefaultBranch(input),
+      }),
+    checkoutChangeRequest: (input) =>
+      run({
+        operation: 'checkoutChangeRequest',
+        cwd: input.cwd,
+        allowPaused: true,
+        effect: provider.checkoutChangeRequest(input),
+      }),
+  })
+}
+
 export const makeWithProviders = Effect.fn('makeSourceControlProviderRegistryWithProviders')(
   function* (registrations: ReadonlyArray<SourceControlProviderRegistration>)
   {
     const config = yield* ServerConfig
     const process = yield* VcsProcess.VcsProcess
     const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry
+    const limits = yield* SourceControlRateLimit.make
     const providers = new Map<
       SourceControlProviderKind,
       SourceControlProvider.SourceControlProvider['Service']
@@ -217,7 +366,9 @@ export const makeWithProviders = Effect.fn('makeSourceControlProviderRegistryWit
     const discoverySpecs = registrations.map((registration) => registration.discovery)
 
     const get: SourceControlProviderRegistry['Service']['get'] = (kind) =>
-      Effect.succeed(providers.get(kind) ?? unsupportedProvider(kind))
+      Effect.succeed(
+        bindProviderRateLimit(providers.get(kind) ?? unsupportedProvider(kind), null, limits),
+      )
 
     const detectProviderContext = Effect.fn('SourceControlProviderRegistry.detectProviderContext')(
       function* (cwd: string)
@@ -272,8 +423,9 @@ export const makeWithProviders = Effect.fn('makeSourceControlProviderRegistryWit
         {
           const kind = context?.provider.kind ?? 'unknown'
           const provider = providers.get(kind) ?? unsupportedProvider(kind)
+          const contextualProvider = bindProviderContext(provider, context)
           return {
-            provider: bindProviderContext(provider, context),
+            provider: bindProviderRateLimit(contextualProvider, context, limits),
             context,
           } satisfies SourceControlProviderHandle
         }),

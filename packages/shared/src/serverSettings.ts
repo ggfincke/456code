@@ -2,6 +2,7 @@
 // normalizes and resolves server settings
 import {
   isProviderDriverKind,
+  resolveProviderInstanceEnabled,
   type ModelSelection,
   type ProviderDriverKind,
   type ServerProvider,
@@ -38,7 +39,7 @@ export function isModelSelectionProviderEnabled(
   const instanceConfig = settings.providerInstances[selection.instanceId]
   if (instanceConfig !== undefined)
   {
-    return instanceConfig.enabled ?? true
+    return resolveProviderInstanceEnabled(instanceConfig)
   }
 
   return (

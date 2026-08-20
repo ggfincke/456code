@@ -149,6 +149,27 @@ describe('VcsProcess.run', () =>
     }).pipe(provideLive),
   )
 
+  it.effect('classifies provider rate-limit failures without retaining stderr', () =>
+    Effect.gen(function* ()
+    {
+      const secretStderr = 'HTTP 429 rate limit exceeded for token super-secret-token'
+      const error = yield* run({
+        operation: 'test.rate-limit',
+        command: 'node',
+        args: ['-e', 'process.stderr.write(process.argv[1]); process.exit(1)', secretStderr],
+        cwd: process.cwd(),
+      }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'VcsProcessExitError',
+        detail: 'Provider API rate limit exceeded.',
+        failureKind: 'rate-limited',
+        stderrLength: secretStderr.length,
+      })
+      expect(error.message).not.toContain('super-secret-token')
+    }).pipe(provideLive),
+  )
+
   it.effect('retains spawn causes without exposing process arguments in the error message', () =>
     Effect.gen(function* ()
     {

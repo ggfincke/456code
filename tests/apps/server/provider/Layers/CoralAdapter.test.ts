@@ -403,6 +403,7 @@ it.layer(NodeServices.layer)('CoralAdapterLive', (it) =>
           providerSessionGeneration: 1,
           endpoint: 'http://127.0.0.1:4567/mcp',
           authorizationHeader: 'Bearer first-token',
+          previewToolsAvailable: true,
         },
       })
       yield* adapter.sendTurn({
@@ -431,6 +432,7 @@ it.layer(NodeServices.layer)('CoralAdapterLive', (it) =>
           providerSessionGeneration: 2,
           endpoint: 'http://127.0.0.1:4567/mcp',
           authorizationHeader: 'Bearer second-token',
+          previewToolsAvailable: true,
         },
       })
 

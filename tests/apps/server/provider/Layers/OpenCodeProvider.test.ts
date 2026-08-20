@@ -39,6 +39,7 @@ const runtimeMock = {
     inventory: {
       providerList: { connected: [] as string[], all: [] as unknown[], default: {} },
       agents: [] as unknown[],
+      skills: [] as unknown[],
     } as unknown,
   },
   reset()
@@ -50,6 +51,7 @@ const runtimeMock = {
     this.state.inventory = {
       providerList: { connected: [], all: [] as unknown[], default: {} },
       agents: [] as unknown[],
+      skills: [] as unknown[],
     }
   },
 }
@@ -192,6 +194,7 @@ it.layer(testLayer)('checkOpenCodeProviderStatus', (it) =>
           { name: 'build', hidden: false, mode: 'primary' },
           { name: 'plan', hidden: false, mode: 'primary' },
         ],
+        skills: [],
       }
 
       const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd())
@@ -223,6 +226,36 @@ it.layer(testLayer)('checkOpenCodeProviderStatus', (it) =>
       yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd())
 
       NodeAssert.equal(runtimeMock.state.closeCalls, 0)
+    }),
+  )
+
+  it.effect('publishes only valid discovered skills', () =>
+    Effect.gen(function* ()
+    {
+      runtimeMock.state.inventory = {
+        providerList: { connected: [], all: [], default: {} },
+        agents: [],
+        skills: [
+          {
+            name: ' review-pr ',
+            description: ' Review a pull request. ',
+            location: ' /tmp/review-pr/SKILL.md ',
+          },
+          { name: 'missing-path', description: 'Ignored' },
+        ],
+      }
+
+      const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd())
+
+      NodeAssert.deepEqual(snapshot.skills, [
+        {
+          name: 'review-pr',
+          description: 'Review a pull request.',
+          shortDescription: 'Review a pull request.',
+          path: '/tmp/review-pr/SKILL.md',
+          enabled: true,
+        },
+      ])
     }),
   )
 

@@ -481,6 +481,40 @@ it.layer(NodeServices.layer)('server settings', (it) =>
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   )
 
+  it.effect('folds legacy in-config enabled flags with explicit false winning', () =>
+    Effect.gen(function* ()
+    {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
+      const grokId = ProviderInstanceId.make('grok')
+      const codexId = ProviderInstanceId.make('codex_work')
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [grokId]: {
+            driver: ProviderDriverKind.make('grok'),
+            enabled: true,
+            config: { enabled: false, binaryPath: '/opt/grok' },
+          },
+          [codexId]: {
+            driver: ProviderDriverKind.make('codex'),
+            config: { enabled: true, homePath: '~/.codex' },
+          },
+        },
+      })
+
+      assert.deepEqual(next.providerInstances[grokId], {
+        driver: ProviderDriverKind.make('grok'),
+        enabled: false,
+        config: { binaryPath: '/opt/grok' },
+      })
+      assert.deepEqual(next.providerInstances[codexId], {
+        driver: ProviderDriverKind.make('codex'),
+        enabled: true,
+        config: { homePath: '~/.codex' },
+      })
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
   it.effect('trims provider path and observability settings when updates are applied', () =>
     Effect.gen(function* ()
     {
@@ -525,7 +559,7 @@ it.layer(NodeServices.layer)('server settings', (it) =>
         launchArgs: '',
       })
       assert.deepEqual(next.providers.opencode, {
-        enabled: true,
+        enabled: false,
         binaryPath: '/opt/homebrew/bin/opencode',
         serverUrl: 'http://127.0.0.1:4096',
         serverPassword: 'secret-password',

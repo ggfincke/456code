@@ -8,6 +8,7 @@ import { describe, it } from 'vite-plus/test'
 import {
   parseModelsCliOutput,
   parseAgentListCliOutput,
+  parseSkillsCliOutput,
 } from '../../../../apps/server/src/provider/opencodeRuntime.ts'
 
 describe('parseModelsCliOutput', () =>
@@ -229,5 +230,33 @@ describe('parseAgentListCliOutput', () =>
     const result = parseAgentListCliOutput(stdout)
     NodeAssert.equal(result[0]!.hidden, true)
     NodeAssert.equal(result[1]!.hidden, false)
+  })
+})
+
+describe('parseSkillsCliOutput', () =>
+{
+  it('parses valid skill metadata and degrades malformed output', () =>
+  {
+    NodeAssert.deepEqual(
+      parseSkillsCliOutput(
+        JSON.stringify([
+          {
+            name: 'review-pr',
+            description: 'Review a pull request.',
+            location: '/tmp/review-pr/SKILL.md',
+            content: '---\nname: review-pr\n---\n',
+          },
+        ]),
+      ),
+      [
+        {
+          name: 'review-pr',
+          description: 'Review a pull request.',
+          location: '/tmp/review-pr/SKILL.md',
+          content: '---\nname: review-pr\n---\n',
+        },
+      ],
+    )
+    NodeAssert.deepEqual(parseSkillsCliOutput('not json'), [])
   })
 })

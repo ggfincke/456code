@@ -33,6 +33,7 @@
 // @module provider/Layers/ProviderInstanceRegistryLive
 import {
   defaultInstanceIdForDriver,
+  providerInstanceConfigEnabledFlag,
   ProviderInstanceId,
   type ProviderInstanceConfig,
   type ProviderInstanceConfigMap,
@@ -115,14 +116,14 @@ const awaitLifecycleOwner = (state: RegistryState) =>
 const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
   Equal.equals(a, b)
 
-const decodedConfigEnabled = (config: unknown): boolean | undefined =>
+const resolveEntryEnabled = (entry: ProviderInstanceConfig, typedConfig: unknown): boolean =>
 {
-  if (!config || typeof config !== 'object' || globalThis.Array.isArray(config))
+  const rawConfigEnabled = providerInstanceConfigEnabledFlag(entry.config)
+  if (entry.enabled === false || rawConfigEnabled === false)
   {
-    return undefined
+    return false
   }
-  const enabled = (config as { readonly enabled?: unknown }).enabled
-  return typeof enabled === 'boolean' ? enabled : undefined
+  return entry.enabled ?? providerInstanceConfigEnabledFlag(typedConfig) ?? true
 }
 
 // build one live entry from a raw config envelope. Returns either a
@@ -196,7 +197,7 @@ const buildEntry = <R>(input: {
         displayName: entry.displayName,
         accentColor: entry.accentColor,
         environment: entry.environment ?? [],
-        enabled: entry.enabled ?? decodedConfigEnabled(typedConfig) ?? true,
+        enabled: resolveEntryEnabled(entry, typedConfig),
         config: typedConfig,
       })
       .pipe(Effect.provideService(Scope.Scope, childScope), Effect.result)

@@ -64,7 +64,7 @@ export function formatServiceStatus(
 {
   if (!status.supported)
   {
-    return '456code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd'
+    return '456code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd'
   }
   if (!status.installed)
   {

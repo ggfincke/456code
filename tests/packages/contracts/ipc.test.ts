@@ -48,6 +48,8 @@ describe('DesktopPreviewTabStateSchema favicon boundary', () =>
     canGoForward: false,
     zoomFactor: 1,
     colorScheme: 'system' as const,
+    audioMuted: false,
+    audible: false,
     controller: 'none' as const,
     updatedAt: '2026-08-16T00:00:00.000Z',
   }

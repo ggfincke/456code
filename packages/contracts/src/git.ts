@@ -203,6 +203,7 @@ const VcsStatusChangeRequest = Schema.Struct({
   baseRef: GitRefStringSchema,
   headRef: GitRefStringSchema,
   state: VcsStatusChangeRequestState,
+  updatedAt: Schema.optional(Schema.NullOr(Schema.String)),
 })
 
 const VcsStatusLocalShape = {

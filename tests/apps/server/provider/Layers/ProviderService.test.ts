@@ -448,6 +448,7 @@ const hasMetricSnapshot = (
 function makeProviderServiceLayer(
   mcpSessionRegistry: McpSessionRegistry.McpSessionRegistryShape = McpSessionRegistry.__testing
     .disabled,
+  serverSettingsLayer = defaultServerSettingsLayer,
 )
 {
   const codex = makeFakeCodexAdapter()
@@ -473,7 +474,7 @@ function makeProviderServiceLayer(
       makeProviderServiceInboxBackedLive().pipe(
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
-        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(serverSettingsLayer),
         Layer.provide(Layer.succeed(McpSessionRegistry.McpSessionRegistry, mcpSessionRegistry)),
         Layer.provideMerge(AnalyticsServiceLayers.layerTest),
         Layer.provide(
@@ -523,6 +524,7 @@ function makeRecordingMcpSessionRegistry()
             providerSessionGeneration: request.providerSessionGeneration,
             endpoint: 'http://127.0.0.1:43123/mcp',
             authorizationHeader: `Bearer token-${providerSessionId}`,
+            previewToolsAvailable: request.capabilities?.has('preview') ?? true,
           },
         }
       }),
@@ -1971,6 +1973,10 @@ mcpRouting.layer('scopes MCP credentials to provider sessions', (it) =>
         runtimeMode: 'full-access',
       })
       const startInput = mcpRouting.codex.startSession.mock.calls[0]?.[0]
+      assert.deepEqual(
+        recordedMcp.issued[0]?.capabilities,
+        new Set(['preview', 'proposal', 'orchestrate', 'architecture']),
+      )
       assert.deepEqual(startInput?.mcp, {
         environmentId: EnvironmentId.make('environment-provider-service-test'),
         threadId,
@@ -1979,6 +1985,7 @@ mcpRouting.layer('scopes MCP credentials to provider sessions', (it) =>
         providerSessionGeneration: 1,
         endpoint: 'http://127.0.0.1:43123/mcp',
         authorizationHeader: 'Bearer token-provider-session-1',
+        previewToolsAvailable: true,
       })
       const turn = yield* provider.sendTurn({
         threadId,
@@ -2032,6 +2039,41 @@ mcpRouting.layer('scopes MCP credentials to provider sessions', (it) =>
 
       assert.equal(result._tag, 'Failure')
       assert.deepEqual(recordedMcp.revokedExact, [])
+    }),
+  )
+})
+
+const restrictedMcp = makeRecordingMcpSessionRegistry()
+const restrictedMcpRouting = makeProviderServiceLayer(
+  restrictedMcp.service,
+  ServerSettings.ServerSettingsService.layerTest({ enableAgentBrowserAccess: false }),
+)
+
+restrictedMcpRouting.layer('agent browser access', (it) =>
+{
+  it.effect('withholds preview while retaining the other MCP capabilities', () =>
+    Effect.gen(function* ()
+    {
+      restrictedMcp.issued.length = 0
+      restrictedMcpRouting.codex.startSession.mockClear()
+      const provider = yield* ProviderService.ProviderService
+      const threadId = asThreadId('thread-browser-access-off')
+
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: 'full-access',
+      })
+
+      assert.deepEqual(
+        restrictedMcp.issued[0]?.capabilities,
+        new Set(['proposal', 'orchestrate', 'architecture']),
+      )
+      assert.equal(
+        restrictedMcpRouting.codex.startSession.mock.calls[0]?.[0].mcp?.previewToolsAvailable,
+        false,
+      )
     }),
   )
 })

@@ -51,11 +51,49 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings)
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
+const foldProviderInstanceEnabledFlags = (settings: ServerSettings): ServerSettings =>
+{
+  let changed = false
+  const providerInstances: Record<string, ProviderInstanceConfig> = {}
+  for (const [instanceId, instance] of Object.entries(settings.providerInstances))
+  {
+    const config = instance.config
+    if (
+      config === null ||
+      typeof config !== 'object' ||
+      Array.isArray(config) ||
+      typeof (config as { readonly enabled?: unknown }).enabled !== 'boolean'
+    )
+    {
+      providerInstances[instanceId] = instance
+      continue
+    }
+
+    const { enabled: configEnabled, ...restConfig } = config as Record<string, unknown> & {
+      readonly enabled: boolean
+    }
+    providerInstances[instanceId] = {
+      ...instance,
+      enabled:
+        instance.enabled === false || configEnabled === false
+          ? false
+          : (instance.enabled ?? configEnabled),
+      config: restConfig,
+    }
+    changed = true
+  }
+
+  return changed
+    ? { ...settings, providerInstances: providerInstances as ServerSettings['providerInstances'] }
+    : settings
+}
+
 const normalizeServerSettings = (
   settings: ServerSettings,
 ): Effect.Effect<ServerSettings, ServerSettingsError> =>
   encodeServerSettings(settings).pipe(
     Effect.flatMap(decodeServerSettings),
+    Effect.map(foldProviderInstanceEnabledFlags),
     Effect.mapError(
       (cause) =>
         new ServerSettingsError({
@@ -301,7 +339,7 @@ const make = Effect.gen(function* ()
       })
       return DEFAULT_SERVER_SETTINGS
     }
-    return decoded.value
+    return foldProviderInstanceEnabledFlags(decoded.value)
   })
 
   const settingsCache = yield* Cache.make<typeof cacheKey, ServerSettings, ServerSettingsError>({

@@ -33,7 +33,7 @@ describe('changeRequestAutoSettles', () =>
     ['closed', false, true],
   ] as const)('state=%s autoSettleOnMerge=%s returns %s', (state, enabled, expected) =>
   {
-    expect(changeRequestAutoSettles(state, enabled)).toBe(expected)
+    expect(changeRequestAutoSettles({ state }, { autoSettleOnMerge: enabled })).toBe(expected)
   })
 })
 
@@ -212,13 +212,13 @@ describe('effectiveSettled', () =>
       expected: false,
     },
     {
-      label: 'open CR with stale activity auto-settles on inactivity',
+      label: 'open CR with stale activity stays active',
       settledOverride: null,
       changeRequestState: 'open' as const,
       activityAt: STALE,
       running: false,
       pending: undefined,
-      expected: true,
+      expected: false,
     },
     {
       label: 'no activity without CR or override stays active',
@@ -244,7 +244,7 @@ describe('effectiveSettled', () =>
       const changeRequestOptions =
         changeRequestState === undefined
           ? {}
-          : { changeRequestState: changeRequestState as ChangeRequestStateLike }
+          : { changeRequest: { state: changeRequestState as ChangeRequestStateLike } }
 
       expect(
         effectiveSettled(shell, {
@@ -263,7 +263,7 @@ describe('effectiveSettled', () =>
       effectiveSettled(shell, {
         now: NOW,
         autoSettleAfterDays: null,
-        changeRequestState: 'closed',
+        changeRequest: { state: 'closed' },
       }),
     ).toBe(true)
   })
@@ -284,35 +284,46 @@ describe('effectiveSettled', () =>
         effectiveSettled(justActive, {
           now: NOW,
           autoSettleAfterDays: null,
-          changeRequestState,
+          changeRequest: { state: changeRequestState },
         }),
       ).toBe(false)
       expect(
         effectiveSettled(boundary, {
           now: NOW,
           autoSettleAfterDays: null,
-          changeRequestState,
+          changeRequest: { state: changeRequestState },
         }),
       ).toBe(false)
       expect(
         effectiveSettled(idle, {
           now: NOW,
           autoSettleAfterDays: null,
-          changeRequestState,
+          changeRequest: { state: changeRequestState },
         }),
       ).toBe(true)
     }
   })
 
-  it('re-settles a merged-PR thread once the follow-up burst goes idle', () =>
+  it('re-settles a terminal-PR follow-up after one hour for state-only and timestamp inputs', () =>
   {
-    // same shell, advancing clock: active while warm, settled again after
-    // the idle window passes — the burst cools and the merge signal wins.
     const shell = makeShell({ activityAt: '2026-04-09T23:30:00.000Z' })
-    const options = { autoSettleAfterDays: null, changeRequestState: 'merged' as const }
+    const changeRequestInputs = [
+      { changeRequestState: 'merged' as const },
+      {
+        changeRequest: {
+          state: 'merged' as const,
+          // the terminal observation predates the follow-up, as web snapshots commonly do.
+          updatedAt: '2026-04-01T00:00:00.000Z',
+        },
+      },
+    ]
 
-    expect(effectiveSettled(shell, { ...options, now: NOW })).toBe(false)
-    expect(effectiveSettled(shell, { ...options, now: '2026-04-10T00:30:00.001Z' })).toBe(true)
+    for (const changeRequestInput of changeRequestInputs)
+    {
+      const options = { autoSettleAfterDays: null, ...changeRequestInput }
+      expect(effectiveSettled(shell, { ...options, now: NOW })).toBe(false)
+      expect(effectiveSettled(shell, { ...options, now: '2026-04-10T00:30:00.001Z' })).toBe(true)
+    }
   })
 
   it('can keep an idle merged PR active without disabling closed-PR settling', () =>
@@ -320,8 +331,8 @@ describe('effectiveSettled', () =>
     const idle = makeShell({ activityAt: '2026-04-09T22:59:59.999Z' })
     const options = { now: NOW, autoSettleAfterDays: null, autoSettleOnMerge: false }
 
-    expect(effectiveSettled(idle, { ...options, changeRequestState: 'merged' })).toBe(false)
-    expect(effectiveSettled(idle, { ...options, changeRequestState: 'closed' })).toBe(true)
+    expect(effectiveSettled(idle, { ...options, changeRequest: { state: 'merged' } })).toBe(false)
+    expect(effectiveSettled(idle, { ...options, changeRequest: { state: 'closed' } })).toBe(true)
   })
 
   it('never settles a starting session, even with a settled override', () =>
@@ -335,7 +346,7 @@ describe('effectiveSettled', () =>
       effectiveSettled(shell, {
         now: NOW,
         autoSettleAfterDays: 3,
-        changeRequestState: 'merged',
+        changeRequest: { state: 'merged' },
       }),
     ).toBe(false)
   })
@@ -356,7 +367,7 @@ describe('effectiveSettled', () =>
         effectiveSettled(shell, {
           now: NOW,
           autoSettleAfterDays: 3,
-          changeRequestState: 'merged',
+          changeRequest: { state: 'merged' },
         }),
       ).toBe(false)
     },
@@ -403,7 +414,7 @@ describe('effectiveSettled', () =>
         effectiveSettled(shell, {
           now: transitionNow,
           autoSettleAfterDays: 3,
-          changeRequestState: 'merged',
+          changeRequest: { state: 'merged' },
         }),
       ).toBe(false)
     }
@@ -529,7 +540,7 @@ describe('canSettle', () =>
       effectiveSettled(queued, {
         now: justAfter,
         autoSettleAfterDays: 3,
-        changeRequestState: 'merged',
+        changeRequest: { state: 'merged' },
       }),
     ).toBe(false)
     // past the window the message is a failed/stale start: settleable again.

@@ -81,13 +81,15 @@ function makeVcsProcessExitError(
   const detail =
     failureKind === 'authentication'
       ? 'Authentication failed.'
-      : failureKind === 'not-found'
-        ? context.command === 'glab'
-          ? 'Merge request not found.'
-          : context.command === 'gh' || context.command === 'az'
-            ? 'Pull request not found.'
-            : 'VCS resource not found.'
-        : 'Process exited with a non-zero status.'
+      : failureKind === 'rate-limited'
+        ? 'Provider API rate limit exceeded.'
+        : failureKind === 'not-found'
+          ? context.command === 'glab'
+            ? 'Merge request not found.'
+            : context.command === 'gh' || context.command === 'az'
+              ? 'Pull request not found.'
+              : 'VCS resource not found.'
+          : 'Process exited with a non-zero status.'
 
   return new VcsProcessExitError({
     ...context,
@@ -114,6 +116,17 @@ const OUTPUT_TRUNCATED_MARKER = '\n\n[truncated]'
 const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFailureKind =>
 {
   const normalized = stderr.toLowerCase()
+
+  if (
+    normalized.includes('api rate limit') ||
+    normalized.includes('rate limit exceeded') ||
+    normalized.includes('secondary rate limit') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('http 429')
+  )
+  {
+    return 'rate-limited'
+  }
 
   if (
     normalized.includes('authentication failed') ||
