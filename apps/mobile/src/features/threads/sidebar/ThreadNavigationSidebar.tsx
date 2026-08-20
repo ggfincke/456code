@@ -202,6 +202,9 @@ function ThreadNavigationSidebarPane(
   const preferencesResult = useAtomValue(mobilePreferencesAtom)
   const threadListV2Enabled =
     AsyncResult.isSuccess(preferencesResult) && preferencesResult.value.threadListV2Enabled === true
+  const autoSettleOnMerge =
+    !AsyncResult.isSuccess(preferencesResult) ||
+    preferencesResult.value.sidebarAutoSettleOnMerge !== false
   const pendingTasks = usePendingNewTasks()
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions()
   const environments = useMemo(
@@ -378,6 +381,7 @@ function ThreadNavigationSidebarPane(
     projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
     projectScopeKey: selectedProjectKey,
     searchQuery: props.searchQuery,
+    autoSettleOnMerge,
   })
   const listItems = useMemo<readonly SidebarListItem[]>(() =>
   {

@@ -26,6 +26,7 @@ export function useThreadListV2State(input: {
   }> | null
   readonly projectScopeKey: string | null
   readonly searchQuery: string
+  readonly autoSettleOnMerge: boolean
 })
 {
   const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
@@ -102,6 +103,7 @@ export function useThreadListV2State(input: {
       projectRefs: input.projectRefs,
       searchQuery: input.searchQuery,
       changeRequestStateByKey,
+      autoSettleOnMerge: input.autoSettleOnMerge,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       settledLimit: settledVisibleCount,
@@ -111,6 +113,7 @@ export function useThreadListV2State(input: {
   }, [
     changeRequestStateByKey,
     input.enabled,
+    input.autoSettleOnMerge,
     input.environmentId,
     input.projectRefs,
     input.searchQuery,

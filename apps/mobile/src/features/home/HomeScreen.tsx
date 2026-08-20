@@ -188,6 +188,9 @@ export function HomeScreen(props: HomeScreenProps)
   const preferencesResult = useAtomValue(mobilePreferencesAtom)
   const threadListV2Enabled =
     AsyncResult.isSuccess(preferencesResult) && preferencesResult.value.threadListV2Enabled === true
+  const autoSettleOnMerge =
+    !AsyncResult.isSuccess(preferencesResult) ||
+    preferencesResult.value.sidebarAutoSettleOnMerge !== false
   const savePreferences = useAtomSet(updateMobilePreferencesAtom)
   const openSwipeableRef = useRef<SwipeableMethods | null>(null)
   const listRef = useRef<LegendListRef | null>(null)
@@ -462,6 +465,7 @@ export function HomeScreen(props: HomeScreenProps)
     projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
     projectScopeKey: v2ProjectScopeKey,
     searchQuery: props.searchQuery,
+    autoSettleOnMerge,
   })
   const threadListV2Items = threadListV2Layout.items
 
