@@ -20,10 +20,20 @@ import { describe, expect, it, vi } from 'vite-plus/test'
 import type { DesktopPreviewOverlay } from '../../../../apps/web/src/browser/previewStateStore'
 import type { RightPanelSurface } from '../../../../apps/web/src/stores/rightPanelStore'
 
+const { confirmTerminalClose, contextMenuShow, setAudioMuted } = vi.hoisted(() => ({
+  confirmTerminalClose: vi.fn(async (): Promise<boolean> => true),
+  contextMenuShow: vi.fn(async (): Promise<string | null> => null),
+  setAudioMuted: vi.fn(async () => undefined),
+}))
+
 vi.mock('~/env', () => ({ isElectron: false }))
-vi.mock('~/localApi', () => ({ readLocalApi: () => null }))
+vi.mock('~/localApi', () => ({
+  readLocalApi: () => ({ contextMenu: { show: contextMenuShow } }),
+}))
 vi.mock('~/hooks/useTheme', () => ({ useTheme: () => ({ resolvedTheme: 'dark' }) }))
 vi.mock('~/lib/workspaceTitlebar', () => ({ COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS: '' }))
+vi.mock('~/browser/previewBridge', () => ({ previewBridge: { setAudioMuted } }))
+vi.mock('~/lib/terminalCloseConfirm', () => ({ confirmTerminalClose }))
 vi.mock('~/lib/utils', () => ({
   cn: (...values: ReadonlyArray<string | false | null | undefined>) =>
     values.filter(Boolean).join(' '),
@@ -46,6 +56,7 @@ vi.mock('~/components/ui/menu', () => ({
       {props.children}
     </button>
   ),
+  MenuShortcut: (props: { readonly children: ReactNode }) => <kbd>{props.children}</kbd>,
 }))
 vi.mock('~/components/ui/scroll-area', () => ({
   ScrollArea: (props: { readonly children: ReactNode; readonly ref?: Ref<HTMLDivElement> }) => (
@@ -59,7 +70,11 @@ vi.mock('../../../../apps/web/src/components/chat/PierreEntryIcon', () => ({
   PierreEntryIcon: () => <span data-file-icon />,
 }))
 
-import { RightPanelTabs } from '../../../../apps/web/src/components/RightPanelTabs'
+import {
+  RightPanelTabs,
+  surfaceShortcutActionForKey,
+  tabMuteMenuItem,
+} from '../../../../apps/web/src/components/RightPanelTabs'
 
 Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
@@ -118,26 +133,37 @@ const previewSessions: Readonly<Record<string, PreviewSessionSnapshot>> = {
   },
 }
 
-const previewOverlay = (favicon: DesktopPreviewFavicon | null): DesktopPreviewOverlay => ({
+const previewOverlay = (
+  favicon: DesktopPreviewFavicon | null,
+  audio: { readonly audible?: boolean; readonly audioMuted?: boolean } = {},
+): DesktopPreviewOverlay => ({
   hasWebContents: true,
   canGoBack: false,
   canGoForward: false,
   loading: false,
   zoomFactor: 1,
   colorScheme: 'system',
+  audioMuted: audio.audioMuted ?? false,
+  audible: audio.audible ?? false,
   controller: 'none',
   favicon,
 })
 
-const renderPreviewTab = (favicon: DesktopPreviewFavicon | null): string =>
+const renderPreviewTab = (
+  favicon: DesktopPreviewFavicon | null,
+  audio: { readonly audible?: boolean; readonly audioMuted?: boolean } = {},
+  runtimeTabId: ((tabId: string) => string) | null = (tabId) => `runtime:${tabId}`,
+): string =>
   renderToStaticMarkup(
     <RightPanelTabs
       mode="embedded"
+      contextKey="thread-right-panel"
       surfaces={[previewSurface]}
       activeSurfaceId={previewSurface.id}
       pendingSurfaceIds={new Set()}
       previewSessions={previewSessions}
-      desktopByTabId={{ 'tab-private': previewOverlay(favicon) }}
+      desktopByTabId={{ 'tab-private': previewOverlay(favicon, audio) }}
+      {...(runtimeTabId ? { previewRuntimeTabId: runtimeTabId } : {})}
       terminalLabelsById={new globalThis.Map()}
       onActivate={() => undefined}
       onCloseSurface={() => undefined}
@@ -166,6 +192,7 @@ function Harness()
   return (
     <RightPanelTabs
       mode="embedded"
+      contextKey="thread-right-panel"
       surfaces={surfaces}
       activeSurfaceId={activeSurfaceId}
       pendingSurfaceIds={new Set()}
@@ -201,8 +228,116 @@ function Harness()
   )
 }
 
+type ContextMenuHarnessInput = {
+  readonly contextKey?: string
+  readonly surfaces: readonly RightPanelSurface[]
+  readonly terminalLabelsById?: ReadonlyMap<string, string>
+  readonly onCloseAllSurfaces: () => void
+}
+
+function renderContextMenuHarness(input: ContextMenuHarnessInput)
+{
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const render = (current: ContextMenuHarnessInput): void =>
+  {
+    act(() =>
+      root.render(
+        <RightPanelTabs
+          mode="embedded"
+          contextKey={current.contextKey ?? 'thread-a'}
+          surfaces={current.surfaces}
+          activeSurfaceId={current.surfaces[0]?.id ?? null}
+          pendingSurfaceIds={new Set()}
+          previewSessions={{} as Readonly<Record<string, PreviewSessionSnapshot>>}
+          desktopByTabId={{}}
+          terminalLabelsById={current.terminalLabelsById ?? new globalThis.Map()}
+          onActivate={() => undefined}
+          onCloseSurface={() => undefined}
+          onCloseOtherSurfaces={() => undefined}
+          onCloseSurfacesToRight={() => undefined}
+          onCloseAllSurfaces={current.onCloseAllSurfaces}
+          onCopyFilePath={() => undefined}
+          onAddBrowser={() => undefined}
+          onAddTerminal={() => undefined}
+          onAddDiff={() => undefined}
+          onAddFiles={() => undefined}
+          onAddWorkers={() => undefined}
+          browserAvailable
+          diffAvailable
+          filesAvailable
+        >
+          <div>Active resource</div>
+        </RightPanelTabs>,
+      ),
+    )
+  }
+  render(input)
+
+  return {
+    render,
+    async requestCloseAll(): Promise<void>
+    {
+      contextMenuShow.mockResolvedValueOnce('close-all')
+      await act(async () =>
+      {
+        container
+          .querySelector<HTMLElement>('[role="tab"]')
+          ?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+    },
+    cleanup(): void
+    {
+      act(() => root.unmount())
+      container.remove()
+    },
+  }
+}
+
 describe('RightPanelTabs', () =>
 {
+  it('resolves available surface shortcuts without stealing modified keystrokes', () =>
+  {
+    const actions = [
+      { shortcut: 'B', available: true, label: 'Browser' },
+      { shortcut: 'T', available: false, label: 'Terminal' },
+    ] as const
+
+    expect(
+      surfaceShortcutActionForKey(actions, {
+        key: 'b',
+        defaultPrevented: false,
+        isComposing: false,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+      })?.label,
+    ).toBe('Browser')
+    expect(
+      surfaceShortcutActionForKey(actions, {
+        key: 't',
+        defaultPrevented: false,
+        isComposing: false,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+      }),
+    ).toBeNull()
+    expect(
+      surfaceShortcutActionForKey(actions, {
+        key: 'b',
+        defaultPrevented: false,
+        isComposing: false,
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+      }),
+    ).toBeNull()
+  })
+
   it('distinguishes exact resources and preserves keyboard focus through activation and close', () =>
   {
     const container = document.createElement('div')
@@ -241,6 +376,162 @@ describe('RightPanelTabs', () =>
     container.remove()
   })
 
+  it('confirms a mixed terminal batch once before closing and leaves it intact on cancellation', async () =>
+  {
+    contextMenuShow.mockReset()
+    confirmTerminalClose.mockReset()
+    confirmTerminalClose.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const closeAll = vi.fn()
+    const terminalSurface = {
+      id: 'terminal:build',
+      kind: 'terminal',
+      resourceId: 'build',
+      terminalIds: ['build', 'server'],
+      activeTerminalId: 'build',
+    } satisfies RightPanelSurface
+    const harness = renderContextMenuHarness({
+      surfaces: [{ id: 'diff', kind: 'diff' }, terminalSurface, { id: 'files', kind: 'files' }],
+      terminalLabelsById: new globalThis.Map([
+        ['build', 'Build'],
+        ['server', 'Development server'],
+      ]),
+      onCloseAllSurfaces: closeAll,
+    })
+
+    await harness.requestCloseAll()
+    expect(confirmTerminalClose).toHaveBeenCalledExactlyOnceWith(['Build', 'Development server'])
+    expect(closeAll).not.toHaveBeenCalled()
+
+    await harness.requestCloseAll()
+    expect(confirmTerminalClose).toHaveBeenCalledTimes(2)
+    expect(closeAll).toHaveBeenCalledOnce()
+    harness.cleanup()
+  })
+
+  it('abandons a confirmed close when its terminal batch changes while prompting', async () =>
+  {
+    contextMenuShow.mockReset()
+    confirmTerminalClose.mockReset()
+    let resolveConfirmation: ((confirmed: boolean) => void) | undefined
+    confirmTerminalClose.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) =>
+        {
+          resolveConfirmation = resolve
+        }),
+    )
+    const staleCloseAll = vi.fn()
+    const currentCloseAll = vi.fn()
+    const terminalSurface = {
+      id: 'terminal:build',
+      kind: 'terminal',
+      resourceId: 'build',
+      terminalIds: ['build'],
+      activeTerminalId: 'build',
+    } satisfies RightPanelSurface
+    const labels = new globalThis.Map([
+      ['build', 'Build'],
+      ['server', 'Development server'],
+    ])
+    const harness = renderContextMenuHarness({
+      surfaces: [{ id: 'diff', kind: 'diff' }, terminalSurface],
+      terminalLabelsById: labels,
+      onCloseAllSurfaces: staleCloseAll,
+    })
+
+    await harness.requestCloseAll()
+    expect(confirmTerminalClose).toHaveBeenCalledExactlyOnceWith(['Build'])
+    harness.render({
+      surfaces: [
+        { id: 'diff', kind: 'diff' },
+        { ...terminalSurface, terminalIds: ['build', 'server'] },
+      ],
+      terminalLabelsById: labels,
+      onCloseAllSurfaces: currentCloseAll,
+    })
+    await act(async () =>
+    {
+      resolveConfirmation?.(true)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(staleCloseAll).not.toHaveBeenCalled()
+    expect(currentCloseAll).not.toHaveBeenCalled()
+    harness.cleanup()
+  })
+
+  it('abandons a confirmed close when the thread changes with an identical batch', async () =>
+  {
+    contextMenuShow.mockReset()
+    confirmTerminalClose.mockReset()
+    let resolveConfirmation: ((confirmed: boolean) => void) | undefined
+    confirmTerminalClose.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) =>
+        {
+          resolveConfirmation = resolve
+        }),
+    )
+    const staleCloseAll = vi.fn()
+    const currentCloseAll = vi.fn()
+    const surfaces = [
+      { id: 'diff', kind: 'diff' },
+      {
+        id: 'terminal:build',
+        kind: 'terminal',
+        resourceId: 'build',
+        terminalIds: ['build'],
+        activeTerminalId: 'build',
+      },
+    ] satisfies readonly RightPanelSurface[]
+    const terminalLabelsById = new globalThis.Map([['build', 'Build']])
+    const harness = renderContextMenuHarness({
+      contextKey: 'thread-a',
+      surfaces,
+      terminalLabelsById,
+      onCloseAllSurfaces: staleCloseAll,
+    })
+
+    await harness.requestCloseAll()
+    expect(confirmTerminalClose).toHaveBeenCalledExactlyOnceWith(['Build'])
+    harness.render({
+      contextKey: 'thread-b',
+      surfaces,
+      terminalLabelsById,
+      onCloseAllSurfaces: currentCloseAll,
+    })
+    await act(async () =>
+    {
+      resolveConfirmation?.(true)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(staleCloseAll).not.toHaveBeenCalled()
+    expect(currentCloseAll).not.toHaveBeenCalled()
+    harness.cleanup()
+  })
+
+  it('closes a non-terminal batch without prompting', async () =>
+  {
+    contextMenuShow.mockReset()
+    confirmTerminalClose.mockReset()
+    const closeAll = vi.fn()
+    const harness = renderContextMenuHarness({
+      surfaces: [
+        { id: 'diff', kind: 'diff' },
+        { id: 'files', kind: 'files' },
+      ],
+      onCloseAllSurfaces: closeAll,
+    })
+
+    await harness.requestCloseAll()
+    expect(confirmTerminalClose).not.toHaveBeenCalled()
+    expect(closeAll).toHaveBeenCalledOnce()
+    harness.cleanup()
+  })
+
   it('prefers a current capture and keeps stale private-origin fallback first-party', () =>
   {
     const captured = renderPreviewTab({
@@ -260,5 +551,56 @@ describe('RightPanelTabs', () =>
     expect(stale).toContain('src="http://192.168.1.20:5173/favicon.ico"')
     expect(stale).not.toContain('google')
     expect(stale).not.toContain('s2/favicons')
+  })
+
+  it.each([
+    { audible: false, audioMuted: false, label: null },
+    { audible: false, audioMuted: true, label: null },
+    { audible: true, audioMuted: false, label: 'Mute Private preview' },
+    { audible: true, audioMuted: true, label: 'Unmute Private preview' },
+  ])('shows an audio toggle only while the tab is audible', ({ audible, audioMuted, label }) =>
+  {
+    const html = renderPreviewTab(null, { audible, audioMuted })
+    if (label === null)
+    {
+      expect(html).not.toContain('Mute Private preview')
+      expect(html).not.toContain('Unmute Private preview')
+      return
+    }
+    expect(html).toContain(`aria-label="${label}"`)
+  })
+
+  it('resolves desktop actions through the runtime tab identity', () =>
+  {
+    const seen: string[] = []
+    renderPreviewTab(null, { audible: true }, (tabId) =>
+    {
+      seen.push(tabId)
+      return `runtime:${tabId}`
+    })
+    expect(seen).toContain('tab-private')
+
+    const withoutRuntimeIdentity = renderPreviewTab(null, { audible: true }, null)
+    expect(withoutRuntimeIdentity).not.toContain('Mute Private preview')
+  })
+
+  it('keeps mute disabled until a desktop tab is addressable', () =>
+  {
+    expect(tabMuteMenuItem({ overlay: null, canResolveRuntimeTabId: true })).toEqual({
+      label: 'Mute tab',
+      disabled: true,
+    })
+    expect(
+      tabMuteMenuItem({
+        overlay: previewOverlay(null, { audioMuted: true }),
+        canResolveRuntimeTabId: false,
+      }),
+    ).toEqual({ label: 'Unmute tab', disabled: true })
+    expect(
+      tabMuteMenuItem({
+        overlay: previewOverlay(null, { audioMuted: false }),
+        canResolveRuntimeTabId: true,
+      }),
+    ).toEqual({ label: 'Mute tab', disabled: false })
   })
 })

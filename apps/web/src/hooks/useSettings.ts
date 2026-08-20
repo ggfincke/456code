@@ -166,6 +166,11 @@ export function getClientSettings(): ClientSettings
   return getClientSettingsSnapshot()
 }
 
+export function ensureClientSettingsHydrated(): Promise<void>
+{
+  return hydrateClientSettings()
+}
+
 function useClientSettingsValue(): ClientSettings
 {
   return useSyncExternalStore(

@@ -4,6 +4,7 @@
 import type {
   DesktopPreviewRecordingArtifact,
   DesktopPreviewRecordingFrame,
+  ScopedThreadRef,
 } from '@t3tools/contracts'
 import { useAtomValue } from '@effect/atom-react'
 import * as Schema from 'effect/Schema'
@@ -105,7 +106,11 @@ type BrowserRecordingLifecycle =
 
 interface ActiveRecording
 {
+  // desktop-scoped identity used by capture and surface stores.
   readonly tabId: string
+  // server-local identity returned by preview automation tools.
+  readonly serverTabId: string
+  readonly threadRef: ScopedThreadRef | null
   readonly canvas: HTMLCanvasElement
   readonly context: CanvasRenderingContext2D
   readonly recorder: MediaRecorder
@@ -136,6 +141,35 @@ export const BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS = 5_000
 export function readActiveBrowserRecordingTabId(): string | null
 {
   return active?.tabId ?? null
+}
+
+export interface ActiveBrowserRecordingTarget
+{
+  readonly runtimeTabId: string
+  readonly serverTabId: string
+}
+
+export function readActiveBrowserRecordingTargets(
+  threadRef: ScopedThreadRef,
+): ReadonlyArray<ActiveBrowserRecordingTarget>
+{
+  const recording = active
+  return recording?.threadRef?.environmentId === threadRef.environmentId &&
+    recording.threadRef.threadId === threadRef.threadId
+    ? [{ runtimeTabId: recording.tabId, serverTabId: recording.serverTabId }]
+    : []
+}
+
+export function findActiveBrowserRecordingRuntimeTabId(
+  threadRef: ScopedThreadRef,
+  serverTabId: string,
+): string | null
+{
+  return (
+    readActiveBrowserRecordingTargets(threadRef).find(
+      (recording) => recording.serverTabId === serverTabId,
+    )?.runtimeTabId ?? null
+  )
 }
 
 const preferredMimeType = (): string =>
@@ -228,7 +262,11 @@ const waitForRecordingStartupToSettle = async (recording: ActiveRecording): Prom
 const isStartupWaitTimeout = (error: unknown): error is BrowserRecordingOperationError =>
   isBrowserRecordingOperationError(error) && error.operation === 'wait-startup'
 
-export async function startBrowserRecording(tabId: string): Promise<string>
+export async function startBrowserRecording(
+  tabId: string,
+  threadRef: ScopedThreadRef | null = null,
+  serverTabId = tabId,
+): Promise<string>
 {
   const bridge = previewBridge
   if (!bridge) throw new BrowserRecordingUnavailableError({ tabId })
@@ -289,6 +327,8 @@ export async function startBrowserRecording(tabId: string): Promise<string>
   })
   const recording: ActiveRecording = {
     tabId,
+    serverTabId,
+    threadRef,
     canvas,
     context,
     recorder,

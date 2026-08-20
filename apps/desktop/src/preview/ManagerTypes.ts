@@ -34,6 +34,8 @@ export interface PreviewTabState
   canGoForward: boolean
   zoomFactor: number
   colorScheme: DesktopPreviewColorScheme
+  audioMuted: boolean
+  audible: boolean
   controller: 'human' | 'agent' | 'none'
   favicon?: DesktopPreviewFavicon
   updatedAt: string

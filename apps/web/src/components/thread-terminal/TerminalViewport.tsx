@@ -1070,7 +1070,7 @@ export function TerminalViewport({
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-hidden rounded-[4px] bg-sidebar"
+      className="relative h-full w-full overflow-hidden bg-[var(--terminal-background)]"
     />
   )
 }

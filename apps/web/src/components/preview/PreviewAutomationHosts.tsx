@@ -34,14 +34,16 @@ import {
 } from '~/previewStateStore'
 import { useRightPanelStore } from '~/rightPanelStore'
 import { resolveBrowserNavigationTarget } from '~/browser/browserTargetResolver'
+import { browserDefaultOpenViewport, resolveBrowserDefaults } from '~/browser/browserDefaults'
 import { previewBridge } from '~/browser/previewBridge'
 import {
-  readActiveBrowserRecordingTabId,
+  readActiveBrowserRecordingTargets,
   startBrowserRecording,
   stopBrowserRecording,
 } from '~/browser/browserRecording'
 import { resolveBrowserRecordingStopTarget } from '~/browser/browserRecordingScope'
 import { useBrowserSurfaceStore } from '~/browser/browserSurfaceStore'
+import { previewRuntimeTabId } from '~/browser/previewRuntimeTabId'
 import { isElectron } from '~/env'
 import { useEnvironments } from '~/state/environments'
 import { previewEnvironment } from '~/state/preview'
@@ -56,7 +58,11 @@ import {
   PreviewAutomationTargetUnavailableError,
   PreviewAutomationViewportTimeoutError,
 } from './previewAutomationErrors'
-import { previewAutomationOpenNeedsOverlay } from './previewAutomationOpenReadiness'
+import {
+  previewAutomationDefaultViewport,
+  previewAutomationOpenNeedsOverlay,
+  shouldOpenPreviewPanel,
+} from './previewAutomationOpenReadiness'
 import { createPreviewAutomationRequestConsumerAtom } from './previewAutomationRequestConsumer'
 import { createPreviewAutomationClientId } from './previewAutomationClientId'
 import {
@@ -70,6 +76,7 @@ const waitForDesktopOverlay = async (
   threadRef: ScopedThreadRef,
   requestId: string,
   tabId: string,
+  runtimeTabId: string,
   timeoutMs: number,
 ): Promise<void> =>
 {
@@ -79,7 +86,7 @@ const waitForDesktopOverlay = async (
     const state = readThreadPreviewState(threadRef)
     if (state.desktopByTabId[tabId] && previewBridge)
     {
-      const status = await previewBridge.automation.status(tabId)
+      const status = await previewBridge.automation.status(runtimeTabId)
       if (status.available) return
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50))
@@ -96,6 +103,7 @@ const waitForNavigationReadiness = async (
   threadRef: ScopedThreadRef,
   requestId: string,
   tabId: string,
+  runtimeTabId: string,
   readiness: PreviewAutomationNavigateInput['readiness'],
   timeoutMs: number,
 ): Promise<void> =>
@@ -107,14 +115,14 @@ const waitForNavigationReadiness = async (
   {
     if (targetReadiness === 'domContentLoaded')
     {
-      const readyState = await previewBridge.automation.evaluate(tabId, {
+      const readyState = await previewBridge.automation.evaluate(runtimeTabId, {
         expression: 'document.readyState',
       })
       if (readyState === 'interactive' || readyState === 'complete') return
     }
     else
     {
-      const status = await previewBridge.automation.status(tabId)
+      const status = await previewBridge.automation.status(runtimeTabId)
       if (!status.loading) return
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50))
@@ -158,9 +166,11 @@ const readWebviewViewport = async (
     : null
 }
 
-const readRenderedViewport = async (tabId: string): Promise<PreviewRenderedViewportSize | null> =>
+const readRenderedViewport = async (
+  runtimeTabId: string,
+): Promise<PreviewRenderedViewportSize | null> =>
 {
-  const webview = findPreviewWebview(tabId)
+  const webview = findPreviewWebview(runtimeTabId)
   if (!webview) return null
   return await readWebviewViewport(webview)
 }
@@ -178,6 +188,7 @@ const readDeclaredViewport = (
 
 const waitForRenderedViewport = async (
   tabId: string,
+  runtimeTabId: string,
   setting: PreviewViewportSetting,
   timeoutMs: number,
   context: {
@@ -192,7 +203,7 @@ const waitForRenderedViewport = async (
   {
     try
     {
-      const webview = findPreviewWebview(tabId)
+      const webview = findPreviewWebview(runtimeTabId)
       const appliedSettingKey = webview?.getAttribute('data-preview-viewport-key') ?? null
       const declaredViewport = readDeclaredViewport(webview)
       const renderedViewport = webview ? await readWebviewViewport(webview) : null
@@ -231,19 +242,20 @@ const currentStatus = async (
   const state = readThreadPreviewState(threadRef)
   const target = resolvePreviewAutomationTarget(state, requestedTabId)
   const { snapshot, tabId } = target
-  const visible = tabId
-    ? (useBrowserSurfaceStore.getState().byTabId[tabId]?.visible ?? false)
+  const runtimeTabId = tabId ? previewRuntimeTabId(threadRef, state.serverEpoch, tabId) : null
+  const visible = runtimeTabId
+    ? (useBrowserSurfaceStore.getState().byTabId[runtimeTabId]?.visible ?? false)
     : false
   const viewportSetting = snapshot ? (snapshot.viewport ?? FILL_PREVIEW_VIEWPORT) : undefined
-  const viewport = tabId ? await readRenderedViewport(tabId).catch(() => null) : null
+  const viewport = runtimeTabId ? await readRenderedViewport(runtimeTabId).catch(() => null) : null
   const viewportStatus = {
     ...(viewportSetting === undefined ? {} : { viewportSetting }),
     ...(viewport === null ? {} : { viewport }),
   }
-  if (tabId && previewBridge && state.desktopByTabId[tabId])
+  if (runtimeTabId && tabId && previewBridge && state.desktopByTabId[tabId])
   {
-    const status = await previewBridge.automation.status(tabId)
-    return { ...status, visible, ...viewportStatus }
+    const status = await previewBridge.automation.status(runtimeTabId)
+    return { ...status, tabId, visible, ...viewportStatus }
   }
   const navStatus = snapshot?.navStatus
   return {
@@ -351,7 +363,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             return raiseAtomCommandFailure(result)
           }
-          reconcilePreviewServerSessions(threadRef, result.value.sessions)
+          reconcilePreviewServerSessions(threadRef, result.value)
           state = readThreadPreviewState(threadRef)
         }
         const target = resolvePreviewAutomationTarget(state, request.tabId ?? null)
@@ -376,8 +388,16 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             throw new PreviewAutomationTargetUnavailableError(unavailableTarget)
           }
-          await waitForDesktopOverlay(threadRef, request.requestId, readyTabId, request.timeoutMs)
-          return { bridge, tabId: readyTabId }
+          const readyState = readThreadPreviewState(threadRef)
+          const runtimeTabId = previewRuntimeTabId(threadRef, readyState.serverEpoch, readyTabId)
+          await waitForDesktopOverlay(
+            threadRef,
+            request.requestId,
+            readyTabId,
+            runtimeTabId,
+            request.timeoutMs,
+          )
+          return { bridge, tabId: readyTabId, runtimeTabId }
         }
         switch (request.operation)
         {
@@ -417,6 +437,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 input: {
                   threadId: request.threadId,
                   ...(resolvedInputUrl ? { url: resolvedInputUrl } : {}),
+                  viewport: browserDefaultOpenViewport(await resolveBrowserDefaults()),
                 },
               })
               if (result._tag === 'Failure')
@@ -429,26 +450,62 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               activeSnapshot = snapshot
               tabId = activeTabId
             }
-            if (input.show ?? true)
+            if (activeSnapshot)
+            {
+              const defaultViewport = previewAutomationDefaultViewport(
+                reusedExistingTab,
+                activeSnapshot,
+              )
+              if (defaultViewport)
+              {
+                const resizeResult = await resize({
+                  environmentId,
+                  input: {
+                    threadId: request.threadId,
+                    tabId: activeTabId,
+                    viewport: defaultViewport,
+                  },
+                })
+                if (resizeResult._tag === 'Failure')
+                {
+                  return raiseAtomCommandFailure(resizeResult)
+                }
+                activeSnapshot = resizeResult.value
+                updatePreviewServerSnapshot(threadRef, resizeResult.value)
+              }
+            }
+            if (
+              shouldOpenPreviewPanel(
+                input,
+                (await resolveBrowserDefaults()).autoShowFloatingPreview,
+              )
+            )
             {
               useRightPanelStore.getState().openBrowser(threadRef, activeTabId)
             }
+            const activeRuntimeTabId = previewRuntimeTabId(
+              threadRef,
+              readThreadPreviewState(threadRef).serverEpoch,
+              activeTabId,
+            )
             if (activeSnapshot && previewAutomationOpenNeedsOverlay(input, activeSnapshot))
             {
               await waitForDesktopOverlay(
                 threadRef,
                 request.requestId,
                 activeTabId,
+                activeRuntimeTabId,
                 request.timeoutMs,
               )
             }
             if (reusedExistingTab && resolvedInputUrl && previewBridge)
             {
-              await previewBridge.navigate(activeTabId, resolvedInputUrl)
+              await previewBridge.navigate(activeRuntimeTabId, resolvedInputUrl)
               await waitForNavigationReadiness(
                 threadRef,
                 request.requestId,
                 activeTabId,
+                activeRuntimeTabId,
                 'load',
                 request.timeoutMs,
               )
@@ -466,11 +523,12 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 url: input.url!,
               },
             )
-            await ready.bridge.navigate(ready.tabId, resolution.resolvedUrl)
+            await ready.bridge.navigate(ready.runtimeTabId, resolution.resolvedUrl)
             await waitForNavigationReadiness(
               threadRef,
               request.requestId,
               ready.tabId,
+              ready.runtimeTabId,
               input.readiness ?? 'load',
               input.timeoutMs ?? request.timeoutMs,
             )
@@ -496,6 +554,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             updatePreviewServerSnapshot(threadRef, result.value)
             const viewport = await waitForRenderedViewport(
               ready.tabId,
+              ready.runtimeTabId,
               setting,
               input.timeoutMs ?? request.timeoutMs,
               {
@@ -514,7 +573,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             const ready = await requireReadyTab()
             const input = request.input as PreviewAutomationSetColorSchemeInput
-            await ready.bridge.setColorScheme(ready.tabId, input.colorScheme)
+            await ready.bridge.setColorScheme(ready.runtimeTabId, input.colorScheme)
             return {
               tabId: ready.tabId,
               colorScheme: input.colorScheme,
@@ -523,13 +582,13 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           case 'snapshot':
           {
             const ready = await requireReadyTab()
-            return await ready.bridge.automation.snapshot(ready.tabId)
+            return await ready.bridge.automation.snapshot(ready.runtimeTabId)
           }
           case 'click':
           {
             const ready = await requireReadyTab()
             return await ready.bridge.automation.click(
-              ready.tabId,
+              ready.runtimeTabId,
               request.input as Parameters<typeof ready.bridge.automation.click>[1],
             )
           }
@@ -537,7 +596,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             const ready = await requireReadyTab()
             return await ready.bridge.automation.type(
-              ready.tabId,
+              ready.runtimeTabId,
               request.input as Parameters<typeof ready.bridge.automation.type>[1],
             )
           }
@@ -545,7 +604,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             const ready = await requireReadyTab()
             return await ready.bridge.automation.press(
-              ready.tabId,
+              ready.runtimeTabId,
               request.input as Parameters<typeof ready.bridge.automation.press>[1],
             )
           }
@@ -553,7 +612,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             const ready = await requireReadyTab()
             return await ready.bridge.automation.scroll(
-              ready.tabId,
+              ready.runtimeTabId,
               request.input as Parameters<typeof ready.bridge.automation.scroll>[1],
             )
           }
@@ -561,7 +620,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             const ready = await requireReadyTab()
             return await ready.bridge.automation.evaluate(
-              ready.tabId,
+              ready.runtimeTabId,
               request.input as Parameters<typeof ready.bridge.automation.evaluate>[1],
             )
           }
@@ -569,14 +628,18 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           {
             const ready = await requireReadyTab()
             return await ready.bridge.automation.waitFor(
-              ready.tabId,
+              ready.runtimeTabId,
               request.input as Parameters<typeof ready.bridge.automation.waitFor>[1],
             )
           }
           case 'recordingStart':
           {
             const ready = await requireReadyTab()
-            const startedAt = await startBrowserRecording(ready.tabId)
+            const startedAt = await startBrowserRecording(
+              ready.runtimeTabId,
+              threadRef,
+              ready.tabId,
+            )
             return {
               tabId: ready.tabId,
               recording: true,
@@ -585,13 +648,16 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case 'recordingStop':
           {
-            const recordingTabId = readActiveBrowserRecordingTabId()
+            const recordingTarget = readActiveBrowserRecordingTargets(threadRef)[0] ?? null
             const stopTabId = resolveBrowserRecordingStopTarget(
-              recordingTabId,
+              recordingTarget?.serverTabId ?? null,
               request.tabIdExplicit ? request.tabId : undefined,
             )
-            const artifact = stopTabId ? await stopBrowserRecording(stopTabId) : null
-            if (!artifact)
+            const artifact =
+              stopTabId && recordingTarget
+                ? await stopBrowserRecording(recordingTarget.runtimeTabId)
+                : null
+            if (!artifact || !stopTabId)
             {
               return raisePreviewAutomationHostError(
                 new PreviewAutomationRecordingNotActiveError({
@@ -602,7 +668,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 }),
               )
             }
-            return artifact
+            return { ...artifact, tabId: stopTabId }
           }
         }
       }

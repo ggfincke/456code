@@ -42,12 +42,13 @@ declare global
 export function HostedBrowserWebview(props: {
   readonly threadRef: ScopedThreadRef
   readonly tabId: string
+  readonly runtimeTabId: string
   readonly initialUrl: string | null
   readonly viewport: PreviewViewportSetting
   readonly zoomFactor: number
 })
 {
-  const { threadRef, tabId, initialUrl, viewport, zoomFactor } = props
+  const { threadRef, tabId, runtimeTabId, initialUrl, viewport, zoomFactor } = props
   const config = usePreviewWebviewConfig(threadRef.environmentId)
   const [initialSrc] = useState(() => initialUrl ?? 'about:blank')
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null)
@@ -58,31 +59,39 @@ export function HostedBrowserWebview(props: {
   const presentation = useBrowserSurfaceStore(
     useShallow((state) =>
     {
-      const current = state.byTabId[tabId]
+      const current = state.byTabId[runtimeTabId]
       return {
-        rect: resolveBrowserSurfacePanelRect(state.byTabId, tabId),
+        rect: resolveBrowserSurfacePanelRect(state.byTabId, runtimeTabId),
         visible: current?.visible ?? false,
       }
     }),
   )
-  usePreviewBridge({ threadRef, tabId })
+  usePreviewBridge({ threadRef, tabId, runtimeTabId })
 
   useEffect(() =>
   {
-    if (presentation.visible || activeRecordingTabId !== tabId) return
-    void stopBrowserRecording(tabId).catch(() => undefined)
-  }, [activeRecordingTabId, presentation.visible, tabId])
+    if (presentation.visible || activeRecordingTabId !== runtimeTabId) return
+    void stopBrowserRecording(runtimeTabId).catch(() => undefined)
+  }, [activeRecordingTabId, presentation.visible, runtimeTabId])
+
+  useEffect(
+    () => () =>
+    {
+      void stopBrowserRecording(runtimeTabId).catch(() => undefined)
+    },
+    [runtimeTabId],
+  )
 
   useEffect(() =>
   {
-    const lease = acquireDesktopTab(tabId)
+    const lease = acquireDesktopTab(runtimeTabId)
     tabLeaseRef.current = lease
     return () =>
     {
       if (tabLeaseRef.current === lease) tabLeaseRef.current = null
       lease.release()
     }
-  }, [tabId])
+  }, [runtimeTabId])
 
   const setWebviewRef = useCallback((node: HTMLElement | null) =>
   {
@@ -112,7 +121,7 @@ export function HostedBrowserWebview(props: {
           const webContentsId = webview.getWebContentsId()
           if (Number.isInteger(webContentsId) && webContentsId > 0)
           {
-            await bridge.registerWebview(tabId, webContentsId)
+            await bridge.registerWebview(runtimeTabId, webContentsId)
           }
         }
         catch
@@ -130,7 +139,7 @@ export function HostedBrowserWebview(props: {
       webview.removeEventListener('did-attach', register)
       webview.removeEventListener('dom-ready', register)
     }
-  }, [config, tabId])
+  }, [config, runtimeTabId])
 
   const active = presentation.visible && presentation.rect !== null
   const lastRect = presentation.rect
@@ -162,7 +171,7 @@ export function HostedBrowserWebview(props: {
     handleResizePointerDown,
     layout,
   } = useBrowserViewportResize({
-    tabId,
+    tabId: runtimeTabId,
     viewport,
     zoomFactor,
     containerSize,
@@ -174,7 +183,7 @@ export function HostedBrowserWebview(props: {
   {
     const wrapper = wrapperRef.current
     if (!wrapper) return
-    useBrowserSurfaceStore.getState().presentContent(tabId, {
+    useBrowserSurfaceStore.getState().presentContent(runtimeTabId, {
       x: layout.viewportX,
       y: layout.viewportY,
       width: layout.viewportWidth,
@@ -183,7 +192,7 @@ export function HostedBrowserWebview(props: {
       scrollLeft: wrapper.scrollLeft,
       scrollTop: wrapper.scrollTop,
     })
-  }, [layout, tabId])
+  }, [layout, runtimeTabId])
 
   useEffect(() =>
   {
@@ -196,7 +205,7 @@ export function HostedBrowserWebview(props: {
     const wrapper = wrapperRef.current
     if (!wrapper) return
     wrapper.scrollTo({ left: 0, top: 0 })
-  }, [tabId, viewport._tag, viewportHeight, viewportWidth])
+  }, [runtimeTabId, viewport._tag, viewportHeight, viewportWidth])
 
   if (!config) return null
 
@@ -212,7 +221,7 @@ export function HostedBrowserWebview(props: {
       className="fixed overflow-hidden bg-muted/35"
       style={{ ...wrapperStyle, overscrollBehavior: 'contain' }}
       onScroll={syncContentPresentation}
-      data-preview-viewport={tabId}
+      data-preview-viewport={runtimeTabId}
     >
       <div className="relative" style={{ width: layout.canvasWidth, height: layout.canvasHeight }}>
         {deviceToolbarVisible && effectiveViewport._tag !== 'fill' ? (
@@ -230,7 +239,8 @@ export function HostedBrowserWebview(props: {
           partition={config.partition}
           webpreferences={config.webPreferences}
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
-          data-preview-tab={tabId}
+          data-preview-tab={runtimeTabId}
+          data-preview-server-tab={tabId}
           data-preview-viewport-mode={effectiveViewport._tag}
           data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
           data-preview-css-width={

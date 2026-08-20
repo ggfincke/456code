@@ -18,6 +18,16 @@ vi.mock('~/state/session', () => ({
   readPreparedConnection: mocks.readPreparedConnection,
 }))
 
+vi.mock('~/browser/browserDefaults', () => ({
+  browserResponsiveViewportForToggle: () => ({ _tag: 'Fill' }),
+  useBrowserDefaults: () => ({
+    viewport: { _tag: 'Fill' },
+    zoomFactor: 1,
+    colorScheme: 'system',
+    autoShowOnAgentNavigation: true,
+  }),
+}))
+
 vi.mock('~/composerDraftStore', () => ({
   useComposerDraftStore: (
     select: (store: { addPreviewAnnotation: () => void; addImage: () => void }) => unknown,
@@ -37,6 +47,7 @@ vi.mock('~/previewStateStore', () => ({
   updatePreviewServerSnapshot: vi.fn(),
   useThreadPreviewState: () => ({
     activeTabId: 'tab-1',
+    serverEpoch: null,
     desktopByTabId: {
       'tab-1': {
         hasWebContents: true,
@@ -45,6 +56,8 @@ vi.mock('~/previewStateStore', () => ({
         loading: false,
         zoomFactor: 1,
         colorScheme: 'system',
+        audioMuted: false,
+        audible: false,
         controller: 'none',
         favicon: null,
       },
@@ -83,6 +96,7 @@ vi.mock('~/state/use-atom-command', () => ({
 }))
 
 vi.mock('~/browser/browserRecording', () => ({
+  findActiveBrowserRecordingRuntimeTabId: vi.fn(() => null),
   startBrowserRecording: vi.fn(),
   stopBrowserRecording: vi.fn(),
   useActiveBrowserRecordingTabId: () => null,
@@ -142,6 +156,13 @@ vi.mock('../../../../../apps/web/src/components/preview/usePreviewSession', () =
 }))
 
 import { PreviewView } from '../../../../../apps/web/src/components/preview/PreviewView'
+import { previewRuntimeTabId } from '../../../../../apps/web/src/browser/previewRuntimeTabId'
+
+const TEST_THREAD_REF = {
+  environmentId: EnvironmentId.make('environment-1'),
+  threadId: ThreadId.make('thread-1'),
+} as const
+const TEST_RUNTIME_TAB_ID = previewRuntimeTabId(TEST_THREAD_REF, null, 'tab-1')
 
 describe('PreviewView navigation', () =>
 {
@@ -177,7 +198,9 @@ describe('PreviewView navigation', () =>
     expect(mocks.submittedUrl).not.toBeNull()
     mocks.submittedUrl?.(submitted)
 
-    await vi.waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('tab-1', expected))
+    await vi.waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID, expected),
+    )
     expect(mocks.rememberPreviewUrl).toHaveBeenCalledWith(
       {
         environmentId: 'environment-1',
@@ -206,7 +229,7 @@ describe('PreviewView navigation', () =>
 
     await vi.waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith(
-        'tab-1',
+        TEST_RUNTIME_TAB_ID,
         'http://172.25.85.75:5173/app?mode=test#top',
       ),
     )

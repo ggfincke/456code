@@ -18,21 +18,28 @@ import {
 import {
   DEFAULT_ZOOM_FACTOR,
   ZOOM_EPSILON,
+  ZOOM_LEVELS,
   type BrowserControlSession,
   type ManagedListeners,
   type PreviewNavStatus,
   type PreviewOperationContext,
   type PreviewTabRecord,
   type PreviewTabState,
+  type RecordingOwner,
 } from './ManagerTypes.ts'
 import { normalizePreviewUrl } from '@t3tools/shared/preview'
-import type { DesktopPreviewAnnotationTheme, DesktopPreviewColorScheme } from '@t3tools/contracts'
+import type {
+  DesktopPreviewAnnotationTheme,
+  DesktopPreviewColorScheme,
+  DesktopPreviewTabDefaults,
+} from '@t3tools/contracts'
 import { ANNOTATION_THEME_CHANNEL } from './GuestProtocol.ts'
 
 export interface ManagerTabsDeps
 {
   readonly tabsRef: SynchronizedRef.SynchronizedRef<ReadonlyMap<string, PreviewTabRecord>>
   readonly mainWindowRef: Ref.Ref<Option.Option<BrowserWindow>>
+  readonly recordingOwnerRef: Ref.Ref<Option.Option<RecordingOwner>>
   readonly attachedRef: Ref.Ref<ReadonlyMap<number, ManagedListeners>>
   readonly annotationThemeRef: Ref.Ref<DesktopPreviewAnnotationTheme>
   readonly tabGenerationSequenceRef: Ref.Ref<number>
@@ -55,6 +62,7 @@ export interface ManagerTabsDeps
     lifecycleGeneration: number,
   ) => Effect.Effect<symbol, PreviewManagerError>
   readonly emit: (tabId: string, state: PreviewTabState) => Effect.Effect<void>
+  readonly emitIfCurrent: (tabId: string, state: PreviewTabState) => Effect.Effect<void>
   readonly nextCounter: (ref: Ref.Ref<number>) => Effect.Effect<number>
   readonly replaceMap: <K, V>(
     source: ReadonlyMap<K, V>,
@@ -80,6 +88,22 @@ export interface ManagerTabsDeps
   readonly ensureControlSession: (
     wc: Electron.WebContents,
   ) => Effect.Effect<BrowserControlSession, PreviewManagerError>
+  readonly syncTabAudible: (
+    tabId: string,
+    wc: Electron.WebContents,
+    audible: boolean,
+  ) => Effect.Effect<void>
+}
+
+const normalizeZoomFactor = (value: number | undefined): number =>
+{
+  if (value === undefined || !Number.isFinite(value)) return DEFAULT_ZOOM_FACTOR
+  let closest = ZOOM_LEVELS[0]!
+  for (const level of ZOOM_LEVELS)
+  {
+    if (Math.abs(level - value) < Math.abs(closest - value)) closest = level
+  }
+  return closest
 }
 
 export const createTabOperations = (deps: ManagerTabsDeps) =>
@@ -87,6 +111,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
   const {
     tabsRef,
     mainWindowRef,
+    recordingOwnerRef,
     attachedRef,
     annotationThemeRef,
     tabGenerationSequenceRef,
@@ -99,6 +124,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     detachListeners,
     attachListeners,
     emit,
+    emitIfCurrent,
     nextCounter,
     replaceMap,
     requireWebContents,
@@ -108,12 +134,20 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     update,
     runFork,
     ensureControlSession,
+    syncTabAudible,
   } = deps
 
   const setMainWindow = Effect.fn('PreviewManager.setMainWindow')(function* (
     window: BrowserWindow,
   )
   {
+    const recordingOwner = yield* Ref.get(recordingOwnerRef)
+    if (Option.isSome(recordingOwner) && !window.isDestroyed())
+    {
+      yield* attempt({ operation: 'setMainWindow.backgroundThrottling' }, () =>
+        window.webContents.setBackgroundThrottling(false),
+      )
+    }
     yield* Ref.set(mainWindowRef, Option.some(window))
   })
 
@@ -129,7 +163,23 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     ).pipe(Effect.ignore)
   })
 
-  const createTabUnlocked = Effect.fn('PreviewManager.createTab')(function* (tabId: string)
+  const assertTabAudioMuted = Effect.fn('PreviewManager.assertTabAudioMuted')(function* (
+    tabId: string,
+  )
+  {
+    const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+    if (!tab || tab.webContentsId === null) return
+    const wc = webContents.fromId(tab.webContentsId)
+    if (!wc || wc.isDestroyed()) return
+    yield* attempt({ operation: 'assertTabAudioMuted', tabId, webContentsId: wc.id }, () =>
+      wc.setAudioMuted(tab.audioMuted),
+    )
+  })
+
+  const createTabUnlocked = Effect.fn('PreviewManager.createTab')(function* (
+    tabId: string,
+    defaults?: DesktopPreviewTabDefaults,
+  )
   {
     const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
     const updatedAt = yield* currentIso
@@ -143,8 +193,10 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         navStatus: { kind: 'Idle' },
         canGoBack: false,
         canGoForward: false,
-        zoomFactor: DEFAULT_ZOOM_FACTOR,
-        colorScheme: 'system',
+        zoomFactor: normalizeZoomFactor(defaults?.zoomFactor),
+        colorScheme: defaults?.colorScheme ?? 'system',
+        audioMuted: false,
+        audible: false,
         controller: 'none',
         updatedAt,
         lifecycleGeneration,
@@ -190,6 +242,8 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
       canGoForward: false,
       zoomFactor: DEFAULT_ZOOM_FACTOR,
       colorScheme: 'system',
+      audioMuted: false,
+      audible: false,
       controller: 'none',
       updatedAt,
     }
@@ -238,6 +292,8 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     {
       // chromium may have just copied the embedder's zoom onto this guest
       yield* assertTabZoom(tabId)
+      yield* assertTabAudioMuted(tabId)
+      yield* syncTabAudible(tabId, wc, wc.isCurrentlyAudible())
       yield* attempt({ operation: 'registerWebview.sendTheme', tabId, webContentsId }, () =>
         wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
       )
@@ -255,6 +311,9 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     // a new guest inherits the app window zoom, never the preview tab zoom
     yield* attempt({ operation: 'registerWebview.restoreZoomFactor', tabId, webContentsId }, () =>
       wc.setZoomFactor(tab.zoomFactor),
+    )
+    yield* attempt({ operation: 'registerWebview.restoreAudioMuted', tabId, webContentsId }, () =>
+      wc.setAudioMuted(tab.audioMuted),
     )
     const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
     // once the source is released, failure leaves the tab explicitly unattached
@@ -311,6 +370,10 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
       return yield* attachListeners(tabId, wc, lifecycleGeneration)
     }).pipe(Effect.onError(() => detachFailedTransition))
     const registeredAt = yield* currentIso
+    const attachedAudible = yield* attempt(
+      { operation: 'registerWebview.readAudible', tabId, webContentsId },
+      () => wc.isCurrentlyAudible(),
+    ).pipe(Effect.orElseSucceed(() => false))
     const registration = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
     {
       const current = tabs.get(tabId)
@@ -329,6 +392,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         navStatus: pendingUrl === null ? computeNavStatus(wc) : current.navStatus,
         canGoBack: wc.navigationHistory.canGoBack(),
         canGoForward: wc.navigationHistory.canGoForward(),
+        audible: attachedAudible,
         updatedAt: registeredAt,
         lifecycleGeneration,
       }
@@ -352,10 +416,18 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
       return yield* new PreviewTabNotFoundError({ tabId })
     }
     const { state: registered, pendingUrl } = registration.value
-    // a zoom action may have landed while the replacement attached
+    // zoom and mute actions may land while the replacement attaches
     yield* assertTabZoom(tabId)
+    yield* assertTabAudioMuted(tabId).pipe(Effect.ignore)
     runFork(restoreControlSession(tabId, wc))
-    yield* emit(tabId, registered)
+    yield* emitIfCurrent(tabId, registered)
+    yield* syncTabAudible(
+      tabId,
+      wc,
+      yield* attempt({ operation: 'registerWebview.reconcileAudible', tabId, webContentsId }, () =>
+        wc.isCurrentlyAudible(),
+      ).pipe(Effect.orElseSucceed(() => false)),
+    )
     yield* attempt({ operation: 'registerWebview.sendTheme', tabId, webContentsId }, () =>
       wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
     )
@@ -400,6 +472,8 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         canGoForward: current?.canGoForward ?? false,
         zoomFactor: current?.zoomFactor ?? DEFAULT_ZOOM_FACTOR,
         colorScheme: current?.colorScheme ?? 'system',
+        audioMuted: current?.audioMuted ?? false,
+        audible: current?.audible ?? false,
         controller: current?.controller ?? 'none',
         ...(current?.favicon ? { favicon: current.favicon } : {}),
         updatedAt,
@@ -413,7 +487,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
         }),
       ] as const
     })
-    yield* emit(tabId, pending)
+    yield* emitIfCurrent(tabId, pending)
     if (pending.webContentsId == null) return
     const webContentsId = pending.webContentsId
     const wc = webContents.fromId(webContentsId)
@@ -478,7 +552,8 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     )
   })
 
-  const createTab = (tabId: string) => withTabLifecycle(tabId, createTabUnlocked(tabId))
+  const createTab = (tabId: string, defaults?: DesktopPreviewTabDefaults) =>
+    withTabLifecycle(tabId, createTabUnlocked(tabId, defaults))
   const closeTab = (tabId: string) =>
     withTabLifecycle(tabId, withAttachmentTransition(closeTabUnlocked(tabId)))
   const registerWebview = (tabId: string, webContentsId: number) =>
@@ -669,6 +744,29 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     yield* applyColorScheme(tabId, wc, colorScheme)
   })
 
+  const setAudioMuted = Effect.fn('PreviewManager.setAudioMuted')(function* (
+    tabId: string,
+    audioMuted: boolean,
+  )
+  {
+    const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+    if (!tab) return yield* new PreviewTabNotFoundError({ tabId })
+    yield* withTabLifecycle(
+      tabId,
+      Effect.gen(function* ()
+      {
+        const previous = (yield* SynchronizedRef.get(tabsRef)).get(tabId)?.audioMuted
+        const committed = previous !== undefined && previous !== audioMuted
+        if (committed) yield* update(tabId, { audioMuted })
+        yield* assertTabAudioMuted(tabId).pipe(
+          Effect.tapError(() =>
+            committed ? update(tabId, { audioMuted: previous }) : Effect.void,
+          ),
+        )
+      }),
+    )
+  })
+
   return {
     setMainWindow,
     createTab,
@@ -684,6 +782,7 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     applyZoom,
     reapplyZoom,
     setColorScheme,
+    setAudioMuted,
     withWebContents,
   }
 }

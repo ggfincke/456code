@@ -1,7 +1,12 @@
 // tests/apps/web/components/preview/openTerminalLinkInPreview.test.ts
 // verify open terminal link in preview behavior
 
-import type { LocalApi, PreviewSessionSnapshot, ScopedThreadRef } from '@t3tools/contracts'
+import {
+  FILL_PREVIEW_VIEWPORT,
+  type LocalApi,
+  type PreviewSessionSnapshot,
+  type ScopedThreadRef,
+} from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
@@ -15,6 +20,17 @@ import {
 vi.mock('~/previewStateStore', () => ({
   applyPreviewServerSnapshot: vi.fn(),
   isPreviewSupportedInRuntime: () => true,
+  rememberPreviewUrl: vi.fn(),
+}))
+
+vi.mock('~/browser/browserDefaults', () => ({
+  browserDefaultOpenViewport: () => ({ _tag: 'fill' }),
+  resolveBrowserDefaults: vi.fn(async () => ({
+    viewport: { _tag: 'fill' },
+    zoomFactor: 1,
+    appearance: 'system',
+    autoShowFloatingPreview: false,
+  })),
 }))
 
 vi.mock('~/rightPanelStore', () => ({
@@ -135,5 +151,32 @@ describe('openTerminalLinkInPreview', () =>
 
     expect(reportError).not.toHaveBeenCalled()
     expect(fallbackToBrowser).not.toHaveBeenCalled()
+  })
+
+  it('applies the configured browser viewport when opening a terminal link', async () =>
+  {
+    const openPreview = vi.fn(async () => AsyncResult.success(snapshot))
+
+    await openTerminalLinkInPreview({
+      url: 'http://localhost:5173/',
+      position: { x: 12, y: 34 },
+      threadRef,
+      openPreview,
+      localApi: {
+        contextMenu: {
+          show: vi.fn(async () => 'open-in-preview'),
+        },
+      } as unknown as LocalApi,
+      fallbackToBrowser: vi.fn(),
+    })
+
+    expect(openPreview).toHaveBeenCalledWith({
+      environmentId: 'local',
+      input: {
+        threadId: 'thread-1',
+        url: 'http://localhost:5173/',
+        viewport: FILL_PREVIEW_VIEWPORT,
+      },
+    })
   })
 })

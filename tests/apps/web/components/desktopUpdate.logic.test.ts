@@ -79,7 +79,7 @@ describe('desktop update button state', () =>
     expect(getDesktopUpdateButtonTooltip(state)).toContain('Click to retry')
   })
 
-  it('prefers install when a downloaded version already exists', () =>
+  it('prefers a newly available release over a stale downloaded version', () =>
   {
     const state: DesktopUpdateState = {
       ...baseState,
@@ -87,7 +87,7 @@ describe('desktop update button state', () =>
       availableVersion: '1.1.0',
       downloadedVersion: '1.1.0',
     }
-    expect(resolveDesktopUpdateButtonAction(state)).toBe('install')
+    expect(resolveDesktopUpdateButtonAction(state)).toBe('download')
   })
 
   it('hides the button for non-actionable check errors', () =>
@@ -259,15 +259,6 @@ describe('canCheckForUpdate', () =>
       label: 'downloading',
       state: { ...baseState, status: 'downloading' as const, downloadPercent: 50 },
     },
-    {
-      label: 'downloaded',
-      state: {
-        ...baseState,
-        status: 'downloaded' as const,
-        availableVersion: '1.1.0',
-        downloadedVersion: '1.1.0',
-      },
-    },
   ])('returns false for $label', ({ state }) =>
   {
     expect(canCheckForUpdate(state)).toBe(false)
@@ -279,6 +270,15 @@ describe('canCheckForUpdate', () =>
     {
       label: 'available',
       state: { ...baseState, status: 'available' as const, availableVersion: '1.1.0' },
+    },
+    {
+      label: 'downloaded',
+      state: {
+        ...baseState,
+        status: 'downloaded' as const,
+        availableVersion: '1.1.0',
+        downloadedVersion: '1.1.0',
+      },
     },
     {
       label: 'error (retry)',

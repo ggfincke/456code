@@ -8,8 +8,9 @@ import * as Schema from 'effect/Schema'
 
 import { resolveBrowserNavigationTarget } from '~/browser/browserTargetResolver'
 import type { OpenPreviewMutation } from '~/browser/openFileInPreview'
-import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from '~/previewStateStore'
+import { isPreviewSupportedInRuntime } from '~/previewStateStore'
 import { useRightPanelStore } from '~/rightPanelStore'
+import { openPreviewSession } from './openPreviewSession'
 
 const terminalLinkErrorContext = {
   environmentId: Schema.String,
@@ -110,9 +111,10 @@ export async function openTerminalLinkInPreview<E>(
     {
       resolvedUrl = input.url
     }
-    const result = await input.openPreview({
-      environmentId: input.threadRef.environmentId,
-      input: { threadId: input.threadRef.threadId, url: resolvedUrl },
+    const result = await openPreviewSession({
+      openPreview: input.openPreview,
+      threadRef: input.threadRef,
+      url: resolvedUrl,
     })
     if (result._tag === 'Failure')
     {
@@ -129,7 +131,6 @@ export async function openTerminalLinkInPreview<E>(
       input.fallbackToBrowser()
       return
     }
-    applyPreviewServerSnapshot(input.threadRef, result.value)
     useRightPanelStore.getState().openBrowser(input.threadRef, result.value.tabId)
     return
   }

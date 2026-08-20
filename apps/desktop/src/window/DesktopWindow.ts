@@ -386,6 +386,8 @@ export const make = Effect.gen(function* ()
       ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
       webPreferences: {
         preload: environment.preloadPath,
+        // boot hidden without Chromium starving the first renderer paint
+        backgroundThrottling: false,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -755,6 +757,10 @@ export const make = Effect.gen(function* ()
     }
     bindFirstRevealTrigger(revealSubscribers, () =>
     {
+      if (!window.isDestroyed())
+      {
+        window.webContents.setBackgroundThrottling(true)
+      }
       // reveal the real window, then close the connecting splash (if any) so the
       // two don't overlap and there's no blank gap between them.
       if (persistedSettings.mainWindowMaximized)

@@ -4,3 +4,4 @@
 export { GeneralSettingsPanel, useSettingsRestore } from './panels/GeneralSettingsPanel'
 export { ProviderSettingsPanel } from './panels/ProviderSettingsPanel'
 export { ArchivedThreadsPanel } from './panels/ArchivedThreadsPanel'
+export { IntegrationsSettingsPanel } from './IntegrationsSettings'

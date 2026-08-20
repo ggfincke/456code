@@ -28,6 +28,7 @@ import {
 } from 'react'
 import { Popover, PopoverPopup, PopoverTrigger } from '~/components/ui/popover'
 import { cn } from '~/lib/utils'
+import { confirmTerminalClose } from '~/lib/terminalCloseConfirm'
 import { type TerminalContextSelection } from '~/lib/terminalContext'
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -327,6 +328,17 @@ export default function ThreadTerminalDrawer({
     }
     return next
   }, [normalizedTerminalIds, terminalLabelsById])
+  const confirmCloseTerminal = useCallback(
+    (terminalId: string) =>
+    {
+      const label = terminalLabelById.get(terminalId) ?? getTerminalLabel(terminalId)
+      void confirmTerminalClose([label]).then((confirmed) =>
+      {
+        if (confirmed) onCloseTerminal(terminalId)
+      })
+    },
+    [onCloseTerminal, terminalLabelById],
+  )
   const resolveTerminalLaunchLocation = useCallback(
     (terminalId: string): TerminalLaunchLocation =>
     {
@@ -585,7 +597,7 @@ export default function ThreadTerminalDrawer({
             <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
               className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-              onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
+              onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
               label={closeTerminalActionLabel}
             >
               <Trash2 className="size-3.25" />
@@ -595,7 +607,12 @@ export default function ThreadTerminalDrawer({
       )}
 
       <div className="min-h-0 w-full flex-1">
-        <div className={`flex h-full min-h-0 ${hasTerminalSidebar ? 'gap-1.5' : ''}`}>
+        <div
+          className={cn(
+            'flex h-full min-h-0 bg-[var(--terminal-background)]',
+            hasTerminalSidebar && 'gap-1.5',
+          )}
+        >
           <div className="min-w-0 flex-1">
             {isSplitView ? (
               <div
@@ -633,7 +650,7 @@ export default function ThreadTerminalDrawer({
                         }
                       }}
                     >
-                      <div className="h-full p-1">
+                      <div className="h-full">
                         <TerminalViewport
                           threadRef={threadRef}
                           threadId={threadId}
@@ -660,7 +677,7 @@ export default function ThreadTerminalDrawer({
                 })}
               </div>
             ) : (
-              <div className="h-full p-1">
+              <div className="h-full">
                 <TerminalViewport
                   key={resolvedActiveTerminalId}
                   threadRef={threadRef}
@@ -721,7 +738,7 @@ export default function ThreadTerminalDrawer({
                   </TerminalActionButton>
                   <TerminalActionButton
                     className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
-                    onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
+                    onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
                     label={closeTerminalActionLabel}
                   >
                     <Trash2 className="size-3.25" />
@@ -792,7 +809,7 @@ export default function ThreadTerminalDrawer({
                                       <button
                                         type="button"
                                         className="inline-flex size-3.5 items-center justify-center rounded text-xs font-medium leading-none text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100"
-                                        onClick={() => onCloseTerminal(terminalId)}
+                                        onClick={() => confirmCloseTerminal(terminalId)}
                                         aria-label={closeTerminalLabel}
                                       />
                                     }

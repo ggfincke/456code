@@ -42,7 +42,11 @@ import {
 import { CHAT_LIST_ANCHOR_OFFSET } from '@t3tools/shared/chatList'
 import { projectScriptCwd, projectScriptRuntimeEnv } from '@t3tools/shared/projectScripts'
 import { truncate } from '@t3tools/shared/String'
-import { nextTerminalId, resolveTerminalSessionLabel } from '@t3tools/shared/terminalLabels'
+import {
+  getTerminalLabel,
+  nextTerminalId,
+  resolveTerminalSessionLabel,
+} from '@t3tools/shared/terminalLabels'
 import { resolveThreadChangeRoot } from '@t3tools/shared/threadChangeRoot'
 import { Debouncer } from '@tanstack/react-pacer'
 import { useAtomValue } from '@effect/atom-react'
@@ -116,6 +120,7 @@ import {
 import { useTheme } from '../hooks/useTheme'
 import { useTurnDiffSummaries } from '../hooks/useTurnDiffSummaries'
 import { isCommandPaletteOpen } from '../commandPaletteBus'
+import { confirmTerminalClose, isTerminalCloseConfirmPending } from '../lib/terminalCloseConfirm'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from '../rightPanelLayout'
 import {
@@ -123,6 +128,7 @@ import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
   selectThreadRightPanelState,
+  type RightPanelSurface,
   useRightPanelStore,
 } from '../rightPanelStore'
 import {
@@ -134,6 +140,7 @@ import type { ArchitectureFileOpenTarget } from './architecture/ArchitectureScop
 import { RepositoryAtlasBootstrap } from './architecture/RepositoryAtlasBootstrap'
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from '../previewStateStore'
 import { registerFaviconProjectForThread } from '../browser/browserFaviconStore'
+import { previewRuntimeTabId } from '../browser/previewRuntimeTabId'
 import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
 import { makeWorkspaceFileDropHandlers } from './chat/workspaceFileDrop'
 import { resolveAutoVisitTimestamp } from './Sidebar.logic'
@@ -1036,6 +1043,14 @@ function ChatViewContent(props: ChatViewProps)
   const activeFileSurface =
     activeRightPanelSurface?.kind === 'file' ? activeRightPanelSurface : null
   const activePreviewState = useThreadPreviewState(activeThreadRef)
+  const activePreviewServerEpoch = activePreviewState.serverEpoch
+  const resolvePreviewRuntimeTabId = useMemo(
+    () =>
+      activeThreadRef
+        ? (tabId: string) => previewRuntimeTabId(activeThreadRef, activePreviewServerEpoch, tabId)
+        : undefined,
+    [activePreviewServerEpoch, activeThreadRef],
+  )
   const panelTerminalIds = useMemo(
     () =>
       new Set(
@@ -2974,10 +2989,10 @@ function ChatViewContent(props: ChatViewProps)
     addWorkersSurface,
     closeAllRightPanelSurfaces,
     closeOtherRightPanelSurfaces,
-    closePanelTerminal,
+    closePanelTerminal: closePanelTerminalImmediately,
     closePlanSidebar,
     closePreviewPanel,
-    closeRightPanelSurface,
+    closeRightPanelSurface: closeRightPanelSurfaceImmediately,
     closeRightPanelSurfacesToRight,
     copyRightPanelFilePath,
     createBrowserSurface,
@@ -3020,6 +3035,51 @@ function ChatViewContent(props: ChatViewProps)
     setMaximizedRightPanelThreadKey,
     storeCloseTerminal,
   })
+  const requestCloseTerminal = useCallback(
+    (terminalId: string) =>
+    {
+      const label = activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId)
+      void confirmTerminalClose([label]).then((confirmed) =>
+      {
+        if (confirmed) closeTerminal(terminalId)
+      })
+    },
+    [activeTerminalLabelsById, closeTerminal],
+  )
+  const requestClosePanelTerminal = useCallback(
+    (terminalId: string) =>
+    {
+      const label = activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId)
+      void confirmTerminalClose([label]).then((confirmed) =>
+      {
+        if (confirmed) closePanelTerminalImmediately(terminalId)
+      })
+    },
+    [activeTerminalLabelsById, closePanelTerminalImmediately],
+  )
+  const closeRightPanelSurface = useCallback(
+    (surface: RightPanelSurface) =>
+    {
+      if (surface.kind !== 'terminal')
+      {
+        closeRightPanelSurfaceImmediately(surface)
+        return
+      }
+      const activeLabel =
+        activeTerminalLabelsById.get(surface.activeTerminalId) ??
+        getTerminalLabel(surface.activeTerminalId)
+      const otherLabels = surface.terminalIds
+        .filter((terminalId) => terminalId !== surface.activeTerminalId)
+        .map(
+          (terminalId) => activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId),
+        )
+      void confirmTerminalClose([activeLabel, ...otherLabels]).then((confirmed) =>
+      {
+        if (confirmed) closeRightPanelSurfaceImmediately(surface)
+      })
+    },
+    [activeTerminalLabelsById, closeRightPanelSurfaceImmediately],
+  )
   const architectureParentSurfaceId = activeRightPanelSurface?.id
   const openArchitectureScopeSurface = useCallback(
     (target: ArchitectureScopeTarget): void =>
@@ -3764,14 +3824,19 @@ function ChatViewContent(props: ChatViewProps)
   const activeThreadSettled = useMemo(() =>
   {
     if (activeThreadShell === null || !supportsSettlement) return false
+    const changeRequest =
+      activeThreadPr === null
+        ? null
+        : { state: activeThreadPr.state, updatedAt: activeThreadPr.updatedAt }
     return effectiveSettled(activeThreadShell, {
       now: `${nowMinute}:00.000Z`,
       autoSettleAfterDays,
       autoSettleOnMerge,
-      changeRequestState: activeThreadPr?.state ?? null,
+      changeRequest,
     })
   }, [
     activeThreadPr?.state,
+    activeThreadPr?.updatedAt,
     activeThreadShell,
     autoSettleAfterDays,
     autoSettleOnMerge,
@@ -4394,13 +4459,14 @@ function ChatViewContent(props: ChatViewProps)
       {
         event.preventDefault()
         event.stopPropagation()
+        if (isTerminalCloseConfirmPending()) return
         if (terminalFocusOwner === 'right-panel' && activeRightPanelSurface?.kind === 'terminal')
         {
-          closePanelTerminal(activeRightPanelSurface.activeTerminalId)
+          requestClosePanelTerminal(activeRightPanelSurface.activeTerminalId)
           return
         }
         if (!terminalUiState.terminalOpen) return
-        closeTerminal(terminalUiState.activeTerminalId)
+        requestCloseTerminal(terminalUiState.activeTerminalId)
         return
       }
 
@@ -4454,8 +4520,8 @@ function ChatViewContent(props: ChatViewProps)
     terminalUiState.terminalOpen,
     terminalUiState.activeTerminalId,
     activeThreadId,
-    closeTerminal,
-    closePanelTerminal,
+    requestCloseTerminal,
+    requestClosePanelTerminal,
     createNewTerminal,
     setTerminalOpen,
     runProjectScript,
@@ -5557,7 +5623,7 @@ function ChatViewContent(props: ChatViewProps)
         onSplitTerminalVertical={splitPanelTerminalVertical}
         onNewTerminal={addTerminalSurface}
         onActiveTerminalChange={activatePanelTerminal}
-        onCloseTerminal={closePanelTerminal}
+        onCloseTerminal={closePanelTerminalImmediately}
         splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
         splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
         newShortcutLabel={newTerminalShortcutLabel ?? undefined}
@@ -6220,12 +6286,14 @@ function ChatViewContent(props: ChatViewProps)
       {!shouldUsePlanSidebarSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
+          contextKey={scopedThreadKey(activeThreadRef)}
           maximized={rightPanelMaximized}
           surfaces={rightPanelState.surfaces}
           activeSurfaceId={activeRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
           desktopByTabId={activePreviewState.desktopByTabId}
+          previewRuntimeTabId={resolvePreviewRuntimeTabId}
           terminalLabelsById={activeTerminalLabelsById}
           onActivate={activateRightPanelSurface}
           onCloseSurface={closeRightPanelSurface}
@@ -6253,12 +6321,14 @@ function ChatViewContent(props: ChatViewProps)
         <RightPanelSheet open onClose={planSidebarOpen ? closePlanSidebar : closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"
+            contextKey={scopedThreadKey(activeThreadRef)}
             layoutControls={<div className="mr-px flex items-center">{panelToggleControls}</div>}
             surfaces={rightPanelState.surfaces}
             activeSurfaceId={activeRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
             desktopByTabId={activePreviewState.desktopByTabId}
+            previewRuntimeTabId={resolvePreviewRuntimeTabId}
             terminalLabelsById={activeTerminalLabelsById}
             onActivate={activateRightPanelSurface}
             onCloseSurface={closeRightPanelSurface}

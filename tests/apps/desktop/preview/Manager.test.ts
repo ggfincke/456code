@@ -14,6 +14,7 @@ import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 import type * as Scope from 'effect/Scope'
 import { TestClock } from 'effect/testing'
+import type * as Electron from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import * as DesktopEnvironment from '../../../../apps/desktop/src/app/DesktopEnvironment.ts'
@@ -134,6 +135,7 @@ const makeFaviconWebContents = (options?: {
   let currentUrl = options?.url ?? 'http://localhost:3200/'
   let destroyed = false
   let loading = false
+  let audible = false
   const fetch = vi.fn(
     options?.fetch ??
       (async () =>
@@ -166,6 +168,8 @@ const makeFaviconWebContents = (options?: {
     isDevToolsOpened: () => false,
     getZoomFactor: () => 1,
     setZoomFactor: vi.fn(),
+    setAudioMuted: vi.fn(),
+    isCurrentlyAudible: () => audible,
     reload,
     reloadIgnoringCache: vi.fn(),
     loadURL,
@@ -207,6 +211,10 @@ const makeFaviconWebContents = (options?: {
     setLoading: (value: boolean) =>
     {
       loading = value
+    },
+    setAudible: (value: boolean) =>
+    {
+      audible = value
     },
     setUrl: (url: string) =>
     {
@@ -606,6 +614,8 @@ describe('PreviewManager', () =>
           isLoading: () => false,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           loadURL,
           on: vi.fn((event: string, listener: (...args: never[]) => void) =>
           {
@@ -667,6 +677,8 @@ describe('PreviewManager', () =>
             return effectiveZoom
           },
           setZoomFactor,
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) =>
           {
             listeners.set(event, listener)
@@ -730,6 +742,8 @@ describe('PreviewManager', () =>
           isLoading: () => false,
           getZoomFactor: () => 1,
           setZoomFactor: replacementSetZoomFactor,
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
@@ -767,6 +781,8 @@ describe('PreviewManager', () =>
           isLoading: () => false,
           getZoomFactor: () => 1,
           setZoomFactor,
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
@@ -795,6 +811,53 @@ describe('PreviewManager', () =>
     ),
   )
 
+  effectIt.effect('applies creation defaults and preserves mute across guest replacement', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        const first = makeFaviconWebContents({ id: 42 })
+        const replacement = makeFaviconWebContents({ id: 43 })
+        const byId = new Map([
+          [42, first.webContents],
+          [43, replacement.webContents],
+        ])
+        fromId.mockImplementation((id?: number) => byId.get(id ?? -1) as never)
+        const states: PreviewManager.PreviewTabState[] = []
+        yield* manager.subscribeStateChanges((_tabId, state) =>
+          Effect.sync(() =>
+          {
+            states.push(state)
+          }),
+        )
+
+        yield* manager.createTab('tab_audio', { zoomFactor: 1.25, colorScheme: 'dark' })
+        yield* manager.registerWebview('tab_audio', 42)
+        yield* manager.setAudioMuted('tab_audio', true)
+        first.setAudible(true)
+        first.emit('audio-state-changed', { audible: true })
+        yield* Effect.yieldNow
+
+        expect(states.at(-1)).toMatchObject({
+          zoomFactor: 1.25,
+          colorScheme: 'dark',
+          audioMuted: true,
+          audible: true,
+        })
+        expect(
+          (first.webContents as unknown as { setZoomFactor: ReturnType<typeof vi.fn> })
+            .setZoomFactor,
+        ).toHaveBeenCalledWith(1.25)
+
+        yield* manager.registerWebview('tab_audio', 43)
+        expect(
+          (replacement.webContents as unknown as { setAudioMuted: ReturnType<typeof vi.fn> })
+            .setAudioMuted,
+        ).toHaveBeenCalledWith(true)
+        expect(states.at(-1)).toMatchObject({ audioMuted: true, audible: false })
+      }),
+    ),
+  )
+
   effectIt.effect('reasserts same-guest zoom without republishing tab state', () =>
     withManager((manager) =>
       Effect.gen(function* ()
@@ -809,6 +872,8 @@ describe('PreviewManager', () =>
           isLoading: () => false,
           getZoomFactor: () => 1,
           setZoomFactor,
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
@@ -863,6 +928,8 @@ describe('PreviewManager', () =>
           isLoading: () => false,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: {
@@ -925,6 +992,8 @@ describe('PreviewManager', () =>
               isLoading: () => false,
               getZoomFactor: () => 1,
               setZoomFactor: vi.fn(),
+              setAudioMuted: vi.fn(),
+              isCurrentlyAudible: () => false,
               on: vi.fn(),
               off: vi.fn(),
               ipc: { on: vi.fn(), off: vi.fn() },
@@ -998,6 +1067,8 @@ describe('PreviewManager', () =>
           isLoading: () => loading,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) =>
           {
             listeners.set(event, listener)
@@ -1091,6 +1162,8 @@ describe('PreviewManager', () =>
           isLoading: () => false,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: never[]) => void) =>
           {
             listeners.set(event, listener)
@@ -1167,6 +1240,8 @@ describe('PreviewManager', () =>
           isFocused: () => true,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) =>
           {
             listeners.set(event, listener)
@@ -1220,6 +1295,8 @@ describe('PreviewManager', () =>
           isFocused: () => true,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) =>
           {
             listeners.set(event, listener)
@@ -1287,6 +1364,13 @@ describe('PreviewManager', () =>
     withManager((manager) =>
       Effect.gen(function* ()
       {
+        const firstMainThrottling = vi.fn()
+        const secondMainThrottling = vi.fn()
+        const firstMainWebContents = { setBackgroundThrottling: firstMainThrottling }
+        yield* manager.setMainWindow({
+          isDestroyed: () => false,
+          webContents: firstMainWebContents,
+        } as unknown as Electron.BrowserWindow)
         let releaseFirstStart: (() => void) | undefined
         let reportFirstStart: (() => void) | undefined
         const firstStartReleased = new Promise<void>((resolve) =>
@@ -1306,6 +1390,7 @@ describe('PreviewManager', () =>
           listenersByWebContents.set(id, listeners)
           webviews.set(id, {
             id,
+            hostWebContents: firstMainWebContents,
             isDestroyed: () => false,
             getType: () => 'webview',
             getURL: () => `https://example.com/${id}`,
@@ -1314,6 +1399,8 @@ describe('PreviewManager', () =>
             isDevToolsOpened: () => false,
             getZoomFactor: () => 1,
             setZoomFactor: vi.fn(),
+            setAudioMuted: vi.fn(),
+            isCurrentlyAudible: () => false,
             on: vi.fn((event: string, listener: (...args: unknown[]) => void) =>
             {
               listeners.set(event, listener)
@@ -1354,6 +1441,13 @@ describe('PreviewManager', () =>
 
         const firstRecording = yield* manager.startRecording('tab_1').pipe(Effect.forkChild)
         yield* Effect.promise(() => firstStartReported)
+        expect(firstMainThrottling.mock.calls).toEqual([[false]])
+
+        yield* manager.setMainWindow({
+          isDestroyed: () => false,
+          webContents: { setBackgroundThrottling: secondMainThrottling },
+        } as unknown as Electron.BrowserWindow)
+        expect(secondMainThrottling.mock.calls).toEqual([[false]])
 
         const conflicting = yield* Effect.exit(manager.startRecording('tab_2'))
         expect(Exit.isFailure(conflicting)).toBe(true)
@@ -1371,8 +1465,12 @@ describe('PreviewManager', () =>
         listenersByWebContents.get(41)?.get('destroyed')?.()
         yield* Effect.yieldNow
         yield* Effect.yieldNow
+        expect(secondMainThrottling.mock.calls).toEqual([[false], [true]])
 
         yield* manager.startRecording('tab_2')
+        expect(secondMainThrottling.mock.calls).toEqual([[false], [true], [false]])
+        yield* manager.stopRecording('tab_2')
+        expect(secondMainThrottling.mock.calls).toEqual([[false], [true], [false], [true]])
       }),
     ),
   )
@@ -1468,6 +1566,8 @@ describe('PreviewManager', () =>
           isDevToolsOpened: () => false,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: {
@@ -1572,6 +1672,8 @@ describe('PreviewManager', () =>
           focus,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: {
@@ -1730,6 +1832,8 @@ describe('PreviewManager', () =>
           isDevToolsOpened: () => false,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: {
@@ -1800,6 +1904,8 @@ describe('PreviewManager', () =>
           isDevToolsOpened: () => false,
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },

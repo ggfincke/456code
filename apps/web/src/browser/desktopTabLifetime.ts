@@ -2,6 +2,7 @@
 // define acquired desktop tab
 
 import { previewBridge } from './previewBridge'
+import { browserDefaultTabState, resolveBrowserDefaults } from './browserDefaults'
 
 interface DesktopTabLease
 {
@@ -11,6 +12,26 @@ interface DesktopTabLease
 }
 
 const leases = new Map<string, DesktopTabLease>()
+const pendingTabOperations = new Map<string, Promise<void>>()
+
+const enqueueDesktopTabOperation = (
+  tabId: string,
+  operation: () => Promise<void> | void,
+): Promise<void> =>
+{
+  const previous = pendingTabOperations.get(tabId)
+  const pending = previous
+    ? previous.catch(() => undefined).then(operation)
+    : Promise.resolve(operation())
+  pendingTabOperations.set(tabId, pending)
+  void pending
+    .finally(() =>
+    {
+      if (pendingTabOperations.get(tabId) === pending) pendingTabOperations.delete(tabId)
+    })
+    .catch(() => undefined)
+  return pending
+}
 
 export interface AcquiredDesktopTab
 {
@@ -25,7 +46,12 @@ export function acquireDesktopTab(tabId: string): AcquiredDesktopTab
     ({
       references: 0,
       closeTimer: null,
-      ready: previewBridge?.createTab(tabId) ?? Promise.resolve(),
+      ready: enqueueDesktopTabOperation(tabId, async () =>
+      {
+        if (!previewBridge) return
+        const defaults = await resolveBrowserDefaults()
+        await previewBridge.createTab(tabId, browserDefaultTabState(defaults))
+      }),
     } satisfies DesktopTabLease)
   if (current.closeTimer !== null) window.clearTimeout(current.closeTimer)
   current.references += 1
@@ -45,7 +71,9 @@ export function acquireDesktopTab(tabId: string): AcquiredDesktopTab
         const latest = leases.get(tabId)
         if (!latest || latest.references > 0) return
         leases.delete(tabId)
-        void previewBridge?.closeTab(tabId)
+        void enqueueDesktopTabOperation(tabId, () => previewBridge?.closeTab(tabId)).catch(
+          () => undefined,
+        )
       }, 0)
     },
   }
