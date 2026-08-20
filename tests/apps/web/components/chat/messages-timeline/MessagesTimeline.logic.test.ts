@@ -2,6 +2,7 @@
 // verify compute message duration start behavior
 
 import { describe, expect, it } from 'vite-plus/test'
+import { toolCallIdentityKey } from '@t3tools/client-runtime/thread-activity'
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
@@ -569,7 +570,7 @@ describe('deriveMessagesTimelineRows', () =>
       'user-entry',
       'turn-fold:turn-1',
       'assistant-thought-entry',
-      'work-entry-1',
+      'work-toggle:work-entry-1',
       'assistant-final-entry',
     ])
     expect(
@@ -577,7 +578,7 @@ describe('deriveMessagesTimelineRows', () =>
     ).toBeDefined()
   })
 
-  it('keeps persisted orchestrate plan rows visible when commentary is folded', () =>
+  it('keeps persisted orchestrate plans and fork task rows visible when commentary is folded', () =>
   {
     const revision = {
       runId: 'run-42',
@@ -625,6 +626,21 @@ describe('deriveMessagesTimelineRows', () =>
           },
         },
         {
+          id: 'task-entry',
+          kind: 'work' as const,
+          createdAt: '2026-01-01T00:00:10Z',
+          entry: {
+            id: 'task-work',
+            createdAt: '2026-01-01T00:00:10Z',
+            turnId: 'turn-1' as never,
+            taskId: 'fork-42',
+            label: 'Investigated the renderer',
+            tone: 'thinking' as const,
+            sourceActivityKind: 'task.completed' as const,
+            toolLifecycleStatus: 'completed' as const,
+          },
+        },
+        {
           id: 'orchestrate-plan:run-42:1',
           kind: 'orchestrate-plan' as const,
           createdAt: '2026-01-01T00:00:12Z',
@@ -654,6 +670,7 @@ describe('deriveMessagesTimelineRows', () =>
     expect(rows.map((row) => row.id)).toEqual([
       'user-entry',
       'turn-fold:turn-1',
+      'task-entry',
       'orchestrate-plan:run-42:1',
       'assistant-final-entry',
     ])
@@ -911,10 +928,74 @@ describe('deriveMessagesTimelineRows', () =>
 
     expect(rows.some((row) => row.kind === 'turn-fold')).toBe(false)
     expect(rows.map((row) => row.id)).toEqual([
-      'assistant-thought-entry',
-      'work-entry-1',
       'working-indicator-row',
+      'assistant-thought-entry',
+      'work-live:work-entry-1',
     ])
+  })
+
+  it('expands the replacing live tool row into its contiguous tool calls', () =>
+  {
+    const turnId = 'turn-live' as never
+    const toolIdentity = toolCallIdentityKey(turnId, 'call-a')
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: 'tool-entry-a',
+          kind: 'work',
+          createdAt: '2026-01-01T00:00:05Z',
+          entry: {
+            id: 'tool-a',
+            createdAt: '2026-01-01T00:00:05Z',
+            turnId,
+            toolCallId: 'call-a',
+            label: 'Ran search',
+            command: 'rg toolCall',
+            tone: 'tool',
+            toolLifecycleStatus: 'completed',
+          },
+        },
+        {
+          id: 'tool-entry-b',
+          kind: 'work',
+          createdAt: '2026-01-01T00:00:06Z',
+          entry: {
+            id: 'tool-b',
+            createdAt: '2026-01-01T00:00:06Z',
+            turnId,
+            toolCallId: 'call-b',
+            label: 'Running tests',
+            command: 'vp test run',
+            tone: 'tool',
+            toolLifecycleStatus: 'inProgress',
+          },
+        },
+      ],
+      latestTurn: {
+        turnId,
+        state: 'running',
+        startedAt: '2026-01-01T00:00:00Z',
+        completedAt: null,
+      },
+      runningTurnId: turnId,
+      expandedWorkGroupIds: new Set([`work-group:tool:${toolIdentity}`]),
+      isWorking: true,
+      activeTurnStartedAt: '2026-01-01T00:00:00Z',
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    })
+
+    expect(rows.map((row) => row.id)).toEqual([
+      'working-indicator-row',
+      `work-live:tool:${toolIdentity}`,
+      'tool-a',
+      'tool-b',
+    ])
+    expect(rows.find((row) => row.kind === 'work-live')).toMatchObject({
+      entry: { id: 'tool-b' },
+      groupedEntries: [{ id: 'tool-a' }, { id: 'tool-b' }],
+      expanded: true,
+    })
   })
 
   it("does not fold the session's running turn when latestTurn regresses", () =>
@@ -976,7 +1057,7 @@ describe('deriveMessagesTimelineRows', () =>
     expect(rows.filter((row) => row.kind === 'turn-fold').map((row) => row.turnId)).toEqual([
       'turn-1',
     ])
-    expect(rows.map((row) => row.id)).toContain('running-work-entry')
+    expect(rows.map((row) => row.id)).toContain('work-live:running-work-entry')
   })
 
   it('only shows assistant metadata on the terminal assistant message', () =>
@@ -1121,18 +1202,19 @@ describe('deriveMessagesTimelineRows', () =>
       expandedWorkGroupIds: new Set(['work-group:work-entry-1']),
     })
 
-    expect(collapsedRows.map((row) => row.id)).toEqual(['work-3', 'work-toggle:work-entry-1'])
+    expect(collapsedRows.map((row) => row.id)).toEqual(['work-toggle:work-entry-1'])
     expect(collapsedRows.find((row) => row.kind === 'work-toggle')).toMatchObject({
       groupId: 'work-group:work-entry-1',
-      hiddenCount: 2,
+      hiddenCount: 3,
       expanded: false,
       onlyToolEntries: true,
+      summary: 'Used 3 tools',
     })
     expect(expandedRows.map((row) => row.id)).toEqual([
+      'work-toggle:work-entry-1',
       'work-1',
       'work-2',
       'work-3',
-      'work-toggle:work-entry-1',
     ])
     expect(expandedRows.find((row) => row.kind === 'work-toggle')).toMatchObject({
       expanded: true,
@@ -1335,8 +1417,10 @@ describe('computeStableMessagesTimelineRows', () =>
     const completed = computeStableMessagesTimelineRows(deriveRows('complete'), initial)
 
     expect(completed).not.toBe(initial)
-    expect(completed.result[0]).not.toBe(initial.result[0])
-    expect(completed.result[0]).toMatchObject({
+    const initialMessage = initial.result.find((row) => row.id === 'assistant-entry')
+    const completedMessage = completed.result.find((row) => row.id === 'assistant-entry')
+    expect(completedMessage).not.toBe(initialMessage)
+    expect(completedMessage).toMatchObject({
       kind: 'message',
       message: {
         id: 'assistant-1',

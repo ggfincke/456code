@@ -202,6 +202,8 @@ describe('PreviewEvent', () =>
         threadId: 't',
         tabId: 'preview-t',
         createdAt: '2026-01-01T00:00:00.000Z',
+        serverEpoch: 'server-a',
+        revision: 1,
         snapshot: {
           threadId: 't',
           tabId: 'preview-t',
@@ -219,6 +221,8 @@ describe('PreviewEvent', () =>
         threadId: 't',
         tabId: 'preview-t',
         createdAt: '2026-01-01T00:00:00.000Z',
+        serverEpoch: 'server-a',
+        revision: 1,
         url: 'https://example.com/',
         title: '',
         code: -105,

@@ -58,6 +58,7 @@ import {
 const environmentId = EnvironmentId.make('env-1')
 const threadRef = scopeThreadRef(environmentId, ThreadId.make('thread-1'))
 const projectRef = scopeProjectRef(environmentId, ProjectId.make('project-1'))
+const runtimeTabId = JSON.stringify([environmentId, threadRef.threadId, 'server-a', 'tab-1'])
 const favicon: DesktopPreviewFavicon = {
   dataUrl: 'data:image/png;base64,AAAA',
   pageUrl: 'http://localhost:3000/app',
@@ -75,6 +76,8 @@ const state = (
   canGoForward: false,
   zoomFactor: 1,
   colorScheme: 'system',
+  audioMuted: false,
+  audible: false,
   controller: 'none',
   favicon,
   updatedAt: '2026-08-16T00:00:00.000Z',
@@ -86,7 +89,7 @@ let container: HTMLDivElement | null = null
 
 const Harness = (props: { readonly revision: number }) =>
 {
-  usePreviewBridge({ threadRef, tabId: 'tab-1' })
+  usePreviewBridge({ threadRef, tabId: 'tab-1', runtimeTabId })
   return <span>{props.revision}</span>
 }
 
@@ -162,8 +165,9 @@ describe('usePreviewBridge favicon behavior', () =>
     await act(async () => root?.render(<Harness revision={0} />))
 
     const initial = state({ kind: 'Success', url: 'http://localhost:3000/', title: 'Home' })
-    await act(async () => mocks.listener?.('tab-1', initial))
-    await act(async () => mocks.listener?.('tab-1', initial))
+    await act(async () => mocks.listener?.(runtimeTabId, initial))
+    await act(async () => mocks.listener?.(runtimeTabId, initial))
+    expect(mocks.applyDesktopState).toHaveBeenLastCalledWith(threadRef, 'tab-1', expect.any(Object))
     expect(mocks.recordFavicon).toHaveBeenLastCalledWith(threadRef, favicon, null, undefined)
     expect(mocks.reportStatus).toHaveBeenCalledTimes(1)
     expect(mocks.flushPending).not.toHaveBeenCalled()
@@ -177,7 +181,7 @@ describe('usePreviewBridge favicon behavior', () =>
 
     expect(mocks.flushPending).toHaveBeenCalledWith(threadRef, projectRef, '192.168.64.2')
     expect(mocks.onStateChange).toHaveBeenCalledTimes(1)
-    await act(async () => mocks.listener?.('tab-1', initial))
+    await act(async () => mocks.listener?.(runtimeTabId, initial))
     expect(mocks.recordFavicon).toHaveBeenLastCalledWith(
       threadRef,
       favicon,
@@ -191,7 +195,7 @@ describe('usePreviewBridge favicon behavior', () =>
       url: 'http://localhost:3000/',
       title: 'Dashboard',
     })
-    await act(async () => mocks.listener?.('tab-1', titleChanged))
+    await act(async () => mocks.listener?.(runtimeTabId, titleChanged))
     expect(mocks.reportStatus).toHaveBeenCalledTimes(2)
     expect(mocks.reportStatus).toHaveBeenLastCalledWith({
       environmentId,
@@ -201,7 +205,7 @@ describe('usePreviewBridge favicon behavior', () =>
       }),
     })
 
-    await act(async () => mocks.listener?.('tab-1', { ...titleChanged, canGoBack: true }))
+    await act(async () => mocks.listener?.(runtimeTabId, { ...titleChanged, canGoBack: true }))
     expect(mocks.reportStatus).toHaveBeenCalledTimes(3)
     expect(mocks.reportStatus).toHaveBeenLastCalledWith({
       environmentId,

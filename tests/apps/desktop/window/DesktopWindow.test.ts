@@ -83,6 +83,7 @@ function makeFakeBrowserWindow()
     reload: vi.fn(),
     replaceMisspelling: vi.fn(),
     send: vi.fn(),
+    setBackgroundThrottling: vi.fn(),
     setZoomLevel: vi.fn((nextZoomLevel: number) =>
     {
       zoomLevel = nextZoomLevel
@@ -132,6 +133,7 @@ function makeFakeBrowserWindow()
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
     send: webContents.send,
+    setBackgroundThrottling: webContents.setBackgroundThrottling,
     setAutoHideCursor: window.setAutoHideCursor,
     setZoomLevel: webContents.setZoomLevel,
     webContentsListeners,
@@ -475,6 +477,7 @@ describe('DesktopWindow', () =>
         assert.isUndefined(createdWindowOptions[0]?.x)
         assert.isUndefined(createdWindowOptions[0]?.y)
         assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor)
+        assert.isFalse(createdWindowOptions[0]?.webPreferences?.backgroundThrottling)
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]])
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ['code456-dev://app/'])
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1)
@@ -655,6 +658,7 @@ describe('DesktopWindow', () =>
         }
         readyToShow()
         assert.equal(fakeWindow.maximize.mock.calls.length, 1)
+        assert.deepEqual(fakeWindow.setBackgroundThrottling.mock.calls, [[true]])
       }).pipe(Effect.provide(layer))
     }),
   )

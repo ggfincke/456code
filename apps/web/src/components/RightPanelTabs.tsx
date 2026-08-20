@@ -15,6 +15,8 @@ import {
   Network,
   Plus,
   TerminalSquare,
+  Volume2,
+  VolumeOff,
   X,
 } from 'lucide-react'
 import {
@@ -25,7 +27,9 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
+  useState,
 } from 'react'
 
 import { isElectron } from '~/env'
@@ -34,11 +38,13 @@ import type { RightPanelSurface } from '~/rightPanelStore'
 import { cn } from '~/lib/utils'
 import { readLocalApi } from '~/localApi'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '~/components/ui/tooltip'
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from '~/components/ui/menu'
+import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from '~/components/ui/menu'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import { faviconUrlForOrigin } from '~/lib/favicon'
+import { confirmTerminalClose } from '~/lib/terminalCloseConfirm'
 import { useTheme } from '~/hooks/useTheme'
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/lib/workspaceTitlebar'
+import { previewBridge } from '~/browser/previewBridge'
 
 import { PreviewPanelShell, type PreviewPanelMode } from './preview/PreviewPanelShell'
 import { FaviconImage } from './preview/PreviewFaviconIcon'
@@ -47,6 +53,7 @@ import { PierreEntryIcon } from './chat/PierreEntryIcon'
 interface RightPanelTabsProps
 {
   mode: PreviewPanelMode
+  contextKey: string
   maximized?: boolean
   layoutControls?: ReactNode
   surfaces: readonly RightPanelSurface[]
@@ -54,6 +61,7 @@ interface RightPanelTabsProps
   pendingSurfaceIds: ReadonlySet<string>
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>
   desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>
+  previewRuntimeTabId?: ((tabId: string) => string) | undefined
   terminalLabelsById: ReadonlyMap<string, string>
   onActivate: (surface: RightPanelSurface) => void
   onCloseSurface: (surface: RightPanelSurface) => void
@@ -85,7 +93,98 @@ const SURFACE_DISABLED_REASONS = {
 } as const
 const NOOP_SURFACE_ACTION = () => undefined
 
-type TabContextMenuAction = 'copy-path' | 'close' | 'close-others' | 'close-to-right' | 'close-all'
+type TabContextMenuAction =
+  'copy-path' | 'toggle-mute' | 'close' | 'close-others' | 'close-to-right' | 'close-all'
+type BulkTabCloseAction = Extract<
+  TabContextMenuAction,
+  'close-others' | 'close-to-right' | 'close-all'
+>
+
+function previewTabIdOf(
+  surface: RightPanelSurface,
+  sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
+): string | null
+{
+  if (surface.kind !== 'preview' || !surface.resourceId) return null
+  return sessions[surface.resourceId]?.tabId ?? null
+}
+
+export function tabMuteMenuItem(input: {
+  readonly overlay: DesktopPreviewOverlay | null
+  readonly canResolveRuntimeTabId: boolean
+}): { readonly label: string; readonly disabled: boolean }
+{
+  return {
+    label: input.overlay?.audioMuted ? 'Unmute tab' : 'Mute tab',
+    disabled: input.overlay === null || !input.canResolveRuntimeTabId,
+  }
+}
+
+type TabAudioState = 'none' | 'audible' | 'muted'
+
+function tabAudioState(overlay: DesktopPreviewOverlay | null): TabAudioState
+{
+  if (!overlay?.audible) return 'none'
+  return overlay.audioMuted ? 'muted' : 'audible'
+}
+
+async function confirmTerminalSurfaceBatch(
+  surfaces: readonly RightPanelSurface[],
+  terminalLabelsById: ReadonlyMap<string, string>,
+): Promise<boolean>
+{
+  const labels = surfaces.flatMap((surface) =>
+    surface.kind === 'terminal'
+      ? surface.terminalIds.map(
+          (terminalId) => terminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId),
+        )
+      : [],
+  )
+  const firstLabel = labels[0]
+  if (firstLabel === undefined) return true
+  return confirmTerminalClose([firstLabel, ...labels.slice(1)])
+}
+
+function resolveBulkCloseBatch(
+  surfaces: readonly RightPanelSurface[],
+  targetId: string,
+  action: BulkTabCloseAction,
+): { readonly target: RightPanelSurface; readonly surfaces: readonly RightPanelSurface[] } | null
+{
+  const targetIndex = surfaces.findIndex((surface) => surface.id === targetId)
+  const target = surfaces[targetIndex]
+  if (!target) return null
+  switch (action)
+  {
+    case 'close-others':
+      return { target, surfaces: surfaces.filter((surface) => surface.id !== targetId) }
+    case 'close-to-right':
+      return { target, surfaces: surfaces.slice(targetIndex + 1) }
+    case 'close-all':
+      return { target, surfaces }
+  }
+}
+
+const closeBatchSignature = (surfaces: readonly RightPanelSurface[]): string =>
+  JSON.stringify(surfaces)
+
+type SurfaceShortcutEvent = Pick<
+  KeyboardEvent,
+  'altKey' | 'ctrlKey' | 'defaultPrevented' | 'isComposing' | 'key' | 'metaKey'
+>
+
+export function surfaceShortcutActionForKey<
+  const Action extends { available: boolean; shortcut: string },
+>(actions: readonly Action[], event: SurfaceShortcutEvent): Action | null
+{
+  if (event.defaultPrevented || event.isComposing) return null
+  if (event.metaKey || event.ctrlKey || event.altKey) return null
+  return (
+    actions.find(
+      (action) => action.available && action.shortcut.toLowerCase() === event.key.toLowerCase(),
+    ) ?? null
+  )
+}
 
 function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement })
 {
@@ -100,6 +199,7 @@ function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement })
 function SurfaceMenuItem(props: {
   available: boolean
   disabledReason?: string
+  shortcut: string
   onClick: () => void
   children: ReactNode
 })
@@ -109,8 +209,10 @@ function SurfaceMenuItem(props: {
       className={!props.available ? 'data-disabled:pointer-events-auto' : undefined}
       onClick={props.onClick}
       disabled={!props.available}
+      aria-keyshortcuts={props.shortcut}
     >
       {props.children}
+      <MenuShortcut>{props.shortcut}</MenuShortcut>
     </MenuItem>
   )
   if (props.available || !props.disabledReason) return item
@@ -447,6 +549,74 @@ export function RightPanelTabs(props: RightPanelTabsProps)
   const { resolvedTheme } = useTheme()
   const tabsetId = useId()
   const tabListRef = useRef<HTMLDivElement>(null)
+  const latestPropsRef = useRef(props)
+  const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false)
+  const addSurfaceActions = [
+    {
+      label: 'Browser',
+      icon: Globe2,
+      shortcut: 'B',
+      available: props.browserAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.browser,
+      onClick: props.onAddBrowser,
+    },
+    {
+      label: 'Terminal',
+      icon: TerminalSquare,
+      shortcut: 'T',
+      available: true,
+      onClick: props.onAddTerminal,
+    },
+    {
+      label: 'Files',
+      icon: Files,
+      shortcut: 'F',
+      available: props.filesAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.files,
+      onClick: props.onAddFiles,
+    },
+    {
+      label: 'Diff',
+      icon: FileDiff,
+      shortcut: 'D',
+      available: props.diffAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.diff,
+      onClick: props.onAddDiff,
+    },
+    {
+      label: 'Workers',
+      icon: Bot,
+      shortcut: 'W',
+      available: true,
+      onClick: props.onAddWorkers,
+    },
+    {
+      label: 'Proposal Review',
+      icon: Network,
+      shortcut: 'P',
+      available: props.explorerAvailable === true,
+      disabledReason: SURFACE_DISABLED_REASONS.explorer,
+      onClick: props.onAddExplorer ?? NOOP_SURFACE_ACTION,
+    },
+    {
+      label: 'Repository Atlas',
+      icon: Map,
+      shortcut: 'R',
+      available: props.repositoryAtlasAvailable === true,
+      disabledReason: SURFACE_DISABLED_REASONS.atlas,
+      onClick: props.onAddRepositoryAtlas ?? NOOP_SURFACE_ACTION,
+    },
+  ] as const
+
+  const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) =>
+  {
+    const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent)
+    if (!action) return
+    event.preventDefault()
+    event.stopPropagation()
+    setAddSurfaceMenuOpen(false)
+    action.onClick()
+  }
   const tabButtonRefs = useRef(new globalThis.Map<string, HTMLButtonElement>())
   const focusAfterCloseRef = useRef(false)
   const activeSurfaceIndex = props.surfaces.findIndex(
@@ -454,6 +624,11 @@ export function RightPanelTabs(props: RightPanelTabsProps)
   )
   const panelId = `${tabsetId}-panel`
   const activeTabId = activeSurfaceIndex < 0 ? undefined : `${tabsetId}-tab-${activeSurfaceIndex}`
+
+  useLayoutEffect(() =>
+  {
+    latestPropsRef.current = props
+  }, [props])
 
   const closeSurface = useCallback(
     (surface: RightPanelSurface): void =>
@@ -469,6 +644,7 @@ export function RightPanelTabs(props: RightPanelTabsProps)
     {
       event.preventDefault()
       event.stopPropagation()
+      const originContextKey = props.contextKey
 
       const api = readLocalApi()
       if (!api) return
@@ -481,8 +657,21 @@ export function RightPanelTabs(props: RightPanelTabsProps)
       {
         items.push({ id: 'copy-path', label: 'Copy path' })
       }
+      const menuPreviewTabId = previewTabIdOf(surface, props.previewSessions)
+      const menuOverlay = menuPreviewTabId ? (props.desktopByTabId[menuPreviewTabId] ?? null) : null
+      const menuMuted = menuOverlay?.audioMuted ?? false
+      if (surface.kind === 'preview')
+      {
+        items.push({
+          id: 'toggle-mute',
+          ...tabMuteMenuItem({
+            overlay: menuOverlay,
+            canResolveRuntimeTabId: props.previewRuntimeTabId !== undefined,
+          }),
+        })
+      }
       items.push(
-        { id: 'close', label: 'Close' },
+        { id: 'close', label: 'Close', separatorBefore: surface.kind === 'preview' },
         {
           id: 'close-others',
           label: 'Close others',
@@ -506,18 +695,58 @@ export function RightPanelTabs(props: RightPanelTabsProps)
         case 'copy-path':
           if (surface.kind === 'file') props.onCopyFilePath(surface.relativePath)
           break
+        case 'toggle-mute':
+        {
+          const runtimeTabId =
+            menuPreviewTabId && menuOverlay
+              ? (props.previewRuntimeTabId?.(menuPreviewTabId) ?? null)
+              : null
+          if (runtimeTabId)
+          {
+            void previewBridge?.setAudioMuted(runtimeTabId, !menuMuted).catch(() => undefined)
+          }
+          break
+        }
         case 'close':
           closeSurface(surface)
           break
         case 'close-others':
-          props.onCloseOtherSurfaces(surface)
-          break
         case 'close-to-right':
-          props.onCloseSurfacesToRight(surface)
-          break
         case 'close-all':
-          props.onCloseAllSurfaces()
+        {
+          const selectedProps = latestPropsRef.current
+          if (selectedProps.contextKey !== originContextKey) break
+          const selectedBatch = resolveBulkCloseBatch(selectedProps.surfaces, surface.id, action)
+          if (!selectedBatch) break
+          const selectedSignature = closeBatchSignature(selectedBatch.surfaces)
+          if (
+            !(await confirmTerminalSurfaceBatch(
+              selectedBatch.surfaces,
+              selectedProps.terminalLabelsById,
+            ))
+          )
+          {
+            break
+          }
+
+          const currentProps = latestPropsRef.current
+          const currentBatch = resolveBulkCloseBatch(currentProps.surfaces, surface.id, action)
+          if (
+            currentProps.contextKey !== originContextKey ||
+            !currentBatch ||
+            closeBatchSignature(currentBatch.surfaces) !== selectedSignature
+          )
+          {
+            break
+          }
+          if (action === 'close-others') currentProps.onCloseOtherSurfaces(currentBatch.target)
+          else if (action === 'close-to-right')
+          {
+            currentProps.onCloseSurfacesToRight(currentBatch.target)
+          }
+          else currentProps.onCloseAllSurfaces()
           break
+        }
         case null:
           break
       }
@@ -616,6 +845,14 @@ export function RightPanelTabs(props: RightPanelTabsProps)
               const pending = props.pendingSurfaceIds.has(surface.id)
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById)
               const tooltip = surfaceTooltip(title, surface)
+              const previewTabId = previewTabIdOf(surface, props.previewSessions)
+              const audioOverlay = previewTabId
+                ? (props.desktopByTabId[previewTabId] ?? null)
+                : null
+              const audio = tabAudioState(audioOverlay)
+              const audioRuntimeTabId = previewTabId
+                ? (props.previewRuntimeTabId?.(previewTabId) ?? null)
+                : null
               return (
                 <div
                   key={surface.id}
@@ -662,6 +899,33 @@ export function RightPanelTabs(props: RightPanelTabsProps)
                     />
                     <TooltipPopup>{tooltip}</TooltipPopup>
                   </Tooltip>
+                  {audio === 'none' || !audioRuntimeTabId ? null : (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted"
+                            aria-label={audio === 'muted' ? `Unmute ${title}` : `Mute ${title}`}
+                            onClick={(event) =>
+                              {
+                              event.stopPropagation()
+                              void previewBridge
+                                ?.setAudioMuted(audioRuntimeTabId, audio !== 'muted')
+                                .catch(() => undefined)
+                            }}
+                          >
+                            {audio === 'muted' ? (
+                              <VolumeOff className="size-3" />
+                            ) : (
+                              <Volume2 className="size-3" />
+                            )}
+                          </button>
+                        }
+                      />
+                      <TooltipPopup>{audio === 'muted' ? 'Unmute tab' : 'Mute tab'}</TooltipPopup>
+                    </Tooltip>
+                  )}
                   <button
                     type="button"
                     className={cn(
@@ -691,62 +955,38 @@ export function RightPanelTabs(props: RightPanelTabsProps)
               )
             })}
             {props.surfaces.length > 0 ? (
-              <Menu>
+              <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
                 <MenuTrigger
                   className="relative inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                   aria-label="Add panel surface"
                 >
                   <Plus className="size-4" />
                 </MenuTrigger>
-                <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
-                  <SurfaceMenuItem
-                    available={props.browserAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.browser}
-                    onClick={props.onAddBrowser}
-                  >
-                    <Globe2 />
-                    Browser
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddTerminal}>
-                    <TerminalSquare />
-                    Terminal
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.filesAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.files}
-                    onClick={props.onAddFiles}
-                  >
-                    <Files />
-                    Files
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.diffAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.diff}
-                    onClick={props.onAddDiff}
-                  >
-                    <FileDiff />
-                    Diff
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddWorkers}>
-                    <Bot />
-                    Workers
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.explorerAvailable === true}
-                    disabledReason={SURFACE_DISABLED_REASONS.explorer}
-                    onClick={props.onAddExplorer ?? NOOP_SURFACE_ACTION}
-                  >
-                    <Network />
-                    Proposal Review
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.repositoryAtlasAvailable === true}
-                    disabledReason={SURFACE_DISABLED_REASONS.atlas}
-                    onClick={props.onAddRepositoryAtlas ?? NOOP_SURFACE_ACTION}
-                  >
-                    <Map />
-                    Repository Atlas
-                  </SurfaceMenuItem>
+                <MenuPopup
+                  align="start"
+                  side="bottom"
+                  sideOffset={6}
+                  className="min-w-44"
+                  onKeyDownCapture={handleAddSurfaceMenuKeyDown}
+                >
+                  {addSurfaceActions.map((action) =>
+                    {
+                    const Icon = action.icon
+                    return (
+                      <SurfaceMenuItem
+                        key={action.label}
+                        available={action.available}
+                        {...('disabledReason' in action
+                          ? { disabledReason: action.disabledReason }
+                          : {})}
+                        shortcut={action.shortcut}
+                        onClick={action.onClick}
+                      >
+                        <Icon />
+                        {action.label}
+                      </SurfaceMenuItem>
+                    )
+                  })}
                 </MenuPopup>
               </Menu>
             ) : null}

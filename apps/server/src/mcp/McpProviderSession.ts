@@ -12,4 +12,5 @@ export interface McpProviderSessionConfig
   readonly providerSessionGeneration: number
   readonly endpoint: string
   readonly authorizationHeader: string
+  readonly previewToolsAvailable: boolean
 }

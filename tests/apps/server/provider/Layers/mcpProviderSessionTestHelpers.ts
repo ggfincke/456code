@@ -21,5 +21,6 @@ export function makeTestMcpProviderSession(
     providerSessionGeneration: 1,
     endpoint: TEST_MCP_ENDPOINT,
     authorizationHeader: TEST_MCP_AUTHORIZATION,
+    previewToolsAvailable: true,
   }
 }

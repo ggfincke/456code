@@ -194,9 +194,13 @@ const resolveEnvironmentPortTarget = (
   const protocol = target.protocol ?? 'http'
   const path = target.path?.startsWith('/') ? target.path : `/${target.path ?? ''}`
   const normalizedEnvironmentHost = environmentUrl.hostname.replace(/^\[|\]$/g, '')
-  const resolvedHost = normalizedEnvironmentHost.includes(':')
-    ? `[${normalizedEnvironmentHost}]`
-    : normalizedEnvironmentHost
+  // local loopback environments advertise localhost so Chromium's dual-stack
+  // lookup can reach a server bound to either ::1 or 127.0.0.1.
+  const resolvedHost = isLocalLoopbackHost(normalizedEnvironmentHost)
+    ? 'localhost'
+    : normalizedEnvironmentHost.includes(':')
+      ? `[${normalizedEnvironmentHost}]`
+      : normalizedEnvironmentHost
   const resolved = sourceUrl
     ? new URL(sourceUrl)
     : new URL(path, `${protocol}://${resolvedHost}:${target.port}`)

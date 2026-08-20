@@ -153,6 +153,28 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   return Object.keys(projectedItem).length > 0 ? projectedItem : undefined
 }
 
+function projectCommandValue(data: Record<string, unknown>): unknown
+{
+  if (data.command !== undefined)
+  {
+    return data.command
+  }
+
+  const input = asRecord(data.input)
+  if (input?.command !== undefined)
+  {
+    return input.command
+  }
+
+  const stateInput = asRecord(asRecord(data.state)?.input)
+  if (stateInput?.command !== undefined)
+  {
+    return stateInput.command
+  }
+
+  return undefined
+}
+
 // keeps client-visible image paths while pruning generated image bytes
 function projectImageViewData(data: Record<string, unknown>): Record<string, unknown> | undefined
 {
@@ -407,9 +429,10 @@ export function projectActivityPayload(
   {
     projectedData.item = item
   }
-  if ('command' in data)
+  const command = projectCommandValue(data)
+  if (command !== undefined)
   {
-    projectedData.command = data.command
+    projectedData.command = command
   }
 
   const changedFiles: string[] = []

@@ -45,3 +45,10 @@ export const HostProcessArguments = Context.Reference<ReadonlyArray<string>>(
     defaultValue: () => process.argv,
   },
 )
+
+export const HostProcessUserId = Context.Reference<number | undefined>(
+  '@t3tools/shared/hostProcess/HostProcessUserId',
+  {
+    defaultValue: () => process.getuid?.(),
+  },
+)

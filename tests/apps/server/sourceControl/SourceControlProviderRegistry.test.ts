@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import { ChildProcessSpawner } from 'effect/unstable/process'
-import { VcsRepositoryDetectionError } from '@t3tools/contracts'
+import { VcsProcessExitError, VcsRepositoryDetectionError } from '@t3tools/contracts'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import type * as VcsDriver from '../../../../apps/server/src/vcs/VcsDriver.ts'
@@ -42,6 +42,7 @@ function makeRegistry(input: {
   }>
   readonly process?: Partial<VcsProcess.VcsProcess['Service']>
   readonly resolve?: VcsDriverRegistry.VcsDriverRegistry['Service']['resolve']
+  readonly github?: Partial<GitHubCli.GitHubCli['Service']>
 })
 {
   const driver = {
@@ -93,7 +94,7 @@ function makeRegistry(input: {
         processLayer,
         Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({}),
         Layer.mock(BitbucketApi.BitbucketApi)({}),
-        Layer.mock(GitHubCli.GitHubCli)({}),
+        Layer.mock(GitHubCli.GitHubCli)({ ...input.github }),
         Layer.mock(GitLabCli.GitLabCli)({}),
         ServerConfig.layerTest(process.cwd(), {
           prefix: 't3-source-control-registry-test-',
@@ -147,6 +148,58 @@ it.effect('routes directly by provider kind for remote-first workflows', () =>
     const provider = yield* registry.get('github')
 
     assert.strictEqual(provider.kind, 'github')
+  }),
+)
+
+it.effect('pauses background provider reads while allowing explicit writes through', () =>
+  Effect.gen(function* ()
+  {
+    let listCalls = 0
+    let createCalls = 0
+    const rateLimitCause = new VcsProcessExitError({
+      operation: 'listOpenPullRequests',
+      command: 'gh',
+      cwd: '/repo',
+      exitCode: 1,
+      detail: 'Provider API rate limit exceeded.',
+      failureKind: 'rate-limited',
+    })
+    const registry = yield* makeRegistry({
+      remotes: [],
+      github: {
+        listOpenPullRequests: () =>
+          Effect.gen(function* ()
+          {
+            listCalls += 1
+            return yield* new GitHubCli.GitHubCliCommandError({
+              command: 'gh',
+              cwd: '/repo',
+              cause: rateLimitCause,
+            })
+          }),
+        createPullRequest: () =>
+          Effect.sync(() =>
+          {
+            createCalls += 1
+          }),
+      },
+    })
+    const provider = yield* registry.get('github')
+    const listInput = { cwd: '/repo', headSelector: 'feature', state: 'open' as const }
+
+    yield* provider.listChangeRequests(listInput).pipe(Effect.flip)
+    const paused = yield* provider.listChangeRequests(listInput).pipe(Effect.flip)
+    yield* provider.createChangeRequest({
+      cwd: '/repo',
+      baseRefName: 'main',
+      headSelector: 'feature',
+      title: 'Feature',
+      bodyFile: '/tmp/body.md',
+    })
+
+    assert.equal(listCalls, 1)
+    assert.include(paused.detail, 'paused until the rate limit resets')
+    assert.equal(createCalls, 1)
   }),
 )
 

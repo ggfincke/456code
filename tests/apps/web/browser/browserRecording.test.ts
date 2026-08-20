@@ -1,6 +1,7 @@
 // tests/apps/web/browser/browserRecording.test.ts
 // verify browser recording behavior
 
+import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const { events, onFrame, registrySet, save, startScreencast, stopScreencast, surfaceState } =
@@ -55,9 +56,12 @@ import {
   BrowserRecordingConflictError,
   BrowserRecordingOperationError,
   BrowserRecordingRequiresVisibleTabError,
+  findActiveBrowserRecordingRuntimeTabId,
+  readActiveBrowserRecordingTargets,
   startBrowserRecording,
   stopBrowserRecording,
 } from '../../../../apps/web/src/browser/browserRecording'
+import { previewRuntimeTabId } from '../../../../apps/web/src/browser/previewRuntimeTabId'
 
 class FakeMediaRecorder
 {
@@ -130,6 +134,31 @@ describe('browser recording', () =>
     expect(events).toEqual(['start-screencast', 'publish:recording-tab'])
 
     await stopBrowserRecording('recording-tab')
+  })
+
+  it('keeps the runtime recording key mapped to its server tab', async () =>
+  {
+    const threadRef = {
+      environmentId: EnvironmentId.make('environment-recording'),
+      threadId: ThreadId.make('thread-recording'),
+    }
+    const runtimeTabId = previewRuntimeTabId(threadRef, 'epoch-a', 'tab_1')
+    surfaceState.byTabId = {
+      [runtimeTabId]: {
+        visible: true,
+        rect: { x: 0, y: 0, width: 800, height: 600 },
+        content: { x: 0, y: 0, width: 800, height: 600, scale: 1, scrollLeft: 0, scrollTop: 0 },
+      },
+    }
+
+    await startBrowserRecording(runtimeTabId, threadRef, 'tab_1')
+
+    expect(startScreencast).toHaveBeenCalledWith(runtimeTabId)
+    expect(readActiveBrowserRecordingTargets(threadRef)).toEqual([
+      { runtimeTabId, serverTabId: 'tab_1' },
+    ])
+    expect(findActiveBrowserRecordingRuntimeTabId(threadRef, 'tab_1')).toBe(runtimeTabId)
+    await stopBrowserRecording(runtimeTabId)
   })
 
   it('rejects recording for a hidden tab before starting screencast', async () =>

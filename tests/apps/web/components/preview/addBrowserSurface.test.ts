@@ -46,7 +46,10 @@ describe('addBrowserSurface', () =>
 
     await addBrowserSurface({ threadRef, openPreview: ({ input }) => openPreview(input) })
 
-    expect(openPreview).toHaveBeenCalledWith({ threadId: 'thread-1' })
+    expect(openPreview).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      viewport: { _tag: 'fill' },
+    })
     expect(Object.keys(readThreadPreviewState(threadRef).sessions)).toEqual(['tab-1', 'tab-2'])
     expect(
       selectThreadRightPanelState(

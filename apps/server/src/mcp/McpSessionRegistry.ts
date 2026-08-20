@@ -18,6 +18,7 @@ export interface McpCredentialRequest
   readonly threadId: ThreadId
   readonly providerInstanceId: ProviderInstanceId
   readonly providerSessionGeneration: number
+  readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>
 }
 
 export interface McpIssuedCredential
@@ -139,7 +140,8 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
         providerSessionId,
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
         providerSessionGeneration: request.providerSessionGeneration,
-        capabilities: new Set(['preview', 'proposal', 'orchestrate', 'architecture']),
+        capabilities:
+          request.capabilities ?? new Set(['preview', 'proposal', 'orchestrate', 'architecture']),
         issuedAt,
       }
       yield* SynchronizedRef.update(state, ({ records }) =>
@@ -160,6 +162,7 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
           providerSessionGeneration: request.providerSessionGeneration,
           endpoint,
           authorizationHeader: `Bearer ${rawToken}`,
+          previewToolsAvailable: scope.capabilities.has('preview'),
         },
       }
     },

@@ -57,7 +57,6 @@ const handlers = {
   preview_open: (input) =>
     invokeTargeted<PreviewAutomationStatus>('open', {
       ...input,
-      show: input.show ?? true,
       reuseExistingTab: input.reuseExistingTab ?? true,
     }),
   preview_navigate: (input) =>

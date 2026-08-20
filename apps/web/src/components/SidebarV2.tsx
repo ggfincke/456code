@@ -121,6 +121,7 @@ import {
   sortThreadsForSidebarV2,
 } from './Sidebar.logic'
 import { resolveLocalCheckoutBranchMismatch } from './BranchToolbar.logic'
+import { buildThreadActionMenuItems } from './threadActionMenu.logic'
 import {
   canRetainTerminalThreadPr,
   nextThreadChangeRequestSnapshot,
@@ -1369,11 +1370,18 @@ export default function SidebarV2()
   const keybindings = useAtomValue(primaryServerKeybindingsAtom)
   const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays)
   const autoSettleOnMerge = useClientSettings((s) => s.sidebarAutoSettleOnMerge)
+  const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive)
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete)
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder)
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings)
-  const { settleThread, unsettleThread, snoozeThread, unsnoozeThread, deleteThread } =
-    useThreadActions()
+  const {
+    archiveThread,
+    settleThread,
+    unsettleThread,
+    snoozeThread,
+    unsnoozeThread,
+    deleteThread,
+  } = useThreadActions()
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   })
@@ -1399,6 +1407,29 @@ export default function SidebarV2()
         stackedThreadToast({
           type: 'error',
           title: 'Failed to copy path',
+          description: error instanceof Error ? error.message : 'An error occurred.',
+        }),
+      )
+    },
+  })
+  const { copyToClipboard: copyThreadValue } = useCopyToClipboard<{
+    label: 'Path' | 'Branch' | 'Thread ID'
+    value: string
+  }>({
+    onCopy: ({ label, value }) =>
+    {
+      toastManager.add({
+        type: 'success',
+        title: `${label} copied`,
+        description: value,
+      })
+    },
+    onError: (error) =>
+    {
+      toastManager.add(
+        stackedThreadToast({
+          type: 'error',
+          title: 'Failed to copy thread value',
           description: error instanceof Error ? error.message : 'An error occurred.',
         }),
       )
@@ -1537,6 +1568,7 @@ export default function SidebarV2()
         if (
           existing?.state === observation.state &&
           existing.branch === observation.branch &&
+          existing.updatedAt === observation.updatedAt &&
           existing.retainOnBranchMismatch === observation.retainOnBranchMismatch
         )
         {
@@ -1826,22 +1858,22 @@ export default function SidebarV2()
         const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
         const snapshot = changeRequestSnapshotByKey.get(threadKey)
         const observation = terminalChangeRequestObservationByKey.get(threadKey)
-        const observedTerminalState =
+        const observedTerminalChangeRequest =
           thread.branch !== null &&
           observation !== undefined &&
           (observation.retainOnBranchMismatch || observation.branch === thread.branch)
-            ? observation.state
+            ? { state: observation.state, updatedAt: observation.updatedAt }
             : null
         // raw adopted paths stay conservative until their row's pinned probe
         // proves the path is gone; that terminal-only observation then wins.
-        const cachedTerminalState =
+        const cachedTerminalChangeRequest =
           thread.branch !== null &&
           snapshot !== undefined &&
           thread.worktreePath === null &&
           thread.orchestrateRunWorktreePath == null
-            ? snapshot.pr.state
+            ? { state: snapshot.pr.state, updatedAt: snapshot.pr.updatedAt }
             : null
-        const changeRequestState = observedTerminalState ?? cachedTerminalState
+        const changeRequest = observedTerminalChangeRequest ?? cachedTerminalChangeRequest
         // snooze outranks settled classification: an explicitly snoozed thread
         // belongs to the shelf even if it would also auto-settle (the shelf's
         // wake time is a stronger statement about when it matters again).
@@ -1855,7 +1887,7 @@ export default function SidebarV2()
             now,
             autoSettleAfterDays,
             autoSettleOnMerge,
-            changeRequestState,
+            changeRequest,
           })
         )
         {
@@ -2533,43 +2565,29 @@ export default function SidebarV2()
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey)
         // presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date())
+        const threadWorkspacePath =
+          thread.worktreePath ??
+          projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+          null
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            [
-              ...(thread.branch
-                ? [
-                    {
-                      id: 'new-thread-on-branch',
-                      label: `New thread on ${thread.branch}`,
-                    },
-                  ]
-                : []),
-              ...(supportsSettlement
-                ? [
-                    isSettled
-                      ? { id: 'unsettle', label: 'Un-settle thread' }
-                      : { id: 'settle', label: 'Settle thread' },
-                  ]
-                : []),
-              ...(supportsSnooze
-                ? [
-                    isSnoozed
-                      ? { id: 'unsnooze', label: 'Wake thread' }
-                      : {
-                          id: 'snooze',
-                          label: 'Snooze',
-                          disabled: !canSnooze(thread, { now: new Date().toISOString() }),
-                          children: snoozePresets.map((preset) => ({
-                            id: `snooze:${preset.id}`,
-                            label: `${preset.label} (${preset.whenLabel})`,
-                          })),
-                        },
-                  ]
-                : []),
-              { id: 'rename', label: 'Rename thread' },
-              { id: 'mark-unread', label: 'Mark unread' },
-              { id: 'delete', label: 'Delete', destructive: true, icon: 'trash' },
-            ],
+            buildThreadActionMenuItems({
+              branch: thread.branch,
+              isPinned: false,
+              isSettled,
+              isSnoozed,
+              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+              isRegeneratingTitle: false,
+              isRunning:
+                thread.session?.status === 'running' && thread.session.activeTurnId != null,
+              supports: {
+                settlement: supportsSettlement,
+                snooze: supportsSnooze,
+                pinning: false,
+                titleRegeneration: false,
+              },
+              snoozePresets,
+            }),
             position,
           ),
         )
@@ -2624,6 +2642,44 @@ export default function SidebarV2()
           case 'mark-unread':
             markThreadUnread(threadKey, thread.latestTurn?.completedAt)
             return
+          case 'copy-path':
+            if (threadWorkspacePath)
+            {
+              copyThreadValue(threadWorkspacePath, { label: 'Path', value: threadWorkspacePath })
+            }
+            return
+          case 'copy-branch':
+            if (thread.branch)
+            {
+              copyThreadValue(thread.branch, { label: 'Branch', value: thread.branch })
+            }
+            return
+          case 'copy-thread-id':
+            copyThreadValue(thread.id, { label: 'Thread ID', value: thread.id })
+            return
+          case 'archive':
+          {
+            if (confirmThreadArchive)
+            {
+              const confirmed = await settlePromise(() =>
+                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
+              )
+              if (confirmed._tag === 'Failure' || !confirmed.value) return
+            }
+            const result = await archiveThread(threadRef)
+            if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+            {
+              const error = squashAtomCommandFailure(result)
+              toastManager.add(
+                stackedThreadToast({
+                  type: 'error',
+                  title: 'Failed to archive thread',
+                  description: error instanceof Error ? error.message : 'An error occurred.',
+                }),
+              )
+            }
+            return
+          }
           case 'delete':
           {
             if (confirmThreadDelete)
@@ -2663,10 +2719,14 @@ export default function SidebarV2()
       attemptSnooze,
       attemptUnsettle,
       attemptUnsnooze,
+      archiveThread,
+      confirmThreadArchive,
       confirmThreadDelete,
+      copyThreadValue,
       deleteThread,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      projectCwdByKey,
       serverConfigs,
       startThreadRename,
     ],

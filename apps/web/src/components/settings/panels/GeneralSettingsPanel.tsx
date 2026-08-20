@@ -52,6 +52,7 @@ import { stackedThreadToast, toastManager } from '../../ui/toast'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import {
   formatDiagnosticsDescription,
+  getChangedBrowserSettingLabels,
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
   readLastEnabledProjectGroupingMode,
@@ -99,7 +100,7 @@ const PROVIDER_USAGE_DISPLAY_LABELS = {
 function AboutVersionTitle()
 {
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex items-baseline gap-2">
       <span>Version</span>
       <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
     </span>
@@ -382,6 +383,9 @@ export function useSettingsRestore(onRestored?: () => void)
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ['Provider update checks']
         : []),
+      ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
+        ? ['Agent browser access']
+        : []),
       ...(Duration.toMillis(settings.automaticGitFetchInterval) !==
       Duration.toMillis(DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval)
         ? ['Automatic Git fetch interval']
@@ -406,6 +410,7 @@ export function useSettingsRestore(onRestored?: () => void)
         ? ['Delete confirmation']
         : []),
       ...(isTextGenerationModelDirty ? ['Text generation model'] : []),
+      ...getChangedBrowserSettingLabels(settings),
     ],
     [
       isTextGenerationModelDirty,
@@ -422,6 +427,11 @@ export function useSettingsRestore(onRestored?: () => void)
       settings.architectureAutoAnalysis,
       settings.enableAssistantStreaming,
       settings.enableProviderUpdateChecks,
+      settings.enableAgentBrowserAccess,
+      settings.browserDefaultViewport,
+      settings.browserDefaultZoomFactor,
+      settings.browserDefaultAppearance,
+      settings.browserAutoShowFloatingPreview,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
@@ -459,6 +469,11 @@ export function useSettingsRestore(onRestored?: () => void)
       desktopNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
+      enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
+      browserDefaultViewport: DEFAULT_UNIFIED_SETTINGS.browserDefaultViewport,
+      browserDefaultZoomFactor: DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor,
+      browserDefaultAppearance: DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance,
+      browserAutoShowFloatingPreview: DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       architectureAutoAnalysis: DEFAULT_UNIFIED_SETTINGS.architectureAutoAnalysis,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,

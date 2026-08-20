@@ -103,7 +103,7 @@ describe('updateMachine', () =>
     expect(failedInstall.canRetry).toBe(true)
   })
 
-  it('clears stale download state when no update is available', () =>
+  it('preserves a downloaded update when no update is available', () =>
   {
     const state = reduceDesktopUpdateStateOnNoUpdate(
       {
@@ -119,11 +119,34 @@ describe('updateMachine', () =>
       '2026-03-04T00:00:00.000Z',
     )
 
+    expect(state.status).toBe('downloaded')
+    expect(state.availableVersion).toBe('1.1.0')
+    expect(state.downloadedVersion).toBe('1.1.0')
+    expect(state.downloadPercent).toBe(100)
+    expect(state.message).toBeNull()
+    expect(state.errorContext).toBeNull()
+    expect(state.canRetry).toBe(true)
+  })
+
+  it('clears stale available state when no update is available', () =>
+  {
+    const state = reduceDesktopUpdateStateOnNoUpdate(
+      {
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'latest'),
+        enabled: true,
+        status: 'error',
+        availableVersion: '1.1.0',
+        message: 'old failure',
+        errorContext: 'download',
+        canRetry: true,
+      },
+      '2026-03-04T00:00:00.000Z',
+    )
+
     expect(state.status).toBe('up-to-date')
     expect(state.availableVersion).toBeNull()
     expect(state.downloadedVersion).toBeNull()
-    expect(state.message).toBeNull()
-    expect(state.errorContext).toBeNull()
+    expect(state.releaseNotes).toEqual([])
   })
 
   it('tracks available, download start, and progress cleanly', () =>

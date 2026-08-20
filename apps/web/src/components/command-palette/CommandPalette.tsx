@@ -23,6 +23,7 @@ export function CommandPalette({ children }: { children: ReactNode })
 {
   const [state, dispatch] = useReducer(reduceCommandPaletteUiState, {
     open: false,
+    openGeneration: 0,
     openIntent: null,
   })
   const setOpen = useCallback((open: boolean) => dispatch({ _tag: 'SetOpen', open }), [])
@@ -91,7 +92,7 @@ export function CommandPalette({ children }: { children: ReactNode })
       <CommandDialog open={state.open} onOpenChange={setOpen}>
         {children}
         <CommandPaletteDialog
-          open={state.open}
+          key={state.openGeneration}
           openIntent={state.openIntent}
           setOpen={setOpen}
           clearOpenIntent={clearOpenIntent}

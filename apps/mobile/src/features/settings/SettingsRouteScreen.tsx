@@ -641,6 +641,9 @@ function BetaSettingsSection()
   const threadListV2Enabled = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.threadListV2Enabled === true
     : false
+  const autoSettleOnMerge = AsyncResult.isSuccess(preferencesResult)
+    ? preferencesResult.value.sidebarAutoSettleOnMerge !== false
+    : true
 
   return (
     <View className="gap-3">
@@ -651,10 +654,19 @@ function BetaSettingsSection()
           value={threadListV2Enabled}
           onValueChange={(value) => savePreferences({ threadListV2Enabled: value })}
         />
+        {threadListV2Enabled ? (
+          <SettingsSwitchRow
+            icon="checkmark.circle"
+            label="Auto-settle merged threads"
+            value={autoSettleOnMerge}
+            onValueChange={(value) => savePreferences({ sidebarAutoSettleOnMerge: value })}
+          />
+        ) : null}
       </SettingsSection>
       <Text className="px-2 text-sm text-foreground-muted">
         One flat thread list in creation order. Active work renders as cards; settled threads
-        collapse to compact rows. Switch back any time.
+        collapse to compact rows. Merged threads settle after one idle hour when enabled; closed
+        threads remain eligible. Switch back any time.
       </Text>
     </View>
   )

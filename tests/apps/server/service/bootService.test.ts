@@ -4,6 +4,7 @@
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
+import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -13,8 +14,10 @@ import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawne
 
 import {
   HostProcessArguments,
+  HostProcessEnvironment,
   HostProcessExecutablePath,
   HostProcessPlatform,
+  HostProcessUserId,
 } from '@t3tools/shared/hostProcess'
 
 import {
@@ -36,6 +39,7 @@ interface RecordedCommand
 {
   readonly command: string
   readonly args: ReadonlyArray<string>
+  readonly timeout?: Duration.Input
 }
 
 const makeRecordingRunnerLayer = (
@@ -56,7 +60,11 @@ const makeRecordingRunnerLayer = (
         Effect.gen(function* ()
         {
           assert.isUndefined(input.env)
-          commands.push({ command: input.command, args: input.args })
+          commands.push({
+            command: input.command,
+            args: input.args,
+            ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
+          })
           const failed =
             input.command === options?.failCommand ||
             options?.failWhen?.(input.command, input.args) === true
@@ -82,10 +90,19 @@ const makeHost = (entry: string, awaitStorageOwner = false): BootService.BootSer
   awaitStorageOwner,
 })
 
-const provideHostRefs = (home: string, platform: NodeJS.Platform = 'linux') =>
+const provideHostRefs = (
+  home: string,
+  platform: NodeJS.Platform = 'linux',
+  uid: number | undefined = 501,
+  environment: NodeJS.ProcessEnv = {
+    PATH: '/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin',
+  },
+) =>
   Effect.provide(
     Layer.mergeAll(
       Layer.succeed(HostProcessPlatform, platform),
+      Layer.succeed(HostProcessUserId, uid),
+      Layer.succeed(HostProcessEnvironment, environment),
       ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: home } })),
     ),
   )
@@ -116,6 +133,7 @@ it('renders a systemd unit with absolute paths and append-mode logging', () =>
   const unit = BootService.renderBootServiceUnit({
     nodePath: '/usr/local/bin/node',
     t3EntryPath: '/home/theo/.456code/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs',
+    environmentPath: '/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin',
     baseDir: '/home/theo/.456code',
     logPath: '/home/theo/.456code/userdata/logs/boot-service.log',
     unitPath: '/home/theo/.config/systemd/user/456code.service',
@@ -134,6 +152,7 @@ it('renders a systemd unit with absolute paths and append-mode logging', () =>
       'WorkingDirectory=%h',
       'Environment=T3CODE_HOME=/home/theo/.456code',
       'Environment=CODE456_BOOT_SERVICE_UNIT=456code.service',
+      'Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin',
       'ExecStart=/usr/local/bin/node /home/theo/.456code/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs serve',
       'Restart=always',
       'RestartSec=5',
@@ -156,12 +175,14 @@ it('quotes systemd values containing spaces and escapes percent specifiers', () 
   const unit = BootService.renderBootServiceUnit({
     nodePath: '/home/me/my tools/node',
     t3EntryPath: '/home/me/T3 Data/bin.mjs',
+    environmentPath: '/opt/provider tools/bin:/usr/bin/%fallback',
     baseDir: '/home/me/T3 Data',
     logPath: '/home/me/100%logs/boot.log',
     unitPath: '/home/me/.config/systemd/user/456code.service',
   })
   assert.include(unit, 'ExecStart="/home/me/my tools/node" "/home/me/T3 Data/bin.mjs" serve')
   assert.include(unit, 'Environment=T3CODE_HOME="/home/me/T3 Data"')
+  assert.include(unit, 'Environment="PATH=/opt/provider tools/bin:/usr/bin/%%fallback"')
   // append: paths take the rest of the line literally (spaces are fine,
   // quoting is not), but % still goes through specifier expansion.
   assert.include(unit, 'StandardOutput=append:/home/me/100%%logs/boot.log')
@@ -357,6 +378,156 @@ it.layer(NodeServices.layer)('BootService', (it) =>
     }),
   )
 
+  it.effect('installs, reports, and removes a bounded macOS launch agent', () =>
+    Effect.gen(function* ()
+    {
+      const { dirs, fs } = yield* makeTestContext()
+      const commands: Array<RecordedCommand> = []
+      const service = yield* BootService.make({
+        baseDir: dirs.baseDir,
+        logsDir: dirs.logsDir,
+        cliVersion: '0.0.27',
+        host: makeHost(dirs.stableEntry),
+      }).pipe(
+        Effect.provide(makeRecordingRunnerLayer(commands)),
+        provideHostRefs(dirs.home, 'darwin', 501),
+      )
+
+      const plan = yield* service.install
+      const plist = yield* fs.readFileString(plan.unitPath)
+      assert.isTrue(
+        plan.unitPath.endsWith(`Library/LaunchAgents/${BootService.BOOT_SERVICE_PLIST_FILE}`),
+      )
+      assert.include(plist, `<string>${dirs.stableEntry}</string>\n    <string>serve</string>`)
+      assert.include(plist, '<key>KeepAlive</key>\n  <true/>')
+      assert.include(plist, '<key>ExitTimeOut</key>\n  <integer>90</integer>')
+      assert.deepEqual(
+        commands.slice(0, 3).map(({ command, args }) => [command, ...args].join(' ')),
+        [
+          `launchctl bootout --wait gui/501/${BootService.BOOT_SERVICE_LAUNCHD_LABEL}`,
+          `launchctl enable gui/501/${BootService.BOOT_SERVICE_LAUNCHD_LABEL}`,
+          `launchctl bootstrap gui/501 ${plan.unitPath}`,
+        ],
+      )
+      assert.equal(commands[0]?.timeout, '120 seconds')
+
+      const status = yield* service.status
+      assert.isTrue(status.supported)
+      assert.isTrue(status.installed)
+      assert.isTrue(status.current)
+      assert.isTrue(yield* service.uninstall)
+      assert.isFalse(yield* fs.exists(plan.unitPath))
+      assert.isFalse(commands.some(({ command }) => command === 'systemctl'))
+    }),
+  )
+
+  it.effect('persists the installer PATH in both service formats with a safe fallback', () =>
+    Effect.gen(function* ()
+    {
+      const installerPath =
+        '/opt/homebrew/bin:/Users/theo/provider tools/bin:/Users/theo/source&control/bin:/usr/bin/%fallback'
+      const fallbackPath = '/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin'
+
+      for (const { platform, uid } of [
+        { platform: 'linux' as const, uid: 501 },
+        { platform: 'darwin' as const, uid: 501 },
+      ])
+      {
+        for (const { environment, expectedPath } of [
+          { environment: { PATH: installerPath }, expectedPath: installerPath },
+          { environment: {}, expectedPath: fallbackPath },
+          { environment: { PATH: '   ' }, expectedPath: fallbackPath },
+        ])
+        {
+          const { dirs, fs } = yield* makeTestContext()
+          const commands: Array<RecordedCommand> = []
+          const service = yield* BootService.make({
+            baseDir: dirs.baseDir,
+            logsDir: dirs.logsDir,
+            cliVersion: '0.0.27',
+            host: makeHost(dirs.stableEntry),
+          }).pipe(
+            Effect.provide(makeRecordingRunnerLayer(commands)),
+            provideHostRefs(dirs.home, platform, uid, environment),
+          )
+
+          const plan = yield* service.install
+          const definition = yield* fs.readFileString(plan.unitPath)
+
+          assert.equal(plan.environmentPath, expectedPath)
+          if (platform === 'linux')
+          {
+            const escapedPath = expectedPath.replaceAll('%', '%%')
+            const renderedPath = expectedPath.includes(' ')
+              ? `Environment="PATH=${escapedPath}"`
+              : `Environment=PATH=${escapedPath}`
+            assert.include(definition, renderedPath)
+          }
+          else
+          {
+            assert.include(
+              definition,
+              `<key>PATH</key>\n    <string>${BootService.escapeXmlText(expectedPath)}</string>`,
+            )
+          }
+          assert.isTrue((yield* service.status).current)
+        }
+      }
+    }),
+  )
+
+  it.effect('unloads a failed macOS launch agent before restoring the prior plist', () =>
+    Effect.gen(function* ()
+    {
+      const { dirs, fs, path } = yield* makeTestContext()
+      const unitPath = path.join(
+        dirs.home,
+        'Library',
+        'LaunchAgents',
+        BootService.BOOT_SERVICE_PLIST_FILE,
+      )
+      yield* fs.makeDirectory(path.dirname(unitPath), { recursive: true })
+      yield* fs.writeFileString(unitPath, 'previous plist\n')
+
+      const commands: Array<RecordedCommand> = []
+      let bootstrapAttempts = 0
+      const service = yield* BootService.make({
+        baseDir: dirs.baseDir,
+        logsDir: dirs.logsDir,
+        cliVersion: '0.0.27',
+        host: makeHost(dirs.stableEntry),
+      }).pipe(
+        Effect.provide(
+          makeRecordingRunnerLayer(commands, {
+            failWhen: (command, args) =>
+            {
+              if (command !== 'launchctl' || args[0] !== 'bootstrap') return false
+              bootstrapAttempts += 1
+              return bootstrapAttempts === 1
+            },
+          }),
+        ),
+        provideHostRefs(dirs.home, 'darwin', 501),
+      )
+
+      const error = yield* service.install.pipe(Effect.flip)
+
+      assert.isTrue(isCommandError(error))
+      assert.equal(yield* fs.readFileString(unitPath), 'previous plist\n')
+      assert.deepEqual(
+        commands.map(({ command, args }) => [command, ...args].join(' ')),
+        [
+          `launchctl bootout --wait gui/501/${BootService.BOOT_SERVICE_LAUNCHD_LABEL}`,
+          `launchctl enable gui/501/${BootService.BOOT_SERVICE_LAUNCHD_LABEL}`,
+          `launchctl bootstrap gui/501 ${unitPath}`,
+          `launchctl bootout --wait gui/501/${BootService.BOOT_SERVICE_LAUNCHD_LABEL}`,
+          `launchctl bootstrap gui/501 ${unitPath}`,
+        ],
+      )
+      assert.equal(commands[3]?.timeout, '120 seconds')
+    }),
+  )
+
   it.effect('reports activation only after a new durable storage owner is visible', () =>
     Effect.gen(function* ()
     {
@@ -440,10 +611,16 @@ it.layer(NodeServices.layer)('BootService', (it) =>
         plan.t3EntryPath,
         path.join(runtimeDir, 'node_modules', '456code', 'dist', 'bin.mjs'),
       )
-      assert.deepEqual(commands[0], {
-        command: 'npm',
-        args: ['install', '--prefix', runtimeDir, '--no-fund', '--no-audit', '456code@0.0.27'],
-      })
+      assert.deepEqual(commands[0]?.command, 'npm')
+      assert.deepEqual(commands[0]?.args, [
+        'install',
+        '--prefix',
+        runtimeDir,
+        '--no-fund',
+        '--no-audit',
+        '456code@0.0.27',
+      ])
+      assert.equal(Duration.toMillis(commands[0]?.timeout ?? 0), Duration.toMillis('10 minutes'))
       // success is recorded via a sentinel so interrupted installs re-run.
       assert.isTrue(yield* fs.exists(path.join(runtimeDir, '.install-complete')))
     }),
@@ -570,7 +747,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
     }),
   )
 
-  it.effect('fails on non-Linux platforms without touching the filesystem', () =>
+  it.effect('fails on unsupported platforms without touching the filesystem', () =>
     Effect.gen(function* ()
     {
       const { dirs, fs, path } = yield* makeTestContext()
@@ -582,7 +759,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
         host: makeHost('/usr/local/lib/node_modules/t3/dist/bin.mjs'),
       }).pipe(
         Effect.provide(makeRecordingRunnerLayer(commands)),
-        provideHostRefs(dirs.home, 'darwin'),
+        provideHostRefs(dirs.home, 'win32', undefined),
       )
 
       const error = yield* service.install.pipe(Effect.flip)

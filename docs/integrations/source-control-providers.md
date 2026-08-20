@@ -55,7 +55,7 @@ Run a quick **Rescan** after setting up a new machine or changing credentials.
 
 ### For GitHub (Recommended for most users)
 
-1. Install the GitHub CLI on the machine running 456code:
+1. Install GitHub CLI 2.81.0 or newer on the machine running 456code:
    ```bash
    brew install gh
    ```
@@ -119,6 +119,7 @@ Bitbucket uses API tokens instead of a CLI tool:
 **Common issues:**
 
 - **Provider shows "Not authenticated"** – Run the login command for that provider (e.g., `gh auth login`) in a terminal on the server, then rescan in Settings
+- **GitHub sign-in status cannot be verified** – Update GitHub CLI to 2.81.0 or newer (e.g., `brew upgrade gh`), then rescan
 - **Bitbucket not connecting** – Double-check your environment variables are set in the correct shell profile and the server was restarted
 - **Can't push to a remote** – Verify your Git remote URL matches the provider you've authenticated with (SSH vs HTTPS remotes may need different credentials)
 

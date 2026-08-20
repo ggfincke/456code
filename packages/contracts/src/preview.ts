@@ -8,7 +8,7 @@
 //
 // @module Preview
 import { Schema } from 'effect'
-import { ThreadId, TrimmedNonEmptyString } from './baseSchemas.ts'
+import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from './baseSchemas.ts'
 
 export const PREVIEW_URL_MAX_LENGTH = 2_048
 export const CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS = 32
@@ -113,6 +113,17 @@ export const FILL_PREVIEW_VIEWPORT = {
   _tag: 'fill',
 } as const satisfies PreviewViewportSetting
 
+export const PREVIEW_ZOOM_LEVELS = [
+  0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0,
+] as const
+export const PreviewZoomFactor = Schema.Literals(PREVIEW_ZOOM_LEVELS)
+export type PreviewZoomFactor = typeof PreviewZoomFactor.Type
+export const DEFAULT_PREVIEW_ZOOM_FACTOR: PreviewZoomFactor = 1.0
+
+export const PreviewAppearancePreference = Schema.Literals(['system', 'light', 'dark'])
+export type PreviewAppearancePreference = typeof PreviewAppearancePreference.Type
+export const DEFAULT_PREVIEW_APPEARANCE: PreviewAppearancePreference = 'system'
+
 export const PreviewNavStatus = Schema.Union([
   Schema.TaggedStruct('Idle', {}),
   Schema.TaggedStruct('Loading', {
@@ -148,6 +159,8 @@ export const PreviewOpenInput = Schema.Struct({
   threadId: ThreadId,
   // omit to create an empty (Idle) tab the user can type into.
   url: Schema.optional(Url),
+  // omit for the historical fill-panel default.
+  viewport: Schema.optional(PreviewViewportSetting),
 })
 export type PreviewOpenInput = typeof PreviewOpenInput.Type
 
@@ -194,6 +207,10 @@ export type PreviewListInput = typeof PreviewListInput.Type
 
 export const PreviewListResult = Schema.Struct({
   sessions: Schema.Array(PreviewSessionSnapshot),
+  // identifies the current server process so revision resets are safe.
+  serverEpoch: TrimmedNonEmptyString,
+  // monotonic server state revision used to reject stale list responses.
+  revision: NonNegativeInt,
 })
 export type PreviewListResult = typeof PreviewListResult.Type
 
@@ -201,6 +218,10 @@ const PreviewEventBaseSchema = Schema.Struct({
   threadId: TrimmedNonEmptyString,
   tabId: PreviewTabId,
   createdAt: Schema.String,
+  // identifies the server process that emitted this event.
+  serverEpoch: TrimmedNonEmptyString,
+  // monotonic server state revision shared with PreviewListResult.
+  revision: PositiveInt,
 })
 
 const PreviewOpenedEvent = Schema.Struct({

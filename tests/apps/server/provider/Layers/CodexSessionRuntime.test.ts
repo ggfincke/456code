@@ -406,6 +406,21 @@ describe('buildCodexDeveloperInstructions', () =>
     }
   })
 
+  it('withholds browser guidance without removing other 456code tools', () =>
+  {
+    const instructions = buildCodexDeveloperInstructions(
+      'plan',
+      { model: 'gpt-5.3-codex', reasoningEffort: 'medium' },
+      false,
+      false,
+    )
+
+    NodeAssert.doesNotMatch(instructions, /456code collaborative browser/)
+    NodeAssert.doesNotMatch(instructions, /preview_status/)
+    NodeAssert.match(instructions, /architecture_blast_radius/)
+    NodeAssert.match(instructions, /proposal_preview_upsert/)
+  })
+
   it('flattens multiline metadata into single-line runtime info', () =>
   {
     const instructions = buildCodexDeveloperInstructions('default', {

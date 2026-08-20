@@ -159,6 +159,7 @@ export interface TerminalChangeRequestObservation
 {
   readonly branch: string
   readonly state: 'closed' | 'merged'
+  readonly updatedAt: string | null | undefined
   readonly retainOnBranchMismatch: boolean
 }
 
@@ -199,6 +200,7 @@ export function nextTerminalChangeRequestObservation(input: {
   return {
     branch: input.threadBranch,
     state: input.displayedPr.state,
+    updatedAt: input.displayedPr.updatedAt,
     retainOnBranchMismatch: input.retainOnBranchMismatch,
   }
 }
@@ -226,6 +228,7 @@ export function threadChangeRequestSnapshotsEqual(
     left.pr.baseRef === right.pr.baseRef &&
     left.pr.headRef === right.pr.headRef &&
     left.pr.state === right.pr.state &&
+    left.pr.updatedAt === right.pr.updatedAt &&
     sourceControlProvidersEqual(left.sourceControlProvider, right.sourceControlProvider)
   )
 }

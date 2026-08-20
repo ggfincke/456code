@@ -15,23 +15,30 @@ import * as Schema from 'effect/Schema'
 
 import {
   HostProcessArguments,
+  HostProcessEnvironment,
   HostProcessExecutablePath,
   HostProcessPlatform,
+  HostProcessUserId,
 } from '@t3tools/shared/hostProcess'
 
 import * as ProcessRunner from '../process/processRunner.ts'
 import { SERVER_STORAGE_LEASE_FILE, ServerStorageLeaseOwner } from '../serverStorageLease.ts'
 import { ensurePinnedRuntimeInstalled, pinnedRuntimePaths } from './pinnedRuntime.ts'
 
-// installs 456code as a per-user boot service. Linux-only for now: systemd
-// user unit + loginctl enable-linger. The service runs a stable or pinned
-// runtime — never an ephemeral `npx 456code` cache whose eviction could break
-// startup.
+// installs 456code as a per-user systemd unit or macOS launch agent. The
+// service runs a stable or pinned runtime, never an ephemeral package-manager
+// cache whose eviction could break startup.
 
 const BOOT_SERVICE_NAME = '456code'
+const DEFAULT_BOOT_SERVICE_PATH = '/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin'
 
 export const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`
+export const BOOT_SERVICE_LAUNCHD_LABEL = 'com.t3tools.456code.service'
+export const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`
 export const BOOT_SERVICE_UNIT_ENV = 'CODE456_BOOT_SERVICE_UNIT'
+
+// launchd may wait for the plist's 90-second ExitTimeOut before bootout returns.
+const STOP_STEP_TIMEOUT = '120 seconds'
 
 const decodeStorageOwner = Schema.decodeUnknownOption(
   Schema.fromJsonString(ServerStorageLeaseOwner),
@@ -70,9 +77,12 @@ export function escapeSystemdSpecifiers(value: string): string
 export function quoteSystemdValue(value: string): string
 {
   const escaped = escapeSystemdSpecifiers(value)
-  return /[\s"'\\]/.test(escaped)
-    ? `"${escaped.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
-    : escaped
+    .replaceAll('\\', '\\\\')
+    .replaceAll('"', '\\"')
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\r')
+    .replaceAll('\t', '\\t')
+  return /[\s"'\\]/.test(escaped) ? `"${escaped}"` : escaped
 }
 
 export interface BootServicePlan
@@ -81,6 +91,7 @@ export interface BootServicePlan
   readonly nodePath: string
   // absolute path of the pinned 456code entry point the unit will run.
   readonly t3EntryPath: string
+  readonly environmentPath: string
   readonly baseDir: string
   readonly logPath: string
   readonly unitPath: string
@@ -95,9 +106,9 @@ export interface BootServicePreparedInstall
 }
 
 // pure so it is testable byte-for-byte. systemd user units run with a
-// minimal environment: every path must be absolute, and the service must
-// not rely on PATH, nvm shims, or shell profiles. Failures land in
-// `logPath` because `systemctl --user` failures are otherwise invisible.
+// minimal environment: executable paths are absolute, while PATH preserves
+// provider and source-control CLIs discovered by the installing process.
+// failures land in `logPath` because systemctl failures are otherwise invisible.
 export function renderBootServiceUnit(plan: BootServicePlan): string
 {
   // no After=network-online.target: it does not exist in the systemd *user*
@@ -117,6 +128,7 @@ export function renderBootServiceUnit(plan: BootServicePlan): string
     'WorkingDirectory=%h',
     `Environment=T3CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
     `Environment=${BOOT_SERVICE_UNIT_ENV}=${BOOT_SERVICE_UNIT_FILE}`,
+    `Environment=${quoteSystemdValue(`PATH=${plan.environmentPath}`)}`,
     `ExecStart=${quoteSystemdValue(plan.nodePath)} ${quoteSystemdValue(plan.t3EntryPath)} serve`,
     'Restart=always',
     'RestartSec=5',
@@ -129,6 +141,60 @@ export function renderBootServiceUnit(plan: BootServicePlan): string
   ].join('\n')
 }
 
+export function escapeXmlText(value: string): string
+{
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+export function renderBootServicePlist(
+  plan: BootServicePlan,
+  options: { readonly homeDir: string },
+): string
+{
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    '  <key>Label</key>',
+    `  <string>${BOOT_SERVICE_LAUNCHD_LABEL}</string>`,
+    '  <key>ProgramArguments</key>',
+    '  <array>',
+    `    <string>${escapeXmlText(plan.nodePath)}</string>`,
+    `    <string>${escapeXmlText(plan.t3EntryPath)}</string>`,
+    '    <string>serve</string>',
+    '  </array>',
+    '  <key>EnvironmentVariables</key>',
+    '  <dict>',
+    '    <key>T3CODE_HOME</key>',
+    `    <string>${escapeXmlText(plan.baseDir)}</string>`,
+    `    <key>${BOOT_SERVICE_UNIT_ENV}</key>`,
+    `    <string>${BOOT_SERVICE_PLIST_FILE}</string>`,
+    '    <key>PATH</key>',
+    `    <string>${escapeXmlText(plan.environmentPath)}</string>`,
+    '  </dict>',
+    '  <key>WorkingDirectory</key>',
+    `  <string>${escapeXmlText(options.homeDir)}</string>`,
+    '  <key>RunAtLoad</key>',
+    '  <true/>',
+    '  <key>KeepAlive</key>',
+    '  <true/>',
+    '  <key>ThrottleInterval</key>',
+    '  <integer>5</integer>',
+    '  <key>ExitTimeOut</key>',
+    '  <integer>90</integer>',
+    '  <key>ProcessType</key>',
+    '  <string>Interactive</string>',
+    '  <key>StandardOutPath</key>',
+    `  <string>${escapeXmlText(plan.logPath)}</string>`,
+    '  <key>StandardErrorPath</key>',
+    `  <string>${escapeXmlText(plan.logPath)}</string>`,
+    '</dict>',
+    '</plist>',
+    '',
+  ].join('\n')
+}
+
 export class BootServiceUnsupportedError extends Schema.TaggedErrorClass<BootServiceUnsupportedError>()(
   'BootServiceUnsupportedError',
   { platform: Schema.String },
@@ -136,7 +202,7 @@ export class BootServiceUnsupportedError extends Schema.TaggedErrorClass<BootSer
 {
   override get message(): string
   {
-    return `Background setup currently supports Linux with systemd; this machine reports '${this.platform}'.`
+    return `Background setup supports Linux with systemd and macOS with launchd; this machine reports '${this.platform}'.`
   }
 }
 
@@ -234,19 +300,25 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
   }
   const awaitStorageOwnerReadiness = input.awaitStorageOwner ?? host.awaitStorageOwner ?? true
   const platform = yield* HostProcessPlatform
+  const uid = yield* HostProcessUserId
+  const hostEnvironment = yield* HostProcessEnvironment
   const homeDir = yield* Config.string('HOME').pipe(Config.withDefault(''))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const runner = yield* ProcessRunner.ProcessRunner
 
-  const unitDir = path.join(homeDir, '.config', 'systemd', 'user')
-  const unitPath = path.join(unitDir, BOOT_SERVICE_UNIT_FILE)
+  const isSystemd = platform === 'linux'
+  const isLaunchd = platform === 'darwin' && uid !== undefined
+  const unitDir = isLaunchd
+    ? path.join(homeDir, 'Library', 'LaunchAgents')
+    : path.join(homeDir, '.config', 'systemd', 'user')
+  const unitPath = path.join(unitDir, isLaunchd ? BOOT_SERVICE_PLIST_FILE : BOOT_SERVICE_UNIT_FILE)
   const logPath = path.join(input.logsDir, 'boot-service.log')
   const runtimePaths = pinnedRuntimePaths(path, input.baseDir, input.cliVersion)
 
-  const requireSystemdLinux = Effect.gen(function* ()
+  const requireSupportedPlatform = Effect.gen(function* ()
   {
-    if (platform !== 'linux' || homeDir === '')
+    if ((!isSystemd && !isLaunchd) || homeDir === '')
     {
       return yield* new BootServiceUnsupportedError({ platform })
     }
@@ -334,10 +406,18 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
   const plan: BootServicePlan = {
     nodePath: host.execPath,
     t3EntryPath: plannedEntryPath,
+    environmentPath:
+      hostEnvironment.PATH?.trim() === '' || hostEnvironment.PATH === undefined
+        ? DEFAULT_BOOT_SERVICE_PATH
+        : hostEnvironment.PATH,
     baseDir: input.baseDir,
     logPath,
     unitPath,
   }
+  const launchdDomainTarget = uid === undefined ? '' : `gui/${uid}`
+  const launchdServiceTarget = `${launchdDomainTarget}/${BOOT_SERVICE_LAUNCHD_LABEL}`
+  const renderServiceDefinition = () =>
+    isLaunchd ? renderBootServicePlist(plan, { homeDir }) : renderBootServiceUnit(plan)
 
   const readStorageOwner = Effect.fn('service.boot_service.read_storage_owner')(function* (
     canonicalBaseDir: string,
@@ -363,7 +443,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
 
   const prepareInstall: BootService['Service']['prepareInstall'] = Effect.gen(function* ()
   {
-    yield* requireSystemdLinux
+    yield* requireSupportedPlatform
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
@@ -384,7 +464,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     )
 
     yield* fs.makeDirectory(unitDir, { recursive: true }).pipe(
-      Effect.andThen(fs.writeFileString(unitPath, renderBootServiceUnit(plan))),
+      Effect.andThen(fs.writeFileString(unitPath, renderServiceDefinition())),
       Effect.mapError((cause) => new BootServiceInstallError({ cause })),
       Effect.tapError(() => restoreUnitFile(previousUnit)),
     )
@@ -427,12 +507,14 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
       yield* Effect.sleep('100 millis')
     }
 
-    yield* runStep('verifying the service is active', 'systemctl', [
-      '--user',
-      'is-active',
-      '--quiet',
-      BOOT_SERVICE_UNIT_FILE,
-    ])
+    yield* isLaunchd
+      ? runStep('verifying the service is active', 'launchctl', ['print', launchdServiceTarget])
+      : runStep('verifying the service is active', 'systemctl', [
+          '--user',
+          'is-active',
+          '--quiet',
+          BOOT_SERVICE_UNIT_FILE,
+        ])
   })
 
   // if activation fails partway (e.g. enable succeeds but restart/linger
@@ -445,28 +527,54 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     {
       if (previousUnit !== null)
       {
+        if (isLaunchd)
+        {
+          yield* runStep(
+            'stopping the failed launch agent',
+            'launchctl',
+            ['bootout', '--wait', launchdServiceTarget],
+            { timeout: STOP_STEP_TIMEOUT },
+          ).pipe(Effect.ignore)
+        }
         yield* fs.writeFileString(unitPath, previousUnit).pipe(Effect.ignore)
       }
       else
       {
-        yield* runStep('cleaning up the service', 'systemctl', [
-          '--user',
-          'disable',
-          '--now',
-          BOOT_SERVICE_UNIT_FILE,
-        ]).pipe(Effect.ignore)
+        yield* isLaunchd
+          ? runStep(
+              'cleaning up the service',
+              'launchctl',
+              ['bootout', '--wait', launchdServiceTarget],
+              { timeout: STOP_STEP_TIMEOUT },
+            ).pipe(Effect.ignore)
+          : runStep('cleaning up the service', 'systemctl', [
+              '--user',
+              'disable',
+              '--now',
+              BOOT_SERVICE_UNIT_FILE,
+            ]).pipe(Effect.ignore)
         yield* fs.remove(unitPath).pipe(Effect.ignore)
       }
-      yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload']).pipe(
-        Effect.ignore,
-      )
+      if (isSystemd)
+      {
+        yield* runStep('reloading systemd user units', 'systemctl', [
+          '--user',
+          'daemon-reload',
+        ]).pipe(Effect.ignore)
+      }
       if (previousUnit !== null)
       {
-        yield* runStep('restoring the previous service', 'systemctl', [
-          '--user',
-          'restart',
-          BOOT_SERVICE_UNIT_FILE,
-        ]).pipe(Effect.ignore)
+        yield* isLaunchd
+          ? runStep('restoring the previous service', 'launchctl', [
+              'bootstrap',
+              launchdDomainTarget,
+              unitPath,
+            ]).pipe(Effect.ignore)
+          : runStep('restoring the previous service', 'systemctl', [
+              '--user',
+              'restart',
+              BOOT_SERVICE_UNIT_FILE,
+            ]).pipe(Effect.ignore)
       }
     },
   )
@@ -475,7 +583,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     'service.boot_service.activate_prepared',
   )(function* (prepared)
   {
-    yield* requireSystemdLinux
+    yield* requireSupportedPlatform
     if (
       prepared.plan.unitPath !== unitPath ||
       prepared.plan.baseDir !== plan.baseDir ||
@@ -489,25 +597,39 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
 
     yield* Effect.gen(function* ()
     {
-      yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
-      yield* runStep('enabling the service', 'systemctl', [
-        '--user',
-        'enable',
-        BOOT_SERVICE_UNIT_FILE,
-      ])
-      // restart rather than enable --now: --now does not replace an already
-      // running process, so repairing a stale unit would leave the old
-      // server running until reboot. restart also starts a stopped service.
-      yield* runStep('starting the service', 'systemctl', [
-        '--user',
-        'restart',
-        BOOT_SERVICE_UNIT_FILE,
-      ])
-      // linger keeps the user manager (and this service) running without an
-      // open session — the whole point on a box reached over SSH. No
-      // username argument: loginctl defaults to the calling user, which is
-      // always right, while $USER can be stale (su without -l) or unset.
-      yield* runStep('enabling lingering for this user', 'loginctl', ['enable-linger'])
+      if (isLaunchd)
+      {
+        yield* runStep(
+          'stopping the installed launch agent',
+          'launchctl',
+          ['bootout', '--wait', launchdServiceTarget],
+          { timeout: STOP_STEP_TIMEOUT },
+        ).pipe(Effect.ignore)
+        yield* runStep('enabling the launch agent', 'launchctl', [
+          'enable',
+          launchdServiceTarget,
+        ]).pipe(Effect.ignore)
+        yield* runStep('starting the service', 'launchctl', [
+          'bootstrap',
+          launchdDomainTarget,
+          unitPath,
+        ])
+      }
+      else
+      {
+        yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
+        yield* runStep('enabling the service', 'systemctl', [
+          '--user',
+          'enable',
+          BOOT_SERVICE_UNIT_FILE,
+        ])
+        yield* runStep('starting the service', 'systemctl', [
+          '--user',
+          'restart',
+          BOOT_SERVICE_UNIT_FILE,
+        ])
+        yield* runStep('enabling lingering for this user', 'loginctl', ['enable-linger'])
+      }
       yield* awaitStorageOwner(prepared)
     }).pipe(Effect.tapError(() => rollbackFailedInstall(prepared.previousUnit)))
 
@@ -521,16 +643,33 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
 
   const restart: BootService['Service']['restart'] = Effect.gen(function* ()
   {
-    yield* requireSystemdLinux
+    yield* requireSupportedPlatform
     const canonicalBaseDir = yield* fs
       .realPath(input.baseDir)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
     const previousStorageOwner = yield* readStorageOwner(canonicalBaseDir)
-    yield* runStep('restoring the previous service', 'systemctl', [
-      '--user',
-      'restart',
-      BOOT_SERVICE_UNIT_FILE,
-    ])
+    if (isLaunchd)
+    {
+      yield* runStep(
+        'stopping the installed launch agent',
+        'launchctl',
+        ['bootout', '--wait', launchdServiceTarget],
+        { timeout: STOP_STEP_TIMEOUT },
+      ).pipe(Effect.ignore)
+      yield* runStep('restoring the previous service', 'launchctl', [
+        'bootstrap',
+        launchdDomainTarget,
+        unitPath,
+      ])
+    }
+    else
+    {
+      yield* runStep('restoring the previous service', 'systemctl', [
+        '--user',
+        'restart',
+        BOOT_SERVICE_UNIT_FILE,
+      ])
+    }
     yield* awaitStorageOwner({
       plan,
       canonicalBaseDir,
@@ -543,7 +682,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
 
   const uninstall: BootService['Service']['uninstall'] = Effect.gen(function* ()
   {
-    yield* requireSystemdLinux
+    yield* requireSupportedPlatform
     const exists = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
@@ -551,22 +690,29 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     {
       return false
     }
-    yield* runStep('stopping the service', 'systemctl', [
-      '--user',
-      'disable',
-      '--now',
-      BOOT_SERVICE_UNIT_FILE,
-    ])
+    yield* isLaunchd
+      ? runStep('stopping the service', 'launchctl', ['bootout', '--wait', launchdServiceTarget], {
+          timeout: STOP_STEP_TIMEOUT,
+        }).pipe(Effect.ignore)
+      : runStep('stopping the service', 'systemctl', [
+          '--user',
+          'disable',
+          '--now',
+          BOOT_SERVICE_UNIT_FILE,
+        ])
     yield* fs
       .remove(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
-    yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
+    if (isSystemd)
+    {
+      yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
+    }
     return true
   }).pipe(Effect.withSpan('service.boot_service.uninstall'))
 
   const stop: BootService['Service']['stop'] = Effect.gen(function* ()
   {
-    yield* requireSystemdLinux
+    yield* requireSupportedPlatform
     const exists = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
@@ -574,13 +720,17 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     {
       return false
     }
-    yield* runStep('stopping the service', 'systemctl', ['--user', 'stop', BOOT_SERVICE_UNIT_FILE])
+    yield* isLaunchd
+      ? runStep('stopping the service', 'launchctl', ['bootout', '--wait', launchdServiceTarget], {
+          timeout: STOP_STEP_TIMEOUT,
+        }).pipe(Effect.ignore)
+      : runStep('stopping the service', 'systemctl', ['--user', 'stop', BOOT_SERVICE_UNIT_FILE])
     return true
   }).pipe(Effect.withSpan('service.boot_service.stop'))
 
   const status: BootService['Service']['status'] = Effect.gen(function* ()
   {
-    if (platform !== 'linux' || homeDir === '')
+    if ((!isSystemd && !isLaunchd) || homeDir === '')
     {
       return {
         supported: false,
@@ -607,12 +757,16 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
         ? fs.exists(runtimePaths.sentinelPath)
         : Effect.succeed(true),
     ])
-    const definitionCurrent = unit === renderBootServiceUnit(plan) && entryExists && sentinelExists
+    const definitionCurrent = unit === renderServiceDefinition() && entryExists && sentinelExists
     const active = yield* runner
-      .run({
-        command: 'systemctl',
-        args: ['--user', 'is-active', '--quiet', BOOT_SERVICE_UNIT_FILE],
-      })
+      .run(
+        isLaunchd
+          ? { command: 'launchctl', args: ['print', launchdServiceTarget] }
+          : {
+              command: 'systemctl',
+              args: ['--user', 'is-active', '--quiet', BOOT_SERVICE_UNIT_FILE],
+            },
+      )
       .pipe(
         Effect.map((result) => result.code === 0),
         Effect.orElseSucceed(() => false),

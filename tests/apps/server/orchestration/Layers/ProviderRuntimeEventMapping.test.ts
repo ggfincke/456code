@@ -68,6 +68,8 @@ describe('runtimeEventToActivities tool streaming persistence', () =>
     const updatePayload = runtimeEventToActivities(update)[0]?.payload as Record<string, unknown>
     const updateData = updatePayload.data as Record<string, unknown>
     const updateItem = updateData.item as Record<string, unknown>
+    expect(updatePayload.toolCallId).toBe('item-streaming-tool')
+    expect(updateData.toolCallId).toBe('tool-call-1')
     expect(updateItem.aggregatedOutput).toBe('first line of output')
     expect(updateItem.result).toEqual({ content: 'first line of output' })
     expect(updateData.rawOutput).toEqual({ content: 'first line of output' })
@@ -107,6 +109,19 @@ describe('runtimeEventToActivities tool streaming persistence', () =>
       string,
       unknown
     >
+    expect(completedPayload.toolCallId).toBe('item-streaming-tool')
     expect(completedPayload.data).toEqual(streamingData)
+
+    const started = {
+      ...update,
+      type: 'item.started',
+      eventId: EventId.make('event-streaming-tool-started'),
+      payload: { itemType: 'command_execution', title: 'Render' },
+    } satisfies ProviderRuntimeEvent
+    expect(runtimeEventToActivities(started)[0]?.payload).toMatchObject({
+      itemType: 'command_execution',
+      toolCallId: 'item-streaming-tool',
+      data: { toolCallId: 'item-streaming-tool' },
+    })
   })
 })

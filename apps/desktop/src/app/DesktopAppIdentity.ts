@@ -115,7 +115,7 @@ export const make = Effect.gen(function* ()
       yield* electronApp.setDesktopName(environment.linuxDesktopEntryName)
     }
 
-    if (environment.platform === 'darwin')
+    if (environment.platform === 'darwin' && !environment.isPackaged)
     {
       const iconPaths = yield* assets.iconPaths
       yield* Option.match(iconPaths.png, {

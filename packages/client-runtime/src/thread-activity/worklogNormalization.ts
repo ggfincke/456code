@@ -451,7 +451,8 @@ function extractToolCallId(
   payload: Record<string, unknown> | null,
 ): string | null
 {
-  const dataToolCallId = asTrimmedString(asRecord(payload?.data)?.toolCallId)
+  const dataToolCallId =
+    asTrimmedString(payload?.toolCallId) ?? asTrimmedString(asRecord(payload?.data)?.toolCallId)
   if (dataToolCallId !== null)
   {
     return dataToolCallId
@@ -474,7 +475,7 @@ function deriveToolLifecycleCollapseKey(entry: NormalizedWorkLogEntry): string |
   }
   if (entry.toolCallId)
   {
-    return `tool:${entry.toolCallId}`
+    return toolCallIdentityKey(entry.turnId, entry.toolCallId)
   }
   const normalizedLabel = normalizeCompactToolLabel(entry.toolTitle ?? entry.label)
   const detail = entry.detail?.trim() ?? ''
@@ -553,6 +554,7 @@ export function mergeNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
   return {
     ...previous,
     ...next,
+    id: previous.id,
     ...((next.detail ?? previous.detail) ? { detail: next.detail ?? previous.detail } : {}),
     ...((next.command ?? previous.command) ? { command: next.command ?? previous.command } : {}),
     ...((next.rawCommand ?? previous.rawCommand)
@@ -596,6 +598,10 @@ function shouldCollapseToolLifecycleEntries(
   {
     return false
   }
+  if (previous.turnId !== next.turnId)
+  {
+    return false
+  }
   // a finished row is never reopened by a later frame
   if (previous.activityKind === 'tool.completed')
   {
@@ -622,22 +628,33 @@ function shouldCollapseToolLifecycleEntries(
 interface OpenHeartbeatRow
 {
   readonly index: number
+  readonly turnId: TurnId | null
   readonly toolCallId?: string | undefined
+}
+
+export function toolCallIdentityKey(turnId: TurnId | null, toolCallId: string): string
+{
+  return JSON.stringify([turnId, toolCallId])
 }
 
 function findOpenHeartbeatToRetire(
   openHeartbeats: ReadonlyArray<OpenHeartbeatRow>,
+  closeTurnId: TurnId | null,
   closeToolCallId: string | undefined,
 ): number
 {
   if (closeToolCallId === undefined)
   {
-    return openHeartbeats.length > 0 ? 0 : -1
+    return openHeartbeats.findIndex((row) => row.turnId === closeTurnId)
   }
-  const exact = openHeartbeats.findIndex((row) => row.toolCallId === closeToolCallId)
+  const exact = openHeartbeats.findIndex(
+    (row) => row.turnId === closeTurnId && row.toolCallId === closeToolCallId,
+  )
   // an id-bearing close frame never claims a row that names a different call,
   // but it does claim an id-less one: codex heartbeats carry no id to match on
-  return exact >= 0 ? exact : openHeartbeats.findIndex((row) => row.toolCallId === undefined)
+  return exact >= 0
+    ? exact
+    : openHeartbeats.findIndex((row) => row.turnId === closeTurnId && row.toolCallId === undefined)
 }
 
 // two tiers of matching, because two id namespaces meet here. an id-bearing
@@ -696,11 +713,9 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
     {
       return
     }
-    const merged = mergeNormalizedWorkLogEntries(previous, entry)
-    // a live row keeps the id it was born with so it does not remount on every
-    // heartbeat; both surfaces key their row on entry.id
-    collapsed[index] =
-      previous.activityKind === 'tool.progress' ? { ...merged, id: previous.id } : merged
+    // a live row keeps the id it was born with so it does not remount as later
+    // lifecycle frames replace its content; both surfaces key rows on entry.id
+    collapsed[index] = mergeNormalizedWorkLogEntries(previous, entry)
     forgetClosedRow(index)
   }
 
@@ -724,8 +739,12 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
       // nothing distinguishes it from the call that row already stands for
       const open =
         entry.toolCallId === undefined
-          ? openHeartbeats.findLast((row) => row.toolCallId === undefined)
-          : openHeartbeats.find((row) => row.toolCallId === entry.toolCallId)
+          ? openHeartbeats.findLast(
+              (row) => row.turnId === entry.turnId && row.toolCallId === undefined,
+            )
+          : openHeartbeats.find(
+              (row) => row.turnId === entry.turnId && row.toolCallId === entry.toolCallId,
+            )
       if (open)
       {
         mergeIntoRow(open.index, entry)
@@ -733,6 +752,7 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
       }
       openHeartbeats.push({
         index: collapsed.length,
+        turnId: entry.turnId,
         ...(entry.toolCallId !== undefined ? { toolCallId: entry.toolCallId } : {}),
       })
       collapsed.push(entry)
@@ -743,10 +763,11 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
     // between its open & close frames cannot steal the row
     if (isToolLifecycleFrameKind(entry.activityKind) && entry.toolCallId !== undefined)
     {
+      const identityKey = toolCallIdentityKey(entry.turnId, entry.toolCallId)
       // * the id-less fallback inside findOpenHeartbeatToRetire is load-bearing:
       // codex heartbeats carry no id, so retiring only on an exact match would
       // strand their row at "in progress" forever
-      const retireIndex = findOpenHeartbeatToRetire(openHeartbeats, entry.toolCallId)
+      const retireIndex = findOpenHeartbeatToRetire(openHeartbeats, entry.turnId, entry.toolCallId)
       if (retireIndex >= 0)
       {
         const [retired] = openHeartbeats.splice(retireIndex, 1)
@@ -755,7 +776,7 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
           retiredIndexes.add(retired.index)
         }
       }
-      const openIndex = openRowIndexByToolCallId.get(entry.toolCallId)
+      const openIndex = openRowIndexByToolCallId.get(identityKey)
       if (openIndex !== undefined)
       {
         mergeIntoRow(openIndex, entry)
@@ -768,7 +789,7 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
         const mergedIndex = lastLiveIndex()
         if (mergedIndex >= 0 && collapsed[mergedIndex]?.activityKind !== 'tool.completed')
         {
-          openRowIndexByToolCallId.set(entry.toolCallId, mergedIndex)
+          openRowIndexByToolCallId.set(identityKey, mergedIndex)
         }
         continue
       }
@@ -776,7 +797,7 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
       collapsed.push(entry)
       if (entry.activityKind !== 'tool.completed')
       {
-        openRowIndexByToolCallId.set(entry.toolCallId, pushedIndex)
+        openRowIndexByToolCallId.set(identityKey, pushedIndex)
       }
       continue
     }
@@ -787,7 +808,7 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
     }
     if (isToolLifecycleFrameKind(entry.activityKind))
     {
-      const retireIndex = findOpenHeartbeatToRetire(openHeartbeats, entry.toolCallId)
+      const retireIndex = findOpenHeartbeatToRetire(openHeartbeats, entry.turnId, entry.toolCallId)
       if (retireIndex >= 0)
       {
         const [retired] = openHeartbeats.splice(retireIndex, 1)
@@ -878,11 +899,12 @@ function toolDetailTextLooksLikeFailure(text: string): boolean
   )
 }
 
-export function workEntryIndicatesToolFailure(
+function workEntryIndicatesToolFailureFromOutput(
   entry: Pick<
     NormalizedWorkLogEntry,
     'tone' | 'command' | 'detail' | 'requestKind' | 'itemType' | 'toolLifecycleStatus'
   >,
+  includeCommand: boolean,
   options: WorkLogClassificationOptions = {},
 ): boolean
 {
@@ -898,8 +920,34 @@ export function workEntryIndicatesToolFailure(
   {
     return false
   }
-  const detail = [entry.detail, entry.command].filter(Boolean).join('\n')
+  const detail = [entry.detail, includeCommand ? entry.command : undefined]
+    .filter(Boolean)
+    .join('\n')
   return detail.length > 0 && toolDetailTextLooksLikeFailure(detail)
+}
+
+export function workEntryIndicatesToolFailure(
+  entry: Pick<
+    NormalizedWorkLogEntry,
+    'tone' | 'command' | 'detail' | 'requestKind' | 'itemType' | 'toolLifecycleStatus'
+  >,
+  options: WorkLogClassificationOptions = {},
+): boolean
+{
+  return workEntryIndicatesToolFailureFromOutput(entry, true, options)
+}
+
+// rendered failure chrome ignores the command because it describes user intent,
+// not the tool's result
+export function workEntryDisplayIndicatesToolFailure(
+  entry: Pick<
+    NormalizedWorkLogEntry,
+    'tone' | 'command' | 'detail' | 'requestKind' | 'itemType' | 'toolLifecycleStatus'
+  >,
+  options: WorkLogClassificationOptions = {},
+): boolean
+{
+  return workEntryIndicatesToolFailureFromOutput(entry, false, options)
 }
 
 export function workEntryIndicatesToolSuccess(

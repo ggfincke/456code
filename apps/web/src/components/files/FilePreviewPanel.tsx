@@ -604,6 +604,7 @@ export default function FilePreviewPanel({
               cwd={cwd}
               projectName={projectName}
               onOpenFile={onOpenFile}
+              {...(relativePath && !isImage ? { onRefreshSelectedFile: file.refresh } : {})}
             />
           </aside>
         ) : null}

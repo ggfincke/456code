@@ -40,7 +40,7 @@ export interface CommandPaletteItem
   readonly value: string
   readonly searchTerms: ReadonlyArray<string>
   readonly title: ReactNode
-  readonly description?: string
+  readonly description?: ReactNode
   readonly timestamp?: string
   readonly icon: ReactNode
   readonly disabled?: boolean
@@ -167,6 +167,7 @@ export function buildProjectActionItems(input: {
   icon: (project: Project) => ReactNode
   runProject: (project: Project) => Promise<void>
   searchTerms?: (project: Project) => ReadonlyArray<string>
+  renderDescription?: (project: Project) => ReactNode
   shortcutCommand?: KeybindingCommand
 }): CommandPaletteActionItem[]
 {
@@ -175,7 +176,7 @@ export function buildProjectActionItems(input: {
     value: `${input.valuePrefix}:${project.environmentId}:${project.id}`,
     searchTerms: [project.title, project.workspaceRoot, ...(input.searchTerms?.(project) ?? [])],
     title: project.title,
-    description: project.workspaceRoot,
+    description: input.renderDescription?.(project) ?? project.workspaceRoot,
     icon: input.icon(project),
     ...(input.shortcutCommand !== undefined ? { shortcutCommand: input.shortcutCommand } : {}),
     run: async () =>

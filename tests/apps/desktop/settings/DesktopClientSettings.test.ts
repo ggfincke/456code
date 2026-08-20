@@ -17,6 +17,15 @@ import * as DesktopClientSettings from '../../../../apps/desktop/src/settings/De
 
 const clientSettings: ClientSettings = {
   autoOpenPlanSidebar: false,
+  browserDefaultViewport: {
+    _tag: 'preset',
+    width: 1024,
+    height: 600,
+    presetId: 'nest-hub',
+  },
+  browserDefaultZoomFactor: 1.25,
+  browserDefaultAppearance: 'dark',
+  browserAutoShowFloatingPreview: false,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   desktopNotificationsEnabled: true,

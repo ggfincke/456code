@@ -3,6 +3,7 @@
 
 // @effect-diagnostics deterministicKeys:off - preserve the existing service identity after this ownership move
 import * as Config from 'effect/Config'
+import * as Clock from 'effect/Clock'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -32,6 +33,7 @@ import {
 import * as SourceControlProvider from '../SourceControlProvider.ts'
 import * as GitVcsDriver from '../../vcs/GitVcsDriver.ts'
 import * as VcsDriverRegistry from '../../vcs/VcsDriverRegistry.ts'
+import { retryAtFromHeader } from '../SourceControlRateLimit.ts'
 
 const DEFAULT_API_BASE_URL = 'https://api.bitbucket.org/2.0'
 
@@ -90,6 +92,7 @@ export class BitbucketResponseError extends Schema.TaggedErrorClass<BitbucketRes
     operation: BitbucketApiOperation,
     status: Schema.Int,
     responseBodyLength: NonNegativeInt,
+    retryAt: Schema.optional(Schema.Number),
   },
 )
 {
@@ -532,25 +535,26 @@ function responseError(
   response: HttpClientResponse.HttpClientResponse,
 ): Effect.Effect<never, BitbucketApiError>
 {
-  return response.text.pipe(
-    Effect.mapError(
-      (cause) =>
-        new BitbucketResponseBodyReadError({
-          operation,
-          status: response.status,
-          cause,
-        }),
-    ),
-    Effect.flatMap((body) =>
-      Effect.fail(
-        new BitbucketResponseError({
-          operation,
-          status: response.status,
-          responseBodyLength: body.length,
-        }),
+  return Effect.gen(function* ()
+  {
+    const now = yield* Clock.currentTimeMillis
+    const body = yield* response.text.pipe(
+      Effect.mapError(
+        (cause) =>
+          new BitbucketResponseBodyReadError({
+            operation,
+            status: response.status,
+            cause,
+          }),
       ),
-    ),
-  )
+    )
+    return yield* new BitbucketResponseError({
+      operation,
+      status: response.status,
+      responseBodyLength: body.length,
+      retryAt: retryAtFromHeader(response.headers['retry-after'], now),
+    })
+  })
 }
 
 export const make = Effect.gen(function* ()

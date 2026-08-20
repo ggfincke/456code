@@ -253,4 +253,28 @@ describe('ElectronWindow', () =>
         }
       }).pipe(Effect.provide(TestLayer)),
   )
+
+  it.effect('continues destroying later windows after preserving the first failure', () =>
+    Effect.gen(function* ()
+    {
+      const firstWindow = {
+        id: 51,
+        destroy: vi.fn(() =>
+        {
+          throw new Error('first destroy failed')
+        }),
+      } as unknown as Electron.BrowserWindow
+      const secondWindow = {
+        id: 52,
+        destroy: vi.fn(),
+      } as unknown as Electron.BrowserWindow
+      getAllWindowsMock.mockReturnValueOnce([firstWindow, secondWindow])
+
+      const electronWindow = yield* ElectronWindow.ElectronWindow
+      const exit = yield* Effect.exit(electronWindow.destroyAll)
+
+      assert.equal(exit._tag, 'Failure')
+      assert.equal(vi.mocked(secondWindow.destroy).mock.calls.length, 1)
+    }).pipe(Effect.provide(TestLayer)),
+  )
 })

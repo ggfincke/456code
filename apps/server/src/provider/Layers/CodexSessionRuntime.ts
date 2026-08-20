@@ -121,6 +121,7 @@ export interface CodexSessionRuntimeOptions
   readonly serviceTier?: CodexServiceTier | undefined
   readonly resumeCursor?: CodexResumeCursor
   readonly appServerArgs?: ReadonlyArray<string>
+  readonly browserToolsAvailable?: boolean
 }
 
 export interface CodexSessionRuntimeSendTurnInput
@@ -389,6 +390,7 @@ function buildCodexCollaborationMode(input: {
   readonly orchestrate?: boolean
   readonly model?: string
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort
+  readonly browserToolsAvailable?: boolean
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined
 {
   if (input.interactionMode === undefined && input.orchestrate === undefined)
@@ -415,6 +417,7 @@ function buildCodexCollaborationMode(input: {
           reasoningEffort,
         },
         input.orchestrate,
+        input.browserToolsAvailable ?? true,
       ),
     },
   }
@@ -433,6 +436,7 @@ export function buildTurnStartParams(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort
   readonly interactionMode?: ProviderInteractionMode
   readonly orchestrate?: boolean
+  readonly browserToolsAvailable?: boolean
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -455,6 +459,7 @@ export function buildTurnStartParams(input: {
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.orchestrate !== undefined ? { orchestrate: input.orchestrate } : {}),
+    browserToolsAvailable: input.browserToolsAvailable ?? true,
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
   })
@@ -1555,6 +1560,8 @@ export const makeCodexSessionRuntime = (
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
             ...(input.orchestrate !== undefined ? { orchestrate: input.orchestrate } : {}),
+            browserToolsAvailable:
+              options.browserToolsAvailable ?? hasConfiguredMcpServer(options.appServerArgs),
           })
           const rawResponse = yield* client.raw.request('turn/start', params).pipe(
             Effect.timeoutOrElse({

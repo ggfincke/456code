@@ -235,6 +235,41 @@ describe('buildThreadListV2Items', () =>
     expect(items.map((item) => item.isLast)).toEqual([false, false, true])
   })
 
+  it('keeps merged threads active when merge auto-settle is disabled but still settles closed threads', () =>
+  {
+    const activityAt = '2026-06-01T20:00:00.000Z'
+    const makeIdleTerminalThread = (id: 'merged' | 'closed') =>
+      makeThread({
+        id: ThreadId.make(id),
+        title: id,
+        latestUserMessageAt: activityAt,
+        latestTurn: {
+          turnId: TurnId.make(`${id}-turn`),
+          state: 'completed',
+          requestedAt: activityAt,
+          startedAt: activityAt,
+          completedAt: activityAt,
+          assistantMessageId: null,
+        },
+      })
+    const { items } = buildThreadListV2Items({
+      threads: [makeIdleTerminalThread('merged'), makeIdleTerminalThread('closed')],
+      environmentId: null,
+      searchQuery: '',
+      changeRequestStateByKey: new Map([
+        [`${environmentId}:merged`, 'merged'],
+        [`${environmentId}:closed`, 'closed'],
+      ]),
+      autoSettleOnMerge: false,
+      now: NOW,
+    })
+
+    expect(items.map((item) => [item.thread.id, item.variant])).toEqual([
+      ['merged', 'card'],
+      ['closed', 'slim'],
+    ])
+  })
+
   it('keeps cards in creation order while settled sorts by recency', () =>
   {
     const { items } = buildThreadListV2Items({

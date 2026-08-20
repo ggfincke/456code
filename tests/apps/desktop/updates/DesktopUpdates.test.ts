@@ -335,6 +335,150 @@ describe('DesktopUpdates', () =>
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)))
   })
 
+  it.effect('refreshes for newer releases without losing a queued installer', () =>
+    Effect.gen(function* ()
+    {
+      const harness = makeHarness()
+
+      yield* Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const updates = yield* DesktopUpdates.DesktopUpdates
+          yield* updates.configure
+
+          harness.emit('update-available', {
+            version: '1.2.4',
+            releaseNotes: '## Changes\n- fix: queued update',
+          })
+          yield* flushCallbacks
+          harness.emit('update-downloaded', { version: '1.2.4' })
+          yield* flushCallbacks
+
+          const refresh = yield* updates.check('poll')
+          assert.isTrue(refresh.checked)
+
+          harness.emit('update-available', { version: '1.2.4' })
+          yield* flushCallbacks
+          let state = yield* updates.getState
+          assert.equal(state.status, 'downloaded')
+          assert.equal(state.downloadedVersion, '1.2.4')
+
+          harness.emit('update-not-available')
+          yield* flushCallbacks
+          state = yield* updates.getState
+          assert.equal(state.status, 'downloaded')
+          assert.equal(state.availableVersion, '1.2.4')
+          assert.equal(state.downloadedVersion, '1.2.4')
+          assert.equal(state.downloadPercent, 100)
+
+          const nextRefresh = yield* updates.check('poll')
+          assert.isTrue(nextRefresh.checked)
+          harness.emit('update-available', { version: '1.2.5' })
+          yield* flushCallbacks
+          state = yield* updates.getState
+          assert.equal(state.status, 'available')
+          assert.equal(state.availableVersion, '1.2.5')
+          assert.isNull(state.downloadedVersion)
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)))
+    }),
+  )
+
+  it.effect(
+    'rejects install while a refresh check is in progress and releases the reservation',
+    () =>
+      Effect.gen(function* ()
+      {
+        const checkStarted = yield* Deferred.make<void>()
+        const releaseCheck = yield* Deferred.make<void>()
+        const harness = makeHarness({
+          checkForUpdates: Deferred.succeed(checkStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseCheck)),
+          ),
+        })
+
+        yield* Effect.scoped(
+          Effect.gen(function* ()
+          {
+            const updates = yield* DesktopUpdates.DesktopUpdates
+            yield* updates.configure
+            harness.emit('update-downloaded', { version: '1.2.4' })
+            yield* flushCallbacks
+
+            const checkFiber = yield* updates.check('manual').pipe(Effect.forkScoped)
+            yield* Deferred.await(checkStarted)
+            const installResult = yield* updates.install
+            assert.isFalse(installResult.accepted)
+
+            yield* Deferred.succeed(releaseCheck, undefined)
+            const checkResult = yield* Fiber.join(checkFiber)
+            assert.isTrue(checkResult.checked)
+            const followUpCheck = yield* updates.check('manual')
+            assert.isTrue(followUpCheck.checked)
+            assert.equal(harness.checkCount(), 2)
+          }),
+        ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)))
+      }),
+  )
+
+  it.effect('rejects refresh checks while install is in progress', () =>
+    Effect.gen(function* ()
+    {
+      const installStarted = yield* Deferred.make<void>()
+      const releaseInstall = yield* Deferred.make<void>()
+      const harness = makeHarness({
+        stopBackend: Deferred.succeed(installStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseInstall)),
+        ),
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const updates = yield* DesktopUpdates.DesktopUpdates
+          yield* updates.configure
+          harness.emit('update-downloaded', { version: '1.2.4' })
+          yield* flushCallbacks
+
+          const installFiber = yield* updates.install.pipe(Effect.forkScoped)
+          yield* Deferred.await(installStarted)
+          const refresh = yield* updates.check('manual')
+          assert.isFalse(refresh.checked)
+
+          yield* Deferred.succeed(releaseInstall, undefined)
+          const installResult = yield* Fiber.join(installFiber)
+          assert.isTrue(installResult.accepted)
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)))
+    }),
+  )
+
+  it.effect('preserves a queued installer after a background updater error', () =>
+  {
+    const harness = makeHarness()
+
+    return Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const updates = yield* DesktopUpdates.DesktopUpdates
+        yield* updates.configure
+        harness.emit('update-downloaded', { version: '1.2.4' })
+        yield* flushCallbacks
+
+        harness.emit('error', new Error('background updater failure'))
+        yield* flushCallbacks
+
+        const state = yield* updates.getState
+        assert.equal(state.status, 'error')
+        assert.equal(state.downloadedVersion, '1.2.4')
+        assert.isNull(state.errorContext)
+
+        const result = yield* updates.install
+        assert.isTrue(result.accepted)
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)))
+  })
+
   it.effect('keeps raw updater event failures out of update state', () =>
   {
     const harness = makeHarness()

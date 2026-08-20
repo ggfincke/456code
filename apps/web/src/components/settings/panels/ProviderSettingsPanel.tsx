@@ -10,6 +10,7 @@ import {
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
+  resolveProviderInstanceEnabled,
   type ServerSettingsPatch,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
@@ -322,12 +323,13 @@ export function ProviderSettingsPanel()
     const explicitInstance = settings.providerInstances?.[defaultInstanceId]
     const legacyConfig = legacyProviders[providerSettings.provider]!
     const defaultLegacyConfig = defaultLegacyProviders[providerSettings.provider]!
+    const { enabled: legacyEnabled, ...legacyConfigRest } = legacyConfig
     const effectiveInstance: ProviderInstanceConfig =
       explicitInstance ??
       ({
         driver,
-        enabled: legacyConfig.enabled,
-        config: legacyConfig,
+        enabled: legacyEnabled,
+        config: legacyConfigRest,
       } satisfies ProviderInstanceConfig)
     const isDirty =
       explicitInstance !== undefined || !Equal.equals(legacyConfig, defaultLegacyConfig)
@@ -577,7 +579,7 @@ export function ProviderSettingsPanel()
               }
               onUpdate={(next) =>
               {
-                const wasEnabled = row.instance.enabled ?? true
+                const wasEnabled = resolveProviderInstanceEnabled(row.instance)
                 const isDisabling = next.enabled === false && wasEnabled
                 const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId
                 if (shouldClearTextGen)

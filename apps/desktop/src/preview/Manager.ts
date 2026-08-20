@@ -9,6 +9,7 @@
 import type {
   DesktopPreviewAnnotationTheme,
   DesktopPreviewColorScheme,
+  DesktopPreviewTabDefaults,
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
   DesktopPreviewRecordingArtifact,
@@ -390,6 +391,16 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     )
   const nextCounter = (ref: Ref.Ref<number>) =>
     Ref.modify(ref, (value) => [value, value + 1] as const)
+  const setRecordingBackgroundThrottling = Effect.fn(
+    'PreviewManager.setRecordingBackgroundThrottling',
+  )(function* (enabled: boolean)
+  {
+    const mainWindow = yield* Ref.get(mainWindowRef)
+    if (Option.isNone(mainWindow) || mainWindow.value.isDestroyed()) return
+    yield* attempt({ operation: 'setRecordingBackgroundThrottling' }, () =>
+      mainWindow.value.webContents.setBackgroundThrottling(enabled),
+    )
+  })
   const withTabLifecycle = <A, E, R>(
     tabId: string,
     effect: Effect.Effect<A, E, R>,
@@ -449,6 +460,8 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     canGoForward: state.canGoForward,
     zoomFactor: state.zoomFactor,
     colorScheme: state.colorScheme,
+    audioMuted: state.audioMuted,
+    audible: state.audible,
     controller: state.controller,
     ...(state.favicon ? { favicon: state.favicon } : {}),
     updatedAt: state.updatedAt,
@@ -502,7 +515,39 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         }),
       ] as const
     })
-    if (Option.isSome(next)) yield* emit(tabId, next.value)
+    if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value)
+  })
+
+  const syncTabAudible = Effect.fn('PreviewManager.syncTabAudible')(function* (
+    tabId: string,
+    wc: Electron.WebContents,
+    audible: boolean,
+  )
+  {
+    if (wc.isDestroyed()) return
+    const updatedAt = yield* currentIso
+    const next = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
+    {
+      const current = tabs.get(tabId)
+      if (
+        !current ||
+        current.webContentsId !== wc.id ||
+        webContents.fromId(wc.id) !== wc ||
+        current.audible === audible
+      )
+      {
+        return [Option.none<PreviewTabRecord>(), tabs] as const
+      }
+      const state: PreviewTabRecord = { ...current, audible, updatedAt }
+      return [
+        Option.some(state),
+        replaceMap(tabs, (copy) =>
+        {
+          copy.set(tabId, state)
+        }),
+      ] as const
+    })
+    if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value)
   })
 
   const requireWebContents = Effect.fn('PreviewManager.requireWebContents')(function* (
@@ -1330,6 +1375,9 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       if (event.isMainFrame && !event.isSameDocument) cancelFaviconCapture()
     }
+    const audioStateChanged = (
+      event: Electron.Event<Electron.WebContentsAudioStateChangedEventParams>,
+    ) => runFork(syncTabAudible(tabId, wc, event.audible))
     const publishFavicon = Effect.fn('PreviewManager.publishFavicon')(function* (input: {
       readonly captureDocumentGeneration: number
       readonly dataUrl: string
@@ -1563,6 +1611,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           wc.off('did-start-loading', sync)
           wc.off('did-stop-loading', sync)
           wc.off('did-fail-load', failed as never)
+          wc.off('audio-state-changed', audioStateChanged)
           wc.off('before-input-event', beforeInput)
           wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput)
           wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
@@ -1611,6 +1660,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         wc.on('did-start-loading', sync)
         wc.on('did-stop-loading', sync)
         wc.on('did-fail-load', failed as never)
+        wc.on('audio-state-changed', audioStateChanged)
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput)
         wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
         wc.setWindowOpenHandler(({ url }) =>
@@ -1632,6 +1682,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   const tabOps = createTabOperations({
     tabsRef,
     mainWindowRef,
+    recordingOwnerRef,
     attachedRef,
     annotationThemeRef,
     tabGenerationSequenceRef,
@@ -1644,6 +1695,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     detachListeners,
     attachListeners,
     emit,
+    emitIfCurrent,
     nextCounter,
     replaceMap,
     requireWebContents,
@@ -1653,6 +1705,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     update,
     runFork,
     ensureControlSession,
+    syncTabAudible,
   })
 
   const {
@@ -1670,6 +1723,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     applyZoom,
     reapplyZoom,
     setColorScheme,
+    setAudioMuted,
   } = tabOps
 
   const pickOps = createPickRecordingOperations({
@@ -1679,6 +1733,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     pickSequenceRef,
     recordingSequenceRef,
     recordingOwnerRef,
+    setRecordingBackgroundThrottling,
     artifactSequenceRef,
     fileSystem,
     path,
@@ -1824,6 +1879,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     saveRecording,
     setAnnotationTheme,
     setColorScheme,
+    setAudioMuted,
     setMainWindow,
     startRecording,
     stopRecording,
@@ -1842,7 +1898,10 @@ export class PreviewManager extends Context.Service<
     readonly setMainWindow: (window: BrowserWindow) => Effect.Effect<void, PreviewManagerError>
     readonly getBrowserSession: (scope?: string) => Effect.Effect<Session, PreviewManagerError>
     readonly isBrowserPartition: (partition: string) => boolean
-    readonly createTab: (tabId: string) => Effect.Effect<PreviewTabState, PreviewManagerError>
+    readonly createTab: (
+      tabId: string,
+      defaults?: DesktopPreviewTabDefaults,
+    ) => Effect.Effect<PreviewTabState, PreviewManagerError>
     readonly closeTab: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly registerWebview: (
       tabId: string,
@@ -1860,6 +1919,10 @@ export class PreviewManager extends Context.Service<
     readonly setColorScheme: (
       tabId: string,
       colorScheme: DesktopPreviewColorScheme,
+    ) => Effect.Effect<void, PreviewManagerError>
+    readonly setAudioMuted: (
+      tabId: string,
+      audioMuted: boolean,
     ) => Effect.Effect<void, PreviewManagerError>
     readonly openDevTools: (tabId: string) => Effect.Effect<void, PreviewManagerError>
     readonly clearCookies: () => Effect.Effect<void, PreviewManagerError>
@@ -1957,6 +2020,7 @@ export const make = Effect.gen(function* PreviewManagerMake()
     resetZoom: operations.resetZoom,
     hardReload: operations.hardReload,
     setColorScheme: operations.setColorScheme,
+    setAudioMuted: operations.setAudioMuted,
     openDevTools: operations.openDevTools,
     clearCookies: Effect.fn('PreviewManager.clearCookies')(function* ()
     {

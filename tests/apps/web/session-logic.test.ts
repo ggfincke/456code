@@ -9,6 +9,7 @@ import {
   type OrchestratePlanRevision,
   type OrchestrationThreadActivity,
 } from '@t3tools/contracts'
+import { toolCallIdentityKey } from '@t3tools/client-runtime/thread-activity'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -1253,6 +1254,110 @@ describe('deriveWorkLogEntries', () =>
 
     const [entry] = deriveWorkLogEntries(activities)
     expect(entry?.toolData).toEqual(item)
+    expect(entry?.toolCallId).toBe('call-1')
+  })
+
+  it('collapses interleaved lifecycle updates by top-level tool call id', () =>
+  {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: 'tool-a-progress',
+        createdAt: '2026-02-23T00:00:01.000Z',
+        turnId: 'turn-1',
+        kind: 'tool.updated',
+        summary: 'Tool A',
+        payload: {
+          itemType: 'command_execution',
+          toolCallId: 'call-a',
+          status: 'inProgress',
+          data: { command: 'vp test run' },
+        },
+      }),
+      makeActivity({
+        id: 'tool-b-progress',
+        createdAt: '2026-02-23T00:00:02.000Z',
+        turnId: 'turn-1',
+        kind: 'tool.updated',
+        summary: 'Tool B',
+        payload: {
+          itemType: 'command_execution',
+          toolCallId: 'call-b',
+          status: 'inProgress',
+          data: { command: 'vp lint' },
+        },
+      }),
+      makeActivity({
+        id: 'tool-a-complete',
+        createdAt: '2026-02-23T00:00:03.000Z',
+        turnId: 'turn-1',
+        kind: 'tool.completed',
+        summary: 'Tool A completed',
+        payload: {
+          itemType: 'command_execution',
+          toolCallId: 'call-a',
+          status: 'completed',
+        },
+      }),
+      makeActivity({
+        id: 'tool-b-complete',
+        createdAt: '2026-02-23T00:00:04.000Z',
+        turnId: 'turn-1',
+        kind: 'tool.completed',
+        summary: 'Tool B completed',
+        payload: {
+          itemType: 'command_execution',
+          toolCallId: 'call-b',
+          status: 'completed',
+        },
+      }),
+    ]
+
+    expect(deriveWorkLogEntries(activities)).toMatchObject([
+      {
+        id: 'tool-a-progress',
+        command: 'vp test run',
+        toolCallId: 'call-a',
+        toolLifecycleStatus: 'completed',
+      },
+      {
+        id: 'tool-b-progress',
+        command: 'vp lint',
+        toolCallId: 'call-b',
+        toolLifecycleStatus: 'completed',
+      },
+    ])
+  })
+
+  it('does not merge reused tool call ids across turns', () =>
+  {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: 'turn-1-tool',
+        createdAt: '2026-02-23T00:00:01.000Z',
+        turnId: 'turn-1',
+        kind: 'tool.updated',
+        summary: 'Tool',
+        payload: {
+          itemType: 'command_execution',
+          toolCallId: 'reused-call',
+          status: 'inProgress',
+        },
+      }),
+      makeActivity({
+        id: 'turn-2-tool',
+        createdAt: '2026-02-23T00:00:02.000Z',
+        turnId: 'turn-2',
+        kind: 'tool.completed',
+        summary: 'Tool completed',
+        payload: {
+          itemType: 'command_execution',
+          toolCallId: 'reused-call',
+          status: 'completed',
+        },
+      }),
+    ]
+
+    expect(deriveWorkLogEntries(activities)).toHaveLength(2)
   })
 
   it('unwraps PowerShell command wrappers for displayed command text', () =>
@@ -1475,7 +1580,7 @@ describe('deriveWorkLogEntries', () =>
     const entries = deriveWorkLogEntries(activities)
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
-      id: 'grep-complete',
+      id: 'grep-update',
       toolTitle: 'grep',
       detail: '19 files',
       itemType: 'web_search',
@@ -1525,7 +1630,7 @@ describe('deriveWorkLogEntries', () =>
     const entries = deriveWorkLogEntries(activities)
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
-      id: 'read-complete',
+      id: 'read-update',
       toolTitle: 'Read File',
       detail: 'import * as Effect from "effect/Effect"',
       itemType: 'dynamic_tool_call',
@@ -1603,15 +1708,22 @@ describe('deriveWorkLogEntries', () =>
     const entries = deriveWorkLogEntries(activities)
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
-      id: 'legacy-read-complete',
+      id: 'legacy-read-update',
       toolTitle: 'Read File',
       itemType: 'dynamic_tool_call',
     })
     expect(entries[0]?.detail).toBeUndefined()
   })
 
-  it('collapses repeated lifecycle updates for the same tool call into one entry', () =>
+  it('keeps the first row id and collision-free identity while collapsing a tool call', () =>
   {
+    expect(toolCallIdentityKey(null, 'call')).not.toBe(
+      toolCallIdentityKey(TurnId.make('null'), 'call'),
+    )
+    expect(toolCallIdentityKey(TurnId.make('turn:a'), 'call')).not.toBe(
+      toolCallIdentityKey(TurnId.make('turn'), 'a:call'),
+    )
+
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: 'tool-update-1',
@@ -1657,7 +1769,7 @@ describe('deriveWorkLogEntries', () =>
 
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
-      id: 'tool-complete',
+      id: 'tool-update-1',
       createdAt: '2026-02-23T00:00:03.000Z',
       label: 'Tool call completed',
       detail: 'Read: {"file_path":"/tmp/app.ts"}',
@@ -1718,7 +1830,7 @@ describe('deriveWorkLogEntries', () =>
 
     const entries = deriveWorkLogEntries(activities)
 
-    expect(entries.map((entry) => entry.id)).toEqual(['tool-1-complete', 'tool-2-complete'])
+    expect(entries.map((entry) => entry.id)).toEqual(['tool-1-update', 'tool-2-update'])
   })
 
   it('collapses same-timestamp lifecycle rows even when completed sorts before updated by id', () =>
@@ -1762,7 +1874,7 @@ describe('deriveWorkLogEntries', () =>
     const entries = deriveWorkLogEntries(activities)
 
     expect(entries).toHaveLength(1)
-    expect(entries[0]?.id).toBe('a-complete-same-timestamp')
+    expect(entries[0]?.id).toBe('z-update-earlier')
   })
 })
 

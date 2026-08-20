@@ -310,6 +310,19 @@ it('parses GitHub auth JSON from stdout when stderr has warnings', () =>
   )
 })
 
+it('reports an outdated GitHub CLI as unknown instead of unauthenticated', () =>
+{
+  const auth = GitHubSourceControlProvider.discovery.parseAuth(
+    processResult('', {
+      stderr: 'unknown flag: --json\nUsage: gh auth status',
+      exitCode: ChildProcessSpawner.ExitCode(1),
+    }),
+  )
+
+  assert.equal(auth.status, 'unknown')
+  assert.include(Option.getOrThrow(auth.detail), 'Update `gh` to 2.81.0 or newer')
+})
+
 it('reports unauthenticated when GitHub JSON has accounts but none are valid', () =>
 {
   const auth = GitHubSourceControlProvider.discovery.parseAuth(

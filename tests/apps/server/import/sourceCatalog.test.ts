@@ -34,10 +34,8 @@ const CODEX = ProviderDriverKind.make('codex')
 const CLAUDE = ProviderDriverKind.make('claudeAgent')
 const CURSOR = ProviderDriverKind.make('cursor')
 const GROK = ProviderDriverKind.make('grok')
-const OPENCODE = ProviderDriverKind.make('opencode')
 const CODEX_DEFAULT = ProviderInstanceId.make('codex')
 const CLAUDE_DEFAULT = ProviderInstanceId.make('claudeAgent')
-const OPENCODE_DEFAULT = ProviderInstanceId.make('opencode')
 const temporaryPaths: string[] = []
 
 async function temporaryDirectory(): Promise<string>
@@ -147,16 +145,6 @@ describe('resolveSourceCatalog', () =>
           continuationIdentity: fileContinuationIdentity(
             CLAUDE,
             NodePath.join(homePath, '.claude', 'projects'),
-          ),
-        },
-        {
-          source: 'opencode',
-          driverKind: OPENCODE,
-          providerInstanceId: OPENCODE_DEFAULT,
-          scanRoot: NodePath.join(homePath, '.local', 'share', 'opencode', 'storage', 'session'),
-          continuationIdentity: fileContinuationIdentity(
-            OPENCODE,
-            NodePath.join(homePath, '.local', 'share', 'opencode', 'storage', 'session'),
           ),
         },
       ])
@@ -269,7 +257,7 @@ describe('resolveSourceCatalog', () =>
       const root = yield* Effect.promise(() => temporaryDirectory())
       const catalog = yield* resolveSourceCatalog(
         settingsWith({
-          opencode: { serverUrl: 'https://opencode.example.test' },
+          opencode: { enabled: true, serverUrl: 'https://opencode.example.test' },
         }),
         { environment: {}, homePath: root, cwd: root },
       )

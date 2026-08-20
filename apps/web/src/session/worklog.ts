@@ -8,6 +8,7 @@ import {
   mergeNormalizedWorkLogEntries,
   normalizeCompactToolLabel,
   stripTrailingExitCode,
+  workEntryDisplayIndicatesToolFailure as normalizedWorkEntryDisplayIndicatesToolFailure,
   workEntryIndicatesToolFailure as normalizedWorkEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus as normalizedWorkEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolRunning as normalizedWorkEntryIndicatesToolRunning,
@@ -50,6 +51,7 @@ export interface WorkLogEntry
   requestKind?: PendingApproval['requestKind']
   // from runtime item / task payload `status` when present (e.g. tool.updated).
   toolLifecycleStatus?: WorkLogToolLifecycleStatus
+  toolCallId?: string
   // originating orchestration activity kind (e.g. `user-input.requested`) for row chrome.
   sourceActivityKind?: OrchestrationThreadActivity['kind']
   // provider-reported age of an in-flight tool call, carried on tool.progress
@@ -130,6 +132,11 @@ export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean
 export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean
 {
   return normalizedWorkEntryIndicatesToolFailure(entry)
+}
+
+export function workEntryDisplayIndicatesToolFailure(entry: WorkLogEntry): boolean
+{
+  return normalizedWorkEntryDisplayIndicatesToolFailure(entry)
 }
 
 export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean
@@ -219,11 +226,15 @@ export function deriveWorkLogEntries(
     const {
       activityKind,
       collapseKey: _collapseKey,
+      toolCallId,
       taskToolUseId: _taskToolUseId,
       parentToolUseId: _parentToolUseId,
       ...rest
     } = entry
-    return Object.assign(rest, { sourceActivityKind: activityKind })
+    return Object.assign(rest, {
+      sourceActivityKind: activityKind,
+      ...(toolCallId ? { toolCallId } : {}),
+    })
   })
 }
 

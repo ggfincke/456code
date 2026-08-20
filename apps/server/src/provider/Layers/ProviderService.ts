@@ -76,6 +76,7 @@ import { type EventNdjsonLogger } from './EventNdjsonLogger.ts'
 import * as ProviderEventLoggers from './ProviderEventLoggers.ts'
 import * as AnalyticsService from '../../telemetry/Services/AnalyticsService.ts'
 import * as McpSessionRegistry from '../../mcp/McpSessionRegistry.ts'
+import * as ServerSettings from '../../serverSettings.ts'
 import { applyOrchestrateModeInstructions } from '../CollaborationModeInstructions.ts'
 import {
   coerceSupportedRuntimeMode,
@@ -356,6 +357,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory
   const backgroundTasks = yield* ProviderBackgroundTaskRegistry
   const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry
+  const serverSettings = yield* ServerSettings.ServerSettingsService
   const runtimeInbox = yield* ProviderRuntimeInbox
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
   const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
@@ -412,9 +414,26 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     providerInstanceId: ProviderInstanceId,
     providerSessionGeneration: number,
   ) =>
-    mcpSessionRegistry
-      .issue({ threadId, providerInstanceId, providerSessionGeneration })
-      .pipe(Effect.map((credential) => credential?.config))
+    Effect.gen(function* ()
+    {
+      const browserAccessEnabled = yield* serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.enableAgentBrowserAccess),
+        Effect.catch((cause) =>
+          Effect.logWarning('Could not read settings; withholding agent browser access.', {
+            cause,
+          }).pipe(Effect.as(false)),
+        ),
+      )
+      const capabilities = new Set<import('../../mcp/McpInvocationContext.ts').McpCapability>([
+        'proposal',
+        'orchestrate',
+        'architecture',
+      ])
+      if (browserAccessEnabled) capabilities.add('preview')
+      return yield* mcpSessionRegistry
+        .issue({ threadId, providerInstanceId, providerSessionGeneration, capabilities })
+        .pipe(Effect.map((credential) => credential?.config))
+    })
   const clearExactMcpSession = (identity: ProviderAdapterRuntimeSessionBinding) =>
     mcpSessionRegistry.revokeExact({
       threadId: identity.threadId,

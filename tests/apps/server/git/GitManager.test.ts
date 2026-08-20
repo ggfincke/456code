@@ -821,6 +821,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
         baseRef: 'main',
         headRef: 'feature/status-open-pr',
         state: 'open',
+        updatedAt: null,
       })
     }),
   )
@@ -872,6 +873,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
         baseRef: 'main',
         headRef: 'feature/status-lowercase-state',
         state: 'merged',
+        updatedAt: '2026-01-02T00:00:00.000Z',
       })
     }),
   )
@@ -1100,6 +1102,45 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
       }),
   )
 
+  it.effect('status does not inherit the default branch pull request from its upstream', () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const remoteDir = yield* createBareRemote()
+      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+      yield* runGit(repoDir, ['push', '-u', 'origin', 'main'])
+      yield* runGit(repoDir, ['checkout', '-b', 'feature/inherited-default-upstream'])
+      yield* runGit(repoDir, ['branch', '--set-upstream-to', 'origin/main'])
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 1661,
+                title: 'Default branch pull request',
+                url: 'https://github.com/pingdotgg/t3code/pull/1661',
+                baseRefName: 'release',
+                headRefName: 'main',
+                state: 'OPEN',
+                updatedAt: '2026-08-18T15:00:00Z',
+              },
+            ]),
+          ],
+        },
+      })
+
+      const status = yield* manager.status({ cwd: repoDir })
+
+      expect(status.refName).toBe('feature/inherited-default-upstream')
+      expect(status.hasUpstream).toBe(true)
+      expect(status.pr).toBeNull()
+      expect(ghCalls.some((call) => call.startsWith('pr list '))).toBe(false)
+    }),
+  )
+
   it.effect(
     'status detects cross-repo PRs from the upstream remote URL owner',
     () =>
@@ -1162,6 +1203,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
           baseRef: 'main',
           headRef: 'statemachine',
           state: 'open',
+          updatedAt: '2026-03-10T07:00:00.000Z',
         })
         expect(ghCalls).toContain(
           'pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner',
@@ -1271,6 +1313,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
           baseRef: 'main',
           headRef: 'effect-atom',
           state: 'open',
+          updatedAt: '2026-03-01T10:00:00.000Z',
         })
         expect(ghCalls.some((call) => call.includes('pr list --head upstream/effect-atom '))).toBe(
           false,
@@ -1338,6 +1381,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
         baseRef: 'main',
         headRef: 'feature/status-merged-pr',
         state: 'merged',
+        updatedAt: '2026-01-30T10:00:00.000Z',
       })
     }),
   )
@@ -1419,6 +1463,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
         baseRef: 'main',
         headRef: 'feature/status-open-over-merged',
         state: 'open',
+        updatedAt: '2026-01-30T10:00:00.000Z',
       })
     }),
   )

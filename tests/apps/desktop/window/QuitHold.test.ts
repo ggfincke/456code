@@ -76,12 +76,13 @@ describe('makeQuitHoldHandler', () =>
     expect(harness.notifications).toEqual(['down', 'up'])
   })
 
-  it('quits once after a full hold or a quick double tap', () =>
+  it('quits after a completed hold is released or a quick double tap', () =>
   {
     const held = makeHarness()
     held.send(makeInput())
     held.holdFor(QUIT_HOLD_DURATION_MS + 200)
-    held.holdFor(300)
+    expect(held.quit).not.toHaveBeenCalled()
+    held.send(makeInput({ type: 'keyUp' }))
     expect(held.quit).toHaveBeenCalledOnce()
     expect(held.notifications).toEqual(['down', 'up'])
 
@@ -90,6 +91,22 @@ describe('makeQuitHoldHandler', () =>
     vi.advanceTimersByTime(QUIT_DOUBLE_TAP_MS - 100)
     tapped.send(makeInput())
     expect(tapped.quit).toHaveBeenCalledOnce()
+  })
+
+  it('waits for Q release when the modifier is released first', () =>
+  {
+    const harness = makeHarness()
+    harness.send(makeInput())
+    harness.holdFor(QUIT_HOLD_DURATION_MS + 200)
+    harness.send(makeInput({ type: 'keyUp', key: 'Meta', meta: false }))
+    harness.preventDefault.mockClear()
+    harness.send(makeInput({ meta: false, isAutoRepeat: true }))
+
+    expect(harness.preventDefault).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(QUIT_HOLD_RELEASE_GRACE_MS * 2)
+    expect(harness.quit).not.toHaveBeenCalled()
+    harness.send(makeInput({ type: 'keyUp', meta: false }))
+    expect(harness.quit).toHaveBeenCalledOnce()
   })
 
   it('quits immediately without a hint when hold-to-quit is disabled', () =>

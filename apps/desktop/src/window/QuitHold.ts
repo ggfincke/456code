@@ -41,6 +41,7 @@ export function makeQuitHoldHandler(
   const modifierKey = options.platform === 'darwin' ? 'meta' : 'control'
   let watchdog: NodeJS.Timeout | undefined
   let holding = false
+  let quitOnRelease = false
   let heldSince = 0
   let lastPressAt = 0
 
@@ -55,6 +56,7 @@ export function makeQuitHoldHandler(
   {
     if (!holding) return
     holding = false
+    quitOnRelease = false
     clearWatchdog()
     options.notify('up')
   }
@@ -70,10 +72,33 @@ export function makeQuitHoldHandler(
     const key = input.key.toLowerCase()
     if (input.type === 'keyUp')
     {
-      if (key === 'q' || key === modifierKey) release()
+      if (key === 'q')
+      {
+        const shouldQuit = quitOnRelease
+        release()
+        if (shouldQuit) options.quit()
+      }
+      else if (key === modifierKey)
+      {
+        if (!quitOnRelease)
+        {
+          release()
+        }
+        else
+        {
+          watchdog = setTimeout(quitNow, QUIT_HOLD_RELEASE_GRACE_MS)
+        }
+      }
       return
     }
     if (input.type !== 'keyDown') return
+
+    if (quitOnRelease && input.isAutoRepeat && key === 'q')
+    {
+      event.preventDefault()
+      clearWatchdog()
+      return
+    }
 
     const exactModifier =
       options.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
@@ -98,7 +123,8 @@ export function makeQuitHoldHandler(
     {
       if (holding && Date.now() - heldSince >= QUIT_HOLD_DURATION_MS)
       {
-        quitNow()
+        quitOnRelease = true
+        clearWatchdog()
       }
       return
     }

@@ -3,6 +3,7 @@
 
 import {
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_UNIFIED_SETTINGS,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInstanceConfig,
@@ -11,9 +12,27 @@ import { describe, expect, it } from 'vite-plus/test'
 import {
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
+  getChangedBrowserSettingLabels,
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
 } from '../../../../../apps/web/src/components/settings/SettingsPanels.logic'
+
+describe('browser default restore labels', () =>
+{
+  it('compares tagged viewport values structurally and labels each changed policy', () =>
+  {
+    expect(getChangedBrowserSettingLabels(DEFAULT_UNIFIED_SETTINGS)).toEqual([])
+    expect(
+      getChangedBrowserSettingLabels({
+        ...DEFAULT_UNIFIED_SETTINGS,
+        browserDefaultViewport: { _tag: 'freeform', width: 900, height: 700 },
+        browserDefaultZoomFactor: 1.25,
+        browserDefaultAppearance: 'dark',
+        browserAutoShowFloatingPreview: false,
+      }),
+    ).toEqual(['Browser viewport', 'Browser zoom', 'Browser appearance', 'Browser auto-show'])
+  })
+})
 
 describe('project grouping toggle', () =>
 {

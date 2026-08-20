@@ -28,6 +28,7 @@ interface FileBrowserPanelProps
   cwd: string
   projectName: string
   onOpenFile: (relativePath: string) => void
+  onRefreshSelectedFile?: () => void
 }
 
 const TREE_UNSAFE_CSS = `
@@ -52,6 +53,7 @@ export default function FileBrowserPanel({
   cwd,
   projectName,
   onOpenFile,
+  onRefreshSelectedFile,
 }: FileBrowserPanelProps)
 {
   const { resolvedTheme } = useTheme()
@@ -65,6 +67,11 @@ export default function FileBrowserPanel({
   const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry['kind']>>(entryKinds)
   const treePaths = useMemo(() => entries.map(treePath), [entries])
   const previousTreePathsRef = useRef<readonly string[]>([])
+  const handleRefresh = () =>
+  {
+    entriesQuery.refresh()
+    onRefreshSelectedFile?.()
+  }
 
   // the tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed
@@ -275,7 +282,7 @@ export default function FileBrowserPanel({
           type="button"
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label="Refresh workspace files"
-          onClick={entriesQuery.refresh}
+          onClick={handleRefresh}
         >
           <RefreshCw className={cn('size-3.5', entriesQuery.isPending && 'animate-spin')} />
         </button>

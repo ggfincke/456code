@@ -9,6 +9,7 @@ export interface CommandPaletteOpenIntent
 export interface CommandPaletteUiState
 {
   readonly open: boolean
+  readonly openGeneration: number
   readonly openIntent: CommandPaletteOpenIntent | null
 }
 
@@ -27,16 +28,29 @@ export function reduceCommandPaletteUiState(
   switch (action._tag)
   {
     case 'SetOpen':
-      return {
-        open: action.open,
-        openIntent: action.open ? state.openIntent : null,
-      }
+      return action.open
+        ? {
+            open: true,
+            openGeneration: state.open ? state.openGeneration : state.openGeneration + 1,
+            openIntent: state.openIntent,
+          }
+        : { ...state, open: false, openIntent: null }
     case 'Toggle':
-      return { open: !state.open, openIntent: null }
+      return state.open
+        ? { ...state, open: false, openIntent: null }
+        : { open: true, openGeneration: state.openGeneration + 1, openIntent: null }
     case 'OpenAddProject':
-      return { open: true, openIntent: { kind: 'add-project' } }
+      return {
+        open: true,
+        openGeneration: state.open ? state.openGeneration : state.openGeneration + 1,
+        openIntent: { kind: 'add-project' },
+      }
     case 'OpenNewThreadIn':
-      return { open: true, openIntent: { kind: 'new-thread-in' } }
+      return {
+        open: true,
+        openGeneration: state.open ? state.openGeneration : state.openGeneration + 1,
+        openIntent: { kind: 'new-thread-in' },
+      }
     case 'ClearOpenIntent':
       return state.openIntent ? { ...state, openIntent: null } : state
   }

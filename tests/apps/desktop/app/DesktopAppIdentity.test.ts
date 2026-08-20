@@ -70,6 +70,7 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
         calls.setDockIcon.push(iconPath)
       }),
     appendCommandLineSwitch: () => Effect.void,
+    onBeforeQuitForUpdate: () => Effect.void,
     on: () => Effect.void,
   } satisfies ElectronApp.ElectronApp['Service'])
 
@@ -173,7 +174,7 @@ describe('DesktopAppIdentity', () =>
         assert.equal(calls.setAboutPanelOptions[0]?.applicationName, '456code (Alpha)')
         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, '1.2.3')
         assert.equal(calls.setAboutPanelOptions[0]?.version, '0123456789ab')
-        assert.deepEqual(calls.setDockIcon, ['/icon.png'])
+        assert.deepEqual(calls.setDockIcon, [])
       }),
       {
         calls,
@@ -182,6 +183,30 @@ describe('DesktopAppIdentity', () =>
             T3CODE_COMMIT_HASH: '0123456789abcdef',
           },
         },
+        pngIconPath: Option.some('/icon.png'),
+      },
+    )
+  })
+
+  it.effect('sets the dock icon only when running unpackaged', () =>
+  {
+    const calls: ElectronAppCalls = {
+      setAboutPanelOptions: [],
+      setDockIcon: [],
+      setName: [],
+    }
+
+    return withIdentity(
+      Effect.gen(function* ()
+      {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity
+        yield* identity.configure
+
+        assert.deepEqual(calls.setDockIcon, ['/icon.png'])
+      }),
+      {
+        calls,
+        environment: { isPackaged: false },
         pngIconPath: Option.some('/icon.png'),
       },
     )

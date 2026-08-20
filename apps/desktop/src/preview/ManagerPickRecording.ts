@@ -50,6 +50,9 @@ export interface ManagerPickRecordingDeps
   readonly pickSequenceRef: Ref.Ref<number>
   readonly recordingSequenceRef: Ref.Ref<number>
   readonly recordingOwnerRef: Ref.Ref<Option.Option<RecordingOwner>>
+  readonly setRecordingBackgroundThrottling: (
+    enabled: boolean,
+  ) => Effect.Effect<void, PreviewManagerError>
   readonly artifactSequenceRef: Ref.Ref<number>
   readonly fileSystem: FileSystem.FileSystem
   readonly path: Path.Path
@@ -101,6 +104,7 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
     pickSequenceRef,
     recordingSequenceRef,
     recordingOwnerRef,
+    setRecordingBackgroundThrottling,
     artifactSequenceRef,
     fileSystem,
     path,
@@ -320,10 +324,20 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
     })
   })
 
-  const releaseRecordingOwner = (owner: RecordingOwner) =>
-    Ref.update(recordingOwnerRef, (current) =>
-      Option.isSome(current) && current.value.token === owner.token ? Option.none() : current,
+  const releaseRecordingOwner = Effect.fn('PreviewManager.releaseRecordingOwner')(function* (
+    owner: RecordingOwner,
+  )
+  {
+    const released = yield* Ref.modify(recordingOwnerRef, (current) =>
+      Option.isSome(current) && current.value.token === owner.token
+        ? ([true, Option.none<RecordingOwner>()] as const)
+        : ([false, current] as const),
     )
+    if (released)
+    {
+      yield* setRecordingBackgroundThrottling(true).pipe(Effect.ignore)
+    }
+  })
 
   const startRecording = Effect.fn('PreviewManager.startRecording')(function* (tabId: string)
   {
@@ -350,6 +364,9 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
     }
     if (!claim.claimed) return
 
+    yield* setRecordingBackgroundThrottling(false).pipe(
+      Effect.onError(() => releaseRecordingOwner(owner)),
+    )
     yield* Scope.addFinalizer(control.scope, releaseRecordingOwner(owner))
     yield* withControlSession(tabId, wc, 'recording.start', startScreencast).pipe(
       Effect.onError(() => releaseRecordingOwner(owner)),

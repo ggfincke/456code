@@ -1629,6 +1629,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
           ...(serviceTier ? { serviceTier } : {}),
           ...(mcpSession
             ? {
+                browserToolsAvailable: mcpSession.previewToolsAvailable,
                 environment: {
                   ...(options?.environment ?? process.env),
                   CODE456_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(

@@ -3,10 +3,15 @@
 import { describe, expect, it } from 'vite-plus/test'
 import * as Schema from 'effect/Schema'
 
-import { ProviderInstanceId } from '../../../packages/contracts/src/providerInstance.ts'
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+} from '../../../packages/contracts/src/providerInstance.ts'
 import {
   ClientSettingsSchema,
   ClientSettingsPatch,
+  defaultEnabledForDriver,
+  resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
 } from '../../../packages/contracts/src/settings.ts'
@@ -31,6 +36,42 @@ describe('ClientSettings word wrap', () =>
     expect(decoded.wordWrap).toBe(true)
     expect(decoded).not.toHaveProperty('chatWordWrap')
     expect(decoded).not.toHaveProperty('diffWordWrap')
+  })
+})
+
+describe('ClientSettings browser defaults', () =>
+{
+  it('decodes defaults and accepts one bounded preferences patch', () =>
+  {
+    const settings = decodeClientSettings({})
+    expect(settings.browserDefaultViewport).toEqual({ _tag: 'fill' })
+    expect(settings.browserDefaultZoomFactor).toBe(1)
+    expect(settings.browserDefaultAppearance).toBe('system')
+    expect(settings.browserAutoShowFloatingPreview).toBe(true)
+
+    expect(
+      decodeClientSettingsPatch({
+        browserDefaultViewport: {
+          _tag: 'preset',
+          width: 1024,
+          height: 600,
+          presetId: 'nest-hub',
+        },
+        browserDefaultZoomFactor: 1.25,
+        browserDefaultAppearance: 'dark',
+        browserAutoShowFloatingPreview: false,
+      }),
+    ).toEqual({
+      browserDefaultViewport: {
+        _tag: 'preset',
+        width: 1024,
+        height: 600,
+        presetId: 'nest-hub',
+      },
+      browserDefaultZoomFactor: 1.25,
+      browserDefaultAppearance: 'dark',
+      browserAutoShowFloatingPreview: false,
+    })
   })
 })
 
@@ -121,6 +162,31 @@ describe('ServerSettings.providerInstances (slice-2 invariant)', () =>
       ollamaHost: 'http://localhost:11434',
       homePath: '',
     })
+  })
+})
+
+describe('ServerSettings provider access defaults', () =>
+{
+  it('requires opt-in for experimental bindings and lets explicit false win', () =>
+  {
+    const settings = decodeServerSettings({})
+    expect(settings.providers.codex.enabled).toBe(true)
+    expect(settings.providers.claudeAgent.enabled).toBe(true)
+    expect(settings.providers.cursor.enabled).toBe(false)
+    expect(settings.providers.grok.enabled).toBe(false)
+    expect(settings.providers.opencode.enabled).toBe(false)
+    expect(settings.enableAgentBrowserAccess).toBe(true)
+    expect(decodeServerSettingsPatch({ enableAgentBrowserAccess: false })).toMatchObject({
+      enableAgentBrowserAccess: false,
+    })
+
+    const grok = ProviderDriverKind.make('grok')
+    expect(defaultEnabledForDriver(grok)).toBe(false)
+    expect(resolveProviderInstanceEnabled({ driver: grok, config: {} })).toBe(false)
+    expect(resolveProviderInstanceEnabled({ driver: grok, enabled: true, config: {} })).toBe(true)
+    expect(
+      resolveProviderInstanceEnabled({ driver: grok, enabled: true, config: { enabled: false } }),
+    ).toBe(false)
   })
 })
 

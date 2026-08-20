@@ -3,6 +3,7 @@
 import { assert, it, vi } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as ConfigProvider from 'effect/ConfigProvider'
+import * as Clock from 'effect/Clock'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -580,6 +581,31 @@ it.effect('keeps Bitbucket response bodies out of checkout diagnostics', () =>
       'Bitbucket API failed in getPullRequest: Bitbucket returned HTTP 403.',
     )
     assert.notInclude(error.message, 'secret-value')
+  }).pipe(Effect.provide(layer))
+})
+
+it.effect('records Bitbucket Retry-After timing on 429 responses', () =>
+{
+  const { layer } = makeLayer({
+    response: () =>
+      new Response('{"error":{"message":"slow down"}}', {
+        status: 429,
+        headers: { 'Retry-After': '120' },
+      }),
+  })
+
+  return Effect.gen(function* ()
+  {
+    const bitbucket = yield* BitbucketApi.BitbucketApi
+    const before = yield* Clock.currentTimeMillis
+    const error = yield* bitbucket
+      .getPullRequest({ cwd: '/repo', reference: '#42' })
+      .pipe(Effect.flip)
+    const after = yield* Clock.currentTimeMillis
+
+    assert.instanceOf(error, BitbucketApi.BitbucketResponseError)
+    assert.isAtLeast(error.retryAt ?? 0, before + 120_000)
+    assert.isAtMost(error.retryAt ?? Number.POSITIVE_INFINITY, after + 120_000)
   }).pipe(Effect.provide(layer))
 })
 

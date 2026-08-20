@@ -28,9 +28,13 @@ import { applyPreviewDesktopState, type DesktopPreviewOverlay } from './previewS
 
 // mirrors low-latency desktop state into the store and reflects navigation
 // events back to the server. Webview lifetime is owned by ElectronBrowserHost.
-export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: string }): void
+export function usePreviewBridge(input: {
+  threadRef: ScopedThreadRef
+  tabId: string
+  runtimeTabId: string
+}): void
 {
-  const { threadRef, tabId } = input
+  const { threadRef, tabId, runtimeTabId } = input
   const clearBrowserPointer = useBrowserPointerStore((state) => state.clear)
   const reportStatus = useAtomCommand(previewEnvironment.reportStatus, 'preview status report')
   const bridge = previewBridge
@@ -59,10 +63,10 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
   const handleStateChange = useEffectEvent(
     (changedTabId: string, state: DesktopPreviewTabState): void =>
     {
-      if (changedTabId !== tabId) return
+      if (changedTabId !== runtimeTabId) return
       if (shouldClearBrowserPointer(lastDesktopNavStatus.current, state.navStatus))
       {
-        clearBrowserPointer(tabId)
+        clearBrowserPointer(runtimeTabId)
       }
       lastDesktopNavStatus.current = state.navStatus
       applyPreviewDesktopState(stableThreadRef, tabId, projectDesktopState(state))
@@ -102,7 +106,7 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
     lastReportedCanGoForward.current = null
     lastDesktopNavStatus.current = null
     return bridge.onStateChange(handleStateChange)
-  }, [bridge, stableThreadRef, tabId])
+  }, [bridge, runtimeTabId, stableThreadRef, tabId])
   useEffect(() =>
   {
     if (!projectRef) return
@@ -144,6 +148,8 @@ export function projectDesktopState(state: DesktopPreviewTabState): DesktopPrevi
     loading: state.navStatus.kind === 'Loading',
     zoomFactor: state.zoomFactor,
     colorScheme: state.colorScheme,
+    audioMuted: state.audioMuted,
+    audible: state.audible,
     controller: state.controller,
     favicon:
       navOrigin !== null && state.favicon && originOf(state.favicon.pageUrl) === navOrigin

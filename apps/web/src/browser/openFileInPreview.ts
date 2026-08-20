@@ -15,11 +15,8 @@ import * as Data from 'effect/Data'
 import { AsyncResult } from 'effect/unstable/reactivity'
 
 import { resolveAssetUrl } from '~/assets/assetUrls'
-import {
-  applyPreviewServerSnapshot,
-  isPreviewSupportedInRuntime,
-  rememberPreviewUrl,
-} from './previewStateStore'
+import { isPreviewSupportedInRuntime } from './previewStateStore'
+import { openPreviewSession } from '~/components/preview/openPreviewSession'
 import { useRightPanelStore } from '~/rightPanelStore'
 
 export const isBrowserPreviewFile = (path: string): boolean =>
@@ -43,14 +40,13 @@ export async function openUrlInPreview<E>(input: {
   readonly openPreview: OpenPreviewMutation<E>
 }): Promise<AtomCommandResult<void, E>>
 {
-  const result = await input.openPreview({
-    environmentId: input.threadRef.environmentId,
-    input: { threadId: input.threadRef.threadId, url: input.url },
+  const result = await openPreviewSession({
+    openPreview: input.openPreview,
+    threadRef: input.threadRef,
+    url: input.url,
   })
   return mapAtomCommandResult(result, (snapshot) =>
   {
-    applyPreviewServerSnapshot(input.threadRef, snapshot)
-    rememberPreviewUrl(input.threadRef, input.url)
     useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId)
   })
 }
