@@ -511,15 +511,27 @@ describe('ImportDiscovery', () =>
         ),
       )
 
-      const result = yield* discovery.scan(DEFAULT_SERVER_SETTINGS, {
-        environment: {
-          HOME: homePath,
-          PATH: DISCOVERY_PATH,
-          XDG_DATA_HOME: dataRoot,
+      const result = yield* discovery.scan(
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          providers: {
+            ...DEFAULT_SERVER_SETTINGS.providers,
+            opencode: {
+              ...DEFAULT_SERVER_SETTINGS.providers.opencode,
+              enabled: true,
+            },
+          },
         },
-        homePath,
-        cwd: homePath,
-      })
+        {
+          environment: {
+            HOME: homePath,
+            PATH: DISCOVERY_PATH,
+            XDG_DATA_HOME: dataRoot,
+          },
+          homePath,
+          cwd: homePath,
+        },
+      )
 
       expect(result.truncated).toBe(false)
       expect(result.errors).toEqual([])
