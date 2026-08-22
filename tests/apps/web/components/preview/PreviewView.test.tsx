@@ -1,7 +1,11 @@
 // tests/apps/web/components/preview/PreviewView.test.tsx
 // verify preview view navigation behavior
 
+// @vitest-environment happy-dom
+
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
+import { act, Profiler } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
@@ -12,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   submittedUrl: null as ((url: string) => void) | null,
   emptyStateUrl: null as ((url: string) => void) | null,
   showEmptyState: false,
+  loading: false,
 }))
 
 vi.mock('~/state/session', () => ({
@@ -53,7 +58,7 @@ vi.mock('~/previewStateStore', () => ({
         hasWebContents: true,
         canGoBack: false,
         canGoForward: false,
-        loading: false,
+        loading: mocks.loading,
         zoomFactor: 1,
         colorScheme: 'system',
         audioMuted: false,
@@ -148,9 +153,6 @@ vi.mock('../../../../../apps/web/src/components/preview/AgentBrowserCursor', () 
   AgentBrowserCursor: () => null,
 }))
 vi.mock('~/browser/BrowserSurfaceSlot', () => ({ BrowserSurfaceSlot: () => null }))
-vi.mock('../../../../../apps/web/src/components/preview/useLoadingProgress', () => ({
-  useLoadingProgress: () => 0,
-}))
 vi.mock('../../../../../apps/web/src/components/preview/usePreviewSession', () => ({
   usePreviewSession: vi.fn(),
 }))
@@ -164,6 +166,8 @@ const TEST_THREAD_REF = {
 } as const
 const TEST_RUNTIME_TAB_ID = previewRuntimeTabId(TEST_THREAD_REF, null, 'tab-1')
 
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+
 describe('PreviewView navigation', () =>
 {
   beforeEach(() =>
@@ -174,6 +178,46 @@ describe('PreviewView navigation', () =>
     mocks.submittedUrl = null
     mocks.emptyStateUrl = null
     mocks.showEmptyState = false
+    mocks.loading = false
+  })
+
+  it('does not rerender while loading time passes', async () =>
+  {
+    mocks.loading = true
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const onRender = vi.fn()
+
+    try
+    {
+      await act(async () =>
+      {
+        root.render(
+          <Profiler id="preview" onRender={onRender}>
+            <PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />
+          </Profiler>,
+        )
+      })
+      const initialRenderCount = onRender.mock.calls.length
+
+      // a reintroduced progress ticker re-renders every 120ms, so a few hundred
+      // ms of real time must pass without a single additional render
+      await act(async () =>
+      {
+        await new Promise((resolve) => setTimeout(resolve, 350))
+      })
+
+      expect(onRender).toHaveBeenCalledTimes(initialRenderCount)
+    }
+    finally
+    {
+      await act(async () =>
+      {
+        root.unmount()
+      })
+      container.remove()
+    }
   })
 
   it.each([
