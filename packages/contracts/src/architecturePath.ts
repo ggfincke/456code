@@ -4,9 +4,11 @@
 import * as Schema from 'effect/Schema'
 
 export const ARCHITECTURE_BLAST_PATH_LIMIT = 400
+export const ARCHITECTURE_RELATIVE_PATH_MAX_LENGTH = 1_024
 
 export const ArchitectureRelativePath = Schema.String.check(
   Schema.isNonEmpty(),
+  Schema.isMaxLength(ARCHITECTURE_RELATIVE_PATH_MAX_LENGTH),
   Schema.makeFilter((value) =>
   {
     if (value.startsWith('/') || value.includes('\\'))

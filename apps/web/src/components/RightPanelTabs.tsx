@@ -8,7 +8,6 @@ import {
   ClipboardList,
   FileDiff,
   Files,
-  FolderTree,
   GitCompareArrows,
   Globe2,
   Map,
@@ -88,7 +87,7 @@ const SURFACE_DISABLED_REASONS = {
   browser: 'Browser previews are only available in the 456code desktop app.',
   files: 'Files are only available when a project is open.',
   diff: 'Diff is only available for server threads in Git repositories.',
-  atlas: 'Repository Atlas requires native architecture analysis for an open project.',
+  atlas: 'Repository Map requires native architecture analysis for an open project.',
   explorer: 'Proposal Review requires proposal previews for an open server project.',
 } as const
 const NOOP_SURFACE_ACTION = () => undefined
@@ -276,7 +275,7 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddExplorer,
     },
     {
-      label: 'Repository Atlas',
+      label: 'Repository Map',
       description: "Explore this project's sealed architecture map.",
       icon: Map,
       available: props.repositoryAtlasAvailable,
@@ -389,31 +388,22 @@ function surfaceTitle(
     case 'workers':
       return 'Workers'
     case 'repository-atlas-home':
-      return 'Repository Atlas'
+      return 'Repository Map'
     case 'explorer':
       return 'Proposal Review'
     case 'architecture-impact':
     {
+      const target = surface.target.descriptor.target
       const revision =
-        surface.target.comparison.kind === 'diff-analysis'
-          ? surface.target.comparison.diffAnalysisId
-          : surface.target.comparison.generationId
+        target.kind === 'comparison'
+          ? target.comparison.kind === 'diff-analysis'
+            ? target.comparison.diffAnalysisId
+            : target.comparison.generationId
+          : surface.target.descriptor.descriptorId
       return `Impact Diff · ${revision.slice(0, 8)}`
     }
     case 'repository-atlas':
-      return `Repository Atlas · ${surface.target.generationId.slice(0, 8)}`
-    case 'architecture-scope':
-    {
-      const label =
-        surface.target.scope.level === 'file-neighborhood'
-          ? surface.target.scope.path.slice(surface.target.scope.path.lastIndexOf('/') + 1)
-          : surface.target.scope.id
-      const revision =
-        surface.target.source.kind === 'diff-analysis'
-          ? surface.target.source.diffAnalysisId
-          : surface.target.source.generationId
-      return `Architecture Scope · ${label} · ${revision.slice(0, 8)}`
-    }
+      return `Repository Map · ${surface.target.generationId.slice(0, 8)}`
     case 'preview':
     {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null
@@ -436,19 +426,18 @@ function surfaceTooltip(title: string, surface: RightPanelSurface): string
   switch (surface.kind)
   {
     case 'architecture-impact':
+    {
+      const target = surface.target.descriptor.target
       return `${title} · ${
-        surface.target.comparison.kind === 'diff-analysis'
-          ? surface.target.comparison.diffAnalysisId
-          : surface.target.comparison.generationId
+        target.kind === 'comparison'
+          ? target.comparison.kind === 'diff-analysis'
+            ? target.comparison.diffAnalysisId
+            : target.comparison.generationId
+          : surface.target.descriptor.descriptorId
       }`
+    }
     case 'repository-atlas':
       return `${title} · ${surface.target.generationId}`
-    case 'architecture-scope':
-      return `${title} · ${
-        surface.target.source.kind === 'diff-analysis'
-          ? surface.target.source.diffAnalysisId
-          : surface.target.source.generationId
-      }`
     case 'file':
       if (!surface.source) return title
       return `${title} · ${
@@ -538,8 +527,6 @@ function SurfaceIcon({
       return <GitCompareArrows className="size-3.5 shrink-0" />
     case 'repository-atlas':
       return <Map className="size-3.5 shrink-0" />
-    case 'architecture-scope':
-      return <FolderTree className="size-3.5 shrink-0" />
   }
 }
 
@@ -599,7 +586,7 @@ export function RightPanelTabs(props: RightPanelTabsProps)
       onClick: props.onAddExplorer ?? NOOP_SURFACE_ACTION,
     },
     {
-      label: 'Repository Atlas',
+      label: 'Repository Map',
       icon: Map,
       shortcut: 'R',
       available: props.repositoryAtlasAvailable === true,

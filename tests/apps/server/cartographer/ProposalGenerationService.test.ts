@@ -18,6 +18,7 @@ import {
   ProjectId,
   ProposalGenerationId,
   ProposalId,
+  ProposalRevisionId,
   ProviderInstanceId,
   ThreadId,
 } from '@t3tools/contracts'
@@ -32,6 +33,7 @@ import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect } from 'vite-plus/test'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
+import * as ArchitectureAdmissionRepository from '../../../../apps/server/src/architecture/ArchitectureAdmissionRepository.ts'
 import * as CartographerAnalyzer from '../../../../apps/server/src/cartographer/CartographerAnalyzer.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
@@ -138,9 +140,49 @@ async function fingerprintDist(distRoot: string, version: string): Promise<strin
   return `@t3tools/cartographer-core@${version}:dist-sha256:${sha256(Buffer.concat(parts))}`
 }
 
+const leaseProposalAdmission = Effect.fn('leaseProposalAdmission')(function* (input: {
+  readonly admissionKey: string
+  readonly threadId: ThreadId
+  readonly proposalId: ProposalId
+  readonly revisionId: ProposalRevisionId
+  readonly revision: number
+  readonly analyzerFingerprint: string
+})
+{
+  const repository = yield* ArchitectureAdmissionRepository.ArchitectureAdmissionRepository
+  yield* repository.enqueue({
+    admissionKey: input.admissionKey,
+    target: {
+      _tag: 'proposal-verified',
+      version: 1,
+      threadId: input.threadId,
+      proposalId: input.proposalId,
+      revisionId: input.revisionId,
+      revision: input.revision,
+      analyzerFingerprint: input.analyzerFingerprint,
+    },
+    now: '2026-08-20T12:00:00.000Z',
+  })
+  const leased = yield* repository.leaseForExplicitStart({
+    admissionKey: input.admissionKey,
+    ownerId: 'proposal-generation-test-worker',
+    leaseExpiresAt: '2099-08-20T12:00:30.000Z',
+    now: '2026-08-20T12:00:01.000Z',
+  })
+  if (leased === null)
+  {
+    return yield* Effect.die(`expected admission ${input.admissionKey} to be leaseable`)
+  }
+  return {
+    admissionId: leased.admissionId,
+    ownerId: 'proposal-generation-test-worker',
+    leaseEpoch: leased.leaseEpoch,
+  }
+})
+
 describe('ProposalGenerationService', () =>
 {
-  it.effect('analyzes retained trees, terminalizes superseded work, and reports drift', () =>
+  it.effect('analyzes retained trees through durable admissions and reports drift', () =>
     Effect.gen(function* ()
     {
       const workspaceRoot = yield* Effect.promise(initializeRepository)
@@ -164,6 +206,7 @@ describe('ProposalGenerationService', () =>
       const analyzerLifecycleLog = NodePath.join(baseDir, 'analyzer-lifecycle.ndjson')
       const analyzerSource = [
         'import { access, appendFile, readFile, writeFile } from "node:fs/promises"',
+        'import { createHash } from "node:crypto"',
         'import { setTimeout as delay } from "node:timers/promises"',
         'const args = process.argv.slice(2)',
         "if (args[0] !== 'analyze-trees') process.exit(64)",
@@ -172,15 +215,17 @@ describe('ProposalGenerationService', () =>
         'const flag = (name) => args[args.indexOf(name) + 1]',
         "const out = flag('--out')",
         "const analyzerVersion = flag('--analyzer-version')",
+        "const implementationChangedFileCount = Number(flag('--implementation-changed-file-count'))",
+        "const sha256 = (value) => createHash('sha256').update(value).digest('hex')",
         'const lifecycleLog = process.env.T3_TEST_CARTOGRAPHER_ANALYZER_LOG',
         "await appendFile(lifecycleLog, `${JSON.stringify({ event: 'start', out })}\\n`)",
         'await delay(Number(process.env.T3_TEST_CARTOGRAPHER_ANALYZER_DELAY_MS || 0))',
         'const badIdentity = await access(process.env.T3_TEST_CARTOGRAPHER_BAD_IDENTITY_FILE).then(() => true, () => false)',
         "const baseContent = await readFile(`${baseRoot}/target.txt`, 'utf8')",
         "const proposedContent = await readFile(`${proposedRoot}/target.txt`, 'utf8')",
-        "await writeFile(`${out}/base.graph.json`, JSON.stringify({ content: baseContent, gitRef: flag('--base-ref') }))",
-        "await writeFile(`${out}/proposed.graph.json`, JSON.stringify({ content: proposedContent, gitRef: flag('--proposed-ref') }))",
-        'await writeFile(`${out}/impact.json`, JSON.stringify({',
+        "const baseGraph = JSON.stringify({ repoRoot: '.', content: baseContent, gitRef: flag('--base-ref') })",
+        "const proposedGraph = JSON.stringify({ repoRoot: '.', content: proposedContent, gitRef: flag('--proposed-ref') })",
+        'const impact = JSON.stringify({',
         "  baseGeneratedAt: '2026-08-07T12:00:00.000Z',",
         "  headGeneratedAt: '2026-08-07T12:00:00.000Z',",
         "  baseGitRef: flag('--base-ref'),",
@@ -196,15 +241,47 @@ describe('ProposalGenerationService', () =>
         '  newViolations: [],',
         '  resolvedViolations: [],',
         '  changed: baseContent !== proposedContent',
-        '}))',
+        '})',
+        'const impactProjection = JSON.stringify({',
+        '  version: 1,',
+        "  kind: 'impact-diff',",
+        "  authority: 'verified',",
+        "  resultState: 'no-impact',",
+        "  generatedAt: '2026-08-07T12:00:00.000Z',",
+        '  analyzerFingerprint: analyzerVersion,',
+        "  baseGitRef: flag('--base-ref'),",
+        "  headGitRef: flag('--proposed-ref'),",
+        '  baseGraphDigest: `sha256:${sha256(baseGraph)}`,',
+        '  headGraphDigest: `sha256:${sha256(proposedGraph)}`,',
+        '  rawImpactDigest: `sha256:${sha256(impact)}`,',
+        '  implementationChangedFileCount,',
+        "  lens: 'structure',",
+        "  semanticLevel: 'files',",
+        '  breadcrumbs: [],',
+        "  layoutVersion: 'semantic-impact-v1',",
+        '  totals: {',
+        '    nodes: { total: 0, returned: 0, omitted: 0 },',
+        '    edges: { total: 0, returned: 0, omitted: 0 },',
+        '    evidence: { total: 0, returned: 0, omitted: 0 },',
+        '    changedFiles: { total: implementationChangedFileCount, returned: 0, omitted: implementationChangedFileCount }',
+        '  },',
+        '  nodes: [],',
+        '  edges: [],',
+        '  evidence: []',
+        '})',
+        'await writeFile(`${out}/base.graph.json`, baseGraph)',
+        'await writeFile(`${out}/proposed.graph.json`, proposedGraph)',
+        'await writeFile(`${out}/impact.json`, impact)',
+        'await writeFile(`${out}/impact-projection.json`, impactProjection)',
         "await appendFile(lifecycleLog, `${JSON.stringify({ event: 'end', out })}\\n`)",
         'console.log(JSON.stringify({',
         "  type: 'cartographer.analysis-ready',",
-        '  version: 1,',
+        '  version: 2,',
         "  analyzerVersion: badIdentity ? 'sha256:wrong-analyzer' : analyzerVersion,",
         "  baseGraph: 'base.graph.json',",
         "  proposedGraph: 'proposed.graph.json',",
-        "  impact: 'impact.json'",
+        "  impact: 'impact.json',",
+        "  impactProjection: 'impact-projection.json'",
         '}))',
         '',
       ].join('\n')
@@ -260,6 +337,7 @@ describe('ProposalGenerationService', () =>
             providerSessionId: 'provider-session-generation-exact',
             providerInstanceId: ProviderInstanceId.make('codex-generation'),
           },
+          verifiedAnalyzerFingerprint: 'cartographer:0.1.0-test',
           cwd: workspaceRoot,
           changes: {
             _tag: 'typed',
@@ -274,10 +352,32 @@ describe('ProposalGenerationService', () =>
           },
         })
 
-        const first = yield* generations.start({ threadId, proposalId, revision: 1 })
-        expect(first.state).toBe('queued')
-        const second = yield* generations.start({ threadId, proposalId, revision: 1 })
-        expect(second.state).toBe('queued')
+        const analyzerFingerprint = yield* Effect.promise(() =>
+          fingerprintDist(analyzerDistRoot, '0.1.0-test'),
+        )
+        const initialAdmissionKey = `proposal-verified:${revision.revisionId}:${analyzerFingerprint}`
+        const initialAdmissionLease = yield* leaseProposalAdmission({
+          admissionKey: initialAdmissionKey,
+          threadId,
+          proposalId,
+          revisionId: revision.revisionId,
+          revision: 1,
+          analyzerFingerprint,
+        })
+        const initialStart = {
+          threadId,
+          proposalId,
+          revision: 1,
+          revisionId: revision.revisionId,
+          analyzerFingerprint,
+          admissionKey: initialAdmissionKey,
+          leaseFence: initialAdmissionLease,
+        }
+        const first = yield* generations.startAdmitted(initialStart)
+        expect(['queued', 'preparing', 'analyzing']).toContain(first.state)
+        const second = yield* generations.startAdmitted(initialStart)
+        expect(['queued', 'preparing', 'analyzing']).toContain(second.state)
+        expect(second.generationId).toBe(first.generationId)
 
         const waitForTerminal = Effect.fn('ProposalGenerationService.test.waitForTerminal')(
           function* (generationThreadId: ThreadId, generationId: ProposalGenerationId)
@@ -302,31 +402,100 @@ describe('ProposalGenerationService', () =>
             return yield* Effect.die(`generation ${generationId} did not terminate`)
           },
         )
+        const startNewAttempt = Effect.fn('ProposalGenerationService.test.startNewAttempt')(
+          function* (input: {
+            readonly threadId: ThreadId
+            readonly proposalId: ProposalId
+            readonly revisionId: ProposalRevisionId
+            readonly revision: number
+            readonly suffix: string
+          })
+          {
+            const admissionKey = `proposal-verified:${input.revisionId}:${analyzerFingerprint}:${input.suffix}`
+            const leaseFence = yield* leaseProposalAdmission({
+              admissionKey,
+              threadId: input.threadId,
+              proposalId: input.proposalId,
+              revisionId: input.revisionId,
+              revision: input.revision,
+              analyzerFingerprint,
+            })
+            return yield* generations.startAdmitted({
+              threadId: input.threadId,
+              proposalId: input.proposalId,
+              revision: input.revision,
+              revisionId: input.revisionId,
+              analyzerFingerprint,
+              admissionKey,
+              leaseFence,
+              forceNewAttempt: true,
+            })
+          },
+        )
 
         const ready = yield* waitForTerminal(threadId, second.generationId)
         expect(ready.state).toBe('ready')
         expect(ready.authority).toBe('authoritative')
         expect(ready.freshness).toBe('fresh')
         expect(ready.workspaceSnapshotTreeOid).toBe(revision.baseSnapshot.workingTreeOid)
-        expect(ready.analyzerVersion).toBe(
-          yield* Effect.promise(() => fingerprintDist(analyzerDistRoot, '0.1.0-test')),
-        )
+        expect(ready.analyzerVersion).toBe(analyzerFingerprint)
         expect(ready.baseGraphArtifact).toBeTruthy()
         expect(ready.proposedGraphArtifact).toBeTruthy()
         expect(ready.impactArtifact).toBeTruthy()
-
-        const superseded = yield* waitForTerminal(threadId, first.generationId)
-        expect(superseded.state).toBe('cancelled')
-        expect(superseded.errorCode).toBe('superseded')
-        const supersededArtifactRoot = NodePath.join(
-          config.stateDir,
-          'cartographer',
-          'generations',
-          first.generationId,
+        expect(ready.impactProjectionArtifact).toBeTruthy()
+        const admittedReuse = yield* generations.startAdmitted({
+          threadId,
+          proposalId,
+          revision: 1,
+          revisionId: revision.revisionId,
+          analyzerFingerprint: ready.analyzerVersion,
+          admissionKey: initialAdmissionKey,
+          leaseFence: initialAdmissionLease,
+        })
+        expect(admittedReuse.generationId).toBe(ready.generationId)
+        expect(admittedReuse.state).toBe('ready')
+        const forcedRetry = yield* generations.startAdmitted({
+          threadId,
+          proposalId,
+          revision: 1,
+          revisionId: revision.revisionId,
+          analyzerFingerprint: ready.analyzerVersion,
+          admissionKey: initialAdmissionKey,
+          leaseFence: initialAdmissionLease,
+          forceNewAttempt: true,
+        })
+        expect(forcedRetry.generationId).not.toBe(ready.generationId)
+        expect((yield* waitForTerminal(threadId, forcedRetry.generationId)).state).toBe('ready')
+        expect((yield* generations.get({ threadId, generationId: ready.generationId })).state).toBe(
+          'ready',
         )
-        expect(yield* Effect.promise(() => pathExists(supersededArtifactRoot))).toBe(false)
+        const fingerprintMismatch = yield* generations
+          .startAdmitted({
+            threadId,
+            proposalId,
+            revision: 1,
+            revisionId: revision.revisionId,
+            analyzerFingerprint: 'cartographer:stale-admission',
+            admissionKey: `proposal-verified:${revision.revisionId}:cartographer:stale-admission`,
+            leaseFence: initialAdmissionLease,
+          })
+          .pipe(Effect.flip)
+        expect(fingerprintMismatch).toMatchObject({ failure: 'analysis-failed' })
+        const revisionMismatch = yield* generations
+          .startAdmitted({
+            threadId,
+            proposalId,
+            revision: 1,
+            revisionId: ProposalRevisionId.make('revision-wrong-exact-identity'),
+            analyzerFingerprint: ready.analyzerVersion,
+            admissionKey: 'proposal-verified:revision-wrong-exact-identity:cartographer:test',
+            leaseFence: initialAdmissionLease,
+          })
+          .pipe(Effect.flip)
+        expect(revisionMismatch).toMatchObject({ failure: 'scope-mismatch' })
+
         expect((yield* generations.latest({ threadId, proposalId }))?.generationId).toBe(
-          second.generationId,
+          forcedRetry.generationId,
         )
 
         const artifactRoot = NodePath.join(
@@ -351,8 +520,8 @@ describe('ProposalGenerationService', () =>
         )
         const nativeImpact = yield* generations.resolveImpactTarget(threadId, second.generationId)
         expect(nativeImpact).toMatchObject({
-          legacy: false,
           diff: { changed: true, addedNodes: ['target.txt'] },
+          projection: { version: 1 },
         })
         const baseGraph = JSON.parse(
           yield* Effect.promise(() => NodeFSP.readFile(architectureTarget.baseGraphPath, 'utf8')),
@@ -363,10 +532,12 @@ describe('ProposalGenerationService', () =>
           ),
         ) as { readonly content: string; readonly gitRef: string }
         expect(baseGraph).toEqual({
+          repoRoot: '.',
           content: 'working-base\r\n',
           gitRef: revision.baseSnapshot.workingTreeOid,
         })
         expect(proposedGraph).toEqual({
+          repoRoot: '.',
           content: 'proposed-exact\r\n',
           gitRef: revision.proposedTreeOid,
         })
@@ -435,10 +606,12 @@ describe('ProposalGenerationService', () =>
             .resolveArchitectureTarget(threadId, second.generationId)
             .pipe(Effect.flip)).failure,
         ).toBe('generation_not_found')
-        const movedRefGeneration = yield* generations.start({
+        const movedRefGeneration = yield* startNewAttempt({
           threadId,
           proposalId,
+          revisionId: revision.revisionId,
           revision: 1,
+          suffix: 'moved-ref',
         })
         const movedRefFailure = yield* waitForTerminal(threadId, movedRefGeneration.generationId)
         yield* Effect.promise(() =>
@@ -463,16 +636,170 @@ describe('ProposalGenerationService', () =>
           ),
         ).toBe(false)
 
-        yield* Effect.promise(() => NodeFSP.writeFile(badIdentityMarker, ''))
-        const failedGeneration = yield* generations.start({
+        yield* Effect.promise(() =>
+          git(workspaceRoot, ['update-ref', '-d', revision.proposedRetainedRef]),
+        )
+        const missingRefGeneration = yield* startNewAttempt({
           threadId,
           proposalId,
+          revisionId: revision.revisionId,
           revision: 1,
+          suffix: 'missing-ref',
+        })
+        const missingRefFailure = yield* waitForTerminal(
+          threadId,
+          missingRefGeneration.generationId,
+        )
+        yield* Effect.promise(() =>
+          git(workspaceRoot, [
+            'update-ref',
+            revision.proposedRetainedRef,
+            proposedRetainedCommitOid,
+          ]),
+        )
+        expect(missingRefFailure).toMatchObject({
+          state: 'failed',
+          errorCode: 'materialization-failed',
+        })
+
+        yield* Effect.promise(() => NodeFSP.writeFile(badIdentityMarker, ''))
+        const failedGeneration = yield* startNewAttempt({
+          threadId,
+          proposalId,
+          revisionId: revision.revisionId,
+          revision: 1,
+          suffix: 'bad-analyzer-identity',
         })
         const failed = yield* waitForTerminal(threadId, failedGeneration.generationId)
         yield* Effect.promise(() => NodeFSP.rm(badIdentityMarker, { force: true }))
         expect(failed.state).toBe('failed')
         expect(failed.errorCode).toBe('analysis-failed')
+        const retryAdmissionKey = `proposal-verified:${revision.revisionId}:${ready.analyzerVersion}:retry-test`
+        const retryAdmissionLease = yield* leaseProposalAdmission({
+          admissionKey: retryAdmissionKey,
+          threadId,
+          proposalId,
+          revisionId: revision.revisionId,
+          revision: 1,
+          analyzerFingerprint: ready.analyzerVersion,
+        })
+        const admittedRetry = yield* generations.startAdmitted({
+          threadId,
+          proposalId,
+          revision: 1,
+          revisionId: revision.revisionId,
+          analyzerFingerprint: ready.analyzerVersion,
+          admissionKey: retryAdmissionKey,
+          leaseFence: retryAdmissionLease,
+        })
+        expect(admittedRetry.generationId).not.toBe(failed.generationId)
+        expect(['queued', 'preparing', 'analyzing', 'ready']).toContain(admittedRetry.state)
+        expect((yield* waitForTerminal(threadId, admittedRetry.generationId)).state).toBe('ready')
+
+        const cancelledAdmissionKey = `proposal-verified:${revision.revisionId}:${ready.analyzerVersion}:cancelled-before-start`
+        const cancelledAdmissionLease = yield* leaseProposalAdmission({
+          admissionKey: cancelledAdmissionKey,
+          threadId,
+          proposalId,
+          revisionId: revision.revisionId,
+          revision: 1,
+          analyzerFingerprint: ready.analyzerVersion,
+        })
+        const admissionRepository =
+          yield* ArchitectureAdmissionRepository.ArchitectureAdmissionRepository
+        yield* admissionRepository.cancelThread({
+          threadId,
+          now: '2026-08-20T12:00:02.000Z',
+        })
+        const cancelledBeforeStart = yield* generations
+          .startAdmitted({
+            threadId,
+            proposalId,
+            revision: 1,
+            revisionId: revision.revisionId,
+            analyzerFingerprint: ready.analyzerVersion,
+            admissionKey: cancelledAdmissionKey,
+            leaseFence: cancelledAdmissionLease,
+          })
+          .pipe(Effect.flip)
+        expect(cancelledBeforeStart).toMatchObject({ failure: 'scope-mismatch' })
+        const cancelledRows = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS "count"
+          FROM proposal_generations
+          WHERE architecture_admission_key = ${cancelledAdmissionKey}
+        `
+        expect(cancelledRows[0]?.count).toBe(0)
+
+        const sentinelGenerationId = ProposalGenerationId.make('generation-legacy-sentinel')
+        yield* sql`
+          INSERT INTO proposal_generations (
+            generation_id,
+            proposal_id,
+            revision_id,
+            revision,
+            thread_id,
+            state,
+            authority,
+            workspace_snapshot_tree_oid,
+            analyzer_version,
+            artifact_root,
+            base_graph_path,
+            proposed_graph_path,
+            impact_path,
+            architecture_admission_key,
+            error_code,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${sentinelGenerationId},
+            ${proposalId},
+            ${revision.revisionId},
+            1,
+            ${threadId},
+            'failed',
+            'authoritative',
+            ${revision.baseSnapshot.workingTreeOid},
+            'resolve-on-lease',
+            ${NodePath.join(config.stateDir, 'cartographer', 'generations', sentinelGenerationId)},
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            'analysis-failed',
+            '2026-08-20T12:00:03.000Z',
+            '2026-08-20T12:00:03.000Z'
+          )
+        `
+        expect(
+          (yield* generations.get({ threadId, generationId: sentinelGenerationId }))
+            .analyzerVersion,
+        ).toBe('resolve-on-lease')
+        const sentinelAdmissionKey = `proposal-verified:${revision.revisionId}:resolve-on-lease`
+        const sentinelLease = yield* leaseProposalAdmission({
+          admissionKey: sentinelAdmissionKey,
+          threadId,
+          proposalId,
+          revisionId: revision.revisionId,
+          revision: 1,
+          analyzerFingerprint: 'resolve-on-lease',
+        })
+        const sentinelStart = yield* generations
+          .startAdmitted({
+            threadId,
+            proposalId,
+            revision: 1,
+            revisionId: revision.revisionId,
+            analyzerFingerprint: 'resolve-on-lease',
+            admissionKey: sentinelAdmissionKey,
+            leaseFence: sentinelLease,
+          })
+          .pipe(Effect.flip)
+        expect(sentinelStart).toMatchObject({ failure: 'analysis-failed' })
+        yield* sql`
+          DELETE FROM proposal_generations
+          WHERE generation_id = ${sentinelGenerationId}
+        `
         expect(
           yield* Effect.promise(() =>
             pathExists(
@@ -489,7 +816,7 @@ describe('ProposalGenerationService', () =>
 
         const deletionRaceThreadId = ThreadId.make('thread-generation-deletion-race')
         const deletionRaceProposalId = ProposalId.make('proposal-generation-deletion-race')
-        yield* proposals.upsert({
+        const deletionRaceRevision = yield* proposals.upsert({
           proposalId: deletionRaceProposalId,
           environmentId: EnvironmentId.make('environment-generation-exact'),
           projectId: ProjectId.make('project-generation-exact'),
@@ -498,6 +825,7 @@ describe('ProposalGenerationService', () =>
             providerSessionId: 'provider-session-generation-deletion-race',
             providerInstanceId: ProviderInstanceId.make('codex-generation'),
           },
+          verifiedAnalyzerFingerprint: 'cartographer:0.1.0-test',
           cwd: workspaceRoot,
           changes: {
             _tag: 'typed',
@@ -511,19 +839,32 @@ describe('ProposalGenerationService', () =>
             ],
           },
         })
-        const racingStart = yield* generations
-          .start({
-            threadId: deletionRaceThreadId,
-            proposalId: deletionRaceProposalId,
-            revision: 1,
-          })
-          .pipe(
-            Effect.match({
-              onFailure: (error) => ({ _tag: 'failure' as const, error }),
-              onSuccess: (generation) => ({ _tag: 'success' as const, generation }),
-            }),
-            Effect.forkScoped,
-          )
+        const deletionRaceAdmissionKey = `proposal-verified:${deletionRaceRevision.revisionId}:${analyzerFingerprint}:deletion-race`
+        const deletionRaceLease = yield* leaseProposalAdmission({
+          admissionKey: deletionRaceAdmissionKey,
+          threadId: deletionRaceThreadId,
+          proposalId: deletionRaceProposalId,
+          revisionId: deletionRaceRevision.revisionId,
+          revision: 1,
+          analyzerFingerprint,
+        })
+        const deletionRaceStart = {
+          threadId: deletionRaceThreadId,
+          proposalId: deletionRaceProposalId,
+          revisionId: deletionRaceRevision.revisionId,
+          revision: 1,
+          analyzerFingerprint,
+          admissionKey: deletionRaceAdmissionKey,
+          leaseFence: deletionRaceLease,
+          forceNewAttempt: true,
+        }
+        const racingStart = yield* generations.startAdmitted(deletionRaceStart).pipe(
+          Effect.match({
+            onFailure: (error) => ({ _tag: 'failure' as const, error }),
+            onSuccess: (generation) => ({ _tag: 'success' as const, generation }),
+          }),
+          Effect.forkScoped,
+        )
         yield* generations.cancelThread(deletionRaceThreadId)
         const racingStartResult = yield* Fiber.join(racingStart)
         if (racingStartResult._tag === 'success')
@@ -551,20 +892,29 @@ describe('ProposalGenerationService', () =>
         expect(racingRows.every((row) => row.state === 'cancelled' || row.state === 'failed')).toBe(
           true,
         )
-        const racingRestart = yield* generations
-          .start({
-            threadId: deletionRaceThreadId,
-            proposalId: deletionRaceProposalId,
-            revision: 1,
-          })
-          .pipe(Effect.flip)
+        const racingRestart = yield* generations.startAdmitted(deletionRaceStart).pipe(Effect.flip)
         expect(racingRestart._tag).toBe('ProposalGenerationError')
 
-        const deletionGeneration = yield* generations.start({
+        const deletionAdmissionKey = `proposal-verified:${revision.revisionId}:${analyzerFingerprint}:cancel-thread`
+        const deletionLease = yield* leaseProposalAdmission({
+          admissionKey: deletionAdmissionKey,
           threadId,
           proposalId,
+          revisionId: revision.revisionId,
           revision: 1,
+          analyzerFingerprint,
         })
+        const deletionStart = {
+          threadId,
+          proposalId,
+          revisionId: revision.revisionId,
+          revision: 1,
+          analyzerFingerprint,
+          admissionKey: deletionAdmissionKey,
+          leaseFence: deletionLease,
+          forceNewAttempt: true,
+        }
+        const deletionGeneration = yield* generations.startAdmitted(deletionStart)
         yield* generations.cancelThread(threadId)
         const deletionCancelled = yield* waitForTerminal(threadId, deletionGeneration.generationId)
         expect(deletionCancelled.state).toBe('cancelled')
@@ -582,7 +932,7 @@ describe('ProposalGenerationService', () =>
           ),
         ).toBe(false)
         const deletedThreadRestart = yield* generations
-          .start({ threadId, proposalId, revision: 1 })
+          .startAdmitted(deletionStart)
           .pipe(Effect.flip)
         expect(deletedThreadRestart._tag).toBe('ProposalGenerationError')
         if (deletedThreadRestart._tag !== 'ProposalGenerationError')
@@ -639,12 +989,13 @@ describe('ProposalGenerationService', () =>
         const concurrencyInputs: Array<{
           readonly threadId: ThreadId
           readonly proposalId: ProposalId
+          readonly revisionId: ProposalRevisionId
         }> = []
         for (let index = 0; index < 3; index += 1)
         {
           const concurrentThreadId = ThreadId.make(`thread-generation-concurrency-${index}`)
           const concurrentProposalId = ProposalId.make(`proposal-generation-concurrency-${index}`)
-          yield* proposals.upsert({
+          const concurrentRevision = yield* proposals.upsert({
             proposalId: concurrentProposalId,
             environmentId: EnvironmentId.make('environment-generation-exact'),
             projectId: ProjectId.make('project-generation-exact'),
@@ -653,6 +1004,7 @@ describe('ProposalGenerationService', () =>
               providerSessionId: `provider-session-generation-concurrency-${index}`,
               providerInstanceId: ProviderInstanceId.make('codex-generation'),
             },
+            verifiedAnalyzerFingerprint: 'cartographer:0.1.0-test',
             cwd: workspaceRoot,
             changes: {
               _tag: 'typed',
@@ -672,15 +1024,16 @@ describe('ProposalGenerationService', () =>
           concurrencyInputs.push({
             threadId: concurrentThreadId,
             proposalId: concurrentProposalId,
+            revisionId: concurrentRevision.revisionId,
           })
         }
         yield* Effect.promise(() => NodeFSP.writeFile(analyzerLifecycleLog, ''))
         const concurrentStarts = yield* Effect.all(
-          concurrencyInputs.map((input) =>
-            generations.start({
-              threadId: input.threadId,
-              proposalId: input.proposalId,
+          concurrencyInputs.map((input, index) =>
+            startNewAttempt({
+              ...input,
               revision: 1,
+              suffix: `concurrent-${index}`,
             }),
           ),
           { concurrency: 'unbounded' },
@@ -923,10 +1276,20 @@ describe('ProposalGenerationService', () =>
         const retainedRestart = yield* beyondGrace.get({ threadId, generationId: abandonedId })
         expect(retainedRestart.state).toBe('abandoned')
         expect(retainedRestart.errorCode).toBe('server-restarted')
+        const latestDurable = yield* beyondGrace.latest({
+          threadId,
+          proposalId,
+          revision: revision.revision,
+        })
+        expect(latestDurable?.generationId).not.toBe(abandonedId)
         expect(
-          (yield* beyondGrace.latest({ threadId, proposalId, revision: revision.revision }))
-            ?.generationId,
-        ).toBe(abandonedId)
+          yield* sql<{ readonly count: number }>`
+            SELECT COUNT(*) AS count
+            FROM proposal_generations
+            WHERE generation_id = ${latestDurable?.generationId ?? ''}
+              AND architecture_admission_key IS NOT NULL
+          `,
+        ).toEqual([{ count: 1 }])
         expect(yield* Effect.promise(() => pathExists(abandonedArtifactRoot))).toBe(false)
       }).pipe(Effect.provide(TestLayer))
     }),
@@ -984,7 +1347,7 @@ describe('ProposalGenerationService', () =>
           const proposals = yield* ProposalService.ProposalService
           const threadId = ThreadId.make('thread-generation-server-restart')
           const proposalId = ProposalId.make('proposal-generation-server-restart')
-          yield* proposals.upsert({
+          const revision = yield* proposals.upsert({
             proposalId,
             environmentId: EnvironmentId.make('environment-generation-server-restart'),
             projectId: ProjectId.make('project-generation-server-restart'),
@@ -993,6 +1356,7 @@ describe('ProposalGenerationService', () =>
               providerSessionId: 'provider-session-generation-server-restart',
               providerInstanceId: ProviderInstanceId.make('codex-generation'),
             },
+            verifiedAnalyzerFingerprint: 'analyzer-restart-test-v1',
             cwd: workspaceRoot,
             changes: {
               _tag: 'typed',
@@ -1007,15 +1371,61 @@ describe('ProposalGenerationService', () =>
             },
           })
 
+          const analyzerFingerprint = 'analyzer-restart-test-v1'
+          const firstAdmissionKey = `proposal-verified:${revision.revisionId}:${analyzerFingerprint}:first`
+          const secondAdmissionKey = `proposal-verified:${revision.revisionId}:${analyzerFingerprint}:second`
+          const rejectedAdmissionKey = `proposal-verified:${revision.revisionId}:${analyzerFingerprint}:closed`
+          const firstLease = yield* leaseProposalAdmission({
+            admissionKey: firstAdmissionKey,
+            threadId,
+            proposalId,
+            revisionId: revision.revisionId,
+            revision: 1,
+            analyzerFingerprint,
+          })
+          const secondLease = yield* leaseProposalAdmission({
+            admissionKey: secondAdmissionKey,
+            threadId,
+            proposalId,
+            revisionId: revision.revisionId,
+            revision: 1,
+            analyzerFingerprint,
+          })
+          const rejectedLease = yield* leaseProposalAdmission({
+            admissionKey: rejectedAdmissionKey,
+            threadId,
+            proposalId,
+            revisionId: revision.revisionId,
+            revision: 1,
+            analyzerFingerprint,
+          })
+
           const serviceScope = yield* Scope.make('sequential')
           yield* Effect.addFinalizer(() => Scope.close(serviceScope, Exit.void))
           const generations = yield* ProposalGenerationService.make.pipe(
             Effect.provideService(Scope.Scope, serviceScope),
           )
-          const first = yield* generations.start({ threadId, proposalId, revision: 1 })
+          const first = yield* generations.startAdmitted({
+            threadId,
+            proposalId,
+            revision: 1,
+            revisionId: revision.revisionId,
+            analyzerFingerprint,
+            admissionKey: firstAdmissionKey,
+            leaseFence: firstLease,
+          })
           yield* Deferred.await(firstAnalyzerStarted)
           const secondStart = yield* generations
-            .start({ threadId, proposalId, revision: 1 })
+            .startAdmitted({
+              threadId,
+              proposalId,
+              revision: 1,
+              revisionId: revision.revisionId,
+              analyzerFingerprint,
+              admissionKey: secondAdmissionKey,
+              leaseFence: secondLease,
+              forceNewAttempt: true,
+            })
             .pipe(Effect.forkScoped)
           let admittedGenerationId: ProposalGenerationId | null = null
           for (let attempt = 0; attempt < 200; attempt += 1)
@@ -1061,14 +1471,23 @@ describe('ProposalGenerationService', () =>
             ),
           ).toBe(false)
           const rejected = yield* generations
-            .start({ threadId, proposalId, revision: 1 })
+            .startAdmitted({
+              threadId,
+              proposalId,
+              revision: 1,
+              revisionId: revision.revisionId,
+              analyzerFingerprint,
+              admissionKey: rejectedAdmissionKey,
+              leaseFence: rejectedLease,
+              forceNewAttempt: true,
+            })
             .pipe(Effect.flip)
           expect(rejected._tag).toBe('ProposalGenerationError')
           if (rejected._tag !== 'ProposalGenerationError')
           {
             throw new Error('expected proposal generation failure')
           }
-          expect(rejected.failure).toBe('analysis-failed')
+          expect(rejected.failure).toBe('process-failed')
           expect(
             (yield* generations.latest({ threadId, proposalId, revision: 1 }))?.generationId,
           ).toBe(second.generationId)

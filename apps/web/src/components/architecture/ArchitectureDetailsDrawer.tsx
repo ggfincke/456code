@@ -86,7 +86,7 @@ export function ArchitectureDetailsDrawer(props: ArchitectureDetailsDrawerProps)
       >
         <SheetPopup
           className="architecture-surface max-w-sm border-[var(--architecture-border)] bg-[var(--architecture-surface)] text-[var(--architecture-text)]"
-          finalFocus={() => props.returnFocus}
+          finalFocus={() => (props.returnFocus?.isConnected ? props.returnFocus : null)}
           id={drawerId}
           side="right"
         >

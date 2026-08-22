@@ -6,23 +6,15 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
-import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 import { DiffAnalysisGenerationRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/DiffAnalysisGenerations.ts'
-import Migration059 from '../../../../../apps/server/src/persistence/Migrations/059_DiffAnalysisGenerations.ts'
+import { runMigrations } from '../../../../../apps/server/src/persistence/Migrations.ts'
 import { DiffAnalysisGenerationRepository } from '../../../../../apps/server/src/persistence/Services/DiffAnalysisGenerations.ts'
 import * as NodeSqliteClient from '../../../../../apps/server/src/persistence/NodeSqliteClient.ts'
 
 const prepareMigration = Effect.gen(function* ()
 {
-  const sql = yield* SqlClient.SqlClient
-  yield* sql`
-    CREATE TABLE projection_threads (
-      thread_id TEXT PRIMARY KEY,
-      interaction_orchestrate INTEGER NOT NULL DEFAULT 0
-    )
-  `
-  yield* Migration059
+  yield* runMigrations({ toMigrationInclusive: 70 })
 })
 
 const persistenceLayer = Layer.mergeAll(
@@ -67,6 +59,8 @@ function row(
     baseGraphPath: null,
     headGraphPath: null,
     impactPath: null,
+    impactProjectionPath: null,
+    implementationChangedFileCount: null,
     artifactByteLength: 0,
     errorCode: null,
     createdAt: now,
@@ -108,6 +102,8 @@ layer('DiffAnalysisGenerationRepository', (it) =>
         baseGraphPath: null,
         headGraphPath: null,
         impactPath: null,
+        impactProjectionPath: '/tmp/analysis-lifecycle/impact-projection.json',
+        implementationChangedFileCount: 4,
         artifactByteLength: 0,
         errorCode: 'analysis-failed',
         updatedAt: now,
@@ -115,6 +111,11 @@ layer('DiffAnalysisGenerationRepository', (it) =>
       const terminal = yield* repository.listTerminalBefore({
         cutoff: '2026-08-07T12:05:00.001Z',
       })
+      assert.equal(
+        terminal[0]?.impactProjectionPath,
+        '/tmp/analysis-lifecycle/impact-projection.json',
+      )
+      assert.equal(terminal[0]?.implementationChangedFileCount, 4)
       assert.deepStrictEqual(
         terminal.map((entry) => entry.diffAnalysisId),
         [diffAnalysisId],
@@ -187,6 +188,8 @@ layer('DiffAnalysisGenerationRepository', (it) =>
         baseGraphPath: null,
         headGraphPath: null,
         impactPath: null,
+        impactProjectionPath: null,
+        implementationChangedFileCount: null,
         artifactByteLength: 0,
         errorCode: 'analysis-failed',
         updatedAt: now,
@@ -214,6 +217,8 @@ layer('DiffAnalysisGenerationRepository', (it) =>
         baseGraphPath: null,
         headGraphPath: null,
         impactPath: null,
+        impactProjectionPath: null,
+        implementationChangedFileCount: null,
         artifactByteLength: 0,
         errorCode: 'analysis-failed',
         updatedAt: now,

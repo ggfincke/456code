@@ -2,6 +2,8 @@
 // renders thread timelines, composer state, and guarded provider dispatch
 import {
   type ApprovalRequestId,
+  type ArchitectureGraphProjection,
+  type ArchitectureStandingAnchor,
   type CollaborationMode,
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -132,11 +134,10 @@ import {
   useRightPanelStore,
 } from '../rightPanelStore'
 import {
-  createArchitectureScopeSurface,
   createRepositoryAtlasSurface,
-  type ArchitectureScopeTarget,
+  type ArchitectureFileOpenTarget,
 } from './architecture/architectureResourceIdentity'
-import type { ArchitectureFileOpenTarget } from './architecture/ArchitectureScopeSurface'
+import type { RepositoryMapFocusRequest } from './architecture/RepositoryMapProjectionSurface'
 import { RepositoryAtlasBootstrap } from './architecture/RepositoryAtlasBootstrap'
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from '../previewStateStore'
 import { registerFaviconProjectForThread } from '../browser/browserFaviconStore'
@@ -193,6 +194,8 @@ import {
 } from '../logicalProject'
 import { buildDraftThreadRouteParams } from '../threadRoutes'
 import {
+  createArchitectureConcernContext,
+  type ArchitectureConcernGraphSelection,
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
   useComposerDraftStore,
@@ -460,11 +463,6 @@ const ArchitectureSourceFilePanel = lazy(() =>
 const RepositoryAtlasSurface = lazy(() =>
   import('./architecture/RepositoryAtlasSurface').then((module) => ({
     default: module.RepositoryAtlasSurface,
-  })),
-)
-const ArchitectureScopeSurface = lazy(() =>
-  import('./architecture/ArchitectureScopeSurface').then((module) => ({
-    default: module.ArchitectureScopeSurface,
   })),
 )
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set()
@@ -768,6 +766,12 @@ function ChatViewContent(props: ChatViewProps)
   const setComposerDraftElementContexts = useComposerDraftStore((store) => store.setElementContexts)
   const setComposerDraftPreviewAnnotations = useComposerDraftStore(
     (store) => store.setPreviewAnnotations,
+  )
+  const setComposerDraftArchitectureContexts = useComposerDraftStore(
+    (store) => store.setArchitectureContexts,
+  )
+  const addComposerDraftArchitectureContext = useComposerDraftStore(
+    (store) => store.addArchitectureContext,
   )
   const setComposerDraftReviewComments = useComposerDraftStore((store) => store.setReviewComments)
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection)
@@ -3081,20 +3085,8 @@ function ChatViewContent(props: ChatViewProps)
     [activeTerminalLabelsById, closeRightPanelSurfaceImmediately],
   )
   const architectureParentSurfaceId = activeRightPanelSurface?.id
-  const openArchitectureScopeSurface = useCallback(
-    (target: ArchitectureScopeTarget): void =>
-    {
-      if (!activeThreadRef) return
-      useRightPanelStore
-        .getState()
-        .openArchitectureSurface(
-          activeThreadRef,
-          createArchitectureScopeSurface(target),
-          architectureParentSurfaceId,
-        )
-    },
-    [activeThreadRef, architectureParentSurfaceId],
-  )
+  const [repositoryMapFocusRequest, setRepositoryMapFocusRequest] =
+    useState<RepositoryMapFocusRequest | null>(null)
   const openArchitectureResourceFile = useCallback(
     (target: ArchitectureFileOpenTarget): void =>
     {
@@ -3116,6 +3108,16 @@ function ChatViewContent(props: ChatViewProps)
     },
     [activeThreadRef, activeWorkspaceRoot, architectureParentSurfaceId],
   )
+  const openPlannedArchitecturePath = useCallback(
+    (relativePath: string, line?: number): void =>
+    {
+      if (!activeThreadRef || activeWorkspaceRoot === undefined) return
+      useRightPanelStore
+        .getState()
+        .openFile(activeThreadRef, relativePath, line, architectureParentSurfaceId)
+    },
+    [activeThreadRef, activeWorkspaceRoot, architectureParentSurfaceId],
+  )
   const viewUpdatedRepositoryAtlas = useCallback(
     (target: Parameters<typeof createRepositoryAtlasSurface>[0]): void =>
     {
@@ -3129,6 +3131,76 @@ function ChatViewContent(props: ChatViewProps)
         )
     },
     [activeThreadRef, architectureParentSurfaceId],
+  )
+  const viewArchitectureStandingAnchor = useCallback(
+    (anchor: ArchitectureStandingAnchor): void =>
+    {
+      if (!activeThreadRef) return
+      setRepositoryMapFocusRequest((current) => ({
+        requestId: (current?.requestId ?? 0) + 1,
+        anchor,
+      }))
+      useRightPanelStore
+        .getState()
+        .openArchitectureSurface(
+          activeThreadRef,
+          createRepositoryAtlasSurface(anchor.source),
+          architectureParentSurfaceId,
+        )
+    },
+    [activeThreadRef, architectureParentSurfaceId],
+  )
+  const addArchitectureConcernToComposer = useCallback(
+    (
+      projection: ArchitectureGraphProjection,
+      selection: ArchitectureConcernGraphSelection,
+    ): void =>
+    {
+      if (!activeThreadRef) return
+      const context = createArchitectureConcernContext({
+        environmentId: activeThreadRef.environmentId,
+        threadId: activeThreadRef.threadId,
+        projection,
+        selection,
+      })
+      const result =
+        context === null
+          ? 'invalid'
+          : addComposerDraftArchitectureContext(composerDraftTarget, context)
+      if (result === 'added')
+      {
+        toastManager.add(
+          stackedThreadToast({
+            type: 'success',
+            title: 'Architecture concern added',
+            description: 'It stays local to this draft until you send the composer.',
+          }),
+        )
+        return
+      }
+      if (result === 'duplicate')
+      {
+        toastManager.add(
+          stackedThreadToast({
+            type: 'info',
+            title: 'Concern already in composer',
+            description: 'The exact resource and selection are already attached.',
+          }),
+        )
+        return
+      }
+      toastManager.add(
+        stackedThreadToast({
+          type: 'warning',
+          title: result === 'limit' ? 'Architecture context limit reached' : 'Concern unavailable',
+          description:
+            result === 'limit'
+              ? 'Remove an architecture concern before adding another.'
+              : 'This selection could not produce a valid bounded draft context.',
+        }),
+      )
+    },
+    [activeThreadRef, addComposerDraftArchitectureContext, composerDraftTarget],
   )
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -3930,6 +4002,7 @@ function ChatViewContent(props: ChatViewProps)
         draft.terminalContexts.length > 0 ||
         draft.elementContexts.length > 0 ||
         draft.previewAnnotations.length > 0 ||
+        draft.architectureContexts.length > 0 ||
         draft.reviewComments.length > 0),
     )
   })
@@ -5368,6 +5441,7 @@ function ChatViewContent(props: ChatViewProps)
       sendInFlightRef,
       setComposerDraftElementContexts,
       setComposerDraftPreviewAnnotations,
+      setComposerDraftArchitectureContexts,
       setComposerDraftPrompt,
       setComposerDraftReviewComments,
       setComposerDraftTerminalContexts,
@@ -5636,6 +5710,8 @@ function ChatViewContent(props: ChatViewProps)
           mode="embedded"
           composerDraftTarget={composerDraftTarget}
           initialGitScope={initialDiffPanelGitScope}
+          onAddArchitectureConcern={addArchitectureConcernToComposer}
+          onViewInRepositoryMap={viewArchitectureStandingAnchor}
         />
       </Suspense>
     ) : activeRightPanelSurface?.kind === 'workers' ? (
@@ -5656,7 +5732,7 @@ function ChatViewContent(props: ChatViewProps)
           className="flex min-h-0 flex-1 items-center justify-center px-6 py-8 text-center text-xs text-muted-foreground"
           role="status"
         >
-          Repository Atlas requires native architecture analysis for an open project.
+          Repository Map requires native architecture analysis for an open project.
         </div>
       )
     ) : activeRightPanelSurface?.kind === 'repository-atlas' ? (
@@ -5666,36 +5742,26 @@ function ChatViewContent(props: ChatViewProps)
             className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground"
             role="status"
           >
-            Loading Repository Atlas…
+            Loading Repository Map…
           </div>
         }
       >
         <RepositoryAtlasSurface
           environmentId={activeThreadRef.environmentId}
+          focusRequest={
+            repositoryMapFocusRequest !== null &&
+            repositoryMapFocusRequest.anchor.source.generationId ===
+              activeRightPanelSurface.target.generationId &&
+            repositoryMapFocusRequest.anchor.source.graphDigest ===
+              activeRightPanelSurface.target.graphDigest
+              ? repositoryMapFocusRequest
+              : undefined
+          }
           target={activeRightPanelSurface.target}
           threadId={activeThreadRef.threadId}
+          onAddConcern={addArchitectureConcernToComposer}
           onOpenFile={openArchitectureResourceFile}
-          onOpenScope={openArchitectureScopeSurface}
           onViewUpdated={viewUpdatedRepositoryAtlas}
-        />
-      </Suspense>
-    ) : activeRightPanelSurface?.kind === 'architecture-scope' ? (
-      <Suspense
-        fallback={
-          <div
-            className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground"
-            role="status"
-          >
-            Loading Architecture Scope…
-          </div>
-        }
-      >
-        <ArchitectureScopeSurface
-          environmentId={activeThreadRef.environmentId}
-          target={activeRightPanelSurface.target}
-          threadId={activeThreadRef.threadId}
-          onOpenFile={openArchitectureResourceFile}
-          onOpenScope={openArchitectureScopeSurface}
         />
       </Suspense>
     ) : activeRightPanelSurface?.kind === 'explorer' ? (
@@ -5732,6 +5798,9 @@ function ChatViewContent(props: ChatViewProps)
         <ConnectedArchitectureImpactSurface
           threadRef={activeThreadRef}
           surface={activeRightPanelSurface}
+          onAddConcern={addArchitectureConcernToComposer}
+          onOpenPlannedPath={openPlannedArchitecturePath}
+          onViewInRepositoryMap={viewArchitectureStandingAnchor}
         />
       </Suspense>
     ) : activeRightPanelSurface?.kind === 'plan' ? (

@@ -16,8 +16,14 @@ import {
   type ProposalGenerationStartInput,
   type ProposalId,
   type ProposalRevision,
+  type ProposalRevisionId,
 } from '@t3tools/contracts'
-import { parseGraphDiff, type GraphDiff } from '@t3tools/cartographer-core/server'
+import {
+  parseGraphDiff,
+  parseVerifiedImpactProjection,
+  type GraphDiff,
+  type VerifiedImpactProjectionArtifact,
+} from '@t3tools/cartographer-core/server'
 import * as Context from 'effect/Context'
 import * as Crypto from 'effect/Crypto'
 import * as Data from 'effect/Data'
@@ -36,6 +42,7 @@ import * as Semaphore from 'effect/Semaphore'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 
+import * as ArchitectureAdmissionRepository from '../architecture/ArchitectureAdmissionRepository.ts'
 import * as ServerConfig from '../config.ts'
 import * as CartographerAnalyzer from '../cartographer/CartographerAnalyzer.ts'
 import * as ProcessRunner from '../process/processRunner.ts'
@@ -44,8 +51,8 @@ import {
   captureExactGitSnapshot,
   EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,
   EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
-  materializeExactGitTree,
 } from '../vcs/ExactGitSnapshot.ts'
+import { materializeExactGitTreeIntoCache } from '../vcs/ExactGitCacheMaterialization.ts'
 import * as ProposalService from './ProposalService.ts'
 
 const GENERATION_MAX_REPOSITORY_FILES = EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT
@@ -55,6 +62,7 @@ const GENERATION_MAX_ARTIFACT_BYTES = 128 * 1024 * 1024
 const GENERATION_GLOBAL_CONCURRENCY = 2
 const GENERATION_RETENTION_GRACE_MS = 24 * 60 * 60 * 1_000
 const SHA256_HEX = /^[0-9a-f]{64}$/u
+const isProposalGenerationError = Schema.is(ProposalGenerationError)
 
 const GenerationRow = Schema.Struct({
   generationId: ProposalGenerationId,
@@ -78,6 +86,8 @@ const GenerationRow = Schema.Struct({
   baseGraphPath: Schema.NullOr(Schema.String),
   proposedGraphPath: Schema.NullOr(Schema.String),
   impactPath: Schema.NullOr(Schema.String),
+  impactProjectionPath: Schema.NullOr(Schema.String),
+  architectureAdmissionKey: Schema.NullOr(Schema.String),
   errorCode: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
@@ -89,6 +99,19 @@ const LatestRequest = Schema.Struct({
   proposalId: Schema.String,
   revision: Schema.Int,
 })
+const LatestExactRequest = Schema.Struct({
+  proposalId: Schema.String,
+  threadId: Schema.String,
+  revisionId: Schema.String,
+  analyzerVersion: Schema.String,
+  architectureAdmissionKey: Schema.String,
+})
+const LatestAdmissionRequest = Schema.Struct({
+  admissionKey: Schema.String,
+  threadId: Schema.String,
+  proposalId: Schema.String,
+  revisionId: Schema.String,
+})
 const GenerationUpdate = Schema.Struct({
   generationId: ProposalGenerationId,
   state: GenerationRow.fields.state,
@@ -96,6 +119,7 @@ const GenerationUpdate = Schema.Struct({
   baseGraphPath: Schema.NullOr(Schema.String),
   proposedGraphPath: Schema.NullOr(Schema.String),
   impactPath: Schema.NullOr(Schema.String),
+  impactProjectionPath: Schema.NullOr(Schema.String),
   errorCode: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
 })
@@ -103,11 +127,12 @@ const GenerationUpdate = Schema.Struct({
 interface AnalyzerManifest
 {
   readonly type: 'cartographer.analysis-ready'
-  readonly version: 1
+  readonly version: 2
   readonly analyzerVersion: string
   readonly baseGraph: 'base.graph.json'
   readonly proposedGraph: 'proposed.graph.json'
   readonly impact: 'impact.json'
+  readonly impactProjection: 'impact-projection.json'
 }
 
 export interface ProposalGenerationArchitectureTarget
@@ -117,13 +142,15 @@ export interface ProposalGenerationArchitectureTarget
   readonly baseGraphPath: string
   readonly proposedGraphPath: string
   readonly impactPath: string
+  readonly impactProjectionPath: string
 }
 
 export interface ProposalGenerationImpactTarget
 {
-  readonly diff: GraphDiff | null
+  readonly diff: GraphDiff
+  readonly projection: VerifiedImpactProjectionArtifact
   readonly impactDigest: string
-  readonly legacy: boolean
+  readonly impactProjectionDigest: string
   readonly repositoryRoot: string
   readonly baseTreeOid: string
   readonly proposedTreeOid: string
@@ -199,16 +226,6 @@ function impactArtifactMatches(
   {
     return false
   }
-}
-
-function impactLabelsMatch(
-  bytes: Uint8Array,
-  expectedBaseGitRef: string,
-  expectedProposedGitRef: string,
-): boolean
-{
-  const value = artifactObject(bytes)
-  return value?.baseGitRef === expectedBaseGitRef && value.headGitRef === expectedProposedGitRef
 }
 
 function parseSealedArtifactName(
@@ -313,8 +330,15 @@ async function digestMaterializedRoot(root: string): Promise<string>
 export class ProposalGenerationService extends Context.Service<
   ProposalGenerationService,
   {
-    readonly start: (
-      input: ProposalGenerationStartInput,
+    readonly startAdmitted: (
+      input: ProposalGenerationStartInput & {
+        readonly revision: number
+        readonly revisionId: ProposalRevisionId
+        readonly analyzerFingerprint: string
+        readonly admissionKey: string
+        readonly leaseFence: ArchitectureAdmissionRepository.ArchitectureAdmissionLeaseFence
+        readonly forceNewAttempt?: boolean
+      },
     ) => Effect.Effect<
       ProposalGeneration,
       ProposalGenerationError | import('@t3tools/contracts').ProposalError
@@ -325,6 +349,15 @@ export class ProposalGenerationService extends Context.Service<
     readonly latest: (
       input: ProposalGenerationLatestInput,
     ) => Effect.Effect<ProposalGeneration | null, ProposalGenerationError>
+    readonly latestAdmitted: (input: {
+      readonly admissionKey: string
+      readonly threadId: string
+      readonly proposalId: string
+      readonly revisionId: string
+    }) => Effect.Effect<
+      Pick<ProposalGeneration, 'generationId' | 'state' | 'errorCode'> | null,
+      ProposalGenerationError
+    >
     readonly resolveArchitectureTarget: (
       threadId: string,
       generationId: ProposalGenerationId,
@@ -333,7 +366,7 @@ export class ProposalGenerationService extends Context.Service<
       threadId: string,
       generationId: ProposalGenerationId,
     ) => Effect.Effect<ProposalGenerationImpactTarget, CartographerError>
-    readonly cancelThread: (threadId: string) => Effect.Effect<void>
+    readonly cancelThread: (threadId: string) => Effect.Effect<void, ProposalGenerationError>
   }
 >()('456code/proposal/ProposalGenerationService')
 {}
@@ -348,11 +381,17 @@ function generationError(
 
 function analyzerGenerationError(error: CartographerError): ProposalGenerationError
 {
+  if (error.failure === 'unsupported')
+  {
+    return generationError('unsupported', 'Architecture analysis is unavailable.')
+  }
+  if (error.failure === 'context_start_failed' || error.failure === 'snapshot_failed')
+  {
+    return generationError('process-failed', 'Architecture analysis could not start or complete.')
+  }
   return generationError(
-    error.failure === 'unsupported' ? 'unsupported' : 'analysis-failed',
-    error.failure === 'unsupported'
-      ? 'Cartographer analysis is unavailable.'
-      : 'Cartographer analysis failed.',
+    'analysis-failed',
+    'Architecture analysis could not prove the requested proposal authority.',
   )
 }
 
@@ -362,6 +401,18 @@ function cartographerError(
 ): CartographerError
 {
   return new CartographerError({ failure, message })
+}
+
+function artifactReadError(cause: unknown): ProposalGenerationError
+{
+  const missing =
+    typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === 'ENOENT'
+  return missing
+    ? generationError(
+        'analysis-failed',
+        'Architecture analysis did not retain the declared artifact.',
+      )
+    : generationError('io-failed', 'An architecture analysis artifact could not be read.')
 }
 
 function decodeManifest(stdout: string): AnalyzerManifest | null
@@ -380,7 +431,7 @@ function decodeManifest(stdout: string): AnalyzerManifest | null
       !('type' in value) ||
       value.type !== 'cartographer.analysis-ready' ||
       !('version' in value) ||
-      value.version !== 1 ||
+      value.version !== 2 ||
       !('analyzerVersion' in value) ||
       typeof value.analyzerVersion !== 'string' ||
       value.analyzerVersion.length === 0 ||
@@ -389,7 +440,9 @@ function decodeManifest(stdout: string): AnalyzerManifest | null
       !('proposedGraph' in value) ||
       value.proposedGraph !== 'proposed.graph.json' ||
       !('impact' in value) ||
-      value.impact !== 'impact.json'
+      value.impact !== 'impact.json' ||
+      !('impactProjection' in value) ||
+      value.impactProjection !== 'impact-projection.json'
     )
     {
       return null
@@ -399,6 +452,36 @@ function decodeManifest(stdout: string): AnalyzerManifest | null
   catch
   {
     return null
+  }
+}
+
+function impactProjectionArtifactMatches(
+  bytes: Uint8Array,
+  expectedBaseGitRef: string,
+  expectedProposedGitRef: string,
+  expectedBaseGraphDigest: string,
+  expectedProposedGraphDigest: string,
+  expectedRawImpactDigest: string,
+  expectedAnalyzerFingerprint: string,
+  implementationChangedFileCount: number,
+): boolean
+{
+  try
+  {
+    const projection = parseVerifiedImpactProjection(artifactObject(bytes))
+    return (
+      projection.baseGitRef === expectedBaseGitRef &&
+      projection.headGitRef === expectedProposedGitRef &&
+      projection.baseGraphDigest === expectedBaseGraphDigest &&
+      projection.headGraphDigest === expectedProposedGraphDigest &&
+      projection.rawImpactDigest === expectedRawImpactDigest &&
+      projection.analyzerFingerprint === expectedAnalyzerFingerprint &&
+      projection.implementationChangedFileCount === implementationChangedFileCount
+    )
+  }
+  catch
+  {
+    return false
   }
 }
 
@@ -428,6 +511,10 @@ function publicGeneration(
     proposedGraphArtifact:
       row.proposedGraphPath === null ? null : artifactReference(row.generationId, 'proposed-graph'),
     impactArtifact: row.impactPath === null ? null : artifactReference(row.generationId, 'impact'),
+    impactProjectionArtifact:
+      row.impactProjectionPath === null
+        ? null
+        : artifactReference(row.generationId, 'impact-projection'),
     errorCode: row.errorCode,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -437,6 +524,8 @@ function publicGeneration(
 export const make = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
+  const architectureAdmissions =
+    yield* ArchitectureAdmissionRepository.ArchitectureAdmissionRepository
   const proposalService = yield* ProposalService.ProposalService
   const cartographerAnalyzer = yield* CartographerAnalyzer.CartographerAnalyzer
   const processRunner = yield* ProcessRunner.ProcessRunner
@@ -496,6 +585,8 @@ export const make = Effect.gen(function* ()
         base_graph_path,
         proposed_graph_path,
         impact_path,
+        impact_projection_path,
+        architecture_admission_key,
         error_code,
         created_at,
         updated_at
@@ -514,6 +605,8 @@ export const make = Effect.gen(function* ()
         ${row.baseGraphPath},
         ${row.proposedGraphPath},
         ${row.impactPath},
+        ${row.impactProjectionPath},
+        ${row.architectureAdmissionKey},
         ${row.errorCode},
         ${row.createdAt},
         ${row.updatedAt}
@@ -530,6 +623,7 @@ export const make = Effect.gen(function* ()
         base_graph_path = ${row.baseGraphPath},
         proposed_graph_path = ${row.proposedGraphPath},
         impact_path = ${row.impactPath},
+        impact_projection_path = ${row.impactProjectionPath},
         error_code = ${row.errorCode},
         updated_at = ${row.updatedAt}
       WHERE generation_id = ${row.generationId}
@@ -553,6 +647,8 @@ export const make = Effect.gen(function* ()
         base_graph_path AS "baseGraphPath",
         proposed_graph_path AS "proposedGraphPath",
         impact_path AS "impactPath",
+        impact_projection_path AS "impactProjectionPath",
+        architecture_admission_key AS "architectureAdmissionKey",
         error_code AS "errorCode",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
@@ -578,12 +674,86 @@ export const make = Effect.gen(function* ()
         base_graph_path AS "baseGraphPath",
         proposed_graph_path AS "proposedGraphPath",
         impact_path AS "impactPath",
+        impact_projection_path AS "impactProjectionPath",
+        architecture_admission_key AS "architectureAdmissionKey",
         error_code AS "errorCode",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM proposal_generations
       WHERE proposal_id = ${proposalId}
         AND revision = ${revision}
+        AND architecture_admission_key IS NOT NULL
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `,
+  })
+  const latestExactRow = SqlSchema.findOneOption({
+    Request: LatestExactRequest,
+    Result: GenerationRow,
+    execute: ({
+      proposalId,
+      threadId,
+      revisionId,
+      analyzerVersion,
+      architectureAdmissionKey,
+    }) => sql`
+      SELECT
+        generation_id AS "generationId",
+        proposal_id AS "proposalId",
+        revision_id AS "revisionId",
+        revision,
+        thread_id AS "threadId",
+        state,
+        authority,
+        workspace_snapshot_tree_oid AS "workspaceSnapshotTreeOid",
+        analyzer_version AS "analyzerVersion",
+        artifact_root AS "artifactRoot",
+        base_graph_path AS "baseGraphPath",
+        proposed_graph_path AS "proposedGraphPath",
+        impact_path AS "impactPath",
+        impact_projection_path AS "impactProjectionPath",
+        architecture_admission_key AS "architectureAdmissionKey",
+        error_code AS "errorCode",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM proposal_generations
+      WHERE proposal_id = ${proposalId}
+        AND thread_id = ${threadId}
+        AND revision_id = ${revisionId}
+        AND analyzer_version = ${analyzerVersion}
+        AND architecture_admission_key = ${architectureAdmissionKey}
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `,
+  })
+  const latestAdmissionRow = SqlSchema.findOneOption({
+    Request: LatestAdmissionRequest,
+    Result: GenerationRow,
+    execute: ({ admissionKey, threadId, proposalId, revisionId }) => sql`
+      SELECT
+        generation_id AS "generationId",
+        proposal_id AS "proposalId",
+        revision_id AS "revisionId",
+        revision,
+        thread_id AS "threadId",
+        state,
+        authority,
+        workspace_snapshot_tree_oid AS "workspaceSnapshotTreeOid",
+        analyzer_version AS "analyzerVersion",
+        artifact_root AS "artifactRoot",
+        base_graph_path AS "baseGraphPath",
+        proposed_graph_path AS "proposedGraphPath",
+        impact_path AS "impactPath",
+        impact_projection_path AS "impactProjectionPath",
+        architecture_admission_key AS "architectureAdmissionKey",
+        error_code AS "errorCode",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM proposal_generations
+      WHERE architecture_admission_key = ${admissionKey}
+        AND thread_id = ${threadId}
+        AND proposal_id = ${proposalId}
+        AND revision_id = ${revisionId}
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `,
@@ -591,6 +761,25 @@ export const make = Effect.gen(function* ()
 
   const sqlFailure = (operation: string) => () =>
     generationError('persistence-failed', `${operation} could not persist proposal analysis state.`)
+
+  const requireActiveAdmissionLease = Effect.fn(
+    'ProposalGenerationService.requireActiveAdmissionLease',
+  )(function* (
+    fence: ArchitectureAdmissionRepository.ArchitectureAdmissionLeaseFence,
+    admissionKey: string,
+  )
+  {
+    const active = yield* architectureAdmissions
+      .assertLeaseActive(fence, admissionKey)
+      .pipe(Effect.mapError(sqlFailure('ProposalGenerationService.assertAdmissionLease')))
+    if (!active)
+    {
+      return yield* generationError(
+        'scope-mismatch',
+        'The durable proposal analysis admission lease is no longer active.',
+      )
+    }
+  })
 
   const generationsRoot = path.resolve(path.join(config.stateDir, 'cartographer', 'generations'))
   const cleanupArtifactRoot = (artifactRoot: string) =>
@@ -611,32 +800,34 @@ export const make = Effect.gen(function* ()
     sourceSha256?: string,
   )
   {
-    const artifact = yield* Effect.tryPromise({
-      try: async () =>
-      {
-        const info = await NodeFSP.lstat(sourcePath)
-        if (!info.isFile() || info.size > GENERATION_MAX_ARTIFACT_BYTES)
-        {
-          throw new Error('analysis artifact is not a bounded regular file')
-        }
-        const bytes = await NodeFSP.readFile(sourcePath)
-        if (bytes.byteLength !== info.size)
-        {
-          throw new Error('analysis artifact changed while it was being sealed')
-        }
-        return { bytes, sha256: sha256(bytes) }
-      },
-      catch: () =>
-        generationError(
-          'analysis-failed',
-          'Cartographer did not produce every required analysis artifact.',
-        ),
+    const info = yield* Effect.tryPromise({
+      try: () => NodeFSP.lstat(sourcePath),
+      catch: artifactReadError,
     })
+    if (!info.isFile() || info.size > GENERATION_MAX_ARTIFACT_BYTES)
+    {
+      return yield* generationError(
+        'analysis-failed',
+        'Architecture analysis did not produce a bounded regular artifact.',
+      )
+    }
+    const bytes = yield* Effect.tryPromise({
+      try: () => NodeFSP.readFile(sourcePath),
+      catch: artifactReadError,
+    })
+    if (bytes.byteLength !== info.size)
+    {
+      return yield* generationError(
+        'analysis-failed',
+        'An architecture analysis artifact changed while it was being sealed.',
+      )
+    }
+    const artifact = { bytes, sha256: sha256(bytes) }
     if (!identityMatches(artifact.bytes))
     {
       return yield* generationError(
         'analysis-failed',
-        'Cartographer analysis artifacts did not match the requested proposal identities.',
+        'Architecture analysis artifacts did not match the requested proposal identities.',
       )
     }
     const sealedPath = path.join(
@@ -646,14 +837,22 @@ export const make = Effect.gen(function* ()
     yield* fileSystem
       .rename(sourcePath, sealedPath)
       .pipe(
-        Effect.mapError(() =>
-          generationError(
-            'analysis-failed',
-            'Cartographer analysis artifacts could not be sealed.',
-          ),
+        Effect.mapError((cause) =>
+          typeof cause === 'object' &&
+          cause !== null &&
+          'reason' in cause &&
+          typeof cause.reason === 'object' &&
+          cause.reason !== null &&
+          '_tag' in cause.reason &&
+          cause.reason._tag === 'NotFound'
+            ? generationError(
+                'analysis-failed',
+                'Architecture analysis artifacts disappeared before they could be sealed.',
+              )
+            : generationError('io-failed', 'Architecture analysis artifacts could not be sealed.'),
         ),
       )
-    return { path: sealedPath, byteLength: artifact.bytes.byteLength }
+    return { path: sealedPath, byteLength: artifact.bytes.byteLength, sha256: artifact.sha256 }
   })
 
   const verifySealedArtifact = Effect.fn('ProposalGenerationService.verifySealedArtifact')(
@@ -830,6 +1029,7 @@ export const make = Effect.gen(function* ()
     cwd: string,
     args: ReadonlyArray<string>,
     env?: NodeJS.ProcessEnv,
+    nonzeroFailure: 'process-failed' | 'materialization-failed' = 'process-failed',
   )
   {
     const result = yield* processRunner
@@ -842,12 +1042,17 @@ export const make = Effect.gen(function* ()
       })
       .pipe(
         Effect.mapError(() =>
-          generationError('materialization-failed', 'Git tree materialization failed.'),
+          generationError('process-failed', 'Git tree materialization process failed.'),
         ),
       )
     if (result.code !== 0)
     {
-      return yield* generationError('materialization-failed', 'Git tree materialization failed.')
+      return yield* generationError(
+        nonzeroFailure,
+        nonzeroFailure === 'materialization-failed'
+          ? 'A retained proposal tree is no longer available.'
+          : 'Git tree materialization process failed.',
+      )
     }
     return result.stdout.trim()
   })
@@ -862,10 +1067,15 @@ export const make = Effect.gen(function* ()
     yield* fileSystem.makeDirectory(destination, { recursive: true }).pipe(
       Effect.uninterruptible,
       Effect.mapError(() =>
-        generationError('materialization-failed', 'Proposal tree storage could not be created.'),
+        generationError('io-failed', 'Proposal tree storage could not be created.'),
       ),
     )
-    const resolvedTreeOid = yield* runGit(cwd, ['rev-parse', '--verify', `${retainedRef}^{tree}`])
+    const resolvedTreeOid = yield* runGit(
+      cwd,
+      ['rev-parse', '--verify', `${retainedRef}^{tree}`],
+      undefined,
+      'materialization-failed',
+    )
     if (resolvedTreeOid !== expectedTreeOid)
     {
       return yield* generationError(
@@ -875,9 +1085,10 @@ export const make = Effect.gen(function* ()
     }
     yield* Effect.tryPromise({
       try: (signal) =>
-        materializeExactGitTree({
+        materializeExactGitTreeIntoCache({
           repositoryRoot: cwd,
           treeOid: resolvedTreeOid,
+          cacheRoot: path.dirname(destination),
           destinationRoot: destination,
           signal,
           limits: {
@@ -885,7 +1096,7 @@ export const make = Effect.gen(function* ()
             maxByteCount: GENERATION_MAX_REPOSITORY_BYTES,
           },
         }),
-      catch: () => generationError('materialization-failed', 'Git tree materialization failed.'),
+      catch: () => generationError('io-failed', 'Git tree materialization failed.'),
     })
   })
 
@@ -934,8 +1145,7 @@ export const make = Effect.gen(function* ()
             maxByteCount: GENERATION_MAX_REPOSITORY_BYTES,
           },
         }),
-      catch: () =>
-        generationError('materialization-failed', 'Git worktree snapshot capture failed.'),
+      catch: () => generationError('io-failed', 'Git worktree snapshot capture failed.'),
     })
     if (snapshot.headOid === null)
     {
@@ -1007,6 +1217,7 @@ export const make = Effect.gen(function* ()
         | 'baseGraphPath'
         | 'proposedGraphPath'
         | 'impactPath'
+        | 'impactProjectionPath'
         | 'errorCode'
       >
     >,
@@ -1022,6 +1233,7 @@ export const make = Effect.gen(function* ()
         baseGraphPath: next.baseGraphPath,
         proposedGraphPath: next.proposedGraphPath,
         impactPath: next.impactPath,
+        impactProjectionPath: next.impactProjectionPath,
         errorCode: next.errorCode,
         updatedAt,
       }).pipe(Effect.mapError(sqlFailure('ProposalGenerationService.update')))
@@ -1040,10 +1252,7 @@ export const make = Effect.gen(function* ()
     yield* fileSystem.makeDirectory(row.artifactRoot, { recursive: true }).pipe(
       Effect.uninterruptible,
       Effect.mapError(() =>
-        generationError(
-          'materialization-failed',
-          'Proposal analysis storage could not be created.',
-        ),
+        generationError('io-failed', 'Proposal analysis storage could not be created.'),
       ),
     )
     yield* materializeTree(
@@ -1067,6 +1276,7 @@ export const make = Effect.gen(function* ()
         outDir: row.artifactRoot,
         baseRef: revision.baseSnapshot.workingTreeOid,
         proposedRef: revision.proposedTreeOid,
+        implementationChangedFileCount: revision.manifest.changedFileCount,
       })
       .pipe(
         withMetrics({ timer: architectureComparisonGenerationDuration }),
@@ -1074,28 +1284,28 @@ export const make = Effect.gen(function* ()
       )
     if (analysis.process.code !== 0)
     {
-      return yield* generationError('analysis-failed', 'Cartographer analysis failed.')
+      return yield* generationError('process-failed', 'Architecture analysis failed.')
     }
     const manifest = decodeManifest(analysis.process.stdout)
     if (!manifest)
     {
       return yield* generationError(
         'analysis-failed',
-        'Cartographer returned an invalid analysis manifest.',
+        'Architecture analysis returned an invalid manifest.',
       )
     }
     if (manifest.analyzerVersion !== analysis.fingerprint)
     {
       return yield* generationError(
         'analysis-failed',
-        'Cartographer analyzer identity did not match the launched executable.',
+        'Architecture analyzer identity did not match the launched executable.',
       )
     }
     const proposedSourceSha256 = yield* Effect.tryPromise({
       try: () => digestMaterializedRoot(proposedRoot),
       catch: () =>
         generationError(
-          'materialization-failed',
+          'io-failed',
           'The materialized proposed tree identity could not be sealed.',
         ),
     })
@@ -1123,12 +1333,32 @@ export const make = Effect.gen(function* ()
           revision.proposedTreeOid,
         ),
     )
-    const artifactBytes = baseGraph.byteLength + proposedGraph.byteLength + impact.byteLength
+    const impactProjection = yield* sealArtifact(
+      row.artifactRoot,
+      path.join(row.artifactRoot, manifest.impactProjection),
+      'impact.projection-v1',
+      (bytes) =>
+        impactProjectionArtifactMatches(
+          bytes,
+          revision.baseSnapshot.workingTreeOid,
+          revision.proposedTreeOid,
+          `sha256:${baseGraph.sha256}`,
+          `sha256:${proposedGraph.sha256}`,
+          `sha256:${impact.sha256}`,
+          analysis.fingerprint,
+          revision.manifest.changedFileCount,
+        ),
+    )
+    const artifactBytes =
+      baseGraph.byteLength +
+      proposedGraph.byteLength +
+      impact.byteLength +
+      impactProjection.byteLength
     if (!Number.isSafeInteger(artifactBytes) || artifactBytes > GENERATION_MAX_ARTIFACT_BYTES)
     {
       return yield* generationError(
         'limit-exceeded',
-        'Cartographer analysis artifacts exceed the configured output limit.',
+        'Architecture analysis artifacts exceed the configured output limit.',
       )
     }
     yield* updateGeneration(row, {
@@ -1137,6 +1367,7 @@ export const make = Effect.gen(function* ()
       baseGraphPath: baseGraph.path,
       proposedGraphPath: proposedGraph.path,
       impactPath: impact.path,
+      impactProjectionPath: impactProjection.path,
       errorCode: null,
     })
   })
@@ -1145,10 +1376,11 @@ export const make = Effect.gen(function* ()
     generationError('scope-mismatch', 'Proposal analysis cannot start for a deleted thread.')
 
   const closingServiceError = () =>
-    generationError('analysis-failed', 'Proposal analysis cannot start while the server restarts.')
+    generationError('process-failed', 'Proposal analysis cannot start while the server restarts.')
 
   const prepareStart = Effect.fn('ProposalGenerationService.prepareStart')(function* (
     input: ProposalGenerationStartInput,
+    exactRevisionId: ProposalRevisionId,
   )
   {
     if (deletedThreads.has(input.threadId))
@@ -1164,6 +1396,13 @@ export const make = Effect.gen(function* ()
       return yield* generationError(
         'scope-mismatch',
         'The proposal does not belong to this source thread.',
+      )
+    }
+    if (selected.revision.revisionId !== exactRevisionId)
+    {
+      return yield* generationError(
+        'scope-mismatch',
+        'The admitted proposal revision no longer matches its exact revision identity.',
       )
     }
     if (
@@ -1189,6 +1428,8 @@ export const make = Effect.gen(function* ()
   const startUnlocked = Effect.fn('ProposalGenerationService.startUnlocked')(function* (
     input: ProposalGenerationStartInput,
     admission: Effect.Success<ReturnType<typeof prepareStart>>,
+    architectureAdmissionKey: string,
+    leaseFence: ArchitectureAdmissionRepository.ArchitectureAdmissionLeaseFence,
   )
   {
     if (yield* Ref.get(serviceClosing))
@@ -1223,11 +1464,30 @@ export const make = Effect.gen(function* ()
       baseGraphPath: null,
       proposedGraphPath: null,
       impactPath: null,
+      impactProjectionPath: null,
+      architectureAdmissionKey,
       errorCode: null,
       createdAt,
       updatedAt: createdAt,
     }
-    yield* insertRow(row).pipe(Effect.mapError(sqlFailure('ProposalGenerationService.insert')))
+    const insertGeneration = insertRow(row).pipe(
+      Effect.mapError(sqlFailure('ProposalGenerationService.insert')),
+    )
+    yield* sql
+      .withTransaction(
+        Effect.gen(function* ()
+        {
+          yield* requireActiveAdmissionLease(leaseFence, architectureAdmissionKey)
+          yield* insertGeneration
+        }),
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          isProposalGenerationError(cause)
+            ? cause
+            : sqlFailure('ProposalGenerationService.insert')(),
+        ),
+      )
     if (deletedThreads.has(input.threadId))
     {
       yield* updateGeneration(row, {
@@ -1326,13 +1586,43 @@ export const make = Effect.gen(function* ()
     return publicGeneration(row, 'fresh')
   })
 
-  const start: ProposalGenerationService['Service']['start'] = Effect.fn(
-    'ProposalGenerationService.start',
+  const startAdmitted: ProposalGenerationService['Service']['startAdmitted'] = Effect.fn(
+    'ProposalGenerationService.startAdmitted',
   )(function* (input)
   {
-    const admission = yield* prepareStart(input)
+    const admission = yield* prepareStart(input, input.revisionId)
     const lock = yield* lockForThread(input.threadId)
-    return yield* lock.withPermit(serviceLifecycle.withPermit(startUnlocked(input, admission)))
+    return yield* lock.withPermit(
+      serviceLifecycle.withPermit(
+        Effect.gen(function* ()
+        {
+          if (input.analyzerFingerprint !== admission.analyzer.fingerprint)
+          {
+            return yield* generationError(
+              'analysis-failed',
+              'The admitted analyzer fingerprint is no longer available.',
+            )
+          }
+          yield* requireActiveAdmissionLease(input.leaseFence, input.admissionKey)
+          const existing = yield* latestExactRow({
+            proposalId: admission.selected.proposal.proposalId,
+            threadId: input.threadId,
+            revisionId: input.revisionId,
+            analyzerVersion: admission.analyzer.fingerprint,
+            architectureAdmissionKey: input.admissionKey,
+          }).pipe(Effect.mapError(sqlFailure('ProposalGenerationService.readAdmittedGeneration')))
+          if (
+            Option.isSome(existing) &&
+            (['queued', 'preparing', 'analyzing'].includes(existing.value.state) ||
+              (!input.forceNewAttempt && existing.value.state === 'ready'))
+          )
+          {
+            return publicGeneration(existing.value, yield* deriveFreshness(existing.value))
+          }
+          return yield* startUnlocked(input, admission, input.admissionKey, input.leaseFence)
+        }),
+      ),
+    )
   })
 
   const cancelThread: ProposalGenerationService['Service']['cancelThread'] = (threadId) =>
@@ -1344,19 +1634,32 @@ export const make = Effect.gen(function* ()
               Effect.gen(function* ()
               {
                 const active = (yield* Ref.get(activeFibers)).get(threadId)
-                if (!active) return
-                active.cancellation.errorCode = 'thread-deleted'
-                active.cancellation.state = 'cancelled'
-                yield* Fiber.interrupt(active.fiber)
-                const activeExit = yield* Fiber.await(active.fiber)
-                if (Exit.isFailure(activeExit))
+                if (active)
                 {
-                  yield* cleanupArtifactRoot(active.row.artifactRoot)
-                  yield* updateGeneration(active.row, {
-                    state: active.cancellation.state,
-                    errorCode: active.cancellation.errorCode,
-                  }).pipe(Effect.ignore)
+                  active.cancellation.errorCode = 'thread-deleted'
+                  active.cancellation.state = 'cancelled'
+                  yield* Fiber.interrupt(active.fiber)
+                  const activeExit = yield* Fiber.await(active.fiber)
+                  if (Exit.isFailure(activeExit))
+                  {
+                    yield* cleanupArtifactRoot(active.row.artifactRoot)
+                    yield* updateGeneration(active.row, {
+                      state: active.cancellation.state,
+                      errorCode: active.cancellation.errorCode,
+                    }).pipe(Effect.ignore)
+                  }
                 }
+                yield* sql`
+                  UPDATE proposal_generations
+                  SET
+                    state = 'cancelled',
+                    error_code = 'thread-deleted',
+                    updated_at = ${DateTime.formatIso(yield* DateTime.now)}
+                  WHERE thread_id = ${threadId}
+                    AND state IN ('queued', 'preparing', 'analyzing')
+                `.pipe(
+                  Effect.mapError(sqlFailure('ProposalGenerationService.cancelThreadGenerations')),
+                )
               }),
             ),
           ),
@@ -1406,6 +1709,21 @@ export const make = Effect.gen(function* ()
     return publicGeneration(row.value, yield* deriveFreshness(row.value))
   })
 
+  const latestAdmitted: ProposalGenerationService['Service']['latestAdmitted'] = Effect.fn(
+    'ProposalGenerationService.latestAdmitted',
+  )(function* (input)
+  {
+    const row = yield* latestAdmissionRow(input).pipe(
+      Effect.mapError(sqlFailure('ProposalGenerationService.latestAdmitted')),
+    )
+    if (Option.isNone(row)) return null
+    return {
+      generationId: row.value.generationId,
+      state: row.value.state,
+      errorCode: row.value.errorCode,
+    }
+  })
+
   const resolveArchitectureTarget: ProposalGenerationService['Service']['resolveArchitectureTarget'] =
     Effect.fn('ProposalGenerationService.resolveArchitectureTarget')(
       function* (threadId, generationId)
@@ -1420,7 +1738,8 @@ export const make = Effect.gen(function* ()
           row.state !== 'ready' ||
           row.baseGraphPath === null ||
           row.proposedGraphPath === null ||
-          row.impactPath === null
+          row.impactPath === null ||
+          row.impactProjectionPath === null
         )
         {
           return yield* cartographerError(
@@ -1498,30 +1817,42 @@ export const make = Effect.gen(function* ()
           true,
           (bytes) => graphArtifactMatches(bytes, selected.revision.proposedTreeOid),
         )
-        const impactStem = path.basename(row.impactPath).startsWith('impact.graph-diff-v1.')
-          ? 'impact.graph-diff-v1'
-          : 'impact'
         const impact = yield* verifySealedArtifact(
           row.artifactRoot,
           row.impactPath,
-          impactStem,
+          'impact.graph-diff-v1',
           false,
           (bytes) =>
-            impactStem === 'impact'
-              ? impactLabelsMatch(
-                  bytes,
-                  selected.revision.baseSnapshot.workingTreeOid,
-                  selected.revision.proposedTreeOid,
-                )
-              : impactArtifactMatches(
-                  bytes,
-                  selected.revision.baseSnapshot.workingTreeOid,
-                  selected.revision.proposedTreeOid,
-                ),
+            impactArtifactMatches(
+              bytes,
+              selected.revision.baseSnapshot.workingTreeOid,
+              selected.revision.proposedTreeOid,
+            ),
+        )
+        const impactProjection = yield* verifySealedArtifact(
+          row.artifactRoot,
+          row.impactProjectionPath,
+          'impact.projection-v1',
+          false,
+          (bytes) =>
+            impactProjectionArtifactMatches(
+              bytes,
+              selected.revision.baseSnapshot.workingTreeOid,
+              selected.revision.proposedTreeOid,
+              `sha256:${baseGraph.artifactSha256}`,
+              `sha256:${proposedGraph.artifactSha256}`,
+              `sha256:${impact.artifactSha256}`,
+              row.analyzerVersion,
+              selected.revision.manifest.changedFileCount,
+            ),
         )
         if (
-          baseGraph.byteLength + proposedGraph.byteLength + impact.byteLength >
-          GENERATION_MAX_ARTIFACT_BYTES
+          impactProjection.byteLength > 2 * 1024 * 1024 ||
+          baseGraph.byteLength +
+            proposedGraph.byteLength +
+            impact.byteLength +
+            impactProjection.byteLength >
+            GENERATION_MAX_ARTIFACT_BYTES
         )
         {
           return yield* cartographerError(
@@ -1564,6 +1895,7 @@ export const make = Effect.gen(function* ()
           baseGraphPath: baseGraph.path,
           proposedGraphPath: proposedGraph.path,
           impactPath: impact.path,
+          impactProjectionPath: impactProjection.path,
         }
       },
     )
@@ -1581,7 +1913,8 @@ export const make = Effect.gen(function* ()
         row.state !== 'ready' ||
         row.baseGraphPath === null ||
         row.proposedGraphPath === null ||
-        row.impactPath === null
+        row.impactPath === null ||
+        row.impactProjectionPath === null
       )
       {
         return yield* cartographerError(
@@ -1645,26 +1978,17 @@ export const make = Effect.gen(function* ()
         selected.revision.proposedRetainedRef,
         selected.revision.proposedTreeOid,
       )
-      const impactStem = path.basename(row.impactPath).startsWith('impact.graph-diff-v1.')
-        ? 'impact.graph-diff-v1'
-        : 'impact'
       const impact = yield* verifySealedArtifact(
         row.artifactRoot,
         row.impactPath,
-        impactStem,
+        'impact.graph-diff-v1',
         false,
         (bytes) =>
-          impactStem === 'impact'
-            ? impactLabelsMatch(
-                bytes,
-                selected.revision.baseSnapshot.workingTreeOid,
-                selected.revision.proposedTreeOid,
-              )
-            : impactArtifactMatches(
-                bytes,
-                selected.revision.baseSnapshot.workingTreeOid,
-                selected.revision.proposedTreeOid,
-              ),
+          impactArtifactMatches(
+            bytes,
+            selected.revision.baseSnapshot.workingTreeOid,
+            selected.revision.proposedTreeOid,
+          ),
       )
       const baseGraph = parseSealedArtifactName(
         path.basename(row.baseGraphPath),
@@ -1683,25 +2007,69 @@ export const make = Effect.gen(function* ()
           'Proposal graph identity could not be verified.',
         )
       }
-      let diff: GraphDiff | null = null
+      if (
+        path.dirname(path.resolve(row.baseGraphPath)) !== path.resolve(row.artifactRoot) ||
+        path.dirname(path.resolve(row.proposedGraphPath)) !== path.resolve(row.artifactRoot)
+      )
+      {
+        return yield* cartographerError(
+          'generation_not_found',
+          'Proposal graph containment could not be verified.',
+        )
+      }
+      let diff: GraphDiff
       try
       {
         diff = parseGraphDiff(artifactObject(impact.bytes))
       }
       catch
       {
-        if (impactStem !== 'impact')
-        {
-          return yield* cartographerError(
-            'generation_not_found',
-            'Proposal impact artifact could not be decoded.',
-          )
-        }
+        return yield* cartographerError(
+          'generation_not_found',
+          'Proposal impact artifact could not be decoded.',
+        )
+      }
+      const verified = yield* verifySealedArtifact(
+        row.artifactRoot,
+        row.impactProjectionPath,
+        'impact.projection-v1',
+        false,
+        (bytes) =>
+          impactProjectionArtifactMatches(
+            bytes,
+            selected.revision.baseSnapshot.workingTreeOid,
+            selected.revision.proposedTreeOid,
+            `sha256:${baseGraph.artifactSha256}`,
+            `sha256:${proposedGraph.artifactSha256}`,
+            `sha256:${impact.artifactSha256}`,
+            row.analyzerVersion,
+            selected.revision.manifest.changedFileCount,
+          ),
+      )
+      if (verified.byteLength > 2 * 1024 * 1024)
+      {
+        return yield* cartographerError(
+          'generation_not_found',
+          'Proposal impact projection exceeds its bounded transport size.',
+        )
+      }
+      let projection: VerifiedImpactProjectionArtifact
+      try
+      {
+        projection = parseVerifiedImpactProjection(artifactObject(verified.bytes))
+      }
+      catch
+      {
+        return yield* cartographerError(
+          'generation_not_found',
+          'Proposal impact projection could not be decoded.',
+        )
       }
       return {
         diff,
+        projection,
         impactDigest: `sha256:${impact.artifactSha256}`,
-        legacy: impactStem === 'impact',
+        impactProjectionDigest: `sha256:${verified.artifactSha256}`,
         repositoryRoot: selected.proposal.worktree.rootPath,
         baseTreeOid: selected.revision.baseSnapshot.workingTreeOid,
         proposedTreeOid: selected.revision.proposedTreeOid,
@@ -1711,13 +2079,16 @@ export const make = Effect.gen(function* ()
     })
 
   return ProposalGenerationService.of({
-    start,
+    startAdmitted,
     get,
     latest,
+    latestAdmitted,
     resolveArchitectureTarget,
     resolveImpactTarget,
     cancelThread,
   })
 })
 
-export const layer = Layer.effect(ProposalGenerationService, make)
+export const layer = Layer.effect(ProposalGenerationService, make).pipe(
+  Layer.provideMerge(ArchitectureAdmissionRepository.layer),
+)

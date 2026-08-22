@@ -74,6 +74,7 @@ import * as ProjectArchitectureLifecycleService from './cartographer/ProjectArch
 import * as ProposalGenerationService from './proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from './proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from './proposal/ProposalService.ts'
+import * as ArchitectureAdmissionService from './architecture/ArchitectureAdmissionService.ts'
 import { dispatchWithAttachmentLifecycle } from './orchestration/dispatchWithAttachmentLifecycle.ts'
 import { makeProposalRpcHandlers } from './ws/handlers/proposalHandlers.ts'
 import { makePreviewRpcHandlers } from './ws/handlers/previewHandlers.ts'
@@ -234,6 +235,8 @@ const makeWsRpcLayer = (
       const path = yield* Path.Path
       const proposalService = yield* ProposalService.ProposalService
       const proposalGenerationService = yield* ProposalGenerationService.ProposalGenerationService
+      const architectureAdmissionService =
+        yield* ArchitectureAdmissionService.ArchitectureAdmissionService
       const diffAnalysisService = yield* DiffAnalysisService.DiffAnalysisService
       const architectureQueryService = yield* ArchitectureQueryService.ArchitectureQueryService
       const architectureProjectionService =
@@ -314,6 +317,7 @@ const makeWsRpcLayer = (
       })
       const proposalRpcHandlers = makeProposalRpcHandlers({
         proposalService,
+        architectureAdmissionService,
         proposalGenerationService,
         proposalImplementationAttemptService,
         projectionSnapshotQuery,
@@ -1062,7 +1066,7 @@ const makeWsRpcLayer = (
               const contextNotFound = () =>
                 new CartographerError({
                   failure: 'workspace_context_not_found' as const,
-                  message: 'The Project Atlas workspace context was not found.',
+                  message: 'The Repository Map workspace context was not found.',
                 })
               const project = yield* projectionSnapshotQuery
                 .getProjectShellById(input.projectId)
@@ -1127,15 +1131,15 @@ const makeWsRpcLayer = (
             }),
             { 'rpc.aggregate': 'cartographer' },
           ),
-        [WS_METHODS.cartographerGetArchitectureImpact]: (input) =>
+        [WS_METHODS.cartographerGetArchitectureImpactProjection]: (input) =>
           observeRpcEffect(
-            WS_METHODS.cartographerGetArchitectureImpact,
-            architectureQueryService.architectureImpact(
+            WS_METHODS.cartographerGetArchitectureImpactProjection,
+            architectureQueryService.architectureImpactProjection(
               {
                 environmentId: serverEnvironmentId,
-                threadId: input.threadId,
+                threadId: input.kind === 'read-exact' ? input.descriptor.threadId : input.threadId,
               },
-              { comparison: input.comparison },
+              input,
             ),
             { 'rpc.aggregate': 'cartographer' },
           ),
@@ -1152,24 +1156,6 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.cartographerGetArchitectureScope,
             architectureProjectionService.architectureScope(
-              { environmentId: serverEnvironmentId, threadId: input.threadId },
-              input,
-            ),
-            { 'rpc.aggregate': 'cartographer' },
-          ),
-        [WS_METHODS.cartographerGetArchitectureNeighborhood]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.cartographerGetArchitectureNeighborhood,
-            architectureProjectionService.architectureNeighborhood(
-              { environmentId: serverEnvironmentId, threadId: input.threadId },
-              input,
-            ),
-            { 'rpc.aggregate': 'cartographer' },
-          ),
-        [WS_METHODS.cartographerGetArchitecturePathScope]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.cartographerGetArchitecturePathScope,
-            architectureProjectionService.architecturePathScope(
               { environmentId: serverEnvironmentId, threadId: input.threadId },
               input,
             ),
@@ -1193,7 +1179,7 @@ const makeWsRpcLayer = (
                 const contextNotFound = () =>
                   new CartographerError({
                     failure: 'workspace_context_not_found' as const,
-                    message: 'The Project Atlas workspace context was not found.',
+                    message: 'The Repository Map workspace context was not found.',
                   })
                 const project = yield* projectionSnapshotQuery
                   .getProjectShellById(input.projectId)

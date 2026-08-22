@@ -466,7 +466,9 @@ export function OpenCommandPaletteDialog(props: {
     hasServerThread: currentThreadRef !== null,
     exactProject: currentProjectId !== null && currentProjectExists,
     capability:
-      currentEnvironment?.serverConfig?.environment.capabilities.architectureImpact ?? null,
+      currentEnvironment?.serverConfig == null
+        ? null
+        : currentEnvironment.serverConfig.environment.capabilities.architectureImpact === true,
     environmentLabel: currentEnvironment?.label,
   })
   const currentProjectCwd = currentProjectId ? (projectCwdById.get(currentProjectId) ?? null) : null
@@ -1103,8 +1105,8 @@ export function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: 'action',
     value: 'action:architecture',
-    searchTerms: ['architecture', 'atlas', 'project graph', 'dependencies'],
-    title: 'Open Repository Atlas',
+    searchTerms: ['architecture', 'repository map', 'project graph', 'dependencies'],
+    title: 'Open Repository Map',
     description: architectureDisabledReason ?? 'Explore this project’s architecture.',
     disabled: architectureDisabledReason !== null,
     icon: <BlocksIcon className={ITEM_ICON_CLASS} />,

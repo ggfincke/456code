@@ -1,6 +1,7 @@
 // tests/apps/web/components/chat/ProposedPlanCard.test.tsx
 // verifies exact proposal identity, generation failures, and explorer availability
 import type {
+  ArchitectureImpactProjectionResult,
   EnvironmentId,
   OrchestrationProposedPlanId,
   ProposalGeneration,
@@ -13,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   findProposalByPlan: vi.fn(),
   latestProposalGeneration: vi.fn(),
   getProposalGeneration: vi.fn(),
+  getArchitectureImpactProjection: vi.fn(),
+  openArchitectureSurface: vi.fn(),
   query: vi.fn(),
 }))
 
@@ -50,6 +53,11 @@ vi.mock('~/state/projects', () => ({
       mocks.getProposalGeneration(input)
       return { kind: 'get-proposal-generation', input }
     },
+    getArchitectureImpactProjection: (input: unknown) =>
+    {
+      mocks.getArchitectureImpactProjection(input)
+      return { kind: 'architecture-impact-projection', input }
+    },
     startProposalGeneration: {},
     writeFile: {},
   },
@@ -65,7 +73,10 @@ vi.mock('~/state/use-atom-command', () => ({
 
 vi.mock('~/rightPanelStore', () => ({
   useRightPanelStore: {
-    getState: () => ({ openExplorer: vi.fn() }),
+    getState: () => ({
+      openArchitectureSurface: mocks.openArchitectureSurface,
+      openExplorer: vi.fn(),
+    }),
   },
 }))
 
@@ -82,7 +93,7 @@ vi.mock('../../../../../apps/web/src/components/ChatMarkdown', () => ({
 
 import { ProposedPlanCard } from '../../../../../apps/web/src/components/chat/ProposedPlanCard'
 import {
-  claimAutomaticProposalGenerationStart,
+  claimManualProposalGenerationStart,
   createProposalGenerationStartTarget,
   failProposalGenerationStart,
   resetProposalGenerationStartStoreForTests,
@@ -107,6 +118,92 @@ const planLookup = {
       workingTreeOid: '0123456789abcdef0123456789abcdef01234567',
     },
   },
+}
+
+function impactProjection(
+  resultState: 'graph' | 'no-impact' = 'graph',
+): ArchitectureImpactProjectionResult
+{
+  return {
+    version: 1,
+    descriptor: {
+      version: 1,
+      descriptorId: 'a'.repeat(64),
+      threadId: threadRef.threadId,
+      projectId: 'project-plan-card',
+      target: { kind: 'plan', plan: { _tag: 'plan', planId }, state: 'active' },
+      verifiedCandidate: {
+        authority: 'verified',
+        source: {
+          kind: 'verified-proposal-impact',
+          threadId: threadRef.threadId,
+          generationId: 'generation-exact',
+          proposalId: 'proposal-exact',
+          revisionId: 'proposal-exact:4',
+          baseTreeOid: '1'.repeat(40),
+          headTreeOid: '2'.repeat(40),
+          baseGraphDigest: `sha256:${'3'.repeat(64)}`,
+          headGraphDigest: `sha256:${'4'.repeat(64)}`,
+          projectionDigest: `sha256:${'5'.repeat(64)}`,
+        },
+        projectionId: 'verified-plan-card',
+        projectionRevision: 1,
+        projectionDigest: `sha256:${'5'.repeat(64)}`,
+        resultState,
+        freshness: 'stale',
+        generatedAt: '2026-08-20T12:00:00.000Z',
+        publishedAt: '2026-08-20T12:00:00.000Z',
+      },
+      defaultAuthority: 'verified',
+      resolvedAt: '2026-08-20T12:00:00.000Z',
+    },
+    selectedAuthority: 'verified',
+    projection: {
+      projectionVersion: 1,
+      projectionId: 'verified-plan-card',
+      projectionRevision: 1,
+      kind: 'impact-diff',
+      authority: 'verified',
+      resultState,
+      freshness: 'stale',
+      generatedAt: '2026-08-20T12:00:00.000Z',
+      publishedAt: '2026-08-20T12:00:00.000Z',
+      source: {
+        kind: 'verified-proposal-impact',
+        threadId: threadRef.threadId,
+        generationId: 'generation-exact',
+        proposalId: 'proposal-exact',
+        revisionId: 'proposal-exact:4',
+        baseTreeOid: '1'.repeat(40),
+        headTreeOid: '2'.repeat(40),
+        baseGraphDigest: `sha256:${'3'.repeat(64)}`,
+        headGraphDigest: `sha256:${'4'.repeat(64)}`,
+        projectionDigest: `sha256:${'5'.repeat(64)}`,
+      },
+      lens: 'architecture',
+      semanticLevel: 'blocks',
+      breadcrumbs: [],
+      layoutVersion: 'semantic-impact-v1',
+      totals: {
+        nodes: {
+          total: resultState === 'graph' ? 2 : 0,
+          returned: resultState === 'graph' ? 2 : 0,
+          omitted: 0,
+        },
+        edges: {
+          total: resultState === 'graph' ? 1 : 0,
+          returned: resultState === 'graph' ? 1 : 0,
+          omitted: 0,
+        },
+        evidence: { total: 0, returned: 0, omitted: 0 },
+        changedFiles: { total: 3, returned: 0, omitted: 3 },
+      },
+      nodes: [],
+      edges: [],
+      evidence: [],
+      anchors: [],
+    },
+  } as unknown as ArchitectureImpactProjectionResult
 }
 
 function proposalGeneration(
@@ -146,6 +243,75 @@ describe('ProposedPlanCard', () =>
       isPending: false,
       refresh: vi.fn(),
     }))
+  })
+
+  it('shows the exact Verified summary and suppresses the graph action for no-impact', () =>
+  {
+    const graph = impactProjection('graph')
+    mocks.query.mockImplementation((query: { readonly kind?: string } | null) => ({
+      data:
+        query?.kind === 'find-proposal-by-plan'
+          ? planLookup
+          : query?.kind === 'architecture-impact-projection'
+            ? graph
+            : null,
+      error: null,
+      failure: null,
+      hasSettled: true,
+      isPending: false,
+      refresh: vi.fn(),
+    }))
+
+    const markup = renderToStaticMarkup(
+      <ProposedPlanCard
+        planId={planId}
+        planMarkdown="# Exact plan"
+        environmentId={environmentId}
+        threadRef={threadRef}
+        cwd="/workspace"
+        workspaceRoot="/workspace"
+      />,
+    )
+
+    expect(markup).toContain('Verified Impact')
+    expect(markup).toContain('2 objects · 1 relationships')
+    expect(markup).toContain('Open Impact Diff')
+    expect(mocks.getArchitectureImpactProjection).toHaveBeenCalledWith({
+      environmentId,
+      input: {
+        version: 1,
+        kind: 'resolve-plan',
+        threadId: threadRef.threadId,
+        plan: { _tag: 'plan', planId },
+      },
+    })
+
+    const noImpact = impactProjection('no-impact')
+    mocks.query.mockImplementation((query: { readonly kind?: string } | null) => ({
+      data:
+        query?.kind === 'find-proposal-by-plan'
+          ? planLookup
+          : query?.kind === 'architecture-impact-projection'
+            ? noImpact
+            : null,
+      error: null,
+      failure: null,
+      hasSettled: true,
+      isPending: false,
+      refresh: vi.fn(),
+    }))
+    const noImpactMarkup = renderToStaticMarkup(
+      <ProposedPlanCard
+        planId={planId}
+        planMarkdown="# Exact plan"
+        environmentId={environmentId}
+        threadRef={threadRef}
+        cwd="/workspace"
+        workspaceRoot="/workspace"
+      />,
+    )
+    expect(noImpactMarkup).toContain('No architectural relationship changes · 3 changed files')
+    expect(noImpactMarkup).not.toContain('Open Impact Diff')
   })
 
   it('queries its exact plan linkage and labels the immutable revision and snapshot', () =>
@@ -222,7 +388,7 @@ describe('ProposedPlanCard', () =>
       proposalId: planLookup.proposal.proposalId as ProposalGeneration['proposalId'],
       revision: planLookup.revision.revision,
     })
-    const attempt = claimAutomaticProposalGenerationStart(target, null)
+    const attempt = claimManualProposalGenerationStart(target, null)
     expect(attempt).not.toBeNull()
     failProposalGenerationStart(attempt!, 'Architecture analysis could not be scheduled.')
 

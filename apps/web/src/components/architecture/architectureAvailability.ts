@@ -10,17 +10,17 @@ export function repositoryAtlasDisabledReason(input: {
 {
   if (!input.hasServerThread)
   {
-    return 'Open a server thread in this project to view Repository Atlas.'
+    return 'Open a server thread in this project to view Repository Map.'
   }
   if (!input.exactProject)
   {
-    return 'Open a thread in this exact project to view Repository Atlas.'
+    return 'Open a thread in this exact project to view Repository Map.'
   }
   if (input.capability === null)
   {
-    return `Repository Atlas availability is still loading for ${input.environmentLabel ?? 'this environment'}.`
+    return `Repository Map availability is still loading for ${input.environmentLabel ?? 'this environment'}.`
   }
   return input.capability
     ? null
-    : `${input.environmentLabel ?? 'This environment'} does not support Repository Atlas.`
+    : `${input.environmentLabel ?? 'This environment'} does not support Repository Map.`
 }

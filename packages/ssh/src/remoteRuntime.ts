@@ -148,7 +148,6 @@ export const launchOrReuseRemoteServer = Effect.fn('ssh/tunnel.launchOrReuseRemo
     }
     yield* Effect.logInfo('ssh.remoteServer.launch.ready', {
       ...sshTargetLogFields(target),
-      remotePort: parsed.remotePort,
       remoteServerKind: parsed.serverKind ?? null,
       stateKey: remoteStateKey(target),
     })

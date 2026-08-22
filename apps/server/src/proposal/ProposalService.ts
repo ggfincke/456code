@@ -36,6 +36,11 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 
+import {
+  architectureAdmissionMetricAttributes,
+  architectureAnalysisAdmissionsTotal,
+  increment,
+} from '../observability/Metrics.ts'
 import * as ProposalGitEngine from './ProposalGitEngine.ts'
 import * as ProposalRepository from './ProposalRepository.ts'
 import * as ProposalRetainedRefAttemptStore from './ProposalRetainedRefAttemptStore.ts'
@@ -55,6 +60,7 @@ export interface ProposalUpsertRequest
   readonly orchestratePlan?: ProposalOrchestratePlanTarget & {
     readonly turnId: TurnId
   }
+  readonly verifiedAnalyzerFingerprint: string
 }
 
 function proposalError(
@@ -230,8 +236,13 @@ export const make = Effect.gen(function* ()
             ...(input.orchestratePlan === undefined
               ? {}
               : { orchestratePlan: input.orchestratePlan }),
+            verifiedAnalyzerFingerprint: input.verifiedAnalyzerFingerprint,
             createdAt,
           })
+          yield* increment(
+            architectureAnalysisAdmissionsTotal,
+            architectureAdmissionMetricAttributes('proposal-verified', 'queued'),
+          )
           yield* attemptStore
             .finalize({ refToken, durableAt: DateTime.formatIso(yield* DateTime.now) })
             .pipe(

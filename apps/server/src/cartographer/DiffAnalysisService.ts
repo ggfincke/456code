@@ -16,7 +16,12 @@ import {
   type DiffAnalysisGeneration,
   type DiffAnalysisSource,
 } from '@t3tools/contracts'
-import { parseGraphDiff, type GraphDiff } from '@t3tools/cartographer-core/server'
+import {
+  parseGraphDiff,
+  parseVerifiedImpactProjection,
+  type GraphDiff,
+  type VerifiedImpactProjectionArtifact,
+} from '@t3tools/cartographer-core/server'
 import { normalizeGitRemoteUrl } from '@t3tools/shared/git'
 import * as Context from 'effect/Context'
 import * as Data from 'effect/Data'
@@ -43,8 +48,8 @@ import {
   EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,
   EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
   ExactGitSnapshotError,
-  materializeExactGitTree,
 } from '../vcs/ExactGitSnapshot.ts'
+import { materializeExactGitTreeIntoCache } from '../vcs/ExactGitCacheMaterialization.ts'
 import * as GitVcsDriver from '../vcs/GitVcsDriver.ts'
 import * as CartographerAnalyzer from './CartographerAnalyzer.ts'
 
@@ -68,11 +73,12 @@ const SYNTHETIC_COMMIT_DATE = '1970-01-01T00:00:00 +0000'
 interface AnalyzerManifest
 {
   readonly type: 'cartographer.analysis-ready'
-  readonly version: 1
+  readonly version: 2
   readonly analyzerVersion: string
   readonly baseGraph: 'base.graph.json'
   readonly proposedGraph: 'proposed.graph.json'
   readonly impact: 'impact.json'
+  readonly impactProjection: 'impact-projection.json'
 }
 
 export interface DiffAnalysisOrphanSweepOptions
@@ -102,11 +108,12 @@ export interface DiffAnalysisOrphanSweepReport
 
 const AnalyzerManifestSchema = Schema.Struct({
   type: Schema.Literal('cartographer.analysis-ready'),
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
   analyzerVersion: Schema.String,
   baseGraph: Schema.Literal('base.graph.json'),
   proposedGraph: Schema.Literal('proposed.graph.json'),
   impact: Schema.Literal('impact.json'),
+  impactProjection: Schema.Literal('impact-projection.json'),
 })
 const decodeAnalyzerManifest = Schema.decodeUnknownSync(AnalyzerManifestSchema, {
   onExcessProperty: 'error',
@@ -168,20 +175,22 @@ export interface ReadyDiffAnalysisTarget
   readonly baseGraphPath: string
   readonly headGraphPath: string
   readonly impactPath: string
+  readonly impactProjectionPath: string
 }
 
 export interface ReadyDiffAnalysisImpactTarget
 {
   readonly generation: DiffAnalysisGeneration
-  readonly diff: GraphDiff | null
+  readonly diff: GraphDiff
+  readonly projection: VerifiedImpactProjectionArtifact
   readonly impactDigest: string
-  readonly legacy: boolean
+  readonly impactProjectionDigest: string
   readonly repositoryRoot: string
   readonly baseTreeOid: string
   readonly headTreeOid: string
   readonly baseGraphDigest: string
   readonly headGraphDigest: string
-  readonly baseRoot: string | null
+  readonly baseRoot: string
   readonly headRoot: string
 }
 
@@ -316,27 +325,34 @@ function impactArtifactMatches(
   }
 }
 
-function impactLabelsMatch(
+function impactProjectionArtifactMatches(
   bytes: Uint8Array,
   expectedBaseGitRef: string,
   expectedHeadGitRef: string,
+  expectedBaseGraphDigest: string,
+  expectedHeadGraphDigest: string,
+  expectedRawImpactDigest: string,
+  expectedAnalyzerFingerprint: string,
+  implementationChangedFileCount: number,
 ): boolean
 {
-  const value = artifactObject(bytes)
-  return value?.baseGitRef === expectedBaseGitRef && value.headGitRef === expectedHeadGitRef
-}
-
-// stem `impact` is labels-only; native `impact.graph-diff-v1` still requires GraphDiff
-function impactStemMatches(
-  bytes: Uint8Array,
-  fileName: string,
-  expectedBaseGitRef: string,
-  expectedHeadGitRef: string,
-): boolean
-{
-  return fileName.startsWith('impact.graph-diff-v1.')
-    ? impactArtifactMatches(bytes, expectedBaseGitRef, expectedHeadGitRef)
-    : impactLabelsMatch(bytes, expectedBaseGitRef, expectedHeadGitRef)
+  try
+  {
+    const projection = parseVerifiedImpactProjection(artifactObject(bytes))
+    return (
+      projection.baseGitRef === expectedBaseGitRef &&
+      projection.headGitRef === expectedHeadGitRef &&
+      projection.baseGraphDigest === expectedBaseGraphDigest &&
+      projection.headGraphDigest === expectedHeadGraphDigest &&
+      projection.rawImpactDigest === expectedRawImpactDigest &&
+      projection.analyzerFingerprint === expectedAnalyzerFingerprint &&
+      projection.implementationChangedFileCount === implementationChangedFileCount
+    )
+  }
+  catch
+  {
+    return false
+  }
 }
 
 // the contract source is a discriminated union; normalization only trims and
@@ -431,6 +447,10 @@ function publicGeneration(
     headGraphArtifact:
       row.headGraphPath === null ? null : `diff-analysis:${row.diffAnalysisId}:head-graph`,
     impactArtifact: row.impactPath === null ? null : `diff-analysis:${row.diffAnalysisId}:impact`,
+    impactProjectionArtifact:
+      row.impactProjectionPath === null
+        ? null
+        : `diff-analysis:${row.diffAnalysisId}:impact-projection`,
     artifactByteLength: row.artifactByteLength,
     errorCode: row.errorCode,
     createdAt: row.createdAt,
@@ -724,6 +744,34 @@ export const make = Effect.gen(function* ()
             }) as DiffAnalysisError,
         ),
       )
+  })
+
+  const changedFileCount = Effect.fn('DiffAnalysisService.changedFileCount')(function* (
+    cwd: string,
+    baseTreeOid: string,
+    headTreeOid: string,
+  )
+  {
+    const result = yield* runGit(cwd, [
+      'diff',
+      '--shortstat',
+      '--find-renames',
+      baseTreeOid,
+      headTreeOid,
+      '--',
+    ])
+    const summary = result.stdout.trim()
+    if (summary.length === 0) return 0
+    const match = /^(\d+) files? changed(?:,|$)/u.exec(summary)
+    const count = match === null ? Number.NaN : Number(match[1])
+    if (!Number.isSafeInteger(count) || count < 0)
+    {
+      return yield* fail(
+        'repository-identity-failed',
+        'Git did not return an exact changed-file count for the comparison.',
+      )
+    }
+    return count
   })
 
   const resolveRepository = Effect.fn('DiffAnalysisService.resolveRepository')(function* (
@@ -1153,7 +1201,7 @@ export const make = Effect.gen(function* ()
         () =>
           new DiffAnalysisFailure({
             code: 'unsupported',
-            message: 'Cartographer analysis is unavailable.',
+            message: 'Impact Diff analysis is unavailable.',
           }) as DiffAnalysisError,
       ),
     )
@@ -1221,6 +1269,8 @@ export const make = Effect.gen(function* ()
         | 'baseGraphPath'
         | 'headGraphPath'
         | 'impactPath'
+        | 'impactProjectionPath'
+        | 'implementationChangedFileCount'
         | 'artifactByteLength'
         | 'errorCode'
       >
@@ -1237,6 +1287,8 @@ export const make = Effect.gen(function* ()
         baseGraphPath: next.baseGraphPath,
         headGraphPath: next.headGraphPath,
         impactPath: next.impactPath,
+        impactProjectionPath: next.impactProjectionPath,
+        implementationChangedFileCount: next.implementationChangedFileCount,
         artifactByteLength: next.artifactByteLength,
         errorCode: next.errorCode,
         updatedAt,
@@ -1252,9 +1304,10 @@ export const make = Effect.gen(function* ()
   {
     return yield* Effect.tryPromise({
       try: (signal) =>
-        materializeExactGitTree({
+        materializeExactGitTreeIntoCache({
           repositoryRoot: cwd,
           treeOid,
+          cacheRoot: NodePath.dirname(destination),
           destinationRoot: destination,
           signal,
           limits: {
@@ -1263,13 +1316,21 @@ export const make = Effect.gen(function* ()
           },
         }),
       catch: (cause) =>
-        new DiffAnalysisFailure({
+      {
+        const detail =
+          cause instanceof ExactGitSnapshotError
+            ? `${cause.code}: ${cause.message}`
+            : cause instanceof Error
+              ? cause.message
+              : 'unknown failure'
+        return new DiffAnalysisFailure({
           code:
             cause instanceof ExactGitSnapshotError && cause.code === 'limit-exceeded'
               ? 'limit-exceeded'
               : 'materialization-failed',
-          message: 'An exact diff tree could not be materialized.',
-        }) as DiffAnalysisError,
+          message: `An exact diff tree could not be materialized (${detail}).`,
+        }) as DiffAnalysisError
+      },
     })
   })
 
@@ -1300,14 +1361,14 @@ export const make = Effect.gen(function* ()
       catch: () =>
         new DiffAnalysisFailure({
           code: 'artifact-invalid',
-          message: 'Cartographer did not produce every required diff artifact.',
+          message: 'Impact Diff analysis did not produce every required artifact.',
         }) as DiffAnalysisError,
     })
     if (!identityMatches(artifact.bytes))
     {
       return yield* fail(
         'artifact-invalid',
-        'Cartographer artifacts do not match the requested comparison labels.',
+        'Impact Diff artifacts do not match the requested comparison labels.',
       )
     }
     const sealedPath = path.join(
@@ -1322,7 +1383,7 @@ export const make = Effect.gen(function* ()
           message: 'A diff artifact could not be sealed.',
         }) as DiffAnalysisError,
     })
-    return { path: sealedPath, byteLength: artifact.bytes.byteLength }
+    return { path: sealedPath, byteLength: artifact.bytes.byteLength, sha256: artifact.digest }
   })
 
   const deleteRowBeforeRoot = Effect.fn('DiffAnalysisService.deleteRowBeforeRoot')(function* (
@@ -1479,6 +1540,11 @@ export const make = Effect.gen(function* ()
     })
     const baseMaterialization = yield* materializeTree(resolved.cwd, resolved.baseTreeOid, baseRoot)
     const headMaterialization = yield* materializeTree(resolved.cwd, resolved.headTreeOid, headRoot)
+    const implementationChangedFileCount = yield* changedFileCount(
+      resolved.cwd,
+      resolved.baseTreeOid,
+      resolved.headTreeOid,
+    )
     row = yield* updateRow(row, { state: 'analyzing' })
 
     // analyzeTrees acquires the single CartographerAnalyzer-owned build permit.
@@ -1490,6 +1556,7 @@ export const make = Effect.gen(function* ()
         outDir: row.artifactRoot,
         baseRef: resolved.baseAnalyzerRef,
         proposedRef: resolved.headAnalyzerRef,
+        implementationChangedFileCount,
       })
       .pipe(
         Effect.mapError(
@@ -1498,8 +1565,8 @@ export const make = Effect.gen(function* ()
               code: error.failure === 'unsupported' ? 'unsupported' : 'analysis-failed',
               message:
                 error.failure === 'unsupported'
-                  ? 'Cartographer analysis is unavailable.'
-                  : 'Cartographer diff analysis failed.',
+                  ? 'Impact Diff analysis is unavailable.'
+                  : 'Impact Diff analysis failed.',
             }) as DiffAnalysisError,
         ),
       )
@@ -1508,7 +1575,7 @@ export const make = Effect.gen(function* ()
     {
       return yield* fail(
         'analysis-manifest-invalid',
-        'Cartographer returned an invalid diff analysis manifest.',
+        'Impact Diff analysis returned an invalid manifest.',
       )
     }
     const [baseRootDigest, headRootDigest] = yield* Effect.tryPromise({
@@ -1544,12 +1611,29 @@ export const make = Effect.gen(function* ()
       'impact.graph-diff-v1',
       (bytes) => impactArtifactMatches(bytes, resolved.baseAnalyzerRef, resolved.headAnalyzerRef),
     )
+    const impactProjection = yield* sealArtifact(
+      row.artifactRoot,
+      path.join(row.artifactRoot, manifest.impactProjection),
+      'impact.projection-v1',
+      (bytes) =>
+        impactProjectionArtifactMatches(
+          bytes,
+          resolved.baseAnalyzerRef,
+          resolved.headAnalyzerRef,
+          `sha256:${baseGraph.sha256}`,
+          `sha256:${headGraph.sha256}`,
+          `sha256:${impact.sha256}`,
+          analysis.fingerprint,
+          implementationChangedFileCount,
+        ),
+    )
     const artifactByteLength =
       baseMaterialization.byteCount +
       headMaterialization.byteCount +
       baseGraph.byteLength +
       headGraph.byteLength +
-      impact.byteLength
+      impact.byteLength +
+      impactProjection.byteLength
     if (
       !Number.isSafeInteger(artifactByteLength) ||
       artifactByteLength > DIFF_ANALYSIS_REPOSITORY_CAP_BYTES
@@ -1566,6 +1650,8 @@ export const make = Effect.gen(function* ()
       baseGraphPath: baseGraph.path,
       headGraphPath: headGraph.path,
       impactPath: impact.path,
+      impactProjectionPath: impactProjection.path,
+      implementationChangedFileCount,
       artifactByteLength,
       errorCode: null,
     })
@@ -1602,6 +1688,11 @@ export const make = Effect.gen(function* ()
       Effect.catch((error) =>
         Effect.gen(function* ()
         {
+          yield* Effect.logError('diff analysis generation failed', {
+            diffAnalysisId: row.diffAnalysisId,
+            errorCode: error.code,
+            detail: error.message,
+          })
           yield* cleanupArtifactRoot(row.artifactRoot)
           yield* updateRow(row, {
             state: 'failed',
@@ -1664,6 +1755,8 @@ export const make = Effect.gen(function* ()
       baseGraphPath: null,
       headGraphPath: null,
       impactPath: null,
+      impactProjectionPath: null,
+      implementationChangedFileCount: null,
       artifactByteLength: 0,
       errorCode: null,
       createdAt,
@@ -1849,11 +1942,14 @@ export const make = Effect.gen(function* ()
       row.headRootPath === null ||
       row.baseGraphPath === null ||
       row.headGraphPath === null ||
-      row.impactPath === null
+      row.impactPath === null ||
+      row.impactProjectionPath === null ||
+      row.implementationChangedFileCount === null
     )
     {
       return yield* fail('invalid-source', 'Ready diff analysis was not found.')
     }
+    const implementationChangedFileCount = row.implementationChangedFileCount
     const verifyArtifact = Effect.fn('DiffAnalysisService.verifyArtifact')(function* (
       artifactPath: string,
       pattern: RegExp,
@@ -1869,8 +1965,17 @@ export const make = Effect.gen(function* ()
         try: async () =>
         {
           const info = await NodeFSP.lstat(artifactPath)
-          if (!info.isFile() || info.isSymbolicLink()) throw new Error('not a regular file')
-          return NodeFSP.readFile(artifactPath)
+          if (
+            !info.isFile() ||
+            info.isSymbolicLink() ||
+            info.size > DIFF_ANALYSIS_MAX_ARTIFACT_BYTES
+          )
+          {
+            throw new Error('not a bounded regular file')
+          }
+          const bytes = await NodeFSP.readFile(artifactPath)
+          if (bytes.byteLength !== info.size) throw new Error('artifact changed during read')
+          return bytes
         },
         catch: () =>
           new DiffAnalysisFailure({
@@ -1889,7 +1994,7 @@ export const make = Effect.gen(function* ()
     })
     const base = yield* verifyArtifact(
       row.baseGraphPath,
-      /^base\.graph\.([0-9a-f]{64})(?:\.([0-9a-f]{64}))?\.json$/u,
+      /^base\.graph\.([0-9a-f]{64})\.([0-9a-f]{64})\.json$/u,
       (bytes) =>
       {
         const value = artifactObject(bytes)
@@ -1905,18 +2010,30 @@ export const make = Effect.gen(function* ()
         return value?.repoRoot === '.' && value.gitRef === row.headAnalyzerRef
       },
     )
-    const impactPath = row.impactPath
     const impact = yield* verifyArtifact(
-      impactPath,
-      /^impact(?:\.graph-diff-v1)?\.([0-9a-f]{64})\.json$/u,
+      row.impactPath,
+      /^impact\.graph-diff-v1\.([0-9a-f]{64})\.json$/u,
+      (bytes) => impactArtifactMatches(bytes, row.baseAnalyzerRef, row.headAnalyzerRef),
+    )
+    const impactProjection = yield* verifyArtifact(
+      row.impactProjectionPath,
+      /^impact\.projection-v1\.([0-9a-f]{64})\.json$/u,
       (bytes) =>
-        impactStemMatches(
+        impactProjectionArtifactMatches(
           bytes,
-          path.basename(impactPath),
           row.baseAnalyzerRef,
           row.headAnalyzerRef,
+          `sha256:${base.match[1]}`,
+          `sha256:${head.match[1]}`,
+          `sha256:${impact.match[1]}`,
+          row.analyzerVersion,
+          implementationChangedFileCount,
         ),
     )
+    if (impactProjection.bytes.byteLength > 2 * 1024 * 1024)
+    {
+      return yield* fail('artifact-invalid', 'The semantic impact projection exceeds its limit.')
+    }
     if (
       artifactObject(base.bytes)?.gitRef !== row.baseAnalyzerRef ||
       artifactObject(head.bytes)?.gitRef !== row.headAnalyzerRef ||
@@ -1925,10 +2042,7 @@ export const make = Effect.gen(function* ()
     {
       return yield* fail('artifact-invalid', 'The sealed diff analysis labels are inconsistent.')
     }
-    if (base.match[2] !== undefined)
-    {
-      yield* verifyRetainedRoot(row, path.join(row.artifactRoot, 'base'), 'base', base.match[2])
-    }
+    yield* verifyRetainedRoot(row, path.join(row.artifactRoot, 'base'), 'base', base.match[2]!)
     const headRootPath = yield* verifyRetainedRoot(
       row,
       row.headRootPath,
@@ -1942,6 +2056,7 @@ export const make = Effect.gen(function* ()
       baseGraphPath: row.baseGraphPath,
       headGraphPath: row.headGraphPath,
       impactPath: row.impactPath,
+      impactProjectionPath: row.impactProjectionPath,
     } satisfies ReadyDiffAnalysisTarget
   })
 
@@ -1956,26 +2071,22 @@ export const make = Effect.gen(function* ()
     })
 
   const verifyReadyImpactTarget = Effect.fn('DiffAnalysisService.verifyReadyImpactTarget')(
-    function* (
-      row: DiffAnalysisGenerations.DiffAnalysisGenerationRecord,
-      repositoryRoot: string,
-      sourceSide?: 'base' | 'head',
-    )
+    function* (row: DiffAnalysisGenerations.DiffAnalysisGenerationRecord, repositoryRoot: string)
     {
       if (
         row.state !== 'ready' ||
         row.headRootPath === null ||
         row.baseGraphPath === null ||
         row.headGraphPath === null ||
-        row.impactPath === null
+        row.impactPath === null ||
+        row.impactProjectionPath === null ||
+        row.implementationChangedFileCount === null
       )
       {
         return yield* fail('invalid-source', 'Ready diff analysis was not found.')
       }
       const impactPath = row.impactPath
-      const match = /^(impact(?:\.graph-diff-v1)?)\.([0-9a-f]{64})\.json$/u.exec(
-        path.basename(impactPath),
-      )
+      const match = /^impact\.graph-diff-v1\.([0-9a-f]{64})\.json$/u.exec(path.basename(impactPath))
       if (
         path.dirname(path.resolve(impactPath)) !== path.resolve(row.artifactRoot) ||
         match === null
@@ -1987,8 +2098,17 @@ export const make = Effect.gen(function* ()
         try: async () =>
         {
           const info = await NodeFSP.lstat(impactPath)
-          if (!info.isFile() || info.isSymbolicLink()) throw new Error('not a regular file')
-          return NodeFSP.readFile(impactPath)
+          if (
+            !info.isFile() ||
+            info.isSymbolicLink() ||
+            info.size > DIFF_ANALYSIS_MAX_ARTIFACT_BYTES
+          )
+          {
+            throw new Error('not a bounded regular file')
+          }
+          const content = await NodeFSP.readFile(impactPath)
+          if (content.byteLength !== info.size) throw new Error('artifact changed during read')
+          return content
         },
         catch: () =>
           new DiffAnalysisFailure({
@@ -1997,18 +2117,13 @@ export const make = Effect.gen(function* ()
           }) as DiffAnalysisError,
       })
       if (
-        sha256(bytes) !== match[2] ||
-        !impactStemMatches(
-          bytes,
-          path.basename(impactPath),
-          row.baseAnalyzerRef,
-          row.headAnalyzerRef,
-        )
+        sha256(bytes) !== match[1] ||
+        !impactArtifactMatches(bytes, row.baseAnalyzerRef, row.headAnalyzerRef)
       )
       {
         return yield* fail('artifact-invalid', 'The sealed diff impact identity is invalid.')
       }
-      const baseGraph = /^base\.graph\.([0-9a-f]{64})(?:\.([0-9a-f]{64}))?\.json$/u.exec(
+      const baseGraph = /^base\.graph\.([0-9a-f]{64})\.([0-9a-f]{64})\.json$/u.exec(
         path.basename(row.baseGraphPath),
       )
       const headGraph = /^head\.graph\.([0-9a-f]{64})\.([0-9a-f]{64})\.json$/u.exec(
@@ -2023,45 +2138,82 @@ export const make = Effect.gen(function* ()
       {
         return yield* fail('artifact-invalid', 'The sealed diff graph identity is invalid.')
       }
-      const baseRoot =
-        baseGraph[2] === undefined
-          ? null
-          : yield* verifyRetainedRoot(
-              row,
-              path.join(row.artifactRoot, 'base'),
-              'base',
-              sourceSide === 'base' ? baseGraph[2] : undefined,
-            )
-      if (sourceSide === 'base' && baseRoot === null)
-      {
-        return yield* fail(
-          'invalid-source',
-          'The retained diff analysis predates immutable base source retention.',
-        )
-      }
-      const headRoot = yield* verifyRetainedRoot(
+      const baseRoot = yield* verifyRetainedRoot(
         row,
-        row.headRootPath,
-        'head',
-        sourceSide === 'head' ? (headGraph[2] ?? '') : undefined,
+        path.join(row.artifactRoot, 'base'),
+        'base',
+        baseGraph[2]!,
       )
-      let diff: GraphDiff | null = null
+      const headRoot = yield* verifyRetainedRoot(row, row.headRootPath, 'head', headGraph[2]!)
+      let diff: GraphDiff
       try
       {
         diff = parseGraphDiff(artifactObject(bytes))
       }
       catch
       {
-        if (match[1] !== 'impact')
+        return yield* fail('artifact-invalid', 'The sealed diff impact could not be decoded.')
+      }
+      const projectionPath = path.resolve(row.impactProjectionPath)
+      const projectionMatch = /^impact\.projection-v1\.([0-9a-f]{64})\.json$/u.exec(
+        path.basename(projectionPath),
+      )
+      if (
+        projectionMatch === null ||
+        path.dirname(projectionPath) !== path.resolve(row.artifactRoot)
+      )
+      {
+        return yield* fail('artifact-invalid', 'The sealed semantic impact name is invalid.')
+      }
+      const projectionBytes = yield* Effect.tryPromise({
+        try: async () =>
         {
-          return yield* fail('artifact-invalid', 'The sealed diff impact could not be decoded.')
-        }
+          const info = await NodeFSP.lstat(projectionPath)
+          if (!info.isFile() || info.isSymbolicLink() || info.size > 2 * 1024 * 1024)
+          {
+            throw new Error('not a bounded regular file')
+          }
+          const content = await NodeFSP.readFile(projectionPath)
+          if (content.byteLength !== info.size) throw new Error('artifact changed during read')
+          return content
+        },
+        catch: () =>
+          new DiffAnalysisFailure({
+            code: 'artifact-invalid',
+            message: 'The sealed semantic impact projection could not be read.',
+          }) as DiffAnalysisError,
+      })
+      if (
+        sha256(projectionBytes) !== projectionMatch[1] ||
+        !impactProjectionArtifactMatches(
+          projectionBytes,
+          row.baseAnalyzerRef,
+          row.headAnalyzerRef,
+          `sha256:${baseGraph[1]}`,
+          `sha256:${headGraph[1]}`,
+          `sha256:${match[1]}`,
+          row.analyzerVersion,
+          row.implementationChangedFileCount,
+        )
+      )
+      {
+        return yield* fail('artifact-invalid', 'The sealed semantic impact identity is invalid.')
+      }
+      let projection: VerifiedImpactProjectionArtifact
+      try
+      {
+        projection = parseVerifiedImpactProjection(artifactObject(projectionBytes))
+      }
+      catch
+      {
+        return yield* fail('artifact-invalid', 'The sealed semantic impact could not be decoded.')
       }
       return {
         generation: publicGeneration(row, true),
         diff,
-        impactDigest: `sha256:${match[2]}`,
-        legacy: match[1] === 'impact',
+        projection,
+        impactDigest: `sha256:${match[1]}`,
+        impactProjectionDigest: `sha256:${projectionMatch[1]}`,
         repositoryRoot,
         baseTreeOid: row.baseTreeOid,
         headTreeOid: row.headTreeOid,
@@ -2152,7 +2304,7 @@ export const make = Effect.gen(function* ()
         {
           return yield* fail('invalid-source', 'Ready diff analysis was being evicted.')
         }
-        const target = yield* verifyReadyImpactTarget(row, repositoryRoot, input.sourceSide).pipe(
+        const target = yield* verifyReadyImpactTarget(row, repositoryRoot).pipe(
           Effect.onError(() => releaseLease(input.diffAnalysisId)),
         )
         const lastAccessedAt = yield* repository

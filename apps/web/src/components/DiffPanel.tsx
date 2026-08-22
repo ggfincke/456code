@@ -12,6 +12,8 @@ import {
 } from '@t3tools/client-runtime/state/runtime'
 import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
 import type {
+  ArchitectureGraphProjection,
+  ArchitectureStandingAnchor,
   DiffAnalysisSource,
   OrchestrationThreadActivity,
   ScopedThreadRef,
@@ -21,7 +23,7 @@ import { resolveThreadChangeRoot } from '@t3tools/shared/threadChangeRoot'
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon, SearchIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useOpenInPreferredEditor } from '../lib/editorPreferences'
-import { type DraftId } from '../composerDraftStore'
+import { type ArchitectureConcernGraphSelection, type DraftId } from '../composerDraftStore'
 import { openDiffFilePrimaryAction } from '../lib/diffFileActions'
 import { useCheckpointDiff } from '~/lib/checkpointDiffState'
 import {
@@ -125,6 +127,11 @@ interface DiffPanelProps
   mode?: DiffPanelMode
   composerDraftTarget: ScopedThreadRef | DraftId
   initialGitScope: 'branch' | 'unstaged'
+  onViewInRepositoryMap: (anchor: ArchitectureStandingAnchor) => void
+  onAddArchitectureConcern: (
+    projection: ArchitectureGraphProjection,
+    selection: ArchitectureConcernGraphSelection,
+  ) => void
 }
 
 export { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
@@ -133,6 +140,8 @@ export default function DiffPanel({
   mode = 'inline',
   composerDraftTarget,
   initialGitScope: initialGitScopeProp,
+  onViewInRepositoryMap,
+  onAddArchitectureConcern,
 }: DiffPanelProps)
 {
   const { resolvedTheme } = useTheme()
@@ -913,6 +922,8 @@ export default function DiffPanel({
             active={activeView === 'architecture'}
             previewTruncated={isSelectedPatchTruncated}
             onOpenFile={openArchitectureFile}
+            onViewInRepositoryMap={onViewInRepositoryMap}
+            onAddConcern={onAddArchitectureConcern}
           />
         }
       />

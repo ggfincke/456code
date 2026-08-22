@@ -5,6 +5,7 @@
 
 import * as NodeFSP from 'node:fs/promises'
 import * as NodePath from 'node:path'
+import * as NodeCrypto from 'node:crypto'
 
 import {
   ARCHITECTURE_API_CONSUMER_LIMIT,
@@ -23,8 +24,19 @@ import {
   type ArchitectureComparisonSelector,
   type ArchitectureFileApiChange,
   type ArchitectureGraphDiffResult,
-  type ArchitectureImpactResult,
-  type ArchitectureImpactResultV2,
+  type ArchitectureGraphProjection,
+  type ArchitectureGraphProjectionSemanticLevel,
+  type ArchitectureImpactDescriptor,
+  type ArchitectureImpactPlannedCandidate,
+  type ArchitectureImpactProjectionRequest,
+  type ArchitectureImpactProjectionResult,
+  type ArchitectureImpactVerifiedCandidate,
+  type ArchitectureStandingSource,
+  type ArchitectureStandingAnchor,
+  type ArchitecturePlannedImpactPlanIdentity,
+  type PlannedImpactMaterializedProjection,
+  type Proposal,
+  type ProposalRevision,
   type ArchitectureGraphMetadata,
   type ArchitectureGraphSelector,
   type ArchitecturePatchContextSelector,
@@ -59,6 +71,7 @@ import {
   workingTreeState,
   type ContextQueryGraph,
   type GraphDiff,
+  type VerifiedImpactProjectionArtifact,
 } from '@t3tools/cartographer-core/server'
 import * as Context from 'effect/Context'
 import * as DateTime from 'effect/DateTime'
@@ -68,16 +81,27 @@ import * as Option from 'effect/Option'
 import type * as Scope from 'effect/Scope'
 
 import * as ServerEnvironment from '../environment/ServerEnvironment.ts'
+import * as PlannedImpactService from '../architecture/PlannedImpactService.ts'
+import * as ProjectAtlasStatusBroadcaster from './ProjectAtlasStatusBroadcaster.ts'
 import {
   architectureImpactReadDuration,
+  architectureGraphViewErrorMetricAttributes,
+  architectureGraphViewMetricAttributes,
+  architectureGraphViewsTotal,
   architecturePatchEvaluationDuration,
+  increment,
   withMetrics,
 } from '../observability/Metrics.ts'
 import * as ProjectionSnapshotQuery from '../orchestration/Services/ProjectionSnapshotQuery.ts'
 import * as ProposalGenerationService from '../proposal/ProposalGenerationService.ts'
+import * as ProposalService from '../proposal/ProposalService.ts'
 import * as AtlasRebuildService from './AtlasRebuildService.ts'
 import * as CurrentWorktreeArchitectureService from './CurrentWorktreeArchitectureService.ts'
 import * as DiffAnalysisService from './DiffAnalysisService.ts'
+import {
+  resolveImpactStandingAnchors,
+  unavailableImpactStandingAnchors,
+} from './architectureStandingAnchors.ts'
 
 const ARCHITECTURE_GRAPH_CACHE_MAX_ENTRIES = 4
 const ARCHITECTURE_GRAPH_CACHE_MAX_BYTES = 128 * 1024 * 1024
@@ -99,9 +123,16 @@ export interface ResolvedArchitectureContext
 
 interface AuthorizedThreadContext
 {
+  readonly environmentId: EnvironmentId
   readonly thread: OrchestrationThread
   readonly project: OrchestrationProjectShell
   readonly workspaceRoot: string
+}
+
+interface LinkedProposal
+{
+  readonly proposal: Proposal
+  readonly revision: ProposalRevision
 }
 
 interface ResolvedGraphPair
@@ -150,10 +181,10 @@ export interface ArchitectureQueryServiceShape
     authority: ArchitectureQueryAuthority,
     input: { readonly comparison: ArchitectureComparisonSelector },
   ) => Effect.Effect<ArchitectureGraphDiffResult, ArchitectureToolError>
-  readonly architectureImpact: (
+  readonly architectureImpactProjection: (
     authority: ArchitectureQueryAuthority,
-    input: { readonly comparison: ArchitectureComparisonSelector },
-  ) => Effect.Effect<ArchitectureImpactResult, ArchitectureToolError>
+    input: ArchitectureImpactProjectionRequest,
+  ) => Effect.Effect<ArchitectureImpactProjectionResult, ArchitectureToolError>
   readonly proposePatch: (
     authority: ArchitectureQueryAuthority,
     input: ArchitectureProposePatchInput,
@@ -346,6 +377,278 @@ function contextNotReady(
   )
 }
 
+function projectionDigest(value: unknown): string
+{
+  return NodeCrypto.createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')
+}
+
+function exactProjectionCount(total: number, returned: number)
+{
+  return { total, returned, omitted: total - returned }
+}
+
+function projectionTreatment(state: 'added' | 'removed' | 'affected' | 'context')
+{
+  switch (state)
+  {
+    case 'added':
+      return { stateLabel: 'Added' as const, badge: 'plus' as const, stroke: 'solid' as const }
+    case 'removed':
+      return { stateLabel: 'Removed' as const, badge: 'minus' as const, stroke: 'dashed' as const }
+    case 'affected':
+      return {
+        stateLabel: 'Affected' as const,
+        badge: 'affected' as const,
+        stroke: 'double' as const,
+      }
+    case 'context':
+      return { stateLabel: 'Context' as const, badge: 'context' as const, stroke: 'muted' as const }
+  }
+}
+
+function plannedSemanticLevel(value: string): ArchitectureGraphProjectionSemanticLevel
+{
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'system' || normalized === 'systems') return 'systems'
+  if (
+    normalized === 'block' ||
+    normalized === 'blocks' ||
+    normalized === 'component' ||
+    normalized === 'module' ||
+    normalized === 'service'
+  )
+    return 'blocks'
+  if (
+    normalized === 'dir' ||
+    normalized === 'directory' ||
+    normalized === 'package' ||
+    normalized === 'folder'
+  )
+    return 'dirs'
+  return 'files'
+}
+
+function plannedProjectionLevel(
+  projection: PlannedImpactMaterializedProjection,
+): ArchitectureGraphProjectionSemanticLevel
+{
+  const levels = new Set(projection.nodes.map((node) => plannedSemanticLevel(node.semanticLevel)))
+  if (levels.has('systems')) return 'systems'
+  if (levels.has('blocks')) return 'blocks'
+  if (levels.has('dirs')) return 'dirs'
+  return 'files'
+}
+
+function projectPlannedImpact(input: {
+  stored: PlannedImpactService.PlannedImpactStored
+  projection: PlannedImpactMaterializedProjection
+  planState: 'active' | 'superseded' | 'reverted'
+  newerProjectionId?: string
+}): ArchitectureGraphProjection
+{
+  const level = plannedProjectionLevel(input.projection)
+  const publication = input.stored.publication
+  const source = {
+    kind: 'planned-impact' as const,
+    environmentId: publication.environmentId,
+    projectId: publication.projectId,
+    threadId: publication.sourceThreadId,
+    plan: publication.plan,
+    publication: {
+      publicationId: publication.publicationId,
+      publicationRevision: publication.publicationRevision,
+      contentDigest: publication.contentDigest,
+    },
+    projection: {
+      projectionId: input.projection.projectionId,
+      projectionRevision: input.projection.projectionRevision,
+      materialization: input.projection.materialization,
+    },
+  }
+  const nodeEvidence = new Map(
+    input.projection.nodes.map((node) => [
+      node.id,
+      `planned-evidence:${projectionDigest(['node', node.id])}`,
+    ]),
+  )
+  const edgeEvidence = new Map(
+    input.projection.edges.map((edge) => [
+      edge.id,
+      `planned-evidence:${projectionDigest(['edge', edge.id])}`,
+    ]),
+  )
+  const evidence = [
+    ...input.projection.nodes.map((node) => ({
+      id: nodeEvidence.get(node.id)!,
+      kind: 'planned' as const,
+      state: node.state,
+      label: node.description ?? node.label,
+      paths: [...new Set(node.pathHints)].slice(0, 25),
+    })),
+    ...input.projection.edges.map((edge) => ({
+      id: edgeEvidence.get(edge.id)!,
+      kind: 'planned' as const,
+      state: edge.state,
+      label: edge.rationale ?? `${edge.relationshipKind} relationship`,
+      paths: [...new Set(edge.pathHints)].slice(0, 25),
+    })),
+  ]
+  const nodes = input.projection.nodes.map((node) => ({
+    id: node.id,
+    label: node.label,
+    semanticLevel: plannedSemanticLevel(node.semanticLevel),
+    ...(node.pathHints.length === 1 ? { relativePath: node.pathHints[0]! } : {}),
+    position: node.position,
+    tintKey: node.tintKey,
+    state: node.state,
+    ...projectionTreatment(node.state),
+    fileCount: node.pathHints.length,
+    inbound: input.projection.edges.filter((edge) => edge.to === node.id).length,
+    outbound: input.projection.edges.filter((edge) => edge.from === node.id).length,
+    affectedConsumerCount: 0,
+    evidenceRefs: [nodeEvidence.get(node.id)!],
+  }))
+  const edges = input.projection.edges.map((edge) => ({
+    id: edge.id,
+    from: edge.from,
+    to: edge.to,
+    relationshipKind: edge.relationshipKind,
+    weight: edge.weight ?? 1,
+    state: edge.state,
+    stateLabel: projectionTreatment(edge.state).stateLabel,
+    stroke: projectionTreatment(edge.state).stroke,
+    evidenceRefs: [edgeEvidence.get(edge.id)!],
+  }))
+  const standingSource: ArchitectureStandingSource | undefined =
+    input.projection.standingSource === undefined
+      ? undefined
+      : {
+          kind: 'standing-project-generation',
+          projectId: input.projection.standingSource.projectId,
+          generationId: input.projection.standingSource.generationId as never,
+          side: 'analyzed',
+          graphDigest: input.projection.standingSource.graphDigest as never,
+        }
+  const nodeIdByLocalId = new Map(input.projection.nodes.map((node) => [node.localId, node.id]))
+  const edgeIdByLocalId = new Map(input.projection.edges.map((edge) => [edge.localId, edge.id]))
+  const anchors: ArchitectureStandingAnchor[] =
+    standingSource === undefined
+      ? []
+      : (input.projection.standingAnchors ?? []).flatMap((anchor) =>
+        {
+          const selectionId =
+            anchor.selectionKind === 'object'
+              ? nodeIdByLocalId.get(anchor.localId)
+              : edgeIdByLocalId.get(anchor.localId)
+          if (selectionId === undefined) return []
+          return [
+            {
+              selectionId,
+              status: anchor.status,
+              source: standingSource,
+              lens: anchor.lens,
+              candidateIds: [...anchor.candidateIds],
+              candidateCount: { ...anchor.candidateCount },
+              ...(anchor.focusId === undefined ? {} : { focusId: anchor.focusId }),
+              ...(anchor.nearestId === undefined ? {} : { nearestId: anchor.nearestId }),
+              disclosure: anchor.disclosure,
+            },
+          ]
+        })
+  const claimedNodes = publication.claims.omissions.changedObjects
+  const claimedEdges = publication.claims.omissions.relationships
+  const claimedPaths = publication.claims.omissions.pathHints
+  return {
+    projectionVersion: 1,
+    projectionId: input.projection.projectionId,
+    projectionRevision: input.projection.projectionRevision,
+    kind: 'impact-diff',
+    authority: 'planned',
+    resultState: input.projection.resultState,
+    freshness:
+      input.planState === 'reverted'
+        ? 'reverted'
+        : input.planState === 'superseded'
+          ? 'stale'
+          : 'fresh',
+    generatedAt: input.projection.createdAt,
+    publishedAt: publication.createdAt,
+    source,
+    lens: level === 'systems' || level === 'blocks' ? 'architecture' : 'structure',
+    semanticLevel: level,
+    breadcrumbs: [],
+    layoutVersion: 'planned-impact-v1',
+    totals: {
+      nodes: exactProjectionCount(claimedNodes.total, nodes.length),
+      edges: exactProjectionCount(claimedEdges.total, edges.length),
+      evidence: exactProjectionCount(claimedNodes.total + claimedEdges.total, evidence.length),
+      changedFiles: exactProjectionCount(claimedPaths.total, publication.claims.pathHints.length),
+    },
+    nodes,
+    edges,
+    evidence,
+    anchors,
+    ...(input.newerProjectionId === undefined
+      ? {}
+      : { newerProjectionId: input.newerProjectionId }),
+  }
+}
+
+function projectVerifiedImpact(input: {
+  artifact: VerifiedImpactProjectionArtifact
+  source: ArchitectureImpactVerifiedCandidate['source']
+  projectionId: string
+  freshness: ArchitectureImpactVerifiedCandidate['freshness']
+  publishedAt: string
+}): ArchitectureGraphProjection
+{
+  return {
+    projectionVersion: 1,
+    projectionId: input.projectionId,
+    projectionRevision: 1,
+    kind: 'impact-diff',
+    authority: 'verified',
+    resultState: input.artifact.resultState,
+    freshness: input.freshness,
+    generatedAt: input.artifact.generatedAt,
+    publishedAt: input.publishedAt,
+    source: input.source,
+    lens: input.artifact.lens,
+    semanticLevel: input.artifact.semanticLevel,
+    breadcrumbs: input.artifact.breadcrumbs,
+    layoutVersion: input.artifact.layoutVersion,
+    totals: input.artifact.totals,
+    nodes: input.artifact.nodes,
+    edges: input.artifact.edges,
+    evidence: input.artifact.evidence,
+    anchors: [],
+  }
+}
+
+function descriptorIdentity(
+  input: Omit<ArchitectureImpactDescriptor, 'descriptorId' | 'resolvedAt'>,
+): string
+{
+  return projectionDigest(input)
+}
+
+function descriptorVersionIdentity(descriptor: ArchitectureImpactDescriptor): string
+{
+  const plannedCandidate =
+    descriptor.plannedCandidate === undefined
+      ? undefined
+      : (({ freshness: _freshness, ...candidate }) => candidate)(descriptor.plannedCandidate)
+  const verifiedCandidate =
+    descriptor.verifiedCandidate === undefined
+      ? undefined
+      : (({ freshness: _freshness, ...candidate }) => candidate)(descriptor.verifiedCandidate)
+  return projectionDigest({
+    ...(plannedCandidate === undefined ? {} : { plannedCandidate }),
+    ...(verifiedCandidate === undefined ? {} : { verifiedCandidate }),
+    defaultAuthority: descriptor.defaultAuthority,
+  })
+}
+
 export const make = (options: ArchitectureQueryServiceOptions = {}) =>
   Effect.gen(function* ()
   {
@@ -354,11 +657,81 @@ export const make = (options: ArchitectureQueryServiceOptions = {}) =>
     const currentWorktrees =
       yield* CurrentWorktreeArchitectureService.CurrentWorktreeArchitectureService
     const projectAtlases = yield* AtlasRebuildService.AtlasRebuildService
+    const projectStatus = yield* ProjectAtlasStatusBroadcaster.ProjectAtlasStatusBroadcaster
+    const plannedImpacts = yield* PlannedImpactService.PlannedImpactService
+    const proposals = yield* ProposalService.ProposalService
     const proposalGenerations = yield* ProposalGenerationService.ProposalGenerationService
     const diffAnalyses = yield* DiffAnalysisService.DiffAnalysisService
     const graphLoader = options.loadGraph ?? loadContextQuery
     const graphCache = new Map<string, GraphCacheEntry>()
     let graphCacheBytes = 0
+
+    const pinCurrentStandingSource = Effect.fn('ArchitectureQueryService.pinCurrentStandingSource')(
+      function* (authorized: AuthorizedThreadContext)
+      {
+        const retained = yield* Effect.scoped(
+          projectAtlases.retainPublishedIndex(authorized.thread.projectId),
+        )
+        if (retained === null) return undefined
+        return {
+          kind: 'standing-project-generation' as const,
+          projectId: authorized.thread.projectId,
+          generationId: retained.generation as never,
+          side: 'analyzed' as const,
+          graphDigest: retained.graphDigest as never,
+        } satisfies ArchitectureStandingSource
+      },
+    )
+
+    const attachImpactStandingAnchors = Effect.fn(
+      'ArchitectureQueryService.attachImpactStandingAnchors',
+    )(function* (
+      projection: ArchitectureGraphProjection,
+      standingSource: ArchitectureStandingSource | undefined,
+    )
+    {
+      if (standingSource === undefined || projection.resultState === 'no-impact') return projection
+      const retained = yield* Effect.scoped(
+        projectAtlases.retainPublishedIndex(standingSource.projectId, standingSource.generationId),
+      )
+      if (retained === null || retained.graphDigest !== standingSource.graphDigest)
+      {
+        return {
+          ...projection,
+          anchors: unavailableImpactStandingAnchors({ source: standingSource, projection }),
+        }
+      }
+      const status = yield* projectStatus.getStatus(standingSource.projectId)
+      const stale =
+        status.source === null ||
+        status.source.projectId !== standingSource.projectId ||
+        status.source.kind !== standingSource.kind ||
+        status.source.side !== standingSource.side ||
+        status.source.generationId !== standingSource.generationId ||
+        status.source.graphDigest !== standingSource.graphDigest
+      if (projection.anchors.length > 0)
+      {
+        return stale
+          ? {
+              ...projection,
+              anchors: projection.anchors.map((anchor) => ({
+                ...anchor,
+                status: 'stale' as const,
+                disclosure: `This anchor stays pinned to an older Repository Map generation. ${anchor.disclosure}`,
+              })),
+            }
+          : projection
+      }
+      return {
+        ...projection,
+        anchors: resolveImpactStandingAnchors({
+          index: retained.index,
+          source: standingSource,
+          projection,
+          stale,
+        }),
+      }
+    })
 
     const requireProjectedRoot = Effect.fn('ArchitectureQueryService.requireProjectedRoot')(
       function* (
@@ -433,11 +806,686 @@ export const make = (options: ArchitectureQueryServiceOptions = {}) =>
       }
       const project = projectOption.value
       return {
+        environmentId: authority.environmentId,
         thread,
         project,
         workspaceRoot: thread.worktreePath ?? project.workspaceRoot,
       } satisfies AuthorizedThreadContext
     })
+
+    const projectedPlanState = (
+      authorized: AuthorizedThreadContext,
+      plan: ArchitecturePlannedImpactPlanIdentity,
+    ): 'active' | 'superseded' | 'reverted' =>
+    {
+      if (plan._tag === 'plan')
+      {
+        return authorized.thread.proposedPlans.some((entry) => entry.id === plan.planId)
+          ? 'active'
+          : 'reverted'
+      }
+      const revision = authorized.thread.orchestratePlans.find(
+        (entry) => entry.runId === plan.runId && entry.revision === plan.revision,
+      )
+      if (revision === undefined || revision.status === 'rejected') return 'reverted'
+      return revision.status === 'superseded' ? 'superseded' : 'active'
+    }
+
+    const proposalForPlan = Effect.fn('ArchitectureQueryService.proposalForPlan')(function* (
+      authorized: AuthorizedThreadContext,
+      plan: ArchitecturePlannedImpactPlanIdentity,
+      operation: string,
+    )
+    {
+      return yield* (
+        plan._tag === 'plan'
+          ? proposals.findLatestByPlan({
+              sourceThreadId: authorized.thread.id,
+              planId: plan.planId,
+            })
+          : proposals.findByOrchestrateRevision({
+              sourceThreadId: authorized.thread.id,
+              runId: plan.runId,
+              revision: plan.revision,
+            })
+      ).pipe(
+        Effect.mapError(() =>
+          architectureError(
+            operation,
+            'persistence-failed',
+            'The proposal linked to this plan could not be resolved.',
+          ),
+        ),
+      )
+    })
+
+    const plannedForPlan = Effect.fn('ArchitectureQueryService.plannedForPlan')(function* (
+      authorized: AuthorizedThreadContext,
+      plan: ArchitecturePlannedImpactPlanIdentity,
+      linkedProposal: LinkedProposal | null,
+      operation: string,
+    )
+    {
+      const pinned = linkedProposal?.revision.plannedImpactRef
+      const stored =
+        pinned === undefined
+          ? yield* plannedImpacts.findLatestForAuthority({
+              environmentId: authorized.environmentId,
+              projectId: authorized.thread.projectId,
+              sourceThreadId: authorized.thread.id,
+              plan,
+            })
+          : yield* plannedImpacts.get(pinned.publicationId)
+      if (stored === null) return null
+      if (
+        stored.publication.environmentId !== authorized.environmentId ||
+        stored.publication.projectId !== authorized.thread.projectId ||
+        stored.publication.sourceThreadId !== authorized.thread.id ||
+        PlannedImpactService.architecturePlanIdentityKey(stored.publication.plan) !==
+          PlannedImpactService.architecturePlanIdentityKey(plan) ||
+        (pinned !== undefined &&
+          (stored.publication.publicationRevision !== pinned.publicationRevision ||
+            stored.publication.contentDigest !== pinned.contentDigest))
+      )
+      {
+        return yield* architectureError(
+          operation,
+          'invalid-publication',
+          'The proposal-linked Planned Impact publication failed exact authority validation.',
+        )
+      }
+      const projection = stored.projections.at(-1)
+      if (projection === undefined)
+      {
+        return yield* architectureError(
+          operation,
+          'invalid-publication',
+          'The exact Planned Impact publication has no materialized projection.',
+        )
+      }
+      const state = projectedPlanState(authorized, plan)
+      const candidate: ArchitectureImpactPlannedCandidate = {
+        authority: 'planned',
+        source: {
+          kind: 'planned-impact',
+          environmentId: stored.publication.environmentId,
+          projectId: stored.publication.projectId,
+          threadId: stored.publication.sourceThreadId,
+          plan: stored.publication.plan,
+          publication: {
+            publicationId: stored.publication.publicationId,
+            publicationRevision: stored.publication.publicationRevision,
+            contentDigest: stored.publication.contentDigest,
+          },
+          projection: {
+            projectionId: projection.projectionId,
+            projectionRevision: projection.projectionRevision,
+            materialization: projection.materialization,
+          },
+        },
+        projectionId: projection.projectionId,
+        projectionRevision: projection.projectionRevision,
+        resultState: projection.resultState,
+        freshness: state === 'reverted' ? 'reverted' : state === 'superseded' ? 'stale' : 'fresh',
+        generatedAt: projection.createdAt,
+        publishedAt: stored.publication.createdAt,
+      }
+      return candidate
+    })
+
+    const verifiedForProposal = Effect.fn('ArchitectureQueryService.verifiedForProposal')(
+      function* (
+        authorized: AuthorizedThreadContext,
+        linkedProposal: LinkedProposal,
+        operation: string,
+      )
+      {
+        const generation = yield* proposalGenerations
+          .latest({
+            threadId: authorized.thread.id,
+            proposalId: linkedProposal.proposal.proposalId,
+            revision: linkedProposal.revision.revision,
+          })
+          .pipe(
+            Effect.mapError(() =>
+              architectureError(
+                operation,
+                'persistence-failed',
+                'The proposal-linked Verified generation could not be resolved.',
+              ),
+            ),
+          )
+        if (generation === null || generation.state !== 'ready') return null
+        const target = yield* proposalGenerations
+          .resolveImpactTarget(authorized.thread.id, generation.generationId)
+          .pipe(
+            Effect.mapError(() =>
+              contextNotReady(operation, {
+                kind: 'proposal-generation',
+                generationId: generation.generationId,
+                graph: 'base',
+              }),
+            ),
+          )
+        const source: ArchitectureImpactVerifiedCandidate['source'] = {
+          kind: 'verified-proposal-impact',
+          threadId: authorized.thread.id,
+          generationId: generation.generationId,
+          proposalId: generation.proposalId,
+          revisionId: generation.revisionId,
+          baseTreeOid: target.baseTreeOid as never,
+          headTreeOid: target.proposedTreeOid as never,
+          baseGraphDigest: target.baseGraphDigest as never,
+          headGraphDigest: target.proposedGraphDigest as never,
+          projectionDigest: target.impactProjectionDigest as never,
+        }
+        const standingSource = yield* pinCurrentStandingSource(authorized)
+        return {
+          authority: 'verified' as const,
+          source,
+          projectionId: `verified:${target.impactProjectionDigest.slice('sha256:'.length)}`,
+          projectionRevision: 1,
+          projectionDigest: target.impactProjectionDigest as never,
+          resultState: target.projection.resultState,
+          freshness: generation.freshness === 'fresh' ? ('fresh' as const) : ('stale' as const),
+          generatedAt: target.projection.generatedAt,
+          publishedAt: generation.updatedAt,
+          ...(standingSource === undefined ? {} : { standingSource }),
+        } satisfies ArchitectureImpactVerifiedCandidate
+      },
+    )
+
+    const verifiedForComparison = Effect.fn('ArchitectureQueryService.verifiedForComparison')(
+      function* (
+        authorized: AuthorizedThreadContext,
+        comparison: ArchitectureComparisonSelector,
+        operation: string,
+      )
+      {
+        if (comparison.kind === 'proposal-generation')
+        {
+          const generation = yield* proposalGenerations
+            .get({ threadId: authorized.thread.id, generationId: comparison.generationId })
+            .pipe(
+              Effect.mapError(() =>
+                contextNotReady(operation, {
+                  kind: 'proposal-generation',
+                  generationId: comparison.generationId,
+                  graph: 'base',
+                }),
+              ),
+            )
+          if (generation.state !== 'ready')
+            return yield* contextNotReady(operation, {
+              kind: 'proposal-generation',
+              generationId: comparison.generationId,
+              graph: 'base',
+            })
+          const target = yield* proposalGenerations
+            .resolveImpactTarget(authorized.thread.id, comparison.generationId)
+            .pipe(
+              Effect.mapError(() =>
+                contextNotReady(operation, {
+                  kind: 'proposal-generation',
+                  generationId: comparison.generationId,
+                  graph: 'base',
+                }),
+              ),
+            )
+          const standingSource = yield* pinCurrentStandingSource(authorized)
+          return {
+            authority: 'verified' as const,
+            source: {
+              kind: 'verified-proposal-impact' as const,
+              threadId: authorized.thread.id,
+              generationId: generation.generationId,
+              proposalId: generation.proposalId,
+              revisionId: generation.revisionId,
+              baseTreeOid: target.baseTreeOid as never,
+              headTreeOid: target.proposedTreeOid as never,
+              baseGraphDigest: target.baseGraphDigest as never,
+              headGraphDigest: target.proposedGraphDigest as never,
+              projectionDigest: target.impactProjectionDigest as never,
+            },
+            projectionId: `verified:${target.impactProjectionDigest.slice('sha256:'.length)}`,
+            projectionRevision: 1,
+            projectionDigest: target.impactProjectionDigest as never,
+            resultState: target.projection.resultState,
+            freshness: generation.freshness === 'fresh' ? ('fresh' as const) : ('stale' as const),
+            generatedAt: target.projection.generatedAt,
+            publishedAt: generation.updatedAt,
+            ...(standingSource === undefined ? {} : { standingSource }),
+          } satisfies ArchitectureImpactVerifiedCandidate
+        }
+        const target = yield* diffAnalyses
+          .retainReadyImpactTarget({
+            workspaceRoot:
+              authorized.thread.orchestrateRunExecution?.repositoryRoot ?? authorized.workspaceRoot,
+            diffAnalysisId: comparison.diffAnalysisId,
+          })
+          .pipe(
+            Effect.mapError(() =>
+              contextNotReady(operation, {
+                kind: 'diff-analysis',
+                diffAnalysisId: comparison.diffAnalysisId,
+                graph: 'base',
+              }),
+            ),
+          )
+        const standingSource = yield* pinCurrentStandingSource(authorized)
+        return {
+          authority: 'verified' as const,
+          source: {
+            kind: 'verified-diff-impact' as const,
+            threadId: authorized.thread.id,
+            diffAnalysisId: comparison.diffAnalysisId,
+            baseTreeOid: target.baseTreeOid as never,
+            headTreeOid: target.headTreeOid as never,
+            baseGraphDigest: target.baseGraphDigest as never,
+            headGraphDigest: target.headGraphDigest as never,
+            projectionDigest: target.impactProjectionDigest as never,
+          },
+          projectionId: `verified:${target.impactProjectionDigest.slice('sha256:'.length)}`,
+          projectionRevision: 1,
+          projectionDigest: target.impactProjectionDigest as never,
+          resultState: target.projection.resultState,
+          freshness: target.generation.sourceCurrent ? ('fresh' as const) : ('stale' as const),
+          generatedAt: target.projection.generatedAt,
+          publishedAt: target.generation.updatedAt,
+          ...(standingSource === undefined ? {} : { standingSource }),
+        } satisfies ArchitectureImpactVerifiedCandidate
+      },
+    )
+
+    const makeDescriptor = Effect.fn('ArchitectureQueryService.makeDescriptor')(function* (input: {
+      readonly authorized: AuthorizedThreadContext
+      readonly target: ArchitectureImpactDescriptor['target']
+      readonly plannedCandidate?: ArchitectureImpactPlannedCandidate
+      readonly verifiedCandidate?: ArchitectureImpactVerifiedCandidate
+    })
+    {
+      if (input.plannedCandidate === undefined && input.verifiedCandidate === undefined)
+      {
+        return yield* architectureError(
+          'architecture_impact_projection',
+          'target-not-found',
+          'No exact Planned or Verified Impact projection exists for this target.',
+        )
+      }
+      const resolvedAt = DateTime.formatIso(yield* DateTime.now)
+      const defaultAuthority =
+        input.verifiedCandidate === undefined ? ('planned' as const) : ('verified' as const)
+      const identity = {
+        version: 1 as const,
+        threadId: input.authorized.thread.id,
+        projectId: input.authorized.thread.projectId,
+        target: input.target,
+        ...(input.plannedCandidate === undefined
+          ? {}
+          : { plannedCandidate: input.plannedCandidate }),
+        ...(input.verifiedCandidate === undefined
+          ? {}
+          : { verifiedCandidate: input.verifiedCandidate }),
+        defaultAuthority,
+      }
+      return {
+        ...identity,
+        descriptorId: descriptorIdentity(identity),
+        resolvedAt,
+      } satisfies ArchitectureImpactDescriptor
+    })
+
+    const resolvePlanDescriptor = Effect.fn('ArchitectureQueryService.resolvePlanDescriptor')(
+      function* (
+        authorized: AuthorizedThreadContext,
+        plan: ArchitecturePlannedImpactPlanIdentity,
+        operation: string,
+      )
+      {
+        const planState = projectedPlanState(authorized, plan)
+        if (planState === 'reverted') return null
+        const linkedProposal = yield* proposalForPlan(authorized, plan, operation)
+        const [plannedCandidate, verifiedCandidate] = yield* Effect.all([
+          plannedForPlan(authorized, plan, linkedProposal, operation),
+          linkedProposal === null
+            ? Effect.succeed(null)
+            : verifiedForProposal(authorized, linkedProposal, operation),
+        ])
+        if (plannedCandidate === null && verifiedCandidate === null) return null
+        const planVerifiedCandidate =
+          verifiedCandidate === null
+            ? null
+            : {
+                ...verifiedCandidate,
+                freshness:
+                  planState === 'superseded' ? ('stale' as const) : verifiedCandidate.freshness,
+              }
+        return yield* makeDescriptor({
+          authorized,
+          target: { kind: 'plan', plan, state: planState },
+          ...(plannedCandidate === null ? {} : { plannedCandidate }),
+          ...(planVerifiedCandidate === null ? {} : { verifiedCandidate: planVerifiedCandidate }),
+        })
+      },
+    )
+
+    const descriptorIdentityMatches = (descriptor: ArchitectureImpactDescriptor): boolean =>
+    {
+      const identity = {
+        version: descriptor.version,
+        threadId: descriptor.threadId,
+        projectId: descriptor.projectId,
+        target: descriptor.target,
+        ...(descriptor.plannedCandidate === undefined
+          ? {}
+          : { plannedCandidate: descriptor.plannedCandidate }),
+        ...(descriptor.verifiedCandidate === undefined
+          ? {}
+          : { verifiedCandidate: descriptor.verifiedCandidate }),
+        defaultAuthority: descriptor.defaultAuthority,
+      }
+      return descriptor.descriptorId === descriptorIdentity(identity)
+    }
+
+    const readExactDescriptor = Effect.fn('ArchitectureQueryService.readExactDescriptor')(
+      function* (
+        authorized: AuthorizedThreadContext,
+        descriptor: ArchitectureImpactDescriptor,
+        requestedAuthority: 'planned' | 'verified' | undefined,
+        operation: string,
+      )
+      {
+        if (
+          descriptor.threadId !== authorized.thread.id ||
+          descriptor.projectId !== authorized.thread.projectId ||
+          !descriptorIdentityMatches(descriptor)
+        )
+        {
+          return yield* architectureError(
+            operation,
+            'identity-mismatch',
+            'The exact Impact descriptor does not match the authenticated thread and project.',
+          )
+        }
+        const selectedAuthority = requestedAuthority ?? descriptor.defaultAuthority
+        const latestDescriptor =
+          descriptor.target.kind === 'plan'
+            ? yield* resolvePlanDescriptor(authorized, descriptor.target.plan, operation).pipe(
+                Effect.orElseSucceed(() => null),
+              )
+            : null
+        const newerDescriptorId =
+          latestDescriptor !== null &&
+          descriptorVersionIdentity(latestDescriptor) !== descriptorVersionIdentity(descriptor)
+            ? latestDescriptor.descriptorId
+            : undefined
+        const returnedDescriptor =
+          newerDescriptorId === undefined ? descriptor : { ...descriptor, newerDescriptorId }
+        if (selectedAuthority === 'planned')
+        {
+          const candidate = descriptor.plannedCandidate
+          if (candidate === undefined)
+          {
+            return yield* architectureError(
+              operation,
+              'target-not-found',
+              'This exact Impact descriptor has no Planned authority candidate.',
+            )
+          }
+          const stored = yield* plannedImpacts.get(candidate.source.publication.publicationId)
+          if (
+            descriptor.target.kind !== 'plan' ||
+            PlannedImpactService.architecturePlanIdentityKey(descriptor.target.plan) !==
+              PlannedImpactService.architecturePlanIdentityKey(candidate.source.plan) ||
+            candidate.source.environmentId !== stored.publication.environmentId ||
+            candidate.source.projectId !== stored.publication.projectId ||
+            candidate.source.threadId !== stored.publication.sourceThreadId ||
+            stored.publication.environmentId !== authorized.environmentId ||
+            stored.publication.projectId !== authorized.thread.projectId ||
+            stored.publication.sourceThreadId !== authorized.thread.id ||
+            stored.publication.publicationRevision !==
+              candidate.source.publication.publicationRevision ||
+            stored.publication.contentDigest !== candidate.source.publication.contentDigest ||
+            PlannedImpactService.architecturePlanIdentityKey(stored.publication.plan) !==
+              PlannedImpactService.architecturePlanIdentityKey(candidate.source.plan) ||
+            candidate.projectionId !== candidate.source.projection.projectionId ||
+            candidate.projectionRevision !== candidate.source.projection.projectionRevision
+          )
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The exact Planned Impact publication no longer matches its descriptor.',
+            )
+          }
+          const projection = stored.projections.find(
+            (item) =>
+              item.projectionId === candidate.source.projection.projectionId &&
+              item.projectionRevision === candidate.source.projection.projectionRevision &&
+              item.materialization === candidate.source.projection.materialization,
+          )
+          if (projection === undefined)
+          {
+            return yield* architectureError(
+              operation,
+              'target-not-found',
+              'The exact Planned Impact projection is no longer available.',
+            )
+          }
+          if (
+            candidate.resultState !== projection.resultState ||
+            candidate.generatedAt !== projection.createdAt ||
+            candidate.publishedAt !== stored.publication.createdAt
+          )
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The exact Planned Impact candidate metadata does not match its stored projection.',
+            )
+          }
+          const state = projectedPlanState(authorized, descriptor.target.plan)
+          const newer = stored.projections.at(-1)
+          const graph = projectPlannedImpact({
+            stored,
+            projection,
+            planState: state,
+            ...(newer === undefined || newer.projectionId === projection.projectionId
+              ? {}
+              : { newerProjectionId: newer.projectionId }),
+          })
+          const standingSource: ArchitectureStandingSource | undefined =
+            projection.standingSource === undefined
+              ? undefined
+              : {
+                  kind: 'standing-project-generation',
+                  projectId: projection.standingSource.projectId,
+                  generationId: projection.standingSource.generationId as never,
+                  side: 'analyzed',
+                  graphDigest: projection.standingSource.graphDigest as never,
+                }
+          const anchoredGraph = yield* attachImpactStandingAnchors(graph, standingSource)
+          return {
+            version: 1 as const,
+            descriptor: returnedDescriptor,
+            selectedAuthority,
+            projection: anchoredGraph,
+            ...(newerDescriptorId === undefined ? {} : { newerDescriptorId }),
+          } satisfies ArchitectureImpactProjectionResult
+        }
+        const candidate = descriptor.verifiedCandidate
+        if (candidate === undefined)
+        {
+          return yield* architectureError(
+            operation,
+            'target-not-found',
+            'This exact Impact descriptor has no Verified authority candidate.',
+          )
+        }
+        if (descriptor.target.kind === 'comparison')
+        {
+          const comparison = descriptor.target.comparison
+          const targetMatches =
+            (comparison.kind === 'proposal-generation' &&
+              candidate.source.kind === 'verified-proposal-impact' &&
+              comparison.generationId === candidate.source.generationId) ||
+            (comparison.kind === 'diff-analysis' &&
+              candidate.source.kind === 'verified-diff-impact' &&
+              comparison.diffAnalysisId === candidate.source.diffAnalysisId)
+          if (!targetMatches)
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The exact Verified projection does not match its comparison target.',
+            )
+          }
+        }
+        else
+        {
+          const linkedProposal = yield* proposalForPlan(
+            authorized,
+            descriptor.target.plan,
+            operation,
+          )
+          if (
+            linkedProposal === null ||
+            candidate.source.kind !== 'verified-proposal-impact' ||
+            candidate.source.proposalId !== linkedProposal.proposal.proposalId ||
+            candidate.source.revisionId !== linkedProposal.revision.revisionId
+          )
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The exact Verified projection does not match the proposal revision linked to this plan.',
+            )
+          }
+        }
+        if (candidate.source.kind === 'verified-proposal-impact')
+        {
+          const source = candidate.source
+          const generation = yield* proposalGenerations
+            .get({ threadId: authorized.thread.id, generationId: source.generationId })
+            .pipe(
+              Effect.mapError(() =>
+                contextNotReady(operation, {
+                  kind: 'proposal-generation',
+                  generationId: source.generationId,
+                  graph: 'base',
+                }),
+              ),
+            )
+          const target = yield* proposalGenerations
+            .resolveImpactTarget(authorized.thread.id, source.generationId)
+            .pipe(
+              Effect.mapError(() =>
+                contextNotReady(operation, {
+                  kind: 'proposal-generation',
+                  generationId: source.generationId,
+                  graph: 'base',
+                }),
+              ),
+            )
+          if (
+            generation.proposalId !== source.proposalId ||
+            generation.revisionId !== source.revisionId ||
+            target.baseTreeOid !== source.baseTreeOid ||
+            target.proposedTreeOid !== source.headTreeOid ||
+            target.baseGraphDigest !== source.baseGraphDigest ||
+            target.proposedGraphDigest !== source.headGraphDigest ||
+            target.impactProjectionDigest !== source.projectionDigest ||
+            candidate.projectionDigest !== source.projectionDigest ||
+            candidate.projectionId !==
+              `verified:${source.projectionDigest.slice('sha256:'.length)}` ||
+            candidate.projectionRevision !== 1 ||
+            candidate.resultState !== target.projection.resultState ||
+            candidate.generatedAt !== target.projection.generatedAt ||
+            candidate.publishedAt !== generation.updatedAt
+          )
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The exact Verified proposal projection failed sealed identity validation.',
+            )
+          }
+          const graph = projectVerifiedImpact({
+            artifact: target.projection,
+            source,
+            projectionId: candidate.projectionId,
+            freshness:
+              descriptor.target.kind === 'plan' &&
+              projectedPlanState(authorized, descriptor.target.plan) === 'reverted'
+                ? 'reverted'
+                : generation.freshness === 'fresh'
+                  ? 'fresh'
+                  : 'stale',
+            publishedAt: generation.updatedAt,
+          })
+          const anchoredGraph = yield* attachImpactStandingAnchors(graph, candidate.standingSource)
+          return {
+            version: 1 as const,
+            descriptor: returnedDescriptor,
+            selectedAuthority,
+            projection: anchoredGraph,
+            ...(newerDescriptorId === undefined ? {} : { newerDescriptorId }),
+          } satisfies ArchitectureImpactProjectionResult
+        }
+        const source = candidate.source
+        const target = yield* diffAnalyses
+          .retainReadyImpactTarget({
+            workspaceRoot:
+              authorized.thread.orchestrateRunExecution?.repositoryRoot ?? authorized.workspaceRoot,
+            diffAnalysisId: source.diffAnalysisId,
+          })
+          .pipe(
+            Effect.mapError(() =>
+              contextNotReady(operation, {
+                kind: 'diff-analysis',
+                diffAnalysisId: source.diffAnalysisId,
+                graph: 'base',
+              }),
+            ),
+          )
+        if (
+          target.baseTreeOid !== source.baseTreeOid ||
+          target.headTreeOid !== source.headTreeOid ||
+          target.baseGraphDigest !== source.baseGraphDigest ||
+          target.headGraphDigest !== source.headGraphDigest ||
+          target.impactProjectionDigest !== source.projectionDigest ||
+          candidate.projectionDigest !== source.projectionDigest ||
+          candidate.projectionId !==
+            `verified:${source.projectionDigest.slice('sha256:'.length)}` ||
+          candidate.projectionRevision !== 1 ||
+          candidate.resultState !== target.projection.resultState ||
+          candidate.generatedAt !== target.projection.generatedAt ||
+          candidate.publishedAt !== target.generation.updatedAt
+        )
+        {
+          return yield* architectureError(
+            operation,
+            'identity-mismatch',
+            'The exact Verified comparison projection failed sealed identity validation.',
+          )
+        }
+        const graph = projectVerifiedImpact({
+          artifact: target.projection,
+          source,
+          projectionId: candidate.projectionId,
+          freshness: target.generation.sourceCurrent ? 'fresh' : 'stale',
+          publishedAt: target.generation.updatedAt,
+        })
+        const anchoredGraph = yield* attachImpactStandingAnchors(graph, candidate.standingSource)
+        return {
+          version: 1 as const,
+          descriptor: returnedDescriptor,
+          selectedAuthority,
+          projection: anchoredGraph,
+          ...(newerDescriptorId === undefined ? {} : { newerDescriptorId }),
+        } satisfies ArchitectureImpactProjectionResult
+      },
+    )
 
     const resolveProposalTarget = Effect.fn('ArchitectureQueryService.resolveProposalTarget')(
       function* (
@@ -899,101 +1947,73 @@ export const make = (options: ArchitectureQueryServiceOptions = {}) =>
       )
     })
 
-    const architectureImpact: ArchitectureQueryServiceShape['architectureImpact'] = Effect.fn(
-      'ArchitectureQueryService.architectureImpact',
-    )(function* (authority, input)
-    {
-      const operation = 'architecture_impact'
-      return yield* Effect.scoped(
-        Effect.gen(function* ()
+    const architectureImpactProjection: ArchitectureQueryServiceShape['architectureImpactProjection'] =
+      Effect.fn('ArchitectureQueryService.architectureImpactProjection')(
+        function* (authority, input)
         {
-          const authorized = yield* resolveAuthority(authority, operation)
-          let diff: GraphDiff | null
-          let impactDigest: string
-          let sources: Pick<ArchitectureImpactResultV2, 'baseSource' | 'headSource'>
-          if (input.comparison.kind === 'proposal-generation')
-          {
-            const comparison = input.comparison
-            const target = yield* proposalGenerations
-              .resolveImpactTarget(authorized.thread.id, comparison.generationId)
-              .pipe(
-                Effect.mapError(() =>
-                  contextNotReady(operation, {
-                    kind: 'proposal-generation',
-                    generationId: comparison.generationId,
-                    graph: 'base',
-                  }),
-                ),
-              )
-            diff = target.diff
-            impactDigest = target.impactDigest
-            sources = {
-              baseSource: {
-                kind: 'proposal-generation',
-                threadId: authorized.thread.id,
-                generationId: comparison.generationId,
-                side: 'base',
-                graphDigest: target.baseGraphDigest,
-              },
-              headSource: {
-                kind: 'proposal-generation',
-                threadId: authorized.thread.id,
-                generationId: comparison.generationId,
-                side: 'proposed',
-                graphDigest: target.proposedGraphDigest,
-              },
-            }
-          }
-          else
-          {
-            const comparison = input.comparison
-            const target = yield* diffAnalyses
-              .retainReadyImpactTarget({
-                workspaceRoot:
-                  authorized.thread.orchestrateRunExecution?.repositoryRoot ??
-                  authorized.workspaceRoot,
-                diffAnalysisId: comparison.diffAnalysisId,
-              })
-              .pipe(
-                Effect.mapError(() =>
-                  contextNotReady(operation, {
-                    kind: 'diff-analysis',
-                    diffAnalysisId: comparison.diffAnalysisId,
-                    graph: 'base',
-                  }),
-                ),
-              )
-            diff = target.diff
-            impactDigest = target.impactDigest
-            sources = {
-              baseSource: {
-                kind: 'diff-analysis',
-                threadId: authorized.thread.id,
-                diffAnalysisId: comparison.diffAnalysisId,
-                side: 'base',
-                graphDigest: target.baseGraphDigest,
-              },
-              headSource: {
-                kind: 'diff-analysis',
-                threadId: authorized.thread.id,
-                diffAnalysisId: comparison.diffAnalysisId,
-                side: 'head',
-                graphDigest: target.headGraphDigest,
-              },
-            }
-          }
-          const projected =
-            diff === null ? yield* graphDiff(authority, input) : projectGraphDiff(diff, false)
-          return {
-            ...projected,
-            version: 2 as const,
-            comparison: input.comparison,
-            impactDigest,
-            ...sources,
-          }
-        }),
-      ).pipe(withMetrics({ timer: architectureImpactReadDuration }))
-    })
+          const operation = 'architecture_impact_projection'
+          const result = yield* Effect.scoped(
+            Effect.gen(function* ()
+            {
+              const authorized = yield* resolveAuthority(authority, operation)
+              if (input.kind === 'read-exact')
+              {
+                return yield* readExactDescriptor(
+                  authorized,
+                  input.descriptor,
+                  input.authority,
+                  operation,
+                )
+              }
+              if (input.threadId !== authority.threadId)
+              {
+                return yield* architectureError(
+                  operation,
+                  'identity-mismatch',
+                  'The requested Impact thread does not match the authenticated thread.',
+                )
+              }
+              if (input.kind === 'resolve-comparison')
+              {
+                const verifiedCandidate = yield* verifiedForComparison(
+                  authorized,
+                  input.comparison,
+                  operation,
+                )
+                const descriptor = yield* makeDescriptor({
+                  authorized,
+                  target: { kind: 'comparison', comparison: input.comparison },
+                  verifiedCandidate,
+                })
+                return yield* readExactDescriptor(authorized, descriptor, undefined, operation)
+              }
+              const descriptor = yield* resolvePlanDescriptor(authorized, input.plan, operation)
+              if (descriptor === null)
+              {
+                return yield* architectureError(
+                  operation,
+                  'target-not-found',
+                  'No exact Planned or Verified Impact projection exists for this plan.',
+                )
+              }
+              return yield* readExactDescriptor(authorized, descriptor, undefined, operation)
+            }),
+          ).pipe(
+            withMetrics({ timer: architectureImpactReadDuration }),
+            Effect.tapError((error) =>
+              increment(
+                architectureGraphViewsTotal,
+                architectureGraphViewErrorMetricAttributes(error.code),
+              ),
+            ),
+          )
+          yield* increment(
+            architectureGraphViewsTotal,
+            architectureGraphViewMetricAttributes(result.projection),
+          )
+          return result
+        },
+      )
 
     const requireActiveTurn = Effect.fn('ArchitectureQueryService.requireActiveTurn')(function* (
       authority: ArchitectureQueryAuthority,
@@ -1165,7 +2185,7 @@ export const make = (options: ArchitectureQueryServiceOptions = {}) =>
       resolveContext,
       blastRadius,
       graphDiff,
-      architectureImpact,
+      architectureImpactProjection,
       proposePatch,
     })
   })

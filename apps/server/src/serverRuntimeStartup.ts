@@ -40,6 +40,7 @@ import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import * as ImportService from './import/importService.ts'
 import * as ProviderSessionReaper from './provider/Services/ProviderSessionReaper.ts'
 import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefReconciler.ts'
+import * as ArchitectureAdmissionService from './architecture/ArchitectureAdmissionService.ts'
 import { formatHeadlessServeOutput, issueHeadlessServeAccessInfo } from './startupAccess.ts'
 
 export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
@@ -403,6 +404,7 @@ export const make = Effect.gen(function* ()
   const serverConfig = yield* ServerConfig.ServerConfig
   const keybindings = yield* Keybindings.Keybindings
   const orchestrationReactor = yield* OrchestrationReactor.OrchestrationReactor
+  const architectureAdmissions = yield* ArchitectureAdmissionService.ArchitectureAdmissionService
   const providerSessionReaper = yield* ProviderSessionReaper.ProviderSessionReaper
   const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents
   const serverSettings = yield* ServerSettings.ServerSettingsService
@@ -471,6 +473,7 @@ export const make = Effect.gen(function* ()
       Effect.gen(function* ()
       {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope))
+        yield* architectureAdmissions.start.pipe(Scope.provide(reactorScope))
         yield* Ref.set(reactorsStarted, true)
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope))
       }),

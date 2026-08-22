@@ -28,7 +28,6 @@ import {
   ArchitectureFileApiChange,
   ArchitectureGraphDiffInput,
   ArchitectureGraphDiffResult,
-  ArchitectureImpactInput,
   ArchitecturePatchGraphDiffResult,
   ArchitectureProposePatchInput,
   ArchitectureProposePatchResult,
@@ -117,7 +116,6 @@ describe('architecture tool contracts', () =>
   {
     const decodeBlast = strictDecode(ArchitectureBlastRadiusInput)
     const decodeDiff = strictDecode(ArchitectureGraphDiffInput)
-    const decodeImpact = strictDecode(ArchitectureImpactInput)
 
     expect(
       decodeBlast({
@@ -144,29 +142,6 @@ describe('architecture tool contracts', () =>
         diffAnalysisId: 'diff-analysis-contract',
       },
     })
-    expect(
-      decodeImpact({
-        threadId: 'thread-architecture-impact',
-        comparison: {
-          kind: 'proposal-generation',
-          generationId: 'proposal-generation-contract',
-        },
-      }),
-    ).toEqual({
-      threadId: 'thread-architecture-impact',
-      comparison: {
-        kind: 'proposal-generation',
-        generationId: 'proposal-generation-contract',
-      },
-    })
-    expect(() =>
-      decodeImpact({
-        comparison: {
-          kind: 'proposal-generation',
-          generationId: 'proposal-generation-contract',
-        },
-      }),
-    ).toThrow()
     expect(() =>
       decodeBlast({
         context: {

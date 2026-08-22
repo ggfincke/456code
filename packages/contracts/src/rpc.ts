@@ -7,19 +7,15 @@ import * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
 import { ExternalLauncherError, LaunchEditorInput } from './editor.ts'
 import {
-  ArchitectureImpactResult,
+  ArchitectureGraphProjection,
+  ArchitectureImpactProjectionRequest,
+  ArchitectureImpactProjectionResult,
   ArchitectureStandingSource,
   CartographerEnsureProjectArchitectureInput,
-  CartographerGetArchitectureNeighborhoodInput,
-  CartographerGetArchitectureNeighborhoodResult,
-  CartographerGetArchitecturePathScopeInput,
-  CartographerGetArchitecturePathScopeResult,
   CartographerGetArchitectureScopeInput,
-  CartographerGetArchitectureScopeResult,
   CartographerGetArchitectureSourceInput,
   CartographerGetArchitectureSourceResult,
   CartographerGetRepositoryMapInput,
-  CartographerGetRepositoryMapResult,
   CartographerSubscribeProjectAtlasStatusInput,
   ProjectAtlasStatus,
 } from './architectureProjections.ts'
@@ -218,7 +214,7 @@ import {
   ProposalGenerationLatestInput,
   ProposalGenerationStartInput,
 } from './cartographer.ts'
-import { ArchitectureImpactInput, ArchitectureToolError } from './architectureTools.ts'
+import { ArchitectureToolError } from './architectureTools.ts'
 
 export const WS_METHODS = {
   // project registry methods
@@ -247,11 +243,9 @@ export const WS_METHODS = {
   cartographerPrepareCurrentWorktreeArchitecture: 'cartographer.prepareCurrentWorktreeArchitecture',
   cartographerRequestDiffAnalysis: 'cartographer.requestDiffAnalysis',
   cartographerGetDiffAnalysis: 'cartographer.getDiffAnalysis',
-  cartographerGetArchitectureImpact: 'cartographer.getArchitectureImpact',
+  cartographerGetArchitectureImpactProjection: 'cartographer.getArchitectureImpactProjection',
   cartographerGetRepositoryMap: 'cartographer.getRepositoryMap',
   cartographerGetArchitectureScope: 'cartographer.getArchitectureScope',
-  cartographerGetArchitectureNeighborhood: 'cartographer.getArchitectureNeighborhood',
-  cartographerGetArchitecturePathScope: 'cartographer.getArchitecturePathScope',
   cartographerGetArchitectureSource: 'cartographer.getArchitectureSource',
 
   // shell methods
@@ -616,18 +610,18 @@ export const WsCartographerGetDiffAnalysisRpc = Rpc.make(WS_METHODS.cartographer
   error: Schema.Union([DiffAnalysisError, CartographerError, EnvironmentAuthorizationError]),
 })
 
-export const WsCartographerGetArchitectureImpactRpc = Rpc.make(
-  WS_METHODS.cartographerGetArchitectureImpact,
+export const WsCartographerGetArchitectureImpactProjectionRpc = Rpc.make(
+  WS_METHODS.cartographerGetArchitectureImpactProjection,
   {
-    payload: ArchitectureImpactInput,
-    success: ArchitectureImpactResult,
+    payload: ArchitectureImpactProjectionRequest,
+    success: ArchitectureImpactProjectionResult,
     error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
   },
 )
 
 export const WsCartographerGetRepositoryMapRpc = Rpc.make(WS_METHODS.cartographerGetRepositoryMap, {
   payload: CartographerGetRepositoryMapInput,
-  success: CartographerGetRepositoryMapResult,
+  success: ArchitectureGraphProjection,
   error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
 })
 
@@ -635,25 +629,7 @@ export const WsCartographerGetArchitectureScopeRpc = Rpc.make(
   WS_METHODS.cartographerGetArchitectureScope,
   {
     payload: CartographerGetArchitectureScopeInput,
-    success: CartographerGetArchitectureScopeResult,
-    error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
-  },
-)
-
-export const WsCartographerGetArchitectureNeighborhoodRpc = Rpc.make(
-  WS_METHODS.cartographerGetArchitectureNeighborhood,
-  {
-    payload: CartographerGetArchitectureNeighborhoodInput,
-    success: CartographerGetArchitectureNeighborhoodResult,
-    error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
-  },
-)
-
-export const WsCartographerGetArchitecturePathScopeRpc = Rpc.make(
-  WS_METHODS.cartographerGetArchitecturePathScope,
-  {
-    payload: CartographerGetArchitecturePathScopeInput,
-    success: CartographerGetArchitecturePathScopeResult,
+    success: ArchitectureGraphProjection,
     error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
   },
 )
@@ -1091,11 +1067,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsCartographerRebuildProjectAtlasRpc,
   WsCartographerRequestDiffAnalysisRpc,
   WsCartographerGetDiffAnalysisRpc,
-  WsCartographerGetArchitectureImpactRpc,
+  WsCartographerGetArchitectureImpactProjectionRpc,
   WsCartographerGetRepositoryMapRpc,
   WsCartographerGetArchitectureScopeRpc,
-  WsCartographerGetArchitectureNeighborhoodRpc,
-  WsCartographerGetArchitecturePathScopeRpc,
   WsCartographerGetArchitectureSourceRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,

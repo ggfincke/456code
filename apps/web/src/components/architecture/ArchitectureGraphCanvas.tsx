@@ -1,7 +1,6 @@
-// apps/web/src/components/architecture/ArchitectureCanvas.tsx
-// renders bounded architecture nodes and selectable weighted relationships
+// apps/web/src/components/architecture/ArchitectureGraphCanvas.tsx
+// provides graph camera, geometry, minimap, and accessible selection mechanics
 
-import type { ArchitectureProjectionEdge, ArchitectureProjectionUnit } from '@t3tools/contracts'
 import { Maximize2Icon, MinusIcon, PlusIcon } from 'lucide-react'
 import {
   useCallback,
@@ -19,32 +18,64 @@ import {
 import { Button } from '~/components/ui/button'
 import { cn } from '~/lib/utils'
 
-export interface ArchitectureCanvasPoint
+export type ArchitectureGraphCanvasTone = 'identity' | 'added' | 'removed' | 'affected' | 'context'
+
+export type ArchitectureGraphCanvasStroke = 'solid' | 'dashed' | 'double' | 'muted'
+
+export interface ArchitectureGraphCanvasNode
 {
-  readonly unit: ArchitectureProjectionUnit
+  readonly id: string
+  readonly label: string
+  readonly description: string
+  readonly badgeLabel: string
+  readonly footerLabels: readonly string[]
+  readonly parentId?: string
+  readonly position: { readonly x: number; readonly y: number }
+  readonly tintKey: string
+  readonly tone: ArchitectureGraphCanvasTone
+  readonly stroke: ArchitectureGraphCanvasStroke
+  readonly ariaLabel: string
+}
+
+export interface ArchitectureGraphCanvasEdge
+{
+  readonly id: string
+  readonly from: string
+  readonly to: string
+  readonly weight: number
+  readonly label: string
+  readonly tone: ArchitectureGraphCanvasTone
+  readonly stroke: ArchitectureGraphCanvasStroke
+  readonly showBadge: boolean
+  readonly ariaLabel: string
+}
+
+export interface ArchitectureGraphCanvasPoint
+{
+  readonly node: ArchitectureGraphCanvasNode
   readonly x: number
   readonly y: number
 }
 
-interface ArchitectureCanvasLayout
+interface ArchitectureGraphCanvasLayout
 {
-  readonly points: readonly ArchitectureCanvasPoint[]
+  readonly points: readonly ArchitectureGraphCanvasPoint[]
   readonly width: number
   readonly height: number
 }
 
-interface ArchitectureCanvasEdgeCurve
+interface ArchitectureGraphCanvasEdgeCurve
 {
-  readonly edge: ArchitectureProjectionEdge
+  readonly edge: ArchitectureGraphCanvasEdge
   readonly id: string
-  readonly from: ArchitectureCanvasPoint
-  readonly to: ArchitectureCanvasPoint
+  readonly from: ArchitectureGraphCanvasPoint
+  readonly to: ArchitectureGraphCanvasPoint
   readonly path: string
   readonly centerX: number
   readonly centerY: number
 }
 
-interface ArchitectureCanvasBounds
+interface ArchitectureGraphCanvasBounds
 {
   readonly x: number
   readonly y: number
@@ -54,14 +85,14 @@ interface ArchitectureCanvasBounds
   readonly height: number
 }
 
-interface ArchitectureCanvasCamera
+interface ArchitectureGraphCanvasCamera
 {
   readonly scale: number
   readonly translateX: number
   readonly translateY: number
 }
 
-interface ArchitectureCanvasViewport
+interface ArchitectureGraphCanvasViewport
 {
   readonly width: number
   readonly height: number
@@ -72,15 +103,17 @@ type ArchitectureNodeStyle = CSSProperties & {
   readonly '--architecture-node-fill': string
 }
 
-export interface ArchitectureCanvasProps
+export interface ArchitectureGraphCanvasProps
 {
-  readonly units: readonly ArchitectureProjectionUnit[]
-  readonly edges: readonly ArchitectureProjectionEdge[]
-  readonly selectedUnitId: string | null
-  readonly selectedEdge: ArchitectureProjectionEdge | null
+  readonly nodes: readonly ArchitectureGraphCanvasNode[]
+  readonly edges: readonly ArchitectureGraphCanvasEdge[]
+  readonly selectedNodeId: string | null
+  readonly selectedEdgeId: string | null
+  readonly highlightedNodeIds?: readonly string[] | undefined
   readonly ariaLabel: string
-  readonly onSelect: (unit: ArchitectureProjectionUnit, trigger: HTMLButtonElement) => void
-  readonly onSelectEdge: (edge: ArchitectureProjectionEdge, trigger: HTMLButtonElement) => void
+  readonly emptyLabel: string
+  readonly onSelectNode: (node: ArchitectureGraphCanvasNode, trigger: HTMLButtonElement) => void
+  readonly onSelectEdge: (edge: ArchitectureGraphCanvasEdge, trigger: HTMLButtonElement) => void
 }
 
 const ARCHITECTURE_NODE_WIDTH = 236
@@ -127,9 +160,9 @@ const ARCHITECTURE_NODE_TONES = [
   },
 ] as const
 
-function architectureEdgeId(edge: ArchitectureProjectionEdge): string
+function architectureEdgeId(edge: ArchitectureGraphCanvasEdge): string
 {
-  return JSON.stringify([edge.from, edge.to])
+  return edge.id
 }
 
 function stableToneIndex(value: string): number
@@ -142,9 +175,36 @@ function stableToneIndex(value: string): number
   return hash % ARCHITECTURE_NODE_TONES.length
 }
 
-function architectureNodeStyle(point: ArchitectureCanvasPoint): ArchitectureNodeStyle
+function architectureNodeStyle(point: ArchitectureGraphCanvasPoint): ArchitectureNodeStyle
 {
-  const ownershipKey = point.unit.parent ?? point.unit.id
+  if (point.node.tone !== 'identity')
+  {
+    const stateTone = {
+      added: {
+        edge: 'color-mix(in srgb, var(--architecture-green) 72%, var(--architecture-border))',
+        fill: 'color-mix(in srgb, var(--architecture-green) 13%, var(--architecture-page))',
+      },
+      removed: {
+        edge: 'color-mix(in srgb, var(--architecture-red) 72%, var(--architecture-border))',
+        fill: 'color-mix(in srgb, var(--architecture-red) 12%, var(--architecture-page))',
+      },
+      affected: {
+        edge: 'color-mix(in srgb, var(--architecture-amber) 76%, var(--architecture-border))',
+        fill: 'color-mix(in srgb, var(--architecture-amber) 13%, var(--architecture-page))',
+      },
+      context: {
+        edge: 'var(--architecture-border)',
+        fill: 'var(--architecture-node-neutral)',
+      },
+    }[point.node.tone]
+    return {
+      '--architecture-node-edge': stateTone.edge,
+      '--architecture-node-fill': stateTone.fill,
+      left: point.x,
+      top: point.y,
+    }
+  }
+  const ownershipKey = point.node.parentId ?? point.node.tintKey
   const tone = ARCHITECTURE_NODE_TONES[stableToneIndex(ownershipKey)]
   return {
     '--architecture-node-edge': tone?.edge ?? 'var(--architecture-border)',
@@ -154,11 +214,11 @@ function architectureNodeStyle(point: ArchitectureCanvasPoint): ArchitectureNode
   }
 }
 
-function createArchitectureCanvasLayout(
-  units: readonly ArchitectureProjectionUnit[],
-): ArchitectureCanvasLayout
+function createArchitectureGraphCanvasLayout(
+  nodes: readonly ArchitectureGraphCanvasNode[],
+): ArchitectureGraphCanvasLayout
 {
-  if (units.length === 0)
+  if (nodes.length === 0)
   {
     return {
       points: [],
@@ -167,18 +227,18 @@ function createArchitectureCanvasLayout(
     }
   }
 
-  const xPositions = [...new Set(units.map((unit) => unit.position.x))].sort((a, b) => a - b)
-  const yPositions = [...new Set(units.map((unit) => unit.position.y))].sort((a, b) => a - b)
+  const xPositions = [...new Set(nodes.map((node) => node.position.x))].sort((a, b) => a - b)
+  const yPositions = [...new Set(nodes.map((node) => node.position.y))].sort((a, b) => a - b)
   const xRank = new Map(xPositions.map((position, index) => [position, index] as const))
   const yRank = new Map(yPositions.map((position, index) => [position, index] as const))
-  const points = units.map((unit) => ({
-    unit,
+  const points = nodes.map((node) => ({
+    node,
     x:
-      (xRank.get(unit.position.x) ?? 0) * 240 * ARCHITECTURE_POSITION_SCALE_X +
+      (xRank.get(node.position.x) ?? 0) * 240 * ARCHITECTURE_POSITION_SCALE_X +
       ARCHITECTURE_CANVAS_PADDING +
       ARCHITECTURE_NODE_WIDTH / 2,
     y:
-      (yRank.get(unit.position.y) ?? 0) * 140 * ARCHITECTURE_POSITION_SCALE_Y +
+      (yRank.get(node.position.y) ?? 0) * 140 * ARCHITECTURE_POSITION_SCALE_Y +
       ARCHITECTURE_CANVAS_PADDING +
       ARCHITECTURE_NODE_HEIGHT / 2,
   }))
@@ -198,11 +258,11 @@ function createArchitectureCanvasLayout(
   }
 }
 
-export function architectureCanvasPoints(
-  units: readonly ArchitectureProjectionUnit[],
-): readonly ArchitectureCanvasPoint[]
+export function architectureGraphCanvasPoints(
+  nodes: readonly ArchitectureGraphCanvasNode[],
+): readonly ArchitectureGraphCanvasPoint[]
 {
-  return createArchitectureCanvasLayout(units).points
+  return createArchitectureGraphCanvasLayout(nodes).points
 }
 
 function clamp(value: number, minimum: number, maximum: number): number
@@ -211,8 +271,8 @@ function clamp(value: number, minimum: number, maximum: number): number
 }
 
 function architectureCanvasBounds(
-  points: readonly ArchitectureCanvasPoint[],
-): ArchitectureCanvasBounds
+  points: readonly ArchitectureGraphCanvasPoint[],
+): ArchitectureGraphCanvasBounds
 {
   if (points.length === 0)
   {
@@ -254,11 +314,11 @@ function centeredTranslation(
 }
 
 function clampCamera(
-  camera: ArchitectureCanvasCamera,
-  bounds: ArchitectureCanvasBounds,
-  viewport: ArchitectureCanvasViewport,
+  camera: ArchitectureGraphCanvasCamera,
+  bounds: ArchitectureGraphCanvasBounds,
+  viewport: ArchitectureGraphCanvasViewport,
   bottomInset: number,
-): ArchitectureCanvasCamera
+): ArchitectureGraphCanvasCamera
 {
   const scale = clamp(camera.scale, ARCHITECTURE_CAMERA_MIN_SCALE, ARCHITECTURE_CAMERA_MAX_SCALE)
   const availableHeight = Math.max(1, viewport.height - bottomInset)
@@ -285,10 +345,10 @@ function clampCamera(
 }
 
 function fitCamera(
-  bounds: ArchitectureCanvasBounds,
-  viewport: ArchitectureCanvasViewport,
+  bounds: ArchitectureGraphCanvasBounds,
+  viewport: ArchitectureGraphCanvasViewport,
   bottomInset: number,
-): ArchitectureCanvasCamera
+): ArchitectureGraphCanvasCamera
 {
   const availableWidth = Math.max(1, viewport.width - ARCHITECTURE_CAMERA_MARGIN * 2)
   const availableViewportHeight = Math.max(1, viewport.height - bottomInset)
@@ -316,8 +376,37 @@ function edgeWidth(weight: number): number
   return Math.min(3.6, 1.2 + Math.log2(1 + weight) * 0.45)
 }
 
+function edgeTone(tone: ArchitectureGraphCanvasTone): string
+{
+  switch (tone)
+  {
+    case 'added':
+      return 'var(--architecture-green)'
+    case 'removed':
+      return 'var(--architecture-red)'
+    case 'affected':
+      return 'var(--architecture-amber)'
+    case 'context':
+      return 'var(--architecture-text-faint)'
+    case 'identity':
+      return 'var(--architecture-edge)'
+  }
+}
+
+function edgeDashArray(stroke: ArchitectureGraphCanvasStroke): string | undefined
+{
+  return stroke === 'dashed' ? '7 5' : stroke === 'muted' ? '2 5' : undefined
+}
+
+function nodeStrokeClass(stroke: ArchitectureGraphCanvasStroke): string | undefined
+{
+  if (stroke === 'dashed') return 'border-dashed'
+  if (stroke === 'double') return 'border-[3px] border-double'
+  return undefined
+}
+
 function rectangularBoundaryPoint(
-  point: ArchitectureCanvasPoint,
+  point: ArchitectureGraphCanvasPoint,
   deltaX: number,
   deltaY: number,
 ): { readonly x: number; readonly y: number }
@@ -334,10 +423,10 @@ function rectangularBoundaryPoint(
 }
 
 function edgeCurve(
-  edge: ArchitectureProjectionEdge,
-  pointsById: ReadonlyMap<string, ArchitectureCanvasPoint>,
+  edge: ArchitectureGraphCanvasEdge,
+  pointsById: ReadonlyMap<string, ArchitectureGraphCanvasPoint>,
   hasReciprocalEdge: boolean,
-): ArchitectureCanvasEdgeCurve | null
+): ArchitectureGraphCanvasEdgeCurve | null
 {
   const from = pointsById.get(edge.from)
   const to = pointsById.get(edge.to)
@@ -394,7 +483,7 @@ function edgeCurve(
   }
 }
 
-export function ArchitectureCanvas(props: ArchitectureCanvasProps)
+export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps)
 {
   const viewportRef = useRef<HTMLDivElement>(null)
   const nodeRefs = useRef(new Map<string, HTMLButtonElement>())
@@ -412,59 +501,52 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
   const [focusedEdgeId, setFocusedEdgeId] = useState<string | null>(null)
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
-  const [viewport, setViewport] = useState<ArchitectureCanvasViewport>({
+  const [viewport, setViewport] = useState<ArchitectureGraphCanvasViewport>({
     width: 0,
     height: 0,
   })
-  const [camera, setCamera] = useState<ArchitectureCanvasCamera>({
+  const [camera, setCamera] = useState<ArchitectureGraphCanvasCamera>({
     scale: 1,
     translateX: 0,
     translateY: 0,
   })
-  const arrowMarkerId = `architecture-arrow-${useId().replaceAll(':', '')}`
-  const activeArrowMarkerId = `${arrowMarkerId}-active`
-  const layout = useMemo(() => createArchitectureCanvasLayout(props.units), [props.units])
+  const markerPrefix = `architecture-arrow-${useId().replaceAll(':', '')}`
+  const layout = useMemo(() => createArchitectureGraphCanvasLayout(props.nodes), [props.nodes])
   const points = layout.points
   const bounds = useMemo(() => architectureCanvasBounds(points), [points])
   const sceneIdentity = useMemo(
-    () => props.units.map((unit) => `${unit.id}:${unit.position.x}:${unit.position.y}`).join('|'),
-    [props.units],
+    () => props.nodes.map((unit) => `${unit.id}:${unit.position.x}:${unit.position.y}`).join('|'),
+    [props.nodes],
   )
   const pointsById = useMemo(
-    () => new Map(points.map((point) => [point.unit.id, point] as const)),
+    () => new Map(points.map((point) => [point.node.id, point] as const)),
     [points],
   )
   const edgeCurves = useMemo(() =>
   {
-    const directedEdgeIds = new Set(props.edges.map((edge) => architectureEdgeId(edge)))
+    const directedEndpoints = new Set(props.edges.map((edge) => `${edge.from}\0${edge.to}`))
     return props.edges.flatMap((edge) =>
     {
-      const reciprocalId = architectureEdgeId({
-        from: edge.to,
-        to: edge.from,
-        weight: edge.weight,
-      })
-      const curve = edgeCurve(edge, pointsById, directedEdgeIds.has(reciprocalId))
+      const curve = edgeCurve(edge, pointsById, directedEndpoints.has(`${edge.to}\0${edge.from}`))
       return curve === null ? [] : [curve]
     })
   }, [pointsById, props.edges])
   const visibleEdgeIds = useMemo(() => new Set(edgeCurves.map((curve) => curve.id)), [edgeCurves])
-  const selectedEdgeId = props.selectedEdge === null ? null : architectureEdgeId(props.selectedEdge)
+  const selectedEdgeId = props.selectedEdgeId
+  const highlightedNodeIds = new Set(props.highlightedNodeIds ?? [])
   const hasVisibleSelectedEdge = selectedEdgeId !== null && visibleEdgeIds.has(selectedEdgeId)
   const hasVisibleSelectedUnit =
-    props.selectedUnitId !== null && pointsById.has(props.selectedUnitId)
-  const activeNodeFocusId =
-    nodeFocusId !== null && pointsById.has(nodeFocusId)
+    props.selectedNodeId !== null && pointsById.has(props.selectedNodeId)
+  const activeNodeFocusId = hasVisibleSelectedUnit
+    ? props.selectedNodeId
+    : nodeFocusId !== null && pointsById.has(nodeFocusId)
       ? nodeFocusId
-      : hasVisibleSelectedUnit
-        ? props.selectedUnitId
-        : (points[0]?.unit.id ?? null)
-  const activeEdgeFocusId =
-    edgeFocusId !== null && visibleEdgeIds.has(edgeFocusId)
+      : (points[0]?.node.id ?? null)
+  const activeEdgeFocusId = hasVisibleSelectedEdge
+    ? selectedEdgeId
+    : edgeFocusId !== null && visibleEdgeIds.has(edgeFocusId)
       ? edgeFocusId
-      : hasVisibleSelectedEdge
-        ? selectedEdgeId
-        : (edgeCurves[0]?.id ?? null)
+      : (edgeCurves[0]?.id ?? null)
   const inspectedEdgeId = selectedEdgeId ?? focusedEdgeId ?? hoveredEdgeId
   const inspectedEdge = edgeCurves.find((curve) => curve.id === inspectedEdgeId) ?? null
   const outsidePageEdgeCount = useMemo(
@@ -477,7 +559,7 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
     ARCHITECTURE_MINIMAP_MIN_HEIGHT,
     ARCHITECTURE_MINIMAP_MAX_HEIGHT,
   )
-  const showMinimap = viewport.width >= 640 && viewport.height >= 520 && props.units.length >= 6
+  const showMinimap = viewport.width >= 640 && viewport.height >= 520 && props.nodes.length >= 6
   const cameraBottomInset = showMinimap ? minimapHeight + ARCHITECTURE_MINIMAP_CONTROL_GAP : 0
   const visibleWorld = {
     x: Math.max(bounds.x, -camera.translateX / camera.scale),
@@ -513,7 +595,7 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
 
   useEffect(() =>
   {
-    if (viewport.width === 0 || viewport.height === 0 || props.units.length === 0) return
+    if (viewport.width === 0 || viewport.height === 0 || props.nodes.length === 0) return
 
     if (fittedSceneRef.current !== sceneIdentity)
     {
@@ -523,10 +605,10 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
     }
 
     setCamera((current) => clampCamera(current, bounds, viewport, cameraBottomInset))
-  }, [bounds, cameraBottomInset, props.units.length, sceneIdentity, viewport])
+  }, [bounds, cameraBottomInset, props.nodes.length, sceneIdentity, viewport])
 
   const updateCamera = useCallback(
-    (update: (current: ArchitectureCanvasCamera) => ArchitectureCanvasCamera): void =>
+    (update: (current: ArchitectureGraphCanvasCamera) => ArchitectureGraphCanvasCamera): void =>
     {
       if (viewport.width === 0 || viewport.height === 0) return
       setCamera((current) => clampCamera(update(current), bounds, viewport, cameraBottomInset))
@@ -571,7 +653,7 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
   )
 
   const activateEdge = useCallback(
-    (curve: ArchitectureCanvasEdgeCurve): void =>
+    (curve: ArchitectureGraphCanvasEdgeCurve): void =>
     {
       const trigger = edgeRefs.current.get(curve.id)
       if (trigger === undefined) return
@@ -588,8 +670,8 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
   ): void =>
   {
     event.preventDefault()
-    const nextIndex = (index + offset + props.units.length) % props.units.length
-    const nextUnit = props.units[nextIndex]
+    const nextIndex = (index + offset + props.nodes.length) % props.nodes.length
+    const nextUnit = props.nodes[nextIndex]
     if (nextUnit === undefined) return
     const nextButton = nodeRefs.current.get(nextUnit.id)
     if (nextButton === undefined) return
@@ -731,11 +813,11 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
     }
   }
 
-  if (props.units.length === 0)
+  if (props.nodes.length === 0)
   {
     return (
       <div className="architecture-surface flex min-h-64 items-center justify-center text-sm text-[var(--architecture-text-muted)]">
-        No architecture units are available in this bounded projection.
+        {props.emptyLabel}
       </div>
     )
   }
@@ -772,20 +854,23 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
       >
         <svg aria-hidden="true" className="absolute inset-0 size-full overflow-visible">
           <defs>
+            {(['identity', 'added', 'removed', 'affected', 'context'] as const).map((tone) => (
+              <marker
+                id={`${markerPrefix}-${tone}`}
+                key={tone}
+                markerHeight="9"
+                markerUnits="userSpaceOnUse"
+                markerWidth="9"
+                orient="auto"
+                refX="7"
+                refY="3"
+                viewBox="0 0 9 6"
+              >
+                <path d="M0 0 7 3 0 6Z" fill={edgeTone(tone)} />
+              </marker>
+            ))}
             <marker
-              id={arrowMarkerId}
-              markerHeight="9"
-              markerUnits="userSpaceOnUse"
-              markerWidth="9"
-              orient="auto"
-              refX="7"
-              refY="3"
-              viewBox="0 0 9 6"
-            >
-              <path d="M0 0 7 3 0 6Z" fill="var(--architecture-edge)" />
-            </marker>
-            <marker
-              id={activeArrowMarkerId}
+              id={`${markerPrefix}-active`}
               markerHeight="9"
               markerUnits="userSpaceOnUse"
               markerWidth="9"
@@ -803,13 +888,32 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
             const active = selected || curve.id === focusedEdgeId || curve.id === hoveredEdgeId
             return (
               <g key={curve.id}>
+                {curve.edge.stroke === 'double' && !active ? (
+                  <path
+                    d={curve.path}
+                    fill="none"
+                    opacity={selectedEdgeId === null || selected ? 0.82 : 0.2}
+                    pointerEvents="none"
+                    stroke={edgeTone(curve.edge.tone)}
+                    strokeLinecap="round"
+                    strokeWidth={edgeWidth(curve.edge.weight) + 3}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null}
                 <path
                   d={curve.path}
                   fill="none"
-                  markerEnd={`url(#${active ? activeArrowMarkerId : arrowMarkerId})`}
+                  markerEnd={`url(#${markerPrefix}-${active ? 'active' : curve.edge.tone})`}
                   opacity={selectedEdgeId === null || selected ? (active ? 1 : 0.78) : 0.2}
                   pointerEvents="none"
-                  stroke={active ? 'var(--architecture-accent)' : 'var(--architecture-edge)'}
+                  stroke={
+                    active
+                      ? 'var(--architecture-accent)'
+                      : curve.edge.stroke === 'double'
+                        ? 'var(--architecture-page)'
+                        : edgeTone(curve.edge.tone)
+                  }
+                  strokeDasharray={edgeDashArray(curve.edge.stroke)}
                   strokeLinecap="round"
                   strokeWidth={
                     selected
@@ -848,11 +952,13 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
                 if (button === null) edgeRefs.current.delete(curve.id)
                 else edgeRefs.current.set(curve.id, button)
               }}
-              aria-label={`Inspect dependency from ${curve.from.unit.label} to ${curve.to.unit.label}, weight ${curve.edge.weight}`}
+              aria-label={curve.edge.ariaLabel}
               aria-pressed={selected}
               className={cn(
                 'absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--architecture-accent)] bg-[var(--architecture-overlay)] px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-opacity focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)]',
-                active ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+                active || curve.edge.showBadge
+                  ? 'pointer-events-auto opacity-100'
+                  : 'pointer-events-none opacity-0',
               )}
               data-architecture-edge-id={curve.id}
               key={`badge:${curve.id}`}
@@ -899,43 +1005,49 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
               onMouseLeave={() => setHoveredEdgeId(null)}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              ×{curve.edge.weight}
+              {curve.edge.showBadge ? curve.edge.label : `×${curve.edge.weight}`}
             </button>
           )
         })}
         {points.map((point, index) =>
         {
-          const selected = props.selectedUnitId === point.unit.id
+          const selected = props.selectedNodeId === point.node.id
+          const highlighted = highlightedNodeIds.has(point.node.id)
           const connectedToInspectedEdge =
             inspectedEdge !== null &&
-            (inspectedEdge.edge.from === point.unit.id || inspectedEdge.edge.to === point.unit.id)
+            (inspectedEdge.edge.from === point.node.id || inspectedEdge.edge.to === point.node.id)
           return (
             <button
               ref={(node) =>
               {
-                if (node === null) nodeRefs.current.delete(point.unit.id)
-                else nodeRefs.current.set(point.unit.id, node)
+                if (node === null) nodeRefs.current.delete(point.node.id)
+                else nodeRefs.current.set(point.node.id, node)
               }}
-              aria-label={`${point.unit.label}, ${point.unit.fileCount} files`}
+              aria-label={point.node.ariaLabel}
               aria-pressed={selected}
               className={cn(
                 'absolute z-20 flex h-24 w-[236px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[11px] border px-[15px] pb-3 pt-[11px] text-left text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-[border-color,box-shadow,opacity,transform] hover:-translate-y-[calc(50%+1px)] hover:border-[var(--architecture-accent)] hover:shadow-[var(--architecture-shadow-node-hover)] focus-visible:border-[var(--architecture-accent)] focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--architecture-page)]',
                 'border-[var(--architecture-node-edge)] bg-[var(--architecture-node-fill)]',
+                nodeStrokeClass(point.node.stroke),
                 selected &&
                   'border-[var(--architecture-accent)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--architecture-accent)_20%,transparent),var(--architecture-shadow-node-hover)]',
+                highlighted &&
+                  !selected &&
+                  'border-[var(--architecture-amber)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--architecture-amber)_18%,transparent),var(--architecture-shadow-node)]',
                 connectedToInspectedEdge &&
                   'border-[var(--architecture-accent)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--architecture-accent)_16%,transparent),var(--architecture-shadow-node)]',
                 hasVisibleSelectedEdge &&
                   !connectedToInspectedEdge &&
                   'opacity-35 hover:opacity-100',
               )}
-              data-architecture-unit-id={point.unit.id}
-              key={point.unit.id}
+              data-architecture-unit-id={point.node.id}
+              data-anchor-highlighted={highlighted ? 'true' : undefined}
+              key={point.node.id}
               style={architectureNodeStyle(point)}
-              tabIndex={point.unit.id === activeNodeFocusId ? 0 : -1}
+              tabIndex={point.node.id === activeNodeFocusId ? 0 : -1}
               type="button"
-              onClick={(event) => props.onSelect(point.unit, event.currentTarget)}
-              onFocus={() => setNodeFocusId(point.unit.id)}
+              onClick={(event) => props.onSelectNode(point.node, event.currentTarget)}
+              onFocus={() => setNodeFocusId(point.node.id)}
               onKeyDown={(event) =>
               {
                 if (event.key === 'ArrowRight' || event.key === 'ArrowDown')
@@ -946,22 +1058,34 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
                 {
                   focusRelativeNode(event, index, -1)
                 }
+                else if (event.key === 'Home' || event.key === 'End')
+                {
+                  event.preventDefault()
+                  const target = event.key === 'Home' ? points[0] : points.at(-1)
+                  if (target === undefined) return
+                  setNodeFocusId(target.node.id)
+                  focusWorldPoint(target.x, target.y)
+                  nodeRefs.current.get(target.node.id)?.focus()
+                }
               }}
               onPointerDown={(event) => event.stopPropagation()}
             >
               <span className="flex min-w-0 items-center justify-between gap-3">
-                <span className="truncate text-[13px] font-semibold">{point.unit.label}</span>
+                <span className="truncate text-[13px] font-semibold">{point.node.label}</span>
                 <span className="shrink-0 rounded-full border border-[var(--architecture-node-edge)] bg-[var(--architecture-page)]/40 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-[var(--architecture-text-secondary)]">
-                  {point.unit.fileCount}
+                  {point.node.badgeLabel}
                 </span>
               </span>
               <span className="mt-1 line-clamp-2 min-h-7 text-[10.5px] leading-[1.35] text-[var(--architecture-text-muted)]">
-                {point.unit.description ?? `${point.unit.level.slice(0, -1)} architecture unit`}
+                {point.node.description}
               </span>
               <span className="mt-auto flex items-center gap-2 font-mono text-[9px] tabular-nums text-[var(--architecture-text-faint)]">
-                <span>in {point.unit.inbound}</span>
-                <span aria-hidden="true">·</span>
-                <span>out {point.unit.outbound}</span>
+                {point.node.footerLabels.map((label, footerIndex) => (
+                  <span key={`${point.node.id}:footer:${label}`}>
+                    {footerIndex > 0 ? <span aria-hidden="true">· </span> : null}
+                    {label}
+                  </span>
+                ))}
               </span>
             </button>
           )
@@ -1009,7 +1133,7 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
                 stroke={
                   curve.id === selectedEdgeId
                     ? 'var(--architecture-accent)'
-                    : 'var(--architecture-edge)'
+                    : edgeTone(curve.edge.tone)
                 }
                 strokeWidth="1"
                 vectorEffect="non-scaling-stroke"
@@ -1020,11 +1144,15 @@ export function ArchitectureCanvas(props: ArchitectureCanvasProps)
                 cx={point.x}
                 cy={point.y}
                 fill={
-                  point.unit.id === props.selectedUnitId
+                  point.node.id === props.selectedNodeId
                     ? 'var(--architecture-accent)'
-                    : 'var(--architecture-text-muted)'
+                    : highlightedNodeIds.has(point.node.id)
+                      ? 'var(--architecture-amber)'
+                      : point.node.tone === 'identity'
+                        ? 'var(--architecture-text-muted)'
+                        : edgeTone(point.node.tone)
                 }
-                key={`minimap:${point.unit.id}`}
+                key={`minimap:${point.node.id}`}
                 r="7"
               />
             ))}

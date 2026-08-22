@@ -6,7 +6,10 @@
 import type {
   ArchitectureProposalSource,
   EnvironmentId,
+  ProjectId,
+  ProposalId,
   ProposalGenerationId,
+  ProposalRevisionId,
   ScopedThreadRef,
 } from '@t3tools/contracts'
 import { act } from 'react'
@@ -19,7 +22,10 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('~/state/projects', () => ({
   projectEnvironment: {
-    getArchitectureImpact: (input: unknown) => ({ kind: 'architecture-impact', input }),
+    getArchitectureImpactProjection: (input: unknown) => ({
+      kind: 'architecture-impact-projection',
+      input,
+    }),
   },
 }))
 
@@ -33,19 +39,22 @@ vi.mock('~/state/query', () => ({
   }),
 }))
 
-vi.mock('../../../../../apps/web/src/components/architecture/ArchitectureImpactSurface', () => ({
-  ArchitectureImpactSurface: (props: {
-    readonly onOpenFile: (
-      source: ArchitectureProposalSource,
-      relativePath: string,
-      line?: number,
-    ) => void
-  }) => (
-    <button type="button" onClick={() => props.onOpenFile(source, 'src/impact.ts', 12)}>
-      Open exact impact file
-    </button>
-  ),
-}))
+vi.mock(
+  '../../../../../apps/web/src/components/architecture/ArchitectureImpactProjectionSurface',
+  () => ({
+    ArchitectureImpactProjectionSurface: (props: {
+      readonly onOpenVerifiedFile: (
+        source: ArchitectureProposalSource,
+        relativePath: string,
+        line?: number,
+      ) => void
+    }) => (
+      <button type="button" onClick={() => props.onOpenVerifiedFile(source, 'src/impact.ts', 12)}>
+        Open exact impact file
+      </button>
+    ),
+  }),
+)
 
 import { ConnectedArchitectureImpactSurface } from '../../../../../apps/web/src/components/architecture/ConnectedArchitectureImpactSurface'
 import { createArchitectureImpactSurface } from '../../../../../apps/web/src/components/architecture/architectureResourceIdentity'
@@ -69,8 +78,42 @@ const source = {
   graphDigest: `sha256:${'a'.repeat(64)}`,
 } as ArchitectureProposalSource
 const surface = createArchitectureImpactSurface({
-  threadId: threadRef.threadId,
-  comparison: { kind: 'proposal-generation', generationId },
+  kind: 'exact-impact',
+  descriptor: {
+    version: 1,
+    descriptorId: 'b'.repeat(64),
+    threadId: threadRef.threadId,
+    projectId: 'project-connected-impact' as ProjectId,
+    target: {
+      kind: 'plan',
+      plan: { _tag: 'plan', planId: 'plan:thread-connected-impact:turn:impact' },
+      state: 'active',
+    },
+    verifiedCandidate: {
+      authority: 'verified',
+      source: {
+        kind: 'verified-proposal-impact',
+        threadId: threadRef.threadId,
+        generationId,
+        proposalId: 'proposal-connected-impact' as ProposalId,
+        revisionId: 'proposal-connected-impact:1' as ProposalRevisionId,
+        baseTreeOid: '1'.repeat(40),
+        headTreeOid: '2'.repeat(40),
+        baseGraphDigest: `sha256:${'3'.repeat(64)}`,
+        headGraphDigest: `sha256:${'4'.repeat(64)}`,
+        projectionDigest: `sha256:${'5'.repeat(64)}`,
+      },
+      projectionId: 'projection-connected-impact',
+      projectionRevision: 1,
+      projectionDigest: `sha256:${'5'.repeat(64)}`,
+      resultState: 'graph',
+      freshness: 'fresh',
+      generatedAt: '2026-08-20T12:00:00.000Z',
+      publishedAt: '2026-08-20T12:00:00.000Z',
+    },
+    defaultAuthority: 'verified',
+    resolvedAt: '2026-08-20T12:00:00.000Z',
+  },
 })
 
 afterEach(() =>
@@ -91,7 +134,15 @@ describe('ConnectedArchitectureImpactSurface', () =>
     {
       await act(async () =>
       {
-        root.render(<ConnectedArchitectureImpactSurface threadRef={threadRef} surface={surface} />)
+        root.render(
+          <ConnectedArchitectureImpactSurface
+            threadRef={threadRef}
+            surface={surface}
+            onOpenPlannedPath={() => undefined}
+            onViewInRepositoryMap={() => undefined}
+            onAddConcern={() => undefined}
+          />,
+        )
       })
       const open = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
         (button) => button.textContent === 'Open exact impact file',

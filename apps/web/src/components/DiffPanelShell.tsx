@@ -171,7 +171,7 @@ export function DiffPanelViews(props: {
           onClick={() => selectView('architecture')}
           onKeyDown={selectFromKeyboard}
         >
-          Impact
+          Impact Diff
         </button>
       </div>
       <div

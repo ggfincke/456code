@@ -7,6 +7,7 @@ import * as Option from 'effect/Option'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
 import type * as WorkspaceMdxDocument from '../../mdx/WorkspaceMdxDocument.ts'
+import type * as ArchitectureAdmissionService from '../../architecture/ArchitectureAdmissionService.ts'
 import type * as ProjectionSnapshotQuery from '../../orchestration/Services/ProjectionSnapshotQuery.ts'
 import type * as ProposalGenerationService from '../../proposal/ProposalGenerationService.ts'
 import type * as ProposalImplementationAttemptService from '../../proposal/ProposalImplementationAttemptService.ts'
@@ -31,6 +32,7 @@ type ProposalRpcHandlers = Pick<WsRpcHandlers, ProposalRpcMethod>
 interface ProposalRpcHandlerDependencies
 {
   readonly proposalService: ProposalService.ProposalService['Service']
+  readonly architectureAdmissionService: ArchitectureAdmissionService.ArchitectureAdmissionService['Service']
   readonly proposalGenerationService: ProposalGenerationService.ProposalGenerationService['Service']
   readonly proposalImplementationAttemptService: ProposalImplementationAttemptService.ProposalImplementationAttemptService['Service']
   readonly projectionSnapshotQuery: ProjectionSnapshotQuery.ProjectionSnapshotQuery['Service']
@@ -41,6 +43,7 @@ interface ProposalRpcHandlerDependencies
 
 export function makeProposalRpcHandlers({
   proposalService,
+  architectureAdmissionService,
   proposalGenerationService,
   proposalImplementationAttemptService,
   projectionSnapshotQuery,
@@ -319,7 +322,11 @@ export function makeProposalRpcHandlers({
               proposalId: input.proposalId,
             })
           }
-          return yield* proposalGenerationService.start(input)
+          return yield* architectureAdmissionService.retryProposal({
+            threadId: input.threadId,
+            proposalId: input.proposalId,
+            revisionId: selected.revision.revisionId,
+          })
         }),
         { 'rpc.aggregate': 'proposal' },
       ),

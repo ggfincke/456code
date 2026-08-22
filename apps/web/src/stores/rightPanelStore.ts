@@ -40,13 +40,12 @@ export const RIGHT_PANEL_KINDS = [
   'repository-atlas-home',
   'architecture-impact',
   'repository-atlas',
-  'architecture-scope',
 ] as const
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number]
 
 type OpenRightPanelKind = Exclude<
   RightPanelKind,
-  'file' | 'terminal' | 'architecture-impact' | 'repository-atlas' | 'architecture-scope'
+  'file' | 'terminal' | 'architecture-impact' | 'repository-atlas'
 >
 type SingletonRightPanelKind = Exclude<OpenRightPanelKind, 'preview'>
 
@@ -95,7 +94,7 @@ export type RightPanelSurface =
   | ArchitectureRightPanelSurface
 
 const RIGHT_PANEL_STORAGE_KEY = '456code:right-panel-state:v2'
-const RIGHT_PANEL_STORAGE_VERSION = 12
+const RIGHT_PANEL_STORAGE_VERSION = 13
 
 export interface ThreadRightPanelState
 {
@@ -426,10 +425,11 @@ export function migratePersistedRightPanelState(
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) =>
                   {
                     if (!surface || typeof surface !== 'object') return []
+                    const persistedKind = (surface as { kind?: unknown }).kind
+                    if (persistedKind === 'architecture-scope') return []
                     if (
-                      surface.kind === 'architecture-impact' ||
-                      surface.kind === 'repository-atlas' ||
-                      surface.kind === 'architecture-scope'
+                      persistedKind === 'architecture-impact' ||
+                      persistedKind === 'repository-atlas'
                     )
                       {
                       const decoded = decodeArchitectureRightPanelSurface(surface)

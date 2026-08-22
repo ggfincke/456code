@@ -47,6 +47,12 @@ import { makeProjectionSnapshotQueryStub } from '../projectionSnapshotQueryTestH
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile)
 const fixedEpoch = Date.UTC(2026, 7, 7, 12, 0, 0)
 const fixedTimestamp = '2026-08-07T12:00:00.000Z'
+const analyzerFingerprint = `sha256:${'f'.repeat(64)}`
+
+function sha256(value: string): string
+{
+  return NodeCrypto.createHash('sha256').update(value).digest('hex')
+}
 
 async function git(cwd: string, args: ReadonlyArray<string>): Promise<string>
 {
@@ -102,53 +108,83 @@ function makeAnalyzer(callCount: {
 }): CartographerAnalyzer.CartographerAnalyzerShape
 {
   return CartographerAnalyzer.CartographerAnalyzer.of({
-    identify: Effect.succeed({ cliPath: '/test/cartographer', fingerprint: 'analyzer-test-v1' }),
+    identify: Effect.succeed({ cliPath: '/test/cartographer', fingerprint: analyzerFingerprint }),
     prepareCurrentWorktree: () => Effect.die('unexpected prepareCurrentWorktree'),
     buildProjectAtlas: () => Effect.die('unexpected buildProjectAtlas'),
     analyzeTrees: (input) =>
       Effect.promise(async () =>
       {
         callCount.value += 1
+        const baseGraph = JSON.stringify({ repoRoot: '.', gitRef: input.baseRef })
+        const proposedGraph = JSON.stringify({ repoRoot: '.', gitRef: input.proposedRef })
+        const impact = JSON.stringify({
+          baseGeneratedAt: fixedTimestamp,
+          headGeneratedAt: fixedTimestamp,
+          baseGitRef: input.baseRef,
+          headGitRef: input.proposedRef,
+          addedNodes: ['source.ts'],
+          removedNodes: [],
+          addedEdges: [],
+          removedEdges: [],
+          movedNodes: [],
+          moveFlows: [],
+          movedEdges: 0,
+          apiChanges: [],
+          newViolations: [],
+          resolvedViolations: [],
+          changed: true,
+        })
+        const impactProjection = JSON.stringify({
+          version: 1,
+          kind: 'impact-diff',
+          authority: 'verified',
+          resultState: 'no-impact',
+          generatedAt: fixedTimestamp,
+          analyzerFingerprint,
+          baseGitRef: input.baseRef,
+          headGitRef: input.proposedRef,
+          baseGraphDigest: `sha256:${sha256(baseGraph)}`,
+          headGraphDigest: `sha256:${sha256(proposedGraph)}`,
+          rawImpactDigest: `sha256:${sha256(impact)}`,
+          implementationChangedFileCount: input.implementationChangedFileCount,
+          lens: 'structure',
+          semanticLevel: 'files',
+          breadcrumbs: [],
+          layoutVersion: 'semantic-impact-v1',
+          totals: {
+            nodes: { total: 0, returned: 0, omitted: 0 },
+            edges: { total: 0, returned: 0, omitted: 0 },
+            evidence: { total: 0, returned: 0, omitted: 0 },
+            changedFiles: {
+              total: input.implementationChangedFileCount,
+              returned: 0,
+              omitted: input.implementationChangedFileCount,
+            },
+          },
+          nodes: [],
+          edges: [],
+          evidence: [],
+        })
         await Promise.all([
+          NodeFSP.writeFile(NodePath.join(input.outDir, 'base.graph.json'), baseGraph),
+          NodeFSP.writeFile(NodePath.join(input.outDir, 'proposed.graph.json'), proposedGraph),
+          NodeFSP.writeFile(NodePath.join(input.outDir, 'impact.json'), impact),
           NodeFSP.writeFile(
-            NodePath.join(input.outDir, 'base.graph.json'),
-            JSON.stringify({ repoRoot: '.', gitRef: input.baseRef }),
-          ),
-          NodeFSP.writeFile(
-            NodePath.join(input.outDir, 'proposed.graph.json'),
-            JSON.stringify({ repoRoot: '.', gitRef: input.proposedRef }),
-          ),
-          NodeFSP.writeFile(
-            NodePath.join(input.outDir, 'impact.json'),
-            JSON.stringify({
-              baseGeneratedAt: fixedTimestamp,
-              headGeneratedAt: fixedTimestamp,
-              baseGitRef: input.baseRef,
-              headGitRef: input.proposedRef,
-              addedNodes: ['source.ts'],
-              removedNodes: [],
-              addedEdges: [],
-              removedEdges: [],
-              movedNodes: [],
-              moveFlows: [],
-              movedEdges: 0,
-              apiChanges: [],
-              newViolations: [],
-              resolvedViolations: [],
-              changed: true,
-            }),
+            NodePath.join(input.outDir, 'impact-projection.json'),
+            impactProjection,
           ),
         ])
         return {
-          fingerprint: 'analyzer-test-v1',
+          fingerprint: analyzerFingerprint,
           process: {
             stdout: `${JSON.stringify({
               type: 'cartographer.analysis-ready',
-              version: 1,
-              analyzerVersion: 'analyzer-test-v1',
+              version: 2,
+              analyzerVersion: analyzerFingerprint,
               baseGraph: 'base.graph.json',
               proposedGraph: 'proposed.graph.json',
               impact: 'impact.json',
+              impactProjection: 'impact-projection.json',
             })}\n`,
             stderr: '',
             code: 0 as never,
@@ -231,7 +267,7 @@ function readyRetentionRow(input: {
     headTreeOid,
     baseAnalyzerRef: `base-ref-${input.cacheSuffix}`,
     headAnalyzerRef: `head-ref-${input.cacheSuffix}`,
-    analyzerVersion: 'analyzer-test-v1',
+    analyzerVersion: analyzerFingerprint,
     analysisPolicyVersion: DiffAnalysisService.DIFF_ANALYSIS_POLICY_VERSION,
     configDigest: `config-${input.cacheSuffix}`,
     scopeDigest: `scope-${input.cacheSuffix}`,
@@ -248,6 +284,8 @@ function readyRetentionRow(input: {
     baseGraphPath: null,
     headGraphPath: null,
     impactPath: null,
+    impactProjectionPath: null,
+    implementationChangedFileCount: null,
     artifactByteLength: input.artifactByteLength ?? 0,
     errorCode: null,
     createdAt: fixedTimestamp,
@@ -383,8 +421,10 @@ it.effect('single-flights a tree pair and retains both verified immutable roots'
             workspaceRoot: fixture.cwd,
           }),
         )
-        assert.equal(nativeImpact.legacy, false)
-        assert.equal(nativeImpact.diff?.changed, true)
+        assert.equal(nativeImpact.diff.changed, true)
+        assert.equal(nativeImpact.projection.version, 1)
+        assert.match(nativeImpact.impactProjectionDigest, /^sha256:[0-9a-f]{64}$/u)
+        assert.isAtLeast(nativeImpact.projection.totals.changedFiles.total, 1)
         assert.equal(
           nativeImpact.baseRoot,
           NodePath.join(NodePath.dirname(target.headRoot), 'base'),
@@ -422,118 +462,6 @@ it.effect('single-flights a tree pair and retains both verified immutable roots'
             cwd: fixture.cwd,
             baseDir,
             analyzer: makeAnalyzer(analyzerCalls),
-          }),
-        ),
-      )
-    }),
-  ),
-)
-
-it.effect('retains a planted labels-only legacy impact without requiring GraphDiff', () =>
-  Effect.scoped(
-    Effect.gen(function* ()
-    {
-      yield* TestClock.setTime(fixedEpoch)
-      const fixture = yield* Effect.promise(initializeRepository)
-      const baseDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-diff-analysis-legacy-impact-')),
-      )
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() =>
-          Promise.all([
-            NodeFSP.rm(fixture.cwd, { recursive: true, force: true }),
-            NodeFSP.rm(baseDir, { recursive: true, force: true }),
-          ]),
-        ).pipe(Effect.ignore),
-      )
-      const source: DiffAnalysisSource = {
-        sourceKind: 'tree-pair',
-        cwd: fixture.cwd,
-        baseTreeOid: fixture.baseTreeOid,
-        headTreeOid: fixture.headTreeOid,
-      }
-
-      yield* Effect.gen(function* ()
-      {
-        const service = yield* DiffAnalysisService.DiffAnalysisService
-        const repository = yield* DiffAnalysisGenerationRepository
-        const requested = yield* service.request({ source, workspaceRoot: fixture.cwd })
-        const ready = yield* waitForTerminal(service, { source, workspaceRoot: fixture.cwd })
-        assert.equal(ready.state, 'ready')
-
-        const row = Option.getOrThrow(
-          yield* repository.getById({ diffAnalysisId: requested.diffAnalysisId }),
-        )
-        const legacyBytes = Buffer.from(
-          JSON.stringify({
-            baseGitRef: row.baseAnalyzerRef,
-            headGitRef: row.headAnalyzerRef,
-            changed: true,
-          }),
-        )
-        const digest = NodeCrypto.createHash('sha256').update(legacyBytes).digest('hex')
-        const nativePlantedPath = NodePath.join(
-          row.artifactRoot,
-          `impact.graph-diff-v1.${digest}.json`,
-        )
-        const legacyPlantedPath = NodePath.join(row.artifactRoot, `impact.${digest}.json`)
-        yield* Effect.promise(() =>
-          Promise.all([
-            NodeFSP.writeFile(nativePlantedPath, legacyBytes),
-            NodeFSP.writeFile(legacyPlantedPath, legacyBytes),
-          ]),
-        )
-        const persistImpactPath = (impactPath: string) =>
-          repository.update({
-            diffAnalysisId: row.diffAnalysisId,
-            state: row.state,
-            headRootPath: row.headRootPath,
-            baseGraphPath: row.baseGraphPath,
-            headGraphPath: row.headGraphPath,
-            impactPath,
-            artifactByteLength: row.artifactByteLength,
-            errorCode: row.errorCode,
-            updatedAt: row.updatedAt,
-          })
-
-        yield* persistImpactPath(nativePlantedPath)
-        const nativeTarget = yield* Effect.scoped(
-          service.retainReadyTarget({
-            diffAnalysisId: requested.diffAnalysisId,
-            workspaceRoot: fixture.cwd,
-          }),
-        ).pipe(Effect.flip)
-        assert.equal(nativeTarget.code, 'artifact-invalid')
-        const nativeImpact = yield* Effect.scoped(
-          service.retainReadyImpactTarget({
-            diffAnalysisId: requested.diffAnalysisId,
-            workspaceRoot: fixture.cwd,
-          }),
-        ).pipe(Effect.flip)
-        assert.equal(nativeImpact.code, 'artifact-invalid')
-
-        yield* persistImpactPath(legacyPlantedPath)
-        const target = yield* Effect.scoped(
-          service.retainReadyTarget({
-            diffAnalysisId: requested.diffAnalysisId,
-            workspaceRoot: fixture.cwd,
-          }),
-        )
-        assert.equal(target.impactPath, legacyPlantedPath)
-        const impact = yield* Effect.scoped(
-          service.retainReadyImpactTarget({
-            diffAnalysisId: requested.diffAnalysisId,
-            workspaceRoot: fixture.cwd,
-          }),
-        )
-        assert.equal(impact.legacy, true)
-        assert.equal(impact.diff, null)
-      }).pipe(
-        Effect.provide(
-          makeTestLayer({
-            cwd: fixture.cwd,
-            baseDir,
-            analyzer: makeAnalyzer({ value: 0 }),
           }),
         ),
       )
@@ -708,7 +636,7 @@ it.effect('abandons active diff analyses and removes partial artifacts on startu
           headTreeOid: fixture.headTreeOid,
           baseAnalyzerRef: fixture.baseTreeOid,
           headAnalyzerRef: fixture.headTreeOid,
-          analyzerVersion: 'analyzer-test-v1',
+          analyzerVersion: analyzerFingerprint,
           analysisPolicyVersion: DiffAnalysisService.DIFF_ANALYSIS_POLICY_VERSION,
           configDigest: 'config-digest-startup',
           scopeDigest: 'scope-digest-startup',
@@ -720,6 +648,8 @@ it.effect('abandons active diff analyses and removes partial artifacts on startu
           baseGraphPath: null,
           headGraphPath: null,
           impactPath: null,
+          impactProjectionPath: null,
+          implementationChangedFileCount: null,
           artifactByteLength: 0,
           errorCode: null,
           createdAt: fixedTimestamp,

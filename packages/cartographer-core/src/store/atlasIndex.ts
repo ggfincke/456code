@@ -16,4 +16,10 @@ export {
   saveAtlasIndex,
   type EnsureAtlasIndexOptions,
 } from './atlasIndex/persist.js'
-export { queryAtlasFiles, queryAtlasIndex } from './atlasIndex/query.js'
+export {
+  queryAtlasFiles,
+  queryAtlasIndex,
+  queryAtlasStructureDirectories,
+  queryAtlasStructureEdges,
+  queryAtlasStructureFiles,
+} from './atlasIndex/query.js'

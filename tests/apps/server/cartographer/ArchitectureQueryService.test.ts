@@ -34,7 +34,6 @@ import {
   loadContextQuery,
   type CartographerGraph,
   type ContextQueryGraph,
-  type GraphDiff,
 } from '@t3tools/cartographer-core'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -45,12 +44,15 @@ import {
   make,
   type ArchitectureQueryAuthority,
 } from '../../../../apps/server/src/cartographer/ArchitectureQueryService.ts'
+import * as PlannedImpactService from '../../../../apps/server/src/architecture/PlannedImpactService.ts'
 import * as AtlasRebuildService from '../../../../apps/server/src/cartographer/AtlasRebuildService.ts'
 import * as CurrentWorktreeArchitectureService from '../../../../apps/server/src/cartographer/CurrentWorktreeArchitectureService.ts'
 import * as DiffAnalysisService from '../../../../apps/server/src/cartographer/DiffAnalysisService.ts'
+import * as ProjectAtlasStatusBroadcaster from '../../../../apps/server/src/cartographer/ProjectAtlasStatusBroadcaster.ts'
 import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
 import * as ProjectionSnapshotQuery from '../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import * as ProposalGenerationService from '../../../../apps/server/src/proposal/ProposalGenerationService.ts'
+import * as ProposalService from '../../../../apps/server/src/proposal/ProposalService.ts'
 import { makeProjectionSnapshotQueryStub } from '../projectionSnapshotQueryTestHelpers.ts'
 
 const environmentId = EnvironmentId.make('environment-architecture-query')
@@ -106,27 +108,6 @@ function graph(
       maxFanIn: edges.length > 0 ? 1 : 0,
       maxFanOut: edges.length > 0 ? 1 : 0,
     },
-  }
-}
-
-function graphDiff(): GraphDiff
-{
-  return {
-    baseGeneratedAt: createdAt,
-    headGeneratedAt: createdAt,
-    baseGitRef: 'a'.repeat(40),
-    headGitRef: 'b'.repeat(40),
-    addedNodes: ['src/added.ts'],
-    removedNodes: [],
-    addedEdges: [{ from: 'src/added.ts', to: 'src/provider.ts' }],
-    removedEdges: [],
-    movedNodes: [],
-    moveFlows: [],
-    movedEdges: 0,
-    apiChanges: [],
-    newViolations: [],
-    resolvedViolations: [],
-    changed: true,
   }
 }
 
@@ -216,6 +197,7 @@ function proposalGeneration(generationId: ProposalGenerationId): ProposalGenerat
     baseGraphArtifact: `proposal:${generationId}:base`,
     proposedGraphArtifact: `proposal:${generationId}:proposed`,
     impactArtifact: `proposal:${generationId}:impact`,
+    impactProjectionArtifact: `proposal:${generationId}:impact-projection`,
     errorCode: null,
     createdAt,
     updatedAt: createdAt,
@@ -237,6 +219,7 @@ function diffGeneration(diffAnalysisId: DiffAnalysisId): DiffAnalysisGeneration
     baseGraphArtifact: `diff:${diffAnalysisId}:base`,
     headGraphArtifact: `diff:${diffAnalysisId}:head`,
     impactArtifact: `diff:${diffAnalysisId}:impact`,
+    impactProjectionArtifact: `diff:${diffAnalysisId}:impact-projection`,
     artifactByteLength: 1,
     errorCode: null,
     createdAt,
@@ -300,6 +283,23 @@ function dependencyLayer(options: DependencyOptions)
       retainReadyImpactTarget: () =>
         Effect.die('unexpected DiffAnalysisService.retainReadyImpactTarget'),
       ...options.diffs,
+    }),
+    Layer.mock(PlannedImpactService.PlannedImpactService)({
+      findLatestForAuthority: () => Effect.succeed(null),
+      get: () => Effect.die('unexpected PlannedImpactService.get'),
+    }),
+    Layer.mock(ProposalService.ProposalService)({
+      findLatestByPlan: () => Effect.succeed(null),
+      findByOrchestrateRevision: () => Effect.succeed(null),
+    }),
+    Layer.mock(ProjectAtlasStatusBroadcaster.ProjectAtlasStatusBroadcaster)({
+      getStatus: () =>
+        Effect.succeed({
+          state: 'idle',
+          source: null,
+          freshness: { builtAt: null, dirty: true },
+          lastBuildError: null,
+        }),
     }),
   )
 }
@@ -665,7 +665,6 @@ describe('ArchitectureQueryService', () =>
       }
       let loaded = 0
       let resolved = 0
-      let generationStarts = 0
       let rebuildRequests = 0
       let diffRequests = 0
       const service = yield* make({
@@ -687,12 +686,6 @@ describe('ArchitectureQueryService', () =>
                 }),
             },
             proposals: {
-              start: () =>
-                Effect.sync(() =>
-                {
-                  generationStarts += 1
-                  throw new Error('unexpected proposal analysis')
-                }),
               get: ({ generationId }) => Effect.succeed(proposalGeneration(generationId)),
               resolveArchitectureTarget: (_threadId, generationId) =>
                 Effect.sync(() =>
@@ -706,6 +699,7 @@ describe('ArchitectureQueryService', () =>
                     baseGraphPath: graphPath,
                     proposedGraphPath: graphPath,
                     impactPath: graphPath,
+                    impactProjectionPath: graphPath,
                   }
                 }),
             },
@@ -740,8 +734,7 @@ describe('ArchitectureQueryService', () =>
       })
 
       expect({ loaded, resolved }).toEqual({ loaded: 6, resolved: 6 })
-      expect({ generationStarts, rebuildRequests, diffRequests }).toEqual({
-        generationStarts: 0,
+      expect({ rebuildRequests, diffRequests }).toEqual({
         rebuildRequests: 0,
         diffRequests: 0,
       })
@@ -833,6 +826,7 @@ describe('ArchitectureQueryService', () =>
                       baseGraphPath,
                       headGraphPath,
                       impactPath: headGraphPath,
+                      impactProjectionPath: headGraphPath,
                     }
                   }),
                   () =>
@@ -890,246 +884,6 @@ describe('ArchitectureQueryService', () =>
         .pipe(Effect.flip)
       expect(persistenceError.code).toBe('persistence-failed')
       expect('recovery' in persistenceError).toBe(false)
-    }),
-  )
-
-  it.effect('serves sealed proposal and diff impact without loading either graph', () =>
-    Effect.gen(function* ()
-    {
-      const root = yield* Effect.promise(() => makeTemporaryRoot('456code-sealed-impact-'))
-      const generationId = ProposalGenerationId.make('generation-sealed-impact')
-      const diffAnalysisId = DiffAnalysisId.make('diff-analysis-sealed-impact')
-      const sealedDiff = graphDiff()
-      let graphLoads = 0
-      let proposalReads = 0
-      let diffRetained = 0
-      let diffReleased = 0
-      const service = yield* make({
-        loadGraph: () =>
-        {
-          graphLoads += 1
-          throw new Error('sealed impact loaded a graph')
-        },
-      }).pipe(
-        Effect.provide(
-          dependencyLayer({
-            root,
-            proposals: {
-              resolveImpactTarget: () =>
-                Effect.sync(() =>
-                {
-                  proposalReads += 1
-                  return {
-                    diff: sealedDiff,
-                    impactDigest: `sha256:${'c'.repeat(64)}`,
-                    legacy: false,
-                    repositoryRoot: root,
-                    baseTreeOid: 'a'.repeat(40),
-                    proposedTreeOid: 'b'.repeat(40),
-                    baseGraphDigest: `sha256:${'d'.repeat(64)}`,
-                    proposedGraphDigest: `sha256:${'e'.repeat(64)}`,
-                  }
-                }),
-            },
-            diffs: {
-              retainReadyImpactTarget: () =>
-                Effect.acquireRelease(
-                  Effect.sync(() =>
-                  {
-                    diffRetained += 1
-                    return {
-                      generation: diffGeneration(diffAnalysisId),
-                      diff: sealedDiff,
-                      impactDigest: `sha256:${'f'.repeat(64)}`,
-                      legacy: false,
-                      repositoryRoot: root,
-                      baseTreeOid: 'a'.repeat(40),
-                      headTreeOid: 'b'.repeat(40),
-                      baseGraphDigest: `sha256:${'1'.repeat(64)}`,
-                      headGraphDigest: `sha256:${'2'.repeat(64)}`,
-                      baseRoot: root,
-                      headRoot: root,
-                    }
-                  }),
-                  () =>
-                    Effect.sync(() =>
-                    {
-                      diffReleased += 1
-                    }),
-                ),
-            },
-          }),
-        ),
-      )
-
-      const proposal = yield* service.architectureImpact(authority, {
-        comparison: { kind: 'proposal-generation', generationId },
-      })
-      const diff = yield* service.architectureImpact(authority, {
-        comparison: { kind: 'diff-analysis', diffAnalysisId },
-      })
-
-      expect(proposal).toMatchObject({
-        version: 2,
-        comparison: { kind: 'proposal-generation', generationId },
-        changed: true,
-        addedNodes: { items: ['src/added.ts'], total: 1, omitted: 0 },
-        baseSource: {
-          kind: 'proposal-generation',
-          threadId,
-          generationId,
-          side: 'base',
-        },
-        headSource: {
-          kind: 'proposal-generation',
-          threadId,
-          generationId,
-          side: 'proposed',
-        },
-      })
-      expect(diff).toMatchObject({
-        version: 2,
-        comparison: { kind: 'diff-analysis', diffAnalysisId },
-        changed: true,
-        baseSource: { kind: 'diff-analysis', threadId, diffAnalysisId, side: 'base' },
-        headSource: { kind: 'diff-analysis', threadId, diffAnalysisId, side: 'head' },
-      })
-      expect({ graphLoads, proposalReads, diffRetained, diffReleased }).toEqual({
-        graphLoads: 0,
-        proposalReads: 1,
-        diffRetained: 1,
-        diffReleased: 1,
-      })
-    }),
-  )
-
-  it.effect('falls back to paired graph reads only for a legacy sealed impact', () =>
-    Effect.gen(function* ()
-    {
-      const root = yield* Effect.promise(() => makeTemporaryRoot('456code-legacy-impact-'))
-      const generationId = ProposalGenerationId.make('generation-legacy-impact')
-      const baseGraphPath = yield* Effect.promise(() =>
-        writeGraph(root, graph(['src/base.ts']), 'legacy-base.graph.json'),
-      )
-      const headGraphPath = yield* Effect.promise(() =>
-        writeGraph(root, graph(['src/base.ts', 'src/added.ts']), 'legacy-head.graph.json'),
-      )
-      let graphLoads = 0
-      const service = yield* make({
-        loadGraph: (path) =>
-        {
-          graphLoads += 1
-          return loadContextQuery(path)
-        },
-      }).pipe(
-        Effect.provide(
-          dependencyLayer({
-            root,
-            proposals: {
-              get: () => Effect.succeed(proposalGeneration(generationId)),
-              resolveArchitectureTarget: () =>
-                Effect.succeed({
-                  generation: proposalGeneration(generationId),
-                  proposedRoot: root,
-                  baseGraphPath,
-                  proposedGraphPath: headGraphPath,
-                  impactPath: headGraphPath,
-                }),
-              resolveImpactTarget: () =>
-                Effect.succeed({
-                  diff: null,
-                  impactDigest: `sha256:${'3'.repeat(64)}`,
-                  legacy: true,
-                  repositoryRoot: root,
-                  baseTreeOid: 'a'.repeat(40),
-                  proposedTreeOid: 'b'.repeat(40),
-                  baseGraphDigest: `sha256:${'4'.repeat(64)}`,
-                  proposedGraphDigest: `sha256:${'5'.repeat(64)}`,
-                }),
-            },
-          }),
-        ),
-      )
-
-      const result = yield* service.architectureImpact(authority, {
-        comparison: { kind: 'proposal-generation', generationId },
-      })
-
-      expect(result).toMatchObject({
-        version: 2,
-        comparison: { kind: 'proposal-generation', generationId },
-        changed: true,
-        addedNodes: { items: ['src/added.ts'], total: 1, omitted: 0 },
-      })
-      expect(graphLoads).toBe(2)
-    }),
-  )
-
-  it.effect('falls back to paired graph reads only for a legacy sealed diff-analysis impact', () =>
-    Effect.gen(function* ()
-    {
-      const root = yield* Effect.promise(() =>
-        makeTemporaryRoot('456code-legacy-diff-analysis-impact-'),
-      )
-      const diffAnalysisId = DiffAnalysisId.make('diff-analysis-legacy-impact')
-      const baseGraphPath = yield* Effect.promise(() =>
-        writeGraph(root, graph(['src/base.ts']), 'legacy-base.graph.json'),
-      )
-      const headGraphPath = yield* Effect.promise(() =>
-        writeGraph(root, graph(['src/base.ts', 'src/added.ts']), 'legacy-head.graph.json'),
-      )
-      let graphLoads = 0
-      const service = yield* make({
-        loadGraph: (path) =>
-        {
-          graphLoads += 1
-          return loadContextQuery(path)
-        },
-      }).pipe(
-        Effect.provide(
-          dependencyLayer({
-            root,
-            diffs: {
-              getById: () => Effect.succeed(diffGeneration(diffAnalysisId)),
-              retainReadyImpactTarget: () =>
-                Effect.succeed({
-                  generation: diffGeneration(diffAnalysisId),
-                  diff: null,
-                  impactDigest: `sha256:${'3'.repeat(64)}`,
-                  legacy: true,
-                  repositoryRoot: root,
-                  baseTreeOid: 'a'.repeat(40),
-                  headTreeOid: 'b'.repeat(40),
-                  baseGraphDigest: `sha256:${'4'.repeat(64)}`,
-                  headGraphDigest: `sha256:${'5'.repeat(64)}`,
-                  baseRoot: root,
-                  headRoot: root,
-                }),
-              retainReadyTarget: () =>
-                Effect.succeed({
-                  generation: diffGeneration(diffAnalysisId),
-                  repositoryKey: 'repository-test',
-                  headRoot: root,
-                  baseGraphPath,
-                  headGraphPath,
-                  impactPath: headGraphPath,
-                }),
-            },
-          }),
-        ),
-      )
-
-      const result = yield* service.architectureImpact(authority, {
-        comparison: { kind: 'diff-analysis', diffAnalysisId },
-      })
-
-      expect(result).toMatchObject({
-        version: 2,
-        comparison: { kind: 'diff-analysis', diffAnalysisId },
-        changed: true,
-        addedNodes: { items: ['src/added.ts'], total: 1, omitted: 0 },
-      })
-      expect(graphLoads).toBe(2)
     }),
   )
 

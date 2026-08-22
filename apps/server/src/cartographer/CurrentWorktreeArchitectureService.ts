@@ -429,7 +429,10 @@ export const make = Effect.fn('CurrentWorktreeArchitectureService.make')(functio
         const liveRoot = yield* Effect.tryPromise({
           try: () => NodeFSP.realpath(input.workspaceRoot),
           catch: () =>
-            publicError('snapshot_failed', 'Cartographer could not resolve the current worktree.'),
+            publicError(
+              'snapshot_failed',
+              'Architecture analysis could not resolve the current worktree.',
+            ),
         })
         yield* Effect.tryPromise({
           try: () => NodeFSP.mkdir(outDir, { recursive: true }),
@@ -445,7 +448,10 @@ export const make = Effect.fn('CurrentWorktreeArchitectureService.make')(functio
           signal: controller.signal,
         }).pipe(
           Effect.mapError(() =>
-            publicError('snapshot_failed', 'Cartographer could not capture the current worktree.'),
+            publicError(
+              'snapshot_failed',
+              'Architecture analysis could not capture the current worktree.',
+            ),
           ),
         )
         yield* options.analyzer.prepareCurrentWorktree({

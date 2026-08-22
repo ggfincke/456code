@@ -34,16 +34,7 @@ const PROJECT_ID_PATH_SEGMENT = /^[A-Za-z0-9_-]{1,160}$/u
 const GENERATION_PATTERN = /^[a-f0-9]{64}$/u
 const PROJECT_ATLAS_INDEX_MAX_BYTES = 64 * 1024 * 1024
 
-const ProjectAtlasMetadataV1Schema = Schema.Struct({
-  version: Schema.Literal(1),
-  projectId: ProjectId,
-  workspaceRoot: Schema.String,
-  analyzerFingerprint: Schema.String,
-  generation: Schema.String,
-  builtAt: Schema.String,
-})
-
-const ProjectAtlasMetadataV2Schema = Schema.Struct({
+const ProjectAtlasMetadataSchema = Schema.Struct({
   version: Schema.Literal(2),
   projectId: ProjectId,
   workspaceRoot: Schema.String,
@@ -55,11 +46,6 @@ const ProjectAtlasMetadataV2Schema = Schema.Struct({
   indexByteLength: Schema.Number,
   builtAt: Schema.String,
 })
-
-const ProjectAtlasMetadataSchema = Schema.Union([
-  ProjectAtlasMetadataV1Schema,
-  ProjectAtlasMetadataV2Schema,
-])
 
 export type ProjectAtlasMetadata = typeof ProjectAtlasMetadataSchema.Type
 
@@ -323,10 +309,10 @@ async function isCompletePublishedAtlas(target: string, projectId: ProjectId): P
     const artifacts = await verifyProjectAtlasArtifacts(target)
     return (
       artifacts.generation === metadata.generation &&
-      (metadata.version === 1 ||
-        (artifacts.graphDigest === metadata.graphDigest &&
-          artifacts.indexSha256 === metadata.indexSha256 &&
-          artifacts.indexByteLength === metadata.indexByteLength))
+      artifacts.graphDigest === metadata.graphDigest &&
+      artifacts.indexSchemaVersion === metadata.indexSchemaVersion &&
+      artifacts.indexSha256 === metadata.indexSha256 &&
+      artifacts.indexByteLength === metadata.indexByteLength
     )
   }
   catch
@@ -348,6 +334,7 @@ export async function verifyProjectAtlasArtifacts(outDir: string): Promise<{
   readonly generation: string
   readonly generatedAt: string
   readonly graphDigest: SourceGraphDigest
+  readonly indexSchemaVersion: typeof ATLAS_INDEX_SCHEMA_VERSION
   readonly indexSha256: string
   readonly indexByteLength: number
 }>
@@ -356,7 +343,7 @@ export async function verifyProjectAtlasArtifacts(outDir: string): Promise<{
   const indexPath = NodePath.join(outDir, 'atlas-index.json')
   if (!(await regularFile(graphPath)) || !(await regularFile(indexPath)))
   {
-    throw new Error('Project Atlas artifacts are incomplete')
+    throw new Error('Repository Map artifacts are incomplete')
   }
   const [graphBytes, indexBytes] = await Promise.all([
     NodeFSP.readFile(graphPath),
@@ -364,7 +351,7 @@ export async function verifyProjectAtlasArtifacts(outDir: string): Promise<{
   ])
   const graph = decodeJson(graphBytes.toString('utf8'))
   const index = decodeJson(indexBytes.toString('utf8'))
-  parseAtlasIndex(index)
+  const parsedIndex = parseAtlasIndex(index)
   if (
     typeof graph !== 'object' ||
     graph === null ||
@@ -378,13 +365,14 @@ export async function verifyProjectAtlasArtifacts(outDir: string): Promise<{
     index.sourceGraphDigest !== graphContentDigest(graphBytes)
   )
   {
-    throw new Error('Project Atlas graph and index generations do not match')
+    throw new Error('Repository Map graph and index generations do not match')
   }
   const graphDigest = graphContentDigest(graphBytes)
   return {
     generation: NodeCrypto.createHash('sha256').update(graphBytes).digest('hex'),
     generatedAt: graph.generatedAt,
     graphDigest,
+    indexSchemaVersion: parsedIndex.version,
     indexSha256: NodeCrypto.createHash('sha256').update(indexBytes).digest('hex'),
     indexByteLength: indexBytes.byteLength,
   }
@@ -403,7 +391,7 @@ export async function loadReusableProjectAtlas(input: {
     metadata.projectId !== input.projectId ||
     metadata.workspaceRoot !== input.root ||
     metadata.analyzerFingerprint !== input.analyzerFingerprint ||
-    metadata.version !== 2
+    metadata.indexSchemaVersion !== ATLAS_INDEX_SCHEMA_VERSION
   )
   {
     return null
@@ -413,6 +401,7 @@ export async function loadReusableProjectAtlas(input: {
     const artifacts = await verifyProjectAtlasArtifacts(input.outDir)
     return artifacts.generation === metadata.generation &&
       artifacts.graphDigest === metadata.graphDigest &&
+      artifacts.indexSchemaVersion === metadata.indexSchemaVersion &&
       artifacts.indexSha256 === metadata.indexSha256 &&
       artifacts.indexByteLength === metadata.indexByteLength
       ? metadata
@@ -450,10 +439,10 @@ async function loadLastGoodProjectAtlas(
     if (
       root !== metadata.workspaceRoot ||
       artifacts.generation !== metadata.generation ||
-      (metadata.version === 2 &&
-        (artifacts.graphDigest !== metadata.graphDigest ||
-          artifacts.indexSha256 !== metadata.indexSha256 ||
-          artifacts.indexByteLength !== metadata.indexByteLength))
+      artifacts.graphDigest !== metadata.graphDigest ||
+      artifacts.indexSchemaVersion !== metadata.indexSchemaVersion ||
+      artifacts.indexSha256 !== metadata.indexSha256 ||
+      artifacts.indexByteLength !== metadata.indexByteLength
     )
     {
       return null
@@ -486,7 +475,6 @@ async function loadPublishedProjectAtlasIndex(
     const metadata = await readMetadata(NodePath.join(outDir, PROJECT_ATLAS_METADATA_FILENAME))
     if (
       metadata === null ||
-      metadata.version !== 2 ||
       metadata.projectId !== projectId ||
       (requestedGeneration !== undefined && metadata.generation !== requestedGeneration) ||
       !NodePath.isAbsolute(metadata.workspaceRoot) ||
@@ -521,7 +509,11 @@ async function loadPublishedProjectAtlasIndex(
       return null
     }
     const index = parseAtlasIndex(decodeJson(indexBytes.toString('utf8')))
-    if (index.sourceGraphDigest !== metadata.graphDigest) return null
+    if (
+      index.sourceGraphDigest !== metadata.graphDigest ||
+      index.version !== metadata.indexSchemaVersion
+    )
+      return null
     return {
       projectId,
       root,
@@ -642,7 +634,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
 
   yield* Effect.tryPromise({
     try: () => recoverInterruptedProjectAtlasPublications(projectsRoot),
-    catch: () => publicError('Interrupted Project Atlas publication recovery failed.'),
+    catch: () => publicError('Interrupted Repository Map publication recovery failed.'),
   })
 
   const lockForProject = Effect.fn('AtlasRebuildService.lockForProject')(function* (
@@ -705,7 +697,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
           marker,
         )
       },
-      catch: () => publicError('Project Atlas staging storage could not be created.'),
+      catch: () => publicError('Repository Map staging storage could not be created.'),
     }).pipe(
       Effect.andThen(
         Effect.gen(function* ()
@@ -717,15 +709,15 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
           })
           if (result.fingerprint.length === 0)
           {
-            return yield* publicError('Project Atlas analyzer identity was unavailable.')
+            return yield* publicError('Repository Map analyzer identity was unavailable.')
           }
           yield* Effect.tryPromise({
             try: () => NodeFSP.rm(NodePath.join(staging, 'graph.db'), { force: true }),
-            catch: () => publicError('Project Atlas snapshot history could not be removed.'),
+            catch: () => publicError('Repository Map snapshot history could not be removed.'),
           })
           const artifacts = yield* Effect.tryPromise({
             try: () => verifyProjectAtlasArtifacts(staging),
-            catch: () => publicError('Project Atlas staging artifacts failed verification.'),
+            catch: () => publicError('Repository Map staging artifacts failed verification.'),
           })
           const metadata: ProjectAtlasMetadata = {
             version: 2,
@@ -749,7 +741,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
               )
               await options.publicationHook?.('staging-complete', { target, staging, backup })
             },
-            catch: () => publicError('Project Atlas staging metadata could not be written.'),
+            catch: () => publicError('Repository Map staging metadata could not be written.'),
           })
 
           const publicationLock = yield* publicationLockForProject(projectId)
@@ -810,7 +802,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
                     }
                   },
                   catch: () =>
-                    publicError('Project Atlas publication failed; the last good build was kept.'),
+                    publicError('Repository Map publication failed; the last good build was kept.'),
                 }),
               ),
             ),
@@ -824,7 +816,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
           {
             if (!movedNew) await removeDirectory(staging)
           },
-          catch: () => publicError('Project Atlas staging cleanup failed.'),
+          catch: () => publicError('Repository Map staging cleanup failed.'),
         }).pipe(Effect.ignore),
       ),
     )
@@ -857,7 +849,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
         else
         {
           failure = publicError(
-            'Project Atlas rebuild failed; the last good build remains available.',
+            'Repository Map rebuild failed; the last good build remains available.',
           )
         }
       } while (active.dirty && !active.controller.signal.aborted)
@@ -867,7 +859,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
         activeBuilds.delete(projectId)
         yield* Deferred.fail(
           active.completion,
-          failure ?? publicError('Project Atlas rebuild stopped.'),
+          failure ?? publicError('Repository Map rebuild stopped.'),
         )
       }
       else
@@ -883,7 +875,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
     {
       const root = yield* Effect.tryPromise({
         try: () => NodeFSP.realpath(input.root),
-        catch: () => publicError('The Project Atlas workspace root is unavailable.'),
+        catch: () => publicError('The Repository Map workspace root is unavailable.'),
       })
       const lock = yield* lockForProject(input.projectId)
       const completion = yield* lock.withPermit(
@@ -973,7 +965,7 @@ export const make = Effect.fn('AtlasRebuildService.make')(function* (
           if (active.fiber !== null) yield* Fiber.interrupt(active.fiber).pipe(Effect.ignore)
           yield* Deferred.fail(
             active.completion,
-            publicError('Project Atlas rebuild was invalidated by a project lifecycle change.'),
+            publicError('Repository Map rebuild was invalidated by a project lifecycle change.'),
           ).pipe(Effect.ignore)
           activeBuilds.delete(projectId)
         }),

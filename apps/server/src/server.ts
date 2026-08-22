@@ -126,6 +126,8 @@ import * as ProposalImplementationAttemptService from './proposal/ProposalImplem
 import * as ProposalService from './proposal/ProposalService.ts'
 import * as ProposalRetainedRefAttemptStore from './proposal/ProposalRetainedRefAttemptStore.ts'
 import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefReconciler.ts'
+import * as PlannedImpactService from './architecture/PlannedImpactService.ts'
+import * as ArchitectureAdmissionService from './architecture/ArchitectureAdmissionService.ts'
 
 // effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
@@ -358,6 +360,10 @@ const ProjectArchitectureLifecycleLayerLive = ProjectArchitectureLifecycleServic
 
 const ArchitectureQueryLayerLive = ArchitectureQueryService.layer.pipe(
   Layer.provideMerge(CurrentWorktreeArchitectureLayerLive),
+  Layer.provideMerge(ProposalGenerationLayerLive),
+  Layer.provideMerge(DiffAnalysisLayerLive),
+  Layer.provideMerge(ProposalService.layer),
+  Layer.provideMerge(PlannedImpactService.layer),
   Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(RepositoryIdentityResolver.layer),
@@ -382,6 +388,13 @@ const ProposalPreviewLayerLive = Layer.mergeAll(
   ),
   ProposalRetainedRefAttemptStore.layer,
   ProposalRetainedRefReconciler.layer.pipe(Layer.provide(ProposalRetainedRefAttemptStore.layer)),
+)
+
+const ArchitectureAdmissionLayerLive = ArchitectureAdmissionService.layer.pipe(
+  Layer.provideMerge(ProposalGenerationLayerLive),
+  Layer.provideMerge(ProjectArchitectureLifecycleLayerLive),
+  Layer.provideMerge(AtlasRebuildLayerLive),
+  Layer.provideMerge(PlannedImpactService.layer),
 )
 
 const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))
@@ -446,6 +459,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),
+  Layer.provideMerge(ArchitectureAdmissionLayerLive),
   Layer.provideMerge(ProposalPreviewLayerLive),
   Layer.provideMerge(DiffAnalysisLayerLive),
   Layer.provideMerge(ServerEnvironment.layer),

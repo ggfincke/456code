@@ -68,7 +68,12 @@ import {
   resolveComposerDispatchMode,
   resolveComposerSlashCommandMode,
 } from '~/composer-logic'
-import type { ComposerImageAttachment, DraftId, DraftThreadEnvMode } from '~/composerDraftStore'
+import type {
+  ArchitectureConcernContext,
+  ComposerImageAttachment,
+  DraftId,
+  DraftThreadEnvMode,
+} from '~/composerDraftStore'
 import { useComposerDraftStore } from '~/composerDraftStore'
 
 type ComposerThreadTarget = ScopedThreadRef | DraftId
@@ -78,6 +83,10 @@ import {
   type ElementContextDraft,
 } from '~/lib/elementContext'
 import { appendPreviewAnnotationPrompt } from '~/lib/previewAnnotation'
+import {
+  appendArchitectureContextsToPrompt,
+  formatArchitectureConcernLabel,
+} from '~/composer-drafts/architectureContext'
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -228,6 +237,10 @@ export interface ChatSendPorts
   readonly setComposerDraftPreviewAnnotations: (
     target: ComposerThreadTarget,
     annotations: PreviewAnnotationPayload[],
+  ) => void
+  readonly setComposerDraftArchitectureContexts: (
+    target: ComposerThreadTarget,
+    contexts: ArchitectureConcernContext[],
   ) => void
   readonly setComposerDraftPrompt: (target: ComposerThreadTarget, prompt: string) => void
   readonly setComposerDraftReviewComments: (
@@ -941,6 +954,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       terminalContexts: sendContextComposerTerminalContexts,
       elementContexts: sendContextComposerElementContexts,
       previewAnnotations: sendContextComposerPreviewAnnotations,
+      architectureContexts: sendContextComposerArchitectureContexts,
       reviewComments: sendContextComposerReviewComments,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
@@ -969,6 +983,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       directProviderSlashCommand === null ? sendContextComposerElementContexts : []
     const composerPreviewAnnotations =
       directProviderSlashCommand === null ? sendContextComposerPreviewAnnotations : []
+    const composerArchitectureContexts =
+      directProviderSlashCommand === null ? sendContextComposerArchitectureContexts : []
     const composerReviewComments =
       directProviderSlashCommand === null ? sendContextComposerReviewComments : []
     const composerDraftOwnerKeyForSend = send.composerDraftOwnerKey
@@ -995,6 +1011,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       elementContextCount:
         composerElementContexts.length +
         composerPreviewAnnotations.length +
+        composerArchitectureContexts.length +
         composerReviewComments.length,
     })
     if (legacyOrchestrateInvocation !== null && !hasSendableContent)
@@ -1009,6 +1026,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
+      composerArchitectureContexts.length === 0 &&
       composerReviewComments.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null
@@ -1026,7 +1044,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       directProviderSlashCommand === null &&
       !options.bypassPlanFollowUp &&
       send.showPlanFollowUpPrompt &&
-      send.activeProposedPlan
+      send.activeProposedPlan &&
+      composerArchitectureContexts.length === 0
     )
     {
       const draftPromptForRetry = send.promptRef.current
@@ -1126,12 +1145,14 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts]
     const composerElementContextsSnapshot = [...composerElementContexts]
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations]
+    const composerArchitectureContextsSnapshot = [...composerArchitectureContexts]
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments]
     const hasAttachmentsOrContext =
       composerImagesSnapshot.length > 0 ||
       composerTerminalContextsSnapshot.length > 0 ||
       composerElementContextsSnapshot.length > 0 ||
       composerPreviewAnnotationsSnapshot.length > 0 ||
+      composerArchitectureContextsSnapshot.length > 0 ||
       composerReviewCommentsSnapshot.length > 0
     const isBareProviderSlashCommandForSend =
       !hasAttachmentsOrContext &&
@@ -1149,8 +1170,12 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
         messageTextWithContexts,
       )
-      messageTextForSend = appendReviewCommentsToPrompt(
+      const messageTextWithArchitectureContexts = appendArchitectureContextsToPrompt(
         messageTextWithPreviewAnnotations,
+        composerArchitectureContextsSnapshot,
+      )
+      messageTextForSend = appendReviewCommentsToPrompt(
+        messageTextWithArchitectureContexts,
         composerReviewCommentsSnapshot,
       )
     }
@@ -1278,6 +1303,10 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       else if (composerElementContextsSnapshot.length > 0)
       {
         titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!)
+      }
+      else if (composerArchitectureContextsSnapshot.length > 0)
+      {
+        titleSeed = formatArchitectureConcernLabel(composerArchitectureContextsSnapshot[0]!)
       }
       else
       {
@@ -1415,6 +1444,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           retryDraft.terminalContexts.length === 0 &&
           retryDraft.elementContexts.length === 0 &&
           retryDraft.previewAnnotations.length === 0 &&
+          retryDraft.architectureContexts.length === 0 &&
           retryDraft.reviewComments.length === 0)
       const composerOwnerIsCurrent =
         send.composerDraftOwnerKeyRef.current === composerDraftOwnerKeyForSend
@@ -1454,6 +1484,10 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         send.setComposerDraftPreviewAnnotations(
           send.composerDraftTarget,
           composerPreviewAnnotationsSnapshot,
+        )
+        send.setComposerDraftArchitectureContexts(
+          send.composerDraftTarget,
+          composerArchitectureContextsSnapshot,
         )
         send.setComposerDraftReviewComments(
           send.composerDraftTarget,

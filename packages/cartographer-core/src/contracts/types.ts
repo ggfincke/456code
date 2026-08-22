@@ -334,14 +334,76 @@ export interface AtlasIndexCounts
   indexedDirs: number
 }
 
-// current derived navigation artifact schema
-export const ATLAS_INDEX_SCHEMA_VERSION = 5
+export interface AtlasIndexStructureDirectory
+{
+  id: string
+  key: string
+  label: string
+  parentId?: string
+  depth: number
+  childDirectoryIds: string[]
+  directFileIds: string[]
+  directFileCount: number
+  descendantFileCount: number
+  inbound: number
+  outbound: number
+  order: number
+  position: AtlasIndexPositionHint
+}
+
+export interface AtlasIndexStructureEdge extends AtlasIndexEdge
+{
+  parent: string
+}
+
+export interface AtlasIndexStructure
+{
+  rootId: string
+  directories: AtlasIndexStructureDirectory[]
+  edges: AtlasIndexStructureEdge[]
+  fileEdges: AtlasIndexEdge[]
+  counts: {
+    directories: number
+    files: number
+    edges: number
+    fileEdges: number
+  }
+}
+
+export type AtlasIndexCrosswalkStatus = 'matched' | 'ambiguous' | 'unmatched'
+
+export interface AtlasIndexDominantCrosswalk
+{
+  sourceId: string
+  targetIds: string[]
+  matchedFileCount: number
+  status: AtlasIndexCrosswalkStatus
+}
+
+export interface AtlasIndexFileCrosswalk
+{
+  fileId: string
+  systemId: string
+  blockId: string
+  directoryId: string
+  position: AtlasIndexPositionHint
+}
+
+export interface AtlasIndexCrosswalks
+{
+  files: AtlasIndexFileCrosswalk[]
+  systemsToDirectories: AtlasIndexDominantCrosswalk[]
+  blocksToDirectories: AtlasIndexDominantCrosswalk[]
+  directoriesToSystems: AtlasIndexDominantCrosswalk[]
+  directoriesToBlocks: AtlasIndexDominantCrosswalk[]
+}
+
+export const ATLAS_INDEX_SCHEMA_VERSION = 6
 
 export type SourceGraphDigest = `sha256:${string}`
 
-export interface AtlasIndex
+interface AtlasIndexBase
 {
-  version: typeof ATLAS_INDEX_SCHEMA_VERSION
   sourceGeneratedAt: string
   sourceGraphDigest: SourceGraphDigest
   repo: {
@@ -361,9 +423,16 @@ export interface AtlasIndex
   files: AtlasIndexFile[]
 }
 
-export type AtlasIndexSummary = Omit<AtlasIndex, 'files'> & {
-  topFiles: AtlasIndexFile[]
+export interface AtlasIndexV6 extends AtlasIndexBase
+{
+  version: typeof ATLAS_INDEX_SCHEMA_VERSION
+  structure: AtlasIndexStructure
+  crosswalks: AtlasIndexCrosswalks
 }
+
+export type AtlasIndex = AtlasIndexV6
+
+export type AtlasIndexSummary = Omit<AtlasIndexV6, 'files'> & { topFiles: AtlasIndexFile[] }
 
 export interface AtlasIndexQuery
 {
@@ -379,6 +448,18 @@ export interface AtlasIndexFileQuery
   search?: string
   cursor?: string
   limit?: number
+}
+
+export interface AtlasIndexStructureQuery
+{
+  parentId: string
+  cursor?: string
+  limit?: number
+}
+
+export interface AtlasIndexStructureFileQuery extends AtlasIndexStructureQuery
+{
+  search?: string
 }
 
 export interface AtlasIndexPage<T>

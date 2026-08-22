@@ -20,6 +20,7 @@ export interface CliValues
   'base-ref'?: string
   'proposed-ref'?: string
   'analyzer-version'?: string
+  'implementation-changed-file-count'?: string
   'from-json'?: string
   // explicit opt-in for seed-rules -> executes the target repo's eslint config
   'from-eslint'?: boolean

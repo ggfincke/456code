@@ -173,6 +173,7 @@ describe('CartographerAnalyzer', () =>
             outDir: '/generations/output',
             baseRef: '1'.repeat(40),
             proposedRef: '2'.repeat(40),
+            implementationChangedFileCount: 2,
           })
           .pipe(Effect.forkChild)
 
@@ -195,6 +196,7 @@ describe('CartographerAnalyzer', () =>
         expect(calls[1]?.args[0]).toBe(cliPath)
         expect(calls[1]?.args).toContain('analyze-trees')
         expect(calls[1]?.args).toContain(comparison.fingerprint)
+        expect(calls[1]?.args).toContain('2')
         expect(calls[1]?.cwd).toBe('/generations/output')
       }),
     ),

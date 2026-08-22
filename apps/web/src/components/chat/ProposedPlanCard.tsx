@@ -28,6 +28,9 @@ import { useEnvironmentQuery } from '~/state/query'
 import { useAtomCommand } from '~/state/use-atom-command'
 import { useRightPanelStore } from '~/rightPanelStore'
 
+import { createArchitectureImpactSurface } from '../architecture/architectureResourceIdentity'
+import { selectExactPlanImpactProjection } from '../architecture/architectureImpactSelection'
+import { hasArchitectureToolErrorCode } from '../architecture/architectureToolFailure'
 import ChatMarkdown from '../ChatMarkdown'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
@@ -76,6 +79,45 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true
   const architectureImpactAvailable =
     serverConfig?.environment.capabilities.architectureImpact === true
+  const impactProjectionQuery = useEnvironmentQuery(
+    architectureImpactAvailable && threadRef
+      ? projectEnvironment.getArchitectureImpactProjection({
+          environmentId,
+          input: {
+            version: 1,
+            kind: 'resolve-plan',
+            threadId: threadRef.threadId,
+            plan: { _tag: 'plan', planId },
+          },
+        })
+      : null,
+  )
+  useEffect(() =>
+  {
+    if (!architectureImpactAvailable || !threadRef) return
+    const intervalId = window.setInterval(impactProjectionQuery.refresh, 3_000)
+    return () => window.clearInterval(intervalId)
+  }, [architectureImpactAvailable, impactProjectionQuery.refresh, threadRef])
+  const exactImpactProjection =
+    threadRef !== undefined
+      ? selectExactPlanImpactProjection(impactProjectionQuery.data, {
+          threadId: threadRef.threadId,
+          plan: { _tag: 'plan', planId },
+        })
+      : null
+  const impactTargetMissing = hasArchitectureToolErrorCode(
+    impactProjectionQuery.failure,
+    'target-not-found',
+  )
+  const impactIdentityMismatch =
+    impactProjectionQuery.data !== null && exactImpactProjection === null
+  const impactProjectionError = impactIdentityMismatch
+    ? 'The server returned Impact data for a different exact plan.'
+    : impactTargetMissing
+      ? null
+      : impactProjectionQuery.error
+  const impactProjectionLoading =
+    architectureImpactAvailable && threadRef !== undefined && !impactProjectionQuery.hasSettled
   const planProposalQuery = useEnvironmentQuery(
     proposalPreviewAvailable && threadRef
       ? projectEnvironment.findProposalByPlan({
@@ -119,96 +161,60 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const startProposalGeneration = useAtomCommand(projectEnvironment.startProposalGeneration, {
     reportFailure: false,
   })
-  const {
-    state: generationStartState,
-    claimAutomatic,
-    claimManual,
-  } = useProposalGenerationStart(generationStartTarget)
+  const { state: generationStartState, claimManual } =
+    useProposalGenerationStart(generationStartTarget)
 
-  const requestProposalGeneration = useCallback(
-    (mode: 'automatic' | 'manual'): void =>
+  const requestProposalGeneration = useCallback((): void =>
+  {
+    if (exactPlanProposal === null || !threadRef || generationStartKey === null) return
+    const attempt = claimManual(latestGenerationQuery.data)
+    if (attempt === null) return
+
+    void startProposalGeneration({
+      environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        proposalId: exactPlanProposal.proposal.proposalId,
+        revision: exactPlanProposal.revision.revision,
+      },
+    }).then((result) =>
     {
-      if (exactPlanProposal === null || !threadRef || generationStartKey === null) return
-      const attempt =
-        mode === 'automatic'
-          ? claimAutomatic(latestGenerationQuery.data)
-          : claimManual(latestGenerationQuery.data)
-      if (attempt === null) return
-
-      void startProposalGeneration({
-        environmentId,
-        input: {
-          threadId: threadRef.threadId,
-          proposalId: exactPlanProposal.proposal.proposalId,
-          revision: exactPlanProposal.revision.revision,
-        },
-      }).then((result) =>
+      if (result._tag === 'Success')
       {
-        if (result._tag === 'Success')
-        {
-          if (completeProposalGenerationStart(attempt, result.value))
-          {
-            latestGenerationQuery.refresh()
-          }
-          return
-        }
-
-        let errorMessage = 'Exact architecture analysis could not start.'
-        if (isAtomCommandInterrupted(result))
-        {
-          errorMessage =
-            'The request to start exact architecture analysis was superseded by a newer request.'
-        }
-        else
-        {
-          const error = squashAtomCommandFailure(result)
-          if (error instanceof Error && error.message.trim().length > 0)
-          {
-            errorMessage = error.message
-          }
-        }
-        if (failProposalGenerationStart(attempt, errorMessage))
+        if (completeProposalGenerationStart(attempt, result.value))
         {
           latestGenerationQuery.refresh()
         }
-      })
-    },
-    [
-      claimAutomatic,
-      claimManual,
-      environmentId,
-      exactPlanProposal,
-      generationStartKey,
-      latestGenerationQuery.data,
-      latestGenerationQuery.refresh,
-      startProposalGeneration,
-      threadRef,
-    ],
-  )
+        return
+      }
 
-  useEffect(() =>
-  {
-    if (
-      exactPlanProposal === null ||
-      !threadRef ||
-      !architectureImpactAvailable ||
-      generationStartKey === null ||
-      latestGenerationQuery.isPending ||
-      latestGenerationQuery.error !== null ||
-      latestGenerationQuery.data !== null
-    )
-    {
-      return
-    }
-    requestProposalGeneration('automatic')
+      let errorMessage = 'Exact architecture analysis could not start.'
+      if (isAtomCommandInterrupted(result))
+      {
+        errorMessage =
+          'The request to start exact architecture analysis was superseded by a newer request.'
+      }
+      else
+      {
+        const error = squashAtomCommandFailure(result)
+        if (error instanceof Error && error.message.trim().length > 0)
+        {
+          errorMessage = error.message
+        }
+      }
+      if (failProposalGenerationStart(attempt, errorMessage))
+      {
+        latestGenerationQuery.refresh()
+      }
+    })
   }, [
-    architectureImpactAvailable,
+    claimManual,
+    environmentId,
     exactPlanProposal,
     generationStartKey,
     latestGenerationQuery.data,
-    latestGenerationQuery.error,
-    latestGenerationQuery.isPending,
-    requestProposalGeneration,
+    latestGenerationQuery.refresh,
+    startProposalGeneration,
     threadRef,
   ])
 
@@ -339,6 +345,23 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     useRightPanelStore.getState().openExplorer(threadRef, { kind: 'plan', planId })
   }
 
+  const handleOpenImpact = () =>
+  {
+    if (
+      !threadRef ||
+      exactImpactProjection === null ||
+      exactImpactProjection.projection.resultState !== 'graph'
+    )
+      return
+    useRightPanelStore.getState().openArchitectureSurface(
+      threadRef,
+      createArchitectureImpactSurface({
+        kind: 'exact-impact',
+        descriptor: exactImpactProjection.descriptor,
+      }),
+    )
+  }
+
   const openSaveDialog = () =>
   {
     if (!workspaceRoot)
@@ -433,7 +456,12 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         </Menu>
       </div>
       <div className="mt-4">
-        {previewIdentity !== null || canOpenExplorer || generationFailure !== null ? (
+        {previewIdentity !== null ||
+        canOpenExplorer ||
+        generationFailure !== null ||
+        exactImpactProjection !== null ||
+        impactProjectionError !== null ||
+        impactProjectionLoading ? (
           <div className="mb-4 grid gap-2 rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               {previewIdentity !== null ? (
@@ -469,10 +497,71 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
                   size="sm"
                   variant="outline"
                   data-scroll-anchor-ignore
-                  onClick={() => requestProposalGeneration('manual')}
+                  onClick={requestProposalGeneration}
                 >
                   Retry analysis
                 </Button>
+              </div>
+            ) : null}
+            {architectureImpactAvailable && exactImpactProjection !== null ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="text-xs font-medium text-foreground">
+                      {exactImpactProjection.selectedAuthority === 'verified'
+                        ? 'Verified Impact'
+                        : 'Planned Impact'}
+                    </p>
+                    <Badge size="sm" variant="outline">
+                      {exactImpactProjection.projection.freshness}
+                    </Badge>
+                  </div>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {exactImpactProjection.projection.resultState === 'no-impact'
+                      ? `No architectural relationship changes · ${exactImpactProjection.projection.totals.changedFiles.total.toLocaleString()} changed files`
+                      : `${exactImpactProjection.projection.totals.nodes.total.toLocaleString()} objects · ${exactImpactProjection.projection.totals.edges.total.toLocaleString()} relationships`}
+                  </p>
+                </div>
+                {exactImpactProjection.projection.resultState === 'graph' ? (
+                  <Button
+                    data-scroll-anchor-ignore
+                    size="sm"
+                    variant="outline"
+                    onClick={handleOpenImpact}
+                  >
+                    Open Impact Diff
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {architectureImpactAvailable &&
+            exactImpactProjection === null &&
+            (impactProjectionError !== null || impactProjectionLoading) ? (
+              <div
+                className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-2"
+                role={impactProjectionError === null ? 'status' : 'alert'}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-foreground">Impact Diff</p>
+                  <p
+                    className={cn(
+                      'truncate text-[11px] text-muted-foreground',
+                      impactProjectionError !== null && 'text-destructive',
+                    )}
+                  >
+                    {impactProjectionError ?? 'Resolving Planned and Verified Impact.'}
+                  </p>
+                </div>
+                {impactProjectionError !== null ? (
+                  <Button
+                    data-scroll-anchor-ignore
+                    size="sm"
+                    variant="ghost"
+                    onClick={impactProjectionQuery.refresh}
+                  >
+                    Retry Impact
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>

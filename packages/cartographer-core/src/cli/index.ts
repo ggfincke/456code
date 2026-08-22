@@ -37,6 +37,7 @@ async function main(): Promise<void>
       'base-ref': { type: 'string' },
       'proposed-ref': { type: 'string' },
       'analyzer-version': { type: 'string' },
+      'implementation-changed-file-count': { type: 'string' },
       'from-json': { type: 'string' },
       'from-eslint': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },

@@ -23,6 +23,7 @@ import {
   MessageCircleIcon,
   MinusIcon,
   MousePointerClickIcon,
+  NetworkIcon,
   PaintbrushIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -43,6 +44,13 @@ import {
   type ReactNode,
 } from 'react'
 import { type ParsedElementContextEntry } from '~/lib/elementContext'
+import {
+  extractTrailingArchitectureContext,
+  formatArchitectureConcernAuthority,
+  formatArchitectureConcernLabel,
+  formatArchitectureConcernTooltip,
+  type ArchitectureConcernContext,
+} from '~/composer-drafts/architectureContext'
 import {
   extractTrailingPreviewAnnotation,
   type ParsedPreviewAnnotation,
@@ -140,8 +148,17 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
   const ctx = use(TimelineRowCtx)
   const userImages = row.message.attachments ?? []
   const reviewCommentState = splitTrailingReviewComments(row.message.text)
+  const architectureContexts: ArchitectureConcernContext[] = []
+  let promptWithoutArchitectureContexts = reviewCommentState.promptText
+  while (true)
+  {
+    const extracted = extractTrailingArchitectureContext(promptWithoutArchitectureContexts)
+    if (!extracted.context) break
+    architectureContexts.unshift(extracted.context)
+    promptWithoutArchitectureContexts = extracted.promptText
+  }
   const previewAnnotations: ParsedPreviewAnnotation[] = []
-  let promptWithoutPreviewAnnotations = reviewCommentState.promptText
+  let promptWithoutPreviewAnnotations = promptWithoutArchitectureContexts
   while (true)
   {
     const extracted = extractTrailingPreviewAnnotation(promptWithoutPreviewAnnotations)
@@ -209,6 +226,13 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
             image={previewImages[index] ?? null}
           />
         ))}
+        {architectureContexts.length > 0 ? (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {architectureContexts.map((context) => (
+              <UserMessageArchitectureConcernChip key={context.id} context={context} />
+            ))}
+          </div>
+        ) : null}
         {elementContexts.length > 0 ? (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {elementContexts.map((context) => (
@@ -303,6 +327,30 @@ const UserMessageElementContextChip = memo(function UserMessageElementContextChi
       />
       <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">
         {tooltipText}
+      </TooltipPopup>
+    </Tooltip>
+  )
+})
+
+const UserMessageArchitectureConcernChip = memo(function UserMessageArchitectureConcernChip(props: {
+  context: ArchitectureConcernContext
+})
+{
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-1.5 py-0.5 text-xs text-foreground/85">
+            <NetworkIcon aria-hidden="true" className="size-3 shrink-0" />
+            <span className="truncate">{formatArchitectureConcernLabel(props.context)}</span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {formatArchitectureConcernAuthority(props.context)}
+            </span>
+          </span>
+        }
+      />
+      <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">
+        {formatArchitectureConcernTooltip(props.context)}
       </TooltipPopup>
     </Tooltip>
   )

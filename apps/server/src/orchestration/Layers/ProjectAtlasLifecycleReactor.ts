@@ -175,7 +175,7 @@ const make = Effect.gen(function* ()
       else
       {
         return yield* new ProjectAtlasLifecyclePayloadError({
-          detail: `Unsupported Project Atlas lifecycle effect '${action.effectKind}'.`,
+          detail: `Unsupported Repository Map lifecycle effect '${action.effectKind}'.`,
         })
       }
       return { status: 'succeeded' as const }

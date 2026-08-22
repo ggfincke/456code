@@ -6,6 +6,8 @@ import {
   ArchitectureBlastRadiusResult,
   ArchitectureGraphDiffInput,
   ArchitectureGraphDiffResult,
+  ArchitecturePlanImpactUpsertInput,
+  ArchitecturePlanImpactUpsertResult,
   ArchitectureProposePatchInput,
   ArchitectureProposePatchResult,
   ArchitectureToolError,
@@ -14,11 +16,15 @@ import * as Schema from 'effect/Schema'
 import { Tool, Toolkit } from 'effect/unstable/ai'
 
 import * as ArchitectureQueryService from '../../../cartographer/ArchitectureQueryService.ts'
+import * as PlannedImpactService from '../../../architecture/PlannedImpactService.ts'
 import * as McpInvocationContext from '../../McpInvocationContext.ts'
+import * as ProjectionSnapshotQuery from '../../../orchestration/Services/ProjectionSnapshotQuery.ts'
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   ArchitectureQueryService.ArchitectureQueryService,
+  PlannedImpactService.PlannedImpactService,
+  ProjectionSnapshotQuery.ProjectionSnapshotQuery,
 ]
 
 // encoded annotations survive provider JSON projection for transformed contract fields
@@ -69,6 +75,52 @@ const ArchitectureProposePatchParameters = Schema.Struct({
   ),
 })
 
+const ArchitecturePlanImpactUpsertParameters = Schema.Struct({
+  version: ArchitecturePlanImpactUpsertInput.fields.version.pipe(
+    Schema.annotateEncoded({ description: 'Planned Impact publication format version; use 1.' }),
+  ),
+  summary: ArchitecturePlanImpactUpsertInput.fields.summary.pipe(
+    Schema.annotateEncoded({
+      description: 'Concise provider interpretation for this Planned Impact publication.',
+    }),
+  ),
+  outcome: ArchitecturePlanImpactUpsertInput.fields.outcome.pipe(
+    Schema.annotateEncoded({
+      description: "Explicit 'changed' or confirmed 'no-impact' architecture outcome.",
+    }),
+  ),
+  changedObjects: ArchitecturePlanImpactUpsertInput.fields.changedObjects.pipe(
+    Schema.annotateEncoded({
+      description: 'Up to 60 changed architecture objects identified by publication-local IDs.',
+    }),
+  ),
+  relationships: ArchitecturePlanImpactUpsertInput.fields.relationships.pipe(
+    Schema.annotateEncoded({
+      description: 'Up to 120 relationships whose endpoints use publication-local object IDs.',
+    }),
+  ),
+  pathHints: ArchitecturePlanImpactUpsertInput.fields.pathHints.pipe(
+    Schema.annotateEncoded({
+      description: 'Up to 100 repository-relative POSIX path hints; these are not trusted IDs.',
+    }),
+  ),
+  rationale: ArchitecturePlanImpactUpsertInput.fields.rationale.pipe(
+    Schema.annotateEncoded({
+      description: 'Optional bounded reasoning that explains the provider interpretation.',
+    }),
+  ),
+  omissions: ArchitecturePlanImpactUpsertInput.fields.omissions.pipe(
+    Schema.annotateEncoded({
+      description: 'Exact returned, total, and omitted counts plus an optional bounded note.',
+    }),
+  ),
+  orchestratePlan: ArchitecturePlanImpactUpsertInput.fields.orchestratePlan.pipe(
+    Schema.annotateEncoded({
+      description: 'Exact tool-sourced Orchestrate run and revision selector; omit for Plan mode.',
+    }),
+  ),
+})
+
 export const ArchitectureBlastRadiusTool = Tool.make('architecture_blast_radius', {
   description:
     'Query the bounded upstream and downstream dependency impact of one repository-relative file or file#export target in an authorized, already-analyzed architecture graph. Select a current-thread-worktree, standing-project, completed proposal-generation, or completed diff-analysis graph through context. This never starts or refreshes analysis. MCP authentication supplies environment, thread, project, filesystem root, graph path, and context authority; do not pass those fields.',
@@ -112,8 +164,24 @@ export const ArchitectureProposePatchTool = Tool.make('architecture_propose_patc
   .annotate(Tool.Destructive, false)
   .annotate(Tool.OpenWorld, false)
 
+export const ArchitecturePlanImpactUpsertTool = Tool.make('architecture_plan_impact_upsert', {
+  description:
+    'Publish one bounded Planned Impact interpretation for the authenticated active Plan or exact tool-sourced Orchestrate revision. Publish this before proposal_preview_upsert when concrete file operations exist and before the final plan. Objects and relationships use publication-local IDs; path hints must be repository-relative POSIX paths. The server derives and verifies environment, project, thread, turn, provider, filesystem, plan, Repository Map, and graph authority. Never pass trusted project, graph, generation, digest, root, or standing semantic IDs. Identical retries are idempotent; changed interpretations append immutable publication revisions. Planned interpretation is never Verified evidence.',
+  parameters: ArchitecturePlanImpactUpsertParameters,
+  success: ArchitecturePlanImpactUpsertResult,
+  failure: ArchitectureToolError,
+  failureMode: 'return',
+  dependencies,
+})
+  .annotate(Tool.Title, 'Publish Planned Impact')
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false)
+
 export const ArchitectureToolkit = Toolkit.make(
   ArchitectureBlastRadiusTool,
   ArchitectureGraphDiffTool,
   ArchitectureProposePatchTool,
+  ArchitecturePlanImpactUpsertTool,
 )

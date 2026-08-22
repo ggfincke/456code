@@ -26,6 +26,7 @@ import {
   type ProposalProducerIdentity,
   type ProposalRevisionId,
   type ProposalSha256,
+  type PlannedImpactPublicationId,
   type ThreadId,
   type TurnId,
 } from '@t3tools/contracts'
@@ -36,6 +37,7 @@ import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 import type { PreparedProposalRevision, ProposalContentBlob } from './ProposalGitEngine.ts'
+import * as ArchitectureAdmissionRepository from '../architecture/ArchitectureAdmissionRepository.ts'
 
 interface ProposalRow
 {
@@ -75,6 +77,9 @@ interface ProposalRevisionRow
   readonly narrativeByteLength: number | null
   readonly planId: string | null
   readonly planMarkdownSha256: string | null
+  readonly plannedImpactPublicationId: string | null
+  readonly plannedImpactPublicationRevision: number | null
+  readonly plannedImpactContentDigest: string | null
   readonly createdAt: string
 }
 
@@ -113,6 +118,7 @@ export interface AppendProposalRevisionInput
   readonly orchestratePlan?: ProposalOrchestratePlanTarget & {
     readonly turnId: TurnId
   }
+  readonly verifiedAnalyzerFingerprint: string
   readonly createdAt: string
 }
 
@@ -233,6 +239,20 @@ function decodeRevisionRow(row: ProposalRevisionRow)
 {
   return Effect.gen(function* ()
   {
+    const plannedImpactFieldCount = [
+      row.plannedImpactPublicationId,
+      row.plannedImpactPublicationRevision,
+      row.plannedImpactContentDigest,
+    ].filter((value) => value !== null).length
+    if (plannedImpactFieldCount !== 0 && plannedImpactFieldCount !== 3)
+    {
+      return yield* proposalError(
+        'ProposalRepository.decodeRevision',
+        'persistence-failed',
+        'Stored proposal Planned Impact reference metadata is incomplete.',
+        row.proposalId as ProposalId,
+      )
+    }
     const policyJson = yield* parseStoredJson(
       row.snapshotPolicyJson,
       'ProposalRepository.decodeRevision',
@@ -297,6 +317,17 @@ function decodeRevisionRow(row: ProposalRevisionRow)
       ...(row.narrativeByteLength === null ? {} : { narrativeByteLength: row.narrativeByteLength }),
       ...(row.planId === null ? {} : { planId: row.planId }),
       ...(row.planMarkdownSha256 === null ? {} : { planMarkdownSha256: row.planMarkdownSha256 }),
+      ...(row.plannedImpactPublicationId === null ||
+      row.plannedImpactPublicationRevision === null ||
+      row.plannedImpactContentDigest === null
+        ? {}
+        : {
+            plannedImpactRef: {
+              publicationId: row.plannedImpactPublicationId as PlannedImpactPublicationId,
+              publicationRevision: row.plannedImpactPublicationRevision,
+              contentDigest: row.plannedImpactContentDigest,
+            },
+          }),
       createdAt: row.createdAt,
     }).pipe(
       Effect.mapError((cause) =>
@@ -332,27 +363,32 @@ const proposalSelect = `
 
 const revisionSelect = `
   SELECT
-    revision_id AS "revisionId",
-    proposal_id AS "proposalId",
-    revision,
-    head_commit_oid AS "headCommitOid",
-    base_tree_oid AS "baseTreeOid",
-    base_retained_ref AS "baseRetainedRef",
-    base_file_count AS "baseFileCount",
-    base_byte_count AS "baseByteCount",
-    snapshot_policy_json AS "snapshotPolicyJson",
-    proposed_tree_oid AS "proposedTreeOid",
-    proposed_retained_ref AS "proposedRetainedRef",
-    manifest_json AS "manifestJson",
-    manifest_sha256 AS "manifestSha256",
-    diff_sha256 AS "diffSha256",
-    diff_byte_length AS "diffByteLength",
-    narrative_sha256 AS "narrativeSha256",
-    narrative_byte_length AS "narrativeByteLength",
-    plan_id AS "planId",
-    plan_markdown_sha256 AS "planMarkdownSha256",
-    created_at AS "createdAt"
-  FROM proposal_revisions
+    revision.revision_id AS "revisionId",
+    revision.proposal_id AS "proposalId",
+    revision.revision,
+    revision.head_commit_oid AS "headCommitOid",
+    revision.base_tree_oid AS "baseTreeOid",
+    revision.base_retained_ref AS "baseRetainedRef",
+    revision.base_file_count AS "baseFileCount",
+    revision.base_byte_count AS "baseByteCount",
+    revision.snapshot_policy_json AS "snapshotPolicyJson",
+    revision.proposed_tree_oid AS "proposedTreeOid",
+    revision.proposed_retained_ref AS "proposedRetainedRef",
+    revision.manifest_json AS "manifestJson",
+    revision.manifest_sha256 AS "manifestSha256",
+    revision.diff_sha256 AS "diffSha256",
+    revision.diff_byte_length AS "diffByteLength",
+    revision.narrative_sha256 AS "narrativeSha256",
+    revision.narrative_byte_length AS "narrativeByteLength",
+    revision.plan_id AS "planId",
+    revision.plan_markdown_sha256 AS "planMarkdownSha256",
+    planned.publication_id AS "plannedImpactPublicationId",
+    planned.publication_revision AS "plannedImpactPublicationRevision",
+    planned.content_digest AS "plannedImpactContentDigest",
+    revision.created_at AS "createdAt"
+  FROM proposal_revisions revision
+  LEFT JOIN proposal_revision_planned_impacts planned
+    ON planned.revision_id = revision.revision_id
 `
 
 export class ProposalRepository extends Context.Service<
@@ -395,6 +431,8 @@ export class ProposalRepository extends Context.Service<
 export const make = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
+  const architectureAdmissions =
+    yield* ArchitectureAdmissionRepository.ArchitectureAdmissionRepository
 
   const append: ProposalRepository['Service']['append'] = Effect.fn('ProposalRepository.append')(
     function* (input)
@@ -649,6 +687,67 @@ export const make = Effect.gen(function* ()
                 )
               `
             }
+            const planIdentityKey =
+              input.planId !== undefined
+                ? `plan:${input.planId}`
+                : input.orchestratePlan !== undefined
+                  ? `orchestrate:${input.orchestratePlan.runId}:${input.orchestratePlan.revision}`
+                  : null
+            if (planIdentityKey !== null)
+            {
+              const plannedRows = yield* sql<{
+                readonly publicationId: string
+                readonly publicationRevision: number
+                readonly contentDigest: string
+              }>`
+                SELECT
+                  publication_id AS "publicationId",
+                  publication_revision AS "publicationRevision",
+                  content_digest AS "contentDigest"
+                FROM architecture_planned_impact_publications
+                WHERE source_thread_id = ${input.sourceThreadId}
+                  AND plan_identity_key = ${planIdentityKey}
+                ORDER BY publication_revision DESC
+                LIMIT 1
+              `
+              const planned = plannedRows[0]
+              if (planned !== undefined)
+              {
+                yield* sql`
+                  INSERT INTO proposal_revision_planned_impacts (
+                    revision_id,
+                    proposal_id,
+                    proposal_revision,
+                    publication_id,
+                    publication_revision,
+                    content_digest,
+                    created_at
+                  )
+                  VALUES (
+                    ${input.revisionId},
+                    ${input.proposalId},
+                    ${revision},
+                    ${planned.publicationId},
+                    ${planned.publicationRevision},
+                    ${planned.contentDigest},
+                    ${input.createdAt}
+                  )
+                `
+              }
+            }
+            yield* architectureAdmissions.enqueue({
+              admissionKey: `proposal-verified:${input.revisionId}:${input.verifiedAnalyzerFingerprint}`,
+              target: {
+                _tag: 'proposal-verified',
+                version: 1,
+                threadId: input.sourceThreadId,
+                proposalId: input.proposalId,
+                revisionId: input.revisionId,
+                revision,
+                analyzerFingerprint: input.verifiedAnalyzerFingerprint,
+              },
+              now: input.createdAt,
+            })
             yield* sql`
             UPDATE proposals
             SET updated_at = ${input.createdAt}
@@ -661,8 +760,8 @@ export const make = Effect.gen(function* ()
           `
             const storedRevisionRows = yield* sql<ProposalRevisionRow>`
             ${sql.unsafe(revisionSelect)}
-            WHERE proposal_id = ${input.proposalId}
-              AND revision = ${revision}
+            WHERE revision.proposal_id = ${input.proposalId}
+              AND revision.revision = ${revision}
           `
             const proposalRow = rows[0]
             const revisionRow = storedRevisionRows[0]
@@ -731,8 +830,8 @@ export const make = Effect.gen(function* ()
       }
       const revisionRows = yield* sql<ProposalRevisionRow>`
       ${sql.unsafe(revisionSelect)}
-      WHERE proposal_id = ${proposalId}
-      ORDER BY revision ASC
+      WHERE revision.proposal_id = ${proposalId}
+      ORDER BY revision.revision ASC
     `.pipe(
         Effect.mapError((cause) => persistenceError('ProposalRepository.get', cause, proposalId)),
       )
@@ -919,4 +1018,6 @@ export const make = Effect.gen(function* ()
   })
 })
 
-export const layer = Layer.effect(ProposalRepository, make)
+export const layer = Layer.effect(ProposalRepository, make).pipe(
+  Layer.provide(ArchitectureAdmissionRepository.layer),
+)

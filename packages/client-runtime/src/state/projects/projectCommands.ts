@@ -174,9 +174,9 @@ export function createProjectEnvironmentAtoms<R, E>(
       staleTimeMs: 0,
       idleTtlMs: 5 * 60_000,
     }),
-    getArchitectureImpact: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: 'environment-data:cartographer:architecture-impact',
-      tag: WS_METHODS.cartographerGetArchitectureImpact,
+    getArchitectureImpactProjection: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:cartographer:architecture-impact-projection',
+      tag: WS_METHODS.cartographerGetArchitectureImpactProjection,
       staleTimeMs: 0,
       idleTtlMs: 5 * 60_000,
     }),
@@ -189,18 +189,6 @@ export function createProjectEnvironmentAtoms<R, E>(
     getArchitectureScope: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:cartographer:architecture-scope',
       tag: WS_METHODS.cartographerGetArchitectureScope,
-      staleTimeMs: Number.POSITIVE_INFINITY,
-      idleTtlMs: 5 * 60_000,
-    }),
-    getArchitectureNeighborhood: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: 'environment-data:cartographer:architecture-neighborhood',
-      tag: WS_METHODS.cartographerGetArchitectureNeighborhood,
-      staleTimeMs: Number.POSITIVE_INFINITY,
-      idleTtlMs: 5 * 60_000,
-    }),
-    getArchitecturePathScope: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: 'environment-data:cartographer:architecture-path-scope',
-      tag: WS_METHODS.cartographerGetArchitecturePathScope,
       staleTimeMs: Number.POSITIVE_INFINITY,
       idleTtlMs: 5 * 60_000,
     }),

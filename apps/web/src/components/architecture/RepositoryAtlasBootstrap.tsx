@@ -100,7 +100,7 @@ export function RepositoryAtlasBootstrap(props: RepositoryAtlasBootstrapProps)
         role="alert"
       >
         <div>
-          <p className="text-sm font-medium text-foreground">Repository Atlas unavailable</p>
+          <p className="text-sm font-medium text-foreground">Repository Map unavailable</p>
           <p className="mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">{error}</p>
         </div>
         <Button size="sm" variant="outline" onClick={() => setAttempt((value) => value + 1)}>
@@ -115,7 +115,7 @@ export function RepositoryAtlasBootstrap(props: RepositoryAtlasBootstrapProps)
       className="flex min-h-0 flex-1 items-center justify-center px-6 py-8 text-center text-xs text-muted-foreground"
       role="status"
     >
-      Preparing the latest sealed Repository Atlas…
+      Preparing the latest sealed Repository Map…
     </div>
   )
 }

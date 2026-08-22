@@ -48,6 +48,8 @@ const generationColumns = `
   base_graph_path AS "baseGraphPath",
   head_graph_path AS "headGraphPath",
   impact_path AS "impactPath",
+  impact_projection_path AS "impactProjectionPath",
+  implementation_changed_file_count AS "implementationChangedFileCount",
   artifact_byte_length AS "artifactByteLength",
   error_code AS "errorCode",
   created_at AS "createdAt",
@@ -85,13 +87,15 @@ const makeDiffAnalysisGenerationRepository = Effect.gen(function* ()
             base_graph_path,
             head_graph_path,
             impact_path,
+            impact_projection_path,
+            implementation_changed_file_count,
             artifact_byte_length,
             error_code,
             created_at,
             updated_at,
             last_accessed_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT DO NOTHING
           RETURNING ${generationColumns}
         `,
@@ -115,6 +119,8 @@ const makeDiffAnalysisGenerationRepository = Effect.gen(function* ()
           row.baseGraphPath,
           row.headGraphPath,
           row.impactPath,
+          row.impactProjectionPath,
+          row.implementationChangedFileCount,
           row.artifactByteLength,
           row.errorCode,
           row.createdAt,
@@ -179,6 +185,8 @@ const makeDiffAnalysisGenerationRepository = Effect.gen(function* ()
             base_graph_path = ?,
             head_graph_path = ?,
             impact_path = ?,
+            impact_projection_path = ?,
+            implementation_changed_file_count = ?,
             artifact_byte_length = ?,
             error_code = ?,
             updated_at = CASE
@@ -194,6 +202,8 @@ const makeDiffAnalysisGenerationRepository = Effect.gen(function* ()
           row.baseGraphPath,
           row.headGraphPath,
           row.impactPath,
+          row.impactProjectionPath,
+          row.implementationChangedFileCount,
           row.artifactByteLength,
           row.errorCode,
           row.updatedAt,
@@ -230,6 +240,8 @@ const makeDiffAnalysisGenerationRepository = Effect.gen(function* ()
           base_graph_path = NULL,
           head_graph_path = NULL,
           impact_path = NULL,
+          impact_projection_path = NULL,
+          implementation_changed_file_count = NULL,
           artifact_byte_length = 0,
           error_code = NULL,
           updated_at = CASE

@@ -62,6 +62,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   orchestrateRunExecutionV1: Schema.optionalKey(Schema.Boolean),
   // server can project native architecture impact for an authorized comparison.
   architectureImpact: Schema.optionalKey(Schema.Boolean),
+  // server exposes the rescued shared Map and Impact Diff contract.
 })
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type
 

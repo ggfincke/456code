@@ -2,16 +2,14 @@
 // defines canonical identities for native architecture right-panel resources
 
 import {
+  ArchitectureImpactDescriptor as ArchitectureImpactDescriptorContract,
   ArchitectureRelativePath,
-  ArchitectureScopeSelector as ArchitectureScopeSelectorContract,
-  type ArchitectureComparisonSelector,
   type ArchitectureDiffSource,
   type ArchitectureGenerationId,
   type ArchitectureGraphDigest,
-  type ArchitectureImpactInput,
+  type ArchitectureImpactDescriptor,
   type ArchitectureProjectionSource,
   type ArchitectureProposalSource,
-  type ArchitectureScopeSelector as ArchitectureProjectionScopeSelector,
   type ArchitectureStandingSource,
   type DiffAnalysisId,
   type ProjectId,
@@ -20,25 +18,20 @@ import {
 } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 
-export type ArchitectureImpactTarget = ArchitectureImpactInput
+export type ArchitectureImpactTarget = {
+  readonly kind: 'exact-impact'
+  readonly descriptor: ArchitectureImpactDescriptor
+}
 export type RepositoryAtlasTarget = ArchitectureStandingSource
 export type ArchitectureResourceSource = ArchitectureProjectionSource
 
-export type ArchitectureScopeSelector =
-  | ArchitectureProjectionScopeSelector
-  | { readonly level: 'file-neighborhood'; readonly path: string }
-
-export type ArchitectureScopeTarget =
-  | {
-      readonly source: ArchitectureStandingSource
-      readonly scope: ArchitectureProjectionScopeSelector
-    }
-  | {
-      readonly source: ArchitectureProjectionSource
-      readonly scope: { readonly level: 'file-neighborhood'; readonly path: string }
-    }
-
 export type ArchitectureFileSource = ArchitectureProposalSource | ArchitectureDiffSource
+
+export interface ArchitectureFileOpenTarget
+{
+  readonly source: ArchitectureProjectionSource
+  readonly relativePath: ArchitectureRelativePath
+}
 
 export type ArchitectureImpactSurface = {
   readonly id: `architecture-impact:${string}`
@@ -52,14 +45,7 @@ export type RepositoryAtlasSurface = {
   readonly target: RepositoryAtlasTarget
 }
 
-export type ArchitectureScopeSurface = {
-  readonly id: `architecture-scope:${string}`
-  readonly kind: 'architecture-scope'
-  readonly target: ArchitectureScopeTarget
-}
-
-export type ArchitectureRightPanelSurface =
-  ArchitectureImpactSurface | RepositoryAtlasSurface | ArchitectureScopeSurface
+export type ArchitectureRightPanelSurface = ArchitectureImpactSurface | RepositoryAtlasSurface
 
 type CanonicalIdentity = readonly (string | CanonicalIdentity)[]
 
@@ -90,7 +76,7 @@ function isGraphDigest(value: unknown): value is ArchitectureGraphDigest
 }
 
 const isArchitectureRelativePathContract = Schema.is(ArchitectureRelativePath)
-const isArchitectureScopeSelectorContract = Schema.is(ArchitectureScopeSelectorContract)
+const isArchitectureImpactDescriptorContract = Schema.is(ArchitectureImpactDescriptorContract)
 
 export function isArchitectureRelativePath(value: string): boolean
 {
@@ -101,17 +87,6 @@ export function isArchitectureRelativePath(value: string): boolean
 function encodeCanonicalIdentity(identity: CanonicalIdentity): string
 {
   return encodeURIComponent(JSON.stringify(identity))
-}
-
-function comparisonIdentity(selector: ArchitectureComparisonSelector): CanonicalIdentity
-{
-  switch (selector.kind)
-  {
-    case 'proposal-generation':
-      return [selector.kind, selector.generationId]
-    case 'diff-analysis':
-      return [selector.kind, selector.diffAnalysisId]
-  }
 }
 
 function sourceIdentity(source: ArchitectureResourceSource): CanonicalIdentity
@@ -127,26 +102,13 @@ function sourceIdentity(source: ArchitectureResourceSource): CanonicalIdentity
   }
 }
 
-function scopeIdentity(scope: ArchitectureScopeSelector): CanonicalIdentity
-{
-  switch (scope.level)
-  {
-    case 'systems':
-    case 'blocks':
-    case 'dirs':
-      return [scope.level, scope.id]
-    case 'file-neighborhood':
-      return [scope.level, scope.path]
-  }
-}
-
 export function architectureImpactSurfaceId(
   target: ArchitectureImpactTarget,
 ): ArchitectureImpactSurface['id']
 {
   return `architecture-impact:${encodeCanonicalIdentity([
-    target.threadId,
-    comparisonIdentity(target.comparison),
+    target.kind,
+    target.descriptor.descriptorId,
   ])}`
 }
 
@@ -155,16 +117,6 @@ export function repositoryAtlasSurfaceId(
 ): RepositoryAtlasSurface['id']
 {
   return `repository-atlas:${encodeCanonicalIdentity(sourceIdentity(target))}`
-}
-
-export function architectureScopeSurfaceId(
-  target: ArchitectureScopeTarget,
-): ArchitectureScopeSurface['id']
-{
-  return `architecture-scope:${encodeCanonicalIdentity([
-    sourceIdentity(target.source),
-    scopeIdentity(target.scope),
-  ])}`
 }
 
 export function architectureFileSurfaceId(
@@ -195,45 +147,6 @@ export function createRepositoryAtlasSurface(
     kind: 'repository-atlas',
     target,
   }
-}
-
-export function createArchitectureScopeSurface(
-  target: ArchitectureScopeTarget,
-): ArchitectureScopeSurface
-{
-  return {
-    id: architectureScopeSurfaceId(target),
-    kind: 'architecture-scope',
-    target,
-  }
-}
-
-function decodeComparisonSelector(value: unknown): ArchitectureComparisonSelector | null
-{
-  if (!isRecord(value)) return null
-  if (
-    value.kind === 'proposal-generation' &&
-    hasExactKeys(value, ['kind', 'generationId']) &&
-    isIdentityString(value.generationId)
-  )
-  {
-    return {
-      kind: 'proposal-generation',
-      generationId: value.generationId as ProposalGenerationId,
-    }
-  }
-  if (
-    value.kind === 'diff-analysis' &&
-    hasExactKeys(value, ['kind', 'diffAnalysisId']) &&
-    isIdentityString(value.diffAnalysisId)
-  )
-  {
-    return {
-      kind: 'diff-analysis',
-      diffAnalysisId: value.diffAnalysisId as DiffAnalysisId,
-    }
-  }
-  return null
 }
 
 export function decodeArchitectureResourceSource(
@@ -301,52 +214,24 @@ export function decodeArchitectureFileSource(value: unknown): ArchitectureFileSo
   return source?.kind === 'standing-project-generation' ? null : source
 }
 
-function decodeScopeSelector(value: unknown): ArchitectureScopeSelector | null
-{
-  if (!isRecord(value)) return null
-  if (
-    (value.level === 'systems' || value.level === 'blocks' || value.level === 'dirs') &&
-    hasExactKeys(value, ['level', 'id']) &&
-    isArchitectureScopeSelectorContract(value)
-  )
-  {
-    return value
-  }
-  if (
-    value.level === 'file-neighborhood' &&
-    hasExactKeys(value, ['level', 'path']) &&
-    typeof value.path === 'string' &&
-    isArchitectureRelativePath(value.path)
-  )
-  {
-    return { level: value.level, path: value.path }
-  }
-  return null
-}
-
 function decodeImpactTarget(value: unknown): ArchitectureImpactTarget | null
 {
-  if (!isRecord(value) || !hasExactKeys(value, ['threadId', 'comparison'])) return null
-  if (!isIdentityString(value.threadId)) return null
-  const comparison = decodeComparisonSelector(value.comparison)
-  if (comparison === null) return null
-  return { threadId: value.threadId as ThreadId, comparison }
+  if (
+    isRecord(value) &&
+    value.kind === 'exact-impact' &&
+    hasExactKeys(value, ['kind', 'descriptor']) &&
+    isArchitectureImpactDescriptorContract(value.descriptor)
+  )
+  {
+    return { kind: 'exact-impact', descriptor: value.descriptor }
+  }
+  return null
 }
 
 function decodeRepositoryTarget(value: unknown): RepositoryAtlasTarget | null
 {
   const source = decodeArchitectureResourceSource(value)
   return source?.kind === 'standing-project-generation' ? source : null
-}
-
-function decodeScopeTarget(value: unknown): ArchitectureScopeTarget | null
-{
-  if (!isRecord(value) || !hasExactKeys(value, ['source', 'scope'])) return null
-  const source = decodeArchitectureResourceSource(value.source)
-  const scope = decodeScopeSelector(value.scope)
-  if (source === null || scope === null) return null
-  if (scope.level === 'file-neighborhood') return { source, scope }
-  return source.kind === 'standing-project-generation' ? { source, scope } : null
 }
 
 export function decodeArchitectureRightPanelSurface(
@@ -368,12 +253,6 @@ export function decodeArchitectureRightPanelSurface(
       const target = decodeRepositoryTarget(value.target)
       if (target === null || value.id !== repositoryAtlasSurfaceId(target)) return null
       return createRepositoryAtlasSurface(target)
-    }
-    case 'architecture-scope':
-    {
-      const target = decodeScopeTarget(value.target)
-      if (target === null || value.id !== architectureScopeSurfaceId(target)) return null
-      return createArchitectureScopeSurface(target)
     }
     default:
       return null

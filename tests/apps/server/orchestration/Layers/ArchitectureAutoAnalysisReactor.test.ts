@@ -170,6 +170,7 @@ function generation(state: DiffAnalysisGeneration['state']): DiffAnalysisGenerat
     baseGraphArtifact: null,
     headGraphArtifact: null,
     impactArtifact: null,
+    impactProjectionArtifact: null,
     artifactByteLength: 0,
     errorCode: null,
     createdAt: NOW,

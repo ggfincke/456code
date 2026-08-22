@@ -1,6 +1,7 @@
 // apps/server/src/observability/Metrics.ts
-// expose rpc requests total
+// defines low-cardinality runtime metrics and recording helpers
 
+import type { ArchitectureToolErrorCode } from '@t3tools/contracts'
 import * as Clock from 'effect/Clock'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -126,6 +127,17 @@ export const architectureProjectionReadDuration = Metric.timer(
   },
 )
 
+export const architectureGraphViewsTotal = Metric.counter('t3_architecture_graph_views_total', {
+  description: 'Total bounded Repository Map and Impact Diff graph projections served.',
+})
+
+export const architectureAnalysisAdmissionsTotal = Metric.counter(
+  't3_architecture_analysis_admissions_total',
+  {
+    description: 'Total durable architecture admissions classified by lifecycle outcome.',
+  },
+)
+
 export const architectureAtlasIndexReadDuration = Metric.timer(
   't3_architecture_atlas_index_read_duration',
   {
@@ -192,6 +204,102 @@ export const increment = (
   attributes: Readonly<Record<string, unknown>>,
   amount = 1,
 ) => Metric.update(Metric.withAttributes(metric, metricAttributes(attributes)), amount)
+
+type ArchitectureGraphViewAnchorMetric = 'none' | 'matched' | 'ambiguous' | 'unmatched' | 'stale'
+type ArchitectureGraphViewOmissionMetric = 'none' | 'nodes' | 'edges' | 'evidence' | 'multiple'
+type ArchitectureGraphViewResultMetric =
+  'graph' | 'no-impact' | 'pending' | 'unavailable' | 'failed'
+
+interface ArchitectureGraphViewMetricAttributes extends Readonly<Record<string, string>>
+{
+  readonly authority: 'standing' | 'planned' | 'verified'
+  readonly result: 'graph' | 'no-impact'
+  readonly lens: 'architecture' | 'structure'
+  readonly freshness: 'fresh' | 'dirty' | 'stale' | 'reverted'
+  readonly omission: ArchitectureGraphViewOmissionMetric
+  readonly anchor: ArchitectureGraphViewAnchorMetric
+}
+
+export function architectureGraphViewMetricAttributes(projection: {
+  readonly authority: 'standing' | 'planned' | 'verified'
+  readonly resultState: 'graph' | 'no-impact'
+  readonly lens: 'architecture' | 'structure'
+  readonly freshness: 'fresh' | 'dirty' | 'stale' | 'reverted'
+  readonly totals: {
+    readonly nodes: { readonly omitted: number }
+    readonly edges: { readonly omitted: number }
+    readonly evidence: { readonly omitted: number }
+    readonly changedFiles: { readonly omitted: number }
+  }
+  readonly anchors: ReadonlyArray<{
+    readonly status: 'matched' | 'ambiguous' | 'unmatched' | 'stale'
+  }>
+}): ArchitectureGraphViewMetricAttributes
+{
+  const anchorStatuses = new Set(projection.anchors.map((anchor) => anchor.status))
+  const omissionKinds: ArchitectureGraphViewOmissionMetric[] = [
+    ...(projection.totals.nodes.omitted > 0 ? (['nodes'] as const) : []),
+    ...(projection.totals.edges.omitted > 0 ? (['edges'] as const) : []),
+    ...(projection.totals.evidence.omitted > 0 || projection.totals.changedFiles.omitted > 0
+      ? (['evidence'] as const)
+      : []),
+  ]
+  const omission: ArchitectureGraphViewOmissionMetric =
+    omissionKinds.length === 0
+      ? 'none'
+      : omissionKinds.length === 1
+        ? omissionKinds[0]!
+        : 'multiple'
+  // one bounded view can carry many anchors; record the most actionable state
+  const anchorStatus: ArchitectureGraphViewAnchorMetric = anchorStatuses.has('stale')
+    ? 'stale'
+    : anchorStatuses.has('ambiguous')
+      ? 'ambiguous'
+      : anchorStatuses.has('unmatched')
+        ? 'unmatched'
+        : anchorStatuses.has('matched')
+          ? 'matched'
+          : 'none'
+  return {
+    authority: projection.authority,
+    result: projection.resultState,
+    lens: projection.lens,
+    freshness: projection.freshness,
+    omission,
+    anchor: anchorStatus,
+  }
+}
+
+export function architectureGraphViewErrorMetricAttributes(code: ArchitectureToolErrorCode): {
+  readonly result: Exclude<ArchitectureGraphViewResultMetric, 'graph' | 'no-impact'>
+}
+{
+  if (code === 'context-not-ready') return { result: 'pending' }
+  if (
+    code === 'capability-unavailable' ||
+    code === 'not-found' ||
+    code === 'target-not-found' ||
+    code === 'unsupported'
+  )
+  {
+    return { result: 'unavailable' }
+  }
+  return { result: 'failed' }
+}
+
+interface ArchitectureAdmissionMetricAttributes extends Readonly<Record<string, string>>
+{
+  readonly kind: 'planned-anchor' | 'proposal-verified'
+  readonly outcome: 'queued' | 'reused' | 'complete' | 'retry' | 'terminal-failed' | 'cancelled'
+}
+
+export function architectureAdmissionMetricAttributes(
+  kind: ArchitectureAdmissionMetricAttributes['kind'],
+  outcome: ArchitectureAdmissionMetricAttributes['outcome'],
+): ArchitectureAdmissionMetricAttributes
+{
+  return { kind, outcome }
+}
 
 export interface WithMetricsOptions
 {

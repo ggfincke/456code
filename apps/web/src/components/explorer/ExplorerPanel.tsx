@@ -1,7 +1,7 @@
 // apps/web/src/components/explorer/ExplorerPanel.tsx
 // presents proposal narrative, exact code changes, and a compact architecture summary
 import type {
-  ArchitectureImpactResult,
+  ArchitectureImpactProjectionResult,
   ImplementationAttemptOutcome,
   MdxSafeDocument,
   ScopedThreadRef,
@@ -43,14 +43,9 @@ export type ExplorerArchitecturePresentation =
   | { readonly kind: 'unavailable'; readonly reason: string }
   | { readonly kind: 'error'; readonly message: string; readonly retry?: () => void }
   | {
-      readonly kind: 'impact'
-      readonly result: ArchitectureImpactResult | null
-      readonly error: string | null
-      readonly isPending: boolean
-      readonly hasSettled: boolean
-      readonly notices?: readonly string[]
-      readonly onRetry: () => void
-      readonly onOpen: () => void
+      readonly kind: 'impact-diff'
+      readonly result: ArchitectureImpactProjectionResult
+      readonly onOpen?: () => void
     }
 
 export interface ExplorerImplementationAttemptPresentation
@@ -181,7 +176,7 @@ function ArchitectureSummaryRow(props: {
       <div className="flex min-h-12 items-center gap-3 border-b border-border bg-muted/20 px-4 py-2">
         <Network className="size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-foreground">Architecture impact unavailable</p>
+          <p className="text-xs font-medium text-foreground">Impact Diff unavailable</p>
           <p className="truncate text-[11px] text-muted-foreground" title={message}>
             {message}
           </p>
@@ -200,63 +195,70 @@ function ArchitectureSummaryRow(props: {
     )
   }
 
-  const result = presentation.result
-  const resultStatus =
-    result === null
-      ? (presentation.error ??
-        (presentation.isPending || !presentation.hasSettled
-          ? 'Loading the exact graph diff.'
-          : 'Exact graph diff is not available yet.'))
-      : result.changed
-        ? 'Architecture changed'
-        : 'No architecture changes'
-  const exactTotals =
-    result === null
-      ? null
-      : `+${result.addedNodes.total}/-${result.removedNodes.total} files · +${result.addedEdges.total}/-${result.removedEdges.total} imports`
-  const notice = presentation.notices?.[0]
-  return (
-    <div
-      className="flex min-h-14 items-center gap-3 border-b border-border bg-muted/20 px-4 py-2"
-      data-proposal-architecture-summary
-    >
-      <Network
-        className={cn(
-          'size-4 shrink-0',
-          result?.changed ? 'text-primary' : 'text-muted-foreground',
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <p className="truncate text-xs font-medium text-foreground">{resultStatus}</p>
-          {exactTotals ? (
-            <p className="shrink-0 font-mono text-[11px] text-muted-foreground">{exactTotals}</p>
-          ) : null}
-        </div>
-        <p className="truncate text-[11px] text-muted-foreground" title={notice ?? result?.summary}>
-          {notice ?? result?.summary ?? 'The graph diff opens as a separate native surface.'}
-        </p>
-      </div>
-      {presentation.error !== null ? (
-        <button
-          type="button"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Retry graph diff"
-          onClick={presentation.onRetry}
-        >
-          <RotateCcw className="size-3.5" />
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground hover:bg-accent"
-        onClick={presentation.onOpen}
+  if (presentation.kind === 'impact-diff')
+  {
+    const projection = presentation.result.projection
+    const authority = presentation.result.selectedAuthority === 'verified' ? 'Verified' : 'Planned'
+    const stale = projection.freshness === 'stale'
+    const dirty = projection.freshness === 'dirty'
+    const reverted = projection.freshness === 'reverted'
+    const newer =
+      projection.newerProjectionId !== undefined ||
+      presentation.result.newerDescriptorId !== undefined
+    return (
+      <div
+        className="flex min-h-14 items-center gap-3 border-b border-border bg-muted/20 px-4 py-2"
+        data-proposal-architecture-summary
       >
-        Open graph diff
-        <ArrowRight className="size-3.5" />
-      </button>
-    </div>
-  )
+        <Network
+          className={cn(
+            'size-4 shrink-0',
+            projection.resultState === 'graph' ? 'text-primary' : 'text-muted-foreground',
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <p className="truncate text-xs font-medium text-foreground">
+              {projection.resultState === 'graph'
+                ? `${authority} Impact`
+                : 'No architectural relationship changes'}
+            </p>
+            {projection.resultState === 'graph' ? (
+              <p className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                {projection.totals.nodes.total.toLocaleString()} objects ·{' '}
+                {projection.totals.edges.total.toLocaleString()} relationships
+              </p>
+            ) : null}
+          </div>
+          <p className="truncate text-[11px] text-muted-foreground">
+            {newer
+              ? 'A newer immutable Impact version is available from the opened resource.'
+              : reverted
+                ? 'Reverted plan · exact historical resource remains read-only.'
+                : dirty
+                  ? 'Repository source changed; the exact Impact resource remains pinned.'
+                  : stale
+                    ? `${authority} evidence is stale; the exact resource remains pinned.`
+                    : projection.authority === 'planned'
+                      ? 'Proposal intent, not verified repository evidence.'
+                      : 'Exact analyzer evidence for this proposal revision.'}
+          </p>
+        </div>
+        {projection.resultState === 'graph' && presentation.onOpen ? (
+          <button
+            type="button"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground hover:bg-accent"
+            onClick={presentation.onOpen}
+          >
+            Open Impact Diff
+            <ArrowRight className="size-3.5" />
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+
+  return null
 }
 
 function attemptMessage(attempt: ExplorerImplementationAttemptPresentation): {

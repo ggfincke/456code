@@ -4,12 +4,15 @@ import { scopeThreadRef } from '@t3tools/client-runtime/environment'
 import {
   type ArchitectureGenerationId,
   type ArchitectureGraphDigest,
+  type ArchitectureImpactDescriptor,
   type DiffAnalysisId,
   type EnvironmentId,
   type OrchestratePlanRunId,
   type OrchestrationProposedPlanId,
   type ProjectId,
   type ProposalGenerationId,
+  type ProposalId,
+  type ProposalRevisionId,
   ThreadId,
 } from '@t3tools/contracts'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
@@ -24,7 +27,6 @@ import {
 import {
   architectureFileSurfaceId,
   createArchitectureImpactSurface,
-  createArchitectureScopeSurface,
   createRepositoryAtlasSurface,
 } from '../../../apps/web/src/components/architecture/architectureResourceIdentity'
 
@@ -34,6 +36,46 @@ const repositoryGenerationId = 'a'.repeat(64) as ArchitectureGenerationId
 const repositoryGraphDigest = `sha256:${'b'.repeat(64)}` as ArchitectureGraphDigest
 const baseGraphDigest = `sha256:${'c'.repeat(64)}` as ArchitectureGraphDigest
 const headGraphDigest = `sha256:${'d'.repeat(64)}` as ArchitectureGraphDigest
+
+function impactDescriptor(descriptorId: string): ArchitectureImpactDescriptor
+{
+  const projectionDigest = `sha256:${'e'.repeat(64)}` as ArchitectureGraphDigest
+  return {
+    version: 1,
+    descriptorId,
+    threadId: refA.threadId,
+    projectId: 'project-1' as ProjectId,
+    target: {
+      kind: 'plan',
+      plan: { _tag: 'plan', planId: 'plan:thread-A:turn:impact' },
+      state: 'active',
+    },
+    verifiedCandidate: {
+      authority: 'verified',
+      source: {
+        kind: 'verified-proposal-impact',
+        threadId: refA.threadId,
+        generationId: 'proposal-generation-1' as ProposalGenerationId,
+        proposalId: 'proposal-1' as ProposalId,
+        revisionId: 'proposal-1:1' as ProposalRevisionId,
+        baseTreeOid: '1'.repeat(40),
+        headTreeOid: '2'.repeat(40),
+        baseGraphDigest,
+        headGraphDigest,
+        projectionDigest,
+      },
+      projectionId: `projection-${descriptorId}`,
+      projectionRevision: 1,
+      projectionDigest,
+      resultState: 'graph',
+      freshness: 'fresh',
+      generatedAt: '2026-08-20T12:00:00.000Z',
+      publishedAt: '2026-08-20T12:00:00.000Z',
+    },
+    defaultAuthority: 'verified',
+    resolvedAt: '2026-08-20T12:00:00.000Z',
+  }
+}
 
 beforeEach(() =>
 {
@@ -190,48 +232,28 @@ describe('rightPanelStore', () =>
   it('builds canonical injective architecture resource identities', () =>
   {
     const first = createArchitectureImpactSurface({
-      threadId: ThreadId.make('thread:a|b'),
-      comparison: {
-        kind: 'proposal-generation',
-        generationId: 'generation:c' as ProposalGenerationId,
-      },
+      kind: 'exact-impact',
+      descriptor: impactDescriptor('1'.repeat(64)),
     })
     const same = createArchitectureImpactSurface({
-      threadId: ThreadId.make('thread:a|b'),
-      comparison: {
-        kind: 'proposal-generation',
-        generationId: 'generation:c' as ProposalGenerationId,
-      },
+      kind: 'exact-impact',
+      descriptor: impactDescriptor('1'.repeat(64)),
     })
-    const delimiterCollisionCandidate = createArchitectureImpactSurface({
-      threadId: ThreadId.make('thread:a'),
-      comparison: {
-        kind: 'proposal-generation',
-        generationId: 'b|generation:c' as ProposalGenerationId,
-      },
-    })
-    const otherSelectorArm = createArchitectureImpactSurface({
-      threadId: ThreadId.make('thread:a|b'),
-      comparison: {
-        kind: 'diff-analysis',
-        diffAnalysisId: 'generation:c' as DiffAnalysisId,
-      },
+    const other = createArchitectureImpactSurface({
+      kind: 'exact-impact',
+      descriptor: impactDescriptor('2'.repeat(64)),
     })
 
     expect(first.id).toBe(same.id)
-    expect(first.id).not.toBe(delimiterCollisionCandidate.id)
-    expect(first.id).not.toBe(otherSelectorArm.id)
+    expect(first.id).not.toBe(other.id)
     expect(first.id).toContain('%5B')
   })
 
-  it('migrates exact architecture resources and drops spoofed identities', () =>
+  it('migrates current architecture resources and drops retired architecture resources', () =>
   {
     const impact = createArchitectureImpactSurface({
-      threadId: refA.threadId,
-      comparison: {
-        kind: 'proposal-generation',
-        generationId: 'proposal-generation-1' as ProposalGenerationId,
-      },
+      kind: 'exact-impact',
+      descriptor: impactDescriptor('3'.repeat(64)),
     })
     const repository = createRepositoryAtlasSurface({
       kind: 'standing-project-generation',
@@ -240,16 +262,23 @@ describe('rightPanelStore', () =>
       side: 'analyzed',
       graphDigest: repositoryGraphDigest,
     })
-    const scope = createArchitectureScopeSurface({
-      source: {
-        kind: 'standing-project-generation',
-        projectId: 'project-1' as ProjectId,
-        generationId: repositoryGenerationId,
-        side: 'analyzed',
-        graphDigest: repositoryGraphDigest,
+    const retiredImpact = {
+      id: 'architecture-impact:retired-comparison',
+      kind: 'architecture-impact',
+      target: {
+        threadId: refA.threadId,
+        comparison: {
+          kind: 'proposal-generation',
+          generationId: 'proposal-generation-retired',
+        },
       },
+    }
+    const retiredScope = {
+      id: 'architecture-scope:retired',
+      kind: 'architecture-scope',
+      source: repository.target,
       scope: { level: 'dirs', id: 'dirs:apps/server/src' },
-    })
+    }
     const retiredAdvanced = {
       id: 'advanced-atlas:retired',
       kind: 'advanced-atlas',
@@ -262,15 +291,15 @@ describe('rightPanelStore', () =>
           byThreadKey: {
             'env-1:thread-A': {
               isOpen: true,
-              activeSurfaceId: scope.id,
+              activeSurfaceId: repository.id,
               surfaces: [
                 impact,
                 repository,
-                scope,
+                retiredImpact,
+                retiredScope,
                 retiredAdvanced,
                 impact,
                 { ...repository, id: `${repository.id}:spoofed` },
-                { ...scope, extra: 'spoofed' },
               ],
             },
           },
@@ -281,8 +310,8 @@ describe('rightPanelStore', () =>
       byThreadKey: {
         'env-1:thread-A': {
           isOpen: true,
-          activeSurfaceId: scope.id,
-          surfaces: [impact, repository, scope],
+          activeSurfaceId: repository.id,
+          surfaces: [impact, repository],
         },
       },
     })
@@ -304,12 +333,6 @@ describe('rightPanelStore', () =>
       'src/tab\tname.ts',
       'src/newline\nname.ts',
     ]
-    const scopes = validPaths.map((path) =>
-      createArchitectureScopeSurface({
-        source,
-        scope: { level: 'file-neighborhood', path },
-      }),
-    )
     const files = validPaths.map((relativePath) => ({
       id: architectureFileSurfaceId(source, relativePath),
       kind: 'file' as const,
@@ -319,10 +342,6 @@ describe('rightPanelStore', () =>
       source,
     }))
     const nulPath = 'src/nul\u0000name.ts'
-    const nulScope = createArchitectureScopeSurface({
-      source,
-      scope: { level: 'file-neighborhood', path: nulPath },
-    })
     const nulFile = {
       id: architectureFileSurfaceId(source, nulPath),
       kind: 'file' as const,
@@ -338,8 +357,8 @@ describe('rightPanelStore', () =>
           byThreadKey: {
             'env-1:thread-A': {
               isOpen: true,
-              activeSurfaceId: scopes[0]?.id,
-              surfaces: [...scopes, ...files, nulScope, nulFile],
+              activeSurfaceId: files[0]?.id,
+              surfaces: [...files, nulFile],
             },
           },
         },
@@ -349,45 +368,8 @@ describe('rightPanelStore', () =>
       byThreadKey: {
         'env-1:thread-A': {
           isOpen: true,
-          activeSurfaceId: scopes[0]?.id,
-          surfaces: [...scopes, ...files],
-        },
-      },
-    })
-  })
-
-  it('preserves contract-valid whitespace-edged architecture scope ids', () =>
-  {
-    const scope = createArchitectureScopeSurface({
-      source: {
-        kind: 'standing-project-generation',
-        projectId: 'project-whitespace-scope' as ProjectId,
-        generationId: repositoryGenerationId,
-        side: 'analyzed',
-        graphDigest: repositoryGraphDigest,
-      },
-      scope: { level: 'systems', id: 'systems: API ' },
-    })
-
-    expect(
-      migratePersistedRightPanelState(
-        {
-          byThreadKey: {
-            'env-1:thread-A': {
-              isOpen: true,
-              activeSurfaceId: scope.id,
-              surfaces: [scope],
-            },
-          },
-        },
-        12,
-      ),
-    ).toEqual({
-      byThreadKey: {
-        'env-1:thread-A': {
-          isOpen: true,
-          activeSurfaceId: scope.id,
-          surfaces: [scope],
+          activeSurfaceId: files[0]?.id,
+          surfaces: files,
         },
       },
     })
@@ -396,33 +378,19 @@ describe('rightPanelStore', () =>
   it('deduplicates architecture resources and inserts explicit children adjacently', () =>
   {
     const impact = createArchitectureImpactSurface({
-      threadId: refA.threadId,
-      comparison: {
-        kind: 'proposal-generation',
-        generationId: 'proposal-generation-1' as ProposalGenerationId,
-      },
-    })
-    const scope = createArchitectureScopeSurface({
-      source: {
-        kind: 'proposal-generation',
-        threadId: refA.threadId,
-        generationId: 'proposal-generation-1' as ProposalGenerationId,
-        side: 'proposed',
-        graphDigest: headGraphDigest,
-      },
-      scope: { level: 'file-neighborhood', path: 'apps/web/src/App.tsx' },
+      kind: 'exact-impact',
+      descriptor: impactDescriptor('4'.repeat(64)),
     })
 
     useRightPanelStore.getState().open(refA, 'plan')
     useRightPanelStore.getState().open(refA, 'diff')
     useRightPanelStore.getState().openArchitectureSurface(refA, impact, 'plan')
-    useRightPanelStore.getState().openArchitectureSurface(refA, scope, impact.id)
     useRightPanelStore.getState().openArchitectureSurface(refA, impact, 'diff')
 
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: true,
       activeSurfaceId: impact.id,
-      surfaces: [{ id: 'plan', kind: 'plan' }, impact, scope, { id: 'diff', kind: 'diff' }],
+      surfaces: [{ id: 'plan', kind: 'plan' }, impact, { id: 'diff', kind: 'diff' }],
     })
   })
 
@@ -435,10 +403,6 @@ describe('rightPanelStore', () =>
       side: 'analyzed',
       graphDigest: repositoryGraphDigest,
     })
-    const scope = createArchitectureScopeSurface({
-      source: repository.target,
-      scope: { level: 'blocks', id: 'server-runtime' },
-    })
     const proposalSource = {
       kind: 'proposal-generation' as const,
       threadId: refA.threadId,
@@ -449,15 +413,16 @@ describe('rightPanelStore', () =>
 
     useRightPanelStore.getState().open(refA, 'plan')
     useRightPanelStore.getState().openArchitectureSurface(refA, repository, 'plan')
-    useRightPanelStore.getState().openArchitectureSurface(refA, scope, repository.id)
     useRightPanelStore.getState().open(refA, 'diff')
-    useRightPanelStore.getState().openFile(refA, 'apps/server/src/server.ts', undefined, scope.id)
     useRightPanelStore
       .getState()
-      .openArchitectureFile(refA, proposalSource, 'apps/web/src/App.tsx', 8, scope.id)
+      .openFile(refA, 'apps/server/src/server.ts', undefined, repository.id)
     useRightPanelStore
       .getState()
-      .openArchitectureFile(refA, proposalSource, 'apps/web/src/App.tsx', 21, scope.id)
+      .openArchitectureFile(refA, proposalSource, 'apps/web/src/App.tsx', 8, repository.id)
+    useRightPanelStore
+      .getState()
+      .openArchitectureFile(refA, proposalSource, 'apps/web/src/App.tsx', 21, repository.id)
 
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       isOpen: true,
@@ -465,7 +430,6 @@ describe('rightPanelStore', () =>
       surfaces: [
         { id: 'plan', kind: 'plan' },
         repository,
-        scope,
         {
           id: architectureFileSurfaceId(proposalSource, 'apps/web/src/App.tsx'),
           kind: 'file',

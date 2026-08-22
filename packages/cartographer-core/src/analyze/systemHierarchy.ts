@@ -155,7 +155,7 @@ function inferredHierarchy(
   {
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
-  const ranked = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  const ranked = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
   if (ranked.length === 0)
   {
     return {

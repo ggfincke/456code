@@ -227,10 +227,10 @@ function ProjectArchitectureButton(props: {
         }
       >
         <BlocksIcon />
-        Repository Atlas
+        Repository Map
       </TooltipTrigger>
       <TooltipPopup side="top">
-        {disabledReason ?? `Open the Repository Atlas for ${props.member.title}.`}
+        {disabledReason ?? `Open the Repository Map for ${props.member.title}.`}
       </TooltipPopup>
     </Tooltip>
   )
@@ -3384,8 +3384,10 @@ export default function SidebarV2()
                       activeEnvironmentId={activeArchitectureEnvironmentId}
                       activeProjectId={activeArchitectureProjectId}
                       architectureCapability={
-                        serverConfigs.get(member.environmentId)?.environment.capabilities
-                          .architectureImpact ?? null
+                        serverConfigs.get(member.environmentId) === undefined
+                          ? null
+                          : serverConfigs.get(member.environmentId)?.environment.capabilities
+                              .architectureImpact === true
                       }
                       onOpen={handleOpenProjectArchitecture}
                     />

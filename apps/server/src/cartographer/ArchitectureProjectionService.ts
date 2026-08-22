@@ -9,38 +9,29 @@ import * as NodeFSP from 'node:fs/promises'
 import * as NodePath from 'node:path'
 
 import {
-  ARCHITECTURE_PROJECTION_EDGE_LIMIT,
-  ARCHITECTURE_PROJECTION_FILE_LIMIT,
-  ARCHITECTURE_PROJECTION_UNIT_LIMIT,
   ARCHITECTURE_SOURCE_MAX_BYTES,
   ArchitectureToolError,
+  type ArchitectureGraphProjection,
+  type ArchitectureGraphProjectionBreadcrumb,
+  type ArchitectureGraphProjectionNode,
   type ArchitectureLimit,
-  type ArchitectureProjectionCount,
-  type ArchitectureProjectionEdge,
-  type ArchitectureProjectionSource,
-  type ArchitectureProjectionUnit,
   type ArchitectureRecoveryAction,
   type ArchitectureStandingSource,
+  type ProjectAtlasStatus,
   type ArchitectureToolErrorCode,
-  type CartographerGetArchitectureNeighborhoodInput,
-  type CartographerGetArchitectureNeighborhoodResult,
-  type CartographerGetArchitecturePathScopeInput,
-  type CartographerGetArchitecturePathScopeResult,
   type CartographerGetArchitectureScopeInput,
-  type CartographerGetArchitectureScopeResult,
   type CartographerGetArchitectureSourceInput,
   type CartographerGetArchitectureSourceResult,
   type CartographerGetRepositoryMapInput,
-  type CartographerGetRepositoryMapResult,
   type OrchestrationProjectShell,
   type OrchestrationThread,
 } from '@t3tools/contracts'
 import {
-  queryAtlasFiles,
-  queryAtlasIndex,
-  type AtlasIndexEdge,
   type AtlasIndexFile,
+  type AtlasIndexFileCrosswalk,
+  type AtlasIndexStructureDirectory,
   type AtlasIndexUnit,
+  type AtlasIndexV6,
 } from '@t3tools/cartographer-core/server'
 import * as Context from 'effect/Context'
 import * as Data from 'effect/Data'
@@ -53,13 +44,17 @@ import * as ServerEnvironment from '../environment/ServerEnvironment.ts'
 import * as ProjectionSnapshotQuery from '../orchestration/Services/ProjectionSnapshotQuery.ts'
 import {
   architectureAtlasIndexReadDuration,
+  architectureGraphViewErrorMetricAttributes,
+  architectureGraphViewMetricAttributes,
+  architectureGraphViewsTotal,
   architectureProjectionReadDuration,
+  increment,
   withMetrics,
 } from '../observability/Metrics.ts'
 import * as ProposalGenerationService from '../proposal/ProposalGenerationService.ts'
-import * as ArchitectureQueryService from './ArchitectureQueryService.ts'
+import type * as ArchitectureQueryService from './ArchitectureQueryService.ts'
 import * as AtlasRebuildService from './AtlasRebuildService.ts'
-import { resolveArchitecturePathScope } from './architecturePathResolver.ts'
+import { resolveStandingCrossLensAnchors } from './architectureStandingAnchors.ts'
 import * as DiffAnalysisService from './DiffAnalysisService.ts'
 import * as ProjectAtlasStatusBroadcaster from './ProjectAtlasStatusBroadcaster.ts'
 
@@ -81,19 +76,11 @@ export interface ArchitectureProjectionServiceShape
   readonly repositoryMap: (
     authority: ArchitectureQueryService.ArchitectureQueryAuthority,
     input: CartographerGetRepositoryMapInput,
-  ) => Effect.Effect<CartographerGetRepositoryMapResult, ArchitectureToolError>
+  ) => Effect.Effect<ArchitectureGraphProjection, ArchitectureToolError>
   readonly architectureScope: (
     authority: ArchitectureQueryService.ArchitectureQueryAuthority,
     input: CartographerGetArchitectureScopeInput,
-  ) => Effect.Effect<CartographerGetArchitectureScopeResult, ArchitectureToolError>
-  readonly architectureNeighborhood: (
-    authority: ArchitectureQueryService.ArchitectureQueryAuthority,
-    input: CartographerGetArchitectureNeighborhoodInput,
-  ) => Effect.Effect<CartographerGetArchitectureNeighborhoodResult, ArchitectureToolError>
-  readonly architecturePathScope: (
-    authority: ArchitectureQueryService.ArchitectureQueryAuthority,
-    input: CartographerGetArchitecturePathScopeInput,
-  ) => Effect.Effect<CartographerGetArchitecturePathScopeResult, ArchitectureToolError>
+  ) => Effect.Effect<ArchitectureGraphProjection, ArchitectureToolError>
   readonly architectureSource: (
     authority: ArchitectureQueryService.ArchitectureQueryAuthority,
     input: CartographerGetArchitectureSourceInput,
@@ -136,54 +123,194 @@ function sourceIdentity(
   }
 }
 
-function projectionCount(
-  total: number,
-  indexed: number,
-  returned: number,
-): ArchitectureProjectionCount
+function standingTint(id: string): string
 {
-  return {
-    total,
-    indexed,
-    returned,
-    omitted: total - indexed,
-  }
+  return NodeCrypto.createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 12)
 }
 
-function projectionUnit(unit: AtlasIndexUnit): ArchitectureProjectionUnit
+function standingEdgeId(from: string, to: string): string
+{
+  const hash = NodeCrypto.createHash('sha256')
+  for (const value of [from, to, 'imports'])
+  {
+    hash.update(value)
+    hash.update('\0')
+  }
+  return `edge:${hash.digest('hex')}`
+}
+
+function standingUnitNode(unit: AtlasIndexUnit): ArchitectureGraphProjectionNode
 {
   return {
     id: unit.id,
-    key: unit.key,
-    level: unit.level,
     label: unit.label,
-    ...(unit.description === undefined ? {} : { description: unit.description }),
-    ...(unit.parent === undefined ? {} : { parent: unit.parent }),
-    ...(unit.source === undefined ? {} : { source: unit.source }),
+    semanticLevel: unit.level,
+    ...(unit.parent === undefined ? {} : { parentId: unit.parent }),
+    ...(unit.level === 'dirs' && unit.key !== '.' ? { relativePath: unit.key as never } : {}),
+    position: unit.position,
+    tintKey: standingTint(unit.id),
+    state: 'context',
+    stateLabel: 'Context',
+    badge: 'context',
+    stroke: 'muted',
     fileCount: unit.fileCount,
     inbound: unit.inbound,
     outbound: unit.outbound,
-    position: unit.position,
+    affectedConsumerCount: 0,
+    evidenceRefs: [],
   }
 }
 
-function projectionEdge(edge: AtlasIndexEdge): ArchitectureProjectionEdge
+function standingDirectoryNode(
+  directory: AtlasIndexStructureDirectory,
+): ArchitectureGraphProjectionNode
 {
-  return { from: edge.from, to: edge.to, weight: edge.weight }
+  return {
+    id: directory.id,
+    label: directory.label,
+    semanticLevel: 'dirs',
+    ...(directory.parentId === undefined ? {} : { parentId: directory.parentId }),
+    ...(directory.key === '.' ? {} : { relativePath: directory.key as never }),
+    position: directory.position,
+    tintKey: standingTint(directory.id),
+    state: 'context',
+    stateLabel: 'Context',
+    badge: 'context',
+    stroke: 'muted',
+    fileCount: directory.descendantFileCount,
+    inbound: directory.inbound,
+    outbound: directory.outbound,
+    affectedConsumerCount: 0,
+    evidenceRefs: [],
+  }
 }
 
-function projectionFile(file: AtlasIndexFile)
+function standingFileNode(
+  file: AtlasIndexFile,
+  membership: AtlasIndexFileCrosswalk,
+  parentId = membership.directoryId,
+): ArchitectureGraphProjectionNode
 {
   return {
     id: file.id,
     label: file.label,
-    ...(file.description === undefined ? {} : { description: file.description }),
-    ...(file.system === undefined ? {} : { system: file.system }),
-    ...(file.block === undefined ? {} : { block: file.block }),
-    ...(file.dir === undefined ? {} : { dir: file.dir }),
-    fanIn: file.fanIn,
-    fanOut: file.fanOut,
+    semanticLevel: 'files',
+    parentId,
+    relativePath: file.id as never,
+    position: membership.position,
+    tintKey: standingTint(file.id),
+    state: 'context',
+    stateLabel: 'Context',
+    badge: 'context',
+    stroke: 'muted',
+    fileCount: 1,
+    inbound: file.fanIn,
+    outbound: file.fanOut,
+    affectedConsumerCount: 0,
+    evidenceRefs: [],
   }
+}
+
+function standingProjection(input: {
+  index: AtlasIndexV6
+  source: ArchitectureStandingSource
+  builtAt: string
+  generatedAt: string
+  freshness: ArchitectureGraphProjection['freshness']
+  lens: 'architecture' | 'structure'
+  semanticLevel: ArchitectureGraphProjection['semanticLevel']
+  scopeKey: string
+  breadcrumbs: ArchitectureGraphProjectionBreadcrumb[]
+  nodes: ArchitectureGraphProjectionNode[]
+  totalNodes: number
+  edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly weight: number }>
+  totalEdges: number
+}): ArchitectureGraphProjection
+{
+  const nodes = input.nodes.slice(0, 60)
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  const edges = input.edges
+    .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
+    .slice(0, 120)
+    .map((edge) => ({
+      id: standingEdgeId(edge.from, edge.to),
+      from: edge.from,
+      to: edge.to,
+      relationshipKind: 'imports',
+      weight: edge.weight,
+      state: 'context' as const,
+      stateLabel: 'Context' as const,
+      stroke: 'muted' as const,
+      evidenceRefs: [],
+    }))
+  const projection: ArchitectureGraphProjection = {
+    projectionVersion: 1,
+    projectionId: `standing:${input.source.generationId}:${input.lens}:${input.scopeKey}`,
+    projectionRevision: 1,
+    kind: 'repository-map',
+    authority: 'standing',
+    resultState: 'graph',
+    freshness: input.freshness,
+    generatedAt: input.generatedAt,
+    publishedAt: input.builtAt,
+    source: input.source,
+    repository: {
+      name: input.index.repo.name,
+      scope: input.index.repo.scope,
+      ...(input.index.repo.gitRef === undefined ? {} : { gitRef: input.index.repo.gitRef }),
+    },
+    lens: input.lens,
+    semanticLevel: input.semanticLevel,
+    breadcrumbs: input.breadcrumbs,
+    layoutVersion: 'repository-map-v2',
+    totals: {
+      nodes: {
+        total: input.totalNodes,
+        returned: nodes.length,
+        omitted: input.totalNodes - nodes.length,
+      },
+      edges: {
+        total: input.totalEdges,
+        returned: edges.length,
+        omitted: input.totalEdges - edges.length,
+      },
+      evidence: { total: 0, returned: 0, omitted: 0 },
+      changedFiles: { total: 0, returned: 0, omitted: 0 },
+    },
+    nodes,
+    edges,
+    evidence: [],
+    anchors: [],
+  }
+  return {
+    ...projection,
+    anchors: resolveStandingCrossLensAnchors({
+      index: input.index,
+      source: input.source,
+      lens: input.lens,
+      projection,
+      stale: input.freshness === 'stale',
+    }),
+  }
+}
+
+function standingFreshness(
+  source: ArchitectureStandingSource,
+  status: ProjectAtlasStatus,
+): ArchitectureGraphProjection['freshness']
+{
+  if (
+    status.source === null ||
+    status.source.projectId !== source.projectId ||
+    status.source.kind !== source.kind ||
+    status.source.side !== source.side ||
+    status.source.generationId !== source.generationId ||
+    status.source.graphDigest !== source.graphDigest
+  )
+  {
+    return 'stale'
+  }
+  return status.freshness.dirty ? 'dirty' : 'fresh'
 }
 
 function runGitBytes(
@@ -383,7 +510,6 @@ export const make = Effect.gen(function* ()
   const projectStatus = yield* ProjectAtlasStatusBroadcaster.ProjectAtlasStatusBroadcaster
   const proposalGenerations = yield* ProposalGenerationService.ProposalGenerationService
   const diffAnalyses = yield* DiffAnalysisService.DiffAnalysisService
-  const architectureQueries = yield* ArchitectureQueryService.ArchitectureQueryService
 
   const resolveAuthority = Effect.fn('ArchitectureProjectionService.resolveAuthority')(function* (
     authority: ArchitectureQueryService.ArchitectureQueryAuthority,
@@ -460,7 +586,7 @@ export const make = Effect.gen(function* ()
         return yield* architectureError(
           operation,
           'context-not-ready',
-          'The requested sealed Repository Atlas generation is not available.',
+          'The requested sealed Repository Map generation is not available.',
           'build_project_atlas',
         )
       }
@@ -469,410 +595,520 @@ export const make = Effect.gen(function* ()
         return yield* architectureError(
           operation,
           'identity-mismatch',
-          'The requested Repository Atlas graph digest does not match its generation.',
+          'The requested Repository Map graph digest does not match its generation.',
         )
       }
       return target
     },
   )
 
+  const repositoryMapProjection = Effect.fn(
+    'ArchitectureProjectionService.repositoryMapProjection',
+  )(function* (
+    authority: ArchitectureQueryService.ArchitectureQueryAuthority,
+    input: CartographerGetRepositoryMapInput,
+  )
+  {
+    const operation = 'architecture_repository_map'
+    const authorized = yield* resolveAuthority(authority, operation)
+    const target = yield* retainStandingIndex(
+      authorized,
+      input.projectId,
+      input.generationId,
+      undefined,
+      operation,
+    )
+    const source = sourceIdentity(input.projectId, target.generation, target.graphDigest)
+    const status = yield* projectStatus.getStatus(input.projectId)
+    const index = target.index
+    if (input.focusIds !== undefined && input.focusIds.length > 0)
+    {
+      const memberships = new Map(
+        index.crosswalks.files.map((membership) => [membership.fileId, membership]),
+      )
+      const nodes = input.focusIds.flatMap((id) =>
+      {
+        if (input.lens === 'architecture')
+        {
+          const unit = [...index.units.systems, ...index.units.blocks].find(
+            (candidate) => candidate.id === id,
+          )
+          if (unit !== undefined) return [standingUnitNode(unit)]
+          const file = index.files.find((candidate) => candidate.id === id)
+          const membership = memberships.get(id)
+          return file === undefined || membership === undefined
+            ? []
+            : [standingFileNode(file, membership, membership.blockId)]
+        }
+        const directory = index.structure.directories.find((candidate) => candidate.id === id)
+        if (directory !== undefined) return [standingDirectoryNode(directory)]
+        const file = index.files.find((candidate) => candidate.id === id)
+        const membership = memberships.get(id)
+        return file === undefined || membership === undefined
+          ? []
+          : [standingFileNode(file, membership)]
+      })
+      if (nodes.length !== input.focusIds.length)
+      {
+        return yield* architectureError(
+          operation,
+          'target-not-found',
+          'One or more exact Repository Map anchor candidates are absent from this generation.',
+        )
+      }
+      const nodeIds = new Set(nodes.map((node) => node.id))
+      const level = nodes[0]!.semanticLevel
+      const sourceEdges =
+        input.lens === 'structure'
+          ? level === 'files'
+            ? index.structure.fileEdges
+            : index.structure.edges
+          : level === 'systems' || level === 'blocks'
+            ? index.edges[level]
+            : index.structure.fileEdges
+      const edges = sourceEdges.filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
+      return standingProjection({
+        index,
+        source,
+        builtAt: target.builtAt,
+        generatedAt: index.sourceGeneratedAt,
+        freshness: standingFreshness(source, status),
+        lens: input.lens,
+        semanticLevel: level,
+        scopeKey: `focus:${standingTint(input.focusIds.join('\0'))}`,
+        breadcrumbs: [],
+        nodes,
+        totalNodes: nodes.length,
+        edges,
+        totalEdges: edges.length,
+      })
+    }
+    if (input.lens === 'architecture')
+    {
+      const level: 'systems' | 'blocks' = index.counts.systems > 0 ? 'systems' : 'blocks'
+      const exactTotal = level === 'systems' ? index.counts.systems : index.counts.blocks
+      return standingProjection({
+        index,
+        source,
+        builtAt: target.builtAt,
+        generatedAt: index.sourceGeneratedAt,
+        freshness: standingFreshness(source, status),
+        lens: 'architecture',
+        semanticLevel: level,
+        scopeKey: 'root',
+        breadcrumbs: [],
+        nodes: index.units[level].map(standingUnitNode),
+        totalNodes: exactTotal,
+        edges: index.edges[level],
+        totalEdges: index.edgeCounts[level].total,
+      })
+    }
+    const root = index.structure.directories.find(
+      (directory) => directory.id === index.structure.rootId,
+    )!
+    const directoryIds = new Set(root.childDirectoryIds)
+    const fileIds = new Set(root.directFileIds)
+    const membershipByFile = new Map(
+      index.crosswalks.files.map((membership) => [membership.fileId, membership]),
+    )
+    const nodes = [
+      ...index.structure.directories
+        .filter((directory) => directoryIds.has(directory.id))
+        .map(standingDirectoryNode),
+      ...index.files
+        .filter((file) => fileIds.has(file.id))
+        .map((file) => standingFileNode(file, membershipByFile.get(file.id)!)),
+    ]
+    const edges = index.structure.edges.filter((edge) => edge.parent === root.id)
+    return standingProjection({
+      index,
+      source,
+      builtAt: target.builtAt,
+      generatedAt: index.sourceGeneratedAt,
+      freshness: standingFreshness(source, status),
+      lens: 'structure',
+      semanticLevel: root.childDirectoryIds.length > 0 ? 'dirs' : 'files',
+      scopeKey: root.id,
+      breadcrumbs: [],
+      nodes,
+      totalNodes: root.childDirectoryIds.length + root.directFileIds.length,
+      edges,
+      totalEdges: edges.length,
+    })
+  })
+
+  const architectureBreadcrumbs = (
+    index: AtlasIndexV6,
+    scopeId: string,
+  ): ArchitectureGraphProjectionBreadcrumb[] =>
+  {
+    const system = index.units.systems.find((unit) => unit.id === scopeId)
+    if (system !== undefined) return [{ id: system.id, label: system.label, level: 'systems' }]
+    const block = index.units.blocks.find((unit) => unit.id === scopeId)
+    if (block !== undefined)
+    {
+      const parent = index.units.systems.find((unit) => unit.id === block.parent)
+      return [
+        ...(parent === undefined
+          ? []
+          : [{ id: parent.id, label: parent.label, level: 'systems' as const }]),
+        { id: block.id, label: block.label, level: 'blocks' },
+      ]
+    }
+    const file = index.files.find((item) => item.id === scopeId)
+    if (file === undefined) return []
+    const membership = index.crosswalks.files.find((item) => item.fileId === file.id)
+    const blockUnit = index.units.blocks.find((unit) => unit.id === membership?.blockId)
+    const systemUnit = index.units.systems.find((unit) => unit.id === membership?.systemId)
+    return [
+      ...(systemUnit === undefined
+        ? []
+        : [{ id: systemUnit.id, label: systemUnit.label, level: 'systems' as const }]),
+      ...(blockUnit === undefined
+        ? []
+        : [{ id: blockUnit.id, label: blockUnit.label, level: 'blocks' as const }]),
+      { id: file.id, label: file.label, level: 'files' },
+    ]
+  }
+
+  const structureBreadcrumbs = (
+    index: AtlasIndexV6,
+    scopeId: string,
+  ): ArchitectureGraphProjectionBreadcrumb[] =>
+  {
+    const file = index.files.find((item) => item.id === scopeId)
+    let directoryId =
+      file === undefined
+        ? scopeId
+        : index.crosswalks.files.find((item) => item.fileId === file.id)?.directoryId
+    const directories: ArchitectureGraphProjectionBreadcrumb[] = []
+    while (directoryId !== undefined)
+    {
+      const directory = index.structure.directories.find((item) => item.id === directoryId)
+      if (directory === undefined) break
+      directories.unshift({ id: directory.id, label: directory.label, level: 'dirs' })
+      directoryId = directory.parentId
+    }
+    return [
+      ...directories,
+      ...(file === undefined ? [] : [{ id: file.id, label: file.label, level: 'files' as const }]),
+    ]
+  }
+
+  const architectureScopeProjection = Effect.fn(
+    'ArchitectureProjectionService.architectureScopeProjection',
+  )(function* (
+    authority: ArchitectureQueryService.ArchitectureQueryAuthority,
+    input: CartographerGetArchitectureScopeInput,
+  )
+  {
+    const operation = 'architecture_scope'
+    const authorized = yield* resolveAuthority(authority, operation)
+    const target = yield* retainStandingIndex(
+      authorized,
+      input.source.projectId,
+      input.source.generationId,
+      input.source.graphDigest,
+      operation,
+    )
+    const index = target.index
+    const status = yield* projectStatus.getStatus(input.source.projectId)
+    const membershipByFile = new Map(
+      index.crosswalks.files.map((membership) => [membership.fileId, membership]),
+    )
+    if (input.lens === 'architecture')
+    {
+      if (input.scope.level === 'systems')
+      {
+        const parent = index.units.systems.find((unit) => unit.id === input.scope.id)
+        if (parent === undefined)
+        {
+          return yield* architectureError(
+            operation,
+            'target-not-found',
+            'The system was not found.',
+          )
+        }
+        const units = index.units.blocks.filter((unit) => unit.parent === parent.id)
+        const ids = new Set(units.map((unit) => unit.id))
+        const edges = index.edges.blocks.filter((edge) => ids.has(edge.from) && ids.has(edge.to))
+        const summary = index.scopes.find(
+          (scope) => scope.parent === parent.id && scope.childLevel === 'blocks',
+        )
+        return standingProjection({
+          index,
+          source: input.source,
+          builtAt: target.builtAt,
+          generatedAt: index.sourceGeneratedAt,
+          freshness: standingFreshness(input.source, status),
+          lens: 'architecture',
+          semanticLevel: 'blocks',
+          scopeKey: parent.id,
+          breadcrumbs: architectureBreadcrumbs(index, parent.id),
+          nodes: units.map(standingUnitNode),
+          totalNodes: summary?.children.total ?? units.length,
+          edges,
+          totalEdges: summary?.edges.total ?? edges.length,
+        })
+      }
+      if (input.scope.level === 'blocks')
+      {
+        const parent = index.units.blocks.find((unit) => unit.id === input.scope.id)
+        if (parent === undefined)
+        {
+          return yield* architectureError(operation, 'target-not-found', 'The block was not found.')
+        }
+        const memberships = index.crosswalks.files.filter(
+          (membership) => membership.blockId === parent.id,
+        )
+        const ids = new Set(memberships.map((membership) => membership.fileId))
+        const files = index.files.filter((file) => ids.has(file.id))
+        const edges = index.structure.fileEdges.filter(
+          (edge) => ids.has(edge.from) && ids.has(edge.to),
+        )
+        return standingProjection({
+          index,
+          source: input.source,
+          builtAt: target.builtAt,
+          generatedAt: index.sourceGeneratedAt,
+          freshness: standingFreshness(input.source, status),
+          lens: 'architecture',
+          semanticLevel: 'files',
+          scopeKey: parent.id,
+          breadcrumbs: architectureBreadcrumbs(index, parent.id),
+          nodes: files.map((file) =>
+            standingFileNode(file, membershipByFile.get(file.id)!, parent.id),
+          ),
+          totalNodes: files.length,
+          edges,
+          totalEdges: edges.length,
+        })
+      }
+      if (input.scope.level === 'files')
+      {
+        const file = index.files.find((item) => item.id === input.scope.id)
+        const membership = membershipByFile.get(input.scope.id)
+        if (file === undefined || membership === undefined)
+        {
+          return yield* architectureError(operation, 'target-not-found', 'The file was not found.')
+        }
+        return standingProjection({
+          index,
+          source: input.source,
+          builtAt: target.builtAt,
+          generatedAt: index.sourceGeneratedAt,
+          freshness: standingFreshness(input.source, status),
+          lens: 'architecture',
+          semanticLevel: 'files',
+          scopeKey: file.id,
+          breadcrumbs: architectureBreadcrumbs(index, file.id),
+          nodes: [standingFileNode(file, membership, membership.blockId)],
+          totalNodes: 1,
+          edges: [],
+          totalEdges: 0,
+        })
+      }
+      return yield* architectureError(
+        operation,
+        'identity-mismatch',
+        'The Architecture lens accepts only systems, blocks, or files.',
+      )
+    }
+    if (input.scope.level === 'files')
+    {
+      const file = index.files.find((item) => item.id === input.scope.id)
+      const membership = membershipByFile.get(input.scope.id)
+      if (file === undefined || membership === undefined)
+      {
+        return yield* architectureError(operation, 'target-not-found', 'The file was not found.')
+      }
+      return standingProjection({
+        index,
+        source: input.source,
+        builtAt: target.builtAt,
+        generatedAt: index.sourceGeneratedAt,
+        freshness: standingFreshness(input.source, status),
+        lens: 'structure',
+        semanticLevel: 'files',
+        scopeKey: file.id,
+        breadcrumbs: structureBreadcrumbs(index, file.id),
+        nodes: [standingFileNode(file, membership)],
+        totalNodes: 1,
+        edges: [],
+        totalEdges: 0,
+      })
+    }
+    if (input.scope.level !== 'dirs')
+    {
+      return yield* architectureError(
+        operation,
+        'identity-mismatch',
+        'The Structure lens accepts only directories or files.',
+      )
+    }
+    const parent = index.structure.directories.find((directory) => directory.id === input.scope.id)
+    if (parent === undefined)
+    {
+      return yield* architectureError(operation, 'target-not-found', 'The directory was not found.')
+    }
+    const childIds = new Set(parent.childDirectoryIds)
+    const fileIds = new Set(parent.directFileIds)
+    const nodes = [
+      ...index.structure.directories
+        .filter((directory) => childIds.has(directory.id))
+        .map(standingDirectoryNode),
+      ...index.files
+        .filter((file) => fileIds.has(file.id))
+        .map((file) => standingFileNode(file, membershipByFile.get(file.id)!)),
+    ]
+    const edges = index.structure.edges.filter((edge) => edge.parent === parent.id)
+    return standingProjection({
+      index,
+      source: input.source,
+      builtAt: target.builtAt,
+      generatedAt: index.sourceGeneratedAt,
+      freshness: standingFreshness(input.source, status),
+      lens: 'structure',
+      semanticLevel: parent.childDirectoryIds.length > 0 ? 'dirs' : 'files',
+      scopeKey: parent.id,
+      breadcrumbs: structureBreadcrumbs(index, parent.id),
+      nodes,
+      totalNodes: parent.childDirectoryIds.length + parent.directFileIds.length,
+      edges,
+      totalEdges: edges.length,
+    })
+  })
+
   const repositoryMap: ArchitectureProjectionServiceShape['repositoryMap'] = Effect.fn(
     'ArchitectureProjectionService.repositoryMap',
   )(function* (authority, input)
   {
-    const operation = 'architecture_repository_map'
-    return yield* Effect.scoped(
-      Effect.gen(function* ()
-      {
-        const authorized = yield* resolveAuthority(authority, operation)
-        const target = yield* retainStandingIndex(
-          authorized,
-          input.projectId,
-          input.generationId,
-          undefined,
-          operation,
-        )
-        const index = target.index
-        const level: 'systems' | 'blocks' = index.counts.systems > 0 ? 'systems' : 'blocks'
-        const units = index.units[level]
-          .slice(0, ARCHITECTURE_PROJECTION_UNIT_LIMIT)
-          .map(projectionUnit)
-        const edges = index.edges[level]
-          .slice(0, ARCHITECTURE_PROJECTION_EDGE_LIMIT)
-          .map(projectionEdge)
-        const status = yield* projectStatus.getStatus(input.projectId)
-        const exactUnitTotal = level === 'systems' ? index.counts.systems : index.counts.blocks
-        const exactEdge = index.edgeCounts[level]
-        return {
-          version: 1 as const,
-          source: sourceIdentity(input.projectId, target.generation, target.graphDigest),
-          builtAt: target.builtAt,
-          dirty: status.freshness.dirty,
-          repo: {
-            name: index.repo.name,
-            scope: index.repo.scope,
-            ...(index.repo.gitRef === undefined ? {} : { gitRef: index.repo.gitRef }),
-          },
-          counts: {
-            files: index.counts.files,
-            imports: index.counts.imports,
-            systems: index.counts.systems,
-            blocks: index.counts.blocks,
-            dirs: index.counts.dirs,
-          },
-          health: index.health,
-          level,
-          systemSource: index.systemSource,
-          units,
-          unitCount: projectionCount(exactUnitTotal, index.units[level].length, units.length),
-          edges,
-          edgeCount: projectionCount(exactEdge.total, exactEdge.indexed, edges.length),
-        }
-      }),
-    ).pipe(withMetrics({ timer: architectureProjectionReadDuration, attributes: { kind: 'map' } }))
+    const projection = yield* Effect.scoped(repositoryMapProjection(authority, input)).pipe(
+      withMetrics({ timer: architectureProjectionReadDuration, attributes: { kind: 'map' } }),
+      Effect.tapError((error) =>
+        increment(
+          architectureGraphViewsTotal,
+          architectureGraphViewErrorMetricAttributes(error.code),
+        ),
+      ),
+    )
+    yield* increment(architectureGraphViewsTotal, architectureGraphViewMetricAttributes(projection))
+    return projection
   })
 
   const architectureScope: ArchitectureProjectionServiceShape['architectureScope'] = Effect.fn(
     'ArchitectureProjectionService.architectureScope',
   )(function* (authority, input)
   {
-    const operation = 'architecture_scope'
-    return yield* Effect.scoped(
-      Effect.gen(function* ()
-      {
-        const authorized = yield* resolveAuthority(authority, operation)
-        const target = yield* retainStandingIndex(
-          authorized,
-          input.source.projectId,
-          input.source.generationId,
-          input.source.graphDigest,
-          operation,
-        )
-        const index = target.index
-        if (!index.units[input.scope.level].some((unit) => unit.id === input.scope.id))
-        {
-          return yield* architectureError(
-            operation,
-            'target-not-found',
-            'The requested architecture scope is not indexed in this generation.',
-          )
-        }
-        if (input.scope.level === 'dirs' && input.cursor !== undefined)
-        {
-          return yield* architectureError(
-            operation,
-            'identity-mismatch',
-            'Directory scopes do not accept a child cursor.',
-          )
-        }
-        const filePage = yield* Effect.try({
-          try: () =>
-            queryAtlasFiles(index, {
-              parent: input.scope,
-              ...(input.fileCursor === undefined ? {} : { cursor: input.fileCursor }),
-              limit: Math.min(input.fileLimit ?? 50, ARCHITECTURE_PROJECTION_FILE_LIMIT),
-            }),
-          catch: () =>
-            architectureError(operation, 'identity-mismatch', 'The file cursor is invalid.'),
-        })
-        if (input.scope.level === 'dirs')
-        {
-          return {
-            version: 1 as const,
-            source: input.source,
-            scope: input.scope,
-            childLevel: 'dirs' as const,
-            children: [],
-            childCount: projectionCount(0, 0, 0),
-            edges: [],
-            edgeCount: projectionCount(0, 0, 0),
-            files: filePage.items.map(projectionFile),
-            fileCount: projectionCount(filePage.total, filePage.total, filePage.items.length),
-            ...(filePage.nextCursor === undefined ? {} : { nextFileCursor: filePage.nextCursor }),
-          }
-        }
-        const childLevel: 'blocks' | 'dirs' = input.scope.level === 'systems' ? 'blocks' : 'dirs'
-        const scope = index.scopes.find(
-          (candidate) => candidate.parent === input.scope.id && candidate.childLevel === childLevel,
-        )
-        if (scope === undefined)
-        {
-          return yield* architectureError(
-            operation,
-            'target-not-found',
-            'The requested architecture scope is not indexed in this generation.',
-          )
-        }
-        const childPage = yield* Effect.try({
-          try: () =>
-            queryAtlasIndex(index, {
-              level: childLevel,
-              parent: input.scope.id,
-              ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-              limit: Math.min(input.limit ?? 50, ARCHITECTURE_PROJECTION_FILE_LIMIT),
-            }),
-          catch: () =>
-            architectureError(operation, 'identity-mismatch', 'The scope cursor is invalid.'),
-        })
-        const childIds = new Set(childPage.items.map((unit) => unit.id))
-        const edges = index.edges[childLevel]
-          .filter((edge) => childIds.has(edge.from) && childIds.has(edge.to))
-          .slice(0, ARCHITECTURE_PROJECTION_EDGE_LIMIT)
-          .map(projectionEdge)
-        return {
-          version: 1 as const,
-          source: input.source,
-          scope: input.scope,
-          childLevel,
-          children: childPage.items.map(projectionUnit),
-          childCount: projectionCount(
-            scope.children.total,
-            scope.children.indexed,
-            childPage.items.length,
-          ),
-          ...(childPage.nextCursor === undefined ? {} : { nextCursor: childPage.nextCursor }),
-          edges,
-          edgeCount: projectionCount(scope.edges.total, scope.edges.indexed, edges.length),
-          files: filePage.items.map(projectionFile),
-          fileCount: projectionCount(filePage.total, filePage.total, filePage.items.length),
-          ...(filePage.nextCursor === undefined ? {} : { nextFileCursor: filePage.nextCursor }),
-        }
-      }),
-    ).pipe(
+    const projection = yield* Effect.scoped(architectureScopeProjection(authority, input)).pipe(
       withMetrics({ timer: architectureProjectionReadDuration, attributes: { kind: 'scope' } }),
+      Effect.tapError((error) =>
+        increment(
+          architectureGraphViewsTotal,
+          architectureGraphViewErrorMetricAttributes(error.code),
+        ),
+      ),
     )
+    yield* increment(architectureGraphViewsTotal, architectureGraphViewMetricAttributes(projection))
+    return projection
   })
 
-  const verifyGraphSource = Effect.fn('ArchitectureProjectionService.verifyGraphSource')(function* (
-    authorized: AuthorizedArchitectureProject,
-    source: ArchitectureProjectionSource,
-    operation: string,
-  ): Effect.fn.Return<
-    | {
-        readonly selector: Parameters<
-          ArchitectureQueryService.ArchitectureQueryServiceShape['resolveContext']
-        >[1]
-      }
-    | {
-        readonly selector: Parameters<
-          ArchitectureQueryService.ArchitectureQueryServiceShape['resolveContext']
-        >[1]
-        readonly resolvedTarget: ArchitectureQueryService.ResolvedArchitectureBlastTarget
-      }
-    | {
-        readonly selector: Parameters<
-          ArchitectureQueryService.ArchitectureQueryServiceShape['resolveContext']
-        >[1]
-        readonly repositoryRoot: string
-        readonly treeOid: string
-      }
-    | {
-        readonly selector: Parameters<
-          ArchitectureQueryService.ArchitectureQueryServiceShape['resolveContext']
-        >[1]
-        readonly retainedRoot: string
-      },
-    ArchitectureToolError,
-    Scope.Scope
-  >
-  {
-    switch (source.kind)
+  const verifySourceIdentity = Effect.fn('ArchitectureProjectionService.verifySourceIdentity')(
+    function* (
+      authorized: AuthorizedArchitectureProject,
+      source: CartographerGetArchitectureSourceInput['source'],
+      operation: string,
+    ): Effect.fn.Return<
+      | { readonly repositoryRoot: string; readonly treeOid: string }
+      | {
+          readonly retainedRoot: string
+        },
+      ArchitectureToolError,
+      Scope.Scope
+    >
     {
-      case 'standing-project-generation':
+      switch (source.kind)
       {
-        const target = yield* retainStandingIndex(
-          authorized,
-          source.projectId,
-          source.generationId,
-          source.graphDigest,
-          operation,
-        )
-        return {
-          selector: { kind: 'standing-project' },
-          resolvedTarget: {
-            context: {
-              root: target.root,
-              outDir: target.outDir,
-              graphPath: target.graphPath,
-              liveRoot: target.root,
-            },
-            recovery: 'build_project_atlas' as const,
-          },
-        }
-      }
-      case 'proposal-generation':
-      {
-        if (source.threadId !== authorized.thread.id)
+        case 'proposal-generation':
         {
-          return yield* architectureError(
-            operation,
-            'identity-mismatch',
-            'The proposal architecture source does not belong to this thread.',
-          )
-        }
-        const target = yield* proposalGenerations
-          .resolveImpactTarget(authorized.thread.id, source.generationId)
-          .pipe(
-            Effect.mapError(() =>
-              architectureError(
-                operation,
-                'context-not-ready',
-                'The proposal architecture source is no longer retained.',
-                'complete_proposal_analysis',
-              ),
-            ),
-          )
-        const digest = source.side === 'base' ? target.baseGraphDigest : target.proposedGraphDigest
-        if (digest !== source.graphDigest)
-        {
-          return yield* architectureError(
-            operation,
-            'identity-mismatch',
-            'The proposal graph digest does not match the retained generation.',
-          )
-        }
-        return {
-          selector: {
-            kind: 'proposal-generation',
-            generationId: source.generationId,
-            graph: source.side === 'base' ? 'base' : 'proposed',
-          },
-          repositoryRoot: target.repositoryRoot,
-          treeOid: source.side === 'base' ? target.baseTreeOid : target.proposedTreeOid,
-        }
-      }
-      case 'diff-analysis':
-      {
-        if (source.threadId !== authorized.thread.id)
-        {
-          return yield* architectureError(
-            operation,
-            'identity-mismatch',
-            'The diff architecture source does not belong to this thread.',
-          )
-        }
-        const target = yield* diffAnalyses
-          .retainReadyImpactTarget({
-            workspaceRoot:
-              authorized.thread.orchestrateRunExecution?.repositoryRoot ?? authorized.workspaceRoot,
-            diffAnalysisId: source.diffAnalysisId,
-            ...(operation === 'architecture_source' ? { sourceSide: source.side } : {}),
-          })
-          .pipe(
-            Effect.mapError(() =>
-              architectureError(
-                operation,
-                'context-not-ready',
-                'The diff architecture source is no longer retained.',
-                'complete_diff_analysis',
-              ),
-            ),
-          )
-        const digest = source.side === 'base' ? target.baseGraphDigest : target.headGraphDigest
-        if (digest !== source.graphDigest)
-        {
-          return yield* architectureError(
-            operation,
-            'identity-mismatch',
-            'The diff graph digest does not match the retained analysis.',
-          )
-        }
-        const selector = {
-          kind: 'diff-analysis' as const,
-          diffAnalysisId: source.diffAnalysisId,
-          graph: source.side,
-        }
-        // neighborhood never reads the retained tree; historical base seals omit it
-        if (operation !== 'architecture_source')
-        {
-          return { selector }
-        }
-        const retainedRoot = source.side === 'base' ? target.baseRoot : target.headRoot
-        if (retainedRoot === null)
-        {
-          return yield* architectureError(
-            operation,
-            'context-not-ready',
-            'The immutable diff source side is no longer retained.',
-            'complete_diff_analysis',
-          )
-        }
-        return {
-          selector,
-          retainedRoot,
-        }
-      }
-    }
-  })
-
-  const architectureNeighborhood: ArchitectureProjectionServiceShape['architectureNeighborhood'] =
-    Effect.fn('ArchitectureProjectionService.architectureNeighborhood')(
-      function* (authority, input)
-      {
-        const operation = 'architecture_neighborhood'
-        return yield* Effect.scoped(
-          Effect.gen(function* ()
+          if (source.threadId !== authorized.thread.id)
           {
-            const authorized = yield* resolveAuthority(authority, operation)
-            const verified = yield* verifyGraphSource(authorized, input.source, operation)
-            const result = yield* architectureQueries.blastRadius(
-              authority,
-              {
-                context: verified.selector,
-                target: input.target,
-                direction: input.direction,
-                maxDepth: input.maxDepth,
-              },
-              'resolvedTarget' in verified ? verified.resolvedTarget : undefined,
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The proposal architecture source does not belong to this thread.',
             )
-            return {
-              version: 1 as const,
-              source: input.source,
-              target: input.target,
-              direction: result.direction,
-              maxDepth: result.maxDepth,
-              upstream: result.upstream,
-              downstream: result.downstream,
-              impactedFileCount: result.impactedFileCount,
-            }
-          }),
-        ).pipe(
-          withMetrics({
-            timer: architectureProjectionReadDuration,
-            attributes: { kind: 'neighborhood' },
-          }),
-        )
-      },
-    )
-
-  const architecturePathScope: ArchitectureProjectionServiceShape['architecturePathScope'] =
-    Effect.fn('ArchitectureProjectionService.architecturePathScope')(function* (authority, input)
-    {
-      const operation = 'architecture_path_scope'
-      return yield* Effect.scoped(
-        Effect.gen(function* ()
-        {
-          const authorized = yield* resolveAuthority(authority, operation)
-          const target = yield* retainStandingIndex(
-            authorized,
-            input.projectId,
-            input.generationId,
-            undefined,
-            operation,
-          )
-          return {
-            version: 1 as const,
-            source: sourceIdentity(input.projectId, target.generation, target.graphDigest),
-            chips: resolveArchitecturePathScope(target.index, input.paths),
           }
-        }),
-      ).pipe(
-        withMetrics({
-          timer: architectureProjectionReadDuration,
-          attributes: { kind: 'path-scope' },
-        }),
-      )
-    })
+          const target = yield* proposalGenerations
+            .resolveImpactTarget(authorized.thread.id, source.generationId)
+            .pipe(
+              Effect.mapError(() =>
+                architectureError(
+                  operation,
+                  'context-not-ready',
+                  'The proposal architecture source is no longer retained.',
+                  'complete_proposal_analysis',
+                ),
+              ),
+            )
+          const digest =
+            source.side === 'base' ? target.baseGraphDigest : target.proposedGraphDigest
+          if (digest !== source.graphDigest)
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The proposal graph digest does not match the retained generation.',
+            )
+          }
+          return {
+            repositoryRoot: target.repositoryRoot,
+            treeOid: source.side === 'base' ? target.baseTreeOid : target.proposedTreeOid,
+          }
+        }
+        case 'diff-analysis':
+        {
+          if (source.threadId !== authorized.thread.id)
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The diff architecture source does not belong to this thread.',
+            )
+          }
+          const target = yield* diffAnalyses
+            .retainReadyImpactTarget({
+              workspaceRoot:
+                authorized.thread.orchestrateRunExecution?.repositoryRoot ??
+                authorized.workspaceRoot,
+              diffAnalysisId: source.diffAnalysisId,
+              ...(operation === 'architecture_source' ? { sourceSide: source.side } : {}),
+            })
+            .pipe(
+              Effect.mapError(() =>
+                architectureError(
+                  operation,
+                  'context-not-ready',
+                  'The diff architecture source is no longer retained.',
+                  'complete_diff_analysis',
+                ),
+              ),
+            )
+          const digest = source.side === 'base' ? target.baseGraphDigest : target.headGraphDigest
+          if (digest !== source.graphDigest)
+          {
+            return yield* architectureError(
+              operation,
+              'identity-mismatch',
+              'The diff graph digest does not match the retained analysis.',
+            )
+          }
+          const retainedRoot = source.side === 'base' ? target.baseRoot : target.headRoot
+          return { retainedRoot }
+        }
+      }
+    },
+  )
 
   const architectureSource: ArchitectureProjectionServiceShape['architectureSource'] = Effect.fn(
     'ArchitectureProjectionService.architectureSource',
@@ -883,15 +1119,7 @@ export const make = Effect.gen(function* ()
       Effect.gen(function* ()
       {
         const authorized = yield* resolveAuthority(authority, operation)
-        const verified = yield* verifyGraphSource(authorized, input.source, operation)
-        if (!('repositoryRoot' in verified) && !('retainedRoot' in verified))
-        {
-          return yield* architectureError(
-            operation,
-            'unsupported',
-            'Standing Repository Atlas files open through the current workspace Files surface.',
-          )
-        }
+        const verified = yield* verifySourceIdentity(authorized, input.source, operation)
         const sourceRead =
           'retainedRoot' in verified
             ? readRetainedText(verified.retainedRoot, input.relativePath)
@@ -952,8 +1180,6 @@ export const make = Effect.gen(function* ()
   return ArchitectureProjectionService.of({
     repositoryMap,
     architectureScope,
-    architectureNeighborhood,
-    architecturePathScope,
     architectureSource,
   })
 })

@@ -8,18 +8,24 @@ import type {
   WorkersListInput,
 } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
-import { ExternalLinkIcon } from 'lucide-react'
+import { ExternalLinkIcon, RotateCcwIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import { cn } from '../../../lib/utils'
 import { useRightPanelStore } from '../../../rightPanelStore'
+import { useServerConfigs } from '../../../state/entities'
 import { projectEnvironment } from '../../../state/projects'
 import { useEnvironmentQuery } from '../../../state/query'
 import { useAtomCommand } from '../../../state/use-atom-command'
 import { workersEnvironment } from '../../../state/workers'
 import { workerRunJobRows, workerRunOutcomeSummaryView } from '../../../workers/workersPanel.logic'
 import { ArchitectureQueryState } from '../../architecture/ArchitectureQueryState'
-import { createArchitectureScopeSurface } from '../../architecture/architectureResourceIdentity'
+import {
+  createArchitectureImpactSurface,
+  createRepositoryAtlasSurface,
+} from '../../architecture/architectureResourceIdentity'
+import { selectExactPlanImpactProjection } from '../../architecture/architectureImpactSelection'
+import { hasArchitectureToolErrorCode } from '../../architecture/architectureToolFailure'
 import { selectExactOrchestrateProposalLookup } from '../../cartographer/orchestrateArchitecture'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
@@ -104,48 +110,47 @@ function atlasUnreadyMessage(state: 'idle' | 'building' | 'error', lastBuildErro
   switch (state)
   {
     case 'building':
-      return 'Building the standing Repository Atlas for this project.'
+      return 'Building the Repository Map for this project.'
     case 'error':
-      return lastBuildError ?? 'The standing Repository Atlas could not be built.'
+      return lastBuildError ?? 'The Repository Map could not be built.'
     case 'idle':
-      return 'The standing Repository Atlas has not been built for this project.'
+      return 'The Repository Map has not been built for this project.'
   }
 }
 
-function OrchestrateArchitectureStrip(props: {
+function OrchestrateImpactStrip(props: {
   readonly actions: OrchestratePlanActions
   readonly revision: OrchestratePlanRevision
   readonly compact?: boolean
 })
 {
   const threadRef = props.actions.threadRef
-  const projectId = props.actions.projectId
-  const paths = props.revision.architecturePaths ?? []
-  const atlasQuery = useEnvironmentQuery(
-    threadRef === null || projectId === null || paths.length === 0
+  const serverConfig = useServerConfigs().get(props.actions.environmentId) ?? null
+  const architectureImpactAvailable =
+    serverConfig?.environment.capabilities.architectureImpact === true
+  const impactProjectionQuery = useEnvironmentQuery(
+    threadRef === null || !architectureImpactAvailable
       ? null
-      : projectEnvironment.projectAtlasStatus({
-          environmentId: props.actions.environmentId,
-          input: { projectId },
-        }),
-  )
-  const atlasStatus = atlasQuery.data
-  const atlasReady = atlasStatus?.state === 'ready' && atlasStatus.source !== null
-  const pathScopeQuery = useEnvironmentQuery(
-    threadRef === null || projectId === null || !atlasReady || paths.length === 0
-      ? null
-      : projectEnvironment.getArchitecturePathScope({
+      : projectEnvironment.getArchitectureImpactProjection({
           environmentId: props.actions.environmentId,
           input: {
+            version: 1,
+            kind: 'resolve-plan',
             threadId: threadRef.threadId,
-            projectId,
-            paths,
-            ...(atlasStatus?.source === null || atlasStatus?.source === undefined
-              ? {}
-              : { generationId: atlasStatus.source.generationId }),
+            plan: {
+              _tag: 'orchestrate',
+              runId: props.revision.runId,
+              revision: props.revision.revision,
+            },
           },
         }),
   )
+  useEffect(() =>
+  {
+    if (threadRef === null || !architectureImpactAvailable || props.compact) return
+    const intervalId = window.setInterval(impactProjectionQuery.refresh, 3_000)
+    return () => window.clearInterval(intervalId)
+  }, [architectureImpactAvailable, impactProjectionQuery.refresh, props.compact, threadRef])
   const proposalTarget = useMemo(
     () =>
       threadRef === null
@@ -189,10 +194,6 @@ function OrchestrateArchitectureStrip(props: {
           },
         }),
   )
-  const ensureProjectArchitecture = useAtomCommand(projectEnvironment.ensureProjectArchitecture, {
-    reportFailure: false,
-  })
-
   const openReview =
     lookup !== null && generationQuery.data !== null && generationQuery.data !== undefined
   const openReviewButton =
@@ -208,24 +209,134 @@ function OrchestrateArchitectureStrip(props: {
         Open review
       </Button>
     ) : null
-
-  if (threadRef === null || projectId === null) return null
-
+  const impactResult =
+    threadRef === null
+      ? null
+      : selectExactPlanImpactProjection(impactProjectionQuery.data, {
+          threadId: threadRef.threadId,
+          projectId: props.actions.projectId,
+          plan: {
+            _tag: 'orchestrate',
+            runId: props.revision.runId,
+            revision: props.revision.revision,
+          },
+        })
+  const impactTargetMissing = hasArchitectureToolErrorCode(
+    impactProjectionQuery.failure,
+    'target-not-found',
+  )
+  const impactIdentityMismatch = impactProjectionQuery.data !== null && impactResult === null
+  const impactError = impactIdentityMismatch
+    ? 'The server returned Impact data for a different exact plan revision.'
+    : impactTargetMissing
+      ? null
+      : impactProjectionQuery.error
+  const impactLoading =
+    architectureImpactAvailable && threadRef !== null && !impactProjectionQuery.hasSettled
+  const openImpact = (): void =>
+  {
+    if (threadRef === null || impactResult?.projection.resultState !== 'graph') return
+    useRightPanelStore.getState().openArchitectureSurface(
+      threadRef,
+      createArchitectureImpactSurface({
+        kind: 'exact-impact',
+        descriptor: impactResult.descriptor,
+      }),
+    )
+  }
+  if (openReviewButton === null && impactResult === null && impactError === null && !impactLoading)
+    return null
   const stripClassName = cn(
     'flex w-full flex-col gap-2 border-border bg-muted/20 px-4 py-2 text-xs',
     props.compact ? 'border-t' : 'border-b',
   )
-  if (paths.length === 0)
-  {
-    if (openReviewButton === null) return null
-    return (
-      <div data-orchestrate-architecture="review" className={stripClassName}>
-        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+  return (
+    <div
+      data-orchestrate-architecture={
+        impactResult === null && impactError === null && !impactLoading ? 'review' : 'impact'
+      }
+      className={stripClassName}
+    >
+      <div className="flex w-full flex-wrap items-center justify-between gap-2">
+        {impactResult === null ? (
+          impactError !== null || impactLoading ? (
+            <span
+              className={cn(
+                'min-w-0 flex-1 text-muted-foreground',
+                impactError !== null && 'text-destructive',
+              )}
+              role={impactError === null ? 'status' : 'alert'}
+            >
+              {impactError ?? 'Resolving Planned and Verified Impact.'}
+            </span>
+          ) : (
+            <span />
+          )
+        ) : (
+          <span className="min-w-0">
+            <span className="flex flex-wrap items-center gap-1.5">
+              <strong className="font-medium">
+                {impactResult.selectedAuthority === 'verified'
+                  ? 'Verified Impact'
+                  : 'Planned Impact'}
+              </strong>
+              <Badge variant="outline" size="sm">
+                {impactResult.projection.freshness}
+              </Badge>
+            </span>
+            <span className="mt-0.5 block text-muted-foreground">
+              {impactResult.projection.resultState === 'no-impact'
+                ? `No architectural relationship changes · ${impactResult.projection.totals.changedFiles.total.toLocaleString()} changed files`
+                : `${impactResult.projection.totals.nodes.total.toLocaleString()} objects · ${impactResult.projection.totals.edges.total.toLocaleString()} relationships`}
+            </span>
+          </span>
+        )}
+        <span className="flex flex-wrap items-center gap-2">
+          {impactError !== null ? (
+            <Button type="button" variant="ghost" size="xs" onClick={impactProjectionQuery.refresh}>
+              <RotateCcwIcon aria-hidden="true" className="size-3" />
+              Retry Impact
+            </Button>
+          ) : null}
           {openReviewButton}
-        </div>
+          {impactResult?.projection.resultState === 'graph' ? (
+            <Button type="button" variant="outline" size="xs" onClick={openImpact}>
+              <ExternalLinkIcon aria-hidden="true" className="size-3" />
+              Open Impact Diff
+            </Button>
+          ) : null}
+        </span>
       </div>
-    )
-  }
+    </div>
+  )
+}
+
+function OrchestrateRepositoryMapStrip(props: {
+  readonly actions: OrchestratePlanActions
+  readonly revision: OrchestratePlanRevision
+  readonly compact?: boolean
+})
+{
+  const threadRef = props.actions.threadRef
+  const projectId = props.actions.projectId
+  const paths = props.revision.architecturePaths ?? []
+  const atlasQuery = useEnvironmentQuery(
+    threadRef === null || projectId === null || paths.length === 0
+      ? null
+      : projectEnvironment.projectAtlasStatus({
+          environmentId: props.actions.environmentId,
+          input: { projectId },
+        }),
+  )
+  const atlasStatus = atlasQuery.data
+  const ensureProjectArchitecture = useAtomCommand(projectEnvironment.ensureProjectArchitecture, {
+    reportFailure: false,
+  })
+  if (threadRef === null || projectId === null || paths.length === 0) return null
+  const stripClassName = cn(
+    'flex w-full flex-col gap-2 border-border bg-muted/20 px-4 py-2 text-xs',
+    props.compact ? 'border-t' : 'border-b',
+  )
 
   const retryAtlas = () =>
   {
@@ -239,7 +350,7 @@ function OrchestrateArchitectureStrip(props: {
   {
     return (
       <div data-orchestrate-architecture="pending" className={stripClassName}>
-        <span className="text-muted-foreground">Checking standing Repository Atlas.</span>
+        <span className="text-muted-foreground">Checking Repository Map.</span>
       </div>
     )
   }
@@ -248,11 +359,11 @@ function OrchestrateArchitectureStrip(props: {
     return (
       <div data-orchestrate-architecture="error" className={stripClassName}>
         {props.compact ? (
-          <span className="text-muted-foreground">Repository Atlas status failed.</span>
+          <span className="text-muted-foreground">Repository Map status failed.</span>
         ) : (
           <ArchitectureQueryState
             kind="error"
-            title="Repository Atlas unavailable"
+            title="Repository Map unavailable"
             message="Standing architecture status could not be loaded."
             onRetry={retryAtlas}
           />
@@ -277,7 +388,7 @@ function OrchestrateArchitectureStrip(props: {
         ) : (
           <ArchitectureQueryState
             kind={unreadyState === 'building' ? 'loading' : 'error'}
-            title="Standing Repository Atlas"
+            title="Repository Map"
             message={atlasUnreadyMessage(unreadyState, atlasStatus?.lastBuildError ?? null)}
             onRetry={unreadyState === 'building' ? undefined : retryAtlas}
           />
@@ -285,80 +396,45 @@ function OrchestrateArchitectureStrip(props: {
       </div>
     )
   }
-  if (!pathScopeQuery.hasSettled)
-  {
-    return (
-      <div data-orchestrate-architecture="pending" className={stripClassName}>
-        <span className="text-muted-foreground">Resolving standing atlas scope.</span>
-      </div>
-    )
-  }
-  if (pathScopeQuery.error !== null)
-  {
-    return (
-      <div data-orchestrate-architecture="error" className={stripClassName}>
-        {props.compact ? (
-          <span className="text-muted-foreground">Standing atlas scope could not be resolved.</span>
-        ) : (
-          <ArchitectureQueryState
-            kind="error"
-            title="Architecture scope unavailable"
-            message="Touched systems and neighbors could not be resolved from the standing atlas."
-            onRetry={pathScopeQuery.refresh}
-          />
-        )}
-      </div>
-    )
-  }
-
-  const chips = pathScopeQuery.data?.chips ?? []
   const source = atlasStatus.source
-
   return (
-    <div
-      data-orchestrate-architecture={chips.length === 0 ? 'empty' : 'ready'}
-      className={stripClassName}
-    >
+    <div data-orchestrate-architecture="ready" className={stripClassName}>
       <div className="flex w-full flex-wrap items-center justify-between gap-2">
         <span className="min-w-0">
-          <strong className="font-medium">Architecture</strong>
+          <strong className="font-medium">Repository Map</strong>
           <span className="ml-2 text-muted-foreground">
-            {chips.length === 0
-              ? 'No matching systems or blocks in the standing Repository Atlas.'
-              : 'Standing atlas scope for this plan.'}
+            Open the pinned map to explore Architecture and Structure.
           </span>
         </span>
-        {openReviewButton}
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          onClick={() =>
+            useRightPanelStore
+              .getState()
+              .openArchitectureSurface(threadRef, createRepositoryAtlasSurface(source))
+          }
+        >
+          <ExternalLinkIcon aria-hidden="true" className="size-3" />
+          Open Repository Map
+        </Button>
       </div>
-      {chips.length === 0 ? null : (
-        <div className="flex flex-wrap gap-1.5">
-          {chips.map((chip) => (
-            <Button
-              key={`${chip.role}:${chip.level}:${chip.id}`}
-              type="button"
-              variant="ghost"
-              size="xs"
-              data-architecture-chip={chip.role}
-              data-architecture-level={chip.level}
-              className="h-auto rounded-md p-0"
-              onClick={() =>
-                useRightPanelStore.getState().openArchitectureSurface(
-                  threadRef,
-                  createArchitectureScopeSurface({
-                    source,
-                    scope: { level: chip.level, id: chip.id },
-                  }),
-                )
-              }
-            >
-              <Badge variant={chip.role === 'touched' ? 'default' : 'outline'} className="gap-1">
-                {chip.label}
-              </Badge>
-            </Button>
-          ))}
-        </div>
-      )}
     </div>
+  )
+}
+
+function OrchestrateArchitectureStrip(props: {
+  readonly actions: OrchestratePlanActions
+  readonly revision: OrchestratePlanRevision
+  readonly compact?: boolean
+})
+{
+  return (
+    <>
+      <OrchestrateImpactStrip {...props} />
+      <OrchestrateRepositoryMapStrip {...props} />
+    </>
   )
 }
 
