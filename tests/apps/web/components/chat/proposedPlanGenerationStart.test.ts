@@ -4,7 +4,6 @@ import type { EnvironmentId, ProposalGeneration } from '@t3tools/contracts'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
 import {
-  claimAutomaticProposalGenerationStart,
   claimManualProposalGenerationStart,
   completeProposalGenerationStart,
   createProposalGenerationStartTarget,
@@ -14,7 +13,6 @@ import {
   recordObservedProposalGenerationFailure,
   resetProposalGenerationStartStoreForTests,
   type ProposalGenerationStartTarget,
-  type ProposalGenerationStartState,
 } from '../../../../../apps/web/src/components/chat/proposedPlanGenerationStart'
 
 const environmentId = 'environment-generation-start' as EnvironmentId
@@ -59,11 +57,11 @@ beforeEach(resetProposalGenerationStartStoreForTests)
 
 describe('proposal generation start transitions', () =>
 {
-  it('claims one automatic attempt and leaves its failed tombstone ineligible', () =>
+  it('keeps a failed manual attempt visible until an explicit retry', () =>
   {
     const owner = target()
     expect(readProposalGenerationStartState(owner).status).toBe('idle')
-    const attempt = claimAutomaticProposalGenerationStart(owner, null)
+    const attempt = claimManualProposalGenerationStart(owner, null)
     const starting = readProposalGenerationStartState(owner)
     expect(failProposalGenerationStart(attempt!, 'start failed')).toBe(true)
     const failed = readProposalGenerationStartState(owner)
@@ -82,14 +80,18 @@ describe('proposal generation start transitions', () =>
       attemptId: 1,
       baselineGenerationId: null,
     })
-    expect(claimAutomaticProposalGenerationStart(owner, null)).toBeNull()
-    expect(readProposalGenerationStartState(owner)).toBe(failed)
+    const retry = claimManualProposalGenerationStart(owner, null)
+    expect(retry?.attemptId).toBe(2)
+    expect(readProposalGenerationStartState(owner)).toMatchObject({
+      status: 'starting',
+      attemptId: 2,
+    })
   })
 
   it('bumps manual attempt IDs and ignores stale attempt completions', () =>
   {
     const owner = target()
-    const first = claimAutomaticProposalGenerationStart(owner, null)
+    const first = claimManualProposalGenerationStart(owner, null)
     expect(first?.attemptId).toBe(1)
     expect(failProposalGenerationStart(first!, 'start failed')).toBe(true)
 
@@ -157,7 +159,7 @@ describe('proposal generation start transitions', () =>
     })
   })
 
-  it('persists a pre-existing terminal generation as an auto-ineligible store entry', () =>
+  it('persists a pre-existing terminal generation until explicit retry', () =>
   {
     const owner = target()
     const terminal = generation('generation-existing', 'failed', 'analysis-failed')
@@ -176,13 +178,13 @@ describe('proposal generation start transitions', () =>
       generation: { generationId: 'generation-existing' },
       attemptId: 0,
     })
-    expect(claimAutomaticProposalGenerationStart(owner, terminal)).toBeNull()
+    expect(claimManualProposalGenerationStart(owner, terminal)).toMatchObject({ attemptId: 1 })
   })
 
   it('reconciles a lost start response with the observed restarted generation', () =>
   {
     const owner = target()
-    const attempt = claimAutomaticProposalGenerationStart(owner, null)!
+    const attempt = claimManualProposalGenerationStart(owner, null)!
     expect(failProposalGenerationStart(attempt, 'The start request lost its response.')).toBe(true)
 
     const restarted = generation('generation-restarted', 'abandoned', 'server-restarted')
@@ -272,28 +274,5 @@ describe('proposal generation start transitions', () =>
     expect(
       proposalGenerationStartBaselineGenerationId(readProposalGenerationStartState(owner), null),
     ).toBe(retained.generationId)
-  })
-
-  it('keeps keyed failure tombstones without eviction', () =>
-  {
-    const firstTarget = target()
-    const firstAttempt = claimAutomaticProposalGenerationStart(firstTarget, null)
-    failProposalGenerationStart(firstAttempt!, 'durable failure')
-
-    for (let index = 1; index <= 1_024; index += 1)
-    {
-      const nextTarget = target(index)
-      const attempt = claimAutomaticProposalGenerationStart(nextTarget, null)
-      failProposalGenerationStart(attempt!, `failure ${index}`)
-    }
-
-    expect(readProposalGenerationStartState(firstTarget)).toEqual({
-      status: 'failed',
-      error: 'durable failure',
-      generation: null,
-      attemptId: 1,
-      baselineGenerationId: null,
-    } satisfies ProposalGenerationStartState)
-    expect(claimAutomaticProposalGenerationStart(firstTarget, null)).toBeNull()
   })
 })

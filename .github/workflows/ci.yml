@@ -21,6 +21,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Reject repository-owned PR assets
+        run: |
+          files="$(git ls-files .github/pr-assets)"
+          if test -n "$files"; then
+            printf 'PR evidence must be uploaded to GitHub, not committed:\n%s\n' "$files" >&2
+            exit 1
+          fi
+
       - name: Parse PowerShell acceptance script
         shell: pwsh
         run: |
@@ -82,6 +90,7 @@ jobs:
       # engine-floor lanes: cartographer-core advertises ^22.16 || ^23.11 || >=24.10,
       # so the bounded job runs the floor, the odd line, and the repo default
       matrix:
+        # prettier-ignore
         node: ["22.16", "23.11", "24"]
     steps:
       - name: Checkout
@@ -130,12 +139,12 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       # new workspace packages with test scripts must be added explicitly; Cartographer stays in its bounded job
+      # the server suite runs in its own sharded job below because it disables file parallelism
       - name: Test
         run: |
           vp run \
             --filter @t3tools/desktop \
             --filter @t3tools/mobile \
-            --filter 456code \
             --filter @t3tools/web \
             --filter @t3tools/client-runtime \
             --filter @t3tools/contracts \
@@ -148,8 +157,116 @@ jobs:
             --filter @t3tools/scripts \
             test
 
+  test_server:
+    name: Test server (shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Build Cartographer core
+        run: vp run --filter @t3tools/cartographer-core build
+
+      - name: Test server suite
+        working-directory: apps/server
+        run: vp test run --shard ${{ matrix.shard }}/3
+
+  # The static analysis below needs a macOS runner, which bills far more than a
+  # Linux minute, so gate it on the native sources it actually lints instead of
+  # paying for it on every push. Detection is API-only (no checkout) and fails
+  # open: if the diff cannot be resolved, the lint runs.
+  mobile_native_changes:
+    name: Mobile Native Changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      changed: ${{ steps.detect.outputs.changed }}
+    steps:
+      - name: Detect mobile native changes
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+
+          fail_open() {
+            echo "$* Running native static analysis."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          count_rows() {
+            printf '%s\n' "$1" | grep -c . || true
+          }
+
+          # one row per changed file, holding the new path and, for a rename,
+          # the path it replaced: renaming a matched file out of the matched
+          # paths removes a lint input just like editing it
+          row='[.filename, (.previous_filename // empty)] | @tsv'
+
+          if [[ -n "${PR_NUMBER}" ]]; then
+            # the PR files endpoint stops at 3000 files and pagination cannot
+            # extend it, so cross-check against the count the PR itself reports
+            expected=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.changed_files') \
+              || fail_open "Could not read the pull request."
+            rows=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq ".[] | ${row}") \
+              || fail_open "Could not resolve changed files."
+
+            listed=$(count_rows "$rows")
+            if [[ "$listed" -lt "$expected" ]]; then
+              fail_open "GitHub listed only ${listed} of ${expected} changed files."
+            fi
+          else
+            rows=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BEFORE_SHA}...${GITHUB_SHA}" --jq ".files[]? | ${row}") \
+              || fail_open "Could not resolve changed files."
+
+            # the compare endpoint reports at most 300 files and pagination does
+            # not extend that list, so a full list may be hiding native changes
+            listed=$(count_rows "$rows")
+            if [[ "$listed" -ge 300 ]]; then
+              fail_open "GitHub listed ${listed} changed files, the compare endpoint maximum."
+            fi
+          fi
+
+          paths=$(tr '\t' '\n' <<< "$rows")
+
+          # sources scripts/mobile-native-static-check.ts lints, plus the tool
+          # and rule configuration that decides how it lints them, plus the
+          # root package.json that defines the lint:mobile command
+          pattern='^apps/mobile/.*\.(swift|kt|kts)$|^apps/mobile/(\.swiftlint\.yml|detekt\.yml|\.editorconfig|Brewfile)$|^scripts/mobile-native-static-check\.ts$|^package\.json$|^\.github/workflows/ci\.yml$'
+
+          if grep -qE "$pattern" <<< "$paths"; then
+            echo "Native sources or lint configuration changed:"
+            grep -E "$pattern" <<< "$paths"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No mobile native sources or lint configuration changed."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
+    needs: mobile_native_changes
+    # skip only on an explicit "no": a gate job that failed or errored leaves the
+    # output empty, and that must run the lint rather than silently skip it
+    if: ${{ !cancelled() && needs.mobile_native_changes.outputs.changed != 'false' }}
     runs-on: macos-15
     timeout-minutes: 20
     steps:

@@ -24,6 +24,7 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { describe, expect } from 'vite-plus/test'
 
 import { CurrentWorktreeArchitectureService } from '../../../../../apps/server/src/cartographer/CurrentWorktreeArchitectureService.ts'
+import { ArchitectureAdmissionService } from '../../../../../apps/server/src/architecture/ArchitectureAdmissionService.ts'
 import { ThreadDeletionReactorLive } from '../../../../../apps/server/src/orchestration/Layers/ThreadDeletionReactor.ts'
 import { OrchestrationEngineWithArchivePermitLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
@@ -226,6 +227,15 @@ function makeLayer(state: HarnessState)
     Layer.provideMerge(persistence),
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
+    Layer.provideMerge(
+      Layer.mock(ArchitectureAdmissionService)({
+        cancelThread: () =>
+          Effect.sync(() =>
+          {
+            state.calls.push('architecture-admission')
+          }),
+      }),
+    ),
     Layer.provideMerge(
       Layer.mock(ProposalGenerationService)({
         // the live service declares a never-failing channel; this mock keeps
@@ -434,7 +444,9 @@ describe('ThreadDeletionReactor', () =>
           'succeeded',
         ])
         expect(state.calls).toEqual([
+          'architecture-admission',
           'proposal-generation',
+          'architecture-admission',
           'proposal-generation',
           'current-worktree-architecture',
           'provider-session',
@@ -472,6 +484,7 @@ describe('ThreadDeletionReactor', () =>
         yield* reactor.start()
 
         expect(state.calls).toEqual([
+          'architecture-admission',
           'proposal-generation',
           'current-worktree-architecture',
           'provider-session',
@@ -594,6 +607,7 @@ describe('ThreadDeletionReactor', () =>
         yield* reactor.drain
 
         expect(state.calls).toEqual([
+          'architecture-admission',
           'proposal-generation',
           'current-worktree-architecture',
           'provider-session',

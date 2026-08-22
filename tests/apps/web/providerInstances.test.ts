@@ -5,6 +5,7 @@ import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from '@t3
 import { describe, expect, it } from 'vite-plus/test'
 import {
   applyProviderInstanceSettings,
+  deriveProviderEntriesByEnvironment,
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
   isProviderInstancePickerReady,
@@ -193,6 +194,81 @@ describe('deriveProviderInstanceEntries', () =>
     expect(entry?.instanceId).toBe('codex_personal')
     expect(entry?.driverKind).toBe('codex')
     expect(entry?.isDefault).toBe(false)
+  })
+})
+
+describe('deriveProviderEntriesByEnvironment', () =>
+{
+  it('keeps same-id default instances distinct per environment', () =>
+  {
+    const byEnvironment = deriveProviderEntriesByEnvironment([
+      [
+        'local',
+        [
+          provider({
+            provider: ProviderDriverKind.make('claudeAgent'),
+            instanceId: 'claudeAgent',
+            displayName: 'Claude Local',
+            accentColor: '#112233',
+          }),
+        ],
+      ],
+      [
+        'remote',
+        [
+          provider({
+            provider: ProviderDriverKind.make('claudeAgent'),
+            instanceId: 'claudeAgent',
+            displayName: 'Claude Remote',
+            accentColor: '#445566',
+          }),
+        ],
+      ],
+    ])
+
+    expect(byEnvironment.get('local')?.get('claudeAgent')?.displayName).toBe('Claude Local')
+    expect(byEnvironment.get('local')?.get('claudeAgent')?.accentColor).toBe('#112233')
+    expect(byEnvironment.get('remote')?.get('claudeAgent')?.displayName).toBe('Claude Remote')
+    expect(byEnvironment.get('remote')?.get('claudeAgent')?.accentColor).toBe('#445566')
+  })
+
+  it("never falls back to another environment's instances", () =>
+  {
+    const byEnvironment = deriveProviderEntriesByEnvironment([
+      ['local', [provider({ provider: ProviderDriverKind.make('codex'), instanceId: 'codex' })]],
+      ['empty', []],
+    ])
+
+    expect(byEnvironment.get('empty')?.get('codex')).toBeUndefined()
+    // every environment gets its own bucket, so an absent lookup is a real
+    // "this environment has no such instance", not a missing key.
+    expect(byEnvironment.get('empty')?.size).toBe(0)
+  })
+
+  it('returns no bucket for an unknown environment so callers fall back to an empty map', () =>
+  {
+    const byEnvironment = deriveProviderEntriesByEnvironment([
+      ['local', [provider({ provider: ProviderDriverKind.make('codex'), instanceId: 'codex' })]],
+    ])
+
+    expect(byEnvironment.get('removed-environment')).toBeUndefined()
+  })
+
+  it('derives the primary environment entries identically to the flat primary map', () =>
+  {
+    const primaryProviders = [
+      provider({ provider: ProviderDriverKind.make('codex'), instanceId: 'codex' }),
+      provider({
+        provider: ProviderDriverKind.make('claudeAgent'),
+        instanceId: 'claude_work',
+        accentColor: '#abcdef',
+      }),
+    ]
+    const byEnvironment = deriveProviderEntriesByEnvironment([['primary', primaryProviders]])
+
+    expect([...(byEnvironment.get('primary')?.entries() ?? [])]).toEqual(
+      deriveProviderInstanceEntries(primaryProviders).map((entry) => [entry.instanceId, entry]),
+    )
   })
 })
 

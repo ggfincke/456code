@@ -6,10 +6,10 @@
 import type {
   ArchitectureGenerationId,
   ArchitectureGraphDigest,
+  ArchitectureImpactDescriptor,
   DesktopPreviewFavicon,
   PreviewSessionSnapshot,
   ProjectId,
-  ProposalGenerationId,
   ThreadId,
 } from '@t3tools/contracts'
 import { act, useState, type ReactNode, type Ref } from 'react'
@@ -90,11 +90,42 @@ const impactSurface = {
   id: 'architecture-impact:test',
   kind: 'architecture-impact',
   target: {
-    threadId: 'thread-right-panel' as ThreadId,
-    comparison: {
-      kind: 'proposal-generation',
-      generationId: 'proposal-generation-1234567890' as ProposalGenerationId,
-    },
+    kind: 'exact-impact',
+    descriptor: {
+      version: 1,
+      descriptorId: 'c'.repeat(64),
+      threadId: 'thread-right-panel',
+      projectId: 'project-right-panel',
+      target: {
+        kind: 'plan',
+        plan: { _tag: 'plan', planId: 'plan:thread-right-panel:turn:impact' },
+        state: 'active',
+      },
+      verifiedCandidate: {
+        authority: 'verified',
+        source: {
+          kind: 'verified-proposal-impact',
+          threadId: 'thread-right-panel',
+          generationId: 'proposal-generation-1234567890',
+          proposalId: 'proposal-right-panel',
+          revisionId: 'proposal-right-panel:1',
+          baseTreeOid: '1'.repeat(40),
+          headTreeOid: '2'.repeat(40),
+          baseGraphDigest: `sha256:${'3'.repeat(64)}`,
+          headGraphDigest: `sha256:${'4'.repeat(64)}`,
+          projectionDigest: `sha256:${'5'.repeat(64)}`,
+        },
+        projectionId: 'projection-right-panel',
+        projectionRevision: 1,
+        projectionDigest: `sha256:${'5'.repeat(64)}`,
+        resultState: 'graph',
+        freshness: 'fresh',
+        generatedAt: '2026-08-20T12:00:00.000Z',
+        publishedAt: '2026-08-20T12:00:00.000Z',
+      },
+      defaultAuthority: 'verified',
+      resolvedAt: '2026-08-20T12:00:00.000Z',
+    } as ArchitectureImpactDescriptor,
   },
 } satisfies RightPanelSurface
 
@@ -350,8 +381,8 @@ describe('RightPanelTabs', () =>
 
     let tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
     expect(tabs).toHaveLength(3)
-    expect(tabs[1]?.textContent).toContain('Impact Diff · proposal')
-    expect(tabs[2]?.textContent).toContain('Repository Atlas · aaaaaaaa')
+    expect(tabs[1]?.textContent).toContain('Impact Diff · cccccccc')
+    expect(tabs[2]?.textContent).toContain('Repository Map · aaaaaaaa')
 
     tabs[0]?.focus()
     act(() =>
@@ -368,7 +399,7 @@ describe('RightPanelTabs', () =>
     act(() => closeImpact?.click())
     tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
     expect(tabs).toHaveLength(2)
-    expect(tabs[1]?.textContent).toContain('Repository Atlas · aaaaaaaa')
+    expect(tabs[1]?.textContent).toContain('Repository Map · aaaaaaaa')
     expect(tabs[1]?.getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement).toBe(tabs[1])
 

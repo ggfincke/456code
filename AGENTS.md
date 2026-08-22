@@ -42,6 +42,10 @@
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
 
+## Pull Request Evidence
+
+- Upload screenshots, recordings, and other pull request evidence to GitHub; never commit them under `.github/pr-assets/` (CI rejects repository-owned PR assets).
+
 ## Vendored Repositories
 
 This project vendors external repositories under `.repos/` as read-only reference material for coding

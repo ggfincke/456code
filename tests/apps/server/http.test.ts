@@ -7,6 +7,7 @@ import {
   assetResponseHeaders,
   isLoopbackHostname,
   resolveDevRedirectUrl,
+  staticFileContentType,
 } from '../../../apps/server/src/http.ts'
 
 describe('http dev routing', () =>
@@ -50,5 +51,32 @@ describe('assetResponseHeaders', () =>
       'Cache-Control': 'private, max-age=3600',
       'X-Content-Type-Options': 'nosniff',
     })
+  })
+
+  it('declares utf-8 for HTML assets so non-ASCII content renders correctly', () =>
+  {
+    expect(assetResponseHeaders('/workspace/page.html')).toHaveProperty(
+      'Content-Type',
+      'text/html; charset=utf-8',
+    )
+    expect(assetResponseHeaders('/workspace/PAGE.HTM')).toHaveProperty(
+      'Content-Type',
+      'text/html; charset=utf-8',
+    )
+  })
+})
+
+describe('staticFileContentType', () =>
+{
+  it('appends utf-8 to html mime lookups', () =>
+  {
+    expect(staticFileContentType('/workspace/index.html')).toBe('text/html; charset=utf-8')
+    expect(staticFileContentType('/workspace/INDEX.HTM')).toBe('text/html; charset=utf-8')
+  })
+
+  it('leaves non-html mime lookups untouched', () =>
+  {
+    expect(staticFileContentType('/workspace/logo.svg')).toBe('image/svg+xml')
+    expect(staticFileContentType('/workspace/data')).toBe('application/octet-stream')
   })
 })

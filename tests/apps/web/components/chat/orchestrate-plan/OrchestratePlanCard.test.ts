@@ -55,10 +55,6 @@ const mocks = vi.hoisted(() => ({
   })),
   generation: null as unknown,
   generationRefresh: vi.fn(),
-  getArchitecturePathScope: vi.fn((input: unknown) => ({
-    kind: 'architecture-path-scope',
-    input,
-  })),
   intervalCallbacks: [] as Array<() => void>,
   latestProposalGeneration: vi.fn((input: unknown) => ({
     kind: 'latest-proposal-generation',
@@ -69,7 +65,6 @@ const mocks = vi.hoisted(() => ({
   openArchitectureSurface: vi.fn(),
   openExplorer: vi.fn(),
   atlasStatus: null as unknown,
-  pathScope: null as unknown,
   projectAtlasStatus: vi.fn((input: unknown) => ({
     kind: 'project-atlas-status',
     input,
@@ -100,7 +95,6 @@ vi.mock('react', async (importOriginal) =>
 vi.mock('~/state/projects', () => ({
   projectEnvironment: {
     findProposalByOrchestrateRevision: mocks.findProposalByOrchestrateRevision,
-    getArchitecturePathScope: mocks.getArchitecturePathScope,
     latestProposalGeneration: mocks.latestProposalGeneration,
     projectAtlasStatus: mocks.projectAtlasStatus,
     startProposalGeneration: mocks.startProposalGeneration,
@@ -151,8 +145,6 @@ vi.mock('~/components/ui/button', async () =>
       readonly disabled?: boolean
       readonly onClick?: () => void
       readonly type?: 'button' | 'reset' | 'submit'
-      readonly 'data-architecture-chip'?: string
-      readonly 'data-architecture-level'?: string
     }) =>
     {
       const label = labelFor(props.children)
@@ -167,12 +159,6 @@ vi.mock('~/components/ui/button', async () =>
           'data-button-label': label,
           disabled: props.disabled,
           type: props.type,
-          ...(props['data-architecture-chip'] === undefined
-            ? {}
-            : { 'data-architecture-chip': props['data-architecture-chip'] }),
-          ...(props['data-architecture-level'] === undefined
-            ? {}
-            : { 'data-architecture-level': props['data-architecture-level'] }),
         },
         props.children,
       )
@@ -262,22 +248,6 @@ const readyAtlasStatus = {
   freshness: { builtAt: '2026-08-13T12:00:00.000Z', dirty: false },
   lastBuildError: null,
 }
-const pathScopeChips = [
-  {
-    role: 'touched' as const,
-    level: 'systems' as const,
-    id: 'systems:runtime',
-    key: 'runtime',
-    label: 'Runtime',
-  },
-  {
-    role: 'context' as const,
-    level: 'blocks' as const,
-    id: 'blocks:store',
-    key: 'store',
-    label: 'Store',
-  },
-]
 const linkedLookup = {
   link: {
     proposalId: 'proposal-1',
@@ -335,7 +305,6 @@ beforeEach(() =>
   mocks.lookup = linkedLookup
   mocks.generation = null
   mocks.atlasStatus = readyAtlasStatus
-  mocks.pathScope = { version: 1, source: standingSource, chips: pathScopeChips }
   mocks.setInterval.mockImplementation((handler: TimerHandler) =>
   {
     if (typeof handler === 'function') mocks.intervalCallbacks.push(() => handler())
@@ -364,14 +333,6 @@ beforeEach(() =>
       case 'project-atlas-status':
         return {
           data: mocks.atlasStatus,
-          error: null,
-          isPending: false,
-          hasSettled: true,
-          refresh: vi.fn(),
-        }
-      case 'architecture-path-scope':
-        return {
-          data: mocks.pathScope,
           error: null,
           isPending: false,
           hasSettled: true,
@@ -520,7 +481,7 @@ describe('persisted orchestrate revision resolution', () =>
 
 describe('OrchestratePlanCard architecture strip', () =>
 {
-  it('routes standing atlas chips without proposal APIs', () =>
+  it('opens the exact standing Repository Map without proposal APIs', () =>
   {
     mocks.lookup = null
     const plan = parsePlan({ ...BASE_PLAN, revision: 3 })
@@ -530,37 +491,24 @@ describe('OrchestratePlanCard architecture strip', () =>
     expect(stripIndex).toBeGreaterThan(markup.indexOf('</header>'))
     expect(stripIndex).toBeLessThan(markup.indexOf('<table'))
     expect(markup).toContain('data-orchestrate-architecture="ready"')
-    expect(markup).toContain('data-architecture-chip="touched"')
-    expect(markup).toContain('data-architecture-chip="context"')
+    expect(markup).toContain('Open the pinned map to explore Architecture and Structure.')
     expect(mocks.projectAtlasStatus).toHaveBeenCalledWith({
       environmentId,
       input: { projectId },
-    })
-    expect(mocks.getArchitecturePathScope).toHaveBeenCalledWith({
-      environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        projectId,
-        paths: ['src/api.ts'],
-        generationId: standingSource.generationId,
-      },
     })
     expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
     expect(mocks.latestProposalGeneration).not.toHaveBeenCalled()
     expect(mocks.intervalCallbacks).toHaveLength(0)
     expect(mocks.buttons.some((button) => button.label === 'Open review')).toBe(false)
 
-    const chip = mocks.buttons.find((button) => button.label === 'Runtime')
-    expect(chip?.onClick).toBeTypeOf('function')
-    chip?.onClick?.()
+    const openMap = mocks.buttons.find((button) => button.label === 'Open Repository Map')
+    expect(openMap?.onClick).toBeTypeOf('function')
+    openMap?.onClick?.()
     expect(mocks.openArchitectureSurface).toHaveBeenCalledWith(
       threadRef,
       expect.objectContaining({
-        kind: 'architecture-scope',
-        target: {
-          source: standingSource,
-          scope: { level: 'systems', id: 'systems:runtime' },
-        },
+        kind: 'repository-atlas',
+        target: standingSource,
       }),
     )
   })
@@ -603,8 +551,7 @@ describe('OrchestratePlanCard architecture strip', () =>
     const markup = renderCard(plan, [persistedRevision(3, ['src/api.ts'])])
 
     expect(markup).toContain('data-orchestrate-architecture="unready"')
-    expect(markup).toContain('The standing Repository Atlas has not been built for this project.')
-    expect(mocks.getArchitecturePathScope).not.toHaveBeenCalled()
+    expect(markup).toContain('The Repository Map has not been built for this project.')
     expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
   })
 
@@ -618,7 +565,6 @@ describe('OrchestratePlanCard architecture strip', () =>
     expect(missing).not.toContain('data-orchestrate-architecture=')
     expect(legacy).not.toContain('data-orchestrate-architecture=')
     expect(noPaths).not.toContain('data-orchestrate-architecture=')
-    expect(mocks.getArchitecturePathScope).not.toHaveBeenCalled()
   })
 
   it('offers Open review when a generation exists even without architecture paths', () =>
@@ -628,7 +574,6 @@ describe('OrchestratePlanCard architecture strip', () =>
     const markup = renderCard(plan, [persistedRevision(3)])
 
     expect(markup).toContain('data-orchestrate-architecture="review"')
-    expect(mocks.getArchitecturePathScope).not.toHaveBeenCalled()
     expect(mocks.projectAtlasStatus).not.toHaveBeenCalled()
     const openExplorer = mocks.buttons.find((button) => button.label === 'Open review')
     expect(openExplorer?.onClick).toBeTypeOf('function')

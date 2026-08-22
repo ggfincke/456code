@@ -45,6 +45,13 @@ import {
 import { type ReviewCommentContext } from '../reviewCommentContext'
 
 import {
+  architectureConcernDedupKey,
+  normalizeArchitectureConcernContext,
+  normalizeArchitectureConcernContexts,
+  type ArchitectureConcernAddResult,
+  type ArchitectureConcernContext,
+} from './architectureContext'
+import {
   type ComposerDraftModelState,
   EMPTY_COMPOSER_DRAFT_MODEL_STATE,
   type EffectiveComposerModelState,
@@ -255,6 +262,16 @@ export interface ComposerDraftStoreState
     annotations: ReadonlyArray<PreviewAnnotationPayload>,
   ) => void
   removePreviewAnnotation: (threadRef: ComposerThreadTarget, annotationId: string) => void
+  addArchitectureContext: (
+    threadRef: ComposerThreadTarget,
+    context: ArchitectureConcernContext,
+  ) => ArchitectureConcernAddResult
+  setArchitectureContexts: (
+    threadRef: ComposerThreadTarget,
+    contexts: ReadonlyArray<ArchitectureConcernContext>,
+  ) => void
+  removeArchitectureContext: (threadRef: ComposerThreadTarget, contextId: string) => void
+  clearArchitectureContexts: (threadRef: ComposerThreadTarget) => void
   addReviewComment: (threadRef: ComposerThreadTarget, comment: ReviewCommentContext) => void
   setReviewComments: (
     threadRef: ComposerThreadTarget,
@@ -268,7 +285,7 @@ export interface ComposerDraftStoreState
   ) => void
   clearComposerContent: (threadRef: ComposerThreadTarget) => void
   // clears only the prompt text and image attachments, preserving terminal /
-  // element contexts, preview annotations, and review comments. Used by the
+  // element/architecture contexts, preview annotations, and review comments. Used by the
   // prompt stash, which can only round-trip text + images: clearing the
   // session-bound contexts would destroy state nothing can restore.
   clearComposerPromptAndImages: (threadRef: ComposerThreadTarget) => void
@@ -1512,6 +1529,114 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey }
           })
         },
+        addArchitectureContext: (threadRef, candidate) =>
+        {
+          const threadKey = resolveComposerDraftKey(get(), threadRef)
+          const threadId = resolveComposerThreadId(get(), threadRef)
+          const normalized = normalizeArchitectureConcernContext(candidate)
+          if (!threadKey || !threadId || normalized === null) return 'invalid'
+          const parsedThreadRef = parseScopedThreadKey(threadKey)
+          const environmentId =
+            parsedThreadRef?.environmentId ??
+            get().draftThreadsByThreadKey[threadKey]?.environmentId
+          if (
+            environmentId === undefined ||
+            normalized.environmentId !== environmentId ||
+            normalized.threadId !== threadId
+          )
+          {
+            return 'invalid'
+          }
+          let result: ArchitectureConcernAddResult = 'invalid'
+          set((state) =>
+          {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft()
+            const dedupeKey = architectureConcernDedupKey(normalized)
+            if (
+              existing.architectureContexts.some(
+                (context) => architectureConcernDedupKey(context) === dedupeKey,
+              )
+            )
+            {
+              result = 'duplicate'
+              return state
+            }
+            const architectureContexts = normalizeArchitectureConcernContexts([
+              ...existing.architectureContexts,
+              normalized,
+            ])
+            if (!architectureContexts.some((context) => context.dedupeKey === dedupeKey))
+            {
+              result = 'limit'
+              return state
+            }
+            result = 'added'
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: { ...existing, architectureContexts },
+              },
+            }
+          })
+          return result
+        },
+        setArchitectureContexts: (threadRef, contexts) =>
+        {
+          const threadKey = resolveComposerDraftKey(get(), threadRef)
+          const threadId = resolveComposerThreadId(get(), threadRef)
+          if (!threadKey || !threadId) return
+          const parsedThreadRef = parseScopedThreadKey(threadKey)
+          const environmentId =
+            parsedThreadRef?.environmentId ??
+            get().draftThreadsByThreadKey[threadKey]?.environmentId
+          if (environmentId === undefined) return
+          const architectureContexts = normalizeArchitectureConcernContexts(contexts).filter(
+            (context) => context.environmentId === environmentId && context.threadId === threadId,
+          )
+          set((state) =>
+          {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft()
+            const nextDraft: ComposerThreadDraftState = { ...existing, architectureContexts }
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
+            if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey]
+            else nextDraftsByThreadKey[threadKey] = nextDraft
+            return { draftsByThreadKey: nextDraftsByThreadKey }
+          })
+        },
+        removeArchitectureContext: (threadRef, contextId) =>
+        {
+          const threadKey = resolveComposerDraftKey(get(), threadRef)
+          if (!threadKey || !contextId) return
+          set((state) =>
+          {
+            const current = state.draftsByThreadKey[threadKey]
+            if (!current) return state
+            const architectureContexts = current.architectureContexts.filter(
+              (context) => context.id !== contextId,
+            )
+            if (architectureContexts.length === current.architectureContexts.length) return state
+            const nextDraft: ComposerThreadDraftState = { ...current, architectureContexts }
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
+            if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey]
+            else nextDraftsByThreadKey[threadKey] = nextDraft
+            return { draftsByThreadKey: nextDraftsByThreadKey }
+          })
+        },
+        clearArchitectureContexts: (threadRef) =>
+        {
+          const threadKey = resolveComposerDraftKey(get(), threadRef)
+          if (!threadKey) return
+          set((state) =>
+          {
+            const current = state.draftsByThreadKey[threadKey]
+            if (!current || current.architectureContexts.length === 0) return state
+            const nextDraft: ComposerThreadDraftState = { ...current, architectureContexts: [] }
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
+            if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey]
+            else nextDraftsByThreadKey[threadKey] = nextDraft
+            return { draftsByThreadKey: nextDraftsByThreadKey }
+          })
+        },
         addReviewComment: (threadRef, comment) =>
         {
           const threadKey = resolveComposerDraftKey(get(), threadRef)
@@ -1660,6 +1785,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               terminalContexts: [],
               elementContexts: [],
               previewAnnotations: [],
+              architectureContexts: [],
               reviewComments: [],
             }
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey }

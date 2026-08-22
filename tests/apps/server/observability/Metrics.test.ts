@@ -10,8 +10,11 @@ import * as Metric from 'effect/Metric'
 import * as TestClock from 'effect/testing/TestClock'
 
 import {
+  architectureAdmissionMetricAttributes,
   architectureAutoAnalysisActionDuration,
   architectureAutoAnalysisActionsTotal,
+  architectureGraphViewErrorMetricAttributes,
+  architectureGraphViewMetricAttributes,
   withMetrics,
 } from '../../../../apps/server/src/observability/Metrics.ts'
 
@@ -40,6 +43,42 @@ const findHistogramSnapshot = (
 
 describe('withMetrics', () =>
 {
+  it('keeps architecture view and admission labels closed and low-cardinality', () =>
+  {
+    const graph = architectureGraphViewMetricAttributes({
+      authority: 'verified',
+      resultState: 'graph',
+      lens: 'architecture',
+      freshness: 'stale',
+      totals: {
+        nodes: { omitted: 2 },
+        edges: { omitted: 1 },
+        evidence: { omitted: 0 },
+        changedFiles: { omitted: 0 },
+      },
+      anchors: [{ status: 'matched' }, { status: 'ambiguous' }],
+    })
+
+    assert.deepStrictEqual(graph, {
+      authority: 'verified',
+      result: 'graph',
+      lens: 'architecture',
+      freshness: 'stale',
+      omission: 'multiple',
+      anchor: 'ambiguous',
+    })
+    assert.deepStrictEqual(architectureGraphViewErrorMetricAttributes('context-not-ready'), {
+      result: 'pending',
+    })
+    assert.deepStrictEqual(architectureGraphViewErrorMetricAttributes('not-found'), {
+      result: 'unavailable',
+    })
+    assert.deepStrictEqual(
+      architectureAdmissionMetricAttributes('proposal-verified', 'terminal-failed'),
+      { kind: 'proposal-verified', outcome: 'terminal-failed' },
+    )
+  })
+
   it.effect('supports pipe-style success and direct-invocation failure', () =>
     Effect.gen(function* ()
     {

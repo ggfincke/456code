@@ -1,133 +1,72 @@
 // tests/apps/server/cartographer/architecturePathResolver.test.ts
-// verifies standing-atlas file/dir resolution and touched vs context chips
+// verifies Atlas v6 file and directory anchoring for planned-impact materialization
 
-import type { AtlasIndex } from '@t3tools/cartographer-core/server'
+import {
+  GRAPH_SCHEMA_VERSION,
+  type CartographerGraph,
+} from '../../../../packages/cartographer-core/src/contracts/types.ts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { resolveArchitecturePathScope } from '../../../../apps/server/src/cartographer/architecturePathResolver.ts'
+import { buildAtlasIndex } from '../../../../packages/cartographer-core/src/store/atlasIndex/build.ts'
 
-const createdAt = '2026-08-07T12:00:00.000Z'
+const createdAt = '2026-08-20T12:00:00.000Z'
 const graphDigest = `sha256:${'a'.repeat(64)}` as const
 
-function unit(input: {
-  readonly id: string
-  readonly key: string
-  readonly level: 'systems' | 'blocks' | 'dirs'
-  readonly label: string
-  readonly parent?: string
-  readonly order: number
-})
+function graph(): CartographerGraph
 {
   return {
-    ...input,
-    fileCount: 1,
-    inbound: 0,
-    outbound: 0,
-    visibilityRank: input.order + 1,
-    position: { x: input.order * 240, y: 0 },
-  }
-}
-
-function index(): AtlasIndex
-{
-  const system = unit({
-    id: 'systems:runtime',
-    key: 'runtime',
-    level: 'systems',
-    label: 'Runtime',
-    order: 0,
-  })
-  const api = unit({
-    id: 'blocks:api',
-    key: 'api',
-    level: 'blocks',
-    label: 'API',
-    parent: system.id,
-    order: 0,
-  })
-  const store = unit({
-    id: 'blocks:store',
-    key: 'store',
-    level: 'blocks',
-    label: 'Store',
-    parent: system.id,
-    order: 1,
-  })
-  const directory = unit({
-    id: 'dirs:src',
-    key: 'src',
-    level: 'dirs',
-    label: 'src',
-    parent: api.id,
-    order: 0,
-  })
-  return {
-    version: 5,
-    sourceGeneratedAt: createdAt,
-    sourceGraphDigest: graphDigest,
-    repo: { root: '/repo', name: 'path-scope-fixture', scope: '.', mode: 'imports' },
-    counts: {
-      files: 3,
-      imports: 2,
-      systems: 1,
-      blocks: 2,
-      dirs: 1,
-      indexedSystems: 1,
-      indexedBlocks: 2,
-      indexedDirs: 1,
-    },
-    systemSource: 'authored',
-    units: { systems: [system], blocks: [api, store], dirs: [directory] },
-    edges: {
-      systems: [],
-      blocks: [{ from: api.id, to: store.id, weight: 2 }],
-      dirs: [],
-    },
-    edgeCounts: {
-      systems: { total: 0, indexed: 0, omitted: 0 },
-      blocks: { total: 1, indexed: 1, omitted: 0 },
-      dirs: { total: 0, indexed: 0, omitted: 0 },
-    },
-    scopes: [],
-    health: {
-      cycles: 0,
-      orphans: 0,
-      violatingImports: 0,
-      violatedRules: 0,
-      ruleTotal: 0,
-    },
-    files: [
+    version: GRAPH_SCHEMA_VERSION,
+    repoRoot: '/repo',
+    mode: 'imports',
+    generatedAt: createdAt,
+    gitRef: '1'.repeat(40),
+    scope: '.',
+    nodes: [
       {
         id: 'src/api.ts',
+        kind: 'file',
         label: 'api.ts',
-        system: system.id,
-        block: api.id,
-        dir: directory.id,
-        fanIn: 0,
-        fanOut: 1,
-        visibilityRank: 1,
+        group: 'api',
+        system: 'runtime',
       },
       {
         id: 'src/store.ts',
+        kind: 'file',
         label: 'store.ts',
-        system: system.id,
-        block: store.id,
-        dir: directory.id,
-        fanIn: 1,
-        fanOut: 0,
-        visibilityRank: 2,
+        group: 'store',
+        system: 'runtime',
       },
       {
-        id: 'src/outside.ts',
+        id: 'outside/outside.ts',
+        kind: 'file',
         label: 'outside.ts',
-        system: system.id,
-        fanIn: 0,
-        fanOut: 0,
-        visibilityRank: 3,
+        group: 'outside',
+        system: 'auxiliary',
       },
     ],
+    edges: [
+      {
+        id: 'api-store',
+        from: 'src/api.ts',
+        to: 'src/store.ts',
+        kind: 'imports',
+      },
+    ],
+    groups: [
+      { id: 'api', label: 'API', fileCount: 1 },
+      { id: 'store', label: 'Store', fileCount: 1 },
+      { id: 'outside', label: 'Outside', fileCount: 1 },
+    ],
+    systems: [
+      { id: 'runtime', label: 'Runtime', fileCount: 2, source: 'authored' },
+      { id: 'auxiliary', label: 'Auxiliary', fileCount: 1, source: 'authored' },
+    ],
+    metrics: { cycles: 0, orphans: 1, maxFanIn: 1, maxFanOut: 1 },
   }
 }
+
+const index = () => buildAtlasIndex(graph(), graphDigest)
 
 describe('resolveArchitecturePathScope', () =>
 {
@@ -146,7 +85,7 @@ describe('resolveArchitecturePathScope', () =>
     ])
   })
 
-  it('treats a directory prefix as all contained files without extra context', () =>
+  it('treats a directory prefix as every contained file without fabricated matches', () =>
   {
     expect(resolveArchitecturePathScope(index(), ['src'])).toEqual([
       {
@@ -159,10 +98,6 @@ describe('resolveArchitecturePathScope', () =>
       { role: 'touched', level: 'blocks', id: 'blocks:api', key: 'api', label: 'API' },
       { role: 'touched', level: 'blocks', id: 'blocks:store', key: 'store', label: 'Store' },
     ])
-  })
-
-  it('returns no chips for paths that are not in the standing catalog', () =>
-  {
     expect(resolveArchitecturePathScope(index(), ['missing/file.ts'])).toEqual([])
   })
 })

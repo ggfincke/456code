@@ -504,7 +504,7 @@ function renderComponent(
           key={keyPath}
           className="my-4 rounded-md border border-border/70 bg-muted/25 px-4 py-3"
         >
-          <p className="font-semibold">{node.props.title ?? 'Architecture impact'}</p>
+          <p className="font-semibold">{node.props.title ?? 'Impact Diff'}</p>
           <p className="text-xs text-muted-foreground">
             Architecture analysis is unavailable in this MDX viewer.
           </p>

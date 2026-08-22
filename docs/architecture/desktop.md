@@ -74,6 +74,11 @@ architecture-specific request interceptor. Primary, WSL, and saved remote enviro
 follow the connection runtime's normal authentication and environment-selection boundary; see
 [Cartographer architecture analysis](../integrations/cartographer.md).
 
+Impact Diff and Repository Map are owned by that shared web renderer. The desktop host does not
+mount a parallel architecture UI, duplicate graph state, translate architecture resources, or own a
+second presentation lifecycle. Desktop-specific verification therefore covers protocol, window,
+renderer, and backend lifecycle behavior around the same web implementation.
+
 ## Failure and Restart Behavior
 
 An unexpected backend exit clears readiness and schedules a restart with exponential delay from

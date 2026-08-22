@@ -82,6 +82,7 @@ import Migration0066 from './Migrations/066_ProviderRuntimeInboxProviderKind.ts'
 import Migration0067 from './Migrations/067_CheckpointRevertRequestedFence.ts'
 import Migration0068 from './Migrations/068_ProjectionThreadOrchestratePlanArchitecturePaths.ts'
 import Migration0069 from './Migrations/069_HealOrchestratePlanRespondFailure.ts'
+import Migration0070 from './Migrations/070_NativeArchitectureViews.ts'
 
 // migration loader with all migrations defined inline.
 //
@@ -158,6 +159,7 @@ export const migrationEntries = [
   [67, 'CheckpointRevertRequestedFence', Migration0067],
   [68, 'ProjectionThreadOrchestratePlanArchitecturePaths', Migration0068],
   [69, 'HealOrchestratePlanRespondFailure', Migration0069],
+  [70, 'NativeArchitectureViews', Migration0070],
 ] as const
 
 export interface MigrationIdentity

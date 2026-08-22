@@ -56,12 +56,12 @@ describe('DiffPanel views', () =>
     expect(rendered).toContain('role="tablist" aria-label="Diff views"')
     expect(rendered.match(/role="tab"/g)).toHaveLength(2)
     expect(rendered.match(/role="tabpanel"/g)).toHaveLength(2)
-    expect(rendered).toContain('>Impact</button>')
+    expect(rendered).toContain('>Impact Diff</button>')
     expect(rendered).toContain('Changes content')
     expect(rendered).not.toContain('Architecture content')
   })
 
-  it('mounts Impact on first activation and retains it after returning to Changes', () =>
+  it('mounts Impact Diff on first activation and retains it after returning to Changes', () =>
   {
     const architectureQuery = vi.fn()
     const container = document.createElement('div')
@@ -72,7 +72,7 @@ describe('DiffPanel views', () =>
     expect(architectureQuery).not.toHaveBeenCalled()
 
     const impactTab = Array.from(container.querySelectorAll('[role="tab"]')).find(
-      (tab) => tab.textContent === 'Impact',
+      (tab) => tab.textContent === 'Impact Diff',
     ) as HTMLButtonElement
     act(() => impactTab.click())
     expect(architectureQuery).toHaveBeenCalled()

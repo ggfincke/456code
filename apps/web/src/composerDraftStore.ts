@@ -14,6 +14,15 @@ export {
   type DraftThreadState,
 } from './composer-drafts/persistence'
 export {
+  createArchitectureConcernContext,
+  formatArchitectureConcernAuthority,
+  formatArchitectureConcernLabel,
+  formatArchitectureConcernTooltip,
+  type ArchitectureConcernAddResult,
+  type ArchitectureConcernContext,
+  type ArchitectureConcernGraphSelection,
+} from './composer-drafts/architectureContext'
+export {
   deriveEffectiveComposerModelState,
   type EffectiveComposerModelState,
 } from './composer-drafts/model-selection'

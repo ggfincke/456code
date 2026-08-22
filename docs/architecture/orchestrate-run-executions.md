@@ -71,9 +71,9 @@ were pruned, the query may use the persisted canonical common object database af
 objects exist there. Missing identity or objects produce a typed unavailable result; they do not
 fall back to the legacy thread-global query.
 
-Architecture impact for an exact run uses the same immutable base/head commit pair returned by the
-exact diff. The analysis service resolves both commits and their trees directly; it does not turn
-the exact range back into a mutable branch-range query or read the current worktree `HEAD`.
+The Impact Diff for an exact run uses the same immutable base/head commit pair returned by the exact
+diff. The analysis service resolves both commits and their trees directly; it does not turn the
+exact range back into a mutable branch-range query or read the current worktree `HEAD`.
 
 ## Client compatibility
 

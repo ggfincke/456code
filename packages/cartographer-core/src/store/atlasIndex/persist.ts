@@ -30,7 +30,7 @@ export function atlasIndexSummary(index: AtlasIndex): AtlasIndexSummary
   return {
     ...summary,
     topFiles: files.slice(0, ATLAS_INDEX_TOP_FILE_LIMIT),
-  }
+  } as AtlasIndexSummary
 }
 
 function assertAtlasIndexVersion(value: unknown, path: string): void
@@ -44,8 +44,8 @@ function assertAtlasIndexVersion(value: unknown, path: string): void
   )
   {
     throw new Error(
-      `${path} uses atlas index schema version ${value.version}; ` +
-        `this build requires version ${ATLAS_INDEX_SCHEMA_VERSION} -> rebuild the graph`,
+      `${path} uses unsupported atlas index schema version ${value.version}; ` +
+        `expected version ${ATLAS_INDEX_SCHEMA_VERSION}`,
     )
   }
 }

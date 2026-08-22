@@ -8,6 +8,8 @@ import {
 } from '@t3tools/client-runtime/state/runtime'
 import { shouldPollDiffAnalysisGeneration } from '@t3tools/client-runtime/state/projects'
 import type {
+  ArchitectureGraphProjection,
+  ArchitectureStandingAnchor,
   DiffAnalysisGeneration,
   DiffAnalysisSource,
   EnvironmentId,
@@ -22,8 +24,10 @@ import { projectEnvironment } from '~/state/projects'
 import { useEnvironmentQuery } from '~/state/query'
 import { useAtomCommand } from '~/state/use-atom-command'
 
-import { ArchitectureImpactSurface } from './ArchitectureImpactSurface'
+import { ArchitectureImpactProjectionSurface } from './ArchitectureImpactProjectionSurface'
+import { selectExactComparisonImpactProjection } from './architectureImpactSelection'
 import type { ArchitectureFileSource } from './architectureResourceIdentity'
+import type { ArchitectureConcernGraphSelection } from '~/composerDraftStore'
 
 const POLL_INTERVAL_MS = 1_500
 
@@ -40,6 +44,11 @@ export interface DiffAnalysisPanelProps
   readonly active: boolean
   readonly previewTruncated: boolean
   readonly onOpenFile: (source: ArchitectureFileSource, relativePath: string, line?: number) => void
+  readonly onViewInRepositoryMap: (anchor: ArchitectureStandingAnchor) => void
+  readonly onAddConcern: (
+    projection: ArchitectureGraphProjection,
+    selection: ArchitectureConcernGraphSelection,
+  ) => void
 }
 
 function commandFailureMessage(
@@ -90,7 +99,7 @@ export function analysisError(generation: DiffAnalysisGeneration): string | null
   }
   return generation.errorCode
     ? `Analysis stopped (${generation.errorCode}).`
-    : 'The architecture impact analysis did not complete.'
+    : 'The Impact Diff analysis did not complete.'
 }
 
 function EmptyAnalysisState(props: {
@@ -138,11 +147,9 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
   } | null>(null)
   const previousActiveRef = useRef(props.active)
   const previousSourceRef = useRef(props.source)
+  const supported = props.available
   const target =
-    props.available &&
-    props.environmentId !== null &&
-    props.threadId !== null &&
-    props.source !== null
+    supported && props.environmentId !== null && props.threadId !== null && props.source !== null
       ? {
           environmentId: props.environmentId,
           input: { owner: { threadId: props.threadId }, source: props.source },
@@ -162,14 +169,16 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
     generationQuery.data?.diffAnalysisId !== requestedGenerationSeed.diffAnalysisId
       ? requestedGenerationSeed
       : generationQuery.data
-  const impactQuery = useEnvironmentQuery(
+  const impactProjectionQuery = useEnvironmentQuery(
     props.available &&
       props.environmentId !== null &&
       props.threadId !== null &&
       generation?.state === 'ready'
-      ? projectEnvironment.getArchitectureImpact({
+      ? projectEnvironment.getArchitectureImpactProjection({
           environmentId: props.environmentId,
           input: {
+            version: 1,
+            kind: 'resolve-comparison',
             threadId: props.threadId,
             comparison: {
               kind: 'diff-analysis',
@@ -179,6 +188,20 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
         })
       : null,
   )
+  const impactProjectionResult =
+    generation?.state === 'ready' && props.threadId !== null
+      ? selectExactComparisonImpactProjection(impactProjectionQuery.data, {
+          threadId: props.threadId,
+          comparison: {
+            kind: 'diff-analysis',
+            diffAnalysisId: generation.diffAnalysisId,
+          },
+        })
+      : null
+  const impactProjectionIdentityError =
+    impactProjectionQuery.data !== null && impactProjectionResult === null
+      ? 'The server returned a different exact Impact Diff comparison.'
+      : null
 
   useEffect(() =>
   {
@@ -200,11 +223,11 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
     const sourceResolvedAgain = previousSourceRef.current !== props.source
     previousActiveRef.current = props.active
     previousSourceRef.current = props.source
-    if (props.available && props.targetKey !== null && (becameActive || sourceResolvedAgain))
+    if (supported && props.targetKey !== null && (becameActive || sourceResolvedAgain))
     {
       generationQuery.refresh()
     }
-  }, [generationQuery.refresh, props.active, props.available, props.source, props.targetKey])
+  }, [generationQuery.refresh, props.active, props.source, props.targetKey, supported])
 
   const requestAnalysis = useCallback(async (): Promise<void> =>
   {
@@ -223,13 +246,13 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
     }
   }, [generationQuery.refresh, props.targetKey, requestDiffAnalysis, target])
 
-  if (!props.available)
+  if (!supported)
   {
     return (
       <EmptyAnalysisState
         kind="error"
-        message="This environment does not support native architecture impact analysis."
-        title="Architecture impact unavailable"
+        message="This environment does not support native Impact Diff analysis."
+        title="Impact Diff unavailable"
       />
     )
   }
@@ -238,7 +261,7 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
     return (
       <EmptyAnalysisState
         kind="idle"
-        message="Architecture impact becomes available after the selected diff target resolves."
+        message="Impact Diff becomes available after the selected diff target resolves."
         title="Resolve the diff first"
       />
     )
@@ -281,20 +304,29 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
               </Button>
             </div>
           ) : null}
-          <ArchitectureImpactSurface
-            error={impactQuery.error}
-            hasSettled={impactQuery.hasSettled}
-            isPending={impactQuery.isPending}
-            result={impactQuery.data}
-            onOpenFile={props.onOpenFile}
-            onRetry={impactQuery.refresh}
+          <ArchitectureImpactProjectionSurface
+            error={impactProjectionIdentityError ?? impactProjectionQuery.error}
+            hasSettled={impactProjectionQuery.hasSettled}
+            isPending={impactProjectionQuery.isPending}
+            newerProjectionError={null}
+            newerProjectionPending={false}
+            requestedAuthority="verified"
+            result={impactProjectionResult}
+            onAddConcern={props.onAddConcern}
+            onOpenNewerProjection={() => undefined}
+            onOpenPlannedPath={() => undefined}
+            onOpenVerifiedFile={props.onOpenFile}
+            onRetry={impactProjectionQuery.refresh}
+            onRetryNewerProjection={() => undefined}
+            onSelectAuthority={() => undefined}
+            onViewInRepositoryMap={props.onViewInRepositoryMap}
           />
         </>
       ) : analyzing ? (
         <EmptyAnalysisState
           kind="loading"
           message="Analyzing the complete exact trees. You can keep using the Changes tab."
-          title="Analyzing architecture impact"
+          title="Analyzing Impact Diff"
         />
       ) : failure !== null ? (
         <EmptyAnalysisState
@@ -308,14 +340,14 @@ export function DiffAnalysisPanel(props: DiffAnalysisPanelProps)
         <EmptyAnalysisState
           kind="loading"
           message="Checking for an exact analysis of this diff."
-          title="Loading architecture impact"
+          title="Loading Impact Diff"
         />
       ) : (
         <EmptyAnalysisState
           actionLabel="Analyze"
           kind="idle"
           message="Build the exact before-and-after architecture diff only when you need it."
-          title="Analyze architecture impact"
+          title="Analyze Impact Diff"
           onAction={() => void requestAnalysis()}
         />
       )}

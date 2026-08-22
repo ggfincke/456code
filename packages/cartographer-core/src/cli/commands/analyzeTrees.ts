@@ -3,8 +3,9 @@
 
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
-import { buildGraph, diffGraphs } from '../../analyze/index.js'
+import { buildGraph, buildVerifiedImpactProjection, diffGraphs } from '../../analyze/index.js'
 import { writeFileAtomic } from '../../store/artifactFs.js'
+import { graphContentDigest } from '../../store/atlasIndex.js'
 import { normalizeGraphJson } from '../../store/graphJson.js'
 import type { CartographerGraph } from '../../contracts/types.js'
 import type { CliValues } from '../lib/args.js'
@@ -12,6 +13,7 @@ import type { CliValues } from '../lib/args.js'
 const BASE_GRAPH_FILE = 'base.graph.json'
 const PROPOSED_GRAPH_FILE = 'proposed.graph.json'
 const IMPACT_FILE = 'impact.json'
+const IMPACT_PROJECTION_FILE = 'impact-projection.json'
 const STAGING_PREFIX = '.cartographer-analyze-trees-'
 const MAX_OUTPUT_BYTES = 128 * 1024 * 1024
 const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
@@ -21,11 +23,12 @@ const ANALYZER_VERSION =
 export interface AnalysisReadyManifest
 {
   type: 'cartographer.analysis-ready'
-  version: 1
+  version: 2
   analyzerVersion: string
   baseGraph: typeof BASE_GRAPH_FILE
   proposedGraph: typeof PROPOSED_GRAPH_FILE
   impact: typeof IMPACT_FILE
+  impactProjection: typeof IMPACT_PROJECTION_FILE
 }
 
 interface AnalyzeTreesOptions
@@ -136,6 +139,20 @@ function requiredValue(
   return value
 }
 
+function requiredNonNegativeInt(value: string | undefined, flag: string): number
+{
+  if (!value || !/^(?:0|[1-9]\d*)$/u.test(value))
+  {
+    throw new Error(`invalid ${flag} -> expected a non-negative integer`)
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed))
+  {
+    throw new Error(`invalid ${flag} -> value is outside the safe integer range`)
+  }
+  return parsed
+}
+
 function serializeJson(value: unknown): string
 {
   return `${JSON.stringify(value, null, 2)}\n`
@@ -197,6 +214,10 @@ export async function runAnalyzeTrees(
     ANALYZER_VERSION,
     'a supported Cartographer analyzer fingerprint',
   )
+  const implementationChangedFileCount = requiredNonNegativeInt(
+    values['implementation-changed-file-count'],
+    '--implementation-changed-file-count',
+  )
 
   const stagedRoot = NodeFS.mkdtempSync(NodePath.join(outputRoot, STAGING_PREFIX))
   let baseGraph: CartographerGraph
@@ -214,19 +235,38 @@ export async function runAnalyzeTrees(
   {
     NodeFS.rmSync(stagedRoot, { recursive: true, force: true })
   }
+  const baseGraphContent = serializeJson(baseGraph)
+  const proposedGraphContent = serializeJson(proposedGraph)
+  const baseGraphDigest = graphContentDigest(baseGraphContent)
+  const proposedGraphDigest = graphContentDigest(proposedGraphContent)
   const impact = diffGraphs(baseGraph, proposedGraph)
+  const impactContent = serializeJson(impact)
+  const impactProjection = buildVerifiedImpactProjection({
+    base: baseGraph,
+    head: proposedGraph,
+    diff: impact,
+    baseGraphDigest,
+    headGraphDigest: proposedGraphDigest,
+    rawImpactDigest: graphContentDigest(impactContent),
+    analyzerFingerprint: analyzerVersion,
+    implementationChangedFileCount,
+  })
   const artifacts = [
     {
       path: NodePath.join(outputRoot, BASE_GRAPH_FILE),
-      content: serializeJson(baseGraph),
+      content: baseGraphContent,
     },
     {
       path: NodePath.join(outputRoot, PROPOSED_GRAPH_FILE),
-      content: serializeJson(proposedGraph),
+      content: proposedGraphContent,
     },
     {
       path: NodePath.join(outputRoot, IMPACT_FILE),
-      content: serializeJson(impact),
+      content: impactContent,
+    },
+    {
+      path: NodePath.join(outputRoot, IMPACT_PROJECTION_FILE),
+      content: serializeJson(impactProjection),
     },
   ]
   const outputBytes = artifacts.reduce(
@@ -244,11 +284,12 @@ export async function runAnalyzeTrees(
 
   const manifest: AnalysisReadyManifest = {
     type: 'cartographer.analysis-ready',
-    version: 1,
+    version: 2,
     analyzerVersion,
     baseGraph: BASE_GRAPH_FILE,
     proposedGraph: PROPOSED_GRAPH_FILE,
     impact: IMPACT_FILE,
+    impactProjection: IMPACT_PROJECTION_FILE,
   }
   process.stdout.write(`${JSON.stringify(manifest)}\n`)
   return manifest

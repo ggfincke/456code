@@ -20,6 +20,7 @@ import {
 } from './orchestration.ts'
 import { ProviderInstanceId } from './providerInstance.ts'
 import { ProjectReadMdxDocumentResult } from './mdx.ts'
+import { PlannedImpactPublicationRef } from './plannedArchitectureImpact.ts'
 
 export const PROPOSAL_MAX_OPERATIONS = 200
 export const PROPOSAL_MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -238,6 +239,7 @@ export const ProposalRevision = Schema.Struct({
   narrativeByteLength: Schema.optionalKey(NonNegativeInt),
   planId: Schema.optionalKey(OrchestrationProposedPlanId),
   planMarkdownSha256: Schema.optionalKey(ProposalSha256),
+  plannedImpactRef: Schema.optionalKey(PlannedImpactPublicationRef),
   createdAt: IsoDateTime,
 })
 export type ProposalRevision = typeof ProposalRevision.Type
@@ -359,6 +361,7 @@ export const ProposalFailureCode = Schema.Literals([
   'invalid-patch',
   'empty-change',
   'git-failed',
+  'analyzer-unavailable',
   'persistence-failed',
   'not-found',
   'identity-mismatch',

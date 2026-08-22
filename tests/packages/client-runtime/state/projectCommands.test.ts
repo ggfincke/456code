@@ -2,13 +2,14 @@
 // verifies native architecture command, query, and subscription atom boundaries
 
 import {
-  type ArchitectureGraphDiffResult,
-  type ArchitectureImpactResult,
+  type ArchitectureImpactProjectionResult,
   ArchitectureGenerationId,
   ArchitectureGraphDigest,
   EnvironmentId,
   ProjectId,
   ProposalGenerationId,
+  ProposalId,
+  ProposalRevisionId,
   ThreadId,
   WS_METHODS,
   type ProjectAtlasStatus,
@@ -43,7 +44,13 @@ const TARGET = new PrimaryConnectionTarget({
 })
 const PROJECT_ID = ProjectId.make('project-1')
 const THREAD_ID = ThreadId.make('thread-architecture-impact')
-const PROPOSAL_GENERATION_ID = ProposalGenerationId.make('proposal-generation-impact')
+const PLAN = {
+  _tag: 'plan' as const,
+  planId: 'plan:thread-architecture-impact:turn:impact',
+}
+const PROPOSAL_GENERATION_ID = ProposalGenerationId.make('generation-impact')
+const PROPOSAL_ID = ProposalId.make('proposal-impact')
+const PROPOSAL_REVISION_ID = ProposalRevisionId.make('proposal-impact:1')
 const READY_STATUS: ProjectAtlasStatus = {
   state: 'ready',
   source: {
@@ -59,23 +66,77 @@ const READY_STATUS: ProjectAtlasStatus = {
   },
   lastBuildError: null,
 }
-const IMPACT_RESULT: ArchitectureGraphDiffResult = {
+const IMPACT_RESULT: ArchitectureImpactProjectionResult = {
   version: 1,
-  summary: 'architecture impact ready',
-  base: { generatedAt: '2026-08-09T12:00:00.000Z', gitRef: 'base-ref' },
-  head: { generatedAt: '2026-08-09T12:00:01.000Z', gitRef: 'head-ref' },
-  changed: true,
-  addedNodes: { items: [], total: 0, omitted: 0 },
-  removedNodes: { items: [], total: 0, omitted: 0 },
-  addedEdges: { items: [], total: 0, omitted: 0 },
-  removedEdges: { items: [], total: 0, omitted: 0 },
-  movedNodes: { items: [], total: 0, omitted: 0 },
-  moveFlows: { items: [], total: 0, omitted: 0 },
-  movedEdges: 0,
-  apiChanges: { items: [], total: 3, omitted: 3 },
-  apiTotals: { files: 3, addedExports: 2, removedExports: 1, brokenConsumers: 4 },
-  newViolations: { items: [], total: 0, omitted: 0 },
-  resolvedViolations: { items: [], total: 0, omitted: 0 },
+  descriptor: {
+    version: 1,
+    descriptorId: 'c'.repeat(64),
+    threadId: THREAD_ID,
+    projectId: PROJECT_ID,
+    target: { kind: 'plan', plan: PLAN, state: 'active' },
+    verifiedCandidate: {
+      authority: 'verified',
+      source: {
+        kind: 'verified-proposal-impact',
+        threadId: THREAD_ID,
+        generationId: PROPOSAL_GENERATION_ID,
+        proposalId: PROPOSAL_ID,
+        revisionId: PROPOSAL_REVISION_ID,
+        baseTreeOid: '1'.repeat(40),
+        headTreeOid: '2'.repeat(40),
+        baseGraphDigest: `sha256:${'3'.repeat(64)}`,
+        headGraphDigest: `sha256:${'4'.repeat(64)}`,
+        projectionDigest: `sha256:${'5'.repeat(64)}`,
+      },
+      projectionId: 'projection-impact',
+      projectionRevision: 1,
+      projectionDigest: `sha256:${'5'.repeat(64)}`,
+      resultState: 'no-impact',
+      freshness: 'fresh',
+      generatedAt: '2026-08-20T12:00:00.000Z',
+      publishedAt: '2026-08-20T12:00:00.000Z',
+    },
+    defaultAuthority: 'verified',
+    resolvedAt: '2026-08-20T12:00:00.000Z',
+  },
+  selectedAuthority: 'verified',
+  projection: {
+    projectionVersion: 1,
+    projectionId: 'projection-impact',
+    projectionRevision: 1,
+    kind: 'impact-diff',
+    authority: 'verified',
+    resultState: 'no-impact',
+    freshness: 'fresh',
+    generatedAt: '2026-08-20T12:00:00.000Z',
+    publishedAt: '2026-08-20T12:00:00.000Z',
+    source: {
+      kind: 'verified-proposal-impact',
+      threadId: THREAD_ID,
+      generationId: PROPOSAL_GENERATION_ID,
+      proposalId: PROPOSAL_ID,
+      revisionId: PROPOSAL_REVISION_ID,
+      baseTreeOid: '1'.repeat(40),
+      headTreeOid: '2'.repeat(40),
+      baseGraphDigest: `sha256:${'3'.repeat(64)}`,
+      headGraphDigest: `sha256:${'4'.repeat(64)}`,
+      projectionDigest: `sha256:${'5'.repeat(64)}`,
+    },
+    lens: 'architecture',
+    semanticLevel: 'files',
+    breadcrumbs: [],
+    layoutVersion: 'semantic-impact-v1',
+    totals: {
+      nodes: { total: 0, returned: 0, omitted: 0 },
+      edges: { total: 0, returned: 0, omitted: 0 },
+      evidence: { total: 0, returned: 0, omitted: 0 },
+      changedFiles: { total: 1, returned: 0, omitted: 1 },
+    },
+    nodes: [],
+    edges: [],
+    evidence: [],
+    anchors: [],
+  },
 }
 
 function session(client: WsRpcProtocolClient): RpcSession
@@ -181,7 +242,7 @@ describe('project atlas environment atoms', () =>
     ),
   )
 
-  it.effect('routes architecture impact queries and revalidates them on remount', () =>
+  it.effect('routes exact Impact projection queries and revalidates them on remount', () =>
     Effect.scoped(
       Effect.gen(function* ()
       {
@@ -194,14 +255,15 @@ describe('project atlas environment atoms', () =>
           generation: 1,
         }
         const inputs = new Array<{
+          readonly version: 1
+          readonly kind: 'resolve-plan'
           readonly threadId: typeof THREAD_ID
-          readonly comparison: {
-            readonly kind: 'proposal-generation'
-            readonly generationId: typeof PROPOSAL_GENERATION_ID
-          }
+          readonly plan: typeof PLAN
         }>()
         const client = {
-          [WS_METHODS.cartographerGetArchitectureImpact]: (input: (typeof inputs)[number]) =>
+          [WS_METHODS.cartographerGetArchitectureImpactProjection]: (
+            input: (typeof inputs)[number],
+          ) =>
             Effect.sync(() =>
             {
               inputs.push(input)
@@ -239,17 +301,16 @@ describe('project atlas environment atoms', () =>
         const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
           Effect.sync(() => registry.dispose()),
         )
-        const impactAtom = atoms.getArchitectureImpact({
+        const impactAtom = atoms.getArchitectureImpactProjection({
           environmentId: TARGET.environmentId,
           input: {
+            version: 1,
+            kind: 'resolve-plan',
             threadId: THREAD_ID,
-            comparison: {
-              kind: 'proposal-generation',
-              generationId: PROPOSAL_GENERATION_ID,
-            },
+            plan: PLAN,
           },
         })
-        const results: ArchitectureImpactResult[] = []
+        const results: ArchitectureImpactProjectionResult[] = []
         const subscribe = () =>
           registry.subscribe(
             impactAtom,
@@ -276,18 +337,16 @@ describe('project atlas environment atoms', () =>
 
         expect(inputs).toEqual([
           {
+            version: 1,
+            kind: 'resolve-plan',
             threadId: THREAD_ID,
-            comparison: {
-              kind: 'proposal-generation',
-              generationId: PROPOSAL_GENERATION_ID,
-            },
+            plan: PLAN,
           },
           {
+            version: 1,
+            kind: 'resolve-plan',
             threadId: THREAD_ID,
-            comparison: {
-              kind: 'proposal-generation',
-              generationId: PROPOSAL_GENERATION_ID,
-            },
+            plan: PLAN,
           },
         ])
         expect(results.at(-1)).toBe(IMPACT_RESULT)

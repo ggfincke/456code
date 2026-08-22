@@ -2398,6 +2398,9 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
     message: TrimmedNonEmptyString,
     code: Schema.optional(TrimmedNonEmptyString),
     cause: Schema.optional(Schema.Defect()),
+    // set when the server rolled back a bootstrap thread it just created,
+    // letting clients rotate their draft onto a fresh thread id and retry
+    bootstrapThreadDisposition: Schema.optional(Schema.Literal('deleted')),
   },
 )
 {}

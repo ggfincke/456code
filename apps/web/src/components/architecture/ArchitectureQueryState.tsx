@@ -12,6 +12,12 @@ export interface ArchitectureQueryStateProps
   readonly title: string
   readonly message: string
   readonly onRetry?: (() => void) | undefined
+  readonly alternateAction?:
+    | {
+        readonly label: string
+        readonly onClick: () => void
+      }
+    | undefined
 }
 
 export function ArchitectureQueryState(props: ArchitectureQueryStateProps)
@@ -30,13 +36,20 @@ export function ArchitectureQueryState(props: ArchitectureQueryStateProps)
         )}
         <h2 className="text-sm font-medium text-foreground">{props.title}</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{props.message}</p>
-        {props.onRetry && (
+        {props.onRetry || props.alternateAction ? (
           <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <Button size="sm" variant="outline" onClick={props.onRetry}>
-              Retry
-            </Button>
+            {props.onRetry ? (
+              <Button size="sm" variant="outline" onClick={props.onRetry}>
+                Retry
+              </Button>
+            ) : null}
+            {props.alternateAction ? (
+              <Button size="sm" onClick={props.alternateAction.onClick}>
+                {props.alternateAction.label}
+              </Button>
+            ) : null}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   )

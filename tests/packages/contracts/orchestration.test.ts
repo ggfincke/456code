@@ -22,6 +22,7 @@ import {
   ModelSelection,
   normalizeCollaborationMode,
   OrchestrationCommand,
+  OrchestrationDispatchCommandError,
   OrchestrationEvent,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
@@ -126,6 +127,7 @@ const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationComma
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent)
 const encodeOrchestrationEvent = Schema.encodeEffect(OrchestrationEvent)
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload)
+const decodeDispatchCommandError = Schema.decodeUnknownEffect(OrchestrationDispatchCommandError)
 const decodeThreadMessagesImportCommand = Schema.decodeUnknownEffect(ThreadMessagesImportCommand)
 const decodeThreadOrigin = Schema.decodeUnknownEffect(ThreadOrigin)
 const decodeImportSessionsRequest = Schema.decodeUnknownEffect(ImportSessionsRequest)
@@ -1346,5 +1348,35 @@ it.effect('decodes unknown event types into the tolerance sentinel', () =>
       payload: { nope: true },
     }).pipe(Effect.result)
     assert.strictEqual(malformed._tag, 'Failure')
+  }),
+)
+
+// the disposition marker lets clients rotate a rolled-back bootstrap draft
+// onto a fresh thread id instead of retrying into a deleted thread
+it.effect('decodes a dispatch error after its bootstrap thread was deleted', () =>
+  Effect.gen(function* ()
+  {
+    const error = yield* decodeDispatchCommandError({
+      _tag: 'OrchestrationDispatchCommandError',
+      message: 'Failed to create worktree.',
+      code: 'worktree_create_failed',
+      bootstrapThreadDisposition: 'deleted',
+    })
+
+    assert.strictEqual(error.bootstrapThreadDisposition, 'deleted')
+    assert.strictEqual(error.code, 'worktree_create_failed')
+
+    const withoutDisposition = yield* decodeDispatchCommandError({
+      _tag: 'OrchestrationDispatchCommandError',
+      message: 'Failed to create worktree.',
+    })
+    assert.isUndefined(withoutDisposition.bootstrapThreadDisposition)
+
+    const invalid = yield* decodeDispatchCommandError({
+      _tag: 'OrchestrationDispatchCommandError',
+      message: 'Failed to create worktree.',
+      bootstrapThreadDisposition: 'archived',
+    }).pipe(Effect.result)
+    assert.strictEqual(invalid._tag, 'Failure')
   }),
 )

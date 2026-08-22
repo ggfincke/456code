@@ -4,7 +4,7 @@
 // @vitest-environment happy-dom
 
 import type {
-  ArchitectureImpactResult,
+  ArchitectureImpactProjectionResult,
   ArchitectureProposalSource,
   EnvironmentId,
   OrchestrationProposedPlanId,
@@ -30,7 +30,7 @@ vi.mock('~/state/projects', () =>
     projectEnvironment: {
       findProposalByOrchestrateRevision: query('find-proposal-by-orchestrate-revision'),
       findProposalByPlan: query('find-proposal-by-plan'),
-      getArchitectureImpact: query('architecture-impact'),
+      getArchitectureImpactProjection: query('architecture-impact-projection'),
       getProposal: query('get-proposal'),
       getProposalDiff: query('get-proposal-diff'),
       getProposalGeneration: query('get-proposal-generation'),
@@ -125,6 +125,7 @@ const generation = {
   baseGraphArtifact: null,
   proposedGraphArtifact: null,
   impactArtifact: null,
+  impactProjectionArtifact: 'impact-projection-resource',
   errorCode: null,
   createdAt: '2026-08-09T12:00:00.000Z',
   updatedAt: '2026-08-09T12:00:00.000Z',
@@ -144,27 +145,81 @@ const proposedSource = {
 } as ArchitectureProposalSource
 
 const impact = {
-  version: 2,
-  summary: 'Exact retained generations were compared.',
-  base: { generatedAt: '2026-08-09T12:00:00.000Z' },
-  head: { generatedAt: '2026-08-09T12:01:00.000Z' },
-  changed: false,
-  addedNodes: { items: [], total: 0, omitted: 0 },
-  removedNodes: { items: [], total: 0, omitted: 0 },
-  addedEdges: { items: [], total: 0, omitted: 0 },
-  removedEdges: { items: [], total: 0, omitted: 0 },
-  movedNodes: { items: [], total: 0, omitted: 0 },
-  moveFlows: { items: [], total: 0, omitted: 0 },
-  movedEdges: 0,
-  apiChanges: { items: [], total: 0, omitted: 0 },
-  apiTotals: { files: 0, addedExports: 0, removedExports: 0, brokenConsumers: 0 },
-  newViolations: { items: [], total: 0, omitted: 0 },
-  resolvedViolations: { items: [], total: 0, omitted: 0 },
-  comparison: { kind: 'proposal-generation', generationId: generation.generationId },
-  impactDigest: `sha256:${'c'.repeat(64)}`,
-  baseSource: beforeSource,
-  headSource: proposedSource,
-} satisfies ArchitectureImpactResult
+  version: 1,
+  descriptor: {
+    version: 1,
+    descriptorId: 'c'.repeat(64),
+    threadId: threadRef.threadId,
+    projectId,
+    target: {
+      kind: 'plan',
+      plan: { _tag: 'plan', planId },
+      state: 'active',
+    },
+    verifiedCandidate: {
+      authority: 'verified',
+      source: {
+        kind: 'verified-proposal-impact',
+        threadId: threadRef.threadId,
+        generationId: generation.generationId,
+        proposalId: generation.proposalId,
+        revisionId: generation.revisionId,
+        baseTreeOid: '1'.repeat(40),
+        headTreeOid: '2'.repeat(40),
+        baseGraphDigest: beforeSource.graphDigest,
+        headGraphDigest: proposedSource.graphDigest,
+        projectionDigest: `sha256:${'c'.repeat(64)}`,
+      },
+      projectionId: 'projection-impact-resource',
+      projectionRevision: 1,
+      projectionDigest: `sha256:${'c'.repeat(64)}`,
+      resultState: 'graph',
+      freshness: 'fresh',
+      generatedAt: '2026-08-20T12:00:00.000Z',
+      publishedAt: '2026-08-20T12:00:00.000Z',
+    },
+    defaultAuthority: 'verified',
+    resolvedAt: '2026-08-20T12:00:00.000Z',
+  },
+  selectedAuthority: 'verified',
+  projection: {
+    projectionVersion: 1,
+    projectionId: 'projection-impact-resource',
+    projectionRevision: 1,
+    kind: 'impact-diff',
+    authority: 'verified',
+    resultState: 'graph',
+    freshness: 'fresh',
+    generatedAt: '2026-08-20T12:00:00.000Z',
+    publishedAt: '2026-08-20T12:00:00.000Z',
+    source: {
+      kind: 'verified-proposal-impact',
+      threadId: threadRef.threadId,
+      generationId: generation.generationId,
+      proposalId: generation.proposalId,
+      revisionId: generation.revisionId,
+      baseTreeOid: '1'.repeat(40),
+      headTreeOid: '2'.repeat(40),
+      baseGraphDigest: beforeSource.graphDigest,
+      headGraphDigest: proposedSource.graphDigest,
+      projectionDigest: `sha256:${'c'.repeat(64)}`,
+    },
+    lens: 'architecture',
+    semanticLevel: 'blocks',
+    breadcrumbs: [],
+    layoutVersion: 'semantic-impact-v1',
+    totals: {
+      nodes: { total: 0, returned: 0, omitted: 0 },
+      edges: { total: 0, returned: 0, omitted: 0 },
+      evidence: { total: 0, returned: 0, omitted: 0 },
+      changedFiles: { total: 1, returned: 0, omitted: 1 },
+    },
+    nodes: [],
+    edges: [],
+    evidence: [],
+    anchors: [],
+  },
+} satisfies ArchitectureImpactProjectionResult
 
 function proposalLookup()
 {
@@ -201,7 +256,7 @@ function queryResult(query: unknown)
       case 'latest-proposal-generation':
       case 'get-proposal-generation':
         return generation
-      case 'architecture-impact':
+      case 'architecture-impact-projection':
         return impact
       default:
         return null
@@ -224,7 +279,7 @@ afterEach(() =>
 
 describe('ConnectedExplorerPanel Impact Diff resource', () =>
 {
-  it('opens and deduplicates the exact generation comparison beside Proposal Review', async () =>
+  it('opens and deduplicates the exact Impact descriptor beside Proposal Review', async () =>
   {
     harness.query.mockImplementation(queryResult)
     useRightPanelStore.getState().openExplorer(threadRef, { kind: 'plan', planId })
@@ -247,7 +302,7 @@ describe('ConnectedExplorerPanel Impact Diff resource', () =>
         )
       })
       const open = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
-        (button) => button.textContent?.includes('Open graph diff'),
+        (button) => button.textContent?.includes('Open Impact Diff'),
       )
       await act(async () => open?.click())
       await act(async () => open?.click())
@@ -261,8 +316,8 @@ describe('ConnectedExplorerPanel Impact Diff resource', () =>
       expect(state.surfaces[1]).toMatchObject({
         kind: 'architecture-impact',
         target: {
-          threadId: threadRef.threadId,
-          comparison: { kind: 'proposal-generation', generationId },
+          kind: 'exact-impact',
+          descriptor: impact.descriptor,
         },
       })
       expect(container.querySelector('iframe')).toBeNull()

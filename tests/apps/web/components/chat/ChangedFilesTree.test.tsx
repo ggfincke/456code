@@ -143,7 +143,7 @@ describe('ChangedFilesCard', () =>
     expect(markup).not.toContain('App.tsx')
   })
 
-  it('capability-gates the secondary Architecture impact action', () =>
+  it('capability-gates the secondary Impact Diff action', () =>
   {
     const renderAction = () =>
       renderToStaticMarkup(
@@ -154,7 +154,7 @@ describe('ChangedFilesCard', () =>
         />,
       )
 
-    expect(renderAction()).toContain('aria-label="Architecture impact"')
+    expect(renderAction()).toContain('aria-label="Impact Diff"')
     expect(renderAction()).toContain('@[32rem]/changed-files:inline')
     expect(renderAction()).not.toContain('sm:inline')
     mocks.atlasAvailable = false

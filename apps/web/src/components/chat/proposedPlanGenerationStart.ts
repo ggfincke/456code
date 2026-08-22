@@ -1,7 +1,7 @@
 // apps/web/src/components/chat/proposedPlanGenerationStart.ts
-// owns proposal generation starts across surfaces, revisions, and remounts
+// coordinates explicit proposal generation retries across mounted surfaces
 import type { EnvironmentId, ProposalGeneration } from '@t3tools/contracts'
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 
 export interface ProposalGenerationStartIdentity
 {
@@ -84,9 +84,6 @@ export interface ProposalGenerationStartAttempt
 export interface ProposalGenerationStartController
 {
   readonly state: ProposalGenerationStartState
-  readonly claimAutomatic: (
-    latest: ProposalGeneration | null,
-  ) => ProposalGenerationStartAttempt | null
   readonly claimManual: (latest: ProposalGeneration | null) => ProposalGenerationStartAttempt | null
 }
 
@@ -275,21 +272,12 @@ function applyTransition(
 
 function claimProposalGenerationStart(
   target: ProposalGenerationStartTarget,
-  mode: 'automatic' | 'manual',
   latest: ProposalGeneration | null,
 ): ProposalGenerationStartAttempt | null
 {
   const current = readProposalGenerationStartState(target)
   const lane = startLanes.get(target.laneKey)
   if (
-    mode === 'automatic' &&
-    (lane?.key === target.key || (current.status !== 'idle' && current.status !== 'superseded'))
-  )
-  {
-    return null
-  }
-  if (
-    mode === 'manual' &&
     lane?.key === target.key &&
     lane.attemptId === current.attemptId &&
     current.status === 'starting'
@@ -319,20 +307,12 @@ function claimProposalGenerationStart(
   return { ...target, attemptId }
 }
 
-export function claimAutomaticProposalGenerationStart(
-  target: ProposalGenerationStartTarget,
-  latest: ProposalGeneration | null,
-): ProposalGenerationStartAttempt | null
-{
-  return claimProposalGenerationStart(target, 'automatic', latest)
-}
-
 export function claimManualProposalGenerationStart(
   target: ProposalGenerationStartTarget,
   latest: ProposalGeneration | null,
 ): ProposalGenerationStartAttempt | null
 {
-  return claimProposalGenerationStart(target, 'manual', latest)
+  return claimProposalGenerationStart(target, latest)
 }
 
 function ownsProposalGenerationStartAttempt(attempt: ProposalGenerationStartAttempt): boolean
@@ -413,30 +393,6 @@ export function useProposalGenerationStart(
     getSnapshot,
     getSnapshot,
   )
-  const automaticActivationRef = useRef<{
-    key: string | null
-    consumed: boolean
-  }>({ key: null, consumed: false })
-  useEffect(() =>
-  {
-    if (automaticActivationRef.current.key === key) return
-    automaticActivationRef.current = { key, consumed: false }
-  }, [key])
-
-  const claimAutomatic = useCallback(
-    (latest: ProposalGeneration | null): ProposalGenerationStartAttempt | null =>
-    {
-      if (key === null || laneKey === null) return null
-      if (automaticActivationRef.current.key !== key)
-      {
-        automaticActivationRef.current = { key, consumed: false }
-      }
-      if (automaticActivationRef.current.consumed) return null
-      automaticActivationRef.current.consumed = true
-      return claimAutomaticProposalGenerationStart({ key, laneKey }, latest)
-    },
-    [key, laneKey],
-  )
   const claimManual = useCallback(
     (latest: ProposalGeneration | null): ProposalGenerationStartAttempt | null =>
       key === null || laneKey === null
@@ -445,7 +401,7 @@ export function useProposalGenerationStart(
     [key, laneKey],
   )
 
-  return { state, claimAutomatic, claimManual }
+  return { state, claimManual }
 }
 
 export function resetProposalGenerationStartStoreForTests(): void

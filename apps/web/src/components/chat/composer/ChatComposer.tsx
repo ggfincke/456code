@@ -88,6 +88,7 @@ import {
 import { useComposerPathSearch } from '../../../lib/composerPathSearchState'
 import { type ElementContextDraft } from '../../../lib/elementContext'
 import { ComposerPendingElementContexts } from './ComposerPendingElementContexts'
+import { ComposerPendingArchitectureContexts } from './ComposerPendingArchitectureContexts'
 import { ComposerPendingReviewComments } from './ComposerPendingReviewComments'
 import { ComposerPreviewAnnotationCards } from './ComposerPreviewAnnotationCards'
 import {
@@ -383,6 +384,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerTerminalContexts = composerDraft.terminalContexts
   const composerElementContexts = composerDraft.elementContexts
   const composerPreviewAnnotations = composerDraft.previewAnnotations
+  const composerArchitectureContexts = composerDraft.architectureContexts
   const composerReviewComments = composerDraft.reviewComments
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds
 
@@ -404,6 +406,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   )
   const removeComposerDraftPreviewAnnotation = useComposerDraftStore(
     (store) => store.removePreviewAnnotation,
+  )
+  const removeComposerDraftArchitectureContext = useComposerDraftStore(
+    (store) => store.removeArchitectureContext,
   )
   const removeComposerDraftReviewComment = useComposerDraftStore(
     (store) => store.removeReviewComment,
@@ -814,10 +819,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         elementContextCount:
           composerElementContexts.length +
           composerPreviewAnnotations.length +
+          composerArchitectureContexts.length +
           composerReviewComments.length,
       }),
     [
       composerElementContexts.length,
+      composerArchitectureContexts.length,
       composerImages.length,
       composerPreviewAnnotations.length,
       composerReviewComments.length,
@@ -1766,6 +1773,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             composerSendState.sendableTerminalContexts.length > 0 ||
             composerElementContexts.length > 0 ||
             composerPreviewAnnotations.length > 0 ||
+            composerArchitectureContexts.length > 0 ||
             composerReviewComments.length > 0,
         })
       )
@@ -1790,6 +1798,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       blurMobileComposerAfterSend,
       importContinuationSendBlocked,
       composerElementContexts.length,
+      composerArchitectureContexts.length,
       composerImages.length,
       composerPreviewAnnotations.length,
       composerReviewComments.length,
@@ -2663,6 +2672,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         terminalContexts: composerTerminalContextsRef.current,
         elementContexts: composerElementContextsRef.current,
         previewAnnotations: composerPreviewAnnotations,
+        architectureContexts: composerArchitectureContexts,
         reviewComments: composerReviewComments,
         selectedPromptEffort,
         selectedModelOptionsForDispatch,
@@ -2693,6 +2703,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerTerminalContextsRef,
       composerElementContextsRef,
       composerPreviewAnnotations,
+      composerArchitectureContexts,
       composerReviewComments,
       isConnecting,
       isComposerApprovalState,
@@ -2994,6 +3005,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     if (preview) onExpandImage(preview)
                   }}
                   className="mb-3"
+                />
+              )}
+
+            {!isComposerCollapsedMobile &&
+              !isComposerApprovalState &&
+              pendingUserInputs.length === 0 &&
+              composerArchitectureContexts.length > 0 && (
+                <ComposerPendingArchitectureContexts
+                  className="mb-3"
+                  contexts={composerArchitectureContexts}
+                  onRemove={(contextId) =>
+                    removeComposerDraftArchitectureContext(composerDraftTarget, contextId)
+                  }
                 />
               )}
 

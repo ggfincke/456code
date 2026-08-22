@@ -8,7 +8,6 @@ import {
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
-  ThreadId,
   TrimmedNonEmptyString,
 } from './baseSchemas.ts'
 import { DiffAnalysisId, ProposalGenerationId } from './cartographer.ts'
@@ -219,16 +218,6 @@ export const ArchitectureGraphDiffInput = Schema.Struct({
   description: 'Compares the paired graphs from one authorized completed analysis.',
 })
 export type ArchitectureGraphDiffInput = typeof ArchitectureGraphDiffInput.Type
-
-export const ArchitectureImpactInput = Schema.Struct({
-  threadId: ThreadId,
-  comparison: ArchitectureComparisonSelector.annotate({
-    description: 'Proposal or diff-analysis identity whose two graphs must be resolved atomically.',
-  }),
-}).annotate({
-  description: 'Requests native architecture impact for one thread-authorized graph comparison.',
-})
-export type ArchitectureImpactInput = typeof ArchitectureImpactInput.Type
 
 export const ArchitecturePatchPath = Schema.String.check(
   Schema.isNonEmpty(),
@@ -588,6 +577,7 @@ export const ArchitectureToolErrorCode = Schema.Literals([
   'target-not-found',
   'unsupported',
   'invalid-patch',
+  'invalid-publication',
   'limit-exceeded',
   'evaluation-failed',
   'persistence-failed',

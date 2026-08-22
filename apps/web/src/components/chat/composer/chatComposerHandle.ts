@@ -11,6 +11,7 @@ import {
 } from '@t3tools/contracts'
 
 import type { ComposerImageAttachment } from '../../../composerDraftStore'
+import type { ArchitectureConcernContext } from '../../../composerDraftStore'
 import type { ElementContextDraft } from '../../../lib/elementContext'
 import type { TerminalContextDraft, TerminalContextSelection } from '../../../lib/terminalContext'
 import type { ReviewCommentContext } from '../../../lib/reviewCommentContext'
@@ -47,6 +48,7 @@ export interface ChatComposerHandle
     terminalContexts: TerminalContextDraft[]
     elementContexts: ElementContextDraft[]
     previewAnnotations: PreviewAnnotationPayload[]
+    architectureContexts: ArchitectureConcernContext[]
     reviewComments: ReviewCommentContext[]
     selectedPromptEffort: string | null
     selectedModelOptionsForDispatch: unknown

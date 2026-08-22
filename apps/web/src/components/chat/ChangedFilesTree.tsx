@@ -51,9 +51,8 @@ export function ArchitectureImpactAction(props: {
 })
 {
   const serverConfigs = useServerConfigs()
-  const available =
-    serverConfigs.get(props.threadRef.environmentId)?.environment.capabilities
-      .architectureImpact === true
+  const capabilities = serverConfigs.get(props.threadRef.environmentId)?.environment.capabilities
+  const available = capabilities?.architectureImpact === true
   if (!available) return null
 
   return (
@@ -64,15 +63,15 @@ export function ArchitectureImpactAction(props: {
             type="button"
             size="xs"
             variant="ghost"
-            aria-label="Architecture impact"
+            aria-label="Impact Diff"
             onClick={() => openChangedFilesArchitectureImpact(props)}
           />
         }
       >
         <Network className="size-3" />
-        <span className="hidden @[32rem]/changed-files:inline">Architecture impact</span>
+        <span className="hidden @[32rem]/changed-files:inline">Impact Diff</span>
       </TooltipTrigger>
-      <TooltipPopup side="top">Analyze architecture affected by this turn</TooltipPopup>
+      <TooltipPopup side="top">Open Impact Diff for this turn</TooltipPopup>
     </Tooltip>
   )
 }

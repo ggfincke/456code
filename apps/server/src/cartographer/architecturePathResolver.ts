@@ -4,8 +4,6 @@
 import {
   ARCHITECTURE_BLAST_PATH_LIMIT,
   ARCHITECTURE_PROJECTION_FILE_LIMIT,
-  ARCHITECTURE_PROJECTION_UNIT_LIMIT,
-  type ArchitecturePathScopeChip,
 } from '@t3tools/contracts'
 import {
   queryAtlasFiles,
@@ -14,6 +12,17 @@ import {
   type AtlasIndexLevel,
   type AtlasIndexUnit,
 } from '@t3tools/cartographer-core/server'
+
+const ARCHITECTURE_PATH_SCOPE_UNIT_LIMIT = 200
+
+interface ArchitecturePathScopeChip
+{
+  readonly role: 'touched' | 'context'
+  readonly level: 'systems' | 'blocks'
+  readonly id: string
+  readonly key: string
+  readonly label: string
+}
 
 type ChipLevel = ArchitecturePathScopeChip['level']
 
@@ -139,5 +148,5 @@ export function resolveArchitecturePathScope(
 
   return [...touched.values(), ...context.values()]
     .toSorted(compareChips)
-    .slice(0, ARCHITECTURE_PROJECTION_UNIT_LIMIT)
+    .slice(0, ARCHITECTURE_PATH_SCOPE_UNIT_LIMIT)
 }

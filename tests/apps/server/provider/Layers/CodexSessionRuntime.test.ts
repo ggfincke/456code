@@ -313,11 +313,8 @@ describe('buildCodexDeveloperInstructions', () =>
 
     NodeAssert.ok(instructions.startsWith(CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS))
     NodeAssert.match(instructions, /proposal_preview_upsert/)
-    NodeAssert.match(instructions, /In Plan mode, call .* before emitting the final/)
-    NodeAssert.match(
-      instructions,
-      /Do not finalize the plan until the required proposal call succeeds/,
-    )
+    NodeAssert.match(instructions, /In Plan mode, call .* then emit the final/)
+    NodeAssert.match(instructions, /Do not finalize the plan until the required calls succeed/)
     NodeAssert.match(instructions, /does not edit the user's worktree or index/)
     NodeAssert.match(instructions, /code456/)
     NodeAssert.match(instructions, /preview_status/)
@@ -346,7 +343,7 @@ describe('buildCodexDeveloperInstructions', () =>
     NodeAssert.match(instructions, /capture its committed .*revision/)
     NodeAssert.match(
       instructions,
-      /proposal_preview_upsert.*orchestratePlan: \{ runId, revision \}/,
+      /publish it next with the committed .*orchestratePlan: \{ runId, revision \}.*Then call .*proposal_preview_upsert/,
     )
     NodeAssert.match(instructions, /same committed .*runId.* and .*revision/)
     NodeAssert.match(instructions, /non-empty decided edit set/)

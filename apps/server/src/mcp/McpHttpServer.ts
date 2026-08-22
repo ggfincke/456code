@@ -12,13 +12,15 @@ import * as Stream from 'effect/Stream'
 import type * as Types from 'effect/Types'
 import { McpSchema, McpServer, Tool } from 'effect/unstable/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
-import { ArchitectureToolError } from '@t3tools/contracts'
+import { ArchitecturePlanImpactUpsertInput, ArchitectureToolError } from '@t3tools/contracts'
 
 import packageJson from '../../package.json' with { type: 'json' }
 import * as ArchitectureQueryService from '../cartographer/ArchitectureQueryService.ts'
+import * as PlannedImpactService from '../architecture/PlannedImpactService.ts'
 import * as McpInvocationContext from './McpInvocationContext.ts'
 import * as McpSessionRegistry from './McpSessionRegistry.ts'
 import * as PreviewAutomationBroker from './PreviewAutomationBroker.ts'
+import * as ProjectionSnapshotQuery from '../orchestration/Services/ProjectionSnapshotQuery.ts'
 import { ArchitectureToolkitHandlersLive } from './toolkits/architecture/handlers.ts'
 import { ArchitectureToolkit } from './toolkits/architecture/tools.ts'
 import { OrchestrateToolkitHandlersLive } from './toolkits/orchestrate/handlers.ts'
@@ -258,6 +260,11 @@ export const ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT =
   'Architecture tool failed unexpectedly. Retry, or ask the operator to check the server log.'
 
 const encodeArchitectureToolError = Schema.encodeUnknownSync(ArchitectureToolError)
+const isArchitectureToolError = Schema.is(ArchitectureToolError)
+const decodeArchitecturePlanImpactInput = Schema.decodeUnknownEffect(
+  ArchitecturePlanImpactUpsertInput,
+  { onExcessProperty: 'error' },
+)
 
 function toolParameterValidationDescription(error: unknown): string | null
 {
@@ -277,7 +284,7 @@ function toolParameterValidationDescription(error: unknown): string | null
   return null
 }
 
-function architectureInvalidPatchResult(
+function architectureInvalidInputResult(
   toolName: string,
   cause: Cause.Cause<unknown>,
 ): McpSchema.CallToolResult | null
@@ -285,6 +292,13 @@ function architectureInvalidPatchResult(
   for (const reason of cause.reasons)
   {
     if (!Cause.isFailReason(reason)) continue
+    if (isArchitectureToolError(reason.error))
+    {
+      return architectureToolCallResult({
+        isFailure: true,
+        encodedResult: encodeArchitectureToolError(reason.error),
+      })
+    }
     const description = toolParameterValidationDescription(reason.error)
     if (description === null) continue
     return architectureToolCallResult({
@@ -292,7 +306,10 @@ function architectureInvalidPatchResult(
       encodedResult: encodeArchitectureToolError(
         new ArchitectureToolError({
           operation: toolName,
-          code: 'invalid-patch',
+          code:
+            toolName === 'architecture_plan_impact_upsert'
+              ? 'invalid-publication'
+              : 'invalid-patch',
           detail: description,
         }),
       ),
@@ -301,8 +318,7 @@ function architectureInvalidPatchResult(
   return null
 }
 
-// only defects reach the unexpected path; toolkit parameter validation maps to
-// structured invalid-patch so the model can retry corrected GraphPatch args
+// typed validation failures stay structured so the model can correct and retry
 export const architectureToolCallFailure =
   (toolName: string) =>
   (cause: Cause.Cause<unknown>): Effect.Effect<McpSchema.CallToolResult> =>
@@ -311,10 +327,10 @@ export const architectureToolCallFailure =
     {
       return Effect.failCause(cause as Cause.Cause<never>)
     }
-    const invalidPatch = architectureInvalidPatchResult(toolName, cause)
-    if (invalidPatch !== null)
+    const invalidInput = architectureInvalidInputResult(toolName, cause)
+    if (invalidInput !== null)
     {
-      return Effect.succeed(invalidPatch)
+      return Effect.succeed(invalidInput)
     }
     return Effect.logError('architecture tool call failed', {
       tool: toolName,
@@ -359,6 +375,8 @@ const registerArchitectureToolkit = Effect.fn('McpHttpServer.registerArchitectur
   {
     const server = yield* McpServer.McpServer
     const queryService = yield* ArchitectureQueryService.ArchitectureQueryService
+    const plannedImpactService = yield* PlannedImpactService.PlannedImpactService
+    const projectionSnapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery
     const built = yield* ArchitectureToolkit
     for (const tool of Object.values(built.tools))
     {
@@ -387,13 +405,35 @@ const registerArchitectureToolkit = Effect.fn('McpHttpServer.registerArchitectur
               fiber.context,
               McpInvocationContext.McpInvocationContext,
             )
-            return built.handle(tool.name, payload).pipe(
+            const decodedPayload =
+              tool.name === 'architecture_plan_impact_upsert'
+                ? decodeArchitecturePlanImpactInput(payload).pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ArchitectureToolError({
+                          operation: tool.name,
+                          code: 'invalid-publication',
+                          detail: cause.message,
+                        }),
+                    ),
+                  )
+                : Effect.succeed(payload)
+            return decodedPayload.pipe(
+              Effect.flatMap((input) => built.handle(tool.name, input)),
               Stream.unwrap,
               Stream.run(Sink.last()),
               Effect.flatMap(Effect.fromOption),
               Effect.provideService(
                 ArchitectureQueryService.ArchitectureQueryService,
                 queryService,
+              ),
+              Effect.provideService(
+                PlannedImpactService.PlannedImpactService,
+                plannedImpactService,
+              ),
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshots,
               ),
               Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
               Effect.matchCauseEffect({

@@ -46,8 +46,9 @@ flowchart TD
 - **Cartographer architecture analysis**: `packages/cartographer-core` owns repository analysis,
   graph artifacts, bounded query primitives, the standalone CLI, and the MCP runtime. Server
   lifecycle services bind those artifacts to authorized project, proposal, and diff identities.
-  The web app renders Proposal Impact, Repository Atlas, and Architecture Scope as ordinary
-  456code resources; it never receives filesystem roots or raw artifact paths. See
+  The web app renders authority-aware Impact Diff and the Architecture/Structure lenses of
+  Repository Map as ordinary 456code resources; it never receives filesystem roots or raw
+  artifact paths. See
   [Cartographer architecture analysis](../integrations/cartographer.md).
 
 - **Provider runtime**: [`ProviderService`][4] routes sessions through the provider adapter

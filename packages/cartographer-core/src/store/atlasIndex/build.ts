@@ -1,15 +1,27 @@
 // packages/cartographer-core/src/store/atlasIndex/build.ts
 // coarse atlas index membership, aggregation & file ranking
 
+// @effect-diagnostics nodeBuiltinImport:off
+
 import * as NodePath from 'node:path'
 import { fileDegrees } from '../../analyze/degrees.js'
+import {
+  buildSemanticSnapshot,
+  directoryPrefixes,
+  type SemanticSnapshot,
+} from '../../analyze/semanticMembership.js'
 import { selectSystemHierarchy } from '../../analyze/systemHierarchy.js'
 import type {
   AtlasIndex,
+  AtlasIndexCrosswalks,
+  AtlasIndexDominantCrosswalk,
   AtlasIndexEdge,
   AtlasIndexFile,
+  AtlasIndexFileCrosswalk,
   AtlasIndexLevel,
   AtlasIndexScopeSummary,
+  AtlasIndexStructure,
+  AtlasIndexStructureDirectory,
   AtlasIndexUnit,
   CartographerGraph,
   GraphNode,
@@ -49,6 +61,11 @@ function unitId(level: AtlasIndexLevel, key: string): string
   return `${level}:${key}`
 }
 
+function compareText(left: string, right: string): number
+{
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
 function dirKey(id: string): string
 {
   const slash = id.lastIndexOf('/')
@@ -85,7 +102,7 @@ function dominant(
         (preferredOrder
           ? (preferredOrder.get(entry[0]) ?? Number.MAX_SAFE_INTEGER) <
             (preferredOrder.get(top[0]) ?? Number.MAX_SAFE_INTEGER)
-          : entry[0].localeCompare(top[0]) < 0))
+          : compareText(entry[0], top[0]) < 0))
     )
     {
       top = entry
@@ -195,7 +212,7 @@ function aggregateLevel(
   {
     const aScore = a[1] * 4 + (inbound.get(a[0]) ?? 0) + (outbound.get(a[0]) ?? 0)
     const bScore = b[1] * 4 + (inbound.get(b[0]) ?? 0) + (outbound.get(b[0]) ?? 0)
-    return bScore - aScore || a[0].localeCompare(b[0])
+    return bScore - aScore || compareText(a[0], b[0])
   })
   const visibilityRank = new Map(ranked.map(([key], index): [string, number] => [key, index + 1]))
   const eligible = allowedParents
@@ -247,7 +264,7 @@ function aggregateLevel(
       const to = key.slice(split + 1)
       return { from: unitId(level, from), to: unitId(level, to), weight }
     })
-    .sort((a, b) => b.weight - a.weight || a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
+    .sort((a, b) => b.weight - a.weight || compareText(a.from, b.from) || compareText(a.to, b.to))
   const edges = exactEdges
     .filter(
       (edge) =>
@@ -344,9 +361,164 @@ function rankedFiles(
     {
       const aScore = (fanIn.get(a.id) ?? 0) * 3 + (fanOut.get(a.id) ?? 0)
       const bScore = (fanIn.get(b.id) ?? 0) * 3 + (fanOut.get(b.id) ?? 0)
-      return bScore - aScore || a.id.localeCompare(b.id)
+      return bScore - aScore || compareText(a.id, b.id)
     })
     .map((node, index) => fileRecord(node, membership, fanIn, fanOut, index + 1, retained))
+}
+
+function buildStructure(graph: CartographerGraph, snapshot: SemanticSnapshot): AtlasIndexStructure
+{
+  const directFiles = new Map<string, string[]>()
+  const childDirectories = new Map<string, string[]>()
+  for (const node of graph.nodes)
+  {
+    const directory = snapshot.memberships.dirs.get(node.id)
+    if (directory === undefined) throw new Error(`missing directory membership for ${node.id}`)
+    const files = directFiles.get(directory) ?? []
+    files.push(node.id)
+    directFiles.set(directory, files)
+  }
+  for (const unit of snapshot.units.dirs.values())
+  {
+    if (unit.parentId === undefined) continue
+    const children = childDirectories.get(unit.parentId) ?? []
+    children.push(unit.id)
+    childDirectories.set(unit.parentId, children)
+  }
+  const inbound = new Map<string, number>()
+  const outbound = new Map<string, number>()
+  for (const edge of snapshot.directoryScopeEdges)
+  {
+    increment(outbound, edge.from, edge.weight)
+    increment(inbound, edge.to, edge.weight)
+  }
+  const siblingOrder = new Map<string, number>()
+  for (const [parent, children] of childDirectories)
+  {
+    children.sort(compareText)
+    children.forEach((id, order) => siblingOrder.set(`${parent}\0${id}`, order))
+  }
+  const directories = [...snapshot.units.dirs.values()]
+    .sort(
+      (left, right) =>
+        (left.key === '.' ? 0 : left.key.split('/').length) -
+          (right.key === '.' ? 0 : right.key.split('/').length) || compareText(left.key, right.key),
+    )
+    .map((unit): AtlasIndexStructureDirectory =>
+    {
+      const children = childDirectories.get(unit.id) ?? []
+      const files = (directFiles.get(unit.id) ?? []).sort(compareText)
+      return {
+        id: unit.id,
+        key: unit.key,
+        label: unit.label,
+        ...(unit.parentId === undefined ? {} : { parentId: unit.parentId }),
+        depth: unit.key === '.' ? 0 : unit.key.split('/').length,
+        childDirectoryIds: children,
+        directFileIds: files,
+        directFileCount: files.length,
+        descendantFileCount: unit.fileCount,
+        inbound: inbound.get(unit.id) ?? 0,
+        outbound: outbound.get(unit.id) ?? 0,
+        order:
+          unit.parentId === undefined ? 0 : (siblingOrder.get(`${unit.parentId}\0${unit.id}`) ?? 0),
+        position: unit.position,
+      }
+    })
+  const edges = snapshot.directoryScopeEdges.map((edge) => ({ ...edge }))
+  const fileEdges = [...snapshot.edges.files.values()].sort(
+    (left, right) => compareText(left.from, right.from) || compareText(left.to, right.to),
+  )
+  return {
+    rootId: 'dirs:.',
+    directories,
+    edges,
+    fileEdges,
+    counts: {
+      directories: directories.length,
+      files: graph.nodes.length,
+      edges: edges.length,
+      fileEdges: fileEdges.length,
+    },
+  }
+}
+
+function dominantCrosswalks(
+  sourceIds: readonly string[],
+  counts: ReadonlyMap<string, ReadonlyMap<string, number>>,
+): AtlasIndexDominantCrosswalk[]
+{
+  return [...sourceIds].sort(compareText).map((sourceId) =>
+  {
+    const candidates = counts.get(sourceId) ?? new Map<string, number>()
+    const matchedFileCount = Math.max(0, ...candidates.values())
+    const targetIds = [...candidates]
+      .filter(([, count]) => count === matchedFileCount && count > 0)
+      .map(([id]) => id)
+      .sort(compareText)
+    return {
+      sourceId,
+      targetIds,
+      matchedFileCount,
+      status:
+        targetIds.length === 0 ? 'unmatched' : targetIds.length === 1 ? 'matched' : 'ambiguous',
+    }
+  })
+}
+
+function buildCrosswalks(
+  graph: CartographerGraph,
+  snapshot: SemanticSnapshot,
+): AtlasIndexCrosswalks
+{
+  const files: AtlasIndexFileCrosswalk[] = graph.nodes
+    .map((node): AtlasIndexFileCrosswalk =>
+    {
+      const systemId = snapshot.memberships.systems.get(node.id)
+      const blockId = snapshot.memberships.blocks.get(node.id)
+      const directoryId = snapshot.memberships.dirs.get(node.id)
+      const file = snapshot.units.files.get(node.id)
+      if (
+        systemId === undefined ||
+        blockId === undefined ||
+        directoryId === undefined ||
+        file === undefined
+      )
+      {
+        throw new Error(`missing semantic crosswalk membership for ${node.id}`)
+      }
+      return { fileId: node.id, systemId, blockId, directoryId, position: file.position }
+    })
+    .sort((left, right) => compareText(left.fileId, right.fileId))
+  const systemDirectories = new Map<string, Map<string, number>>()
+  const blockDirectories = new Map<string, Map<string, number>>()
+  const directorySystems = new Map<string, Map<string, number>>()
+  const directoryBlocks = new Map<string, Map<string, number>>()
+  const count = (map: Map<string, Map<string, number>>, source: string, target: string): void =>
+  {
+    const row = map.get(source) ?? new Map<string, number>()
+    increment(row, target)
+    map.set(source, row)
+  }
+  for (const file of files)
+  {
+    count(systemDirectories, file.systemId, file.directoryId)
+    count(blockDirectories, file.blockId, file.directoryId)
+    const directoryKey = file.directoryId.slice('dirs:'.length)
+    for (const prefix of directoryPrefixes(directoryKey))
+    {
+      const directoryId = unitId('dirs', prefix)
+      count(directorySystems, directoryId, file.systemId)
+      count(directoryBlocks, directoryId, file.blockId)
+    }
+  }
+  return {
+    files,
+    systemsToDirectories: dominantCrosswalks([...snapshot.units.systems.keys()], systemDirectories),
+    blocksToDirectories: dominantCrosswalks([...snapshot.units.blocks.keys()], blockDirectories),
+    directoriesToSystems: dominantCrosswalks([...snapshot.units.dirs.keys()], directorySystems),
+    directoriesToBlocks: dominantCrosswalks([...snapshot.units.dirs.keys()], directoryBlocks),
+  }
 }
 
 export function buildAtlasIndex(
@@ -357,6 +529,7 @@ export function buildAtlasIndex(
 {
   const canonicalRoot = NodePath.resolve(root)
   const membership = buildMembership(graph)
+  const semanticSnapshot = buildSemanticSnapshot(graph)
   const blockParents = parentByMajority(
     graph,
     membership.blockOf,
@@ -473,5 +646,7 @@ export function buildAtlasIndex(
       ruleTotal: graph.rules?.length ?? 0,
     },
     files: rankedFiles(graph, membership, retained),
+    structure: buildStructure(graph, semanticSnapshot),
+    crosswalks: buildCrosswalks(graph, semanticSnapshot),
   }
 }

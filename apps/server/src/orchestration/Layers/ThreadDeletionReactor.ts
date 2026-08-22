@@ -15,6 +15,7 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 
+import { ArchitectureAdmissionService } from '../../architecture/ArchitectureAdmissionService.ts'
 import { CurrentWorktreeArchitectureService } from '../../cartographer/CurrentWorktreeArchitectureService.ts'
 import { ReactorDeliveryError } from '../../persistence/Errors.ts'
 import { OrchestrationReactorDelivery } from '../../persistence/Services/OrchestrationReactorDelivery.ts'
@@ -101,6 +102,7 @@ const make = Effect.gen(function* ()
   const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
   const terminalManager = yield* TerminalManager.TerminalManager
   const proposalGenerationService = yield* ProposalGenerationService
+  const architectureAdmissions = yield* ArchitectureAdmissionService
   const currentWorktrees = yield* CurrentWorktreeArchitectureService
 
   const definition: DurableReactorDefinition = {
@@ -176,6 +178,7 @@ const make = Effect.gen(function* ()
       switch (action.effectKind)
       {
         case 'proposal-generation.cancel':
+          yield* architectureAdmissions.cancelThread(event.payload.threadId)
           yield* proposalGenerationService.cancelThread(event.payload.threadId)
           break
         // historical durable rows keep replaying through the neutral lifecycle owner

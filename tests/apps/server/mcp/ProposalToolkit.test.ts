@@ -3,6 +3,7 @@
 
 import { expect, it } from '@effect/vitest'
 import {
+  CartographerError,
   EnvironmentId,
   ProjectId,
   PROPOSAL_SNAPSHOT_POLICY_V1,
@@ -19,6 +20,7 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import { McpSchema, McpServer } from 'effect/unstable/ai'
 
+import * as CartographerAnalyzer from '../../../../apps/server/src/cartographer/CartographerAnalyzer.ts'
 import * as McpHttpServer from '../../../../apps/server/src/mcp/McpHttpServer.ts'
 import * as McpInvocationContext from '../../../../apps/server/src/mcp/McpInvocationContext.ts'
 import { proposalToolkitHandlers } from '../../../../apps/server/src/mcp/toolkits/proposal/handlers.ts'
@@ -91,9 +93,11 @@ function makeLayer(
     readonly interactionMode?: ProviderInteractionMode
     readonly orchestrate?: boolean
     readonly orchestratePlans?: ReadonlyArray<OrchestratePlanRevision>
+    readonly analyzerUnavailable?: boolean
   } = {},
 ): Layer.Layer<
   | McpServer.McpServer
+  | CartographerAnalyzer.CartographerAnalyzer
   | ProposalService.ProposalService
   | ProjectionSnapshotQuery.ProjectionSnapshotQuery
 >
@@ -114,6 +118,22 @@ function makeLayer(
   })
   const proposedPlanTurnId =
     options.proposedPlanTurnId === undefined ? turnId : options.proposedPlanTurnId
+  const analyzer = CartographerAnalyzer.CartographerAnalyzer.of({
+    identify: options.analyzerUnavailable
+      ? Effect.fail(
+          new CartographerError({
+            failure: 'unsupported',
+            message: 'Cartographer is unavailable in this test.',
+          }),
+        )
+      : Effect.succeed({
+          cliPath: '/test/cartographer',
+          fingerprint: 'cartographer:test',
+        }),
+    prepareCurrentWorktree: () => Effect.die('unused'),
+    analyzeTrees: () => Effect.die('unused'),
+    buildProjectAtlas: () => Effect.die('unused'),
+  })
   const snapshots = {
     getThreadDetailById: (requestedThreadId: ThreadId) =>
       Effect.succeed(
@@ -169,6 +189,7 @@ function makeLayer(
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(Layer.succeed(ProposalService.ProposalService, proposals)),
     Layer.provideMerge(Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, snapshots)),
+    Layer.provideMerge(Layer.succeed(CartographerAnalyzer.CartographerAnalyzer, analyzer)),
   )
 }
 
@@ -354,7 +375,56 @@ it.effect('accepts an active plan-mode turn before its proposed plan row is pers
     expect(result.isError).toBe(false)
     expect(captured).toHaveLength(1)
     expect(captured[0]?.planId).toBe(`plan:${threadId}:turn:${turnId}`)
-  }).pipe(Effect.provide(makeLayer(captured, { proposedPlanTurnId: null, orchestrate: true })))
+    expect(captured[0]?.verifiedAnalyzerFingerprint).toBe('cartographer:test')
+  }).pipe(
+    Effect.provide(
+      makeLayer(captured, {
+        proposedPlanTurnId: null,
+        orchestrate: true,
+      }),
+    ),
+  )
+})
+
+it.effect('rejects proposal admission when the exact analyzer identity is unavailable', () =>
+{
+  const captured: Array<ProposalService.ProposalUpsertRequest> = []
+  return Effect.gen(function* ()
+  {
+    const failure = yield* proposalToolkitHandlers
+      .proposal_preview_upsert({
+        changes: {
+          _tag: 'typed',
+          operations: [
+            {
+              _tag: 'add',
+              path: 'src/proposed.ts',
+              content: { encoding: 'utf8', data: 'x' },
+            },
+          ],
+        },
+      })
+      .pipe(
+        Effect.provideService(
+          McpInvocationContext.McpInvocationContext,
+          invocation(new Set(['proposal'])),
+        ),
+        Effect.flip,
+      )
+
+    expect(failure).toMatchObject({
+      code: 'analyzer-unavailable',
+      operation: 'proposal_preview_upsert.resolve_analyzer',
+    })
+    expect(captured).toHaveLength(0)
+  }).pipe(
+    Effect.provide(
+      makeLayer(captured, {
+        proposedPlanTurnId: null,
+        analyzerUnavailable: true,
+      }),
+    ),
+  )
 })
 
 it.effect('rejects an orchestrate target supplied from a plan-mode turn', () =>

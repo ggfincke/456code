@@ -49,7 +49,7 @@ async function writeBuild(outDir: string, build: number): Promise<void>
     NodeFSP.writeFile(
       NodePath.join(outDir, 'atlas-index.json'),
       `${JSON.stringify({
-        version: 5,
+        version: 6,
         sourceGeneratedAt: generatedAt,
         sourceGraphDigest: graphDigest,
         repo: {
@@ -85,6 +85,49 @@ async function writeBuild(outDir: string, build: number): Promise<void>
           ruleTotal: 0,
         },
         files: [],
+        structure: {
+          rootId: 'dirs:.',
+          directories: [
+            {
+              id: 'dirs:.',
+              key: '.',
+              label: 'fixture',
+              depth: 0,
+              childDirectoryIds: [],
+              directFileIds: [],
+              directFileCount: 0,
+              descendantFileCount: 0,
+              inbound: 0,
+              outbound: 0,
+              order: 0,
+              position: { x: 0, y: 0 },
+            },
+          ],
+          edges: [],
+          fileEdges: [],
+          counts: { directories: 1, files: 0, edges: 0, fileEdges: 0 },
+        },
+        crosswalks: {
+          files: [],
+          systemsToDirectories: [],
+          blocksToDirectories: [],
+          directoriesToSystems: [
+            {
+              sourceId: 'dirs:.',
+              targetIds: [],
+              matchedFileCount: 0,
+              status: 'unmatched',
+            },
+          ],
+          directoriesToBlocks: [
+            {
+              sourceId: 'dirs:.',
+              targetIds: [],
+              matchedFileCount: 0,
+              status: 'unmatched',
+            },
+          ],
+        },
       })}\n`,
     ),
     NodeFSP.writeFile(NodePath.join(outDir, 'graph.db'), `database-${build}`),
@@ -362,7 +405,7 @@ describe('AtlasRebuildService', () =>
         expect(target).toMatchObject({
           projectId,
           generation: first.generation,
-          index: { version: 5 },
+          index: { version: 6 },
         })
 
         const replacing = yield* service
@@ -380,7 +423,7 @@ describe('AtlasRebuildService', () =>
     ),
   )
 
-  it.effect('reads only a sealed v5 index and rejects wrong or tampered identities', () =>
+  it.effect('reads only a sealed v6 index and rejects wrong or tampered identities', () =>
     Effect.scoped(
       Effect.gen(function* ()
       {
@@ -417,7 +460,7 @@ describe('AtlasRebuildService', () =>
           version: 2,
           projectId,
           generation: published.generation,
-          indexSchemaVersion: 5,
+          indexSchemaVersion: 6,
           indexByteLength: indexStat.size,
         })
         expect(metadata.indexSha256).toMatch(/^[0-9a-f]{64}$/u)
@@ -431,7 +474,7 @@ describe('AtlasRebuildService', () =>
         expect(retained).toMatchObject({
           generation: published.generation,
           graphDigest: metadata.graphDigest,
-          index: { version: 5 },
+          index: { version: 6 },
         })
         expect(
           yield* Effect.scoped(service.retainPublishedIndex(projectId, 'f'.repeat(64))),
@@ -475,13 +518,16 @@ describe('AtlasRebuildService', () =>
         expect(yield* Effect.scoped(service.retainLastGood(projectId))).toBeNull()
 
         const outDir = projectAtlasDirectory(stateDir, projectId)
-        yield* Effect.promise(async () =>
+        const artifacts = yield* Effect.promise(async () =>
         {
           await NodeFSP.mkdir(outDir, { recursive: true })
           await writeBuild(outDir, 1)
-          const artifacts = await verifyProjectAtlasArtifacts(outDir)
-          await NodeFSP.writeFile(
-            NodePath.join(outDir, PROJECT_ATLAS_METADATA_FILENAME),
+          return verifyProjectAtlasArtifacts(outDir)
+        })
+        const metadataPath = NodePath.join(outDir, PROJECT_ATLAS_METADATA_FILENAME)
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            metadataPath,
             `${JSON.stringify({
               version: 1,
               projectId,
@@ -490,17 +536,30 @@ describe('AtlasRebuildService', () =>
               generation: artifacts.generation,
               builtAt: '2026-08-07T12:00:01.000Z',
             })}\n`,
-          )
-        })
+          ),
+        )
+        expect(yield* Effect.scoped(service.retainLastGood(projectId))).toBeNull()
+
+        const metadata = {
+          version: 2,
+          projectId,
+          workspaceRoot: realRoot,
+          analyzerFingerprint: 'test-analyzer-v1',
+          generation: artifacts.generation,
+          graphDigest: artifacts.graphDigest,
+          indexSchemaVersion: artifacts.indexSchemaVersion,
+          indexSha256: artifacts.indexSha256,
+          indexByteLength: artifacts.indexByteLength,
+          builtAt: '2026-08-07T12:00:01.000Z',
+        }
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(metadataPath, `${JSON.stringify(metadata)}\n`),
+        )
         expect(yield* Effect.scoped(service.retainLastGood(projectId))).toMatchObject({
           projectId,
           root: realRoot,
         })
 
-        const metadataPath = NodePath.join(outDir, PROJECT_ATLAS_METADATA_FILENAME)
-        const metadata = JSON.parse(
-          yield* Effect.promise(() => NodeFSP.readFile(metadataPath, 'utf8')),
-        )
         yield* Effect.promise(() =>
           NodeFSP.writeFile(metadataPath, `${JSON.stringify({ ...metadata, builtAt: '' })}\n`),
         )

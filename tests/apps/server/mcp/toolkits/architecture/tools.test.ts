@@ -36,6 +36,17 @@ function schemaNodes(schema: unknown): ReadonlyArray<Record<string, unknown>>
 const expectedFields = {
   architecture_blast_radius: ['context', 'direction', 'maxDepth', 'target'],
   architecture_graph_diff: ['comparison'],
+  architecture_plan_impact_upsert: [
+    'changedObjects',
+    'omissions',
+    'orchestratePlan',
+    'outcome',
+    'pathHints',
+    'rationale',
+    'relationships',
+    'summary',
+    'version',
+  ],
   architecture_propose_patch: ['context', 'ops'],
 } as const
 
@@ -51,7 +62,7 @@ const forbiddenAuthorityFields = [
   'activeTurnId',
 ] as const
 
-it('exports three described object schemas without caller-supplied authority', () =>
+it('exports four described object schemas without caller-supplied authority', () =>
 {
   expect(Object.keys(ArchitectureToolkit.tools).sort()).toEqual(Object.keys(expectedFields).sort())
 

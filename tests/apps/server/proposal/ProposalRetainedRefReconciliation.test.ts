@@ -89,6 +89,7 @@ const scope = {
     providerSessionId: 'provider-session-proposal-reconcile',
     providerInstanceId: ProviderInstanceId.make('codex-test'),
   },
+  verifiedAnalyzerFingerprint: 'cartographer:proposal-reconcile-test',
 } as const
 
 const clearProposalState = Effect.gen(function* ()

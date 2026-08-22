@@ -74,7 +74,7 @@ async function captureCurrentWorktreePromise(
 {
   if (!NodePath.isAbsolute(input.workspaceRoot) || !NodePath.isAbsolute(input.artifactRoot))
   {
-    throw publicError('Cartographer current-worktree capture requires absolute paths.')
+    throw publicError('Architecture current-worktree capture requires absolute paths.')
   }
 
   const controller = new AbortController()
@@ -92,7 +92,7 @@ async function captureCurrentWorktreePromise(
   {
     if (controller.signal.aborted)
     {
-      throw publicError('Cartographer current-worktree capture was cancelled.')
+      throw publicError('Architecture current-worktree capture was cancelled.')
     }
 
     const workspaceRoot = await NodeFSP.realpath(input.workspaceRoot)
@@ -100,7 +100,7 @@ async function captureCurrentWorktreePromise(
     if (isPathWithin(workspaceRoot, artifactRoot))
     {
       throw publicError(
-        'Cartographer current-worktree artifacts must be stored outside the captured worktree.',
+        'Architecture current-worktree artifacts must be stored outside the captured worktree.',
       )
     }
 
@@ -121,7 +121,7 @@ async function captureCurrentWorktreePromise(
 
     if (controller.signal.aborted)
     {
-      throw publicError('Cartographer current-worktree capture was cancelled.')
+      throw publicError('Architecture current-worktree capture was cancelled.')
     }
 
     destinationRoot = await NodeFSP.mkdtemp(NodePath.join(artifactRoot, 'current-worktree-'))
@@ -138,12 +138,14 @@ async function captureCurrentWorktreePromise(
       materialized.byteCount !== snapshot.byteCount
     )
     {
-      throw publicError('Cartographer could not verify the materialized current-worktree snapshot.')
+      throw publicError(
+        'Architecture analysis could not verify the materialized current-worktree snapshot.',
+      )
     }
 
     if (controller.signal.aborted)
     {
-      throw publicError('Cartographer current-worktree capture was cancelled.')
+      throw publicError('Architecture current-worktree capture was cancelled.')
     }
 
     return {
@@ -163,7 +165,9 @@ async function captureCurrentWorktreePromise(
       }
       catch
       {
-        throw publicError('Cartographer could not remove temporary current-worktree capture state.')
+        throw publicError(
+          'Architecture analysis could not remove temporary current-worktree capture state.',
+        )
       }
     }
     if (isCartographerError(cause))
@@ -172,9 +176,9 @@ async function captureCurrentWorktreePromise(
     }
     if (controller.signal.aborted)
     {
-      throw publicError('Cartographer current-worktree capture was cancelled.')
+      throw publicError('Architecture current-worktree capture was cancelled.')
     }
-    throw publicError('Cartographer could not capture the current worktree.')
+    throw publicError('Architecture analysis could not capture the current worktree.')
   }
   finally
   {
@@ -192,6 +196,6 @@ export const captureCurrentWorktree = Effect.fn('CurrentWorktreeSnapshot.capture
     catch: (cause) =>
       isCartographerError(cause)
         ? cause
-        : publicError('Cartographer could not capture the current worktree.'),
+        : publicError('Architecture analysis could not capture the current worktree.'),
   })
 })

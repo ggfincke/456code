@@ -1,5 +1,5 @@
 // tests/apps/web/components/chat/proposalGenerationOwnership.test.tsx
-// verifies mounted proposal generation ownership across shared surfaces and revision changes
+// verifies server-owned admission and explicit retry fencing across mounted surfaces
 
 // @vitest-environment happy-dom
 
@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   refresh: vi.fn(),
   startProposalGeneration: vi.fn(),
+  latestByRevision: new Map<number, ProposalGeneration>(),
   writeFile: vi.fn(async () => ({ _tag: 'Success', value: undefined })),
 }))
 
@@ -50,10 +51,10 @@ vi.mock('~/state/projects', () =>
     projectEnvironment: {
       findProposalByOrchestrateRevision: query('find-proposal-by-orchestrate-revision'),
       findProposalByPlan: query('find-proposal-by-plan'),
+      getArchitectureImpactProjection: query('get-architecture-impact-projection'),
       getProposal: query('get-proposal'),
       getProposalDiff: query('get-proposal-diff'),
       getProposalGeneration: query('get-proposal-generation'),
-      getArchitectureImpact: query('get-architecture-impact'),
       getProposalNarrative: query('get-proposal-narrative'),
       latestProposalGeneration: query('latest-proposal-generation'),
       latestProposalImplementationAttempt: query('latest-implementation-attempt'),
@@ -175,7 +176,7 @@ function generation(
     baseGraphArtifact: null,
     proposedGraphArtifact: null,
     impactArtifact: null,
-    errorCode: null,
+    errorCode: state === 'failed' ? 'analysis-failed' : null,
     createdAt: '2026-08-08T12:00:00.000Z',
     updatedAt: '2026-08-08T12:00:00.000Z',
   } as ProposalGeneration
@@ -189,11 +190,13 @@ function queryResult(query: unknown)
       readonly input?: {
         readonly planId?: OrchestrationProposedPlanId
         readonly revision?: number
+        readonly generationId?: string
       }
     }
   } | null
   const planId = request?.input?.input?.planId
   const revision = request?.input?.input?.revision
+  const generationId = request?.input?.input?.generationId
   const data = (() =>
   {
     switch (request?.kind)
@@ -204,6 +207,14 @@ function queryResult(query: unknown)
         return revision === 1 ? proposalLookup(planA) : proposalLookup(planB)
       case 'get-proposal-diff':
         return { diff: '' }
+      case 'latest-proposal-generation':
+        return revision === undefined ? null : (mocks.latestByRevision.get(revision) ?? null)
+      case 'get-proposal-generation':
+        return (
+          [...mocks.latestByRevision.values()].find(
+            (candidate) => candidate.generationId === generationId,
+          ) ?? null
+        )
       default:
         return null
     }
@@ -256,6 +267,9 @@ describe('proposal generation mounted ownership', () =>
     resetProposalGenerationStartStoreForTests()
     vi.clearAllMocks()
     mocks.pendingStarts.length = 0
+    mocks.latestByRevision.clear()
+    mocks.latestByRevision.set(1, generation('generation-failed-A', 1, 'failed'))
+    mocks.latestByRevision.set(2, generation('generation-failed-B', 2, 'failed'))
     mocks.query.mockImplementation(queryResult)
     mocks.startProposalGeneration.mockImplementation(
       (input: unknown) =>
@@ -284,7 +298,7 @@ describe('proposal generation mounted ownership', () =>
     })
   }
 
-  it('admits one start when the card and Explorer mount together and either remounts', async () =>
+  it('never starts generation when the card and Explorer mount or remount', async () =>
   {
     await render(
       <>
@@ -292,28 +306,21 @@ describe('proposal generation mounted ownership', () =>
         {explorer(planA)}
       </>,
     )
-    expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(1)
-    expect(mocks.pendingStarts).toHaveLength(1)
+    expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
+    expect(mocks.pendingStarts).toHaveLength(0)
 
     await render(null)
-    expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(1)
+    expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
     await render(
       <>
         {card(planA)}
         {explorer(planA)}
       </>,
     )
-    expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(1)
-
-    await act(async () =>
-    {
-      mocks.pendingStarts[0]!.resolve(startSuccess(generation('generation-shared', 1)))
-      await Promise.resolve()
-    })
-    expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(1)
+    expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
   })
 
-  it('fences delayed A1 and B after a mounted A to B to A transition', async () =>
+  it('fences delayed manual retries across an A to B to A transition', async () =>
   {
     expect(
       proposalGenerationStartCommandKey({
@@ -326,31 +333,30 @@ describe('proposal generation mounted ownership', () =>
         input: { threadId: threadRef.threadId, proposalId, revision: 2 },
       }),
     )
-    await render(
-      <>
-        {card(planA)}
-        {explorer(planA)}
-      </>,
-    )
+    const clickRetry = async (): Promise<void> =>
+    {
+      const button = [...container.querySelectorAll('button')].find(
+        (candidate) => candidate.textContent?.trim() === 'Retry analysis',
+      )
+      expect(button).toBeDefined()
+      await act(async () =>
+      {
+        button!.click()
+        await Promise.resolve()
+      })
+    }
+
+    await render(card(planA))
+    expect(mocks.startProposalGeneration).not.toHaveBeenCalled()
+    await clickRetry()
     expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(1)
 
-    await render(
-      <>
-        {card(planA)}
-        {explorer(planB)}
-      </>,
-    )
-    expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(2)
-    expect(container.textContent).toContain('superseded by a newer revision')
-    await act(async () => Promise.resolve())
+    await render(card(planB))
+    await clickRetry()
     expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(2)
 
-    await render(
-      <>
-        {card(planA)}
-        {explorer(planA)}
-      </>,
-    )
+    await render(card(planA))
+    await clickRetry()
     expect(mocks.startProposalGeneration).toHaveBeenCalledTimes(3)
 
     const refreshCountBeforeA2 = mocks.refresh.mock.calls.length

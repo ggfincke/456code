@@ -54,6 +54,11 @@ import {
   normalizeProviderInstanceId,
   normalizeProviderModelOptions,
 } from './model-selection'
+import {
+  ArchitectureConcernContextSchema,
+  normalizeArchitectureConcernContexts,
+  type ArchitectureConcernContext,
+} from './architectureContext'
 import { type ComposerDraftStoreState } from './runtime'
 
 const isPreviewAnnotationPayload = Schema.is(PreviewAnnotationPayloadSchema)
@@ -62,7 +67,7 @@ export const isReviewCommentContext = Schema.is(ReviewCommentContextSchema)
 
 export const COMPOSER_DRAFT_STORAGE_KEY = '456code:composer-drafts:v1'
 
-export const COMPOSER_DRAFT_STORAGE_VERSION = 10
+export const COMPOSER_DRAFT_STORAGE_VERSION = 11
 
 const DraftThreadEnvModeSchema = Schema.Literals(['local', 'worktree'])
 
@@ -136,6 +141,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   terminalContexts: Schema.optionalKey(Schema.Array(PersistedTerminalContextDraft)),
   elementContexts: Schema.optionalKey(Schema.Array(PersistedElementContextDraft)),
   previewAnnotations: Schema.optionalKey(Schema.Array(PreviewAnnotationPayloadSchema)),
+  architectureContexts: Schema.optionalKey(Schema.Array(ArchitectureConcernContextSchema)),
   reviewComments: Schema.optionalKey(Schema.Array(ReviewCommentContextSchema)),
   // keyed by `ProviderInstanceId` (open branded slug) so custom provider
   // instances (e.g. `codex_personal`) round-trip alongside the built-in
@@ -271,6 +277,7 @@ export interface ComposerThreadDraftState
   // re-derive the snapshot from on reload.
   elementContexts: ElementContextDraft[]
   previewAnnotations: PreviewAnnotationPayload[]
+  architectureContexts: ArchitectureConcernContext[]
   reviewComments: ReviewCommentContext[]
   // per-instance model selection. Keyed by `ProviderInstanceId` (open
   // branded slug) so a default `codex` instance and a user-authored
@@ -345,6 +352,8 @@ const EMPTY_ELEMENT_CONTEXTS: ElementContextDraft[] = []
 
 const EMPTY_PREVIEW_ANNOTATIONS: PreviewAnnotationPayload[] = []
 
+const EMPTY_ARCHITECTURE_CONTEXTS: ArchitectureConcernContext[] = []
+
 const EMPTY_REVIEW_COMMENTS: ReviewCommentContext[] = []
 
 export const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
@@ -355,6 +364,7 @@ export const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   terminalContexts: EMPTY_TERMINAL_CONTEXTS,
   elementContexts: EMPTY_ELEMENT_CONTEXTS,
   previewAnnotations: EMPTY_PREVIEW_ANNOTATIONS,
+  architectureContexts: EMPTY_ARCHITECTURE_CONTEXTS,
   reviewComments: EMPTY_REVIEW_COMMENTS,
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
   activeProvider: null,
@@ -376,6 +386,7 @@ export function createEmptyThreadDraft(): ComposerThreadDraftState
     terminalContexts: [],
     elementContexts: [],
     previewAnnotations: [],
+    architectureContexts: [],
     reviewComments: [],
     modelSelectionByProvider: {},
     activeProvider: null,
@@ -458,6 +469,7 @@ export function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean
     draft.terminalContexts.length === 0 &&
     draft.elementContexts.length === 0 &&
     draft.previewAnnotations.length === 0 &&
+    draft.architectureContexts.length === 0 &&
     draft.reviewComments.length === 0 &&
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
@@ -1187,6 +1199,25 @@ function normalizePersistedDraftsByThreadId(
     const previewAnnotations = Array.isArray(draftCandidate.previewAnnotations)
       ? draftCandidate.previewAnnotations.filter(isPreviewAnnotationPayload)
       : []
+    const parsedContextThreadRef = parseScopedThreadKey(threadKeyOrId)
+    const contextDraftThread = draftThreadsByThreadKey[threadKeyOrId]
+    const contextEnvironmentId =
+      parsedContextThreadRef?.environmentId ??
+      contextDraftThread?.environmentId ??
+      environmentIdByThreadId.get(threadKeyOrId as ThreadId)
+    const contextThreadId =
+      parsedContextThreadRef?.threadId ??
+      contextDraftThread?.threadId ??
+      (contextEnvironmentId === undefined ? undefined : (threadKeyOrId as ThreadId))
+    const architectureContexts = normalizeArchitectureConcernContexts(
+      draftCandidate.architectureContexts,
+    ).filter(
+      (context) =>
+        contextEnvironmentId !== undefined &&
+        contextThreadId !== undefined &&
+        context.environmentId === contextEnvironmentId &&
+        context.threadId === contextThreadId,
+    )
     const reviewComments = Array.isArray(draftCandidate.reviewComments)
       ? draftCandidate.reviewComments.filter(isReviewCommentContext)
       : []
@@ -1254,6 +1285,7 @@ function normalizePersistedDraftsByThreadId(
       terminalContexts.length === 0 &&
       elementContexts.length === 0 &&
       previewAnnotations.length === 0 &&
+      architectureContexts.length === 0 &&
       reviewComments.length === 0 &&
       !hasModelData &&
       !runtimeMode &&
@@ -1282,6 +1314,13 @@ function normalizePersistedDraftsByThreadId(
       ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
       ...(elementContexts.length > 0 ? { elementContexts } : {}),
       ...(previewAnnotations.length > 0 ? { previewAnnotations } : {}),
+      ...(architectureContexts.length > 0
+        ? {
+            architectureContexts: architectureContexts.map(
+              (context) => ({ ...context }) as DeepMutable<ArchitectureConcernContext>,
+            ),
+          }
+        : {}),
       ...(reviewComments.length > 0 ? { reviewComments } : {}),
       ...(hasModelData
         ? {
@@ -1374,6 +1413,7 @@ export function partializeComposerDraftStoreState(
       draft.terminalContexts.length === 0 &&
       draft.elementContexts.length === 0 &&
       draft.previewAnnotations.length === 0 &&
+      draft.architectureContexts.length === 0 &&
       draft.reviewComments.length === 0 &&
       !hasModelData &&
       draft.runtimeMode === null &&
@@ -1420,6 +1460,13 @@ export function partializeComposerDraftStoreState(
         ? {
             previewAnnotations: draft.previewAnnotations.map(
               (annotation) => ({ ...annotation }) as DeepMutable<PreviewAnnotationPayload>,
+            ),
+          }
+        : {}),
+      ...(draft.architectureContexts.length > 0
+        ? {
+            architectureContexts: draft.architectureContexts.map(
+              (context) => ({ ...context }) as DeepMutable<ArchitectureConcernContext>,
             ),
           }
         : {}),
@@ -1722,6 +1769,7 @@ export function toHydratedThreadDraft(
       })) ?? [],
     previewAnnotations:
       persistedDraft.previewAnnotations?.map((annotation) => ({ ...annotation })) ?? [],
+    architectureContexts: normalizeArchitectureConcernContexts(persistedDraft.architectureContexts),
     reviewComments: persistedDraft.reviewComments?.map((comment) => ({ ...comment })) ?? [],
     modelSelectionByProvider,
     activeProvider,

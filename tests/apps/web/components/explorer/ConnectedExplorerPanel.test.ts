@@ -2,7 +2,7 @@
 // verifies Proposal Review discovery and exact target scoping
 import {
   ThreadId,
-  type ArchitectureImpactResult,
+  type ArchitectureImpactProjectionResult,
   type ProposalGenerationId,
 } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
@@ -52,29 +52,23 @@ describe('ConnectedExplorerPanel proposal selection', () =>
     expect(isExplorerTargetScopedToThread(target, ThreadId.make('thread-B'))).toBe(true)
   })
 
-  it('accepts only matching v2 proposal identities and preserves unavailable sides', () =>
+  it('accepts only the matching verified proposal projection identity', () =>
   {
     const threadId = ThreadId.make('thread-exact-proposal-source')
     const generationId = 'generation-exact-proposal-source' as ProposalGenerationId
-    const baseSource = {
-      kind: 'proposal-generation',
-      threadId,
-      generationId,
-      side: 'base',
-      graphDigest: `sha256:${'a'.repeat(64)}`,
-    } as const
+    const baseGraphDigest = `sha256:${'a'.repeat(64)}` as const
+    const headGraphDigest = `sha256:${'b'.repeat(64)}` as const
     const result = {
-      version: 2,
-      comparison: { kind: 'proposal-generation', generationId },
-      baseSource,
-      headSource: {
-        kind: 'diff-analysis',
-        threadId,
-        diffAnalysisId: 'unrelated-diff-analysis',
-        side: 'head',
-        graphDigest: `sha256:${'b'.repeat(64)}`,
+      projection: {
+        source: {
+          kind: 'verified-proposal-impact',
+          threadId,
+          generationId,
+          baseGraphDigest,
+          headGraphDigest,
+        },
       },
-    } as unknown as ArchitectureImpactResult
+    } as unknown as ArchitectureImpactProjectionResult
 
     expect(selectExactProposalDiffSources(null, { generationId, threadId })).toBeNull()
     expect(
@@ -84,8 +78,20 @@ describe('ConnectedExplorerPanel proposal selection', () =>
       }),
     ).toBeNull()
     expect(selectExactProposalDiffSources(result, { generationId, threadId })).toEqual({
-      beforeSource: baseSource,
-      proposedSource: null,
+      beforeSource: {
+        kind: 'proposal-generation',
+        threadId,
+        generationId,
+        side: 'base',
+        graphDigest: baseGraphDigest,
+      },
+      proposedSource: {
+        kind: 'proposal-generation',
+        threadId,
+        generationId,
+        side: 'proposed',
+        graphDigest: headGraphDigest,
+      },
     })
   })
 })

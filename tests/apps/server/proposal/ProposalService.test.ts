@@ -14,6 +14,7 @@ import * as NodeUtil from 'node:util'
 import { it } from '@effect/vitest'
 import {
   EnvironmentId,
+  OrchestrationProposedPlanId,
   PROPOSAL_MAX_FILE_BYTES,
   PROPOSAL_MAX_TOTAL_CONTENT_BYTES,
   ProjectId,
@@ -35,15 +36,18 @@ import { describe, expect } from 'vite-plus/test'
 
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import { PersistenceSqlError } from '../../../../apps/server/src/persistence/Errors.ts'
+import * as ArchitectureAdmissionRepository from '../../../../apps/server/src/architecture/ArchitectureAdmissionRepository.ts'
 import * as ProposalGitEngine from '../../../../apps/server/src/proposal/ProposalGitEngine.ts'
 import * as ProposalRepository from '../../../../apps/server/src/proposal/ProposalRepository.ts'
 import * as ProposalRetainedRefAttemptStore from '../../../../apps/server/src/proposal/ProposalRetainedRefAttemptStore.ts'
 import * as ProposalService from '../../../../apps/server/src/proposal/ProposalService.ts'
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile)
-const TestLayer = Layer.mergeAll(ProposalService.layer, ProposalRetainedRefAttemptStore.layer).pipe(
-  Layer.provideMerge(SqlitePersistenceMemory),
-)
+const TestLayer = Layer.mergeAll(
+  ProposalService.layer,
+  ProposalRetainedRefAttemptStore.layer,
+  ArchitectureAdmissionRepository.layer,
+).pipe(Layer.provideMerge(SqlitePersistenceMemory))
 
 async function git(cwd: string, args: ReadonlyArray<string>): Promise<string>
 {
@@ -152,6 +156,7 @@ const scope = {
     providerSessionId: 'provider-session-proposal-test',
     providerInstanceId: ProviderInstanceId.make('codex-test'),
   },
+  verifiedAnalyzerFingerprint: 'cartographer:proposal-test',
 } as const
 
 it.layer(TestLayer)('ProposalService', (it) =>
@@ -507,8 +512,14 @@ it.layer(TestLayer)('ProposalService', (it) =>
         const revisionRows = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM proposal_revisions WHERE proposal_id = ${proposalId}
         `
+        const admissionRows = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM architecture_analysis_admissions
+          WHERE target_json LIKE ${`%${proposalId}%`}
+        `
         expect(proposalRows[0]?.count).toBe(0)
         expect(revisionRows[0]?.count).toBe(0)
+        expect(admissionRows[0]?.count).toBe(0)
         expect(yield* Effect.promise(() => proposalRefFiles(cwd))).toEqual([])
         const preparedToken = ProposalGitEngine.proposalRetainedRefPairToken(
           prepared.baseRetainedRef,
@@ -518,6 +529,85 @@ it.layer(TestLayer)('ProposalService', (it) =>
           (yield* (yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore)
             .list).some((attempt) => attempt.refToken === preparedToken),
         ).toBe(false)
+      }),
+    )
+
+    it.effect('rolls back the exact revision when durable Verified admission fails', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* Effect.acquireRelease(
+          Effect.promise(() => initializeRepository('456code-proposal-admission-rollback-')),
+          (directory) =>
+            Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })).pipe(
+              Effect.ignore,
+            ),
+        )
+        const proposalId = ProposalId.make('proposal-admission-rollback')
+        const liveAdmissions =
+          yield* ArchitectureAdmissionRepository.ArchitectureAdmissionRepository
+        const failingAdmissions =
+          ArchitectureAdmissionRepository.ArchitectureAdmissionRepository.of({
+            ...liveAdmissions,
+            enqueue: () =>
+              Effect.fail(
+                new PersistenceSqlError({
+                  operation: 'ProposalService.test.enqueue',
+                  detail: 'forced Verified admission failure',
+                }),
+              ),
+          })
+        const repository = yield* ProposalRepository.make.pipe(
+          Effect.provideService(
+            ArchitectureAdmissionRepository.ArchitectureAdmissionRepository,
+            failingAdmissions,
+          ),
+        )
+        const gitEngine = yield* ProposalGitEngine.make
+        const service = yield* ProposalService.make.pipe(
+          Effect.provideService(ProposalGitEngine.ProposalGitEngine, gitEngine),
+          Effect.provideService(ProposalRepository.ProposalRepository, repository),
+        )
+        const sql = yield* SqlClient.SqlClient
+
+        const rejected = yield* service
+          .upsert({
+            ...scope,
+            proposalId,
+            cwd,
+            changes: {
+              _tag: 'typed',
+              operations: [
+                {
+                  _tag: 'add',
+                  path: 'admission-rollback.txt',
+                  content: { encoding: 'utf8', data: 'must-roll-back\n' },
+                },
+              ],
+            },
+          })
+          .pipe(Effect.flip)
+
+        expect(rejected.code).toBe('persistence-failed')
+        const rows = yield* sql<{
+          readonly proposals: number
+          readonly revisions: number
+          readonly admissions: number
+        }>`
+          SELECT
+            (SELECT COUNT(*) FROM proposals WHERE proposal_id = ${proposalId}) AS proposals,
+            (
+              SELECT COUNT(*)
+              FROM proposal_revisions
+              WHERE proposal_id = ${proposalId}
+            ) AS revisions,
+            (
+              SELECT COUNT(*)
+              FROM architecture_analysis_admissions
+              WHERE target_json LIKE ${`%${proposalId}%`}
+            ) AS admissions
+        `
+        expect(rows).toEqual([{ proposals: 0, revisions: 0, admissions: 0 }])
+        expect(yield* Effect.promise(() => proposalRefFiles(cwd))).toEqual([])
       }),
     )
   })
@@ -751,6 +841,153 @@ it.layer(TestLayer)('ProposalService', (it) =>
         const corrupted = yield* service.get({ proposalId }).pipe(Effect.flip)
         expect(corrupted.code).toBe('persistence-failed')
         expect(corrupted.detail).toContain('failed its content hash check')
+      }),
+    )
+
+    it.effect('pins the current Planned publication and admits Verified work atomically', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* Effect.acquireRelease(
+          Effect.promise(() => initializeRepository('456code-proposal-planned-link-')),
+          (directory) =>
+            Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })).pipe(
+              Effect.ignore,
+            ),
+        )
+        const service = yield* ProposalService.ProposalService
+        const sql = yield* SqlClient.SqlClient
+        const proposalId = ProposalId.make('proposal-planned-link')
+        const planId = OrchestrationProposedPlanId.make('plan-proposal-planned-link')
+        const firstPublicationId = 'planned-impact-proposal-link-1'
+        const secondPublicationId = 'planned-impact-proposal-link-2'
+        const firstPayload = '{"version":1,"summary":"first"}'
+        const secondPayload = '{"version":1,"summary":"second"}'
+
+        yield* sql`
+          INSERT INTO architecture_planned_impact_publications (
+            publication_id,
+            environment_id,
+            project_id,
+            source_thread_id,
+            turn_id,
+            provider_session_id,
+            provider_instance_id,
+            plan_kind,
+            plan_identity_key,
+            plan_id,
+            publication_revision,
+            content_digest,
+            canonical_payload_json,
+            created_at
+          )
+          VALUES (
+            ${firstPublicationId},
+            ${scope.environmentId},
+            ${scope.projectId},
+            ${scope.sourceThreadId},
+            'turn-proposal-planned-link',
+            ${scope.producer.providerSessionId},
+            ${scope.producer.providerInstanceId},
+            'plan',
+            ${`plan:${planId}`},
+            ${planId},
+            1,
+            ${sha256(firstPayload)},
+            ${firstPayload},
+            '2026-08-20T12:00:00.000Z'
+          )
+        `
+
+        const first = yield* service.upsert({
+          ...scope,
+          proposalId,
+          planId,
+          cwd,
+          changes: {
+            _tag: 'typed',
+            operations: [
+              {
+                _tag: 'add',
+                path: 'planned-first.txt',
+                content: { encoding: 'utf8', data: 'first\n' },
+              },
+            ],
+          },
+        })
+        expect(first.plannedImpactRef).toEqual({
+          publicationId: firstPublicationId,
+          publicationRevision: 1,
+          contentDigest: sha256(firstPayload),
+        })
+
+        yield* sql`
+          INSERT INTO architecture_planned_impact_publications (
+            publication_id,
+            environment_id,
+            project_id,
+            source_thread_id,
+            turn_id,
+            provider_session_id,
+            provider_instance_id,
+            plan_kind,
+            plan_identity_key,
+            plan_id,
+            publication_revision,
+            content_digest,
+            canonical_payload_json,
+            supersedes_publication_id,
+            created_at
+          )
+          VALUES (
+            ${secondPublicationId},
+            ${scope.environmentId},
+            ${scope.projectId},
+            ${scope.sourceThreadId},
+            'turn-proposal-planned-link',
+            ${scope.producer.providerSessionId},
+            ${scope.producer.providerInstanceId},
+            'plan',
+            ${`plan:${planId}`},
+            ${planId},
+            2,
+            ${sha256(secondPayload)},
+            ${secondPayload},
+            ${firstPublicationId},
+            '2026-08-20T12:01:00.000Z'
+          )
+        `
+        const second = yield* service.upsert({
+          ...scope,
+          proposalId,
+          planId,
+          cwd,
+          changes: {
+            _tag: 'typed',
+            operations: [
+              {
+                _tag: 'add',
+                path: 'planned-second.txt',
+                content: { encoding: 'utf8', data: 'second\n' },
+              },
+            ],
+          },
+        })
+        expect(second.plannedImpactRef).toEqual({
+          publicationId: secondPublicationId,
+          publicationRevision: 2,
+          contentDigest: sha256(secondPayload),
+        })
+
+        const stored = yield* service.get({ proposalId })
+        expect(stored.revisions[0]?.plannedImpactRef?.publicationId).toBe(firstPublicationId)
+        expect(stored.revisions[1]?.plannedImpactRef?.publicationId).toBe(secondPublicationId)
+        const admissions = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM architecture_analysis_admissions
+          WHERE kind = 'proposal-verified'
+            AND target_json LIKE ${`%${proposalId}%`}
+        `
+        expect(admissions).toEqual([{ count: 2 }])
       }),
     )
   })

@@ -116,6 +116,7 @@ import { useShortcutModifierState } from '../lib/shortcutModifierState'
 import { readLocalApi } from '../localApi'
 import { useComposerDraftStore } from '../composerDraftStore'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
+import { useTerminalFocus } from '../hooks/useTerminalFocus'
 import { useDesktopUpdateState } from '../state/desktopUpdate'
 
 import { useThreadActions } from '../hooks/useThreadActions'
@@ -3349,6 +3350,7 @@ function ProjectSidebar()
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor)
   const platform = navigator.platform
   const shortcutModifiers = useShortcutModifierState()
+  const terminalFocused = useTerminalFocus()
   const { environments } = useEnvironments()
   const primaryEnvironmentId = usePrimaryEnvironmentId()
   const environmentLabelById = useMemo(
@@ -3703,7 +3705,7 @@ function ProjectSidebar()
     [threadJumpCommandByKey],
   )
   const sidebarShortcutContext = {
-    terminalFocus: false,
+    terminalFocus: terminalFocused,
     terminalOpen: routeTerminalOpen,
     modelPickerOpen: isModelPickerOpen(),
   }

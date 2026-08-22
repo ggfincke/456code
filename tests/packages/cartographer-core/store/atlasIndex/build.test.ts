@@ -1,10 +1,11 @@
 // tests/packages/cartographer-core/store/atlasIndex/build.test.ts
-// verifies v5 scope exactness, deterministic omissions & health invariants
+// verifies v6 structure, crosswalks, deterministic omissions & strict reads
 
 import { describe, expect, it } from 'vite-plus/test'
 
 import { parseAtlasIndex } from '../../../../../packages/cartographer-core/src/contracts/atlasIndexCodec.ts'
 import {
+  ATLAS_INDEX_SCHEMA_VERSION,
   GRAPH_SCHEMA_VERSION,
   type CartographerGraph,
   type GraphEdge,
@@ -103,7 +104,65 @@ function overCapGraph(reverse = false): CartographerGraph
   }
 }
 
-describe('buildAtlasIndex v5', () =>
+function structureGraph(): CartographerGraph
+{
+  return {
+    version: GRAPH_SCHEMA_VERSION,
+    repoRoot: '/repo',
+    mode: 'imports',
+    generatedAt: '2026-08-20T12:00:00.000Z',
+    gitRef: '2'.repeat(40),
+    scope: '.',
+    nodes: [
+      {
+        id: 'src/api/index.ts',
+        kind: 'file',
+        label: 'index.ts',
+        group: 'shared',
+        system: 'system-a',
+      },
+      {
+        id: 'src/worker/index.ts',
+        kind: 'file',
+        label: 'index.ts',
+        group: 'shared',
+        system: 'system-a',
+      },
+      {
+        id: 'src/worker/nested/job.ts',
+        kind: 'file',
+        label: 'job.ts',
+        group: 'worker',
+        system: 'system-b',
+      },
+    ],
+    edges: [
+      {
+        id: 'api-worker',
+        from: 'src/api/index.ts',
+        to: 'src/worker/index.ts',
+        kind: 'imports',
+      },
+      {
+        id: 'worker-job',
+        from: 'src/worker/index.ts',
+        to: 'src/worker/nested/job.ts',
+        kind: 'imports',
+      },
+    ],
+    groups: [
+      { id: 'shared', label: 'Shared', fileCount: 2 },
+      { id: 'worker', label: 'Worker', fileCount: 1 },
+    ],
+    systems: [
+      { id: 'system-a', label: 'System A', fileCount: 2, source: 'authored' },
+      { id: 'system-b', label: 'System B', fileCount: 1, source: 'authored' },
+    ],
+    metrics: { cycles: 0, orphans: 0, maxFanIn: 1, maxFanOut: 1 },
+  }
+}
+
+describe('buildAtlasIndex v6', () =>
 {
   it('retains exact per-parent omissions and objective health deterministically', () =>
   {
@@ -129,6 +188,86 @@ describe('buildAtlasIndex v5', () =>
       violatedRules: 2,
       ruleTotal: 3,
     })
+    expect(parseAtlasIndex(index)).toEqual(index)
+  })
+
+  it('builds nested Structure scopes and explicit architecture crosswalk ambiguity', () =>
+  {
+    const index = buildAtlasIndex(structureGraph(), SOURCE_DIGEST)
+    if (index.version !== ATLAS_INDEX_SCHEMA_VERSION)
+    {
+      throw new Error('expected a current atlas index')
+    }
+
+    expect(index.structure).toMatchObject({
+      rootId: 'dirs:.',
+      counts: { directories: 5, files: 3, edges: 2, fileEdges: 2 },
+    })
+    expect(index.structure.directories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'dirs:.',
+          childDirectoryIds: ['dirs:src'],
+          descendantFileCount: 3,
+        }),
+        expect.objectContaining({
+          id: 'dirs:src/worker',
+          childDirectoryIds: ['dirs:src/worker/nested'],
+          directFileIds: ['src/worker/index.ts'],
+          descendantFileCount: 2,
+        }),
+      ]),
+    )
+    expect(index.structure.edges).toEqual([
+      { parent: 'dirs:src', from: 'dirs:src/api', to: 'dirs:src/worker', weight: 1 },
+      {
+        parent: 'dirs:src/worker',
+        from: 'src/worker/index.ts',
+        to: 'dirs:src/worker/nested',
+        weight: 1,
+      },
+    ])
+    expect(index.crosswalks.blocksToDirectories).toContainEqual({
+      sourceId: 'blocks:shared',
+      targetIds: ['dirs:src/api', 'dirs:src/worker'],
+      matchedFileCount: 1,
+      status: 'ambiguous',
+    })
+
+    expect(() => parseAtlasIndex({ ...index, version: 5 })).toThrow(
+      'atlas index has an invalid schema',
+    )
+  })
+
+  it('validates mixed-case directory paths with the builder canonical ordering', () =>
+  {
+    const source = structureGraph()
+    const ids = new Map([
+      ['src/api/index.ts', 'Apps/api/index.ts'],
+      ['src/worker/index.ts', 'apps/worker/index.ts'],
+      ['src/worker/nested/job.ts', 'src/worker/nested/job.ts'],
+    ])
+    const graph: CartographerGraph = {
+      ...source,
+      nodes: source.nodes.map((node) => ({ ...node, id: ids.get(node.id)! })),
+      edges: source.edges.map((edge) => ({
+        ...edge,
+        from: ids.get(edge.from)!,
+        to: ids.get(edge.to)!,
+      })),
+    }
+
+    const index = buildAtlasIndex(graph, SOURCE_DIGEST)
+    if (index.version !== ATLAS_INDEX_SCHEMA_VERSION)
+    {
+      throw new Error('expected a current atlas index')
+    }
+
+    expect(
+      index.structure.directories
+        .filter((directory) => directory.depth === 1)
+        .map((directory) => directory.key),
+    ).toEqual(['Apps', 'apps', 'src'])
     expect(parseAtlasIndex(index)).toEqual(index)
   })
 

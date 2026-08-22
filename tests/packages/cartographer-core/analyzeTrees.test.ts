@@ -55,6 +55,7 @@ function analysisValues(output: string)
     'base-ref': BASE_REF,
     'proposed-ref': PROPOSED_REF,
     'analyzer-version': ANALYZER_VERSION,
+    'implementation-changed-file-count': '2',
   }
 }
 
@@ -146,11 +147,12 @@ describe('analyze-trees', () =>
 
     const expectedManifest: AnalysisReadyManifest = {
       type: 'cartographer.analysis-ready',
-      version: 1,
+      version: 2,
       analyzerVersion: ANALYZER_VERSION,
       baseGraph: 'base.graph.json',
       proposedGraph: 'proposed.graph.json',
       impact: 'impact.json',
+      impactProjection: 'impact-projection.json',
     }
     expect(firstManifest).toEqual(expectedManifest)
     expect(secondManifest).toEqual(expectedManifest)
@@ -160,12 +162,18 @@ describe('analyze-trees', () =>
     expect(NodeFS.existsSync(gitMarker)).toBe(false)
     expect(NodeFS.existsSync(projectCodeMarker)).toBe(false)
 
-    for (const name of ['base.graph.json', 'proposed.graph.json', 'impact.json'])
+    for (const name of [
+      'base.graph.json',
+      'proposed.graph.json',
+      'impact.json',
+      'impact-projection.json',
+    ])
     {
       expect(artifact(first, name)).toBe(artifact(second, name))
     }
     const baseGraph = JSON.parse(artifact(first, 'base.graph.json'))
     const impact = JSON.parse(artifact(first, 'impact.json'))
+    const impactProjection = JSON.parse(artifact(first, 'impact-projection.json'))
     expect(baseGraph).toMatchObject({
       repoRoot: '.',
       generatedAt: '1970-01-01T00:00:00.000Z',
@@ -179,6 +187,18 @@ describe('analyze-trees', () =>
       addedNodes: ['src/c.ts'],
       removedNodes: [],
       changed: true,
+    })
+    expect(impactProjection).toMatchObject({
+      version: 1,
+      kind: 'impact-diff',
+      authority: 'verified',
+      resultState: 'graph',
+      baseGitRef: BASE_REF,
+      headGitRef: PROPOSED_REF,
+      implementationChangedFileCount: 2,
+      totals: {
+        changedFiles: { total: 2, returned: 0, omitted: 2 },
+      },
     })
   })
 
@@ -198,7 +218,12 @@ describe('analyze-trees', () =>
     await runAnalyzeTrees(first.base, first.proposed, analysisValues(first.output))
     await runAnalyzeTrees(second.base, second.proposed, analysisValues(second.output))
 
-    for (const name of ['base.graph.json', 'proposed.graph.json', 'impact.json'])
+    for (const name of [
+      'base.graph.json',
+      'proposed.graph.json',
+      'impact.json',
+      'impact-projection.json',
+    ])
     {
       expect(artifact(first, name)).toBe(artifact(second, name))
     }
@@ -210,6 +235,32 @@ describe('analyze-trees', () =>
     expect(NodeFS.lstatSync(secondLink).isSymbolicLink()).toBe(true)
     expect(NodeFS.readFileSync(firstOutside, 'utf-8')).toBe('export const outside = "first"\n')
     expect(NodeFS.readFileSync(secondOutside, 'utf-8')).toBe('export const outside = "second"\n')
+  })
+
+  it('seals an implementation-only change as exact no-impact', async () =>
+  {
+    const pair = treePair()
+    NodeFS.rmSync(NodePath.join(pair.proposed, 'src'), { recursive: true })
+    NodeFS.cpSync(NodePath.join(pair.base, 'src'), NodePath.join(pair.proposed, 'src'), {
+      recursive: true,
+    })
+
+    await runAnalyzeTrees(pair.base, pair.proposed, {
+      ...analysisValues(pair.output),
+      'implementation-changed-file-count': '1',
+    })
+
+    const impactProjection = JSON.parse(artifact(pair, 'impact-projection.json'))
+    expect(impactProjection).toMatchObject({
+      authority: 'verified',
+      resultState: 'no-impact',
+      implementationChangedFileCount: 1,
+      nodes: [],
+      edges: [],
+      totals: {
+        changedFiles: { total: 1, returned: 0, omitted: 1 },
+      },
+    })
   })
 
   it('keeps staging under the output owner and cleans it on success or failure', async () =>
@@ -248,7 +299,12 @@ describe('analyze-trees', () =>
     expect(stagingDirectories(pair.output)).toHaveLength(1)
     await expect(analysis).rejects.toThrow('analysis artifacts exceed the 1-byte output limit')
     expect(stagingDirectories(pair.output)).toEqual([])
-    for (const name of ['base.graph.json', 'proposed.graph.json', 'impact.json'])
+    for (const name of [
+      'base.graph.json',
+      'proposed.graph.json',
+      'impact.json',
+      'impact-projection.json',
+    ])
     {
       expect(NodeFS.existsSync(NodePath.join(pair.output, name))).toBe(false)
     }

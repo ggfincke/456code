@@ -285,8 +285,8 @@ describe('captureCurrentWorktree', () =>
       expect(error).toMatchObject({
         _tag: 'CartographerError',
         failure: 'snapshot_failed',
-        message: 'Cartographer current-worktree capture was cancelled.',
       })
+      expect(error.message).toBe('Architecture current-worktree capture was cancelled.')
       expect(artifacts).toEqual([])
     }),
   )

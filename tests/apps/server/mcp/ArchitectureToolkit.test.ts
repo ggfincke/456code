@@ -6,6 +6,7 @@ import {
   ArchitectureToolError,
   DiffAnalysisId,
   EnvironmentId,
+  ProjectId,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -18,14 +19,20 @@ import {
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { McpSchema, McpServer } from 'effect/unstable/ai'
 
 import * as ArchitectureQueryService from '../../../../apps/server/src/cartographer/ArchitectureQueryService.ts'
+import * as PlannedImpactService from '../../../../apps/server/src/architecture/PlannedImpactService.ts'
 import * as McpHttpServer from '../../../../apps/server/src/mcp/McpHttpServer.ts'
 import * as McpInvocationContext from '../../../../apps/server/src/mcp/McpInvocationContext.ts'
 import { architectureToolkitHandlers } from '../../../../apps/server/src/mcp/toolkits/architecture/handlers.ts'
+import * as ProjectionSnapshotQuery from '../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
+import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 
 const environmentId = EnvironmentId.make('environment-architecture-mcp')
+const projectId = ProjectId.make('project-architecture-mcp')
 const threadId = ThreadId.make('thread-architecture-mcp')
 const providerInstanceId = ProviderInstanceId.make('codex')
 const turnId = TurnId.make('turn-architecture-mcp')
@@ -136,23 +143,54 @@ function makeService(
     resolveContext: () => Effect.die('unused'),
     blastRadius: () => Effect.succeed(blastResult),
     graphDiff: () => Effect.succeed(graphDiffResult),
-    architectureImpact: () => Effect.succeed(graphDiffResult),
+    architectureImpactProjection: () => Effect.die('unused'),
     proposePatch: () => Effect.succeed(proposePatchResult),
     ...overrides,
   })
 }
 
-function registrationLayer(
-  service: ArchitectureQueryService.ArchitectureQueryServiceShape,
-): Layer.Layer<McpServer.McpServer>
+function registrationLayer(service: ArchitectureQueryService.ArchitectureQueryServiceShape)
 {
+  const snapshots = {
+    getThreadDetailById: (requestedThreadId: ThreadId) =>
+      Effect.succeed(
+        requestedThreadId === threadId
+          ? Option.some({
+              id: threadId,
+              projectId,
+              worktreePath: '/derived/architecture-worktree',
+              interactionMode: 'plan',
+              session: { status: 'running', activeTurnId: turnId },
+              latestTurn: {
+                turnId,
+                state: 'running',
+                requestedAt: generatedAt,
+                startedAt: generatedAt,
+                completedAt: null,
+                assistantMessageId: null,
+              },
+              orchestratePlans: [],
+            })
+          : Option.none(),
+      ),
+    getProjectShellById: (requestedProjectId: ProjectId) =>
+      Effect.succeed(
+        requestedProjectId === projectId
+          ? Option.some({ id: projectId, workspaceRoot: '/derived/architecture-project' })
+          : Option.none(),
+      ),
+  } as unknown as ProjectionSnapshotQuery.ProjectionSnapshotQuery['Service']
+  const plannedImpacts = PlannedImpactService.layer.pipe(Layer.provide(SqlitePersistenceMemory))
   return McpHttpServer.ArchitectureToolkitRegistrationLive.pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provide(Layer.succeed(ArchitectureQueryService.ArchitectureQueryService, service)),
+    Layer.provide(Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, snapshots)),
+    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provide(plannedImpacts),
   )
 }
 
-it.effect('registers the three closed-world architecture tools with exact safety hints', () =>
+it.effect('registers the four closed-world architecture tools with exact safety hints', () =>
 {
   const service = makeService()
   return Effect.gen(function* ()
@@ -161,6 +199,7 @@ it.effect('registers the three closed-world architecture tools with exact safety
     expect(server.tools.map(({ tool }) => tool.name).sort()).toEqual([
       'architecture_blast_radius',
       'architecture_graph_diff',
+      'architecture_plan_impact_upsert',
       'architecture_propose_patch',
     ])
 
@@ -182,6 +221,15 @@ it.effect('registers the three closed-world architecture tools with exact safety
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
+      openWorldHint: false,
+    })
+    const plannedAnnotations = server.tools.find(
+      ({ tool }) => tool.name === 'architecture_plan_impact_upsert',
+    )?.tool.annotations
+    expect(plannedAnnotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
       openWorldHint: false,
     })
   }).pipe(Effect.provide(registrationLayer(service)))
@@ -310,6 +358,87 @@ it.effect('returns a typed architecture error before service access without capa
     expect(calls).toBe(0)
   }).pipe(Effect.provide(registrationLayer(service)))
 })
+
+it.effect(
+  'strictly admits Planned Impact only with both capabilities and active Plan authority',
+  () =>
+  {
+    const service = makeService()
+    const arguments_ = {
+      version: 1,
+      summary: 'The proposal remains inside the existing implementation unit.',
+      outcome: 'no-impact',
+      changedObjects: [],
+      relationships: [],
+      pathHints: ['src/internal.ts'],
+      omissions: {
+        changedObjects: { total: 0, omitted: 0 },
+        relationships: { total: 0, omitted: 0 },
+        pathHints: { total: 1, omitted: 0 },
+      },
+    } as const
+
+    return Effect.gen(function* ()
+    {
+      const server = yield* McpServer.McpServer
+      const sql = yield* SqlClient.SqlClient
+      const authorized = invocation(new Set(['architecture', 'proposal']), turnId)
+      const result = yield* server
+        .callTool({ name: 'architecture_plan_impact_upsert', arguments: arguments_ })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, authorized),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        )
+      expect(result).toMatchObject({
+        isError: false,
+        structuredContent: {
+          version: 1,
+          publication: { publicationRevision: 1 },
+          projection: { projectionRevision: 1, materialization: 'no-impact' },
+          anchoring: 'not-required',
+        },
+      })
+
+      const spoofed = yield* server
+        .callTool({
+          name: 'architecture_plan_impact_upsert',
+          arguments: { ...arguments_, root: '/attacker/root' },
+        })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, authorized),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        )
+      expect(spoofed).toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: { code: 'invalid-publication' },
+        },
+      })
+
+      for (const capabilities of [new Set(['architecture']), new Set(['proposal'])])
+      {
+        const denied = yield* server
+          .callTool({ name: 'architecture_plan_impact_upsert', arguments: arguments_ })
+          .pipe(
+            Effect.provideService(
+              McpInvocationContext.McpInvocationContext,
+              invocation(capabilities as ReadonlySet<McpInvocationContext.McpCapability>, turnId),
+            ),
+            Effect.provideService(McpSchema.McpServerClient, client),
+          )
+        expect(denied).toMatchObject({
+          isError: true,
+          structuredContent: { error: { code: 'capability-unavailable' } },
+        })
+      }
+
+      const rows = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count FROM architecture_planned_impact_publications
+    `
+      expect(rows).toEqual([{ count: 1 }])
+    }).pipe(Effect.provide(registrationLayer(service)))
+  },
+)
 
 it.effect('preserves recovery and limit details in registered MCP failures', () =>
 {

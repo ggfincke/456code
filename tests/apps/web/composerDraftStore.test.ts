@@ -891,6 +891,44 @@ describe('composerDraftStore project draft thread mapping', () =>
     })
   })
 
+  it('rotates a failed bootstrap thread id without losing its draft', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    const retryThreadId = ThreadId.make('thread-retry')
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      branch: 'feature/test',
+      worktreePath: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      envMode: 'worktree',
+      startFromOrigin: true,
+      runtimeMode: 'full-access',
+      collaborationMode: { baseMode: 'default', orchestrate: false },
+    })
+    store.setPrompt(draftId, 'keep this prompt')
+    markPromotedDraftThread(threadId)
+
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+      threadId: retryThreadId,
+      createdAt: '2026-01-01T00:01:00.000Z',
+    })
+
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
+      threadId: retryThreadId,
+      branch: 'feature/test',
+      worktreePath: null,
+      createdAt: '2026-01-01T00:01:00.000Z',
+      envMode: 'worktree',
+      startFromOrigin: true,
+      runtimeMode: 'full-access',
+      collaborationMode: { baseMode: 'default', orchestrate: false },
+      promotedTo: null,
+    })
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
+      'keep this prompt',
+    )
+  })
+
   it('persists Plan with Orchestrate in draft thread context', () =>
   {
     const persistApi = useComposerDraftStore.persist as unknown as {

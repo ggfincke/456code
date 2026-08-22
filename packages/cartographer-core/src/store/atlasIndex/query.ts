@@ -9,7 +9,12 @@ import type {
   AtlasIndexLevel,
   AtlasIndexPage,
   AtlasIndexQuery,
+  AtlasIndexStructureDirectory,
+  AtlasIndexStructureEdge,
+  AtlasIndexStructureFileQuery,
+  AtlasIndexStructureQuery,
   AtlasIndexUnit,
+  AtlasIndexV6,
 } from '../../contracts/types.js'
 import { ATLAS_INDEX_QUERY_LIMIT, ATLAS_INDEX_QUERY_LIMIT_MAX } from './constants.js'
 
@@ -199,4 +204,77 @@ export function queryAtlasFiles(
     total,
     ...(next < total ? { nextCursor: encodeCursor(signature, next) } : {}),
   }
+}
+
+function structureParent(index: AtlasIndexV6, parentId: string): AtlasIndexStructureDirectory
+{
+  const parent = index.structure.directories.find((directory) => directory.id === parentId)
+  if (parent === undefined) throw new Error('structure parent was not found')
+  return parent
+}
+
+export function queryAtlasStructureDirectories(
+  index: AtlasIndexV6,
+  query: AtlasIndexStructureQuery,
+): AtlasIndexPage<AtlasIndexStructureDirectory>
+{
+  const parent = structureParent(index, query.parentId)
+  const children = new Set(parent.childDirectoryIds)
+  const items = index.structure.directories.filter((directory) => children.has(directory.id))
+  const signature = hashSignature([
+    index.repo.root,
+    index.sourceGeneratedAt,
+    index.sourceGraphDigest,
+    'structure-directories',
+    parent.id,
+  ])
+  return page(items, signature, query.cursor, query.limit)
+}
+
+export function queryAtlasStructureFiles(
+  index: AtlasIndexV6,
+  query: AtlasIndexStructureFileQuery,
+): AtlasIndexPage<AtlasIndexFile>
+{
+  const parent = structureParent(index, query.parentId)
+  const search = query.search?.trim().toLowerCase()
+  if (search && search.length > 200)
+  {
+    throw new Error('search must not exceed 200 characters')
+  }
+  const directIds = new Set(parent.directFileIds)
+  const items = index.files.filter(
+    (file) =>
+      directIds.has(file.id) &&
+      (!search ||
+        file.id.toLowerCase().includes(search) ||
+        file.label.toLowerCase().includes(search) ||
+        (file.description ?? '').toLowerCase().includes(search)),
+  )
+  const signature = hashSignature([
+    index.repo.root,
+    index.sourceGeneratedAt,
+    index.sourceGraphDigest,
+    'structure-files',
+    parent.id,
+    search ?? '',
+  ])
+  return page(items, signature, query.cursor, query.limit)
+}
+
+export function queryAtlasStructureEdges(
+  index: AtlasIndexV6,
+  query: AtlasIndexStructureQuery,
+): AtlasIndexPage<AtlasIndexStructureEdge>
+{
+  const parent = structureParent(index, query.parentId)
+  const items = index.structure.edges.filter((edge) => edge.parent === parent.id)
+  const signature = hashSignature([
+    index.repo.root,
+    index.sourceGeneratedAt,
+    index.sourceGraphDigest,
+    'structure-edges',
+    parent.id,
+  ])
+  return page(items, signature, query.cursor, query.limit)
 }

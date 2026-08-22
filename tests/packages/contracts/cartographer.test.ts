@@ -245,6 +245,7 @@ describe('cartographer contracts', () =>
         baseGraphArtifact: 'base-graph-ref',
         headGraphArtifact: 'head-graph-ref',
         impactArtifact: 'impact-ref',
+        impactProjectionArtifact: 'impact-projection-ref',
         artifactByteLength: 4096,
         errorCode: null,
         createdAt: '2026-08-09T12:00:00.000Z',
@@ -254,6 +255,10 @@ describe('cartographer contracts', () =>
     ).toMatchObject({ diffAnalysisId: 'diff-analysis-ready', artifactByteLength: 4096 })
     expect(WS_METHODS.cartographerRequestDiffAnalysis).toBe('cartographer.requestDiffAnalysis')
     expect(WS_METHODS.cartographerGetDiffAnalysis).toBe('cartographer.getDiffAnalysis')
-    expect(WS_METHODS.cartographerGetArchitectureImpact).toBe('cartographer.getArchitectureImpact')
+    expect(WS_METHODS.cartographerGetArchitectureImpactProjection).toBe(
+      'cartographer.getArchitectureImpactProjection',
+    )
+    expect(WS_METHODS.cartographerGetRepositoryMap).toBe('cartographer.getRepositoryMap')
+    expect(WS_METHODS.cartographerGetArchitectureScope).toBe('cartographer.getArchitectureScope')
   })
 })

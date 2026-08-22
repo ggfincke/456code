@@ -9,6 +9,8 @@ import {
   getCloneDestinationBrowsePath,
   getCloneDestinationPath,
   getCloneDirectoryName,
+  getDefaultCloneUrl,
+  normalizePastedCloneUrl,
 } from '@t3tools/client-runtime/operations/projects'
 import { connectionStatusText } from '@t3tools/client-runtime/connection'
 import {
@@ -466,7 +468,9 @@ export function OpenCommandPaletteDialog(props: {
     hasServerThread: currentThreadRef !== null,
     exactProject: currentProjectId !== null && currentProjectExists,
     capability:
-      currentEnvironment?.serverConfig?.environment.capabilities.architectureImpact ?? null,
+      currentEnvironment?.serverConfig == null
+        ? null
+        : currentEnvironment.serverConfig.environment.capabilities.architectureImpact === true,
     environmentLabel: currentEnvironment?.label,
   })
   const currentProjectCwd = currentProjectId ? (projectCwdById.get(currentProjectId) ?? null) : null
@@ -1103,8 +1107,8 @@ export function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: 'action',
     value: 'action:architecture',
-    searchTerms: ['architecture', 'atlas', 'project graph', 'dependencies'],
-    title: 'Open Repository Atlas',
+    searchTerms: ['architecture', 'repository map', 'project graph', 'dependencies'],
+    title: 'Open Repository Map',
     description: architectureDisabledReason ?? 'Explore this project’s architecture.',
     disabled: architectureDisabledReason !== null,
     icon: <BlocksIcon className={ITEM_ICON_CLASS} />,
@@ -1370,7 +1374,7 @@ export function OpenCommandPaletteDialog(props: {
           source: addProjectCloneFlow.source,
           repositoryInput: rawRepository,
           repository: null,
-          remoteUrl: rawRepository,
+          remoteUrl: normalizePastedCloneUrl(rawRepository),
         })
         setHighlightedItemValue(null)
         setQuery(destinationPath)
@@ -1412,7 +1416,7 @@ export function OpenCommandPaletteDialog(props: {
         source: addProjectCloneFlow.source,
         repositoryInput: rawRepository,
         repository,
-        remoteUrl: repository.sshUrl,
+        remoteUrl: getDefaultCloneUrl(repository),
       })
       setHighlightedItemValue(null)
       setQuery(destinationPath)

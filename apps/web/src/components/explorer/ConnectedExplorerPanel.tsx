@@ -1,8 +1,7 @@
 // apps/web/src/components/explorer/ConnectedExplorerPanel.tsx
 // connects Proposal Review to immutable proposal and architecture summary state
 import type {
-  ArchitectureImpactResult,
-  ArchitectureImpactResultV2,
+  ArchitectureImpactProjectionResult,
   ArchitectureProposalSource,
   ProjectId,
   ProposalGeneration,
@@ -21,6 +20,11 @@ import { useAtomCommand } from '~/state/use-atom-command'
 import { useRightPanelStore } from '~/rightPanelStore'
 
 import { createArchitectureImpactSurface } from '../architecture/architectureResourceIdentity'
+import {
+  selectExactComparisonImpactProjection,
+  selectExactPlanImpactProjection,
+} from '../architecture/architectureImpactSelection'
+import { hasArchitectureToolErrorCode } from '../architecture/architectureToolFailure'
 import { selectExactOrchestrateProposalLookup } from '../cartographer/orchestrateArchitecture'
 import { formatProposalGenerationFailure } from '../cartographer/proposalGenerationFailure'
 import {
@@ -77,29 +81,35 @@ export function isExplorerTargetScopedToThread(
 }
 
 export function selectExactProposalDiffSources(
-  result: ArchitectureImpactResult | null,
+  result: ArchitectureImpactProjectionResult | null,
   expected: Pick<ProposalGeneration, 'generationId' | 'threadId'>,
 ): Pick<ProposalDiffFileActions, 'beforeSource' | 'proposedSource'> | null
 {
+  const source = result?.projection.source
   if (
-    result?.version !== 2 ||
-    result.comparison.kind !== 'proposal-generation' ||
-    result.comparison.generationId !== expected.generationId
+    source?.kind !== 'verified-proposal-impact' ||
+    source.threadId !== expected.threadId ||
+    source.generationId !== expected.generationId
   )
   {
     return null
   }
-  const sourceMatches = (
-    source: ArchitectureImpactResultV2['baseSource'],
-    side: ArchitectureProposalSource['side'],
-  ): source is ArchitectureProposalSource =>
-    source.kind === 'proposal-generation' &&
-    source.threadId === expected.threadId &&
-    source.generationId === expected.generationId &&
-    source.side === side
-  const beforeSource = sourceMatches(result.baseSource, 'base') ? result.baseSource : null
-  const proposedSource = sourceMatches(result.headSource, 'proposed') ? result.headSource : null
-  return beforeSource === null && proposedSource === null ? null : { beforeSource, proposedSource }
+  return {
+    beforeSource: {
+      kind: 'proposal-generation',
+      threadId: source.threadId,
+      generationId: source.generationId,
+      side: 'base',
+      graphDigest: source.baseGraphDigest,
+    },
+    proposedSource: {
+      kind: 'proposal-generation',
+      threadId: source.threadId,
+      generationId: source.generationId,
+      side: 'proposed',
+      graphDigest: source.headGraphDigest,
+    },
+  }
 }
 
 function commandFailureMessage(
@@ -204,6 +214,33 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
     props.threadRef.threadId,
   )
   const orchestrateTarget = orchestrateTargetScoped ? rawOrchestrateTarget : null
+  const impactPlanIdentity =
+    planTarget !== null
+      ? { _tag: 'plan' as const, planId: planTarget.planId }
+      : orchestrateTarget !== null
+        ? {
+            _tag: 'orchestrate' as const,
+            runId: orchestrateTarget.runId,
+            revision: orchestrateTarget.revision,
+          }
+        : null
+  const impactProjectionQuery = useEnvironmentQuery(
+    props.architectureImpactAvailable && impactPlanIdentity !== null
+      ? projectEnvironment.getArchitectureImpactProjection({
+          environmentId: props.threadRef.environmentId,
+          input: {
+            version: 1,
+            kind: 'resolve-plan',
+            threadId: props.threadRef.threadId,
+            plan: impactPlanIdentity,
+          },
+        })
+      : null,
+  )
+  useLatestGenerationRefresh({
+    enabled: props.architectureImpactAvailable && impactPlanIdentity !== null,
+    refresh: impactProjectionQuery.refresh,
+  })
   const planProposalQuery = useEnvironmentQuery(
     props.proposalPreviewAvailable && planTarget !== null
       ? projectEnvironment.findProposalByPlan({
@@ -435,87 +472,51 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
           revision: proposalSelector.revision,
         })
   const generationStartKey = generationStartTarget?.key ?? null
-  const {
-    state: generationStartState,
-    claimAutomatic,
-    claimManual,
-  } = useProposalGenerationStart(generationStartTarget)
+  const { state: generationStartState, claimManual } =
+    useProposalGenerationStart(generationStartTarget)
 
-  const requestProposalGeneration = useCallback(
-    (mode: 'automatic' | 'manual'): void =>
+  const requestProposalGeneration = useCallback((): void =>
+  {
+    if (proposalSelector === null || generationStartKey === null) return
+    const attempt = claimManual(latestGenerationQuery.data)
+    if (attempt === null) return
+
+    void startProposalGeneration({
+      environmentId: props.threadRef.environmentId,
+      input: {
+        threadId: proposalSourceThreadId,
+        proposalId: proposalSelector.proposalId,
+        revision: proposalSelector.revision,
+      },
+    }).then((result) =>
     {
-      if (proposalSelector === null || generationStartKey === null) return
-      const attempt =
-        mode === 'automatic'
-          ? claimAutomatic(latestGenerationQuery.data)
-          : claimManual(latestGenerationQuery.data)
-      if (attempt === null) return
-
-      void startProposalGeneration({
-        environmentId: props.threadRef.environmentId,
-        input: {
-          threadId: proposalSourceThreadId,
-          proposalId: proposalSelector.proposalId,
-          revision: proposalSelector.revision,
-        },
-      }).then((result) =>
+      if (result._tag === 'Success')
       {
-        if (result._tag === 'Success')
-        {
-          if (completeProposalGenerationStart(attempt, result.value))
-          {
-            latestGenerationQuery.refresh()
-          }
-          return
-        }
-        if (
-          failProposalGenerationStart(
-            attempt,
-            commandFailureMessage(result, 'Exact architecture analysis could not start'),
-          )
-        )
+        if (completeProposalGenerationStart(attempt, result.value))
         {
           latestGenerationQuery.refresh()
         }
-      })
-    },
-    [
-      claimAutomatic,
-      claimManual,
-      generationStartKey,
-      latestGenerationQuery.data,
-      latestGenerationQuery.refresh,
-      proposalSourceThreadId,
-      proposalSelector,
-      props.threadRef.environmentId,
-      startProposalGeneration,
-    ],
-  )
-
-  useEffect(() =>
-  {
-    if (
-      !props.architectureImpactAvailable ||
-      proposalSelector === null ||
-      generationStartKey === null ||
-      proposalQuery.data === null ||
-      (latestGenerationQuery.isPending && latestGenerationQuery.data === null) ||
-      (latestGenerationQuery.error !== null && latestGenerationQuery.data === null) ||
-      latestGenerationQuery.data !== null
-    )
-    {
-      return
-    }
-    requestProposalGeneration('automatic')
+        return
+      }
+      if (
+        failProposalGenerationStart(
+          attempt,
+          commandFailureMessage(result, 'Exact architecture analysis could not start'),
+        )
+      )
+      {
+        latestGenerationQuery.refresh()
+      }
+    })
   }, [
+    claimManual,
     generationStartKey,
     latestGenerationQuery.data,
-    latestGenerationQuery.error,
-    latestGenerationQuery.isPending,
-    proposalQuery.data,
+    latestGenerationQuery.refresh,
+    proposalSourceThreadId,
     proposalSelector,
-    props.architectureImpactAvailable,
-    requestProposalGeneration,
+    props.threadRef.environmentId,
+    startProposalGeneration,
   ])
 
   const generationSeed =
@@ -543,12 +544,14 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
     queryFailed: generationQuery.error !== null,
     refresh: generationQuery.refresh,
   })
-  const architectureImpactQuery = useEnvironmentQuery(
-    props.architectureImpactAvailable && generation?.state === 'ready'
-      ? projectEnvironment.getArchitectureImpact({
+  const comparisonImpactProjectionQuery = useEnvironmentQuery(
+    props.architectureImpactAvailable && props.target === null && generation?.state === 'ready'
+      ? projectEnvironment.getArchitectureImpactProjection({
           environmentId: props.threadRef.environmentId,
           input: {
-            threadId: proposalSourceThreadId,
+            version: 1,
+            kind: 'resolve-comparison',
+            threadId: props.threadRef.threadId,
             comparison: {
               kind: 'proposal-generation',
               generationId: generation.generationId,
@@ -557,13 +560,11 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
         })
       : null,
   )
-  const exactProposalDiffSources =
-    generation?.state === 'ready'
-      ? selectExactProposalDiffSources(architectureImpactQuery.data, {
-          generationId: generation.generationId,
-          threadId: proposalSourceThreadId,
-        })
-      : null
+  useLatestGenerationRefresh({
+    enabled:
+      props.architectureImpactAvailable && props.target === null && generation?.state === 'ready',
+    refresh: comparisonImpactProjectionQuery.refresh,
+  })
   const openExactProposalFile = useCallback(
     (source: ArchitectureProposalSource, filePath: string): void =>
     {
@@ -573,9 +574,6 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
     },
     [props.threadRef],
   )
-  const proposalFileActions: ProposalDiffFileActions | undefined = exactProposalDiffSources
-    ? { ...exactProposalDiffSources, onOpenFile: openExactProposalFile }
-    : undefined
   const generationIsTerminalFailure =
     generation?.state === 'failed' ||
     generation?.state === 'cancelled' ||
@@ -687,34 +685,105 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
     () => generationQuery.refresh(),
     [generationQuery.refresh],
   )
-  const architectureImpactTarget =
-    generation?.state === 'ready'
-      ? {
-          threadId: proposalSourceThreadId,
-          comparison: {
-            kind: 'proposal-generation' as const,
-            generationId: generation.generationId,
-          },
-        }
+  const selectedImpactProjectionQuery =
+    impactPlanIdentity === null ? comparisonImpactProjectionQuery : impactProjectionQuery
+  const selectedImpactProjectionResult =
+    impactPlanIdentity !== null
+      ? selectExactPlanImpactProjection(selectedImpactProjectionQuery.data, {
+          threadId: props.threadRef.threadId,
+          projectId: props.projectId,
+          plan: impactPlanIdentity,
+        })
+      : generation?.state === 'ready'
+        ? selectExactComparisonImpactProjection(selectedImpactProjectionQuery.data, {
+            threadId: props.threadRef.threadId,
+            projectId: props.projectId,
+            comparison: {
+              kind: 'proposal-generation',
+              generationId: generation.generationId,
+            },
+          })
+        : null
+  const impactProjectionIdentityError =
+    selectedImpactProjectionQuery.data !== null && selectedImpactProjectionResult === null
+      ? 'The server returned Impact data for a different exact plan or comparison.'
       : null
-  const openArchitectureImpact = useCallback((): void =>
+  const impactTargetMissing = hasArchitectureToolErrorCode(
+    selectedImpactProjectionQuery.failure,
+    'target-not-found',
+  )
+  const exactProposalDiffSources =
+    generation?.state === 'ready'
+      ? selectExactProposalDiffSources(selectedImpactProjectionResult, {
+          generationId: generation.generationId,
+          threadId: proposalSourceThreadId,
+        })
+      : null
+  const proposalFileActions: ProposalDiffFileActions | undefined = exactProposalDiffSources
+    ? { ...exactProposalDiffSources, onOpenFile: openExactProposalFile }
+    : undefined
+  const openResolvedImpact = useCallback((): void =>
   {
-    if (architectureImpactTarget === null) return
-    useRightPanelStore
-      .getState()
-      .openArchitectureSurface(
-        props.threadRef,
-        createArchitectureImpactSurface(architectureImpactTarget),
-        'explorer',
-      )
-  }, [architectureImpactTarget, props.threadRef])
+    const result = selectedImpactProjectionResult
+    if (result === null || result.projection.resultState !== 'graph') return
+    useRightPanelStore.getState().openArchitectureSurface(
+      props.threadRef,
+      createArchitectureImpactSurface({
+        kind: 'exact-impact',
+        descriptor: result.descriptor,
+      }),
+      'explorer',
+    )
+  }, [selectedImpactProjectionResult, props.threadRef])
+  const hasProjectionTarget =
+    impactPlanIdentity !== null || (props.target === null && generation?.state === 'ready')
   const architecture: ExplorerArchitecturePresentation = (() =>
   {
     if (!props.architectureImpactAvailable)
     {
       return {
         kind: 'unavailable',
-        reason: 'Native architecture impact is not available for this server environment.',
+        reason: 'Native Impact Diff is not available for this server environment.',
+      }
+    }
+    if (hasProjectionTarget && selectedImpactProjectionResult !== null)
+    {
+      return {
+        kind: 'impact-diff',
+        result: selectedImpactProjectionResult,
+        ...(selectedImpactProjectionResult.projection.resultState === 'graph'
+          ? { onOpen: openResolvedImpact }
+          : {}),
+      }
+    }
+    if (hasProjectionTarget && impactProjectionIdentityError !== null)
+    {
+      return {
+        kind: 'error',
+        message: impactProjectionIdentityError,
+        retry: selectedImpactProjectionQuery.refresh,
+      }
+    }
+    if (
+      hasProjectionTarget &&
+      selectedImpactProjectionQuery.error !== null &&
+      !impactTargetMissing
+    )
+    {
+      return {
+        kind: 'error',
+        message: selectedImpactProjectionQuery.error,
+        retry: selectedImpactProjectionQuery.refresh,
+      }
+    }
+    if (hasProjectionTarget && !impactTargetMissing)
+    {
+      return {
+        kind: 'loading',
+        message:
+          impactPlanIdentity === null
+            ? 'Resolving Verified Impact for this exact proposal generation.'
+            : 'Resolving Planned and Verified Impact for this exact plan revision.',
       }
     }
     if (props.proposalPreviewAvailable && proposalDiscoveryError !== null)
@@ -788,7 +857,7 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
         return {
           kind: 'error',
           message: generationStartState.error,
-          retry: () => requestProposalGeneration('manual'),
+          retry: requestProposalGeneration,
         }
       }
       if (generation === null)
@@ -807,7 +876,7 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
         return {
           kind: 'error',
           message: formatProposalGenerationFailure(generation),
-          retry: () => requestProposalGeneration('manual'),
+          retry: requestProposalGeneration,
         }
       }
       if (
@@ -821,25 +890,14 @@ export function ConnectedExplorerPanel(props: ConnectedExplorerPanelProps)
     }
     if (generation === null || generation.state !== 'ready')
     {
-      return { kind: 'loading', message: 'Preparing exact architecture impact.' }
+      return { kind: 'loading', message: 'Preparing exact Impact Diff.' }
     }
-    const notices = [
-      ...(generation.authority === 'estimated'
-        ? ['This impact is an estimate, not an authoritative exact analysis.']
-        : []),
-      ...(generation.freshness === 'fresh'
-        ? []
-        : [`Analysis freshness: ${generation.freshness.replaceAll('-', ' ')}.`]),
-    ]
     return {
-      kind: 'impact',
-      result: architectureImpactQuery.data,
-      error: architectureImpactQuery.error,
-      isPending: architectureImpactQuery.isPending,
-      hasSettled: architectureImpactQuery.hasSettled,
-      ...(notices.length === 0 ? {} : { notices }),
-      onRetry: architectureImpactQuery.refresh,
-      onOpen: openArchitectureImpact,
+      kind: 'error',
+      message:
+        selectedImpactProjectionQuery.error ??
+        'This Ready analysis does not contain the current semantic Impact projection. Retry to create a new generation.',
+      retry: requestProposalGeneration,
     }
   })()
 

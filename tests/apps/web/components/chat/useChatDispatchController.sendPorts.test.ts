@@ -58,6 +58,7 @@ const CHAT_SEND_PORT_KEYS = {
   sendEnvMode: 'sendEnvMode',
   sendInFlightRef: 'sendInFlightRef',
   setComposerDraftElementContexts: 'setComposerDraftElementContexts',
+  setComposerDraftArchitectureContexts: 'setComposerDraftArchitectureContexts',
   setComposerDraftPreviewAnnotations: 'setComposerDraftPreviewAnnotations',
   setComposerDraftPrompt: 'setComposerDraftPrompt',
   setComposerDraftReviewComments: 'setComposerDraftReviewComments',

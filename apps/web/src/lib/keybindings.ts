@@ -346,6 +346,17 @@ export function shouldShowThreadJumpHintsForModifiers(
   options?: ShortcutMatchOptions,
 ): boolean
 {
+  // the embedded terminal owns keystrokes while it has focus: the surface
+  // encodes the keydown and can write the pressed key into the shell before
+  // our window-level shortcut handling ever runs, regardless of any configured
+  // `when` clause on the jump command. advertising jump hints here would
+  // promise a shortcut that instead types into the terminal, so never show
+  // them while the terminal is focused.
+  if (resolveContext(options).terminalFocus)
+  {
+    return false
+  }
+
   const platform = resolvePlatform(options)
 
   for (const command of THREAD_JUMP_KEYBINDING_COMMANDS)

@@ -3,7 +3,14 @@
 
 // @vitest-environment happy-dom
 
-import type { ArchitectureImpactResult, ScopedThreadRef } from '@t3tools/contracts'
+import type {
+  ArchitectureImpactProjectionResult,
+  ProjectId,
+  ProposalGenerationId,
+  ProposalId,
+  ProposalRevisionId,
+  ScopedThreadRef,
+} from '@t3tools/contracts'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -53,33 +60,86 @@ const proposal = {
 
 const impactResult = {
   version: 1,
-  summary: 'Exact retained generations were compared.',
-  base: { generatedAt: '2026-08-09T12:00:00.000Z', gitRef: 'base-ref' },
-  head: { generatedAt: '2026-08-09T12:01:00.000Z', gitRef: 'head-ref' },
-  changed: true,
-  addedNodes: { items: ['src/added.ts'], total: 12, omitted: 11 },
-  removedNodes: { items: [], total: 2, omitted: 2 },
-  addedEdges: { items: [], total: 4, omitted: 4 },
-  removedEdges: { items: [], total: 1, omitted: 1 },
-  movedNodes: { items: [], total: 0, omitted: 0 },
-  moveFlows: { items: [], total: 0, omitted: 0 },
-  movedEdges: 0,
-  apiChanges: { items: [], total: 0, omitted: 0 },
-  apiTotals: { files: 0, addedExports: 0, removedExports: 0, brokenConsumers: 0 },
-  newViolations: { items: [], total: 0, omitted: 0 },
-  resolvedViolations: { items: [], total: 0, omitted: 0 },
-} satisfies ArchitectureImpactResult
+  descriptor: {
+    version: 1,
+    descriptorId: '1'.repeat(64),
+    threadId: threadRef.threadId,
+    projectId: 'project-explorer-test' as ProjectId,
+    target: {
+      kind: 'plan',
+      plan: { _tag: 'plan', planId: 'plan:thread-explorer-test:turn:impact' },
+      state: 'active',
+    },
+    verifiedCandidate: {
+      authority: 'verified',
+      source: {
+        kind: 'verified-proposal-impact',
+        threadId: threadRef.threadId,
+        generationId: 'generation-explorer-test' as ProposalGenerationId,
+        proposalId: proposal.proposalId as ProposalId,
+        revisionId: `${proposal.proposalId}:3` as ProposalRevisionId,
+        baseTreeOid: '2'.repeat(40),
+        headTreeOid: '3'.repeat(40),
+        baseGraphDigest: `sha256:${'4'.repeat(64)}`,
+        headGraphDigest: `sha256:${'5'.repeat(64)}`,
+        projectionDigest: `sha256:${'6'.repeat(64)}`,
+      },
+      projectionId: 'projection-explorer-test',
+      projectionRevision: 1,
+      projectionDigest: `sha256:${'6'.repeat(64)}`,
+      resultState: 'graph',
+      freshness: 'fresh',
+      generatedAt: '2026-08-20T12:00:00.000Z',
+      publishedAt: '2026-08-20T12:00:00.000Z',
+    },
+    defaultAuthority: 'verified',
+    resolvedAt: '2026-08-20T12:00:00.000Z',
+  },
+  selectedAuthority: 'verified',
+  projection: {
+    projectionVersion: 1,
+    projectionId: 'projection-explorer-test',
+    projectionRevision: 1,
+    kind: 'impact-diff',
+    authority: 'verified',
+    resultState: 'graph',
+    freshness: 'fresh',
+    generatedAt: '2026-08-20T12:00:00.000Z',
+    publishedAt: '2026-08-20T12:00:00.000Z',
+    source: {
+      kind: 'verified-proposal-impact',
+      threadId: threadRef.threadId,
+      generationId: 'generation-explorer-test' as ProposalGenerationId,
+      proposalId: proposal.proposalId as ProposalId,
+      revisionId: `${proposal.proposalId}:3` as ProposalRevisionId,
+      baseTreeOid: '2'.repeat(40),
+      headTreeOid: '3'.repeat(40),
+      baseGraphDigest: `sha256:${'4'.repeat(64)}`,
+      headGraphDigest: `sha256:${'5'.repeat(64)}`,
+      projectionDigest: `sha256:${'6'.repeat(64)}`,
+    },
+    lens: 'architecture',
+    semanticLevel: 'blocks',
+    breadcrumbs: [],
+    layoutVersion: 'semantic-impact-v1',
+    totals: {
+      nodes: { total: 12, returned: 1, omitted: 11 },
+      edges: { total: 4, returned: 0, omitted: 4 },
+      evidence: { total: 0, returned: 0, omitted: 0 },
+      changedFiles: { total: 14, returned: 0, omitted: 14 },
+    },
+    nodes: [],
+    edges: [],
+    evidence: [],
+    anchors: [],
+  },
+} satisfies ArchitectureImpactProjectionResult
 
 function architecture(onOpen = () => undefined): ExplorerArchitecturePresentation
 {
   return {
-    kind: 'impact',
+    kind: 'impact-diff',
     result: impactResult,
-    error: null,
-    isPending: false,
-    hasSettled: true,
-    notices: ['Analysis freshness: worktree changed.'],
-    onRetry: () => undefined,
     onOpen,
   }
 }
@@ -101,10 +161,10 @@ describe('ExplorerPanel', () =>
     )
 
     expect(markup).toContain('data-proposal-architecture-summary')
-    expect(markup).toContain('Architecture changed')
-    expect(markup).toContain('+12/-2 files · +4/-1 imports')
-    expect(markup).toContain('Analysis freshness: worktree changed.')
-    expect(markup).toContain('Open graph diff')
+    expect(markup).toContain('Verified Impact')
+    expect(markup).toContain('12 objects · 4 relationships')
+    expect(markup).toContain('Exact analyzer evidence for this proposal revision.')
+    expect(markup).toContain('Open Impact Diff')
     expect(markup).toContain('>Narrative</button>')
     expect(markup).toContain('>Changes</button>')
     expect(markup).not.toContain('>Impact</button>')
@@ -136,7 +196,7 @@ describe('ExplorerPanel', () =>
         )
       })
       const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
-        candidate.textContent?.includes('Open graph diff'),
+        candidate.textContent?.includes('Open Impact Diff'),
       )
       await act(async () => button?.click())
       expect(onOpen).toHaveBeenCalledTimes(1)

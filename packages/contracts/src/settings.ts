@@ -330,8 +330,9 @@ export type ClaudeSettings = typeof ClaudeSettings.Type
 
 export const CursorSettings = makeProviderSettingsSchema(
   {
+    // enabled by default alongside codex and claude agent.
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting('cursor-agent').pipe(

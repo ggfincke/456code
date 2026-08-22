@@ -54,6 +54,7 @@ export interface ComparisonAnalysisInput
   readonly outDir: string
   readonly baseRef: string
   readonly proposedRef: string
+  readonly implementationChangedFileCount: number
 }
 
 export interface ComparisonAnalysisResult
@@ -123,7 +124,10 @@ export function workspaceDistributionCapabilities(
 {
   return Effect.promise(async () =>
   {
-    if (typeof Bun !== 'undefined') return { architectureImpact: false }
+    if (typeof Bun !== 'undefined')
+    {
+      return { architectureImpact: false }
+    }
     try
     {
       const packageJsonPath = await (options.resolvePackageJson?.() ??
@@ -141,7 +145,8 @@ export function workspaceDistributionCapabilities(
           return false
         }
       }
-      return { architectureImpact: await isRegularFile(CARTOGRAPHER_CLI_ENTRY) }
+      const architectureImpact = await isRegularFile(CARTOGRAPHER_CLI_ENTRY)
+      return { architectureImpact }
     }
     catch
     {
@@ -316,7 +321,7 @@ export const make = Effect.fn('CartographerAnalyzer.make')(function* (
       cause,
       error: publicError(
         'unsupported',
-        'Cartographer analysis is unavailable because its workspace distribution is missing.',
+        'Architecture analysis is unavailable because its workspace distribution is missing.',
       ),
     }),
   }).pipe(
@@ -336,7 +341,7 @@ export const make = Effect.fn('CartographerAnalyzer.make')(function* (
         .run(input)
         .pipe(
           Effect.mapError(() =>
-            publicError('context_start_failed', 'Cartographer analysis could not be started.'),
+            publicError('context_start_failed', 'Architecture analysis could not be started.'),
           ),
         ),
     )
@@ -373,7 +378,7 @@ export const make = Effect.fn('CartographerAnalyzer.make')(function* (
     {
       return yield* publicError(
         'snapshot_failed',
-        'Cartographer could not build the architecture snapshot.',
+        'Architecture analysis could not build the repository snapshot.',
       )
     }
   })
@@ -398,6 +403,8 @@ export const make = Effect.fn('CartographerAnalyzer.make')(function* (
         input.proposedRef,
         '--analyzer-version',
         analyzer.fingerprint,
+        '--implementation-changed-file-count',
+        String(input.implementationChangedFileCount),
       ],
       cwd: input.outDir,
       timeout: ANALYSIS_TIMEOUT_MS,
@@ -407,7 +414,7 @@ export const make = Effect.fn('CartographerAnalyzer.make')(function* (
     {
       return yield* publicError(
         'snapshot_failed',
-        'Cartographer could not build the proposal comparison.',
+        'Architecture analysis could not build the proposal comparison.',
       )
     }
     return { process, fingerprint: analyzer.fingerprint }
@@ -432,7 +439,7 @@ export const make = Effect.fn('CartographerAnalyzer.make')(function* (
     {
       return yield* publicError(
         'context_start_failed',
-        'Cartographer could not rebuild the project Atlas.',
+        'Architecture analysis could not rebuild the Repository Map.',
       )
     }
     return { fingerprint: analyzer.fingerprint }

@@ -17,7 +17,7 @@ Usage:
   cartographer annotate [root] [--scope <dir>] [--from-json <path|->]
   cartographer seed-rules [root] --from-eslint   (prints candidate rules[] for review; writes nothing)
   cartographer watch [root] [--scope <dir>] [--tsconfig <file>] [--out <dir>] [--report]
-  cartographer analyze-trees <base-root> <proposed-root> --out <external-dir> --base-ref <oid> --proposed-ref <oid> --analyzer-version <sha256:fingerprint>
+  cartographer analyze-trees <base-root> <proposed-root> --out <external-dir> --base-ref <oid> --proposed-ref <oid> --analyzer-version <sha256:fingerprint> --implementation-changed-file-count <count>
 
 Defaults: root ".", --scope "${DEFAULT_SCOPE}", --out "${DEFAULT_OUT_DIR}", --direction both, --max-depth ${DEFAULT_MAX_DEPTH}
 --tsconfig ${TSCONFIG_DISCOVERY_DESC}

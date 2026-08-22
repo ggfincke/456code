@@ -70,6 +70,41 @@ describe('ElectronShell', () =>
     }).pipe(Effect.provide(ElectronShell.layer)),
   )
 
+  it.effect('does not open remote editor URLs with userinfo', () =>
+    Effect.gen(function* ()
+    {
+      openExternalMock.mockResolvedValue(undefined)
+
+      const electronShell = yield* ElectronShell.ElectronShell
+      const results = yield* Effect.all([
+        electronShell.openExternal(
+          'vscode://user@vscode-remote/ssh-remote+example.com/home/user/project',
+        ),
+        electronShell.openExternal(
+          'vscode://:secret@vscode-remote/ssh-remote+example.com/home/user/project',
+        ),
+      ])
+
+      assert.deepEqual(results, [false, false])
+      assert.equal(openExternalMock.mock.calls.length, 0)
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  )
+
+  it.effect('does not open non-remote editor URLs', () =>
+    Effect.gen(function* ()
+    {
+      openExternalMock.mockResolvedValue(undefined)
+
+      const electronShell = yield* ElectronShell.ElectronShell
+      const result = yield* electronShell.openExternal(
+        'vscode://ms-python.python/some-command?argument=attacker',
+      )
+
+      assert.equal(result, false)
+      assert.equal(openExternalMock.mock.calls.length, 0)
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  )
+
   it.effect('returns false when Electron rejects openExternal', () =>
     Effect.gen(function* ()
     {

@@ -148,6 +148,8 @@ import * as CurrentWorktreeArchitectureService from '../../../apps/server/src/ca
 import * as DiffAnalysisService from '../../../apps/server/src/cartographer/DiffAnalysisService.ts'
 import * as ProjectAtlasStatusBroadcaster from '../../../apps/server/src/cartographer/ProjectAtlasStatusBroadcaster.ts'
 import * as ProjectArchitectureLifecycleService from '../../../apps/server/src/cartographer/ProjectArchitectureLifecycleService.ts'
+import * as ArchitectureAdmissionService from '../../../apps/server/src/architecture/ArchitectureAdmissionService.ts'
+import * as PlannedImpactService from '../../../apps/server/src/architecture/PlannedImpactService.ts'
 import * as ProposalGenerationService from '../../../apps/server/src/proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from '../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from '../../../apps/server/src/proposal/ProposalService.ts'
@@ -421,6 +423,10 @@ const buildAppUnderTest = (options?: {
     proposalGenerationService?: Partial<
       ProposalGenerationService.ProposalGenerationService['Service']
     >
+    architectureAdmissionService?: Partial<
+      ArchitectureAdmissionService.ArchitectureAdmissionService['Service']
+    >
+    plannedImpactService?: Partial<PlannedImpactService.PlannedImpactService['Service']>
     proposalImplementationAttemptService?: Partial<
       ProposalImplementationAttemptService.ProposalImplementationAttemptService['Service']
     >
@@ -750,7 +756,7 @@ const buildAppUnderTest = (options?: {
             resolveContext: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
             blastRadius: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
             graphDiff: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
-            architectureImpact: () =>
+            architectureImpactProjection: () =>
               Effect.die('ArchitectureQueryService not stubbed in this test'),
             proposePatch: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
             ...options?.layers?.architectureQueryService,
@@ -759,10 +765,6 @@ const buildAppUnderTest = (options?: {
             repositoryMap: () =>
               Effect.die('ArchitectureProjectionService not stubbed in this test'),
             architectureScope: () =>
-              Effect.die('ArchitectureProjectionService not stubbed in this test'),
-            architectureNeighborhood: () =>
-              Effect.die('ArchitectureProjectionService not stubbed in this test'),
-            architecturePathScope: () =>
               Effect.die('ArchitectureProjectionService not stubbed in this test'),
             architectureSource: () =>
               Effect.die('ArchitectureProjectionService not stubbed in this test'),
@@ -799,17 +801,35 @@ const buildAppUnderTest = (options?: {
           Layer.mock(DiffAnalysisService.DiffAnalysisService)({
             request: () => Effect.die('DiffAnalysisService not stubbed in this test'),
             get: () => Effect.die('DiffAnalysisService not stubbed in this test'),
+            getById: () => Effect.die('DiffAnalysisService not stubbed in this test'),
             retainReadyTarget: () => Effect.die('DiffAnalysisService not stubbed in this test'),
+            retainReadyImpactTarget: () =>
+              Effect.die('DiffAnalysisService not stubbed in this test'),
             ...options?.layers?.diffAnalysisService,
           }),
           Layer.mock(ProposalGenerationService.ProposalGenerationService)({
-            start: () => Effect.die('ProposalGenerationService not stubbed in this test'),
+            startAdmitted: () => Effect.die('ProposalGenerationService not stubbed in this test'),
             get: () => Effect.die('ProposalGenerationService not stubbed in this test'),
             latest: () => Effect.succeed(null),
+            latestAdmitted: () => Effect.succeed(null),
             resolveArchitectureTarget: () =>
+              Effect.die('ProposalGenerationService not stubbed in this test'),
+            resolveImpactTarget: () =>
               Effect.die('ProposalGenerationService not stubbed in this test'),
             cancelThread: () => Effect.void,
             ...options?.layers?.proposalGenerationService,
+          }),
+          Layer.mock(ArchitectureAdmissionService.ArchitectureAdmissionService)({
+            retryProposal: () =>
+              Effect.die('ArchitectureAdmissionService not stubbed in this test'),
+            cancelThread: () => Effect.void,
+            ...options?.layers?.architectureAdmissionService,
+          }),
+          Layer.mock(PlannedImpactService.PlannedImpactService)({
+            upsert: () => Effect.die('PlannedImpactService not stubbed in this test'),
+            get: () => Effect.die('PlannedImpactService not stubbed in this test'),
+            appendAnchored: () => Effect.die('PlannedImpactService not stubbed in this test'),
+            ...options?.layers?.plannedImpactService,
           }),
           Layer.mock(ProposalImplementationAttemptService.ProposalImplementationAttemptService)({
             begin: () =>
@@ -3672,97 +3692,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect('serves exact architecture impact through read-scoped authority', () =>
-    Effect.gen(function* ()
-    {
-      const generationId = ProposalGenerationId.make('proposal-generation-impact-rpc')
-      const calls: Array<{
-        readonly authority: ArchitectureQueryService.ArchitectureQueryAuthority
-        readonly comparison: { readonly kind: string; readonly generationId?: string }
-      }> = []
-      yield* buildAppUnderTest({
-        layers: {
-          architectureQueryService: {
-            architectureImpact: (authority, input) =>
-              Effect.sync(() =>
-              {
-                calls.push({ authority, comparison: input.comparison })
-                return {
-                  version: 2 as const,
-                  summary: 'No architecture changes.',
-                  base: { generatedAt: '2026-08-09T00:00:00.000Z' },
-                  head: { generatedAt: '2026-08-09T00:00:01.000Z' },
-                  changed: false,
-                  addedNodes: { items: [], total: 0, omitted: 0 },
-                  removedNodes: { items: [], total: 0, omitted: 0 },
-                  addedEdges: { items: [], total: 0, omitted: 0 },
-                  removedEdges: { items: [], total: 0, omitted: 0 },
-                  movedNodes: { items: [], total: 0, omitted: 0 },
-                  moveFlows: { items: [], total: 0, omitted: 0 },
-                  movedEdges: 0,
-                  apiChanges: { items: [], total: 0, omitted: 0 },
-                  apiTotals: {
-                    files: 0,
-                    addedExports: 0,
-                    removedExports: 0,
-                    brokenConsumers: 0,
-                  },
-                  newViolations: { items: [], total: 0, omitted: 0 },
-                  resolvedViolations: { items: [], total: 0, omitted: 0 },
-                  comparison: input.comparison,
-                  impactDigest: `sha256:${'c'.repeat(64)}` as const,
-                  baseSource: {
-                    kind: 'proposal-generation' as const,
-                    threadId: defaultThreadId,
-                    generationId,
-                    side: 'base' as const,
-                    graphDigest: `sha256:${'d'.repeat(64)}` as const,
-                  },
-                  headSource: {
-                    kind: 'proposal-generation' as const,
-                    threadId: defaultThreadId,
-                    generationId,
-                    side: 'proposed' as const,
-                    graphDigest: `sha256:${'e'.repeat(64)}` as const,
-                  },
-                }
-              }),
-          },
-        },
-      })
-
-      const { body: readToken } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
-        scope: 'orchestration:read',
-      })
-      const readTicketResponse = yield* HttpClient.post('/api/auth/websocket-ticket', {
-        headers: { authorization: `Bearer ${readToken.access_token ?? ''}` },
-      })
-      const readTicket = (yield* readTicketResponse.json) as { readonly ticket: string }
-      const readWsUrl = `${yield* getWsServerUrl('/ws', {
-        authenticated: false,
-      })}?wsTicket=${encodeURIComponent(readTicket.ticket)}`
-      const result = yield* Effect.scoped(
-        withWsRpcClient(readWsUrl, (client) =>
-          client[WS_METHODS.cartographerGetArchitectureImpact]({
-            threadId: defaultThreadId,
-            comparison: { kind: 'proposal-generation', generationId },
-          }),
-        ),
-      )
-
-      assert.equal(result.changed, false)
-      assert.deepEqual(calls, [
-        {
-          authority: {
-            environmentId: testEnvironmentDescriptor.environmentId,
-            threadId: defaultThreadId,
-          },
-          comparison: { kind: 'proposal-generation', generationId },
-        },
-      ])
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  )
-
   it.effect('routes native architecture projections through read-scoped authority', () =>
     Effect.gen(function* ()
     {
@@ -3788,33 +3717,43 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         readonly kind: string
         readonly authority: ArchitectureQueryService.ArchitectureQueryAuthority
       }> = []
+      const emptyCount = { total: 0, returned: 0, omitted: 0 }
+      const projectionBase = {
+        projectionVersion: 1 as const,
+        projectionRevision: 1,
+        kind: 'repository-map' as const,
+        authority: 'standing' as const,
+        resultState: 'graph' as const,
+        freshness: 'fresh' as const,
+        generatedAt: '2026-08-09T00:00:00.000Z',
+        source,
+        repository: { name: '456code', scope: '.', gitRef: 'HEAD' },
+        layoutVersion: 'repository-map-v2',
+        totals: {
+          nodes: emptyCount,
+          edges: emptyCount,
+          evidence: emptyCount,
+          changedFiles: emptyCount,
+        },
+        nodes: [],
+        edges: [],
+        evidence: [],
+        anchors: [],
+      }
       yield* buildAppUnderTest({
         layers: {
           architectureProjectionService: {
-            repositoryMap: (authority) =>
+            repositoryMap: (authority, input) =>
               Effect.sync(() =>
               {
                 calls.push({ kind: 'map', authority })
                 return {
-                  version: 1 as const,
-                  source,
-                  builtAt: '2026-08-09T00:00:00.000Z',
-                  dirty: false,
-                  repo: { name: '456code', scope: '.' },
-                  counts: { files: 2, imports: 1, systems: 1, blocks: 1, dirs: 1 },
-                  health: {
-                    cycles: 0,
-                    orphans: 0,
-                    violatingImports: 0,
-                    violatedRules: 0,
-                    ruleTotal: 0,
-                  },
-                  level: 'systems' as const,
-                  systemSource: 'authored' as const,
-                  units: [],
-                  unitCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
-                  edges: [],
-                  edgeCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
+                  ...projectionBase,
+                  projectionId: 'repository-map-root',
+                  lens: input.lens,
+                  semanticLevel:
+                    input.lens === 'architecture' ? ('systems' as const) : ('dirs' as const),
+                  breadcrumbs: [],
                 }
               }),
             architectureScope: (authority, input) =>
@@ -3822,31 +3761,11 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
               {
                 calls.push({ kind: 'scope', authority })
                 return {
-                  version: 1 as const,
-                  source,
-                  scope: input.scope,
-                  childLevel: 'blocks' as const,
-                  children: [],
-                  childCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
-                  edges: [],
-                  edgeCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
-                  files: [],
-                  fileCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
-                }
-              }),
-            architectureNeighborhood: (authority, input) =>
-              Effect.sync(() =>
-              {
-                calls.push({ kind: 'neighborhood', authority })
-                return {
-                  version: 1 as const,
-                  source: input.source,
-                  target: input.target,
-                  direction: input.direction,
-                  maxDepth: input.maxDepth,
-                  upstream: { items: [], total: 0, omitted: 0 },
-                  downstream: { items: [], total: 0, omitted: 0 },
-                  impactedFileCount: 0,
+                  ...projectionBase,
+                  projectionId: 'repository-map-scope',
+                  lens: input.lens,
+                  semanticLevel: 'blocks' as const,
+                  breadcrumbs: [{ id: input.scope.id, label: 'Runtime', level: input.scope.level }],
                 }
               }),
             architectureSource: (authority, input) =>
@@ -3882,36 +3801,35 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
             const map = yield* client[WS_METHODS.cartographerGetRepositoryMap]({
               threadId: defaultThreadId,
               projectId: defaultProjectId,
+              lens: 'architecture',
             })
             const scope = yield* client[WS_METHODS.cartographerGetArchitectureScope]({
               threadId: defaultThreadId,
               source,
+              lens: 'architecture',
               scope: { level: 'systems', id: 'systems:runtime' },
-            })
-            const neighborhood = yield* client[WS_METHODS.cartographerGetArchitectureNeighborhood]({
-              threadId: defaultThreadId,
-              source,
-              target: 'src/value.ts',
-              direction: 'both',
-              maxDepth: 1,
             })
             const immutableSource = yield* client[WS_METHODS.cartographerGetArchitectureSource]({
               threadId: defaultThreadId,
               source: proposalSource,
               relativePath: 'src/value.ts',
             })
-            return { map, scope, neighborhood, immutableSource }
+            return { map, scope, immutableSource }
           }),
         ),
       )
 
+      if (results.map.source.kind !== 'standing-project-generation')
+      {
+        return yield* Effect.die('expected the standing Repository Map source')
+      }
       assert.equal(results.map.source.generationId, standingGeneration)
-      assert.equal(results.scope.scope.id, 'systems:runtime')
-      assert.equal(results.neighborhood.target, 'src/value.ts')
+      assert.equal(results.map.projectionId, 'repository-map-root')
+      assert.equal(results.scope.breadcrumbs[0]?.id, 'systems:runtime')
       assert.equal(results.immutableSource.content, 'export const value = 1\n')
       assert.deepEqual(
         calls.map((call) => call.kind),
-        ['map', 'scope', 'neighborhood', 'source'],
+        ['map', 'scope', 'source'],
       )
       assert.equal(
         calls.every(
@@ -3979,6 +3897,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         baseGraphArtifact: 'base-graph-ref',
         headGraphArtifact: 'head-graph-ref',
         impactArtifact: 'impact-ref',
+        impactProjectionArtifact: 'impact-projection-ref',
         artifactByteLength: 1024,
         errorCode: null,
         createdAt: '2026-08-07T12:00:00.000Z',
@@ -7694,6 +7613,103 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assertTrue(result._tag === 'Failure')
       assertTrue(result.failure._tag === 'OrchestrationDispatchCommandError')
       assert.include(result.failure.message, 'worktree exploded')
+      assert.strictEqual(result.failure.bootstrapThreadDisposition, 'deleted')
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ['thread.create', 'thread.delete'],
+      )
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('does not report a deleted bootstrap thread when cleanup fails', () =>
+    Effect.gen(function* ()
+    {
+      const dispatchedCommands: Array<OrchestrationCommand> = []
+      const createWorktree = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['createWorktree']>[0]) =>
+          Effect.die(new Error('worktree exploded')),
+      )
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            createWorktree,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+            {
+              if (command.type === 'thread.delete')
+              {
+                return Effect.sync(() =>
+                {
+                  dispatchedCommands.push(command)
+                  return { sequence: dispatchedCommands.length }
+                }).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      new OrchestrationListenerCallbackError({
+                        listener: 'domain-event',
+                        detail: 'thread cleanup exploded',
+                      }),
+                    ),
+                  ),
+                )
+              }
+              return Effect.sync(() =>
+              {
+                dispatchedCommands.push(command)
+                return { sequence: dispatchedCommands.length }
+              })
+            },
+            readEvents: () => Stream.empty,
+          },
+        },
+      })
+
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: 'thread.turn.start',
+            commandId: CommandId.make('cmd-bootstrap-turn-start-cleanup-defect'),
+            threadId: ThreadId.make('thread-bootstrap-cleanup-defect'),
+            message: {
+              messageId: MessageId.make('msg-bootstrap-cleanup-defect'),
+              role: 'user',
+              text: 'hello',
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: 'Bootstrap Thread',
+                modelSelection: defaultModelSelection,
+                runtimeMode: 'full-access',
+                interactionMode: 'default',
+                branch: 'main',
+                worktreePath: null,
+                createdAt,
+              },
+              prepareWorktree: {
+                projectCwd: '/tmp/project',
+                baseBranch: 'main',
+                branch: 't3code/bootstrap-refName',
+              },
+              runSetupScript: false,
+            },
+            createdAt,
+          }),
+        ).pipe(Effect.result),
+      )
+
+      assertTrue(result._tag === 'Failure')
+      assertTrue(result.failure._tag === 'OrchestrationDispatchCommandError')
+      assert.include(result.failure.message, 'worktree exploded')
+      assert.strictEqual(result.failure.bootstrapThreadDisposition, undefined)
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
         ['thread.create', 'thread.delete'],

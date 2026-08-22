@@ -20,6 +20,7 @@ import {
   verifyExactGitTreeMaterialization,
   verifyExactGitTreeRestore,
 } from '../../../../apps/server/src/vcs/ExactGitSnapshot.ts'
+import { materializeExactGitTreeIntoCache } from '../../../../apps/server/src/vcs/ExactGitCacheMaterialization.ts'
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile)
 const temporaryRoots = new Set<string>()
@@ -240,6 +241,33 @@ describe.sequential('ExactGitSnapshot', () =>
         process.env.T3_EXACT_GIT_FILTER_MARKER = previousMarker
       }
     }
+  })
+
+  it('publishes an exact tree into an ignored server cache inside the worktree', async () =>
+  {
+    const { repositoryRoot } = await initializeRepository()
+    await NodeFSP.appendFile(NodePath.join(repositoryRoot, '.gitignore'), '.456code\n')
+    await git(repositoryRoot, ['add', '.gitignore'])
+    await git(repositoryRoot, ['commit', '-m', 'ignore local server state'])
+
+    const treeOid = ((await git(repositoryRoot, ['rev-parse', 'HEAD^{tree}'])) as string).trim()
+    const cacheRoot = NodePath.join(repositoryRoot, '.456code', 'state', 'generation')
+    const destinationRoot = NodePath.join(cacheRoot, 'base')
+    await NodeFSP.mkdir(destinationRoot, { recursive: true })
+
+    const materialization = await materializeExactGitTreeIntoCache({
+      repositoryRoot,
+      treeOid,
+      cacheRoot,
+      destinationRoot,
+      signal: new AbortController().signal,
+    })
+
+    expect(materialization.rootPath).toBe(await NodeFSP.realpath(destinationRoot))
+    await expect(
+      NodeFSP.readFile(NodePath.join(destinationRoot, 'tracked.txt'), 'utf8'),
+    ).resolves.toBe('committed\n')
+    await expect(git(repositoryRoot, ['status', '--short'])).resolves.toBe('')
   })
 
   it('preflights byte limits before object or materialization writes', async () =>

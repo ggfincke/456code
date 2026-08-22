@@ -82,6 +82,49 @@ async function writeProjectBuild(input: {
         ruleTotal: 0,
       },
       files: [],
+      structure: {
+        rootId: 'dirs:.',
+        directories: [
+          {
+            id: 'dirs:.',
+            key: '.',
+            label: 'fixture',
+            depth: 0,
+            childDirectoryIds: [],
+            directFileIds: [],
+            directFileCount: 0,
+            descendantFileCount: 0,
+            inbound: 0,
+            outbound: 0,
+            order: 0,
+            position: { x: 0, y: 0 },
+          },
+        ],
+        edges: [],
+        fileEdges: [],
+        counts: { directories: 1, files: 0, edges: 0, fileEdges: 0 },
+      },
+      crosswalks: {
+        files: [],
+        systemsToDirectories: [],
+        blocksToDirectories: [],
+        directoriesToSystems: [
+          {
+            sourceId: 'dirs:.',
+            targetIds: [],
+            matchedFileCount: 0,
+            status: 'unmatched',
+          },
+        ],
+        directoriesToBlocks: [
+          {
+            sourceId: 'dirs:.',
+            targetIds: [],
+            matchedFileCount: 0,
+            status: 'unmatched',
+          },
+        ],
+      },
     })}\n`,
   )
   const metadata: ProjectAtlasMetadata = {
