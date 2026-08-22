@@ -50,13 +50,24 @@ const SVG_CONTENT_SECURITY_POLICY = `default-src 'none'; style-src 'unsafe-inlin
 
 export function assetResponseHeaders(filePath: string): Record<string, string>
 {
+  const lowerPath = filePath.toLowerCase()
   return {
     'Cache-Control': 'private, max-age=3600',
     'X-Content-Type-Options': 'nosniff',
-    ...(filePath.toLowerCase().endsWith('.svg')
+    ...(lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')
+      ? { 'Content-Type': 'text/html; charset=utf-8' }
+      : {}),
+    ...(lowerPath.endsWith('.svg')
       ? { 'Content-Security-Policy': SVG_CONTENT_SECURITY_POLICY }
       : {}),
   }
+}
+
+export function staticFileContentType(filePath: string): string
+{
+  const mimeType = Mime.getType(filePath) ?? 'application/octet-stream'
+  // the mime db emits charset-less types, so html needs an explicit utf-8 marker
+  return mimeType === 'text/html' ? `${mimeType}; charset=utf-8` : mimeType
 }
 
 export const browserApiCorsLayer = Layer.unwrap(
@@ -315,7 +326,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       })
     }
 
-    const contentType = Mime.getType(filePath) ?? 'application/octet-stream'
+    const contentType = staticFileContentType(filePath)
     const data = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null))
     if (!data)
     {
