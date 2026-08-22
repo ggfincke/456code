@@ -9,15 +9,26 @@ import * as Option from 'effect/Option'
 
 import * as Electron from 'electron'
 
-const SAFE_EXTERNAL_PROTOCOLS = new Set([
-  'http:',
-  'https:',
-  ...REMOTE_CAPABLE_EDITOR_IDS.flatMap((editorId) =>
+// remote open-in-editor deep links (`vscode://vscode-remote/ssh-remote+…`)
+// must reach the os handler; every other non-web scheme stays blocked.
+const SAFE_WEB_PROTOCOLS = new Set(['http:', 'https:'])
+const REMOTE_EDITOR_PROTOCOLS = new Set(
+  REMOTE_CAPABLE_EDITOR_IDS.flatMap((editorId) =>
   {
     const scheme = remoteSchemeForEditor(editorId)
     return scheme === undefined ? [] : [`${scheme}:`]
   }),
-])
+)
+
+// renderer-controlled strings must not reach arbitrary extension uri handlers,
+// so editor schemes pass only for credential-free vscode-remote ssh targets.
+const isRemoteEditorUrl = (url: URL) =>
+  REMOTE_EDITOR_PROTOCOLS.has(url.protocol) &&
+  url.username.length === 0 &&
+  url.password.length === 0 &&
+  url.host === 'vscode-remote' &&
+  url.pathname.startsWith('/ssh-remote+') &&
+  url.pathname.length > '/ssh-remote+'.length
 
 export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string>
 {
@@ -29,7 +40,9 @@ export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string>
   try
   {
     const url = new URL(rawUrl)
-    return SAFE_EXTERNAL_PROTOCOLS.has(url.protocol) ? Option.some(url.href) : Option.none()
+    return SAFE_WEB_PROTOCOLS.has(url.protocol) || isRemoteEditorUrl(url)
+      ? Option.some(url.href)
+      : Option.none()
   }
   catch
   {
