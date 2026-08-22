@@ -38,6 +38,8 @@ dist-electron/
 .showcase/
 apps/mobile/.showcase/
 artifacts/app-store/screenshots/
+# pull request evidence belongs on GitHub, never in the repository
+.github/pr-assets/
 node_modules/
 .alchemy/
 *.log
