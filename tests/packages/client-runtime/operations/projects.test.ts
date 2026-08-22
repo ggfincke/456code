@@ -19,6 +19,8 @@ import {
   getCloneDestinationBrowsePath,
   getCloneDestinationPath,
   getCloneDirectoryName,
+  getDefaultCloneUrl,
+  normalizePastedCloneUrl,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
 } from '../../../../packages/client-runtime/src/operations/projects.ts'
@@ -76,6 +78,50 @@ describe('add project shared logic', () =>
   ] as const)('derives clone folder %j as %j', (source, expected) =>
   {
     expect(getCloneDirectoryName(source)).toBe(expected)
+  })
+
+  it('routes owner/repository shorthand to github over https', () =>
+  {
+    expect(normalizePastedCloneUrl('imputnet/helium')).toBe(
+      'https://github.com/imputnet/helium.git',
+    )
+    expect(normalizePastedCloneUrl('  pingdotgg/t3code  ')).toBe(
+      'https://github.com/pingdotgg/t3code.git',
+    )
+  })
+
+  it('keeps explicit clone urls and local paths unchanged', () =>
+  {
+    expect(normalizePastedCloneUrl('https://gitlab.com/group/project.git')).toBe(
+      'https://gitlab.com/group/project.git',
+    )
+    expect(normalizePastedCloneUrl('git@github.com:owner/repo.git')).toBe(
+      'git@github.com:owner/repo.git',
+    )
+    expect(normalizePastedCloneUrl('group/subgroup/project')).toBe('group/subgroup/project')
+    expect(normalizePastedCloneUrl('/srv/git/repo.git')).toBe('/srv/git/repo.git')
+  })
+
+  it('uses https for repositories selected through a provider', () =>
+  {
+    expect(
+      getDefaultCloneUrl({
+        provider: 'github',
+        url: 'https://github.com/imputnet/helium',
+        sshUrl: 'git@github.com:imputnet/helium.git',
+      }),
+    ).toBe('https://github.com/imputnet/helium')
+  })
+
+  it('preserves existing clone transport behavior for other providers', () =>
+  {
+    expect(
+      getDefaultCloneUrl({
+        provider: 'gitlab',
+        url: 'https://gitlab.com/group/project.git',
+        sshUrl: 'git@gitlab.com:group/project.git',
+      }),
+    ).toBe('git@gitlab.com:group/project.git')
   })
 
   it('pins clone destinations without duplicating an existing folder', () =>

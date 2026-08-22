@@ -9,6 +9,8 @@ import {
   getCloneDestinationBrowsePath,
   getCloneDestinationPath,
   getCloneDirectoryName,
+  getDefaultCloneUrl,
+  normalizePastedCloneUrl,
 } from '@t3tools/client-runtime/operations/projects'
 import { connectionStatusText } from '@t3tools/client-runtime/connection'
 import {
@@ -1372,7 +1374,7 @@ export function OpenCommandPaletteDialog(props: {
           source: addProjectCloneFlow.source,
           repositoryInput: rawRepository,
           repository: null,
-          remoteUrl: rawRepository,
+          remoteUrl: normalizePastedCloneUrl(rawRepository),
         })
         setHighlightedItemValue(null)
         setQuery(destinationPath)
@@ -1414,7 +1416,7 @@ export function OpenCommandPaletteDialog(props: {
         source: addProjectCloneFlow.source,
         repositoryInput: rawRepository,
         repository,
-        remoteUrl: repository.sshUrl,
+        remoteUrl: getDefaultCloneUrl(repository),
       })
       setHighlightedItemValue(null)
       setQuery(destinationPath)
