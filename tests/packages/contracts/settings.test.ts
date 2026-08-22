@@ -167,12 +167,12 @@ describe('ServerSettings.providerInstances (slice-2 invariant)', () =>
 
 describe('ServerSettings provider access defaults', () =>
 {
-  it('requires opt-in for experimental bindings and lets explicit false win', () =>
+  it('enables cursor by default while grok and opencode stay opt-in', () =>
   {
     const settings = decodeServerSettings({})
     expect(settings.providers.codex.enabled).toBe(true)
     expect(settings.providers.claudeAgent.enabled).toBe(true)
-    expect(settings.providers.cursor.enabled).toBe(false)
+    expect(settings.providers.cursor.enabled).toBe(true)
     expect(settings.providers.grok.enabled).toBe(false)
     expect(settings.providers.opencode.enabled).toBe(false)
     expect(settings.enableAgentBrowserAccess).toBe(true)
@@ -180,6 +180,7 @@ describe('ServerSettings provider access defaults', () =>
       enableAgentBrowserAccess: false,
     })
 
+    expect(defaultEnabledForDriver(ProviderDriverKind.make('cursor'))).toBe(true)
     const grok = ProviderDriverKind.make('grok')
     expect(defaultEnabledForDriver(grok)).toBe(false)
     expect(resolveProviderInstanceEnabled({ driver: grok, config: {} })).toBe(false)
