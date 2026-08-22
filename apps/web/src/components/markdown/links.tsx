@@ -692,8 +692,11 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         side="top"
         className="max-w-[min(40rem,calc(100vw-2rem))] font-mono text-[11px] leading-tight"
       >
+        {/* show the full path: the chip already displays the shortened form,
+            and a link to the workspace root collapses to a bare label that
+            would otherwise repeat it. */}
         <div className="markdown-file-link-tooltip-scroll overflow-x-auto whitespace-nowrap">
-          {displayPath}
+          {targetPath}
         </div>
       </TooltipPopup>
     </Tooltip>

@@ -628,6 +628,18 @@ function useLocalDispatchState(input: {
   }
 }
 
+// drop the send-time anchored end space while keeping the thread scoping. that
+// space holds a sent row near the top while its turn streams and keeps
+// maintainScrollAtEnd switched off for as long as it is installed, so every
+// manual return to the live edge must release the anchor too — otherwise the
+// timeline settles into 'following-end' with nothing following anything.
+function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | null }>(
+  current: T,
+): T
+{
+  return current.messageId === null ? current : { ...current, messageId: null }
+}
+
 function ChatViewContent(props: ChatViewProps)
 {
   const {
@@ -3399,6 +3411,7 @@ function ChatViewContent(props: ChatViewProps)
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current
     pendingTimelineAnchorRef.current = null
     activeTimelineAnchorIndexRef.current = null
+    setTimelineAnchor(releaseChatTimelineAnchor)
     showScrollDebouncer.current.cancel()
     setShowScrollToBottom(false)
     void legendListRef.current?.scrollToEnd?.({ animated })
@@ -3570,6 +3583,11 @@ function ChatViewContent(props: ChatViewProps)
     {
       timelineScrollModeRef.current = 'following-end'
       liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current
+      // reachable only once manual navigation has already broken follow, so
+      // the anchored turn framing is over: the user scrolled back to the live
+      // edge and expects the stream to stick to it again, exactly like the
+      // scroll-to-bottom pill.
+      setTimelineAnchor(releaseChatTimelineAnchor)
       showScrollDebouncer.current.cancel()
       setShowScrollToBottom(false)
     }

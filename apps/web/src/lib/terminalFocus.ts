@@ -17,3 +17,16 @@ export function isTerminalFocused(): boolean
 {
   return getTerminalFocusOwner() !== null
 }
+
+// focus never bubbles, so capture-phase listeners are the only way to observe
+// focus entering or leaving the terminal surface from a window-level store.
+export function subscribeToTerminalFocusChanges(listener: () => void): () => void
+{
+  window.addEventListener('focusin', listener, true)
+  window.addEventListener('focusout', listener, true)
+  return () =>
+  {
+    window.removeEventListener('focusin', listener, true)
+    window.removeEventListener('focusout', listener, true)
+  }
+}

@@ -67,6 +67,7 @@ import {
 } from '../keybindings'
 import { useShortcutModifierState } from '../lib/shortcutModifierState'
 import { isTerminalFocused } from '../lib/terminalFocus'
+import { useTerminalFocus } from '../hooks/useTerminalFocus'
 import { isModelPickerOpen } from '../modelPickerVisibility'
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from '../terminalUiStateStore'
 import { isMacPlatform } from '~/lib/utils'
@@ -145,11 +146,10 @@ import { ProjectFavicon } from './ProjectFavicon'
 import { ProviderInstanceIcon } from './chat/ProviderInstanceIcon'
 import { getTriggerDisplayModelLabel } from './chat/providerIconUtils'
 import {
-  deriveProviderInstanceEntries,
+  deriveProviderEntriesByEnvironment,
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from '../providerInstances'
-import { primaryServerProvidersAtom } from '../state/server'
 import { stackedThreadToast, toastManager } from './ui/toast'
 import { CommandDialogTrigger } from './ui/command'
 import { Button } from './ui/button'
@@ -180,6 +180,9 @@ const SETTLED_TAIL_INITIAL_COUNT = 10
 const SETTLED_TAIL_PAGE_COUNT = 25
 const SIDEBAR_V2_LIST_CONTENT_STYLE = { gap: 1 }
 const SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION = { data: true, size: false }
+// stable fallback for threads whose environment has no resolved server config,
+// so row props never churn a fresh Map per render.
+const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map()
 type SidebarV2ThreadSection = 'active' | 'imported' | 'snoozed' | 'settled'
 
 type SidebarV2Shelf = Exclude<SidebarV2ThreadSection, 'active'>
@@ -1506,16 +1509,6 @@ export default function SidebarV2()
     () => sortLogicalProjectsForSidebar(unsortedProjectGroups, threads, sidebarProjectSortOrder),
     [sidebarProjectSortOrder, threads, unsortedProjectGroups],
   )
-  const serverProviders = useAtomValue(primaryServerProvidersAtom)
-  const providerEntryByInstanceId = useMemo(
-    () =>
-      new Map(
-        deriveProviderInstanceEntries(serverProviders).map(
-          (entry) => [entry.instanceId as string, entry] as const,
-        ),
-      ),
-    [serverProviders],
-  )
   const projectCwdByKey = useMemo(
     () =>
       new Map(
@@ -1790,6 +1783,16 @@ export default function SidebarV2()
   // merging, no optimistic holds. Archived threads remain hidden here —
   // archive keeps its original "remove from sidebar" meaning.
   const serverConfigs = useAtomValue(environmentServerConfigsAtom)
+  // threads on non-primary environments resolve their provider entry from
+  // their own environment's config: default instance ids are driver slugs,
+  // so a flat map would collide across environments.
+  const providerEntriesByEnvironment = useMemo(
+    () =>
+      deriveProviderEntriesByEnvironment(
+        [...serverConfigs].map(([environmentId, config]) => [environmentId, config.providers]),
+      ),
+    [serverConfigs],
+  )
   const hasArchitectureServerThread = newThreadContext.activeThread !== null
   const activeArchitectureEnvironmentId = newThreadContext.activeThread?.environmentId ?? null
   const activeArchitectureProjectId = newThreadContext.activeThread?.projectId ?? null
@@ -2793,10 +2796,14 @@ export default function SidebarV2()
   // match a thread-jump binding. Adding Shift (screenshots) or Alt no
   // longer matches ⌘1..9, so the overlay hides for chords like ⌘⇧4.
   const shortcutModifiers = useShortcutModifierState()
+  const terminalFocused = useTerminalFocus()
   const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
     shortcutModifiers,
     keybindings,
-    { platform: navigator.platform },
+    {
+      platform: navigator.platform,
+      context: { terminalFocus: terminalFocused },
+    },
   )
   useEffect(() =>
   {
@@ -2847,7 +2854,9 @@ export default function SidebarV2()
           projectTitle={
             projectDisplayNameByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
           }
-          providerEntryByInstanceId={providerEntryByInstanceId}
+          providerEntryByInstanceId={
+            providerEntriesByEnvironment.get(thread.environmentId) ?? EMPTY_PROVIDER_ENTRIES
+          }
           onThreadClick={handleThreadClick}
           onThreadActivate={navigateToThread}
           onStartRename={startThreadRename}
@@ -2885,7 +2894,7 @@ export default function SidebarV2()
       primaryEnvironmentId,
       projectCwdByKey,
       projectDisplayNameByKey,
-      providerEntryByInstanceId,
+      providerEntriesByEnvironment,
       renamingThreadKey,
       renamingTitle,
       routeThreadKey,
@@ -2973,7 +2982,7 @@ export default function SidebarV2()
                 <button
                   type="button"
                   onClick={openAddProjectCommandPalette}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                 >
                   <PlusIcon className="size-3" />
                   Add project

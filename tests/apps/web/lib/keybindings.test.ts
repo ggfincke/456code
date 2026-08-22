@@ -448,6 +448,22 @@ describe('jump navigation helpers', () =>
     )
   })
 
+  it('never shows jump hints while the terminal is focused, even with an unrestricted binding', () =>
+  {
+    assert.isFalse(
+      shouldShowThreadJumpHints(event({ metaKey: true }), DEFAULT_BINDINGS, {
+        platform: 'MacIntel',
+        context: { terminalFocus: true },
+      }),
+    )
+    assert.isTrue(
+      shouldShowThreadJumpHints(event({ metaKey: true }), DEFAULT_BINDINGS, {
+        platform: 'MacIntel',
+        context: { terminalFocus: false },
+      }),
+    )
+  })
+
   it('shows model picker jump hints only while the picker context is active', () =>
   {
     assert.isFalse(
