@@ -28,7 +28,7 @@ This document covers the unified release workflow for stable and nightly desktop
     npm package containing the private Cartographer runtime, validates that exact tarball in clean
     npm and pnpm consumers, and passes the same tarball to `npm publish`
   - the Cartographer payload contains the analysis/query engine plus CLI and MCP entries; it does
-    not contain the retired browser workbench or a static Atlas web bundle
+    not contain the retired browser workbench or a static browser bundle
 - Deploys the hosted web app to Vercel only after a release is published:
   - stable releases are aliased to the `latest` hosted app channel
   - nightly releases are aliased to the `nightly` hosted app channel

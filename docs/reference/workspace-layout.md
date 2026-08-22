@@ -7,8 +7,8 @@
   Claude, Cursor, Grok, and OpenCode provider sessions. It also owns architecture-analysis
   lifecycle and serves authorized bounded projections over Effect RPC.
 - `/apps/web`: React + Vite UI. Owns session control, conversation and provider event rendering,
-  plus the native Proposal Impact, Repository Atlas, and Architecture Scope resources. Connects to
-  the server via WebSocket.
+  plus native Impact Diff and the Architecture/Structure Repository Map lenses. Connects to the
+  server via WebSocket.
 - `/apps/mobile`: Expo client for iOS and Android. Connects to registered environments through the
   shared client runtime.
 - `/apps/desktop`: Electron host. Supervises a primary 456code server backend and optional WSL
