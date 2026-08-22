@@ -7,7 +7,12 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from '@t3tools/client-runtime/state/runtime'
-import { scopedThreadKey, scopeThreadRef } from '@t3tools/client-runtime/environment'
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from '@t3tools/client-runtime/environment'
+import { wasBootstrapThreadDeleted } from '@t3tools/client-runtime/errors'
 import {
   DEFAULT_MODEL,
   type CollaborationMode,
@@ -94,7 +99,7 @@ import {
 } from '~/lib/terminalContext'
 import { appendReviewCommentsToPrompt, type ReviewCommentContext } from '~/reviewCommentContext'
 import { resolveAppModelSelectionForInstance } from '~/modelSelection'
-import { newMessageId, randomHex } from '~/lib/utils'
+import { newMessageId, newThreadId, randomHex } from '~/lib/utils'
 import { deriveProviderInstanceEntries } from '~/providerInstances'
 import {
   canApplyProviderSwitchRetry,
@@ -1509,6 +1514,32 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       if (!isAtomCommandInterrupted(failure))
       {
         const error = squashAtomCommandFailure(failure)
+        // the server rolled this bootstrap thread back; rotate the draft onto a
+        // fresh thread id so retrying does not send into a deleted thread
+        if (
+          send.isLocalDraftThread &&
+          typeof send.composerDraftTarget === 'string' &&
+          wasBootstrapThreadDeleted(error)
+        )
+        {
+          const failedDraftSession = useComposerDraftStore
+            .getState()
+            .getDraftSession(send.composerDraftTarget)
+          if (failedDraftSession?.threadId === threadIdForSend)
+          {
+            useComposerDraftStore
+              .getState()
+              .setLogicalProjectDraftThreadId(
+                failedDraftSession.logicalProjectKey,
+                scopeProjectRef(failedDraftSession.environmentId, failedDraftSession.projectId),
+                send.composerDraftTarget,
+                {
+                  threadId: newThreadId(),
+                  createdAt: new Date().toISOString(),
+                },
+              )
+          }
+        }
         setThreadError(
           threadIdForSend,
           error instanceof Error ? error.message : 'Failed to send message.',
