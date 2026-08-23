@@ -26,6 +26,7 @@ export interface TimelineRowSharedState
   workspaceRoot: string | undefined
   skills: ReadonlyArray<Pick<ServerProviderSkill, 'name' | 'displayName'>>
   activeThreadEnvironmentId: EnvironmentId
+  canRevertConversation: boolean
   onRevertUserMessage: (messageId: MessageId) => void
   onImageExpand: (preview: ExpandedImagePreview) => void
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void

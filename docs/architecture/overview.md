@@ -5,8 +5,9 @@
 
 456code is a four-application monorepo: a Node.js HTTP/WebSocket server, React web client, Expo
 mobile client, and Electron desktop host. The server routes agent work across the built-in Codex,
-Claude, Cursor, Grok, and OpenCode providers. It also turns Cartographer's repository-analysis
-artifacts into authorized, bounded projections for native web resources.
+Claude, Cursor, Grok, OpenCode, Coral, Gemini, and Antigravity providers. It also turns
+Cartographer's repository-analysis artifacts into authorized, bounded projections for native web
+resources.
 
 ```mermaid
 flowchart TD
@@ -16,7 +17,7 @@ flowchart TD
     Runtime["packages/client-runtime"]
     Server["apps/server"]
     Cartographer["packages/cartographer-core"]
-    Providers["Codex / Claude / Cursor / Grok / OpenCode"]
+    Providers["Codex / Claude / Cursor / Grok / OpenCode / Coral / Gemini / Antigravity"]
 
     Desktop -->|hosts| Web
     Desktop -->|supervises backend instances| Server
@@ -52,8 +53,15 @@ flowchart TD
   [Cartographer architecture analysis](../integrations/cartographer.md).
 
 - **Provider runtime**: [`ProviderService`][4] routes sessions through the provider adapter
-  registry. The registered built-in drivers create the Codex, Claude, Cursor, Grok, and OpenCode
-  implementations behind that shared service contract.
+  registry. The registered built-in drivers create the Codex, Claude, Cursor, Grok, OpenCode,
+  Coral, Gemini, and Antigravity implementations behind that shared service contract. Gemini uses
+  the official `gemini --acp` ACP stdio protocol. Antigravity (Experimental) uses its distinct
+  official `agy --input-format stream-json --output-format stream-json` persistent NDJSON protocol;
+  it is not an ACP adapter. Both Google CLIs own their authentication and native session files.
+  456code does not share credentials, extract tokens, call direct provider backends, or use a
+  Python SDK/sidecar. See [Provider architecture](./providers.md) and the
+  [Gemini](../providers/gemini.md) and [Antigravity](../providers/antigravity.md) guides for
+  capability limits and safety gates.
 
 - **Durable async owners**: ProviderService appends each canonical provider event to the
   `ProviderRuntimeInbox` before downstream publication. Independent ingestion and checkpoint lanes

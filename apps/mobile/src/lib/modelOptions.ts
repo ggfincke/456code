@@ -31,11 +31,17 @@ function providerDisplayLabel(provider: {
   readonly instanceId: string
 }): string
 {
-  if (provider.displayName) return provider.displayName
-  if (provider.driver === 'codex') return 'Codex'
-  if (provider.driver === 'claudeAgent') return 'Claude'
-  if (provider.driver === 'coral') return 'Coral'
-  return provider.instanceId
+  let label = provider.displayName
+  if (!label)
+  {
+    if (provider.driver === 'codex') label = 'Codex'
+    else if (provider.driver === 'claudeAgent') label = 'Claude'
+    else if (provider.driver === 'coral') label = 'Coral'
+    else if (provider.driver === 'gemini') label = 'Gemini'
+    else if (provider.driver === 'antigravity') label = 'Antigravity'
+    else label = provider.instanceId
+  }
+  return provider.driver === 'antigravity' ? `${label} · Experimental` : label
 }
 
 function normalizeSelectionOptions(

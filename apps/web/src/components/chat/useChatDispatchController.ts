@@ -23,6 +23,8 @@ import {
   type ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderInteractionMode,
+  type ProviderRuntimeModeWarning,
+  type ProviderRuntimeModeWarningId,
   type RuntimeMode,
   type ScopedThreadRef,
   type ServerProvider,
@@ -58,6 +60,7 @@ import {
   getStartedThreadProviderSwitchBlockReason,
   handleImportContinuationSendBlock,
   IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  isComposerProviderInstanceChange,
   readFileAsDataUrl,
   revokeUserMessagePreviewUrls,
   shouldReconcileComposerDraftModelSelection,
@@ -120,6 +123,7 @@ import { stackedThreadToast, toastManager } from '../ui/toast'
 import type { ChatComposerHandle } from './chatComposerHandle'
 import { blockUnknownComposerSlashCommand } from './composer/composerSlashCommandValidation'
 import type { TimelineScrollMode } from './messages-timeline/timelineScrollAnchoring'
+import { resolveRuntimeModeStartWarnings } from './runtimeModeWarnings'
 import { resolvePlanFollowUpSubmission, type PlanImplementVariant } from '~/proposedPlan'
 
 // keep the payload structural so ChatView's atom command remains assignable
@@ -150,6 +154,7 @@ type StartThreadTurnMutation = (input: {
     readonly modelSelection: ModelSelection
     readonly titleSeed: string
     readonly runtimeMode: RuntimeMode
+    readonly runtimeModeAcknowledgements?: ReadonlyArray<ProviderRuntimeModeWarningId>
     readonly interactionMode: ProviderInteractionMode
     readonly orchestrate: boolean
     readonly bootstrap?: {
@@ -219,6 +224,7 @@ export interface ChatSendPorts
   readonly onSubmitPlanFollowUp: (input: {
     text: string
     collaborationMode: CollaborationMode
+    runtimeModeAcknowledgements?: ReadonlyArray<ProviderRuntimeModeWarningId>
   }) => Promise<boolean>
   readonly pendingTimelineAnchorRef: MutableRefObject<MessageId | null>
   readonly persistThreadSettingsForNextTurn: (input: {
@@ -355,6 +361,18 @@ interface ProviderSwitchConfirmation
   // the same target the pill and the outcome do
   readonly targetLabel: string
   readonly expectedCurrentInstanceId: ProviderInstanceId
+  readonly targetDefaultRuntimeMode?: RuntimeMode
+}
+
+interface RuntimeModeWarningConfirmation
+{
+  readonly environmentId: EnvironmentId
+  readonly threadId: ThreadId
+  readonly targetModelSelection: ModelSelection
+  readonly runtimeMode: RuntimeMode
+  readonly warning: ProviderRuntimeModeWarning
+  readonly confirmedIds: ReadonlyArray<ProviderRuntimeModeWarningId>
+  readonly sendOptions: ChatDispatchSendOptions
 }
 
 type InterruptThreadTurnMutation = (input: {
@@ -412,6 +430,7 @@ interface ChatDispatchSendOptions
   readonly bypassPlanFollowUp?: boolean
   readonly planImplementVariant?: PlanImplementVariant
   readonly providerSlashCommand?: string
+  readonly runtimeModeAcknowledgements?: ReadonlyArray<ProviderRuntimeModeWarningId>
 }
 
 export function useChatDispatchController(input: UseChatDispatchControllerInput)
@@ -445,6 +464,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
   } = input
   const [providerSwitchConfirmation, setProviderSwitchConfirmation] =
     useState<ProviderSwitchConfirmation | null>(null)
+  const [runtimeModeWarningConfirmation, setRuntimeModeWarningConfirmation] =
+    useState<RuntimeModeWarningConfirmation | null>(null)
   const [switchingProviderThreadKey, setSwitchingProviderThreadKey] = useState<string | null>(null)
   const isSwitchingProvider = switchingProviderThreadKey === routeThreadKey
 
@@ -625,6 +646,9 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           }),
           expectedCurrentInstanceId:
             currentProviderInstanceId ?? activeThread.modelSelection.instanceId,
+          ...(entry.capabilities?.defaultRuntimeMode
+            ? { targetDefaultRuntimeMode: entry.capabilities.defaultRuntimeMode }
+            : {}),
         })
         return
       }
@@ -653,6 +677,20 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         selection: nextModelSelection,
         supersededProjection: activeThread.modelSelection,
       }
+      if (
+        isComposerProviderInstanceChange({
+          composerSelection: composerModelSelection,
+          hasStarted: threadHasStarted(activeThread),
+          nextInstanceId: instanceId,
+          projectedSelection: activeThread.modelSelection,
+        }) &&
+        entry.capabilities?.defaultRuntimeMode
+      )
+      {
+        useComposerDraftStore
+          .getState()
+          .setRuntimeMode(targetThreadRef, entry.capabilities.defaultRuntimeMode)
+      }
       applyComposerModelSelection(targetThreadRef, nextModelSelection)
       scheduleComposerFocus()
     },
@@ -660,6 +698,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       activeThread,
       applyComposerModelSelection,
       currentProviderInstanceId,
+      composerModelSelection,
       lockedProvider,
       providerSwitchBlockReason,
       providerStatuses,
@@ -701,6 +740,12 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         expectedCurrentInstanceId: confirmation.expectedCurrentInstanceId,
       },
     })
+    if (result._tag === 'Success' && confirmation.targetDefaultRuntimeMode)
+    {
+      useComposerDraftStore
+        .getState()
+        .setRuntimeMode(targetThreadRef, confirmation.targetDefaultRuntimeMode)
+    }
     // acceptance only queues the switch; the composer follows the server's
     // projected selection once the handoff completes
     if (result._tag !== 'Success' && !isAtomCommandInterrupted(result))
@@ -967,8 +1012,30 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
       selectedProviderSlashCommands: ctxSelectedProviderSlashCommands,
+      selectedProviderCapabilities: ctxSelectedProviderCapabilities,
       runtimeMode: dispatchRuntimeMode,
     } = sendCtx
+    const runtimeModeWarningResolution = resolveRuntimeModeStartWarnings({
+      capabilities: ctxSelectedProviderCapabilities,
+      confirmedIds: options.runtimeModeAcknowledgements ?? [],
+      currentModelSelection: activeThread.modelSelection,
+      session: activeThread.session,
+      targetModelSelection: ctxSelectedModelSelection,
+      runtimeMode: dispatchRuntimeMode,
+    })
+    if (runtimeModeWarningResolution.missingWarning !== null)
+    {
+      setRuntimeModeWarningConfirmation({
+        environmentId: activeThread.environmentId,
+        threadId: activeThread.id,
+        targetModelSelection: ctxSelectedModelSelection,
+        runtimeMode: dispatchRuntimeMode,
+        warning: runtimeModeWarningResolution.missingWarning,
+        confirmedIds: runtimeModeWarningResolution.acknowledgements,
+        sendOptions: options,
+      })
+      return false
+    }
     const promptForDispatch = directProviderSlashCommand ?? sendCtx.prompt
     if (
       directProviderSlashCommand !== null &&
@@ -1077,6 +1144,11 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       const sent = await send.onSubmitPlanFollowUp({
         text: followUp.text,
         collaborationMode: followUp.collaborationMode,
+        ...(runtimeModeWarningResolution.acknowledgements.length > 0
+          ? {
+              runtimeModeAcknowledgements: runtimeModeWarningResolution.acknowledgements,
+            }
+          : {}),
       })
       if (!sent)
       {
@@ -1414,6 +1486,11 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
           runtimeMode: dispatchRuntimeMode,
+          ...(runtimeModeWarningResolution.acknowledgements.length > 0
+            ? {
+                runtimeModeAcknowledgements: runtimeModeWarningResolution.acknowledgements,
+              }
+            : {}),
           interactionMode: dispatchMode.interactionMode,
           orchestrate: dispatchMode.orchestrate,
           ...(bootstrap ? { bootstrap } : {}),
@@ -1568,12 +1645,47 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     [dispatchSend],
   )
 
+  const confirmRuntimeModeWarning = useCallback((): void =>
+  {
+    const confirmation = runtimeModeWarningConfirmation
+    const currentContext = send.composerRef.current?.getSendContext()
+    if (
+      confirmation === null ||
+      activeThread === null ||
+      currentContext === undefined ||
+      activeThread.environmentId !== confirmation.environmentId ||
+      activeThread.id !== confirmation.threadId ||
+      currentContext.selectedModelSelection.instanceId !==
+        confirmation.targetModelSelection.instanceId ||
+      currentContext.selectedModelSelection.model !== confirmation.targetModelSelection.model ||
+      currentContext.runtimeMode !== confirmation.runtimeMode
+    )
+    {
+      setRuntimeModeWarningConfirmation(null)
+      return
+    }
+    setRuntimeModeWarningConfirmation(null)
+    void dispatchSend(undefined, {
+      ...confirmation.sendOptions,
+      runtimeModeAcknowledgements: [...confirmation.confirmedIds, confirmation.warning.id],
+    })
+  }, [activeThread, dispatchSend, runtimeModeWarningConfirmation, send.composerRef])
+
+  const onRuntimeModeWarningConfirmationOpenChange = useCallback((open: boolean): void =>
+  {
+    if (!open)
+    {
+      setRuntimeModeWarningConfirmation(null)
+    }
+  }, [])
+
   return {
     activeProviderSwitch,
     activeProviderSwitchTarget,
     activeProviderSwitchTargetLabel,
     composerProviderSwitch,
     confirmProviderSwitch,
+    confirmRuntimeModeWarning,
     dispatchSend,
     getModelDisabledReason,
     isSwitchingProvider,
@@ -1583,7 +1695,9 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     onInterrupt,
     onProviderModelSelect,
     onProviderSwitchConfirmationOpenChange,
+    onRuntimeModeWarningConfirmationOpenChange,
     onSend,
     providerSwitchConfirmation,
+    runtimeModeWarningConfirmation,
   }
 }

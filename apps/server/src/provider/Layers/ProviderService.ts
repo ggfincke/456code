@@ -28,6 +28,8 @@ import {
   type ProviderDriverKind,
   type ProviderContinuationIdentity as ProviderContinuationIdentityType,
   type ProviderRuntimeEvent,
+  type ProviderRuntimeModeWarning,
+  type RuntimeMode,
   type ProviderSession,
 } from '@t3tools/contracts'
 import { causeErrorTag } from '@t3tools/shared/observability'
@@ -62,6 +64,7 @@ import {
 } from '../../observability/Metrics.ts'
 import { type ProviderAdapterError, ProviderValidationError } from '../Errors.ts'
 import type {
+  ProviderAdapterCapabilities,
   ProviderAdapterRuntimeEvent,
   ProviderAdapterRuntimeSessionBinding,
   ProviderAdapterSessionStartInput,
@@ -214,6 +217,7 @@ function toRuntimePayloadFromSession(
     readonly modelSelection?: unknown
     readonly lastRuntimeEvent?: string
     readonly lastRuntimeEventAt?: string
+    readonly runtimeModeAcknowledgements?: RuntimeModeAcknowledgementState | null
   },
 ): Record<string, unknown>
 {
@@ -230,7 +234,64 @@ function toRuntimePayloadFromSession(
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
+    ...(extra?.runtimeModeAcknowledgements !== undefined
+      ? { runtimeModeAcknowledgements: extra.runtimeModeAcknowledgements }
+      : {}),
   }
+}
+
+interface RuntimeModeAcknowledgementState
+{
+  readonly providerInstanceId: string
+  readonly threadId: ThreadId
+  readonly runtimeMode: RuntimeMode
+  readonly continuationKey: string
+  readonly warningFingerprint: string
+  readonly warningIds: ReadonlyArray<string>
+}
+
+function isRecord(value: unknown): value is Record<string, unknown>
+{
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readPersistedRuntimeModeAcknowledgements(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding['runtimePayload'],
+): RuntimeModeAcknowledgementState | undefined
+{
+  if (!isRecord(runtimePayload) || !isRecord(runtimePayload.runtimeModeAcknowledgements))
+  {
+    return undefined
+  }
+  const value = runtimePayload.runtimeModeAcknowledgements
+  if (
+    typeof value.providerInstanceId !== 'string' ||
+    typeof value.threadId !== 'string' ||
+    typeof value.runtimeMode !== 'string' ||
+    typeof value.continuationKey !== 'string' ||
+    typeof value.warningFingerprint !== 'string' ||
+    !Array.isArray(value.warningIds) ||
+    !value.warningIds.every((id): id is string => typeof id === 'string')
+  )
+  {
+    return undefined
+  }
+  return value as unknown as RuntimeModeAcknowledgementState
+}
+
+function runtimeModeWarningFingerprint(
+  warnings: ReadonlyArray<ProviderRuntimeModeWarning>,
+): string
+{
+  return stableStringify(
+    warnings.map((warning) => ({
+      id: warning.id,
+      mode: warning.mode,
+      severity: warning.severity,
+      message: warning.message,
+      requiresAcknowledgement: warning.requiresAcknowledgement,
+    })),
+  )
 }
 
 function readPersistedModelSelection(
@@ -570,9 +631,93 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       ),
     )
 
+  // refresh durable session state from the adapter that accepted the event.
+  // the adapter binding and inbox generation are both checked so a late event
+  // from a retired process cannot overwrite a replacement session's cursor.
+  const refreshSessionBindingFromAdapter = (
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+    binding: ProviderAdapterRuntimeSessionBinding,
+    event: ProviderRuntimeEvent,
+  ) =>
+    Effect.gen(function* ()
+    {
+      const adapterBinding = yield* adapter.getSessionRuntimeBinding(binding.threadId)
+      if (
+        adapterBinding === undefined ||
+        adapterBinding.providerInstanceId !== binding.providerInstanceId ||
+        adapterBinding.threadId !== binding.threadId ||
+        adapterBinding.sessionGeneration !== binding.sessionGeneration
+      )
+      {
+        return false
+      }
+
+      const currentRuntime = Option.getOrUndefined(
+        yield* runtimeInbox.getCurrentSession({
+          providerInstanceId: binding.providerInstanceId,
+          threadId: binding.threadId,
+        }),
+      )
+      if (
+        currentRuntime === undefined ||
+        currentRuntime.provider !== event.provider ||
+        currentRuntime.providerInstanceId !== binding.providerInstanceId ||
+        currentRuntime.threadId !== binding.threadId ||
+        currentRuntime.sessionGeneration !== binding.sessionGeneration
+      )
+      {
+        return false
+      }
+
+      const session = (yield* adapter.listSessions()).find(
+        (candidate) => candidate.threadId === binding.threadId,
+      )
+      if (session === undefined)
+      {
+        return false
+      }
+
+      const currentBinding = Option.getOrUndefined(yield* directory.getBinding(binding.threadId))
+      if (
+        currentBinding === undefined ||
+        session.provider !== event.provider ||
+        (session.providerInstanceId !== undefined &&
+          session.providerInstanceId !== binding.providerInstanceId) ||
+        currentBinding.provider !== session.provider ||
+        currentBinding.providerInstanceId !== binding.providerInstanceId
+      )
+      {
+        return false
+      }
+
+      yield* directory.upsert({
+        threadId: binding.threadId,
+        provider: session.provider,
+        providerInstanceId: binding.providerInstanceId,
+        runtimeMode: session.runtimeMode,
+        status: toRuntimeStatus(session),
+        ...(session.resumeCursor !== undefined ? { resumeCursor: session.resumeCursor } : {}),
+        runtimePayload: toRuntimePayloadFromSession(session, {
+          lastRuntimeEvent: event.type,
+          lastRuntimeEventAt: yield* nowIso,
+        }),
+      })
+      return true
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning('provider.session.binding.refresh-failed', {
+          providerInstanceId: binding.providerInstanceId,
+          threadId: binding.threadId,
+          eventType: event.type,
+          cause,
+        }).pipe(Effect.as(false)),
+      ),
+    )
+
   const publishRuntimeEvent = (
     binding: ProviderAdapterRuntimeSessionBinding,
     event: ProviderRuntimeEvent,
+    adapter?: ProviderAdapterShape<ProviderAdapterError>,
   ): Effect.Effect<void, RuntimeEventAdmissionError> =>
     admitRuntimeEvent(binding, event).pipe(
       Effect.flatMap((result) =>
@@ -591,12 +736,20 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                   ? canonicalEventLogger.write(event, event.threadId)
                   : Effect.void,
               ),
-              Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
               Effect.andThen(
                 shouldRefreshLastSeenAt(event)
-                  ? refreshSessionLastSeenAt(event.threadId, binding.providerInstanceId)
+                  ? adapter === undefined
+                    ? refreshSessionLastSeenAt(event.threadId, binding.providerInstanceId)
+                    : refreshSessionBindingFromAdapter(adapter, binding, event).pipe(
+                        Effect.flatMap((refreshed) =>
+                          refreshed
+                            ? Effect.void
+                            : refreshSessionLastSeenAt(event.threadId, binding.providerInstanceId),
+                        ),
+                      )
                   : Effect.void,
               ),
+              Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
               Effect.asVoid,
             ),
       ),
@@ -1032,6 +1185,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       readonly modelSelection?: unknown
       readonly lastRuntimeEvent?: string
       readonly lastRuntimeEventAt?: string
+      readonly runtimeModeAcknowledgements?: RuntimeModeAcknowledgementState | null
     },
   ) =>
     Effect.gen(function* ()
@@ -1309,6 +1463,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           ),
         { concurrency: 'unbounded' },
       )
+
       const cleanupFailures = [
         ...closeResults.flatMap((result) =>
           Exit.isFailure(result) ? [Cause.squash(result.cause)] : [],
@@ -1368,6 +1523,79 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         ),
       ),
     )
+
+  const validateRuntimeModeAcknowledgements = (input: {
+    readonly threadId: ThreadId
+    readonly providerInstanceId: ProviderInstanceId
+    readonly runtimeMode: RuntimeMode
+    readonly continuationKey: string
+    readonly capabilities: ProviderAdapterCapabilities
+    readonly persistedBinding?: ProviderSessionDirectory.ProviderRuntimeBinding
+    readonly requestedIds: ReadonlyArray<string>
+    readonly allowPersisted: boolean
+  }): Effect.Effect<RuntimeModeAcknowledgementState | null, ProviderValidationError> =>
+  {
+    const warnings = input.capabilities.runtimeModeWarnings ?? []
+    const applicableWarnings = warnings.filter(
+      (warning) => warning.mode === input.runtimeMode && warning.requiresAcknowledgement,
+    )
+    const warningFingerprint = runtimeModeWarningFingerprint(warnings)
+    const warningIds = new Set(applicableWarnings.map((warning) => warning.id))
+    const persisted = input.persistedBinding
+      ? readPersistedRuntimeModeAcknowledgements(input.persistedBinding.runtimePayload)
+      : undefined
+    const canReusePersisted =
+      input.allowPersisted &&
+      persisted?.providerInstanceId === input.providerInstanceId &&
+      persisted.threadId === input.threadId &&
+      persisted.runtimeMode === input.runtimeMode &&
+      persisted.continuationKey === input.continuationKey &&
+      persisted.warningFingerprint === warningFingerprint
+    const acknowledgedIds = new Set<string>()
+    if (canReusePersisted)
+    {
+      for (const id of persisted.warningIds)
+      {
+        if (warningIds.has(id)) acknowledgedIds.add(id)
+      }
+    }
+    for (const id of input.requestedIds)
+    {
+      if (warningIds.has(id)) acknowledgedIds.add(id)
+    }
+    for (const warning of applicableWarnings)
+    {
+      if (!acknowledgedIds.has(warning.id))
+      {
+        return Effect.fail(
+          toValidationError(
+            'ProviderService.startSession',
+            `Runtime mode '${input.runtimeMode}' requires acknowledgement '${warning.id}': ${warning.message}`,
+          ),
+        )
+      }
+    }
+    if (acknowledgedIds.size === 0)
+    {
+      return Effect.succeed(null)
+    }
+    const accepted = Array.from(acknowledgedIds).sort()
+    return Effect.logInfo('provider runtime mode warnings acknowledged', {
+      providerInstanceId: input.providerInstanceId,
+      threadId: input.threadId,
+      runtimeMode: input.runtimeMode,
+      warningIds: accepted,
+    }).pipe(
+      Effect.as({
+        providerInstanceId: input.providerInstanceId,
+        threadId: input.threadId,
+        runtimeMode: input.runtimeMode,
+        continuationKey: input.continuationKey,
+        warningFingerprint,
+        warningIds: accepted,
+      }),
+    )
+  }
 
   const stopRuntimeSessionIfExactWithinThreadPermit = Effect.fn(
     'ProviderService.stopRuntimeSessionIfExactWithinThreadPermit',
@@ -1513,7 +1741,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
             return { binding: envelope.binding, event }
           }),
         ),
-        Effect.flatMap(({ binding, event }) => publishRuntimeEvent(binding, event)),
+        Effect.flatMap(({ binding, event }) => publishRuntimeEvent(binding, event, source.adapter)),
       ),
     ).pipe(
       Effect.tapCause((cause) =>
@@ -1836,6 +2064,22 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           ? { routingAuthority: input.routingAuthority }
           : {}),
       })
+      const recoveryRuntimeMode = coerceSupportedRuntimeMode(
+        input.route.adapter.capabilities,
+        input.binding.runtimeMode ??
+          input.route.adapter.capabilities.defaultRuntimeMode ??
+          'full-access',
+      )
+      const runtimeModeAcknowledgements = yield* validateRuntimeModeAcknowledgements({
+        threadId: input.binding.threadId,
+        providerInstanceId: bindingInstanceId,
+        runtimeMode: recoveryRuntimeMode,
+        continuationKey: input.route.info.continuationIdentity.continuationKey,
+        capabilities: input.route.adapter.capabilities,
+        persistedBinding: input.binding,
+        requestedIds: [],
+        allowPersisted: true,
+      })
       const hasResumeCursor =
         input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined
       const hasActiveSession = yield* input.route.adapter.hasSession(input.binding.threadId)
@@ -1887,7 +2131,10 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           yield* upsertSessionBinding(
             { ...existing, providerInstanceId: bindingInstanceId },
             input.binding.threadId,
-            { continuationIdentity: input.route.info.continuationIdentity },
+            {
+              continuationIdentity: input.route.info.continuationIdentity,
+              runtimeModeAcknowledgements,
+            },
           )
           yield* analytics.record('provider.session.recovered', {
             provider: existing.provider,
@@ -1931,7 +2178,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
               ...(persistedCwd ? { cwd: persistedCwd } : {}),
               ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
               ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
-              runtimeMode: input.binding.runtimeMode ?? 'full-access',
+              runtimeMode: recoveryRuntimeMode,
               ...(mcp === undefined ? {} : { mcp }),
               runtimeSessionBinding: {
                 providerInstanceId: bindingInstanceId,
@@ -1955,7 +2202,10 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
             yield* upsertSessionBinding(
               { ...resumed, providerInstanceId: bindingInstanceId },
               input.binding.threadId,
-              { continuationIdentity: input.route.info.continuationIdentity },
+              {
+                continuationIdentity: input.route.info.continuationIdentity,
+                runtimeModeAcknowledgements,
+              },
             )
             yield* analytics.record('provider.session.recovered', {
               provider: resumed.provider,
@@ -2247,6 +2497,16 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                     `Provider instance '${route.info.instanceId}' cannot safely continue sessions because ${route.info.continuationUnavailableReason}.`,
                   )
                 }
+                const runtimeModeAcknowledgements = yield* validateRuntimeModeAcknowledgements({
+                  threadId,
+                  providerInstanceId: resolvedInstanceId,
+                  runtimeMode,
+                  continuationKey: route.info.continuationIdentity.continuationKey,
+                  capabilities: route.adapter.capabilities,
+                  ...(persistedBinding === undefined ? {} : { persistedBinding }),
+                  requestedIds: input.runtimeModeAcknowledgements ?? [],
+                  allowPersisted: input.resumeCursor !== undefined && input.resumeCursor !== null,
+                })
                 return {
                   route,
                   input,
@@ -2254,6 +2514,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                   effectiveResumeCursor,
                   persistedBinding,
                   resolvedProvider,
+                  runtimeModeAcknowledgements,
                 }
               })
 
@@ -2385,6 +2646,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                       yield* upsertSessionBinding(sessionWithInstance, threadId, {
                         continuationIdentity: route.info.continuationIdentity,
                         modelSelection: prepared.input.modelSelection,
+                        runtimeModeAcknowledgements: prepared.runtimeModeAcknowledgements,
                       })
                       yield* analytics.record('provider.session.started', {
                         provider: sessionWithInstance.provider,

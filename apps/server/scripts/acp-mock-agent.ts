@@ -4,6 +4,7 @@
 
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
+import * as NodeTimers from 'node:timers'
 
 import * as Effect from 'effect/Effect'
 
@@ -28,18 +29,23 @@ const emitForeignSessionUpdates = process.env.T3_ACP_EMIT_FOREIGN_SESSION_UPDATE
 const hangPromptForever = process.env.T3_ACP_HANG_PROMPT_FOREVER === '1'
 const hangFirstPromptForever = process.env.T3_ACP_HANG_FIRST_PROMPT_FOREVER === '1'
 const emitLateUpdateAfterCancel = process.env.T3_ACP_EMIT_LATE_UPDATE_AFTER_CANCEL === '1'
+const emitLateTerminalToolAfterCancel =
+  process.env.T3_ACP_EMIT_LATE_TERMINAL_TOOL_AFTER_CANCEL === '1'
 const omitXAiPromptCompleteStopReason =
   process.env.T3_ACP_OMIT_XAI_PROMPT_COMPLETE_STOP_REASON === '1'
 const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === '1'
 const emitLoadReplay = process.env.T3_ACP_EMIT_LOAD_REPLAY === '1'
+const earlyLoadResponseBeforeReplay = process.env.T3_ACP_EARLY_LOAD_RESPONSE_BEFORE_REPLAY === '1'
 const advertiseResume = process.env.T3_ACP_ADVERTISE_RESUME === '1'
 const advertisedAuthMethodIds = (process.env.T3_ACP_AUTH_METHOD_IDS ?? '')
   .split(',')
   .map((methodId) => methodId.trim())
   .filter((methodId) => methodId.length > 0)
 const coralModes = process.env.T3_ACP_CORAL_MODES === '1'
+const geminiModes = process.env.T3_ACP_GEMINI_MODES === '1'
 const hangLoadSessionAfterReplay = process.env.T3_ACP_HANG_LOAD_SESSION_AFTER_REPLAY === '1'
 const delayLoadSessionAfterReplay = process.env.T3_ACP_DELAY_LOAD_SESSION_AFTER_REPLAY === '1'
+const emitLateLoadReplayAfterIdle = process.env.T3_ACP_EMIT_LATE_LOAD_REPLAY_AFTER_IDLE === '1'
 const loadSessionDelayMs = Number(process.env.T3_ACP_LOAD_SESSION_DELAY_MS ?? '5000')
 const emitStaleXAiPromptCompleteBeforeSecondHang =
   process.env.T3_ACP_EMIT_STALE_XAI_PROMPT_COMPLETE_BEFORE_SECOND_HANG === '1'
@@ -61,7 +67,7 @@ const permissionOptionIds = {
 }
 const sessionId = 'mock-session-1'
 
-let currentModeId = coralModes ? 'default' : 'ask'
+let currentModeId = coralModes || geminiModes ? 'default' : 'ask'
 let currentModelId = 'default'
 let currentCoralRuntimeMode = 'approval-required'
 let parameterizedModelPicker = false
@@ -97,6 +103,35 @@ function logExit(reason: string): void
 function writeJsonRpcNotification(method: string, params: unknown): void
 {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`)
+}
+
+function scheduleLoadReplayUserMessage(requestedSessionId: string): void
+{
+  // @effect-diagnostics-next-line globalTimers:off - The mock deliberately schedules a notification after its RPC response.
+  NodeTimers.setTimeout(() =>
+  {
+    writeJsonRpcNotification('session/update', {
+      sessionId: requestedSessionId,
+      update: {
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'older replayed user message' },
+      },
+    })
+    writeJsonRpcNotification('session/update', {
+      sessionId: requestedSessionId,
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'older replayed assistant message' },
+      },
+    })
+    writeJsonRpcNotification('session/update', {
+      sessionId: requestedSessionId,
+      update: {
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'replay' },
+      },
+    })
+  }, 50)
 }
 
 process.once('SIGTERM', () =>
@@ -298,23 +333,30 @@ function availableModels(): ReadonlyArray<{
 
 const availableModes: ReadonlyArray<AcpSchema.SessionMode> = coralModes
   ? [{ id: 'default', name: 'Default' }]
-  : [
-      {
-        id: 'ask',
-        name: 'Ask',
-        description: 'Request permission before making any changes',
-      },
-      {
-        id: 'architect',
-        name: 'Architect',
-        description: 'Design and plan software systems without implementation',
-      },
-      {
-        id: 'code',
-        name: 'Code',
-        description: 'Write and modify code with full tool access',
-      },
-    ]
+  : geminiModes
+    ? [
+        { id: 'default', name: 'Default', description: 'Prompts for approval' },
+        { id: 'autoEdit', name: 'Auto Edit', description: 'Auto-approves edit tools' },
+        { id: 'yolo', name: 'YOLO', description: 'Auto-approves all tools' },
+        { id: 'plan', name: 'Plan', description: 'Read-only mode' },
+      ]
+    : [
+        {
+          id: 'ask',
+          name: 'Ask',
+          description: 'Request permission before making any changes',
+        },
+        {
+          id: 'architect',
+          name: 'Architect',
+          description: 'Design and plan software systems without implementation',
+        },
+        {
+          id: 'code',
+          name: 'Code',
+          description: 'Write and modify code with full tool access',
+        },
+      ]
 
 function modeState(): AcpSchema.SessionModeState
 {
@@ -384,6 +426,14 @@ const program = Effect.gen(function* ()
       _meta: { isReplay: true },
       sessionId: requestedSessionId,
       update: {
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'older replayed user message' },
+      },
+    })
+    writeJsonRpcNotification('session/update', {
+      _meta: { isReplay: true },
+      sessionId: requestedSessionId,
+      update: {
         sessionUpdate: 'tool_call',
         toolCallId: 'replay-tool-1',
         title: 'Replay tool',
@@ -409,6 +459,15 @@ const program = Effect.gen(function* ()
       {
         return yield* AcpError.AcpRequestError.internalError('Mock load session failure')
       }
+      if (earlyLoadResponseBeforeReplay)
+      {
+        scheduleLoadReplayUserMessage(requestedSessionId)
+        return {
+          modes: modeState(),
+          models: modelState(),
+          configOptions: configOptions(),
+        }
+      }
       if (hangLoadSessionAfterReplay || delayLoadSessionAfterReplay)
       {
         emitLoadReplayNotifications(requestedSessionId)
@@ -420,6 +479,16 @@ const program = Effect.gen(function* ()
           },
         })
         yield* Effect.sleep(loadSessionDelayMs)
+        if (emitLateLoadReplayAfterIdle)
+        {
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'late unmarked replay content' },
+            },
+          })
+        }
         return {
           modes: modeState(),
           models: modelState(),
@@ -559,6 +628,24 @@ const program = Effect.gen(function* ()
             update: {
               sessionUpdate: 'agent_message_chunk',
               content: { type: 'text', text: 'late after cancel' },
+            },
+          })
+        })
+      }
+      if (emitLateTerminalToolAfterCancel)
+      {
+        yield* Effect.sleep('50 millis')
+        yield* Effect.sync(() =>
+        {
+          writeJsonRpcNotification('session/update', {
+            sessionId: cancelledSessionId,
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'late-terminal-tool',
+              title: 'Late terminal tool',
+              kind: 'execute',
+              status: 'completed',
+              rawOutput: { exitCode: 0 },
             },
           })
         })

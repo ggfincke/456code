@@ -29,6 +29,10 @@ import {
 } from '../../lib/composerImages'
 import type { DraftComposerImageAttachment } from '../../lib/composerImages'
 import { scopedThreadKey } from '../../lib/scopedEntities'
+import {
+  confirmProviderRuntimeModeWarnings,
+  providerSessionNeedsRuntimeModeAcknowledgement,
+} from '../../lib/providerRuntimeModeWarnings'
 import { buildThreadFeed } from '../../lib/threadActivity'
 import { appAtomRegistry } from '../atom-registry'
 import { useEnvironmentServerConfig } from '../entities'
@@ -120,6 +124,26 @@ export function resolveThreadComposerDispatchSettings(input: {
       : (capabilities.supportedRuntimeModes[0] ?? 'approval-required'),
     collaborationMode,
   }
+}
+
+export function modelSelectionChangeBlockedByCapabilities(input: {
+  readonly threadStarted: boolean
+  readonly currentModelSelection: ModelSelection
+  readonly nextModelSelection: ModelSelection
+  readonly capabilities: ProviderRuntimeCapabilities
+}): string | null
+{
+  if (
+    !input.threadStarted ||
+    input.currentModelSelection.instanceId !== input.nextModelSelection.instanceId ||
+    input.currentModelSelection.model === input.nextModelSelection.model
+  )
+  {
+    return null
+  }
+  return input.capabilities.sessionModelSwitch === 'unsupported'
+    ? 'This provider does not allow changing models after a thread has started.'
+    : null
 }
 
 export function appendReviewCommentToDraft(input: {
@@ -271,6 +295,30 @@ export function useThreadComposerState()
       thread,
       serverConfig,
     })
+    const providerCapabilities =
+      serverConfig?.providers.find(
+        (provider) => provider.instanceId === dispatchSettings.modelSelection.instanceId,
+      )?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+    if (
+      attachments.length > 0 &&
+      !providerCapabilities.supportedAttachmentTypes.includes('image')
+    )
+    {
+      setPendingConnectionError('This provider does not support image attachments.')
+      return null
+    }
+    const runtimeModeAcknowledgements = providerSessionNeedsRuntimeModeAcknowledgement({
+      currentModelSelection: thread.modelSelection,
+      session: thread.session,
+      targetModelSelection: dispatchSettings.modelSelection,
+      runtimeMode: dispatchSettings.runtimeMode,
+    })
+      ? await confirmProviderRuntimeModeWarnings(providerCapabilities, dispatchSettings.runtimeMode)
+      : []
+    if (runtimeModeAcknowledgements === null)
+    {
+      return null
+    }
     // clear on optimistic enqueue and restore content if storage fails
     const enqueuePromise = enqueueThreadOutboxMessage({
       environmentId: selectedThreadShell.environmentId,
@@ -281,6 +329,7 @@ export function useThreadComposerState()
       attachments,
       modelSelection: dispatchSettings.modelSelection,
       runtimeMode: dispatchSettings.runtimeMode,
+      ...(runtimeModeAcknowledgements.length > 0 ? { runtimeModeAcknowledgements } : {}),
       interactionMode: dispatchSettings.collaborationMode.baseMode,
       orchestrate: dispatchSettings.collaborationMode.orchestrate,
       createdAt: metadata.createdAt,
@@ -319,6 +368,15 @@ export function useThreadComposerState()
       return
     }
 
+    const capabilities =
+      serverConfig?.providers.find((provider) => provider.instanceId === modelSelection?.instanceId)
+        ?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+    if (!capabilities.supportedAttachmentTypes.includes('image'))
+    {
+      setPendingConnectionError('This provider does not support image attachments.')
+      return
+    }
+
     const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id)
     const result = await pickComposerImages({
       existingCount: composerDrafts[threadKey]?.attachments.length ?? 0,
@@ -331,12 +389,21 @@ export function useThreadComposerState()
     {
       setPendingConnectionError(result.error)
     }
-  }, [composerDrafts, selectedThreadShell])
+  }, [composerDrafts, modelSelection?.instanceId, selectedThreadShell, serverConfig])
 
   const onPasteIntoDraft = useCallback(async () =>
   {
     if (!selectedThreadShell)
     {
+      return
+    }
+
+    const capabilities =
+      serverConfig?.providers.find((provider) => provider.instanceId === modelSelection?.instanceId)
+        ?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+    if (!capabilities.supportedAttachmentTypes.includes('image'))
+    {
+      setPendingConnectionError('This provider does not support image attachments.')
       return
     }
 
@@ -356,13 +423,23 @@ export function useThreadComposerState()
     {
       setPendingConnectionError(result.error)
     }
-  }, [composerDrafts, selectedThreadShell])
+  }, [composerDrafts, modelSelection?.instanceId, selectedThreadShell, serverConfig])
 
   const onNativePasteImages = useCallback(
     async (uris: ReadonlyArray<string>) =>
     {
       if (!selectedThreadShell || uris.length === 0)
       {
+        return
+      }
+
+      const capabilities =
+        serverConfig?.providers.find(
+          (provider) => provider.instanceId === modelSelection?.instanceId,
+        )?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+      if (!capabilities.supportedAttachmentTypes.includes('image'))
+      {
+        setPendingConnectionError('This provider does not support image attachments.')
         return
       }
 
@@ -388,7 +465,7 @@ export function useThreadComposerState()
         })
       }
     },
-    [composerDrafts, selectedThreadShell],
+    [composerDrafts, modelSelection?.instanceId, selectedThreadShell, serverConfig],
   )
 
   const onDiscardFailedQueuedMessage = useCallback(() =>
@@ -445,13 +522,48 @@ export function useThreadComposerState()
       {
         return
       }
+      const targetProviderCapabilities =
+        serverConfig?.providers.find((provider) => provider.instanceId === value.instanceId)
+          ?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+      const threadStarted =
+        (selectedThreadShell?.session !== null && selectedThreadShell?.session !== undefined) ||
+        (selectedThreadShell?.latestTurn !== null &&
+          selectedThreadShell?.latestTurn !== undefined) ||
+        (selectedThreadShell?.latestUserMessageAt !== null &&
+          selectedThreadShell?.latestUserMessageAt !== undefined)
+      const modelChangeBlockReason = modelSelectionChangeBlockedByCapabilities({
+        threadStarted,
+        currentModelSelection: selectedThreadShell?.modelSelection ?? value,
+        nextModelSelection: value,
+        capabilities: targetProviderCapabilities,
+      })
+      if (modelChangeBlockReason !== null)
+      {
+        setPendingConnectionError(modelChangeBlockReason)
+        return
+      }
       if (providerSwitch.requestProviderSwitch(value))
       {
         return
       }
-      updateComposerDraftSettings(selectedThreadKey, { modelSelection: value })
+      const targetDefaultRuntimeMode = serverConfig?.providers.find(
+        (provider) => provider.instanceId === value.instanceId,
+      )?.capabilities?.defaultRuntimeMode
+      updateComposerDraftSettings(selectedThreadKey, {
+        modelSelection: value,
+        ...(value.instanceId !== modelSelection?.instanceId &&
+        targetDefaultRuntimeMode !== undefined
+          ? { runtimeMode: targetDefaultRuntimeMode }
+          : {}),
+      })
     },
-    [providerSwitch, selectedThreadKey],
+    [
+      modelSelection?.instanceId,
+      providerSwitch,
+      selectedThreadKey,
+      selectedThreadShell,
+      serverConfig,
+    ],
   )
 
   const onUpdateRuntimeMode = useCallback(

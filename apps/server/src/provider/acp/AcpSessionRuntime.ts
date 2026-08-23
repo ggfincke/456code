@@ -35,14 +35,18 @@ import {
   extractModelConfigId,
   findSessionConfigOption,
   mergeToolCallState,
+  appendReplayUserMessageChunk,
   parseSessionModeState,
   parseSessionUpdateEvent,
+  replayUserMessageChunk,
   sessionUpdateIsReplay,
+  SESSION_LOAD_REPLAY_TAIL_MISMATCH_DETAIL,
   waitForSessionLoadReplayIdle,
   type SessionLoadGate,
   type AcpParsedSessionEvent,
   type AcpSessionModeState,
   type AcpToolCallState,
+  type SessionLoadReplayTailMismatch,
 } from './AcpRuntimeModel.ts'
 
 function formatConfigOptionValue(value: string | boolean): string
@@ -82,6 +86,8 @@ export interface AcpSpawnInput
   readonly args: ReadonlyArray<string>
   readonly cwd?: string
   readonly env?: NodeJS.ProcessEnv
+  // set false when the child must not inherit the server process environment.
+  readonly extendEnv?: boolean
 }
 
 export interface AcpSessionRuntimeOptions
@@ -94,12 +100,15 @@ export interface AcpSessionRuntimeOptions
   readonly continuationFallback?: 'load' | 'reject'
   readonly sessionLoadTimeout?: Duration.Input
   readonly sessionLoadReplayIdleGap?: Duration.Input
+  readonly expectedReplayUserMessageSha256?: string
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest['clientCapabilities']
   readonly clientInfo: {
     readonly name: string
     readonly version: string
   }
   readonly authMethodId?: string
+  // some agents can reuse credentials already selected in their own config.
+  readonly reuseAgentAuthentication?: boolean
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>
   readonly protocolLogging?: {
@@ -194,6 +203,7 @@ export class AcpSessionRuntime extends Context.Service<
     // @see https://agentclientprotocol.com/protocol/schema#session/prompt
     readonly prompt: (
       payload: Omit<EffectAcpSchema.PromptRequest, 'sessionId'>,
+      onStarted?: Effect.Effect<void>,
     ) => Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>
     // sends a real ACP `session/cancel` notification for the active session.
     // @see https://agentclientprotocol.com/protocol/schema#session/cancel
@@ -295,6 +305,14 @@ export const make = (
     >(Option.none())
     const sessionLoadGateRef = yield* Ref.make<Option.Option<SessionLoadGate>>(Option.none())
 
+    const digestReplayUserMessage = (text: string): Effect.Effect<string, never> =>
+      crypto.digest('SHA-256', new TextEncoder().encode(text)).pipe(
+        Effect.map((bytes) =>
+          Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(''),
+        ),
+        Effect.orDie,
+      )
+
     const logRequest = (event: AcpSessionRequestLogEvent) =>
       options.requestLogger ? options.requestLogger(event) : Effect.void
 
@@ -329,13 +347,17 @@ export const make = (
     const spawnCommand = yield* resolveSpawnCommand(
       options.spawn.command,
       options.spawn.args,
-      options.spawn.env ? { env: options.spawn.env, extendEnv: true } : {},
+      options.spawn.env
+        ? { env: options.spawn.env, extendEnv: options.spawn.extendEnv ?? true }
+        : {},
     )
     const child = yield* spawner
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          ...(options.spawn.env ? { env: options.spawn.env, extendEnv: true } : {}),
+          ...(options.spawn.env
+            ? { env: options.spawn.env, extendEnv: options.spawn.extendEnv ?? true }
+            : {}),
           shell: spawnCommand.shell,
         }),
       )
@@ -382,11 +404,21 @@ export const make = (
         )
         {
           const lastActivityAtMillis = yield* Clock.currentTimeMillis
+          const replayChunk = replayUserMessageChunk(notification)
+          const replayUserMessageBlocks =
+            replayChunk === undefined
+              ? gate.value.replayUserMessageBlocks
+              : appendReplayUserMessageChunk(
+                  gate.value.replayUserMessageOpen ? gate.value.replayUserMessageBlocks : [],
+                  replayChunk,
+                )
           yield* Ref.set(
             sessionLoadGateRef,
             Option.some({
               ...gate.value,
               lastActivityAtMillis,
+              replayUserMessageBlocks,
+              replayUserMessageOpen: replayChunk !== undefined,
             }),
           )
           return
@@ -569,38 +601,44 @@ export const make = (
       {
         if (options.authMethodId === undefined)
         {
-          return yield* new EffectAcpErrors.AcpRequestError({
-            code: -32602,
-            errorMessage:
-              'ACP agent requires an advertised authentication method, but none was configured',
-            data: {
-              advertisedMethodIds: advertisedAuthMethods.map((method) => method.id),
-            },
-          })
+          if (options.reuseAgentAuthentication !== true)
+          {
+            return yield* new EffectAcpErrors.AcpRequestError({
+              code: -32602,
+              errorMessage:
+                'ACP agent requires an advertised authentication method, but none was configured',
+              data: {
+                advertisedMethodIds: advertisedAuthMethods.map((method) => method.id),
+              },
+            })
+          }
         }
-        const advertisedAuthMethod = advertisedAuthMethods.find(
-          (method) => method.id === options.authMethodId,
-        )
-        if (!advertisedAuthMethod)
+        else
         {
-          return yield* new EffectAcpErrors.AcpRequestError({
-            code: -32602,
-            errorMessage: `ACP agent did not advertise configured authentication method "${options.authMethodId}"`,
-            data: {
-              configuredMethodId: options.authMethodId,
-              advertisedMethodIds: advertisedAuthMethods.map((method) => method.id),
-            },
-          })
-        }
-        const authenticatePayload = {
-          methodId: advertisedAuthMethod.id,
-        } satisfies EffectAcpSchema.AuthenticateRequest
+          const advertisedAuthMethod = advertisedAuthMethods.find(
+            (method) => method.id === options.authMethodId,
+          )
+          if (!advertisedAuthMethod)
+          {
+            return yield* new EffectAcpErrors.AcpRequestError({
+              code: -32602,
+              errorMessage: `ACP agent did not advertise configured authentication method "${options.authMethodId}"`,
+              data: {
+                configuredMethodId: options.authMethodId,
+                advertisedMethodIds: advertisedAuthMethods.map((method) => method.id),
+              },
+            })
+          }
+          const authenticatePayload = {
+            methodId: advertisedAuthMethod.id,
+          } satisfies EffectAcpSchema.AuthenticateRequest
 
-        yield* runLoggedRequest(
-          'authenticate',
-          authenticatePayload,
-          acp.agent.authenticate(authenticatePayload),
-        )
+          yield* runLoggedRequest(
+            'authenticate',
+            authenticatePayload,
+            acp.agent.authenticate(authenticatePayload),
+          )
+        }
       }
 
       let sessionId: string
@@ -675,10 +713,16 @@ export const make = (
               lastActivityAtMillis: undefined,
               idleGap: sessionLoadReplayIdleGap,
               initializeResult,
+              ...(options.expectedReplayUserMessageSha256 === undefined
+                ? {}
+                : { expectedReplayUserMessageSha256: options.expectedReplayUserMessageSha256 }),
+              replayUserMessageBlocks: [],
+              replayUserMessageOpen: false,
             }),
           )
 
           sessionId = options.resumeSessionId
+          let replayGateCleanupTransferred = false
           sessionSetupResult = yield* Effect.gen(function* ()
           {
             yield* logRequest({
@@ -687,16 +731,36 @@ export const make = (
               status: 'started',
             })
 
+            const mapReplayTailFailure = (cause: SessionLoadReplayTailMismatch) =>
+              new EffectAcpErrors.AcpTransportError({
+                operation: 'call-rpc',
+                method: 'session/load',
+                detail: SESSION_LOAD_REPLAY_TAIL_MISMATCH_DETAIL,
+                cause,
+              })
+            const waitForReplayIdle = waitForSessionLoadReplayIdle({
+              gateRef: sessionLoadGateRef,
+              digestReplayUserMessage,
+            }).pipe(Effect.mapError(mapReplayTailFailure))
             const loadSession = isImport
-              ? acp.agent.loadSession(loadPayload)
+              ? options.expectedReplayUserMessageSha256 === undefined
+                ? acp.agent.loadSession(loadPayload)
+                : Effect.gen(function* ()
+                  {
+                    const loadFiber = yield* acp.agent
+                      .loadSession(loadPayload)
+                      .pipe(Effect.forkIn(runtimeScope))
+                    const idleFiber = yield* waitForReplayIdle.pipe(Effect.forkIn(runtimeScope))
+                    const response = yield* Fiber.join(loadFiber)
+                    yield* Fiber.join(idleFiber)
+                    return response
+                  })
               : Effect.gen(function* ()
                 {
                   const loadFiber = yield* acp.agent
                     .loadSession(loadPayload)
                     .pipe(Effect.forkIn(runtimeScope))
-                  const idleFiber = yield* waitForSessionLoadReplayIdle({
-                    gateRef: sessionLoadGateRef,
-                  }).pipe(Effect.forkIn(runtimeScope))
+                  const idleFiber = yield* waitForReplayIdle.pipe(Effect.forkIn(runtimeScope))
                   const outcome = yield* Effect.raceFirst(
                     Fiber.join(loadFiber).pipe(
                       Effect.map((response) => ({ _tag: 'loaded' as const, response })),
@@ -705,17 +769,39 @@ export const make = (
                       Effect.map((response) => ({ _tag: 'replay-idle' as const, response })),
                     ),
                   ).pipe(
-                    Effect.onInterrupt(() => Fiber.interrupt(loadFiber).pipe(Effect.asVoid)),
-                    Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
+                    Effect.onInterrupt(() =>
+                      Effect.all([Fiber.interrupt(loadFiber), Fiber.interrupt(idleFiber)], {
+                        discard: true,
+                      }),
+                    ),
                   )
-                  yield* outcome._tag === 'replay-idle'
-                    ? Fiber.join(loadFiber).pipe(
-                        Effect.flatMap(updateConfigOptions),
-                        Effect.ignore,
-                        Effect.forkIn(runtimeScope),
-                        Effect.asVoid,
-                      )
-                    : Effect.void
+                  if (outcome._tag === 'replay-idle')
+                    {
+                    yield* Fiber.join(loadFiber).pipe(
+                      Effect.timeout(sessionLoadTimeout),
+                      Effect.flatMap(updateConfigOptions),
+                      Effect.ignore,
+                      Effect.ensuring(
+                        Effect.all(
+                          [
+                            Fiber.interrupt(loadFiber).pipe(Effect.ignore),
+                            Ref.set(sessionLoadGateRef, Option.none()),
+                          ],
+                          { discard: true },
+                        ),
+                      ),
+                      Effect.forkIn(runtimeScope),
+                    )
+                    replayGateCleanupTransferred = true
+                  }
+                  else if (options.expectedReplayUserMessageSha256 === undefined)
+                    {
+                    yield* Fiber.interrupt(idleFiber).pipe(Effect.ignore)
+                  }
+                  else
+                    {
+                    yield* Fiber.join(idleFiber).pipe(Effect.asVoid)
+                  }
                   return outcome.response
                 })
             const loaded = yield* loadSession.pipe(
@@ -754,7 +840,15 @@ export const make = (
             )
 
             return loaded
-          }).pipe(Effect.ensuring(Ref.set(sessionLoadGateRef, Option.none())))
+          }).pipe(
+            Effect.ensuring(
+              Effect.suspend(() =>
+                replayGateCleanupTransferred
+                  ? Effect.void
+                  : Ref.set(sessionLoadGateRef, Option.none()),
+              ),
+            ),
+          )
         }
       }
       else
@@ -851,7 +945,7 @@ export const make = (
       }),
       getModeState: Ref.get(modeStateRef),
       getConfigOptions: Ref.get(configOptionsRef),
-      prompt: (payload) =>
+      prompt: (payload, onStarted) =>
         promptSerializationSemaphore.withPermit(
           Effect.gen(function* ()
           {
@@ -871,8 +965,9 @@ export const make = (
               'session/prompt',
               requestPayload,
               acp.agent.prompt(requestPayload),
-            ).pipe(Effect.forkIn(runtimeScope))
+            ).pipe(Effect.forkIn(runtimeScope, { startImmediately: true }))
             yield* Ref.set(activePromptFiberRef, Option.some(promptRpcFiber))
+            if (onStarted !== undefined) yield* onStarted
             return yield* Fiber.join(promptRpcFiber).pipe(
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
@@ -900,13 +995,15 @@ export const make = (
           Effect.gen(function* ()
           {
             const activePromptFiber = yield* Ref.get(activePromptFiberRef)
+            // send cancellation before interrupting the local prompt wait so providers
+            // that serialize prompt and cancel requests can observe the cancel first.
+            yield* acp.agent
+              .cancel({ sessionId: started.sessionId })
+              .pipe(Effect.ignore, Effect.forkIn(runtimeScope, { startImmediately: true }))
             if (Option.isSome(activePromptFiber))
             {
               yield* Fiber.interrupt(activePromptFiber.value).pipe(Effect.ignore)
             }
-            yield* acp.agent
-              .cancel({ sessionId: started.sessionId })
-              .pipe(Effect.ignore, Effect.forkIn(runtimeScope))
           }),
         ),
       ),

@@ -6,6 +6,7 @@ import {
   type ModelSelection,
   type PreviewAnnotationPayload,
   type ProviderDriverKind,
+  type ProviderRuntimeCapabilities,
   type RuntimeMode,
   type ServerProvider,
 } from '@t3tools/contracts'
@@ -58,6 +59,7 @@ export interface ChatComposerHandle
     selectedModel: string
     selectedProviderModels: ReadonlyArray<ServerProvider['models'][number]>
     selectedProviderSlashCommands: ReadonlyArray<ServerProvider['slashCommands'][number]>
+    selectedProviderCapabilities: ProviderRuntimeCapabilities
     runtimeMode: RuntimeMode
   }
 }

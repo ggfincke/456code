@@ -1623,6 +1623,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
             : {}),
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,
+          runtimeModeAcknowledgements: command.runtimeModeAcknowledgements,
           interactionMode: targetThread.interactionMode,
           ...(command.orchestrate !== undefined || targetThread.orchestrate !== undefined
             ? { orchestrate: command.orchestrate ?? targetThread.orchestrate }

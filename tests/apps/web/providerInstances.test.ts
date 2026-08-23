@@ -10,6 +10,7 @@ import {
   getDefaultProviderInstanceModel,
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
+  providerInstancePickerLabel,
   resolveDefaultProviderModelSelection,
   resolveSelectableProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
@@ -22,6 +23,7 @@ function provider(input: {
   enabled?: boolean
   availability?: ServerProvider['availability']
   displayName?: string
+  badgeLabel?: string
   accentColor?: string
   status?: ServerProvider['status']
   models?: ServerProvider['models']
@@ -31,6 +33,7 @@ function provider(input: {
     instanceId: ProviderInstanceId.make(input.instanceId),
     driver: input.provider,
     ...(input.displayName ? { displayName: input.displayName } : {}),
+    ...(input.badgeLabel ? { badgeLabel: input.badgeLabel } : {}),
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     enabled: input.enabled ?? true,
     installed: true,
@@ -194,6 +197,21 @@ describe('deriveProviderInstanceEntries', () =>
     expect(entry?.instanceId).toBe('codex_personal')
     expect(entry?.driverKind).toBe('codex')
     expect(entry?.isDefault).toBe(false)
+  })
+
+  it('preserves provider badges in the picker display label', () =>
+  {
+    const [entry] = deriveProviderInstanceEntries([
+      provider({
+        provider: ProviderDriverKind.make('antigravity'),
+        instanceId: 'antigravity',
+        displayName: 'Antigravity',
+        badgeLabel: 'Experimental',
+      }),
+    ])
+
+    expect(entry?.badgeLabel).toBe('Experimental')
+    expect(entry && providerInstancePickerLabel(entry)).toBe('Antigravity · Experimental')
   })
 })
 

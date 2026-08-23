@@ -12,6 +12,16 @@ import {
 
 describe('ProviderSettingsForm helpers', () =>
 {
+  it('exposes Antigravity with the experimental badge metadata', () =>
+  {
+    const antigravity = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make('antigravity')]
+
+    expect(antigravity).toMatchObject({
+      label: 'Antigravity',
+      badgeLabel: 'Experimental',
+    })
+  })
+
   it('derives visible provider config fields from the client definition schema', () =>
   {
     const codex = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make('codex')]

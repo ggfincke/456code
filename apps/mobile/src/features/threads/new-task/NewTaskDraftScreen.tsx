@@ -47,6 +47,7 @@ import {
 } from '../../../state/use-composer-drafts'
 import { useProjects } from '../../../state/entities'
 import { deriveThreadTitleFromPrompt } from '../../../lib/projectThreadStartTurn'
+import { confirmProviderRuntimeModeWarnings } from '../../../lib/providerRuntimeModeWarnings'
 import { armAgentAwarenessLiveActivityForLocalWork } from '../../agent-awareness/remoteRegistration'
 import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from '../../../state/thread-outbox'
 import { useRemoteConnectionStatus } from '../../../state/use-remote-environment-registry'
@@ -638,6 +639,8 @@ export function NewTaskDraftScreen(props: {
     [flow.selectedModel?.options, flow.selectedModelOption?.capabilities],
   )
   const selectedProviderRuntimeCapabilities = flow.selectedProviderRuntimeCapabilities
+  const supportsImageAttachments =
+    selectedProviderRuntimeCapabilities.supportedAttachmentTypes.includes('image')
   const effectiveRuntimeMode = selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(
     flow.runtimeMode,
   )
@@ -913,7 +916,7 @@ export function NewTaskDraftScreen(props: {
 
   async function handlePickImages(): Promise<void>
   {
-    if (isIncomingShareTransferPending)
+    if (isIncomingShareTransferPending || !supportsImageAttachments)
     {
       return
     }
@@ -927,6 +930,10 @@ export function NewTaskDraftScreen(props: {
   const handleNativePasteImages = useCallback(
     async (uris: ReadonlyArray<string>) =>
     {
+      if (!supportsImageAttachments)
+      {
+        return
+      }
       try
       {
         const images = await convertPastedImagesToAttachments({
@@ -943,7 +950,7 @@ export function NewTaskDraftScreen(props: {
         console.error('[native paste] error converting images', error)
       }
     },
-    [flow],
+    [flow, supportsImageAttachments],
   )
 
   async function handleStart(): Promise<void>
@@ -990,6 +997,23 @@ export function NewTaskDraftScreen(props: {
       return
     }
 
+    if (draft.attachments.length > 0 && !supportsImageAttachments)
+    {
+      Alert.alert(
+        'Attachments unavailable',
+        'Remove image attachments before starting with this provider.',
+      )
+      return
+    }
+    const runtimeModeAcknowledgements = await confirmProviderRuntimeModeWarnings(
+      selectedProviderRuntimeCapabilities,
+      runtimeMode,
+    )
+    if (runtimeModeAcknowledgements === null)
+    {
+      return
+    }
+
     const editingPendingTask = flow.editingPendingTask
 
     if (!environmentConnected)
@@ -1005,7 +1029,7 @@ export function NewTaskDraftScreen(props: {
             createdAt: editingPendingTask.createdAt,
           }
         : makeTurnCommandMetadata()
-      const message = flow.buildPendingTaskMessage(metadata)
+      const message = flow.buildPendingTaskMessage(metadata, runtimeModeAcknowledgements)
       if (!message)
       {
         return
@@ -1056,6 +1080,7 @@ export function NewTaskDraftScreen(props: {
       worktreePath: workspaceMode === 'worktree' ? null : selectedWorktreePath,
       startFromOrigin,
       runtimeMode,
+      runtimeModeAcknowledgements,
       interactionMode,
       initialMessageText,
       initialAttachments: draft.attachments,
@@ -1137,6 +1162,7 @@ export function NewTaskDraftScreen(props: {
     isIncomingShareReady &&
     !isImportingShare &&
     !flow.submitting &&
+    (supportsImageAttachments || flow.attachments.length === 0) &&
     !(flow.workspaceMode === 'worktree' && !flow.selectedBranchName)
   const promptEditor = (
     <ComposerEditor
@@ -1151,7 +1177,9 @@ export function NewTaskDraftScreen(props: {
       onChangeText={flow.setPrompt}
       onFocus={() => setIsComposerFocused(true)}
       onBlur={() => setIsComposerFocused(false)}
-      onPasteImages={(uris) => void handleNativePasteImages(uris)}
+      onPasteImages={
+        supportsImageAttachments ? (uris) => void handleNativePasteImages(uris) : undefined
+      }
       placeholder={`Describe a coding task in ${selectedProject.title}`}
       // same collapsed centering as ThreadComposer: native vertical gravity
       // in a pill-height box.
@@ -1174,12 +1202,14 @@ export function NewTaskDraftScreen(props: {
 
   const toolbarPills = (
     <>
-      <ComposerToolbarButton
-        icon="plus"
-        onPress={() => void handlePickImages()}
-        showChevron={false}
-        disabled={isIncomingShareTransferPending}
-      />
+      {supportsImageAttachments ? (
+        <ComposerToolbarButton
+          icon="plus"
+          onPress={() => void handlePickImages()}
+          showChevron={false}
+          disabled={isIncomingShareTransferPending}
+        />
+      ) : null}
       <ControlPillMenu
         actions={modelMenuActions}
         onPressAction={({ nativeEvent }) => handleModelMenuAction(nativeEvent.event)}

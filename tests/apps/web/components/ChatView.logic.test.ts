@@ -33,6 +33,7 @@ import {
   handleImportContinuationSendBlock,
   hasServerAcknowledgedLocalDispatch,
   importContinuationConsentToken,
+  isComposerProviderInstanceChange,
   isImportContinuationSendBlocked,
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
@@ -231,6 +232,44 @@ describe('shouldReconcileComposerDraftModelSelection', () =>
         previousProjection: { threadKey, selection: projectedWithOptions },
         projectedSelection: projectedWithOptions,
         threadKey,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('isComposerProviderInstanceChange', () =>
+{
+  const projectedSelection = {
+    instanceId: ProviderInstanceId.make('antigravity'),
+    model: 'default',
+  }
+
+  it('uses the latest composer selection before the thread starts', () =>
+  {
+    expect(
+      isComposerProviderInstanceChange({
+        composerSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5.6-sol',
+        },
+        hasStarted: false,
+        nextInstanceId: projectedSelection.instanceId,
+        projectedSelection,
+      }),
+    ).toBe(true)
+  })
+
+  it('uses the projected selection after the thread starts', () =>
+  {
+    expect(
+      isComposerProviderInstanceChange({
+        composerSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5.6-sol',
+        },
+        hasStarted: true,
+        nextInstanceId: projectedSelection.instanceId,
+        projectedSelection,
       }),
     ).toBe(false)
   })

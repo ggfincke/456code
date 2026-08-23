@@ -15,6 +15,7 @@ export const TrimmedString = Schema.String.pipe(
   ),
 )
 export const TrimmedNonEmptyString = TrimmedString.check(Schema.isNonEmpty())
+export const ProviderRuntimeModeWarningIdSchema = TrimmedNonEmptyString
 
 // git accepts non-ASCII whitespace in ref names, so only remove ASCII input
 // padding from ref values and ref-name search queries.

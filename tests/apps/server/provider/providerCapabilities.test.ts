@@ -20,6 +20,7 @@ describe('providerCapabilities', () =>
     {
       driver: 'codex',
       expected: {
+        defaultRuntimeMode: 'full-access',
         sessionModelSwitch: 'in-session',
         supportedInteractionModes: ['default', 'plan'],
         supportedRuntimeModes: ['approval-required', 'auto-accept-edits', 'auto', 'full-access'],
@@ -27,11 +28,14 @@ describe('providerCapabilities', () =>
         conversationRollback: 'exact',
         orchestrateInstructionDelivery: 'native',
         orchestrateBaseModes: ['default', 'plan'],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
       },
     },
     {
       driver: 'claudeAgent',
       expected: {
+        defaultRuntimeMode: 'full-access',
         sessionModelSwitch: 'in-session',
         supportedInteractionModes: ['default', 'plan'],
         supportedRuntimeModes: ['approval-required', 'auto-accept-edits', 'auto', 'full-access'],
@@ -39,11 +43,14 @@ describe('providerCapabilities', () =>
         conversationRollback: 'exact',
         orchestrateInstructionDelivery: 'native',
         orchestrateBaseModes: ['default', 'plan'],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
       },
     },
     {
       driver: 'cursor',
       expected: {
+        defaultRuntimeMode: 'approval-required',
         sessionModelSwitch: 'in-session',
         supportedInteractionModes: ['default', 'plan'],
         supportedRuntimeModes: ['approval-required', 'full-access'],
@@ -51,11 +58,14 @@ describe('providerCapabilities', () =>
         conversationRollback: 'unsupported',
         orchestrateInstructionDelivery: 'prompt-prefix',
         orchestrateBaseModes: ['default', 'plan'],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
       },
     },
     {
       driver: 'grok',
       expected: {
+        defaultRuntimeMode: 'approval-required',
         sessionModelSwitch: 'in-session',
         supportedInteractionModes: ['default'],
         supportedRuntimeModes: ['approval-required', 'full-access'],
@@ -63,11 +73,14 @@ describe('providerCapabilities', () =>
         conversationRollback: 'unsupported',
         orchestrateInstructionDelivery: 'prompt-prefix',
         orchestrateBaseModes: ['default'],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
       },
     },
     {
       driver: 'opencode',
       expected: {
+        defaultRuntimeMode: 'approval-required',
         sessionModelSwitch: 'in-session',
         supportedInteractionModes: ['default', 'plan'],
         supportedRuntimeModes: ['approval-required', 'full-access'],
@@ -75,11 +88,14 @@ describe('providerCapabilities', () =>
         conversationRollback: 'exact',
         orchestrateInstructionDelivery: 'prompt-prefix',
         orchestrateBaseModes: ['default', 'plan'],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
       },
     },
     {
       driver: 'coral',
       expected: {
+        defaultRuntimeMode: 'approval-required',
         sessionModelSwitch: 'in-session',
         supportedInteractionModes: ['default'],
         supportedRuntimeModes: ['approval-required'],
@@ -87,6 +103,48 @@ describe('providerCapabilities', () =>
         conversationRollback: 'unsupported',
         orchestrateInstructionDelivery: 'unsupported',
         orchestrateBaseModes: [],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
+      },
+    },
+    {
+      driver: 'gemini',
+      expected: {
+        defaultRuntimeMode: 'approval-required',
+        sessionModelSwitch: 'unsupported',
+        supportedInteractionModes: ['default'],
+        supportedRuntimeModes: ['approval-required'],
+        activeTurnInput: 'unsupported',
+        conversationRollback: 'unsupported',
+        orchestrateInstructionDelivery: 'prompt-prefix',
+        orchestrateBaseModes: ['default'],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
+      },
+    },
+    {
+      driver: 'antigravity',
+      expected: {
+        defaultRuntimeMode: 'auto-accept-edits',
+        sessionModelSwitch: 'unsupported',
+        supportedInteractionModes: ['default'],
+        supportedRuntimeModes: ['auto-accept-edits', 'full-access'],
+        activeTurnInput: 'unsupported',
+        conversationRollback: 'unsupported',
+        orchestrateInstructionDelivery: 'prompt-prefix',
+        orchestrateBaseModes: ['default'],
+        runtimeModeWarnings: [
+          {
+            id: 'antigravity-full-access-v1',
+            mode: 'full-access',
+            severity: 'danger',
+            requiresAcknowledgement: true,
+            message:
+              'Antigravity will run with --dangerously-skip-permissions. ' +
+              '456code cannot review or approve individual tool calls.',
+          },
+        ],
+        supportedAttachmentTypes: [],
       },
     },
   ] as const)('returns the canonical $driver matrix', ({ driver, expected }) =>

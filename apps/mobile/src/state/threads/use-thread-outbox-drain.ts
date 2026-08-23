@@ -142,6 +142,7 @@ export function useThreadOutboxDrain(): void
           attachments: queuedMessage.attachments,
           modelSelection,
           runtimeMode: queuedMessage.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+          runtimeModeAcknowledgements: queuedMessage.runtimeModeAcknowledgements ?? [],
           interactionMode: normalizeCollaborationMode(
             queuedMessage.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
             queuedMessage.orchestrate,

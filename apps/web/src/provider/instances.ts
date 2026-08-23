@@ -39,13 +39,14 @@ export const NO_PROVIDER_MODEL_SELECTION: ModelSelection = {
  * UI-facing projection of one configured provider instance. Carries the
  * snapshot verbatim for callers that need server-side fields we don't
  * hoist here, plus the precomputed `instanceId` / `driverKind` /
- * `displayName` used by every picker and settings view.
+ * `displayName` / `badgeLabel` used by every picker and settings view.
  */
 export interface ProviderInstanceEntry
 {
   readonly instanceId: ProviderInstanceId
   readonly driverKind: ProviderDriverKind
   readonly displayName: string
+  readonly badgeLabel?: string | undefined
   readonly accentColor?: string | undefined
   readonly continuationGroupKey?: string | undefined
   readonly enabled: boolean
@@ -74,6 +75,11 @@ export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boo
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean
 {
   return entry.enabled
+}
+
+export function providerInstancePickerLabel(entry: ProviderInstanceEntry): string
+{
+  return entry.badgeLabel ? `${entry.displayName} · ${entry.badgeLabel}` : entry.displayName
 }
 
 // turn an instance id slug into a human-readable label. Splits on `_` / `-`
@@ -185,6 +191,7 @@ export function deriveProviderInstanceEntries(
       instanceId,
       driverKind,
       displayName,
+      ...(snapshot.badgeLabel?.trim() ? { badgeLabel: snapshot.badgeLabel.trim() } : {}),
       accentColor: normalizeProviderAccentColor(snapshot.accentColor),
       continuationGroupKey: snapshot.continuation?.groupKey,
       enabled: snapshot.enabled,

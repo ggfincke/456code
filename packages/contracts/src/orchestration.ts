@@ -20,6 +20,7 @@ import {
   NonNegativeInt,
   ProjectId,
   ProviderItemId,
+  ProviderRuntimeModeWarningIdSchema,
   ThreadId,
   TrimmedString,
   TrimmedNonEmptyString,
@@ -1079,6 +1080,11 @@ export const ThreadTurnStartCommand = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  runtimeModeAcknowledgements: Schema.optionalKey(
+    Schema.Array(ProviderRuntimeModeWarningIdSchema).pipe(
+      Schema.withDecodingDefault(Effect.succeed([] as const)),
+    ),
+  ),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
@@ -1102,6 +1108,11 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode,
+  runtimeModeAcknowledgements: Schema.optionalKey(
+    Schema.Array(ProviderRuntimeModeWarningIdSchema).pipe(
+      Schema.withDecodingDefault(Effect.succeed([] as const)),
+    ),
+  ),
   interactionMode: ProviderInteractionMode,
   orchestrate: Schema.optional(Schema.Boolean),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
@@ -1699,6 +1710,11 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  runtimeModeAcknowledgements: Schema.optionalKey(
+    Schema.Array(ProviderRuntimeModeWarningIdSchema).pipe(
+      Schema.withDecodingDefault(Effect.succeed([] as const)),
+    ),
+  ),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),

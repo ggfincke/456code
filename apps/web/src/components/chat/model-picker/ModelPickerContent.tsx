@@ -28,6 +28,7 @@ import { TooltipProvider } from '../../ui/tooltip'
 import {
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
+  providerInstancePickerLabel,
   type ProviderInstanceEntry,
 } from '../../../providerInstances'
 import { providerModelKey, sortProviderModelItems } from '../../../modelOrdering'
@@ -241,7 +242,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.subProvider ? { subProvider: model.subProvider } : {}),
           instanceId,
           driverKind: entry.driverKind,
-          instanceDisplayName: entry.displayName,
+          instanceDisplayName: providerInstancePickerLabel(entry),
           ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
           ...(entry.continuationGroupKey
             ? { continuationGroupKey: entry.continuationGroupKey }
@@ -633,7 +634,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               ? {
                   disabledInstanceIds: lockedDisabledInstanceIds,
                   getDisabledInstanceTooltip: (entry: ProviderInstanceEntry) =>
-                    `${entry.displayName} is unavailable in this thread. Start a new thread to switch providers.`,
+                    `${providerInstancePickerLabel(entry)} is unavailable in this thread. Start a new thread to switch providers.`,
                 }
               : {})}
           />

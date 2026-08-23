@@ -182,6 +182,7 @@ describe('thread outbox', () =>
         options: [{ id: 'reasoningEffort', value: 'xhigh' }],
       },
       runtimeMode: 'approval-required',
+      runtimeModeAcknowledgements: ['antigravity-full-access-v1'],
       interactionMode: 'plan',
       orchestrate: true,
     } satisfies QueuedThreadMessage
@@ -216,7 +217,7 @@ describe('thread outbox', () =>
     ).toMatchObject({ interactionMode: 'default', orchestrate: true })
   })
 
-  it('round-trips persisted delivery state while decoding schema versions one through four', () =>
+  it('round-trips persisted delivery state while decoding schema versions one through five', () =>
   {
     const message = {
       ...queuedMessage({
@@ -229,7 +230,7 @@ describe('thread outbox', () =>
     } satisfies QueuedThreadMessage
 
     expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(message))).toEqual(message)
-    for (const schemaVersion of [1, 2, 3, 4])
+    for (const schemaVersion of [1, 2, 3, 4, 5])
     {
       expect(
         decodeQueuedThreadMessage({

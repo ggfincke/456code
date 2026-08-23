@@ -34,7 +34,7 @@ interface RootResolutionOptions
   readonly cwd?: string
 }
 
-interface AcpContinuationRoute
+export interface AcpContinuationRoute
 {
   readonly command: string
   readonly args: ReadonlyArray<string>
@@ -74,6 +74,14 @@ const GROK_SOURCE_ENVIRONMENT_NAMES = [
 ] as const
 
 const CORAL_SOURCE_ENVIRONMENT_NAMES = ['CORAL_HOME', 'HOME', 'PATH', 'PATHEXT'] as const
+
+const GEMINI_SOURCE_ENVIRONMENT_NAMES = [
+  'GEMINI_API_KEY',
+  'GEMINI_CLI_HOME',
+  'HOME',
+  'PATH',
+  'PATHEXT',
+] as const
 
 const ACP_PATH_SOURCE_ENVIRONMENT_NAMES = new Set([
   'CURSOR_CONFIG_DIR',
@@ -254,7 +262,7 @@ function updateLengthPrefixed(hash: NodeCrypto.Hash, value: string): void
 
 function continuationIdentityFromFields(
   driverKind: ProviderDriverKind,
-  sourceKind: 'acp' | 'file' | 'server',
+  sourceKind: 'acp' | 'file' | 'server' | 'process',
   fields: ReadonlyArray<string>,
 ): ProviderContinuationIdentity
 {
@@ -350,6 +358,26 @@ export function acpContinuationIdentity(
     .filter((entry): entry is [string, string] => entry[1] !== undefined)
     .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
   return continuationIdentityFromFields(driverKind, 'acp', [
+    'command',
+    route.command,
+    'args',
+    String(route.args.length),
+    ...route.args,
+    'env',
+    String(environmentEntries.length),
+    ...environmentEntries.flatMap(([name, value]) => [name, value]),
+  ])
+}
+
+export function processContinuationIdentity(
+  driverKind: ProviderDriverKind,
+  route: AcpContinuationRoute,
+): ProviderContinuationIdentity
+{
+  const environmentEntries = Object.entries(route.env ?? {})
+    .filter((entry): entry is [string, string] => entry[1] !== undefined)
+    .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+  return continuationIdentityFromFields(driverKind, 'process', [
     'command',
     route.command,
     'args',
@@ -580,9 +608,11 @@ export function acpContinuationEnvironment(
       ? CURSOR_SOURCE_ENVIRONMENT_NAMES
       : driverKind === 'grok'
         ? GROK_SOURCE_ENVIRONMENT_NAMES
-        : driverKind === 'coral'
-          ? CORAL_SOURCE_ENVIRONMENT_NAMES
-          : []
+        : driverKind === 'gemini'
+          ? GEMINI_SOURCE_ENVIRONMENT_NAMES
+          : driverKind === 'coral'
+            ? CORAL_SOURCE_ENVIRONMENT_NAMES
+            : []
   const environment: NodeJS.ProcessEnv = {}
   for (const variable of instanceEnvironment ?? [])
   {

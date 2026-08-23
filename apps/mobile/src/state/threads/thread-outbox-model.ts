@@ -15,6 +15,7 @@ import {
   NonNegativeInt,
   ProjectId,
   ProviderInteractionMode,
+  ProviderRuntimeModeWarningId,
   RuntimeMode,
   ThreadId,
   normalizeCollaborationMode,
@@ -29,7 +30,7 @@ import { DraftComposerImageAttachmentSchema } from '../../lib/composer-image-sch
 import type { DraftComposerImageAttachment } from '../../lib/composerImages'
 import { scopedThreadKey } from '../../lib/scopedEntities'
 
-const THREAD_OUTBOX_SCHEMA_VERSION = 5
+const THREAD_OUTBOX_SCHEMA_VERSION = 6
 const THREAD_OUTBOX_MAX_RETRY_DELAY_MS = 16_000
 const THREAD_OUTBOX_MAX_SETTINGS_SYNC_ATTEMPTS = 3
 const THREAD_OUTBOX_MAX_DELIVERY_ATTEMPTS = 3
@@ -51,7 +52,7 @@ const QueuedThreadCreationSchema = Schema.Struct({
 })
 
 export const QueuedThreadMessageSchema = Schema.Struct({
-  schemaVersion: Schema.Literals([1, 2, 3, 4, THREAD_OUTBOX_SCHEMA_VERSION]),
+  schemaVersion: Schema.Literals([1, 2, 3, 4, 5, THREAD_OUTBOX_SCHEMA_VERSION]),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   messageId: MessageId,
@@ -60,6 +61,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   attachments: Schema.Array(DraftComposerImageAttachmentSchema),
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
+  runtimeModeAcknowledgements: Schema.optional(Schema.Array(ProviderRuntimeModeWarningId)),
   interactionMode: Schema.optional(ProviderInteractionMode),
   orchestrate: Schema.optional(Schema.Boolean),
   // present when the queued item creates a brand-new thread (pending task)
@@ -96,6 +98,7 @@ export interface QueuedThreadMessage
   readonly attachments: ReadonlyArray<DraftComposerImageAttachment>
   readonly modelSelection?: ModelSelectionType
   readonly runtimeMode?: RuntimeModeType
+  readonly runtimeModeAcknowledgements?: ReadonlyArray<ProviderRuntimeModeWarningId>
   readonly interactionMode?: ProviderInteractionModeType
   readonly orchestrate?: boolean
   readonly creation?: QueuedThreadCreation
