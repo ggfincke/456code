@@ -19,7 +19,11 @@ import {
   getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,
 } from '../providerIconUtils'
-import { shouldShowInstanceBadge, type ProviderInstanceEntry } from '../../../providerInstances'
+import {
+  providerInstancePickerLabel,
+  shouldShowInstanceBadge,
+  type ProviderInstanceEntry,
+} from '../../../providerInstances'
 import type { ModelSwitchCacheHint } from '../../../providerSwitchPresentation'
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -79,7 +83,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const triggerAriaLabel =
     props.triggerAriaLabel ??
     (activeEntry
-      ? `Change provider and model — currently ${activeEntry.displayName}, ${triggerTitle}`
+      ? `Change provider and model — currently ${providerInstancePickerLabel(activeEntry)}, ${triggerTitle}`
       : `Change provider and model — currently ${triggerTitle}`)
 
   const setIsMenuOpen = (open: boolean) =>

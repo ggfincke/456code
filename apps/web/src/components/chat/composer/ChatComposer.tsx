@@ -566,6 +566,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   )
   const selectedProviderCapabilities =
     selectedProviderStatus?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+  const supportsImageAttachments =
+    selectedProviderCapabilities.supportedAttachmentTypes.includes('image')
   const orchestrateMode =
     collaborationMode.orchestrate &&
     selectedProviderCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
@@ -600,8 +602,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase === 'running' && selectedProviderCapabilities.activeTurnInput === 'unsupported'
       ? 'Wait for the active provider turn to finish before sending another message.'
       : null
+  const unsupportedAttachmentReason =
+    !supportsImageAttachments && composerImages.length > 0
+      ? 'Remove image attachments before sending with this provider.'
+      : null
   const effectiveSendDisabledReason =
-    sendDisabledReason ?? activeTurnInputDisabledReason ?? brokerNotReadyMessage
+    sendDisabledReason ??
+    unsupportedAttachmentReason ??
+    activeTurnInputDisabledReason ??
+    brokerNotReadyMessage
   const isSendDisabled = effectiveSendDisabledReason !== null
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider['models'][number]>>(
     () => selectedProviderEntry?.models ?? [],
@@ -2320,6 +2329,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const addComposerImages = async (files: File[]) =>
   {
     if (!activeThreadId || files.length === 0) return
+    if (!supportsImageAttachments)
+    {
+      setThreadError(activeThreadId, 'This provider does not support image attachments.')
+      return
+    }
     if (pendingUserInputs.length > 0)
     {
       toastManager.add({
@@ -2585,7 +2599,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       },
       addDroppedFiles: (files: File[]) =>
       {
-        if (isSendBusy || isConnecting || providerSwitch !== null) return
+        if (isSendBusy || isConnecting || providerSwitch !== null || !supportsImageAttachments)
+          return
         void addComposerImages(files)
         focusComposer()
       },
@@ -2682,6 +2697,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedModel,
         selectedProviderModels,
         selectedProviderSlashCommands: selectedProviderStatus?.slashCommands ?? [],
+        selectedProviderCapabilities,
         runtimeMode: runtimeModeForSend(
           runtimeMode,
           selectedProviderCapabilities.supportedRuntimeModes,

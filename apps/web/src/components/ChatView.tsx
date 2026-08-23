@@ -12,6 +12,7 @@ import {
   type ProjectScript,
   type ProjectId,
   type ProviderApprovalDecision,
+  type ProviderRuntimeModeWarningId,
   ProviderInstanceId,
   type ServerProvider,
   type ScopedThreadRef,
@@ -4632,6 +4633,15 @@ function ChatViewContent(props: ChatViewProps)
       const localApi = readLocalApi()
       if (!localApi || !activeThread || isRevertingCheckpoint) return
 
+      const threadProviderStatus = providerStatuses.find(
+        (provider) => provider.instanceId === activeThread.modelSelection.instanceId,
+      )
+      if (threadProviderStatus?.capabilities?.conversationRollback === 'unsupported')
+      {
+        setThreadError(activeThread.id, 'This provider does not support conversation rollback.')
+        return
+      }
+
       if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel)
       {
         setThreadError(
@@ -4685,6 +4695,7 @@ function ChatViewContent(props: ChatViewProps)
       isRevertingCheckpoint,
       isSendBusy,
       phase,
+      providerStatuses,
       revertThreadCheckpoint,
       setThreadError,
     ],
@@ -4983,9 +4994,11 @@ function ChatViewContent(props: ChatViewProps)
     async ({
       text,
       collaborationMode: nextCollaborationMode,
+      runtimeModeAcknowledgements,
     }: {
       text: string
       collaborationMode: CollaborationMode
+      runtimeModeAcknowledgements?: ReadonlyArray<ProviderRuntimeModeWarningId>
     }): Promise<boolean> =>
     {
       if (
@@ -5109,6 +5122,9 @@ function ChatViewContent(props: ChatViewProps)
             modelSelection: ctxSelectedModelSelection,
             titleSeed: activeThread.title,
             runtimeMode: dispatchRuntimeMode,
+            ...(runtimeModeAcknowledgements && runtimeModeAcknowledgements.length > 0
+              ? { runtimeModeAcknowledgements }
+              : {}),
             interactionMode: wireMode.interactionMode,
             orchestrate: wireMode.orchestrate,
             ...(importContinuationConsent ? { importContinuationConsent } : {}),
@@ -5209,8 +5225,26 @@ function ChatViewContent(props: ChatViewProps)
         selectedProviderModels: ctxSelectedProviderModels,
         selectedPromptEffort: ctxSelectedPromptEffort,
         selectedModelSelection: ctxSelectedModelSelection,
+        selectedProviderCapabilities: ctxSelectedProviderCapabilities,
         runtimeMode: dispatchRuntimeMode,
       } = sendCtx
+
+      const runtimeModeAcknowledgements: ProviderRuntimeModeWarningId[] = []
+      for (const warning of ctxSelectedProviderCapabilities.runtimeModeWarnings)
+      {
+        if (warning.mode !== dispatchRuntimeMode || !warning.requiresAcknowledgement)
+        {
+          continue
+        }
+        const message = `${warning.message}\n\nWarning id: ${warning.id}`
+        const confirmed =
+          (await readLocalApi()?.dialogs.confirm(message)) ?? window.confirm(message)
+        if (!confirmed)
+        {
+          return
+        }
+        runtimeModeAcknowledgements.push(warning.id)
+      }
 
       const createdAt = new Date().toISOString()
       const nextThreadId = newThreadId()
@@ -5280,6 +5314,7 @@ function ChatViewContent(props: ChatViewProps)
             modelSelection: ctxSelectedModelSelection,
             titleSeed: nextThreadTitle,
             runtimeMode: dispatchRuntimeMode,
+            ...(runtimeModeAcknowledgements.length > 0 ? { runtimeModeAcknowledgements } : {}),
             interactionMode: implementationWireMode.interactionMode,
             orchestrate: implementationWireMode.orchestrate,
             sourceProposedPlan: {
@@ -5388,6 +5423,7 @@ function ChatViewContent(props: ChatViewProps)
     activeProviderSwitchTargetLabel,
     composerProviderSwitch,
     confirmProviderSwitch,
+    confirmRuntimeModeWarning,
     dispatchSend,
     getModelDisabledReason,
     isSwitchingProvider,
@@ -5395,8 +5431,10 @@ function ChatViewContent(props: ChatViewProps)
     onInterrupt,
     onProviderModelSelect,
     onProviderSwitchConfirmationOpenChange,
+    onRuntimeModeWarningConfirmationOpenChange,
     onSend,
     providerSwitchConfirmation,
+    runtimeModeWarningConfirmation,
   } = useChatDispatchController({
     activeLatestTurnRunning: activeLatestTurn?.state === 'running',
     activeThread: activeThread ?? null,
@@ -6001,6 +6039,9 @@ function ChatViewContent(props: ChatViewProps)
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                canRevertConversation={
+                  activeProviderStatus?.capabilities?.conversationRollback !== 'unsupported'
+                }
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
@@ -6291,6 +6332,37 @@ function ChatViewContent(props: ChatViewProps)
                     onClick={() => void confirmProviderSwitch()}
                   >
                     {isSwitchingProvider ? 'Switching...' : 'Switch provider'}
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogPopup>
+            </AlertDialog>
+
+            <AlertDialog
+              open={
+                runtimeModeWarningConfirmation?.environmentId === activeThread.environmentId &&
+                runtimeModeWarningConfirmation.threadId === activeThread.id
+              }
+              onOpenChange={onRuntimeModeWarningConfirmationOpenChange}
+            >
+              <AlertDialogPopup>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Start this full-access session?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {runtimeModeWarningConfirmation?.warning.message ??
+                      'This provider mode requires explicit acknowledgement.'}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+                  <Button
+                    variant={
+                      runtimeModeWarningConfirmation?.warning.severity === 'danger'
+                        ? 'destructive'
+                        : 'default'
+                    }
+                    onClick={confirmRuntimeModeWarning}
+                  >
+                    I understand, start
                   </Button>
                 </AlertDialogFooter>
               </AlertDialogPopup>

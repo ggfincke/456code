@@ -9,6 +9,7 @@ import {
   type CollaborationMode,
   type ModelSelection,
   type ProjectId,
+  type ProviderRuntimeModeWarningId,
   type RuntimeMode,
 } from '@t3tools/contracts'
 
@@ -38,6 +39,7 @@ export interface ProjectThreadStartTurnSpec
   readonly attachments: ReadonlyArray<DraftComposerImageAttachment>
   readonly modelSelection: ModelSelection
   readonly runtimeMode: RuntimeMode
+  readonly runtimeModeAcknowledgements: ReadonlyArray<ProviderRuntimeModeWarningId>
   readonly interactionMode: CollaborationMode
   readonly workspaceMode: 'local' | 'worktree'
   readonly branch: string | null
@@ -67,6 +69,9 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     modelSelection: spec.modelSelection,
     titleSeed: title,
     runtimeMode: spec.runtimeMode,
+    ...(spec.runtimeModeAcknowledgements.length > 0
+      ? { runtimeModeAcknowledgements: spec.runtimeModeAcknowledgements }
+      : {}),
     ...wireInteractionMode,
     bootstrap: {
       createThread: {

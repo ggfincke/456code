@@ -9,6 +9,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { cn } from '~/lib/utils'
 import {
   isProviderInstancePickerReady,
+  providerInstancePickerLabel,
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from '../../../providerInstances'
@@ -18,7 +19,7 @@ import {
 // instances get their user-authored name (e.g. "Codex Personal — Unavailable.").
 function describeUnavailableInstance(entry: ProviderInstanceEntry): string
 {
-  const label = entry.displayName
+  const label = providerInstancePickerLabel(entry)
   if (!entry.enabled || entry.status === 'disabled')
   {
     return `${label} — Disabled in settings.`
@@ -161,14 +162,15 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             const isHovered = hoveredInstanceId === entry.instanceId
             const showNewBadge = props.newBadgeInstanceIds?.has(entry.instanceId) ?? false
             const showInstanceBadge = shouldShowInstanceBadge(entry, props.instanceEntries)
+            const pickerLabel = providerInstancePickerLabel(entry)
 
             const tooltip = isUnavailable
               ? describeUnavailableInstance(entry)
               : isContextDisabled
                 ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
                 : showNewBadge
-                  ? `${entry.displayName} — New`
-                  : entry.displayName
+                  ? `${pickerLabel} — New`
+                  : pickerLabel
 
             const button = (
               <button
@@ -190,11 +192,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 disabled={isDisabled}
                 type="button"
                 aria-label={
-                  isDisabled
-                    ? tooltip
-                    : showNewBadge
-                      ? `${entry.displayName}, new`
-                      : entry.displayName
+                  isDisabled ? tooltip : showNewBadge ? `${pickerLabel}, new` : pickerLabel
                 }
               >
                 <ProviderInstanceIcon

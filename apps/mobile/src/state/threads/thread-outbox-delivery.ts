@@ -494,6 +494,9 @@ async function sendQueuedMessage(input: {
       },
       ...(threadHasStarted(finalThread) ? {} : { modelSelection: finalSettings.modelSelection }),
       runtimeMode: finalSettings.runtimeMode,
+      ...((dispatchMessage.runtimeModeAcknowledgements?.length ?? 0) > 0
+        ? { runtimeModeAcknowledgements: dispatchMessage.runtimeModeAcknowledgements }
+        : {}),
       ...wireInteractionMode,
       createdAt: dispatchMessage.turnStartCreatedAt,
     },

@@ -1,7 +1,11 @@
 // apps/mobile/src/state/threads/use-thread-provider-switch.ts
 // drives confirmed provider switches and their lifecycle notice for the selected thread
 
-import type { ModelSelection, ProviderInstanceId } from '@t3tools/contracts'
+import type {
+  ModelSelection,
+  ProviderInstanceId,
+  ProviderRuntimeCapabilities,
+} from '@t3tools/contracts'
 import { hasBlockingApprovalOutcome } from '@t3tools/client-runtime/state/thread-settled'
 import { useCallback, useMemo, useState } from 'react'
 import { Alert } from 'react-native'
@@ -24,7 +28,10 @@ import {
 } from '../../lib/thread-activity/provider-switch'
 import { threadEnvironment } from './threads'
 import { useAtomCommand } from '../use-atom-command'
-import { updateComposerDraftSettings } from './use-composer-drafts'
+import {
+  updateComposerDraftSettings,
+  type ComposerDraftSettingsUpdate,
+} from './use-composer-drafts'
 import { useRemoteEnvironmentRuntime } from '../use-remote-environment-registry'
 import { useSelectedThreadDetail } from './use-thread-detail'
 import { useThreadSelection } from './use-thread-selection'
@@ -47,6 +54,18 @@ interface DismissedOutcome
 {
   readonly threadKey: string
   readonly outcomeId: string
+}
+
+export function resolveConfirmedProviderSwitchDraftSettings(
+  capabilities: Pick<ProviderRuntimeCapabilities, 'defaultRuntimeMode'> | undefined,
+): ComposerDraftSettingsUpdate
+{
+  return {
+    modelSelection: undefined,
+    ...(capabilities?.defaultRuntimeMode !== undefined
+      ? { runtimeMode: capabilities.defaultRuntimeMode }
+      : {}),
+  }
 }
 
 export function useThreadProviderSwitch(): ThreadProviderSwitchState
@@ -129,10 +148,14 @@ export function useThreadProviderSwitch(): ThreadProviderSwitchState
       // the draft's provider override would keep naming the outgoing instance
       // once the handoff lands. Drop that one setting — draft text, images, and
       // the outbox are untouched — so the composer tracks the thread's real
-      // provider for the whole switch.
+      // provider for the whole switch. Runtime mode changes with the confirmed
+      // dispatch so blocked or canceled switches leave the draft untouched.
+      const targetCapabilities = providers?.find(
+        (provider) => provider.instanceId === selection.instanceId,
+      )?.capabilities
       updateComposerDraftSettings(
         scopedThreadKey(selectedThread.environmentId, selectedThread.id),
-        { modelSelection: undefined },
+        resolveConfirmedProviderSwitchDraftSettings(targetCapabilities),
       )
       void switchProvider({
         environmentId: selectedThread.environmentId,
@@ -143,7 +166,7 @@ export function useThreadProviderSwitch(): ThreadProviderSwitchState
         },
       })
     },
-    [selectedThread, switchProvider],
+    [providers, selectedThread, switchProvider],
   )
 
   const onDismissNotice = useCallback(() =>

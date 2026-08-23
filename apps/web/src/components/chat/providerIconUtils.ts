@@ -2,7 +2,17 @@
 // provide provider icon by integration
 
 import { ProviderDriverKind } from '@t3tools/contracts'
-import { ClaudeAI, CoralIcon, CursorIcon, GrokIcon, Icon, OpenAI, OpenCodeIcon } from '../Icons'
+import {
+  AntigravityIcon,
+  ClaudeAI,
+  CoralIcon,
+  CursorIcon,
+  Gemini,
+  GrokIcon,
+  Icon,
+  OpenAI,
+  OpenCodeIcon,
+} from '../Icons'
 import { PROVIDER_OPTIONS } from '../../session-logic'
 
 export {
@@ -19,6 +29,8 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>
   [ProviderDriverKind.make('cursor')]: CursorIcon,
   [ProviderDriverKind.make('grok')]: GrokIcon,
   [ProviderDriverKind.make('coral')]: CoralIcon,
+  [ProviderDriverKind.make('gemini')]: Gemini,
+  [ProviderDriverKind.make('antigravity')]: AntigravityIcon,
 }
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {

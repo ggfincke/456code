@@ -10,6 +10,7 @@ import {
   ThreadId,
   type CollaborationMode,
   type ModelSelection,
+  type ProviderRuntimeModeWarningId,
   type RuntimeMode,
 } from '@t3tools/contracts'
 import { buildTemporaryWorktreeBranchName } from '@t3tools/shared/git'
@@ -38,6 +39,7 @@ export function useCreateProjectThread()
       readonly worktreePath: string | null
       readonly startFromOrigin?: boolean
       readonly runtimeMode: RuntimeMode
+      readonly runtimeModeAcknowledgements: ReadonlyArray<ProviderRuntimeModeWarningId>
       readonly interactionMode: CollaborationMode
       readonly initialMessageText: string
       readonly initialAttachments: ReadonlyArray<DraftComposerImageAttachment>
@@ -75,6 +77,7 @@ export function useCreateProjectThread()
           attachments: input.initialAttachments,
           modelSelection: input.modelSelection,
           runtimeMode: input.runtimeMode,
+          runtimeModeAcknowledgements: input.runtimeModeAcknowledgements,
           interactionMode: input.interactionMode,
           workspaceMode: input.envMode,
           branch: input.branch,

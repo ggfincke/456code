@@ -207,6 +207,7 @@ function buildProps()
     onOpenTurnDiff: () =>
     {},
     revertTurnCountByUserMessageId: new Map(),
+    canRevertConversation: true,
     onRevertUserMessage: () =>
     {},
     isRevertingCheckpoint: false,
@@ -516,6 +517,30 @@ describe('MessagesTimeline', () =>
     expect(markup).not.toContain('Show full message')
     expect(markup).toContain('data-user-message-collapsible="false"')
     expect(markup).toContain('rounded-2xl bg-accent p-3')
+  })
+
+  it('hides rollback controls when the provider reports rollback as unsupported', () =>
+  {
+    const entry = buildUserTimelineEntry('Do not offer rollback.')
+    const revertTurnCountByUserMessageId = new Map([[entry.message.id, 1]])
+    const supportedMarkup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[entry]}
+        revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+      />,
+    )
+    const unsupportedMarkup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[entry]}
+        revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+        canRevertConversation={false}
+      />,
+    )
+
+    expect(supportedMarkup).toContain('aria-label="Revert to this message"')
+    expect(unsupportedMarkup).not.toContain('aria-label="Revert to this message"')
   })
 
   it('preserves XML-like tags as inert source text in user messages', () =>

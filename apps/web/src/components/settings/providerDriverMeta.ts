@@ -2,19 +2,23 @@
 // resolve driver option
 
 import {
+  AntigravitySettings,
   ClaudeSettings,
   CoralSettings,
   CodexSettings,
   CursorSettings,
+  GeminiSettings,
   GrokSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from '@t3tools/contracts'
 import type * as Schema from 'effect/Schema'
 import {
+  AntigravityIcon,
   ClaudeAI,
   CoralIcon,
   CursorIcon,
+  Gemini,
   GrokIcon,
   type Icon,
   OpenAI,
@@ -84,6 +88,19 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     icon: CoralIcon,
     badgeLabel: 'Early Access',
     settingsSchema: CoralSettings,
+  },
+  {
+    value: ProviderDriverKind.make('gemini'),
+    label: 'Gemini',
+    icon: Gemini,
+    settingsSchema: GeminiSettings,
+  },
+  {
+    value: ProviderDriverKind.make('antigravity'),
+    label: 'Antigravity',
+    icon: AntigravityIcon,
+    badgeLabel: 'Experimental',
+    settingsSchema: AntigravitySettings,
   },
 ]
 

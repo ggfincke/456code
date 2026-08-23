@@ -60,6 +60,7 @@ interface MessagesTimelineProps
   routeThreadKey: string
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void
   revertTurnCountByUserMessageId: Map<MessageId, number>
+  canRevertConversation: boolean
   onRevertUserMessage: (messageId: MessageId) => void
   isRevertingCheckpoint: boolean
   onImageExpand: (preview: ExpandedImagePreview) => void
@@ -94,6 +95,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   routeThreadKey,
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
+  canRevertConversation,
   onRevertUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
@@ -353,6 +355,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      canRevertConversation,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -368,6 +371,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      canRevertConversation,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,

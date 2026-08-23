@@ -180,7 +180,7 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
           .join('\n\n')
   const previewImages = userImages.filter((image) => image.name.startsWith('preview-annotation-'))
   const regularImages = userImages.filter((image) => !image.name.startsWith('preview-annotation-'))
-  const canRevertAgentWork = typeof row.revertTurnCount === 'number'
+  const canRevertAgentWork = ctx.canRevertConversation && typeof row.revertTurnCount === 'number'
 
   return (
     <div className="group flex flex-col items-end gap-1">

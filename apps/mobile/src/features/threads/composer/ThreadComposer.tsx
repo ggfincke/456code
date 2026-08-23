@@ -419,6 +419,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId])
   const providerCapabilities =
     selectedProviderStatus?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+  const supportsImageAttachments = providerCapabilities.supportedAttachmentTypes.includes('image')
   const currentRuntimeMode = providerCapabilities.supportedRuntimeModes.includes(
     selectedRuntimeMode,
   )
@@ -434,15 +435,22 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   )
   const providerRejectsActiveInput =
     props.activeThreadBusy && providerCapabilities.activeTurnInput === 'unsupported'
-  const canSend = hasContent && props.sendBlockedReason === null && !providerRejectsActiveInput
+  const hasUnsupportedAttachments = !supportsImageAttachments && props.draftAttachments.length > 0
+  const canSend =
+    hasContent &&
+    props.sendBlockedReason === null &&
+    !providerRejectsActiveInput &&
+    !hasUnsupportedAttachments
   const sendLabel =
     props.sendBlockedReason !== null
       ? 'Sending blocked'
       : providerRejectsActiveInput
         ? 'Wait for the current turn'
-        : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
-          ? 'Queue'
-          : 'Send'
+        : hasUnsupportedAttachments
+          ? 'Remove unsupported attachments'
+          : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
+            ? 'Queue'
+            : 'Send'
   const providerSkills = useMemo(
     () =>
       (selectedProviderStatus?.skills ?? []).filter(
@@ -997,7 +1005,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               selection={composerSelection}
               onChangeText={props.onChangeDraftMessage}
               onSelectionChange={handleSelectionChange}
-              onPasteImages={(uris) => void props.onNativePasteImages(uris)}
+              onPasteImages={
+                supportsImageAttachments
+                  ? (uris) => void props.onNativePasteImages(uris)
+                  : undefined
+              }
               placeholder={props.placeholder}
               onFocus={handleFocus}
               onBlur={handleBlur}
@@ -1069,12 +1081,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 fadeOpaque={toolbarFadeOpaque}
                 fadeTransparent={toolbarFadeTransparent}
               >
-                <ComposerToolbarButton
-                  accessibilityLabel="Add attachment"
-                  icon="plus"
-                  onPress={() => void props.onPickDraftImages()}
-                  showChevron={false}
-                />
+                {supportsImageAttachments ? (
+                  <ComposerToolbarButton
+                    accessibilityLabel="Add attachment"
+                    icon="plus"
+                    onPress={() => void props.onPickDraftImages()}
+                    showChevron={false}
+                  />
+                ) : null}
                 <ControlPillMenu
                   actions={modelMenuActions}
                   onPressAction={({ nativeEvent }) => handleModelMenuAction(nativeEvent.event)}
