@@ -90,6 +90,14 @@ function isolatedImportSettings(
         ...DEFAULT_SERVER_SETTINGS.providers.grok,
         enabled: false,
       },
+      gemini: {
+        ...DEFAULT_SERVER_SETTINGS.providers.gemini,
+        enabled: false,
+      },
+      antigravity: {
+        ...DEFAULT_SERVER_SETTINGS.providers.antigravity,
+        enabled: false,
+      },
       opencode: {
         ...DEFAULT_SERVER_SETTINGS.providers.opencode,
         enabled: false,
