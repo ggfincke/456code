@@ -785,6 +785,19 @@ export function modelSelectionsEqual(left: ModelSelection, right: ModelSelection
   )
 }
 
+export function isComposerProviderInstanceChange(input: {
+  composerSelection: ModelSelection | null
+  hasStarted: boolean
+  nextInstanceId: ProviderInstanceId
+  projectedSelection: ModelSelection
+}): boolean
+{
+  const currentSelection = input.hasStarted
+    ? input.projectedSelection
+    : (input.composerSelection ?? input.projectedSelection)
+  return currentSelection.instanceId !== input.nextInstanceId
+}
+
 // a composer selection the user picked directly, paired with the projection it
 // replaced at that moment. A user pick is model-only — the draft keeps its own
 // options — so the selection identifies the instance and model, not the options.

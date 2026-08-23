@@ -60,6 +60,7 @@ import {
   getStartedThreadProviderSwitchBlockReason,
   handleImportContinuationSendBlock,
   IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  isComposerProviderInstanceChange,
   readFileAsDataUrl,
   revokeUserMessagePreviewUrls,
   shouldReconcileComposerDraftModelSelection,
@@ -677,7 +678,12 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         supersededProjection: activeThread.modelSelection,
       }
       if (
-        instanceId !== activeThread.modelSelection.instanceId &&
+        isComposerProviderInstanceChange({
+          composerSelection: composerModelSelection,
+          hasStarted: threadHasStarted(activeThread),
+          nextInstanceId: instanceId,
+          projectedSelection: activeThread.modelSelection,
+        }) &&
         entry.capabilities?.defaultRuntimeMode
       )
       {
@@ -692,6 +698,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       activeThread,
       applyComposerModelSelection,
       currentProviderInstanceId,
+      composerModelSelection,
       lockedProvider,
       providerSwitchBlockReason,
       providerStatuses,
