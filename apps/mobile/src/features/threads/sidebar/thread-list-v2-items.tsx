@@ -221,16 +221,24 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     () =>
       props.pinningSupported
         ? [
-            pinnedRow
+            thread.pinnedAt != null
               ? { id: 'unpin', title: 'Unpin', image: 'pin.slash' }
               : { id: 'pin', title: 'Pin', image: 'pin' },
           ]
         : [],
-    [pinnedRow, props.pinningSupported],
+    [props.pinningSupported, thread.pinnedAt],
   )
   const cardMenuActions = useMemo<MenuAction[]>(
     () => [CARD_MENU_ACTIONS[0]!, ...pinMenuItem, ...CARD_MENU_ACTIONS.slice(1)],
     [pinMenuItem],
+  )
+  const slimMenuActions = useMemo<MenuAction[]>(
+    () => [
+      SLIM_MENU_ACTIONS[0]!,
+      ...(thread.pinnedAt != null ? pinMenuItem : []),
+      SLIM_MENU_ACTIONS[1]!,
+    ],
+    [pinMenuItem, thread.pinnedAt],
   )
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) =>
@@ -543,7 +551,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               !props.settlementSupported
                 ? LEGACY_MENU_ACTIONS
                 : canUnsettle
-                  ? SLIM_MENU_ACTIONS
+                  ? slimMenuActions
                   : cardMenuActions
             }
             onPressAction={handleMenuAction}

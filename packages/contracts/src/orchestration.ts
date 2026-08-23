@@ -725,9 +725,9 @@ export const OrchestrationThread = Schema.Struct({
   // optional so payloads from pre-snooze servers still decode.
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
-  // pinning clears existing settlement/snooze state, but a later lifecycle
-  // transition can coexist with this timestamp. Optional so payloads from
-  // pre-pinning servers still decode.
+  // active pinned threads render in the pinned block. settled and snoozed
+  // threads stay in their lifecycle shelves while retaining this timestamp.
+  // optional so payloads from pre-pinning servers still decode.
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),

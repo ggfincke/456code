@@ -212,7 +212,7 @@ describe('buildThreadListV2Items', () =>
     expect(layout.snoozedCount).toBe(1)
   })
 
-  it('renders pinned threads first and exempts them from settlement', () =>
+  it('places settled pinned threads in the settled tail without clearing the pin', () =>
   {
     const layout = buildThreadListV2Items({
       threads: [
@@ -230,10 +230,48 @@ describe('buildThreadListV2Items', () =>
       now: NOW,
     })
 
-    expect(layout.items.map((item) => item.thread.id)).toEqual(['pinned-settled', 'active'])
-    expect(layout.items.map((item) => item.pinned)).toEqual([true, false])
-    expect(layout.items.map((item) => item.variant)).toEqual(['card', 'card'])
+    expect(layout.items.map((item) => item.thread.id)).toEqual(['active', 'pinned-settled'])
+    expect(layout.items.map((item) => item.pinned)).toEqual([false, false])
+    expect(layout.items.map((item) => item.variant)).toEqual(['card', 'slim'])
+    expect(layout.items[1]?.thread.pinnedAt).toBe('2026-06-01T12:00:00.000Z')
     expect(layout.hiddenSettledCount).toBe(0)
+  })
+
+  it('moves merged and inactive pins to the settled tail while active pins stay first', () =>
+  {
+    const pinnedAt = '2026-05-21T00:00:00.000Z'
+    const activePin = makeThread({ id: ThreadId.make('active-pin'), title: 'Active pin', pinnedAt })
+    const merged = makeThread({ id: ThreadId.make('merged-pin'), title: 'Merged pin', pinnedAt })
+    const inactive = makeThread({
+      id: ThreadId.make('inactive-pin'),
+      title: 'Inactive pin',
+      pinnedAt,
+      latestUserMessageAt: '2026-05-21T00:00:00.000Z',
+    })
+    const { items } = buildThreadListV2Items({
+      threads: [
+        inactive,
+        merged,
+        makeThread({ id: ThreadId.make('active'), title: 'Active' }),
+        activePin,
+      ],
+      environmentId: null,
+      searchQuery: '',
+      changeRequestStateByKey: new Map([[`${environmentId}:${merged.id}`, 'merged']]),
+      now: NOW,
+    })
+
+    expect(items.map((item) => [item.thread.id, item.variant, item.pinned])).toEqual([
+      ['active-pin', 'card', true],
+      ['active', 'card', false],
+      ['merged-pin', 'slim', false],
+      ['inactive-pin', 'slim', false],
+    ])
+    expect(
+      items
+        .filter((item) => item.variant === 'slim')
+        .every((item) => item.thread.pinnedAt === pinnedAt),
+    ).toBe(true)
   })
 
   it('keeps imported history-only threads out of pin actions and the pinned block', () =>
@@ -381,13 +419,14 @@ describe('buildThreadListV2Items', () =>
     expect(items.map((item) => item.isLast)).toEqual([false, false, true])
   })
 
-  it('keeps merged threads active when merge auto-settle is disabled but still settles closed threads', () =>
+  it('keeps merged pins active when merge auto-settle is disabled but still settles closed pins', () =>
   {
     const activityAt = '2026-06-01T20:00:00.000Z'
     const makeIdleTerminalThread = (id: 'merged' | 'closed') =>
       makeThread({
         id: ThreadId.make(id),
         title: id,
+        pinnedAt: '2026-06-01T12:00:00.000Z',
         latestUserMessageAt: activityAt,
         latestTurn: {
           turnId: TurnId.make(`${id}-turn`),
@@ -414,6 +453,8 @@ describe('buildThreadListV2Items', () =>
       ['merged', 'card'],
       ['closed', 'slim'],
     ])
+    expect(items.map((item) => item.pinned)).toEqual([true, false])
+    expect(items.every((item) => item.thread.pinnedAt === '2026-06-01T12:00:00.000Z')).toBe(true)
   })
 
   it('keeps cards in creation order while settled sorts by recency', () =>

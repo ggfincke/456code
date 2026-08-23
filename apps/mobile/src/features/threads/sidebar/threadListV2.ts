@@ -124,7 +124,7 @@ export interface ThreadListV2Item
 {
   readonly thread: EnvironmentThreadShell
   readonly variant: 'card' | 'slim'
-  // pinned-block row: renders the pin glyph and offers Unpin.
+  // belongs to the pinned block; lifecycle shelves retain the pin on thread.
   readonly pinned: boolean
   // first settled row after the card block draws the SETTLED divider.
   readonly showSettledDivider: boolean
@@ -215,8 +215,7 @@ export function buildThreadListV2Items(input: {
     const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true
     const changeRequestState =
       input.changeRequestStateByKey?.get(`${thread.environmentId}:${thread.id}`) ?? null
-    // snooze outranks pinning: a hidden pinned thread keeps its pin and
-    // returns to the pinned block when it wakes.
+    // snooze outranks settlement and pinning until the thread wakes.
     if (supportsSnooze && effectiveSnoozed(thread, { now: snoozeNow }))
     {
       snoozedCount += 1
@@ -230,13 +229,6 @@ export function buildThreadListV2Items(input: {
       }
       continue
     }
-    // pinning overrides settlement in this wave, including stale settled
-    // state that has not yet observed the server-side pin transition.
-    if (thread.pinnedAt != null && !isImportedHistoryOnlyThread(thread))
-    {
-      pinned.push(thread)
-      continue
-    }
     if (
       supportsSettlement &&
       effectiveSettled(thread, {
@@ -248,6 +240,10 @@ export function buildThreadListV2Items(input: {
     )
     {
       settled.push(thread)
+    }
+    else if (thread.pinnedAt != null && !isImportedHistoryOnlyThread(thread))
+    {
+      pinned.push(thread)
     }
     else
     {

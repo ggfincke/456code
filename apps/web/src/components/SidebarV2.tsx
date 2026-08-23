@@ -552,7 +552,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   settlementSupported: boolean
   // same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean
-  // pinned cards keep their lifecycle quick actions; pin/unpin stays in the menu.
+  // the pin marker survives lifecycle shelves; pin/unpin stays in the menu.
   isPinned: boolean
   // compact wake countdown ("2h") for rows in the snoozed shelf.
   snoozeWakeLabelText: string | null
@@ -1075,6 +1075,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         #{pr.number}
       </button>
     ) : null
+  const pinIndicator = props.isPinned ? (
+    <PinIcon aria-label="Pinned" role="img" className="size-3 shrink-0 text-muted-foreground/65" />
+  ) : null
 
   if (variant === 'slim')
   {
@@ -1126,6 +1129,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             ) : (
               title
             )}
+            {pinIndicator}
             {/* The PR badge stays outside the hover-fading slot: it must
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
@@ -1235,13 +1239,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : (
                 <span className="flex-1" />
               )}
-              {props.isPinned ? (
-                <PinIcon
-                  aria-label="Pinned"
-                  role="img"
-                  className="size-3 shrink-0 text-muted-foreground/65"
-                />
-              ) : null}
+              {pinIndicator}
               <span className="group/v2-actions relative ml-auto flex h-5 min-w-8 shrink-0 items-center justify-end pl-1 text-xs">
                 {/* hidden status text must not intercept hover actions */}
                 <span
@@ -2932,7 +2930,7 @@ export default function SidebarV2()
           snoozeSupported={
             serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
           }
-          isPinned={section === 'pinned'}
+          isPinned={section !== 'imported' && thread.pinnedAt != null}
           snoozeWakeLabelText={
             section === 'snoozed' && thread.snoozedUntil != null
               ? snoozeWakeLabel(thread.snoozedUntil, new Date())

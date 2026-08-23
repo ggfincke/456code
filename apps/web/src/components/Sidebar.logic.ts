@@ -64,6 +64,7 @@ export function partitionLegacySidebarProjectThreads<
   },
 >(
   threads: readonly TThread[],
+  isLifecycleShelfThread: (thread: TThread) => boolean,
 ): {
   readonly pinnedThreads: readonly TThread[]
   readonly regularThreads: readonly TThread[]
@@ -73,7 +74,12 @@ export function partitionLegacySidebarProjectThreads<
   const regularThreads: TThread[] = []
   for (const thread of threads)
   {
-    if (thread.pinnedAt != null && !isImportedShelfThread(thread)) pinnedThreads.push(thread)
+    if (
+      thread.pinnedAt != null &&
+      !isImportedShelfThread(thread) &&
+      !isLifecycleShelfThread(thread)
+    )
+      pinnedThreads.push(thread)
     else regularThreads.push(thread)
   }
   return { pinnedThreads, regularThreads }
@@ -98,8 +104,7 @@ export function estimateSidebarV2HeaderSize(input: {
 
 export type SidebarV2LifecycleSection = 'active' | 'pinned' | 'settled' | 'snoozed'
 
-// explicit snooze temporarily hides a pin; otherwise pinning keeps a thread
-// above the inbox before settlement is considered.
+// snooze and settlement keep their shelves even while the underlying pin remains.
 export function resolveSidebarV2LifecycleSection(input: {
   readonly snoozed: boolean
   readonly pinned: boolean
@@ -107,8 +112,8 @@ export function resolveSidebarV2LifecycleSection(input: {
 }): SidebarV2LifecycleSection
 {
   if (input.snoozed) return 'snoozed'
-  if (input.pinned) return 'pinned'
   if (input.settled) return 'settled'
+  if (input.pinned) return 'pinned'
   return 'active'
 }
 

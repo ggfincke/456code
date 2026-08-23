@@ -66,6 +66,7 @@ import {
   scopeThreadRef,
 } from '@t3tools/client-runtime/environment'
 import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
+import { effectiveSettled, effectiveSnoozed } from '@t3tools/client-runtime/state/thread-settled'
 import { resolveThreadChangeRoot } from '@t3tools/shared/threadChangeRoot'
 import {
   isAtomCommandInterrupted,
@@ -91,6 +92,7 @@ import {
   readThreadShell,
   useProject,
   useProjects,
+  useServerConfigs,
   useThreadShells,
   useThreadShellsForProjectRefs,
 } from '../state/entities'
@@ -119,6 +121,7 @@ import { readLocalApi } from '../localApi'
 import { useComposerDraftStore } from '../composerDraftStore'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
 import { useTerminalFocus } from '../hooks/useTerminalFocus'
+import { useNowMinute } from '../hooks/useNowMinute'
 import { useDesktopUpdateState } from '../state/desktopUpdate'
 
 import { useThreadActions } from '../hooks/useThreadActions'
@@ -1245,6 +1248,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   )
+  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays)
+  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const serverConfigs = useServerConfigs()
+  const nowMinute = useNowMinute()
   const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   )
@@ -1417,8 +1424,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     return counts
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads])
 
-  const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() =>
+  const {
+    projectStatus,
+    pinnedProjectThreads,
+    regularProjectThreads,
+    visibleProjectThreads,
+    orderedProjectThreadKeys,
+  } = useMemo(() =>
   {
+    const now = `${nowMinute}:00.000Z`
     const lastVisitedAtByThreadKey = new Map(
       projectThreads.map((thread, index) => [
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
@@ -1441,8 +1455,32 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       projectThreads.filter((thread) => thread.archivedAt === null),
       threadSortOrder,
     )
-    const { pinnedThreads, regularThreads } =
-      partitionLegacySidebarProjectThreads(sortedProjectThreads)
+    const { pinnedThreads, regularThreads } = partitionLegacySidebarProjectThreads(
+      sortedProjectThreads,
+      (thread) =>
+      {
+        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities
+        const snapshot = changeRequestSnapshotByKey.get(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        )
+        const changeRequest =
+          thread.branch !== null &&
+          snapshot !== undefined &&
+          (thread.worktreePath === null || snapshot.branch === thread.branch)
+            ? snapshot.pr
+            : null
+        return (
+          (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now })) ||
+          (capabilities?.threadSettlement === true &&
+            effectiveSettled(thread, {
+              now,
+              autoSettleAfterDays,
+              autoSettleOnMerge,
+              changeRequest,
+            }))
+        )
+      },
+    )
     const visibleProjectThreads = [...pinnedThreads, ...regularThreads]
     const projectStatus = resolveProjectStatusIndicator(
       visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
@@ -1452,9 +1490,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
       projectStatus,
+      pinnedProjectThreads: pinnedThreads,
+      regularProjectThreads: regularThreads,
       visibleProjectThreads,
     }
-  }, [projectThreads, threadLastVisitedAts, threadSortOrder])
+  }, [
+    autoSettleAfterDays,
+    autoSettleOnMerge,
+    changeRequestSnapshotByKey,
+    nowMinute,
+    projectThreads,
+    serverConfigs,
+    threadLastVisitedAts,
+    threadSortOrder,
+  ])
   const pinnedCollapsedThread = useMemo(() =>
   {
     const activeThreadKey = activeRouteThreadKey ?? undefined
@@ -1497,12 +1546,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       })
     }
-    const { pinnedThreads, regularThreads } =
-      partitionLegacySidebarProjectThreads(visibleProjectThreads)
-    const regularPreviewCount = Math.max(0, sidebarThreadPreviewCount - pinnedThreads.length)
+    const regularPreviewCount = Math.max(0, sidebarThreadPreviewCount - pinnedProjectThreads.length)
     const previewThreads = isThreadListExpanded
       ? visibleProjectThreads
-      : [...pinnedThreads, ...regularThreads.slice(0, regularPreviewCount)]
+      : [...pinnedProjectThreads, ...regularProjectThreads.slice(0, regularPreviewCount)]
     const hasOverflowingThreads = previewThreads.length < visibleProjectThreads.length
     const visibleThreadKeys = new Set(
       [...previewThreads, ...(pinnedCollapsedThread ? [pinnedCollapsedThread] : [])].map((thread) =>
@@ -1523,7 +1570,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       hiddenThreadStatus: resolveProjectStatusIndicator(
         hiddenThreads.map((thread) => resolveProjectThreadStatus(thread)),
       ),
-      pinnedThreadCount: pinnedThreads.length,
+      pinnedThreadCount: pinnedProjectThreads.length,
       renderedThreads,
       showEmptyThreadState: projectExpanded && visibleProjectThreads.length === 0,
       shouldShowThreadPanel: projectExpanded || pinnedCollapsedThread !== null,
@@ -1531,8 +1578,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }, [
     isThreadListExpanded,
     pinnedCollapsedThread,
+    pinnedProjectThreads,
     projectExpanded,
     projectThreads,
+    regularProjectThreads,
     sidebarThreadPreviewCount,
     threadLastVisitedAts,
     visibleProjectThreads,

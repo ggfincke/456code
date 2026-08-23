@@ -2,6 +2,7 @@
 // verifies sidebar thread grouping and presentation
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { effectiveSettled, effectiveSnoozed } from '@t3tools/client-runtime/state/thread-settled'
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
@@ -110,7 +111,7 @@ describe('resolveSidebarV2LifecycleSection', () =>
     ).toBe('snoozed')
   })
 
-  it('keeps a pinned thread above settlement in the initial pinning model', () =>
+  it('keeps a settled pinned thread in the settled shelf', () =>
   {
     expect(
       resolveSidebarV2LifecycleSection({
@@ -118,11 +119,18 @@ describe('resolveSidebarV2LifecycleSection', () =>
         pinned: true,
         settled: true,
       }),
-    ).toBe('pinned')
+    ).toBe('settled')
   })
 
   it('falls through to settled and active sections', () =>
   {
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: true,
+        settled: false,
+      }),
+    ).toBe('pinned')
     expect(
       resolveSidebarV2LifecycleSection({
         snoozed: false,
@@ -246,12 +254,10 @@ describe('partitionLegacySidebarProjectThreads', () =>
       pinnedAt: 'stale-pin',
     }
 
-    const partition = partitionLegacySidebarProjectThreads([
-      regular,
-      legacyWithoutPinField,
-      importedPinned,
-      nativePinned,
-    ])
+    const partition = partitionLegacySidebarProjectThreads(
+      [regular, legacyWithoutPinField, importedPinned, nativePinned],
+      () => false,
+    )
 
     expect(partition.pinnedThreads.map((thread) => thread.id)).toEqual(['native-pinned'])
     expect(partition.regularThreads.map((thread) => thread.id)).toEqual([
@@ -259,6 +265,64 @@ describe('partitionLegacySidebarProjectThreads', () =>
       'legacy-without-pin-field',
       'imported-pinned',
     ])
+  })
+
+  it('does not promote settled or snoozed pins, including derived settlement', () =>
+  {
+    const now = '2026-06-02T00:00:00.000Z'
+    const pinnedAt = '2026-05-21T00:00:00.000Z'
+    const active = {
+      ...makeThread({ id: ThreadId.make('active-pinned'), pinnedAt }),
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    }
+    const settled = {
+      ...active,
+      id: ThreadId.make('settled-pinned'),
+      settledOverride: 'settled' as const,
+      settledAt: now,
+    }
+    const inactive = {
+      ...active,
+      id: ThreadId.make('inactive-pinned'),
+      latestUserMessageAt: '2026-05-21T00:00:00.000Z',
+    }
+    const merged = { ...active, id: ThreadId.make('merged-pinned') }
+    const snoozed = {
+      ...settled,
+      id: ThreadId.make('snoozed-pinned'),
+      snoozedAt: '2026-06-01T12:00:00.000Z',
+      snoozedUntil: '2026-06-03T12:00:00.000Z',
+    }
+    const threads = [settled, inactive, merged, snoozed, active]
+    const sectionForThread = (thread: (typeof threads)[number]) =>
+      resolveSidebarV2LifecycleSection({
+        snoozed: effectiveSnoozed(thread, { now }),
+        pinned: thread.pinnedAt != null,
+        settled: effectiveSettled(thread, {
+          now,
+          autoSettleAfterDays: 3,
+          changeRequest: thread.id === merged.id ? { state: 'merged' } : null,
+        }),
+      })
+
+    expect(threads.map(sectionForThread)).toEqual([
+      'settled',
+      'settled',
+      'settled',
+      'snoozed',
+      'pinned',
+    ])
+    const partition = partitionLegacySidebarProjectThreads(threads, (thread) =>
+    {
+      const section = sectionForThread(thread)
+      return section === 'settled' || section === 'snoozed'
+    })
+    expect(partition.pinnedThreads).toEqual([active])
+    expect(partition.regularThreads).toEqual([settled, inactive, merged, snoozed])
+    expect(threads.every((thread) => thread.pinnedAt === pinnedAt)).toBe(true)
   })
 })
 
