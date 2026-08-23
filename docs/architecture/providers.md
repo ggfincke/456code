@@ -32,7 +32,7 @@ registry to remove or replace the route. A failed stop leaves the durable genera
 generation-bound MCP credential live for exact cleanup. Additions use the same mutation gate, so no
 settings change can install a route after shutdown fences admission high-water.
 
-Five built-in provider drivers are registered in
+Eight built-in provider drivers are registered in
 [`builtInDrivers.ts`](../../apps/server/src/provider/catalog/builtInDrivers.ts):
 
 - Codex
@@ -40,6 +40,30 @@ Five built-in provider drivers are registered in
 - Cursor
 - Grok
 - OpenCode
+- Coral (Early Access)
+- Gemini — gemini-cli over ACP stdio (`gemini --acp`), disabled by default
+- Antigravity (Experimental) — `agy` over persistent NDJSON stdio, disabled by default
+
+Gemini and Antigravity remain separate provider identities. Each driver launches its official
+Google executable and lets that executable own its login and native session files. 456code does not
+copy credentials between them, extract Google tokens, or redirect one CLI through the other's
+backend. Antigravity's headless protocol is not ACP, so it has a dedicated runtime rather than an
+ACP compatibility shim.
+
+## Google CLI capability boundary
+
+The two Google providers intentionally expose different runtime contracts:
+
+| Provider                   | Process transport                                                              | Runtime modes                                                                                                                 | Session/model limits                                                                                                                                | Attachments and orchestration                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Gemini                     | `gemini --acp` over ACP JSON-RPC stdio                                         | Conservative `approval-required` fallback; `auto-accept-edits` and `full-access` only after ACP confirms their exact mode IDs | Multi-turn and replay-gated `session/load`; rollback and active-turn input unsupported; model switching only when the CLI advertises it             | Images supported; plan interaction only after ACP confirms it; orchestration is a prompt prefix |
+| Antigravity (Experimental) | Persistent `agy --input-format stream-json --output-format stream-json` NDJSON | `auto-accept-edits` and acknowledgement-gated `full-access`                                                                   | Opaque `conversation_id` continuation; rollback, active-turn input, and in-session model/interaction-mode switching unsupported; one turn at a time | No native attachments; orchestration is a prompt prefix                                         |
+
+Antigravity full-access admission is server-enforced with the exact capability acknowledgement
+`antigravity-full-access-v1`. The server cannot review individual headless tool calls, so a client
+or direct RPC caller that omits the acknowledgement is rejected before the session starts.
+Neither provider shares credentials with the other, extracts CLI tokens, calls a direct Google
+backend, or uses a Python SDK/sidecar.
 
 ## Client transport
 

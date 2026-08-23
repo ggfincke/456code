@@ -43,6 +43,7 @@ unapproved plan without guessing that it started.
 | [28-coral-provider-integration.md](28-coral-provider-integration.md) | Early Access Core shipped | Disabled-by-default Coral driver; Phase 2 HTTP MCP/Orchestrate parked; Phases 3–4 not this release. |
 | [29-native-architecture-views-product-rescue.md](29-native-architecture-views-product-rescue.md) | completed / compatibility superseded | Preserves the completed rescue and acceptance record; plan 30 replaces only its Native Architecture compatibility policy. |
 | [30-native-architecture-breaking-cutover.md](30-native-architecture-breaking-cutover.md) | completed | Current-only Native Architecture cutover, focused verification, migration-070 upgrade, and retained source dogfood acceptance are complete. |
+| [31-gemini-provider-integration.md](31-gemini-provider-integration.md) | active | First-class Gemini ACP and Antigravity persistent NDJSON drivers; three sequential review slices and real-CLI closeout gates remain tracked. |
 | [README.md](README.md) | active | Maintained inventory and status index for the tracked planning surface. |
 | [branch-environment-picker-in-chatview-input.md](branch-environment-picker-in-chatview-input.md) | historical | Legacy renderer UX proposal with obsolete package paths and no closeout state. |
 | [effect-atom.md](effect-atom.md) | proposed | AtomRpc migration phases are specified without an implementation ledger. |
