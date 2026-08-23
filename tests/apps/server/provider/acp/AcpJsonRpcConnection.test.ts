@@ -2,6 +2,7 @@
 // verifies scoped ACP JSON-RPC session lifecycle and replay handling
 
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from 'node:crypto'
 import * as NodePath from 'node:path'
 import * as NodeOS from 'node:os'
 import * as NodeURL from 'node:url'
@@ -26,6 +27,9 @@ const mockAgentPath = NodePath.join(
 )
 const mockAgentCommand = 'node'
 const mockAgentArgs = [mockAgentPath]
+const sha256 = (value: string): string =>
+  NodeCrypto.createHash('sha256').update(value, 'utf8').digest('hex')
+const userMessageSha256 = (text: string): string => sha256(JSON.stringify([{ type: 'text', text }]))
 
 describe('AcpSessionRuntime', () =>
 {
@@ -285,6 +289,58 @@ describe('AcpSessionRuntime', () =>
       ),
       Effect.scoped,
       Effect.provide(NodeServices.layer),
+    ),
+  )
+
+  it.effect('keeps late terminal tool notifications after session/cancel', () =>
+    Effect.gen(function* ()
+    {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime
+      yield* runtime.start()
+
+      const promptFiber = yield* runtime
+        .prompt({
+          prompt: [{ type: 'text', text: 'hang forever' }],
+        })
+        .pipe(Effect.forkChild({ startImmediately: true }))
+
+      yield* runtime.cancel
+      const promptResult = yield* Fiber.join(promptFiber)
+      expect(promptResult).toMatchObject({ stopReason: 'cancelled' })
+
+      const lateEvent = yield* Stream.runHead(runtime.getEvents()).pipe(Effect.timeout('1 second'))
+      expect(Option.isSome(lateEvent)).toBe(true)
+      if (Option.isSome(lateEvent))
+      {
+        expect(lateEvent.value._tag).toBe('ToolCallUpdated')
+        if (lateEvent.value._tag !== 'ToolCallUpdated')
+        {
+          return
+        }
+        expect(lateEvent.value.toolCall).toMatchObject({
+          toolCallId: 'late-terminal-tool',
+          status: 'completed',
+        })
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_HANG_FIRST_PROMPT_FOREVER: '1',
+              T3_ACP_EMIT_LATE_TERMINAL_TOOL_AFTER_CANCEL: '1',
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: 't3-test', version: '0.0.0' },
+          authMethodId: 'test',
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
     ),
   )
 
@@ -630,6 +686,116 @@ describe('AcpSessionRuntime', () =>
           cwd: process.cwd(),
           resumeSessionId: 'mock-session-1',
           sessionLoadReplayIdleGap: '50 millis',
+          sessionLoadTimeout: '1 second',
+          clientInfo: { name: 't3-test', version: '0.0.0' },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
+    ),
+  )
+
+  it.effect('keeps replay gating active until a delayed session/load RPC settles', () =>
+    Effect.gen(function* ()
+    {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime
+      const started = yield* runtime.start().pipe(Effect.timeout('2 seconds'))
+
+      expect(started.sessionSetupResult._meta).toMatchObject({
+        t3SessionLoadReady: 'replay_idle',
+      })
+      const unexpectedReplayEvent = yield* Stream.runHead(runtime.getEvents()).pipe(
+        Effect.timeoutOption('500 millis'),
+      )
+      expect(Option.isNone(unexpectedReplayEvent)).toBe(true)
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: 'test',
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_DELAY_LOAD_SESSION_AFTER_REPLAY: '1',
+              T3_ACP_EMIT_LATE_LOAD_REPLAY_AFTER_IDLE: '1',
+              T3_ACP_LOAD_SESSION_DELAY_MS: '150',
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: 'mock-session-1',
+          sessionLoadReplayIdleGap: '25 millis',
+          sessionLoadTimeout: '1 second',
+          clientInfo: { name: 't3-test', version: '0.0.0' },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
+    ),
+  )
+
+  it.effect('waits for the expected replay user-message tail before accepting session/load', () =>
+    Effect.gen(function* ()
+    {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime
+      const started = yield* runtime.start().pipe(Effect.timeout('2 seconds'))
+
+      expect(started.sessionId).toBe('mock-session-1')
+      expect(started.sessionSetupResult._meta).not.toMatchObject({
+        t3SessionLoadReady: 'replay_idle',
+      })
+      const unexpectedReplayEvent = yield* Stream.runHead(runtime.getEvents()).pipe(
+        Effect.timeoutOption('100 millis'),
+      )
+      expect(Option.isNone(unexpectedReplayEvent)).toBe(true)
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: 'test',
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_EARLY_LOAD_RESPONSE_BEFORE_REPLAY: '1',
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: 'mock-session-1',
+          expectedReplayUserMessageSha256: userMessageSha256('replay'),
+          sessionLoadReplayIdleGap: '25 millis',
+          sessionLoadTimeout: '1 second',
+          clientInfo: { name: 't3-test', version: '0.0.0' },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
+    ),
+  )
+
+  it.effect('fails session/load when replay does not reach the expected local history tail', () =>
+    Effect.gen(function* ()
+    {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime
+      const error = yield* runtime.start().pipe(Effect.flip)
+
+      expect(error._tag).toBe('AcpTransportError')
+      expect(error._tag === 'AcpTransportError' ? error.detail : '').toBe(
+        'session/load replay did not reach the expected local history tail',
+      )
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: 'test',
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+          },
+          cwd: process.cwd(),
+          resumeSessionId: 'mock-session-1',
+          expectedReplayUserMessageSha256: userMessageSha256('wrong-tail'),
+          sessionLoadReplayIdleGap: '25 millis',
           sessionLoadTimeout: '1 second',
           clientInfo: { name: 't3-test', version: '0.0.0' },
         }),

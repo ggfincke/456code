@@ -537,6 +537,64 @@ export function sessionUpdateIsReplay(params: EffectAcpSchema.SessionNotificatio
   return isRecord(meta) && meta.isReplay === true
 }
 
+export function replayUserMessageChunk(
+  params: EffectAcpSchema.SessionNotification,
+): EffectAcpSchema.ContentBlock | undefined
+{
+  const update = params.update
+  return update.sessionUpdate === 'user_message_chunk' ? update.content : undefined
+}
+
+export function appendReplayUserMessageChunk(
+  current: ReadonlyArray<EffectAcpSchema.ContentBlock>,
+  chunk: EffectAcpSchema.ContentBlock,
+): ReadonlyArray<EffectAcpSchema.ContentBlock>
+{
+  const previous = current.at(-1)
+  if (chunk.type === 'text' && previous?.type === 'text')
+  {
+    return [...current.slice(0, -1), { type: 'text', text: previous.text + chunk.text }]
+  }
+  return [...current, chunk]
+}
+
+export function canonicalReplayUserMessage(
+  blocks: ReadonlyArray<EffectAcpSchema.ContentBlock>,
+): string
+{
+  return JSON.stringify(
+    blocks.map((block) =>
+    {
+      switch (block.type)
+      {
+        case 'text':
+          return { type: block.type, text: block.text }
+        case 'image':
+          return {
+            type: block.type,
+            data: block.data,
+            mimeType: block.mimeType,
+            ...(block.uri ? { uri: block.uri } : {}),
+          }
+        case 'audio':
+          return { type: block.type, data: block.data, mimeType: block.mimeType }
+        case 'resource_link':
+          return {
+            type: block.type,
+            uri: block.uri,
+            name: block.name,
+            ...(block.title ? { title: block.title } : {}),
+            ...(block.description ? { description: block.description } : {}),
+            ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+            ...(block.size === undefined || block.size === null ? {} : { size: block.size }),
+          }
+        case 'resource':
+          return { type: block.type, resource: block.resource }
+      }
+    }),
+  )
+}
+
 export interface SessionLoadGate
 {
   readonly active: boolean
@@ -544,11 +602,25 @@ export interface SessionLoadGate
   readonly lastActivityAtMillis: number | undefined
   readonly idleGap: Duration.Duration
   readonly initializeResult: EffectAcpSchema.InitializeResponse
+  readonly expectedReplayUserMessageSha256?: string
+  readonly replayUserMessageBlocks: ReadonlyArray<EffectAcpSchema.ContentBlock>
+  readonly replayUserMessageOpen: boolean
 }
+
+export interface SessionLoadReplayTailMismatch
+{
+  readonly _tag: 'SessionLoadReplayTailMismatch'
+  readonly expected: string
+  readonly actual: string
+}
+
+export const SESSION_LOAD_REPLAY_TAIL_MISMATCH_DETAIL =
+  'session/load replay did not reach the expected local history tail'
 
 export const waitForSessionLoadReplayIdle = (input: {
   readonly gateRef: Ref.Ref<Option.Option<SessionLoadGate>>
-}): Effect.Effect<EffectAcpSchema.LoadSessionResponse, never> =>
+  readonly digestReplayUserMessage: (text: string) => Effect.Effect<string, never>
+}): Effect.Effect<EffectAcpSchema.LoadSessionResponse, SessionLoadReplayTailMismatch> =>
   Effect.gen(function* ()
   {
     const pollInterval = Duration.millis(25)
@@ -565,6 +637,20 @@ export const waitForSessionLoadReplayIdle = (input: {
         const nowMillis = yield* Clock.currentTimeMillis
         if (nowMillis - gate.value.lastActivityAtMillis >= idleGapMillis)
         {
+          if (gate.value.expectedReplayUserMessageSha256 !== undefined)
+          {
+            const actual = yield* input.digestReplayUserMessage(
+              canonicalReplayUserMessage(gate.value.replayUserMessageBlocks),
+            )
+            if (actual !== gate.value.expectedReplayUserMessageSha256)
+            {
+              return yield* Effect.fail({
+                _tag: 'SessionLoadReplayTailMismatch' as const,
+                expected: gate.value.expectedReplayUserMessageSha256,
+                actual,
+              })
+            }
+          }
           return syntheticLoadSessionResponseFromInitialize(gate.value.initializeResult)
         }
       }
