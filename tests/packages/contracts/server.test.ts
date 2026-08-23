@@ -66,6 +66,8 @@ describe('ServerProvider', () =>
           sessionModelSwitch: 'in-session',
           supportedInteractionModes: ['default'],
           supportedRuntimeModes: ['approval-required'],
+          runtimeModeWarnings: [],
+          supportedAttachmentTypes: ['image'],
           activeTurnInput: 'unsupported',
           conversationRollback: 'unsupported',
           orchestrateInstructionDelivery: 'unsupported',
