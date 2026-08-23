@@ -9,6 +9,7 @@ import * as NodePath from 'node:path'
 import type {
   ProviderApprovalDecision,
   ProviderRuntimeEvent,
+  ProviderRuntimeCapabilities,
   ProviderSendTurnInput,
   ProviderSession,
   ProviderTurnStartResult,
@@ -170,10 +171,14 @@ type LegacyProviderRuntimeEvent = {
   readonly [key: string]: unknown
 }
 
-function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
+function makeFakeCodexAdapter(
+  provider: ProviderDriverKind = CODEX_DRIVER,
+  capabilities: ProviderRuntimeCapabilities = providerCapabilitiesForDriver(provider),
+)
 {
   const sessions = new Map<ThreadId, ProviderSession>()
   const runtimeSessionBindings = new Map<ThreadId, ProviderAdapterRuntimeSessionBinding>()
+  let activeCapabilities = capabilities
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderAdapterRuntimeEvent>())
   let exitEventOrdinal = 0
 
@@ -351,7 +356,10 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
 
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
     provider,
-    capabilities: providerCapabilitiesForDriver(provider),
+    get capabilities()
+    {
+      return activeCapabilities
+    },
     startSession,
     sendTurn,
     interruptTurn,
@@ -428,6 +436,10 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
     stopAll,
     clearSession,
     clearSessions,
+    setCapabilities: (next: ProviderRuntimeCapabilities): void =>
+    {
+      activeCapabilities = next
+    },
   }
 }
 
@@ -580,7 +592,11 @@ function makeProviderServiceTestLayer(
     Layer.provide(SqlitePersistenceMemory),
   )
   const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
-  return makeProviderServiceTestLive(undefined, lifecycleLayer, runtimeInboxLayer).pipe(
+  const serviceLayer = makeProviderServiceTestLive(
+    undefined,
+    lifecycleLayer,
+    runtimeInboxLayer,
+  ).pipe(
     Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
     Layer.provide(directoryLayer),
     Layer.provide(defaultServerSettingsLayer),
@@ -592,6 +608,7 @@ function makeProviderServiceTestLayer(
       ),
     ),
   )
+  return Layer.merge(serviceLayer, directoryLayer)
 }
 
 function makeProviderInstanceLifecycleOwnerTestRegistry(
@@ -1155,6 +1172,119 @@ it.effect('ProviderServiceLive coerces unsupported Coral runtime modes before st
     assert.equal(session.runtimeMode, 'approval-required')
     assert.equal(coral.startSession.mock.calls.length, 1)
     assert.equal(coral.startSession.mock.calls[0]?.[0].runtimeMode, 'approval-required')
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('ProviderServiceLive enforces and recovers runtime mode warning acknowledgements', () =>
+  Effect.gen(function* ()
+  {
+    const warningCapabilities = {
+      ...providerCapabilitiesForDriver(CODEX_DRIVER),
+      runtimeModeWarnings: [
+        {
+          id: 'codex-full-access-v1',
+          mode: 'full-access' as const,
+          severity: 'danger' as const,
+          message: 'This provider can modify files without prompting.',
+          requiresAcknowledgement: true,
+        },
+        {
+          id: 'codex-full-access-display-v1',
+          mode: 'full-access' as const,
+          severity: 'warning' as const,
+          message: 'This provider uses full access mode.',
+          requiresAcknowledgement: false,
+        },
+      ],
+    } satisfies ProviderRuntimeCapabilities
+    const codex = makeFakeCodexAdapter(CODEX_DRIVER, warningCapabilities)
+    const registry = makeAdapterRegistryMock({
+      [CODEX_DRIVER]: codex.adapter,
+    })
+    const threadId = asThreadId('thread-runtime-warning-ack')
+
+    const missing = yield* Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      return yield* provider
+        .startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: 'full-access',
+        })
+        .pipe(Effect.flip)
+    }).pipe(Effect.provide(makeProviderServiceTestLayer(registry)))
+    assert.instanceOf(missing, ProviderValidationError)
+    assert.include(missing.issue, 'codex-full-access-v1')
+    assert.include(missing.issue, 'can modify files')
+    assert.equal(codex.startSession.mock.calls.length, 0)
+
+    yield* Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: 'full-access',
+        runtimeModeAcknowledgements: ['unknown-id', 'codex-full-access-v1'],
+      })
+      codex.clearSession(threadId)
+      yield* provider.sendTurn({ threadId, input: 'recover', attachments: [] })
+      assert.equal(codex.startSession.mock.calls.length, 2)
+
+      codex.setCapabilities({
+        ...warningCapabilities,
+        runtimeModeWarnings: [
+          {
+            id: 'codex-full-access-v2',
+            mode: 'full-access' as const,
+            severity: 'danger' as const,
+            message: 'The provider can modify files without prompting (updated).',
+            requiresAcknowledgement: true,
+          },
+        ],
+      })
+      codex.clearSession(threadId)
+      const stale = yield* provider
+        .sendTurn({ threadId, input: 'stale recovery', attachments: [] })
+        .pipe(Effect.flip)
+      assert.instanceOf(stale, ProviderValidationError)
+      assert.include(stale.issue, 'codex-full-access-v2')
+      assert.equal(codex.startSession.mock.calls.length, 2)
+
+      codex.setCapabilities(warningCapabilities)
+      const fresh = yield* provider
+        .startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: 'full-access',
+        })
+        .pipe(Effect.flip)
+      assert.instanceOf(fresh, ProviderValidationError)
+      assert.include(fresh.issue, 'codex-full-access-v1')
+      assert.equal(codex.startSession.mock.calls.length, 2)
+
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: 'approval-required',
+      })
+      const safeModeBinding = yield* directory.getBinding(threadId)
+      assert.equal(Option.isSome(safeModeBinding), true)
+      if (Option.isSome(safeModeBinding))
+      {
+        assert.equal(
+          (safeModeBinding.value.runtimePayload as Record<string, unknown>)
+            .runtimeModeAcknowledgements,
+          null,
+        )
+      }
+    }).pipe(Effect.provide(makeProviderServiceTestLayer(registry)))
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
@@ -1942,6 +2072,7 @@ it.effect('ProviderServiceLive resets authority when switching same-driver insta
             driverKind: CODEX_DRIVER,
             continuationKey: `codex:file:v1:${secondInstanceId}`,
           },
+          runtimeModeAcknowledgements: null,
         })
       }
     }).pipe(Effect.provide(layer))
@@ -2147,6 +2278,71 @@ it.effect('ProviderServiceLive writes canonical events to the emitting thread se
       canonicalThreadIds.every((threadId) => threadId === 'thread-canonical-thread-segment'),
       true,
     )
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('ProviderServiceLive persists the adapter cursor refreshed at turn completion', () =>
+  Effect.gen(function* ()
+  {
+    const codex = makeFakeCodexAdapter()
+    const registry = makeAdapterRegistryMock({
+      [ProviderDriverKind.make('codex')]: codex.adapter,
+    })
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    )
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
+    const providerLayer = makeProviderServiceTestLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+      Layer.provideMerge(directoryLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(AnalyticsServiceLayers.layerTest),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+    )
+
+    yield* Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory
+      const threadId = asThreadId('thread-terminal-cursor-refresh')
+      const initialCursor = {
+        version: 1,
+        conversationId: 'conversation-1',
+        cumulativeUsage: { inputTokens: 1 },
+      }
+      const terminalCursor = {
+        version: 2,
+        conversationId: 'conversation-1',
+        cumulativeUsage: { inputTokens: 4, outputTokens: 2 },
+      }
+
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: 'full-access',
+        resumeCursor: initialCursor,
+      })
+      codex.updateSession(threadId, (session) => ({ ...session, resumeCursor: terminalCursor }))
+      yield* advanceTestClock(10)
+      codex.emit({
+        eventId: asEventId('evt-terminal-cursor-refresh'),
+        provider: CODEX_DRIVER,
+        threadId,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        type: 'turn.completed',
+        payload: { state: 'completed' },
+      })
+      yield* advanceTestClock(20)
+
+      const binding = Option.getOrUndefined(yield* directory.getBinding(threadId))
+      assert.deepEqual(binding?.resumeCursor, terminalCursor)
+    }).pipe(Effect.provide(providerLayer))
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 

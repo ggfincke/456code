@@ -3,7 +3,7 @@
 
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
-import { TrimmedNonEmptyString } from './baseSchemas.ts'
+import { ProviderRuntimeModeWarningIdSchema, TrimmedNonEmptyString } from './baseSchemas.ts'
 import {
   ApprovalRequestId,
   EventId,
@@ -26,6 +26,9 @@ import {
   RuntimeMode,
 } from './orchestration.ts'
 import { ProviderInstanceId, ProviderDriverKind } from './providerInstance.ts'
+
+export const ProviderRuntimeModeWarningId = ProviderRuntimeModeWarningIdSchema
+export type ProviderRuntimeModeWarningId = typeof ProviderRuntimeModeWarningId.Type
 
 export const ProviderSessionModelSwitchMode = Schema.Literals(['in-session', 'unsupported'])
 export type ProviderSessionModelSwitchMode = typeof ProviderSessionModelSwitchMode.Type
@@ -56,17 +59,28 @@ const SupportedProviderInteractionModes = Schema.NonEmptyArray(ProviderBaseInter
 
 const SupportedProviderRuntimeModes = Schema.NonEmptyArray(RuntimeMode)
 
-export const CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES = {
-  sessionModelSwitch: 'unsupported',
-  supportedInteractionModes: ['default'],
-  supportedRuntimeModes: ['approval-required'],
-  activeTurnInput: 'unsupported',
-  conversationRollback: 'unsupported',
-  orchestrateInstructionDelivery: 'unsupported',
-  orchestrateBaseModes: [],
-} as const
+export const ProviderRuntimeModeWarning = Schema.Struct({
+  id: ProviderRuntimeModeWarningId,
+  mode: RuntimeMode,
+  severity: Schema.Literals(['warning', 'danger']),
+  message: TrimmedNonEmptyString,
+  requiresAcknowledgement: Schema.Boolean,
+})
+export type ProviderRuntimeModeWarning = typeof ProviderRuntimeModeWarning.Type
+
+export const ProviderAttachmentType = Schema.Literal('image')
+export type ProviderAttachmentType = typeof ProviderAttachmentType.Type
+
+const ProviderRuntimeModeWarnings = Schema.Array(ProviderRuntimeModeWarning).check(
+  Schema.makeFilter(
+    (warnings) =>
+      new Set(warnings.map((warning) => warning.id)).size === warnings.length ||
+      'Provider runtime mode warning ids must be unique.',
+  ),
+)
 
 export const ProviderRuntimeCapabilities = Schema.Struct({
+  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   sessionModelSwitch: ProviderSessionModelSwitchMode.pipe(
     Schema.withDecodingDefault(Effect.succeed('unsupported' as const)),
   ),
@@ -75,6 +89,12 @@ export const ProviderRuntimeCapabilities = Schema.Struct({
   ),
   supportedRuntimeModes: SupportedProviderRuntimeModes.pipe(
     Schema.withDecodingDefault(Effect.succeed(['approval-required'] as const)),
+  ),
+  runtimeModeWarnings: ProviderRuntimeModeWarnings.pipe(
+    Schema.withDecodingDefault(Effect.succeed([] as const)),
+  ),
+  supportedAttachmentTypes: Schema.Array(ProviderAttachmentType).pipe(
+    Schema.withDecodingDefault(Effect.succeed(['image'] as const)),
   ),
   activeTurnInput: ProviderActiveTurnInputMode.pipe(
     Schema.withDecodingDefault(Effect.succeed('unsupported' as const)),
@@ -90,17 +110,36 @@ export const ProviderRuntimeCapabilities = Schema.Struct({
   ),
 }).check(
   Schema.makeFilter((capabilities) =>
-    capabilities.orchestrateInstructionDelivery === 'unsupported'
-      ? capabilities.orchestrateBaseModes.length === 0 ||
-        'Unsupported orchestrate delivery must advertise no orchestrate base modes.'
-      : (capabilities.orchestrateBaseModes.length > 0 &&
-          capabilities.orchestrateBaseModes.every((mode) =>
-            capabilities.supportedInteractionModes.includes(mode),
-          )) ||
-        'Orchestrate base modes must be non-empty and supported interaction modes.',
+    capabilities.defaultRuntimeMode !== undefined &&
+    !capabilities.supportedRuntimeModes.includes(capabilities.defaultRuntimeMode)
+      ? 'Provider default runtime mode must be supported.'
+      : capabilities.runtimeModeWarnings.some(
+            (warning) => !capabilities.supportedRuntimeModes.includes(warning.mode),
+          )
+        ? 'Provider runtime mode warning modes must be supported.'
+        : capabilities.orchestrateInstructionDelivery === 'unsupported'
+          ? capabilities.orchestrateBaseModes.length === 0 ||
+            'Unsupported orchestrate delivery must advertise no orchestrate base modes.'
+          : (capabilities.orchestrateBaseModes.length > 0 &&
+              capabilities.orchestrateBaseModes.every((mode) =>
+                capabilities.supportedInteractionModes.includes(mode),
+              )) ||
+            'Orchestrate base modes must be non-empty and supported interaction modes.',
   ),
 )
 export type ProviderRuntimeCapabilities = typeof ProviderRuntimeCapabilities.Type
+
+export const CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES: ProviderRuntimeCapabilities = {
+  sessionModelSwitch: 'unsupported',
+  supportedInteractionModes: ['default'],
+  supportedRuntimeModes: ['approval-required'],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: [],
+  activeTurnInput: 'unsupported',
+  conversationRollback: 'unsupported',
+  orchestrateInstructionDelivery: 'unsupported',
+  orchestrateBaseModes: [],
+}
 
 const ProviderSessionStatus = Schema.Literals(['connecting', 'ready', 'running', 'error', 'closed'])
 
@@ -135,6 +174,11 @@ export const ProviderSessionStartInput = Schema.Struct({
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
   runtimeMode: RuntimeMode,
+  runtimeModeAcknowledgements: Schema.optionalKey(
+    Schema.Array(ProviderRuntimeModeWarningId).pipe(
+      Schema.withDecodingDefault(Effect.succeed([] as const)),
+    ),
+  ),
 })
 export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type
 

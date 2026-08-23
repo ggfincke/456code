@@ -26,6 +26,7 @@ const ALL_RUNTIME_MODES = [
 ] as const satisfies ReadonlyArray<RuntimeMode>
 
 export const CODEX_PROVIDER_CAPABILITIES = {
+  defaultRuntimeMode: 'full-access',
   sessionModelSwitch: 'in-session',
   supportedInteractionModes: ['default', 'plan'],
   supportedRuntimeModes: ALL_RUNTIME_MODES,
@@ -33,6 +34,8 @@ export const CODEX_PROVIDER_CAPABILITIES = {
   conversationRollback: 'exact',
   orchestrateInstructionDelivery: 'native',
   orchestrateBaseModes: ['default', 'plan'],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: ['image'],
 } as const satisfies ProviderRuntimeCapabilities
 
 export const CLAUDE_PROVIDER_CAPABILITIES = {
@@ -40,6 +43,7 @@ export const CLAUDE_PROVIDER_CAPABILITIES = {
 } as const satisfies ProviderRuntimeCapabilities
 
 export const CURSOR_PROVIDER_CAPABILITIES = {
+  defaultRuntimeMode: 'approval-required',
   sessionModelSwitch: 'in-session',
   supportedInteractionModes: ['default', 'plan'],
   supportedRuntimeModes: ['approval-required', 'full-access'],
@@ -47,9 +51,12 @@ export const CURSOR_PROVIDER_CAPABILITIES = {
   conversationRollback: 'unsupported',
   orchestrateInstructionDelivery: 'prompt-prefix',
   orchestrateBaseModes: ['default', 'plan'],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: ['image'],
 } as const satisfies ProviderRuntimeCapabilities
 
 export const GROK_PROVIDER_CAPABILITIES = {
+  defaultRuntimeMode: 'approval-required',
   sessionModelSwitch: 'in-session',
   supportedInteractionModes: ['default'],
   supportedRuntimeModes: ['approval-required', 'full-access'],
@@ -57,9 +64,12 @@ export const GROK_PROVIDER_CAPABILITIES = {
   conversationRollback: 'unsupported',
   orchestrateInstructionDelivery: 'prompt-prefix',
   orchestrateBaseModes: ['default'],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: ['image'],
 } as const satisfies ProviderRuntimeCapabilities
 
 export const OPENCODE_PROVIDER_CAPABILITIES = {
+  defaultRuntimeMode: 'approval-required',
   sessionModelSwitch: 'in-session',
   supportedInteractionModes: ['default', 'plan'],
   supportedRuntimeModes: ['approval-required', 'full-access'],
@@ -67,9 +77,12 @@ export const OPENCODE_PROVIDER_CAPABILITIES = {
   conversationRollback: 'exact',
   orchestrateInstructionDelivery: 'prompt-prefix',
   orchestrateBaseModes: ['default', 'plan'],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: ['image'],
 } as const satisfies ProviderRuntimeCapabilities
 
 export const CORAL_PROVIDER_CAPABILITIES = {
+  defaultRuntimeMode: 'approval-required',
   sessionModelSwitch: 'in-session',
   supportedInteractionModes: ['default'],
   supportedRuntimeModes: ['approval-required'],
@@ -77,6 +90,44 @@ export const CORAL_PROVIDER_CAPABILITIES = {
   conversationRollback: 'unsupported',
   orchestrateInstructionDelivery: 'unsupported',
   orchestrateBaseModes: [],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: ['image'],
+} as const satisfies ProviderRuntimeCapabilities
+
+export const GEMINI_PROVIDER_CAPABILITIES = {
+  defaultRuntimeMode: 'approval-required',
+  sessionModelSwitch: 'unsupported',
+  supportedInteractionModes: ['default'],
+  supportedRuntimeModes: ['approval-required'],
+  activeTurnInput: 'unsupported',
+  conversationRollback: 'unsupported',
+  orchestrateInstructionDelivery: 'prompt-prefix',
+  orchestrateBaseModes: ['default'],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: ['image'],
+} as const satisfies ProviderRuntimeCapabilities
+
+export const ANTIGRAVITY_PROVIDER_CAPABILITIES = {
+  defaultRuntimeMode: 'auto-accept-edits',
+  sessionModelSwitch: 'unsupported',
+  supportedInteractionModes: ['default'],
+  supportedRuntimeModes: ['auto-accept-edits', 'full-access'],
+  runtimeModeWarnings: [
+    {
+      id: 'antigravity-full-access-v1',
+      mode: 'full-access',
+      severity: 'danger',
+      requiresAcknowledgement: true,
+      message:
+        'Antigravity will run with --dangerously-skip-permissions. ' +
+        '456code cannot review or approve individual tool calls.',
+    },
+  ],
+  supportedAttachmentTypes: [],
+  activeTurnInput: 'unsupported',
+  conversationRollback: 'unsupported',
+  orchestrateInstructionDelivery: 'prompt-prefix',
+  orchestrateBaseModes: ['default'],
 } as const satisfies ProviderRuntimeCapabilities
 
 export const CONSERVATIVE_PROVIDER_CAPABILITIES =
@@ -114,6 +165,10 @@ export function providerCapabilitiesForDriver(
       return OPENCODE_PROVIDER_CAPABILITIES
     case 'coral':
       return CORAL_PROVIDER_CAPABILITIES
+    case 'gemini':
+      return GEMINI_PROVIDER_CAPABILITIES
+    case 'antigravity':
+      return ANTIGRAVITY_PROVIDER_CAPABILITIES
     default:
       return CONSERVATIVE_PROVIDER_CAPABILITIES
   }

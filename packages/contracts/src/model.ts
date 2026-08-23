@@ -137,6 +137,8 @@ const CLAUDE_DRIVER_KIND = ProviderDriverKind.make('claudeAgent')
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make('cursor')
 const GROK_DRIVER_KIND = ProviderDriverKind.make('grok')
 const CORAL_DRIVER_KIND = ProviderDriverKind.make('coral')
+const GEMINI_DRIVER_KIND = ProviderDriverKind.make('gemini')
+const ANTIGRAVITY_DRIVER_KIND = ProviderDriverKind.make('antigravity')
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make('opencode')
 
 export const DEFAULT_MODEL = 'gpt-5.6-sol'
@@ -156,6 +158,8 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CURSOR_DRIVER_KIND]: 'auto',
   [GROK_DRIVER_KIND]: 'grok-build',
   [CORAL_DRIVER_KIND]: 'gemma4:31b-mlx',
+  [GEMINI_DRIVER_KIND]: 'auto',
+  [ANTIGRAVITY_DRIVER_KIND]: 'default',
   [OPENCODE_DRIVER_KIND]: 'openai/gpt-5',
 }
 
@@ -167,6 +171,8 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CLAUDE_DRIVER_KIND]: 'claude-haiku-4-5',
   [CURSOR_DRIVER_KIND]: 'composer-2',
   [CORAL_DRIVER_KIND]: 'gemma4:31b-mlx',
+  [GEMINI_DRIVER_KIND]: 'auto',
+  [ANTIGRAVITY_DRIVER_KIND]: 'default',
   [OPENCODE_DRIVER_KIND]: 'openai/gpt-5',
 }
 
@@ -227,5 +233,7 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CURSOR_DRIVER_KIND]: 'Cursor',
   [GROK_DRIVER_KIND]: 'Grok',
   [CORAL_DRIVER_KIND]: 'Coral',
+  [GEMINI_DRIVER_KIND]: 'Gemini',
+  [ANTIGRAVITY_DRIVER_KIND]: 'Antigravity',
   [OPENCODE_DRIVER_KIND]: 'OpenCode',
 }

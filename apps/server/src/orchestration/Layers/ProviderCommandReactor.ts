@@ -12,6 +12,7 @@ import {
   ProviderContinuationIdentity,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderRuntimeModeWarning,
   type ProviderInteractionMode,
   coerceRuntimeMode,
   normalizeCollaborationMode,
@@ -350,6 +351,7 @@ const ProviderActionPayloadSchema = Schema.fromJsonString(
           Schema.Struct({
             sessionModelSwitch: Schema.Literals(['in-session', 'unsupported']),
             supportedRuntimeModes: Schema.optional(Schema.NonEmptyArray(RuntimeMode)),
+            runtimeModeWarnings: Schema.optional(Schema.Array(ProviderRuntimeModeWarning)),
           }),
         ),
         recoverableById: Schema.Record(Schema.String, Schema.Boolean),
@@ -982,6 +984,7 @@ const make = Effect.gen(function* ()
     options?: {
       readonly importContinuationAuthority?: ThreadImportContinuationAuthority
       readonly modelSelection?: ModelSelection
+      readonly runtimeModeAcknowledgements?: ReadonlyArray<string>
       readonly pendingTurnStart?: boolean
     },
   )
@@ -1189,6 +1192,7 @@ const make = Effect.gen(function* ()
               modelSelection: desiredModelSelection,
               ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
               runtimeMode: desiredRuntimeMode,
+              runtimeModeAcknowledgements: options?.runtimeModeAcknowledgements ?? [],
             },
             importContinuationAuthority === undefined
               ? undefined
@@ -1315,6 +1319,7 @@ const make = Effect.gen(function* ()
     readonly attachments?: ReadonlyArray<ChatAttachment>
     readonly importContinuationAuthority?: ThreadImportContinuationAuthority
     readonly modelSelection?: ModelSelection
+    readonly runtimeModeAcknowledgements?: ReadonlyArray<string>
     readonly interactionMode?: ProviderInteractionMode
     readonly orchestrate?: boolean
     readonly createdAt: string
@@ -1342,6 +1347,9 @@ const make = Effect.gen(function* ()
         ? { importContinuationAuthority: input.importContinuationAuthority }
         : {}),
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+      ...(input.runtimeModeAcknowledgements === undefined
+        ? {}
+        : { runtimeModeAcknowledgements: input.runtimeModeAcknowledgements }),
       pendingTurnStart: true,
     })
     if (input.modelSelection !== undefined)
@@ -1596,6 +1604,9 @@ const make = Effect.gen(function* ()
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
         : {}),
+      ...(event.payload.runtimeModeAcknowledgements === undefined
+        ? {}
+        : { runtimeModeAcknowledgements: event.payload.runtimeModeAcknowledgements }),
       interactionMode: event.payload.interactionMode,
       ...(event.payload.orchestrate !== undefined
         ? { orchestrate: event.payload.orchestrate }
@@ -2218,6 +2229,21 @@ const make = Effect.gen(function* ()
         }
         const cachedModelSelection =
           requireActiveEnvironment().rememberedModelSelection ?? undefined
+        const runtimeModeCapabilities = yield* getPlannedCapabilities(
+          cachedModelSelection?.instanceId ?? thread.modelSelection.instanceId,
+        )
+        const requiresRuntimeModeAcknowledgement =
+          runtimeModeCapabilities.runtimeModeWarnings?.some(
+            (warning) => warning.mode === thread.runtimeMode && warning.requiresAcknowledgement,
+          ) === true
+        if (requiresRuntimeModeAcknowledgement)
+        {
+          yield* Effect.logInfo('provider command reactor deferring guarded runtime mode restart', {
+            threadId: event.payload.threadId,
+            runtimeMode: thread.runtimeMode,
+          })
+          return
+        }
         yield* ensureSessionForThread(
           event.payload.threadId,
           event.occurredAt,

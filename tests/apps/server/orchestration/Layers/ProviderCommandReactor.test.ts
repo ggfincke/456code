@@ -14,6 +14,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type RuntimeMode,
+  type ProviderRuntimeModeWarning,
   type ThreadOrigin,
 } from '@t3tools/contracts'
 import { createModelSelection } from '@t3tools/shared/model'
@@ -240,6 +241,7 @@ describe('ProviderCommandReactor', () =>
     readonly instanceDriverKind?: ProviderDriverKind
     readonly sessionModelSwitch?: 'unsupported' | 'in-session'
     readonly supportedRuntimeModes?: readonly [RuntimeMode, ...RuntimeMode[]]
+    readonly runtimeModeWarnings?: ReadonlyArray<ProviderRuntimeModeWarning>
     readonly requiresNewThreadForModelChange?: boolean
     readonly withRuntimeIngestion?: boolean
     readonly startReactor?: boolean
@@ -474,6 +476,9 @@ describe('ProviderCommandReactor', () =>
                 orchestrateInstructionDelivery: 'unsupported' as const,
                 orchestrateBaseModes: [],
               }),
+          ...(input?.runtimeModeWarnings === undefined
+            ? {}
+            : { runtimeModeWarnings: input.runtimeModeWarnings }),
         }),
       getInstanceInfo,
       rollbackConversation: () => unsupported(),
@@ -3237,6 +3242,83 @@ describe('ProviderCommandReactor', () =>
       }
     },
   )
+
+  it('defers eager restart for a guarded runtime mode until an acknowledged turn start', async () =>
+  {
+    const harness = await createHarness({
+      supportedRuntimeModes: ['auto-accept-edits', 'full-access'],
+      runtimeModeWarnings: [
+        {
+          id: 'antigravity-full-access-v1',
+          mode: 'full-access',
+          severity: 'danger',
+          requiresAcknowledgement: true,
+          message: 'Full access bypasses individual permission review.',
+        },
+      ],
+    })
+    const now = '2026-01-01T00:00:00.000Z'
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-guarded-runtime-mode-start-1'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-guarded-runtime-mode-1'),
+          role: 'user',
+          text: 'safe turn',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'auto-accept-edits',
+        createdAt: now,
+      }),
+    )
+    await waitFor(() => harness.startSession.mock.calls.length === 1)
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.runtime-mode.set',
+        commandId: CommandId.make('cmd-guarded-runtime-mode-set'),
+        threadId: ThreadId.make('thread-1'),
+        runtimeMode: 'full-access',
+        createdAt: now,
+      }),
+    )
+    await waitFor(async () =>
+    {
+      const readModel = await harness.readModel()
+      return readModel.threads[0]?.runtimeMode === 'full-access'
+    })
+    await harness.drain()
+    expect(harness.startSession).toHaveBeenCalledTimes(1)
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-guarded-runtime-mode-start-2'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-guarded-runtime-mode-2'),
+          role: 'user',
+          text: 'confirmed turn',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'full-access',
+        runtimeModeAcknowledgements: ['antigravity-full-access-v1'],
+        createdAt: now,
+      }),
+    )
+    await waitFor(() => harness.startSession.mock.calls.length === 2)
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      runtimeMode: 'full-access',
+      runtimeModeAcknowledgements: ['antigravity-full-access-v1'],
+      resumeCursor: { opaque: 'resume-1' },
+    })
+  })
 
   it('does not inject derived model options when restarting claude on runtime mode changes', async () =>
   {

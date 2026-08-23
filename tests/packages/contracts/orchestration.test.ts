@@ -442,6 +442,7 @@ it.effect('decodes thread.turn.start defaults for provider and runtime mode', ()
     })
     assert.strictEqual(parsed.modelSelection, undefined)
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE)
+    assert.deepStrictEqual(parsed.runtimeModeAcknowledgements, [])
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE)
   }),
 )
@@ -1102,6 +1103,7 @@ it.effect(
       })
       assert.strictEqual(parsed.modelSelection, undefined)
       assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE)
+      assert.deepStrictEqual(parsed.runtimeModeAcknowledgements, [])
       assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE)
       assert.strictEqual(parsed.sourceProposedPlan, undefined)
     }),

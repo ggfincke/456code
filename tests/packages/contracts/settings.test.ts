@@ -174,6 +174,14 @@ describe('ServerSettings provider access defaults', () =>
     expect(settings.providers.claudeAgent.enabled).toBe(true)
     expect(settings.providers.cursor.enabled).toBe(true)
     expect(settings.providers.grok.enabled).toBe(false)
+    expect(settings.providers.gemini.enabled).toBe(false)
+    expect(settings.providers.antigravity).toEqual({
+      enabled: false,
+      binaryPath: 'agy',
+      agent: '',
+      sandbox: true,
+      customModels: [],
+    })
     expect(settings.providers.opencode.enabled).toBe(false)
     expect(settings.enableAgentBrowserAccess).toBe(true)
     expect(decodeServerSettingsPatch({ enableAgentBrowserAccess: false })).toMatchObject({
@@ -188,6 +196,10 @@ describe('ServerSettings provider access defaults', () =>
     expect(
       resolveProviderInstanceEnabled({ driver: grok, enabled: true, config: { enabled: false } }),
     ).toBe(false)
+    const gemini = ProviderDriverKind.make('gemini')
+    expect(defaultEnabledForDriver(gemini)).toBe(false)
+    expect(resolveProviderInstanceEnabled({ driver: gemini, config: {} })).toBe(false)
+    expect(resolveProviderInstanceEnabled({ driver: gemini, enabled: true, config: {} })).toBe(true)
   })
 })
 
