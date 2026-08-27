@@ -152,7 +152,7 @@ const ManualSchemas: Record<string, Schema.Json> = {
   },
 }
 
-// keep every response namespace compatible with codex 0.150 multi-agent values
+// keep response namespaces compatible with codex 0.150 multi-agent and account values
 const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
   CollabAgentTool: {
     type: 'string',
@@ -171,6 +171,28 @@ const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
   CollabAgentToolCallStatus: {
     type: 'string',
     enum: ['inProgress', 'completed', 'failed', 'interrupted'],
+  },
+  PlanType: {
+    type: 'string',
+    enum: [
+      'free',
+      'go',
+      'plus',
+      'pro',
+      'prolite',
+      'team',
+      'self_serve_business_prolite',
+      'self_serve_business_usage_based',
+      'business',
+      'ent26',
+      'enterprise_cbp_automation',
+      'enterprise_cbp_usage_based',
+      'enterprise',
+      'edu',
+      'edu_plus',
+      'edu_pro',
+      'unknown',
+    ],
   },
   SubAgentActivityKind: {
     type: 'string',

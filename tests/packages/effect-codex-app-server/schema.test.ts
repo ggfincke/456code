@@ -1,11 +1,59 @@
 // tests/packages/effect-codex-app-server/schema.test.ts
-// verify codex multi-agent compatibility across notification and response decoders
+// verify codex multi-agent and account compatibility across protocol decoders
 
 import { assert, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
 import * as CodexSchema from 'effect-codex-app-server/schema'
 
 const decodeResumeResponse = Schema.decodeUnknownSync(CodexSchema.V2ThreadResumeResponse)
+const decodeAccountResponse = Schema.decodeUnknownSync(CodexSchema.V2GetAccountResponse)
+
+it.each([
+  'ServerNotification',
+  'V2AccountRateLimitsUpdatedNotification',
+  'V2AccountUpdatedNotification',
+  'V2GetAccountRateLimitsResponse',
+  'V2GetAccountResponse',
+] as const)('accepts existing and Codex 0.150 account plans in %s', (namespace) =>
+{
+  for (const planType of [
+    'free',
+    'go',
+    'plus',
+    'pro',
+    'prolite',
+    'team',
+    'self_serve_business_prolite',
+    'self_serve_business_usage_based',
+    'business',
+    'ent26',
+    'enterprise_cbp_automation',
+    'enterprise_cbp_usage_based',
+    'enterprise',
+    'edu',
+    'edu_plus',
+    'edu_pro',
+    'unknown',
+  ])
+  {
+    assert.isTrue(Schema.is(CodexSchema[`${namespace}__PlanType`])(planType))
+  }
+})
+
+it.each([
+  'self_serve_business_prolite',
+  'ent26',
+  'enterprise_cbp_automation',
+  'edu_plus',
+  'edu_pro',
+] as const)('decodes a Codex 0.150 account response with plan %s', (planType) =>
+{
+  const response = {
+    account: { type: 'chatgpt', email: 'user@example.com', planType },
+    requiresOpenaiAuth: true,
+  } as const
+  assert.deepStrictEqual(decodeAccountResponse(response), response)
+})
 
 const namespaces = [
   'ServerNotification',
