@@ -42,6 +42,7 @@ export interface NormalizeWorkLogOptions<T extends NormalizedWorkLogEntry>
   readonly requestKindFromRequestType: (requestType: unknown) => WorkLogRequestKind | null
   readonly excludedActivityKinds?: ReadonlySet<string>
   readonly includeTaskStarted?: boolean
+  readonly entryCache?: WeakMap<OrchestrationThreadActivity, T>
   readonly mapEntry?: (input: {
     readonly activity: OrchestrationThreadActivity
     readonly payload: Record<string, unknown> | null
@@ -845,11 +846,20 @@ export function deriveNormalizedWorkLogEntries<
     if (options.excludedActivityKinds?.has(activity.kind)) continue
     if (activity.summary === 'Checkpoint captured' || isPlanBoundaryToolActivity(activity)) continue
 
+    const cached = options.entryCache?.get(activity)
+    if (cached)
+    {
+      entries.push(cached)
+      continue
+    }
+
     const payload = workLogPayload(activity)
     const entry = toNormalizedWorkLogEntry(activity, options.requestKindFromRequestType)
     const mapped = options.mapEntry ? options.mapEntry({ activity, payload, entry }) : (entry as T)
     const collapseKey = deriveToolLifecycleCollapseKey(mapped)
-    entries.push(collapseKey ? ({ ...mapped, collapseKey } as T) : mapped)
+    const cacheable = collapseKey ? ({ ...mapped, collapseKey } as T) : mapped
+    options.entryCache?.set(activity, cacheable)
+    entries.push(cacheable)
   }
   const collapsed = collapseNormalizedWorkLogEntries(entries)
   return options.finalizeEntries ? [...options.finalizeEntries(collapsed)] : collapsed

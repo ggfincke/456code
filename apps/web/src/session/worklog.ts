@@ -124,6 +124,12 @@ interface DerivedWorkLogEntry extends WorkLogEntry
   parentToolUseId?: string
 }
 
+const derivedWorkLogEntryByActivity = new WeakMap<
+  OrchestrationThreadActivity,
+  DerivedWorkLogEntry
+>()
+const publicWorkLogEntryByDerivedEntry = new WeakMap<DerivedWorkLogEntry, WorkLogEntry>()
+
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean
 {
   return normalizedWorkLogEntryIsToolLike(entry)
@@ -219,23 +225,31 @@ export function deriveWorkLogEntries(
       WORKER_VERDICT_ACTIVITY_KIND,
     ]),
     includeTaskStarted: true,
+    entryCache: derivedWorkLogEntryByActivity,
     mapEntry: mapWebWorkLogEntry,
     finalizeEntries: collapseTaskWorkLogEntries,
-  }).map((entry) =>
-  {
-    const {
-      activityKind,
-      collapseKey: _collapseKey,
-      toolCallId,
-      taskToolUseId: _taskToolUseId,
-      parentToolUseId: _parentToolUseId,
-      ...rest
-    } = entry
-    return Object.assign(rest, {
-      sourceActivityKind: activityKind,
-      ...(toolCallId ? { toolCallId } : {}),
-    })
+  }).map(toPublicWorkLogEntry)
+}
+
+function toPublicWorkLogEntry(entry: DerivedWorkLogEntry): WorkLogEntry
+{
+  const cached = publicWorkLogEntryByDerivedEntry.get(entry)
+  if (cached) return cached
+
+  const {
+    activityKind,
+    collapseKey: _collapseKey,
+    toolCallId,
+    taskToolUseId: _taskToolUseId,
+    parentToolUseId: _parentToolUseId,
+    ...rest
+  } = entry
+  const publicEntry = Object.assign(rest, {
+    sourceActivityKind: activityKind,
+    ...(toolCallId ? { toolCallId } : {}),
   })
+  publicWorkLogEntryByDerivedEntry.set(entry, publicEntry)
+  return publicEntry
 }
 
 function mapWebWorkLogEntry(input: {
