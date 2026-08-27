@@ -71,6 +71,45 @@ digest rather than the app version, so repeated local builds with the same versi
 different stale tree. Packaging rejects sidecar links and more than 256 loose files in the unpacked
 application, guarding both safe WSL traversal and the fast-install topology.
 
+## Desktop dependency warning baseline
+
+As of 2026-08-27, a fresh workspace dependency resolution still reports seven deprecated
+subdependencies. These warnings are known upstream constraints, not a deprecation-free or security
+audit result:
+
+| Warning                           | Locked owner path                                                             | Latest metadata checked                                                                               |
+| --------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `boolean@3.2.0`                   | `@electron/get@2.0.3` and `@electron/get@3.1.0` -> `global-agent@3.0.0`       | `app-builder-lib@26.15.6` still uses `@electron/get@3.1.0`                                            |
+| `crypto-js@4.2.0`                 | `@clerk/clerk-js@6.25.7`                                                      | Clerk `6.30.1` still accepts `crypto-js@^4.2.0`                                                       |
+| `glob@7.2.3` and `inflight@1.0.6` | transitive `@electron/asar@3.4.1` copies retained by Electron Builder tooling | `app-builder-lib@26.15.6`, `@electron/universal@2.0.3`, and `electron-winstaller@5.4.0` retain ASAR 3 |
+| `lodash.isequal@4.5.0`            | `electron-updater@6.8.3`                                                      | `electron-updater@6.8.9` still accepts `lodash.isequal@^4.5.0`                                        |
+| `rimraf@2.6.3`                    | `electron-winstaller@5.4.0` -> `temp@0.9.4`                                   | `electron-winstaller@5.4.4` still uses `temp@0.9.4`                                                   |
+| `uuid@7.0.3`                      | Expo tooling -> `xcode@3.0.1`                                                 | `xcode@3.0.1` remains current                                                                         |
+
+Do not silence these warnings or force transitive dependencies across unsupported major versions.
+Recheck the owning package before a supported parent upgrade, and remove a row only after a fresh
+workspace resolution no longer reports it.
+
+The lockfile updates `@xmldom/xmldom` to `0.8.15` and `0.9.12` within the existing parent ranges,
+without permanent overrides. The scripts package uses `@electron/asar@4.3.0`; its ESM-only API and
+Node >=22.12 requirement match the Node 24 packaging environment. Other parents still retain ASAR 3.
+The separate fresh macOS production stage reports only `boolean@3.2.0` and `lodash.isequal@4.5.0`;
+its dependency set is smaller than the workspace's.
+
+`pnpm-workspace.yaml` allows only `@effect/atom-react@4.0.0-beta.78` to use React `19.2.3` outside
+its declared `^19.2.4` peer range. Expo SDK 56's React Native `0.85.3` renderer requires the exact
+React `19.2.3` version. The Atom bindings use supported React APIs, including
+`useSyncExternalStore`; a `RegistryProvider`/`useAtomValue` server-render probe passed with mobile's
+React and React DOM `19.2.3`. This is a scoped compatibility exception, not an upstream peer fix or
+a substitute for native client verification when React or React Native changes. Other React peer
+requirements remain enforced by `pnpm peers check`.
+
+The install preparation command `effect-tsgo patch && vp config --no-agent` is intentional.
+`Patched Effect Language Service binary` followed by `Verification succeeded` is successful setup,
+not an error. Keep the native TypeScript 7 compiler and TypeScript 6 API/mobile split unchanged.
+Build output may also contain informational plugin timings, skipped signing, or upstream macOS
+`hdiutil` deprecations; distinguish those from a nonzero build exit or missing artifact.
+
 ## Hosted Windows acceptance
 
 Every pull request and main-branch update runs the public-repository acceptance chain in

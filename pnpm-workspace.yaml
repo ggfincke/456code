@@ -118,6 +118,8 @@ peerDependencyRules:
     - utf-8-validate
     - typescript
   allowedVersions:
+    # expo 56's react-native 0.85.3 renderer requires react 19.2.3; these atom hooks use supported APIs
+    "@effect/atom-react@4.0.0-beta.78>react": "19.2.3"
     vite: "*"
     utf-8-validate: "*"
     typescript: "*"
