@@ -235,6 +235,26 @@ function collectThreadAttachmentRelativePaths(
   return relativePaths
 }
 
+// a full refresh reads the entire thread history, so reserve it for activity
+// lifecycle changes that can alter the projected shell summary
+function shouldRefreshThreadShellSummaryForActivity(
+  activity: Pick<ProjectionThreadActivity, 'kind'>,
+): boolean
+{
+  switch (activity.kind)
+  {
+    case 'approval.requested':
+    case 'approval.resolved':
+    case 'provider.approval.respond.failed':
+    case 'user-input.requested':
+    case 'user-input.resolved':
+    case 'provider.user-input.respond.failed':
+      return true
+    default:
+      return false
+  }
+}
+
 const runAttachmentSideEffects = Effect.fn('runAttachmentSideEffects')(function* (
   sideEffects: DirectAttachmentSideEffects,
 )
@@ -1037,6 +1057,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             archiveGeneration: 0,
             settledOverride: null,
             settledAt: null,
+            unsettledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
             latestUserMessageAt: null,
@@ -1095,6 +1116,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             ...existingRow.value,
             settledOverride: 'settled',
             settledAt: event.payload.settledAt,
+            unsettledAt: null,
             updatedAt: event.payload.updatedAt,
           })
           return
@@ -1113,6 +1135,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             ...existingRow.value,
             settledOverride: event.payload.reason === 'user' ? 'active' : null,
             settledAt: null,
+            // clearing an existing active pin is not a list re-entry
+            unsettledAt:
+              existingRow.value.settledOverride === 'active'
+                ? existingRow.value.unsettledAt
+                : event.payload.updatedAt,
             updatedAt: event.payload.updatedAt,
           })
           return
@@ -1462,7 +1489,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             ...existingRow.value,
             updatedAt: event.occurredAt,
           })
-          yield* refreshThreadShellSummary(event.payload.threadId)
           return
         }
 
@@ -1488,7 +1514,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                 : existingRow.value.pendingHandoff,
             updatedAt: event.occurredAt,
           })
-          if (!isImportedTranscriptActivity)
+          if (
+            !isImportedTranscriptActivity &&
+            shouldRefreshThreadShellSummaryForActivity(event.payload.activity)
+          )
           {
             yield* refreshThreadShellSummary(event.payload.threadId)
           }

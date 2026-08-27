@@ -340,6 +340,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           orchestrateRunExecution: null,
           settledOverride: null,
           settledAt: null,
+          unsettledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
           deletedAt: null,
@@ -459,6 +460,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           orchestrateRunExecution: null,
           settledOverride: null,
           settledAt: null,
+          unsettledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
           session: {

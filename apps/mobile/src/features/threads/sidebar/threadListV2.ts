@@ -3,6 +3,7 @@
 
 import { effectiveSettled, effectiveSnoozed } from '@t3tools/client-runtime/state/thread-settled'
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
+import { activeThreadAnchorTimestampMs } from '@t3tools/client-runtime/state/thread-sort'
 import type { EnvironmentId, ProjectId } from '@t3tools/contracts'
 
 // thread List v2 model, ported from the web sidebar v2
@@ -98,19 +99,21 @@ function firstValidTimestampMs(...candidates: ReadonlyArray<string | null | unde
   return 0
 }
 
-// v2 sort: static creation order, newest thread on top. Activity NEVER
-// reorders the list — a row holds its position from open until settled, so
-// the screen only moves at lifecycle transitions. Mirrors web's
-// sortThreadsForSidebarV2.
-export function sortThreadsForListV2<T extends { readonly id: string; readonly createdAt: string }>(
-  threads: readonly T[],
-): T[]
+// v2 sort: static active-list order, re-anchored only when a thread re-enters
+// after settling; routine activity never moves an already-active row
+export function sortThreadsForListV2<
+  T extends {
+    readonly id: string
+    readonly createdAt: string
+    readonly unsettledAt?: string | null | undefined
+  },
+>(threads: readonly T[]): T[]
 {
   // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023
   // change-by-copy array methods.
   return [...threads].sort(
     (left, right) =>
-      parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt) ||
+      activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
       left.id.localeCompare(right.id),
   )
 }

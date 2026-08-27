@@ -82,6 +82,19 @@ export function getThreadSortTimestamp(
   return getLatestUserMessageTimestamp(thread)
 }
 
+// creation anchors a new row; a later re-entry stamp moves a previously
+// settled row back to the top without changing its displayed timestamps
+export function activeThreadAnchorTimestampMs(thread: {
+  readonly createdAt: string
+  readonly unsettledAt?: string | null | undefined
+}): number
+{
+  return Math.max(
+    toSortableTimestamp(thread.createdAt) ?? 0,
+    toSortableTimestamp(thread.unsettledAt ?? undefined) ?? 0,
+  )
+}
+
 export function sortThreads<T extends { readonly id: string } & ThreadSortInput>(
   threads: readonly T[],
   sortOrder: SidebarThreadSortOrder,

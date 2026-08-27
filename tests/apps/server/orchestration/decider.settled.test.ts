@@ -8,6 +8,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationSession,
   type OrchestrationThread,
@@ -17,6 +18,7 @@ import { expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 
 import { decideOrchestrationCommand } from '../../../../apps/server/src/orchestration/decider.ts'
+import { projectEvent } from '../../../../apps/server/src/orchestration/projector.ts'
 
 const NOW = '2026-01-01T00:00:00.000Z'
 const SETTLED_AT = '2025-12-30T00:00:00.000Z'
@@ -363,6 +365,33 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
       const userAgainEvents = Array.isArray(userAgain) ? userAgain : [userAgain]
       expect(userAgainEvents).toHaveLength(1)
       expect(userAgainEvents[0]?.type).toBe('thread.unsettled')
+    }),
+  )
+
+  it.effect('re-anchors an accepted user un-settle in the active list', () =>
+    Effect.gen(function* ()
+    {
+      const readModel = makeReadModel('settled')
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: 'thread.unsettle',
+          commandId: CommandId.make('cmd-unsettle-anchor'),
+          threadId: ThreadId.make('thread-1'),
+          reason: 'user',
+        },
+        readModel,
+      })
+      const events = Array.isArray(result) ? result : [result]
+      const unsettled = events[0]
+      expect(unsettled?.type).toBe('thread.unsettled')
+      if (unsettled?.type !== 'thread.unsettled') return
+
+      const projected = yield* projectEvent(readModel, {
+        ...unsettled,
+        sequence: readModel.snapshotSequence + 1,
+      } as OrchestrationEvent)
+      expect(projected.threads[0]?.settledOverride).toBe('active')
+      expect(projected.threads[0]?.unsettledAt).toBe(unsettled.payload.updatedAt)
     }),
   )
 

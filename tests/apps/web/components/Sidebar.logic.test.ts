@@ -22,6 +22,7 @@ import {
   shouldNavigateAfterProjectRemoval,
   shouldClearThreadSelectionOnMouseDown,
   sortLogicalProjectsForSidebar,
+  sortThreadsForSidebarV2,
   sortSettledThreadsForSidebarV2,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
@@ -43,6 +44,34 @@ import {
 } from '../../../../apps/web/src/types'
 
 const localEnvironmentId = EnvironmentId.make('environment-local')
+
+describe('sortThreadsForSidebarV2', () =>
+{
+  it('surfaces a reactivated thread without using malformed timestamps', () =>
+  {
+    const sorted = sortThreadsForSidebarV2([
+      {
+        id: 'old-reactivated',
+        createdAt: '2026-03-09T08:00:00.000Z',
+        unsettledAt: '2026-03-09T13:00:00.000Z',
+      },
+      { id: 'newer', createdAt: '2026-03-09T12:00:00.000Z' },
+      { id: 'malformed', createdAt: 'invalid', unsettledAt: 'also-invalid' },
+    ])
+
+    expect(sorted.map((thread) => thread.id)).toEqual(['old-reactivated', 'newer', 'malformed'])
+  })
+
+  it('uses the thread id as a stable tie-breaker', () =>
+  {
+    const sorted = sortThreadsForSidebarV2([
+      { id: 'b', createdAt: '2026-03-09T12:00:00.000Z' },
+      { id: 'a', createdAt: '2026-03-09T12:00:00.000Z' },
+    ])
+
+    expect(sorted.map((thread) => thread.id)).toEqual(['a', 'b'])
+  })
+})
 
 describe('shouldNavigateAfterProjectRemoval', () =>
 {

@@ -117,6 +117,20 @@ describe('sortThreadsForListV2', () =>
     ])
     expect(sorted.map((thread) => thread.id)).toEqual(['newest', 'middle', 'oldest'])
   })
+
+  it('surfaces a reactivated thread and sinks malformed timestamps', () =>
+  {
+    const sorted = sortThreadsForListV2([
+      {
+        id: 'old-reactivated',
+        createdAt: '2026-06-01T08:00:00.000Z',
+        unsettledAt: '2026-06-01T13:00:00.000Z',
+      },
+      { id: 'newest', createdAt: '2026-06-01T12:00:00.000Z' },
+      { id: 'malformed', createdAt: 'invalid', unsettledAt: 'also-invalid' },
+    ])
+    expect(sorted.map((thread) => thread.id)).toEqual(['old-reactivated', 'newest', 'malformed'])
+  })
 })
 
 describe('buildThreadListV2Items', () =>

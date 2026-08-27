@@ -48,6 +48,7 @@ function makeDetail(overrides: Partial<EnvironmentThread> = {}): EnvironmentThre
     origin: null,
     settledOverride: null,
     settledAt: null,
+    unsettledAt: null,
     deletedAt: null,
     messages: [],
     proposedPlans: [],
@@ -79,6 +80,7 @@ function makeShell(overrides: Partial<EnvironmentThreadShell> = {}): Environment
     origin: null,
     settledOverride: null,
     settledAt: null,
+    unsettledAt: null,
     session: null,
     latestUserMessageAt: null,
     hasPendingApprovals: false,
@@ -130,5 +132,19 @@ describe('mergeEnvironmentThread provider switch', () =>
     expect(
       mergeEnvironmentThread(detail, makeShell({ id: ThreadId.make('thread-2') }))?.providerSwitch,
     ).toEqual(activeSwitch)
+  })
+})
+
+describe('mergeEnvironmentThread settlement metadata', () =>
+{
+  it('takes the active-list re-entry stamp from the authoritative shell', () =>
+  {
+    const unsettledAt = '2026-08-02T01:00:00.000Z'
+    const merged = mergeEnvironmentThread(
+      makeDetail({ unsettledAt: null }),
+      makeShell({ unsettledAt }),
+    )
+
+    expect(merged?.unsettledAt).toBe(unsettledAt)
   })
 })

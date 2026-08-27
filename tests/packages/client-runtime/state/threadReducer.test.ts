@@ -52,6 +52,7 @@ const baseThread: OrchestrationThread = {
   origin: null,
   settledOverride: null,
   settledAt: null,
+  unsettledAt: null,
   deletedAt: null,
   messages: [],
   proposedPlans: [],
@@ -643,6 +644,7 @@ describe('applyThreadDetailEvent', () =>
       {
         expect(result.thread.settledOverride).toBe('settled')
         expect(result.thread.settledAt).toBe(settledAt)
+        expect(result.thread.unsettledAt).toBeNull()
       }
     })
 
@@ -676,6 +678,36 @@ describe('applyThreadDetailEvent', () =>
       {
         expect(result.thread.settledOverride).toBe(settledOverride)
         expect(result.thread.settledAt).toBeNull()
+        expect(result.thread.unsettledAt).toBe(updatedAt)
+      }
+    })
+
+    it('preserves the re-entry stamp while clearing an active pin', () =>
+    {
+      const unsettledAt = '2026-04-01T05:30:00.000Z'
+      const updatedAt = '2026-04-01T06:00:00.000Z'
+      const result = applyThreadDetailEvent(
+        { ...baseThread, settledOverride: 'active', unsettledAt },
+        {
+          ...baseEventFields,
+          sequence: 7,
+          occurredAt: updatedAt,
+          aggregateKind: 'thread',
+          aggregateId: ThreadId.make('thread-1'),
+          type: 'thread.unsettled',
+          payload: {
+            threadId: ThreadId.make('thread-1'),
+            reason: 'activity',
+            updatedAt,
+          },
+        },
+      )
+
+      expect(result.kind).toBe('updated')
+      if (result.kind === 'updated')
+      {
+        expect(result.thread.settledOverride).toBeNull()
+        expect(result.thread.unsettledAt).toBe(unsettledAt)
       }
     })
   })

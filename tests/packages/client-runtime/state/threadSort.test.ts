@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import { ProjectId } from '@t3tools/contracts'
 
 import {
+  activeThreadAnchorTimestampMs,
   getLatestThreadForProject,
   sortThreads,
   type ThreadSortInput,
@@ -19,6 +20,26 @@ type ProjectThread = TestThread & {
 }
 
 const PROJECT_ID = ProjectId.make('project-1')
+
+describe('activeThreadAnchorTimestampMs', () =>
+{
+  it('uses the newest valid creation or re-entry timestamp', () =>
+  {
+    expect(
+      activeThreadAnchorTimestampMs({
+        createdAt: '2026-03-09T10:00:00.000Z',
+        unsettledAt: '2026-03-09T12:00:00.000Z',
+      }),
+    ).toBe(Date.parse('2026-03-09T12:00:00.000Z'))
+    expect(
+      activeThreadAnchorTimestampMs({
+        createdAt: '2026-03-09T10:00:00.000Z',
+        unsettledAt: 'malformed',
+      }),
+    ).toBe(Date.parse('2026-03-09T10:00:00.000Z'))
+    expect(activeThreadAnchorTimestampMs({ createdAt: 'malformed', unsettledAt: null })).toBe(0)
+  })
+})
 
 function makeThread(overrides: Partial<TestThread> = {}): TestThread
 {
