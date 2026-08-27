@@ -42,6 +42,14 @@ describe('extractTerminalLinks', () =>
     ])
   })
 
+  it('classifies mixed-case URL schemes without mistaking them for file paths', () =>
+  {
+    expect(extractTerminalLinks('open HTTPS://example.com/docs Http://example.com')).toEqual([
+      { kind: 'url', text: 'HTTPS://example.com/docs', start: 5, end: 29 },
+      { kind: 'url', text: 'Http://example.com', start: 30, end: 48 },
+    ])
+  })
+
   it('trims trailing punctuation from links', () =>
   {
     const line = '(https://example.com/docs), ./src/main.ts:12.'
