@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import { ProviderDriverKind, ProviderInstanceId, type ModelCapabilities } from '@t3tools/contracts'
 
 import {
+  applyClaudePromptEffortPrefix,
   buildProviderOptionSelectionsFromDescriptors,
   createModelCapabilities,
   createModelSelection,
@@ -16,6 +17,23 @@ import {
   normalizeCustomModelSlug,
   normalizeModelSlug,
 } from '../../../packages/shared/src/model.ts'
+
+it('preserves extended Claude slash commands without treating absolute paths as commands', () =>
+{
+  for (const command of ['/compact', '/plugin:review changes', '/deploy.prod staging'])
+  {
+    expect(applyClaudePromptEffortPrefix(command, 'ultrathink')).toBe(command)
+    expect(applyClaudePromptEffortPrefix(command, 'ultrathink', false)).toBe(
+      `Ultrathink:\n${command}`,
+    )
+  }
+  expect(applyClaudePromptEffortPrefix('/home/user/file.ts', 'ultrathink')).toBe(
+    'Ultrathink:\n/home/user/file.ts',
+  )
+  expect(applyClaudePromptEffortPrefix('Review changes', 'ultrathink')).toBe(
+    'Ultrathink:\nReview changes',
+  )
+})
 
 const codexCaps: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [

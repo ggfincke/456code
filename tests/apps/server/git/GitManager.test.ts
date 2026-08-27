@@ -1352,7 +1352,28 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
       yield* initRepo(repoDir)
       yield* runGit(repoDir, ['checkout', '-b', 'feature/status-merged-pr'])
 
-      const { manager } = yield* makeManager({
+      const remote = yield* createBareRemote()
+      yield* runGit(repoDir, ['remote', 'add', 'origin', remote])
+      yield* runGit(repoDir, ['push', '-u', 'origin', 'feature/status-merged-pr'])
+      yield* runGit(remote, ['update-ref', '-d', 'refs/heads/feature/status-merged-pr'])
+      yield* runGit(repoDir, ['fetch', '--prune', 'origin'])
+      const tracking = yield* runGit(
+        repoDir,
+        ['show-ref', '--verify', 'refs/remotes/origin/feature/status-merged-pr'],
+        true,
+      )
+      expect(tracking.exitCode).not.toBe(0)
+      expect(
+        (yield* runGit(repoDir, [
+          'config',
+          'branch.feature/status-merged-pr.remote',
+        ])).stdout.trim(),
+      ).toBe('origin')
+      expect(
+        (yield* runGit(repoDir, ['config', 'branch.feature/status-merged-pr.merge'])).stdout.trim(),
+      ).toBe('refs/heads/feature/status-merged-pr')
+
+      const { manager, ghCalls } = yield* makeManager({
         ghScenario: {
           prListSequence: [
             // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -1374,6 +1395,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
 
       const status = yield* manager.status({ cwd: repoDir })
       expect(status.refName).toBe('feature/status-merged-pr')
+      expect(ghCalls.some((call) => call.startsWith('pr list '))).toBe(true)
       expect(status.pr).toEqual({
         number: 22,
         title: 'Merged PR',

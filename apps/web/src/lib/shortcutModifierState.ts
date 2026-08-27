@@ -41,7 +41,8 @@ export function useShortcutModifierState(): ShortcutModifierState
     {
       setState((current) => shortcutModifierStateAfterKeyboardEvent(current, event))
     }
-    const onWindowBlur = () =>
+    // dictation paste can omit the modifier keyup, so it cannot retain jump intent
+    const onResetEvent = () =>
     {
       setState((current) =>
         areShortcutModifierStatesEqual(current, EMPTY_SHORTCUT_MODIFIER_STATE)
@@ -52,12 +53,14 @@ export function useShortcutModifierState(): ShortcutModifierState
 
     window.addEventListener('keydown', onKeyboardEvent, true)
     window.addEventListener('keyup', onKeyboardEvent, true)
-    window.addEventListener('blur', onWindowBlur)
+    window.addEventListener('paste', onResetEvent, true)
+    window.addEventListener('blur', onResetEvent)
     return () =>
     {
       window.removeEventListener('keydown', onKeyboardEvent, true)
       window.removeEventListener('keyup', onKeyboardEvent, true)
-      window.removeEventListener('blur', onWindowBlur)
+      window.removeEventListener('paste', onResetEvent, true)
+      window.removeEventListener('blur', onResetEvent)
     }
   }, [])
 
@@ -100,11 +103,12 @@ export function shortcutModifierStateAfterKeyboardEvent(
   }
   else
   {
+    // stale flags after a synthetic paste may clear modifiers, but cannot set them
     nextState = {
-      metaKey: event.metaKey,
-      ctrlKey: event.ctrlKey,
-      altKey: event.altKey,
-      shiftKey: event.shiftKey,
+      metaKey: currentState.metaKey && event.metaKey,
+      ctrlKey: currentState.ctrlKey && event.ctrlKey,
+      altKey: currentState.altKey && event.altKey,
+      shiftKey: currentState.shiftKey && event.shiftKey,
     }
   }
 

@@ -172,6 +172,19 @@ describe('environmentBootstrap', () =>
     })
   })
 
+  it.each([
+    ['VITE_WS_URL', 'WSS://remote.example.com'],
+    ['VITE_HTTP_URL', 'HTTPS://remote.example.com'],
+  ])('preserves TLS when %s has an uppercase scheme', (name, value) =>
+  {
+    vi.stubEnv(name, value)
+
+    expect(readPrimaryEnvironmentTarget().target).toEqual({
+      httpBaseUrl: 'https://remote.example.com/',
+      wsBaseUrl: 'wss://remote.example.com/',
+    })
+  })
+
   it('uses the current origin as the descriptor base for local dev environments', async () =>
   {
     installTestBrowser('http://localhost:5735/')

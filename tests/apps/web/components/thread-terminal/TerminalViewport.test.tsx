@@ -4,7 +4,7 @@
 // @vitest-environment happy-dom
 
 import type { ResolvedKeybindingsConfig, ScopedThreadRef, ThreadId } from '@t3tools/contracts'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ILink, type ILinkProvider } from '@xterm/xterm'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 const harness = vi.hoisted(() => ({
   terminal: null as unknown,
   keyHandler: null as ((event: KeyboardEvent) => boolean) | null,
+  linkProvider: null as ILinkProvider | null,
   writeText: vi.fn(),
   showContextMenu: vi.fn(),
   closeContextMenu: vi.fn(),
@@ -123,6 +124,7 @@ beforeEach(async () =>
 {
   harness.terminal = null
   harness.keyHandler = null
+  harness.linkProvider = null
   harness.writeText.mockReset().mockResolvedValue(true)
   harness.showContextMenu.mockReset().mockResolvedValue(null)
   harness.closeContextMenu.mockReset().mockResolvedValue(undefined)
@@ -133,6 +135,15 @@ beforeEach(async () =>
     return 1
   })
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
+  const registerLinkProvider = Terminal.prototype.registerLinkProvider
+  vi.spyOn(Terminal.prototype, 'registerLinkProvider').mockImplementation(function (
+    this: Terminal,
+    provider: ILinkProvider,
+  )
+  {
+    harness.linkProvider = provider
+    return registerLinkProvider.call(this, provider)
+  })
   const attachCustomKeyEventHandler = Terminal.prototype.attachCustomKeyEventHandler
   vi.spyOn(Terminal.prototype, 'attachCustomKeyEventHandler').mockImplementation(function (
     this: Terminal,
@@ -178,6 +189,37 @@ afterEach(async () =>
 
 describe('TerminalViewport clipboard and context menu runtime', () =>
 {
+  it('shows link decorations only with the activation modifier and clears their lifecycle', async () =>
+  {
+    const terminal = activeTerminal()
+    await new Promise<void>((resolve) => terminal.write('HTTPS://example.com', resolve))
+    const links = await new Promise<ILink[] | undefined>((resolve) =>
+      harness.linkProvider?.provideLinks(1, resolve),
+    )
+    const link = links?.[0]
+    expect(link?.text).toBe('HTTPS://example.com')
+    if (!link) throw new Error('Expected a terminal link')
+
+    link.hover?.(new MouseEvent('mousemove'), link.text)
+    expect(link.decorations).toEqual({ pointerCursor: false, underline: false })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }))
+    expect(link.decorations).toEqual({ pointerCursor: true, underline: true })
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control' }))
+    expect(link.decorations).toEqual({ pointerCursor: false, underline: false })
+
+    link.hover?.(new MouseEvent('mousemove', { ctrlKey: true }), link.text)
+    expect(link.decorations?.underline).toBe(true)
+    link.leave?.(new MouseEvent('mouseleave'), link.text)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }))
+    expect(link.decorations).toEqual({ pointerCursor: false, underline: false })
+
+    link.hover?.(new MouseEvent('mousemove', { ctrlKey: true }), link.text)
+    await act(async () => root.render(null))
+    expect(link.decorations).toEqual({ pointerCursor: false, underline: false })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }))
+    expect(link.decorations).toEqual({ pointerCursor: false, underline: false })
+  })
+
   it('lets native shifted-copy beat the async Clipboard API while retaining its fallback', async () =>
   {
     const terminal = activeTerminal()

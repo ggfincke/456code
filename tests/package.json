@@ -9,6 +9,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
     "@clerk/expo": "catalog:",
+    "@effect/atom-react": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@expo/ui": "~56.0.18",
@@ -55,6 +56,8 @@
     "react-markdown": "^10.1.0",
     "react-native": "0.85.3",
     "react-native-nitro-markdown": "^0.5.0",
+    "react-native-reanimated": "4.3.1",
+    "react-native-safe-area-context": "~5.7.0",
     "remark-gfm": "^4.0.1",
     "vite-plus": "catalog:"
   }

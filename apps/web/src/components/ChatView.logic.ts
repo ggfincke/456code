@@ -638,7 +638,11 @@ export function formatOutgoingPrompt(params: {
   }
   const caps = getProviderModelCapabilities(params.models, params.model, params.provider)
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort)
-  return applyClaudePromptEffortPrefix(params.text, promptEffort)
+  return applyClaudePromptEffortPrefix(
+    params.text,
+    promptEffort,
+    params.hasAttachmentsOrContext !== true,
+  )
 }
 
 // retry restore only when the draft is still empty and the owner key has not moved

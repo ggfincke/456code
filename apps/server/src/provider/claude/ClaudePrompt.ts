@@ -61,7 +61,7 @@ export function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel)
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort)
-  return applyClaudePromptEffortPrefix(text, promptEffort)
+  return applyClaudePromptEffortPrefix(text, promptEffort, (input.attachments?.length ?? 0) === 0)
 }
 
 export function buildUserMessage(input: {

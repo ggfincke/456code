@@ -14,6 +14,7 @@ import { Pressable, ScrollView, useColorScheme, View, type ViewStyle } from 'rea
 
 import { AppText as Text } from '../../../components/AppText'
 import { PierreEntryIcon } from '../../../components/PierreEntryIcon'
+import { groupCommandItems } from './composerCommandItems'
 export type ComposerCommandItem =
   | {
       readonly id: string
@@ -58,12 +59,6 @@ interface ComposerCommandPopoverProps
   readonly triggerKind: ComposerTriggerKind | null
   readonly isLoading: boolean
   readonly onSelect: (item: ComposerCommandItem) => void
-}
-
-type ComposerCommandGroup = {
-  readonly id: string
-  readonly label: string | null
-  readonly items: ReadonlyArray<ComposerCommandItem>
 }
 
 function PopoverSurface(props: {
@@ -122,48 +117,6 @@ function itemIcon(item: ComposerCommandItem)
     case 'path':
       return null
   }
-}
-
-function groupCommandItems(
-  items: ReadonlyArray<ComposerCommandItem>,
-  triggerKind: ComposerTriggerKind | null,
-): ComposerCommandGroup[]
-{
-  if (triggerKind === 'skill')
-  {
-    return items.length > 0 ? [{ id: 'skills', label: 'Skills', items }] : []
-  }
-  if (triggerKind === 'path')
-  {
-    return items.length > 0 ? [{ id: 'files', label: 'Files', items }] : []
-  }
-  if (triggerKind === 'slash-model')
-  {
-    return items.length > 0 ? [{ id: 'models', label: 'Models', items }] : []
-  }
-  if (triggerKind !== 'slash-command')
-  {
-    return items.length > 0 ? [{ id: 'default', label: null, items }] : []
-  }
-
-  const builtInItems = items.filter((item) => item.type === 'slash-command')
-  const providerItems = items.filter((item) => item.type === 'provider-slash-command')
-  const skillItems = items.filter((item) => item.type === 'skill')
-
-  const groups: ComposerCommandGroup[] = []
-  if (builtInItems.length > 0)
-  {
-    groups.push({ id: 'built-in', label: 'Commands', items: builtInItems })
-  }
-  if (providerItems.length > 0)
-  {
-    groups.push({ id: 'provider', label: 'Provider', items: providerItems })
-  }
-  if (skillItems.length > 0)
-  {
-    groups.push({ id: 'skills', label: 'Skills', items: skillItems })
-  }
-  return groups
 }
 
 function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean): string
