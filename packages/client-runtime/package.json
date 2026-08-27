@@ -59,6 +59,10 @@
       "types": "./src/state/connections.ts",
       "default": "./src/state/connections.ts"
     },
+    "./state/thread-search": {
+      "types": "./src/state/threadSearch.ts",
+      "default": "./src/state/threadSearch.ts"
+    },
     "./state/entities": {
       "types": "./src/state/entities.ts",
       "default": "./src/state/entities.ts"

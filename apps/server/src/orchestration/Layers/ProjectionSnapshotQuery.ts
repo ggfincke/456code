@@ -8,6 +8,12 @@ import {
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
+  OrchestrationThreadSearchSource,
+  ProjectId,
+  ThreadId,
+  IsoDateTime,
+  THREAD_SEARCH_MAX_RESULTS,
+  THREAD_SEARCH_SNIPPET_MAX_CHARS,
   type ApprovalOutcome,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -91,6 +97,26 @@ import {
 } from '../Services/ProjectionSnapshotQuery.ts'
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel)
+const ThreadSearchRequest = Schema.Struct({ pattern: Schema.String, limit: Schema.Int })
+const ThreadSearchRow = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  source: OrchestrationThreadSearchSource,
+  matchText: Schema.String,
+  messageCreatedAt: Schema.NullOr(IsoDateTime),
+})
+
+function searchSnippet(text: string, query: string): string
+{
+  const compact = text.replace(/\s+/g, ' ').trim()
+  if (compact.length <= THREAD_SEARCH_SNIPPET_MAX_CHARS) return compact
+  const fold = (value: string) => value.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+  const match = fold(compact).indexOf(fold(query.replace(/\s+/g, ' ').trim()))
+  const bodyLength = THREAD_SEARCH_SNIPPET_MAX_CHARS - 2
+  const start = Math.min(Math.max(0, match - 72), compact.length - bodyLength)
+  const end = start + bodyLength
+  return `${start > 0 ? '…' : ''}${compact.slice(start, end)}${end < compact.length ? '…' : ''}`
+}
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot)
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread)
 const THREAD_DETAIL_ACTIVITY_LIMIT = 500
@@ -310,6 +336,64 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 const makeProjectionSnapshotQuery = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
+  const readThreadSearch = SqlSchema.findAll({
+    Request: ThreadSearchRequest,
+    Result: ThreadSearchRow,
+    execute: ({ pattern, limit }) => sql`
+      WITH ranked AS (
+        SELECT threads.thread_id, threads.project_id, messages.role AS source,
+          messages.text AS match_text, messages.created_at AS message_created_at,
+          CASE messages.role WHEN 'user' THEN 0 ELSE 1 END AS match_rank,
+          threads.updated_at AS thread_updated_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY threads.thread_id
+            ORDER BY CASE messages.role WHEN 'user' THEN 0 ELSE 1 END,
+              messages.created_at DESC, messages.message_id ASC
+          ) AS thread_match_rank
+        FROM projection_thread_messages AS messages
+        INNER JOIN projection_threads AS threads ON threads.thread_id = messages.thread_id
+        INNER JOIN projection_projects AS projects ON projects.project_id = threads.project_id
+        WHERE threads.deleted_at IS NULL AND threads.archived_at IS NULL
+          AND projects.deleted_at IS NULL AND messages.is_streaming = 0
+          AND (messages.role = 'user' OR (
+            messages.role = 'assistant' AND EXISTS (
+              SELECT 1 FROM projection_turns AS turns
+              WHERE turns.thread_id = messages.thread_id
+                AND turns.assistant_message_id = messages.message_id
+            )
+          ))
+          AND messages.text LIKE ${pattern} ESCAPE '!'
+      )
+      SELECT thread_id AS "threadId", project_id AS "projectId", source,
+        match_text AS "matchText", message_created_at AS "messageCreatedAt"
+      FROM ranked WHERE thread_match_rank = 1
+      ORDER BY match_rank ASC, thread_updated_at DESC, thread_id ASC LIMIT ${limit}
+    `,
+  })
+  const searchThreads: ProjectionSnapshotQueryShape['searchThreads'] = Effect.fn(
+    'ProjectionSnapshotQuery.searchThreads',
+  )(function* (input)
+  {
+    const query = input.query.trim()
+    const pattern = `%${query.replaceAll('!', '!!').replaceAll('%', '!%').replaceAll('_', '!_')}%`
+    const rows = yield* readThreadSearch({
+      pattern,
+      limit: input.limit ?? THREAD_SEARCH_MAX_RESULTS,
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          'ProjectionSnapshotQuery.searchThreads:query',
+          'ProjectionSnapshotQuery.searchThreads:decode',
+        ),
+      ),
+    )
+    return {
+      matches: rows.map(({ matchText, ...row }) => ({
+        ...row,
+        snippet: searchSnippet(matchText, query),
+      })),
+    }
+  })
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver
   const repositoryIdentityResolutionConcurrency = 4
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
@@ -3274,6 +3358,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
 
   return {
     getCommandReadModel,
+    searchThreads,
     getSnapshot,
     getShellSnapshot,
     getArchivedShellSnapshot,

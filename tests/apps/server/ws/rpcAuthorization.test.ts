@@ -1,18 +1,19 @@
 // tests/apps/server/ws/rpcAuthorization.test.ts
-// checks workspace search authorization before its read effect can execute
+// checks search authorization before either read effect can execute
 
 import { expect, it } from '@effect/vitest'
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
+  ORCHESTRATION_WS_METHODS,
   WS_METHODS,
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import { makeRpcAuthorization } from '../../../../apps/server/src/ws/rpcAuthorization.ts'
 import type { AuthenticatedSession } from '../../../../apps/server/src/auth/EnvironmentAuth.ts'
 
-it.effect('requires read scope for workspace content search before invoking the query', () =>
+it.effect('requires read scope for both content searches before invoking the query', () =>
   Effect.gen(function* ()
   {
     let reads = 0
@@ -24,7 +25,10 @@ it.effect('requires read scope for workspace content search before invoking the 
     }
     const denied = makeRpcAuthorization(session)
     const allowed = makeRpcAuthorization({ ...session, scopes: [AuthOrchestrationReadScope] })
-    for (const method of [WS_METHODS.projectsSearchContents])
+    for (const method of [
+      WS_METHODS.projectsSearchContents,
+      ORCHESTRATION_WS_METHODS.searchThreads,
+    ])
     {
       const read = Effect.sync(() => ++reads)
       const failure = yield* Effect.flip(denied.observeRpcEffect(method, read))
@@ -32,9 +36,9 @@ it.effect('requires read scope for workspace content search before invoking the 
         _tag: 'EnvironmentAuthorizationError',
         requiredScope: AuthOrchestrationReadScope,
       })
-      expect(reads).toBe(0)
+      expect(reads).toBe(method === WS_METHODS.projectsSearchContents ? 0 : 1)
       yield* allowed.observeRpcEffect(method, read)
     }
-    expect(reads).toBe(1)
+    expect(reads).toBe(2)
   }),
 )

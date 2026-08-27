@@ -5,6 +5,7 @@ import { effectiveSettled, effectiveSnoozed } from '@t3tools/client-runtime/stat
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 import { activeThreadAnchorTimestampMs } from '@t3tools/client-runtime/state/thread-sort'
 import type { EnvironmentId, ProjectId } from '@t3tools/contracts'
+import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 
 // thread List v2 model, ported from the web sidebar v2
 // (apps/web/src/components/Sidebar.logic.ts + SidebarV2.tsx).
@@ -153,6 +154,7 @@ export function buildThreadListV2Items(input: {
     readonly projectId: ProjectId
   }> | null
   readonly searchQuery: string
+  readonly matchedThreadKeys?: ReadonlySet<string>
   // per-row PR state reported up by visible rows ("env:threadId" keys).
   readonly changeRequestStateByKey?: ReadonlyMap<string, 'open' | 'closed' | 'merged'>
   // environments whose server supports thread.settle/unsettle. Threads on
@@ -197,7 +199,14 @@ export function buildThreadListV2Items(input: {
     {
       continue
     }
-    if (query.length > 0 && !thread.title.toLocaleLowerCase().includes(query)) continue
+    if (
+      query.length > 0 &&
+      !thread.title.toLocaleLowerCase().includes(query) &&
+      input.matchedThreadKeys?.has(
+        threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+      ) !== true
+    )
+      continue
     const supportsSettlement = input.settlementEnvironmentIds?.has(thread.environmentId) ?? true
     const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true
     const changeRequestState =

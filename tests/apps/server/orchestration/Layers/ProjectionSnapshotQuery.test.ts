@@ -60,6 +60,66 @@ const projectionSnapshotLayer = it.layer(
 
 projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
 {
+  it.effect('searches literal canonical messages with ranked bounded thread results', () =>
+    Effect.gen(function* ()
+    {
+      const sql = yield* SqlClient.SqlClient
+      const query = yield* ProjectionSnapshotQuery
+      yield* clearProjectionTables(sql)
+      const timestamp = '2026-08-27T00:00:00.000Z'
+      for (const projectId of ['search-project', 'deleted-project'])
+      {
+        yield* sql`INSERT INTO projection_projects
+          (project_id, title, workspace_root, default_model_selection_json, scripts_json, created_at, updated_at, deleted_at)
+          VALUES (${projectId}, ${projectId}, '/tmp/search', NULL, '[]', ${timestamp}, ${timestamp},
+            ${projectId === 'deleted-project' ? timestamp : null})`
+      }
+      const rows = [
+        ['user', 'user', 'literal !%_ match'],
+        ['assistant', 'assistant', 'literal !%_ match'],
+        ['intermediate', 'assistant', 'literal !%_ match'],
+        ['streaming', 'user', 'literal !%_ match'],
+        ['archived', 'user', 'literal !%_ match'],
+        ['deleted', 'user', 'literal !%_ match'],
+        ['project-deleted', 'user', 'literal !%_ match'],
+        ['system', 'system', 'literal !%_ match'],
+        ['wildcard-decoy', 'user', 'literal !XX match'],
+      ] as const
+      for (const [id, role, text] of rows)
+      {
+        yield* sql`INSERT INTO projection_threads
+          (thread_id, project_id, title, model_selection_json, created_at, updated_at, archived_at, deleted_at)
+          VALUES (${id}, ${id === 'project-deleted' ? 'deleted-project' : 'search-project'}, ${id},
+            '{"provider":"codex","model":"gpt-5"}', ${timestamp}, ${timestamp},
+            ${id === 'archived' ? timestamp : null}, ${id === 'deleted' ? timestamp : null})`
+        yield* sql`INSERT INTO projection_thread_messages
+          (message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at)
+          VALUES (${`message-${id}`}, ${id}, ${`turn-${id}`}, ${role}, ${text},
+            ${id === 'streaming' ? 1 : 0}, ${timestamp}, ${timestamp})`
+      }
+      yield* sql`INSERT INTO projection_turns
+        (thread_id, turn_id, assistant_message_id, state, requested_at, checkpoint_files_json)
+        VALUES ('assistant', 'turn-assistant', 'message-assistant', 'completed', ${timestamp}, '[]')`
+      // return only the newest matching user message from the same thread
+      yield* sql`INSERT INTO projection_thread_messages
+        (message_id, thread_id, role, text, is_streaming, created_at, updated_at)
+        VALUES ('second-user', 'user', 'user', ${`${'prefix '.repeat(50)}!%_ ${'suffix '.repeat(50)}`},
+          0, '2026-08-27T00:01:00.000Z', ${timestamp})`
+      const found = yield* query.searchThreads({ query: '!%_' })
+      assert.deepEqual(
+        found.matches.map((match) => [match.threadId, match.source]),
+        [
+          ['user', 'user'],
+          ['assistant', 'assistant'],
+        ],
+      )
+      assert.isAtMost(found.matches[0]!.snippet.length, 240)
+      assert.include(found.matches[0]!.snippet, '!%_')
+      assert.equal(found.matches[0]!.messageCreatedAt, '2026-08-27T00:01:00.000Z')
+      assert.equal((yield* query.searchThreads({ query: '!%_', limit: 1 })).matches.length, 1)
+    }),
+  )
+
   it.effect('hydrates read model from projection tables and computes snapshot sequence', () =>
     Effect.gen(function* ()
     {

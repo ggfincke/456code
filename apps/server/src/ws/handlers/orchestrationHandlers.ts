@@ -11,6 +11,7 @@ import {
   OrchestrationGetRunDiffError,
   OrchestrationGetRunExecutionDiffV1Error,
   OrchestrationGetSnapshotError,
+  OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
@@ -53,6 +54,7 @@ type OrchestrationRpcMethod =
   | typeof ORCHESTRATION_WS_METHODS.importScan
   | typeof ORCHESTRATION_WS_METHODS.importSessions
   | typeof ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot
+  | typeof ORCHESTRATION_WS_METHODS.searchThreads
   | typeof ORCHESTRATION_WS_METHODS.subscribeThread
 type OrchestrationRpcHandlers = Pick<WsRpcHandlers, OrchestrationRpcMethod>
 
@@ -556,6 +558,19 @@ export function makeOrchestrationRpcHandlers({
             synchronizedThenLive,
           )
         }),
+        { 'rpc.aggregate': 'orchestration' },
+      ),
+    [ORCHESTRATION_WS_METHODS.searchThreads]: (input) =>
+      observeRpcEffect(
+        ORCHESTRATION_WS_METHODS.searchThreads,
+        projectionSnapshotQuery.searchThreads(input).pipe(
+          Effect.mapError(
+            () =>
+              new OrchestrationSearchThreadsError({
+                message: 'Failed to search conversation contents.',
+              }),
+          ),
+        ),
         { 'rpc.aggregate': 'orchestration' },
       ),
     [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: (_input) =>

@@ -75,6 +75,7 @@ import {
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationRpcSchemas,
+  OrchestrationSearchThreadsError,
 } from './orchestration.ts'
 import { ProviderInstanceId } from './providerInstance.ts'
 import {
@@ -923,6 +924,12 @@ export const WsOrchestrationGetRunExecutionDiffV1Rpc = Rpc.make(
   },
 )
 
+export const WsOrchestrationSearchThreadsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.searchThreads, {
+  payload: OrchestrationRpcSchemas.searchThreads.input,
+  success: OrchestrationRpcSchemas.searchThreads.output,
+  error: Schema.Union([OrchestrationSearchThreadsError, EnvironmentAuthorizationError]),
+})
+
 export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,
   {
@@ -1131,6 +1138,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetRunDiffRpc,
   WsOrchestrationGetRunExecutionDiffV1Rpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
+  WsOrchestrationSearchThreadsRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
 )

@@ -4,6 +4,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from '@t3tools/client-runtime/state/shell'
+import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -79,6 +80,58 @@ function buildGroups(
 
 describe('buildHomeThreadGroups', () =>
 {
+  it('unions title and content matches once while preserving environment and archive scope', () =>
+  {
+    const environmentId = EnvironmentId.make('local')
+    const remoteId = EnvironmentId.make('remote')
+    const projectId = ProjectId.make('project')
+    const projects = [environmentId, remoteId].map((id) =>
+      makeProject({ environmentId: id, id: projectId, title: 'Workspace' }),
+    )
+    const title = makeThread({
+      environmentId,
+      id: ThreadId.make('title'),
+      projectId,
+      title: 'Needle title',
+      createdAt: '2026-06-29T00:00:00.000Z',
+    })
+    const content = makeThread({
+      environmentId,
+      id: ThreadId.make('content'),
+      projectId,
+      title: 'Different name',
+      createdAt: '2026-06-28T00:00:00.000Z',
+    })
+    const remoteCollision = { ...content, environmentId: remoteId }
+    const archived = {
+      ...content,
+      id: ThreadId.make('archived'),
+      archivedAt: '2026-06-28T01:00:00.000Z',
+    }
+    const threads = [title, content, remoteCollision, archived]
+    const matchedThreadKeys = new Set(
+      [title, content, archived].map((thread) =>
+        threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+      ),
+    )
+    const overrides = {
+      searchQuery: 'needle',
+      matchedThreadKeys,
+      threadSortOrder: 'created_at' as const,
+    }
+    const filtered = buildGroups(projects, threads, overrides).flatMap((group) => group.threads)
+    expect(filtered).toEqual([title, content])
+    expect(buildGroups(projects, threads, { ...overrides, environmentId: remoteId })).toEqual([])
+    expect(
+      buildGroups(projects, threads, { ...overrides, matchedThreadKeys: new Set() }).flatMap(
+        (group) => group.threads,
+      ),
+    ).toEqual([title])
+    expect(buildGroups(projects, threads, { searchQuery: '', matchedThreadKeys })).toEqual(
+      buildGroups(projects, threads),
+    )
+  })
+
   it('builds one v2 scope for the same repository across environments', () =>
   {
     const localEnvironmentId = EnvironmentId.make('environment-local')

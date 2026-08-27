@@ -25,6 +25,7 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationEvent,
   OrchestrationGetTurnDiffInput,
+  OrchestrationSearchThreadsInput,
   OrchestrationLatestTurn,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
@@ -50,6 +51,24 @@ import {
 } from '../../../packages/contracts/src/providerInstance.ts'
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput)
+const decodeThreadSearchInput = Schema.decodeUnknownSync(OrchestrationSearchThreadsInput)
+it('bounds and trims conversation search requests', () =>
+{
+  assert.deepEqual(decodeThreadSearchInput({ query: '  needle  ', limit: 50 }), {
+    query: 'needle',
+    limit: 50,
+  })
+  for (const input of [
+    { query: ' x ' },
+    { query: 'x'.repeat(201) },
+    { query: 'ok', limit: 0 },
+    { query: 'ok', limit: 51 },
+  ])
+  {
+    assert.throws(() => decodeThreadSearchInput(input))
+  }
+})
+
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff)
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand)
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload)

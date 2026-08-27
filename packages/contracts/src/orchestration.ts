@@ -42,6 +42,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getRunDiff: 'orchestration.getRunDiff',
   getRunExecutionDiffV1: 'orchestration.getRunExecutionDiff.v1',
   getArchivedShellSnapshot: 'orchestration.getArchivedShellSnapshot',
+  searchThreads: 'orchestration.searchThreads',
   subscribeShell: 'orchestration.subscribeShell',
   subscribeThread: 'orchestration.subscribeThread',
 } as const
@@ -2375,7 +2376,51 @@ export const ImportSessionsResult = Schema.Struct({
 })
 export type ImportSessionsResult = typeof ImportSessionsResult.Type
 
+export const THREAD_SEARCH_QUERY_MIN_CHARS = 2
+export const THREAD_SEARCH_QUERY_MAX_CHARS = 200
+export const THREAD_SEARCH_SNIPPET_MAX_CHARS = 240
+export const THREAD_SEARCH_MAX_RESULTS = 50
+
+export const OrchestrationSearchThreadsInput = Schema.Struct({
+  query: TrimmedNonEmptyString.check(
+    Schema.isMinLength(THREAD_SEARCH_QUERY_MIN_CHARS),
+    Schema.isMaxLength(THREAD_SEARCH_QUERY_MAX_CHARS),
+  ),
+  limit: Schema.optionalKey(
+    Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(THREAD_SEARCH_MAX_RESULTS),
+    ),
+  ),
+})
+export type OrchestrationSearchThreadsInput = typeof OrchestrationSearchThreadsInput.Type
+
+export const OrchestrationThreadSearchSource = Schema.Literals(['user', 'assistant'])
+export const OrchestrationThreadSearchMatch = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  source: OrchestrationThreadSearchSource,
+  snippet: Schema.String.check(Schema.isMaxLength(THREAD_SEARCH_SNIPPET_MAX_CHARS)),
+  messageCreatedAt: Schema.NullOr(IsoDateTime),
+})
+export type OrchestrationThreadSearchMatch = typeof OrchestrationThreadSearchMatch.Type
+
+export const OrchestrationSearchThreadsResult = Schema.Struct({
+  matches: Schema.Array(OrchestrationThreadSearchMatch),
+})
+export type OrchestrationSearchThreadsResult = typeof OrchestrationSearchThreadsResult.Type
+
+export class OrchestrationSearchThreadsError extends Schema.TaggedErrorClass<OrchestrationSearchThreadsError>()(
+  'OrchestrationSearchThreadsError',
+  { message: TrimmedNonEmptyString },
+)
+{}
+
 export const OrchestrationRpcSchemas = {
+  searchThreads: {
+    input: OrchestrationSearchThreadsInput,
+    output: OrchestrationSearchThreadsResult,
+  },
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,

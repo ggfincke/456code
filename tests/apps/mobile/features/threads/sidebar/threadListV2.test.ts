@@ -1,6 +1,7 @@
 // tests/apps/mobile/features/threads/sidebar/threadListV2.test.ts
 // verifies mobile thread list ordering and status presentation
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
+import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -135,6 +136,51 @@ describe('sortThreadsForListV2', () =>
 
 describe('buildThreadListV2Items', () =>
 {
+  it('adds scoped content matches without duplicates or changing reentry and settled order', () =>
+  {
+    const title = makeThread({
+      id: ThreadId.make('title'),
+      title: 'Needle title',
+      createdAt: '2026-06-01T12:00:00.000Z',
+    })
+    const content = makeThread({
+      id: ThreadId.make('content'),
+      title: 'Different name',
+      unsettledAt: '2026-06-01T13:00:00.000Z',
+    })
+    const settled = makeThread({
+      id: ThreadId.make('settled'),
+      title: 'Finished',
+      settledOverride: 'settled',
+      settledAt: '2026-06-01T15:00:00.000Z',
+    })
+    const remoteCollision = { ...content, environmentId: EnvironmentId.make('remote') }
+    const threads = [title, settled, remoteCollision, content]
+    const matchedThreadKeys = new Set(
+      [title, content, settled].map((thread) =>
+        threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+      ),
+    )
+    const input = {
+      threads,
+      environmentId: null,
+      searchQuery: 'needle',
+      matchedThreadKeys,
+      now: NOW,
+    }
+    const layout = buildThreadListV2Items(input)
+    expect(layout.items.map((item) => item.thread)).toEqual([content, title, settled])
+    expect(layout.items.map((item) => item.variant)).toEqual(['card', 'card', 'slim'])
+    expect(
+      buildThreadListV2Items({ ...input, matchedThreadKeys: new Set() }).items.map(
+        (item) => item.thread,
+      ),
+    ).toEqual([title])
+    expect(buildThreadListV2Items({ ...input, searchQuery: '' })).toEqual(
+      buildThreadListV2Items({ threads, environmentId: null, searchQuery: '', now: NOW }),
+    )
+  })
+
   it('hides snoozed threads and counts them — visibility parity with web', () =>
   {
     const layout = buildThreadListV2Items({

@@ -37,6 +37,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.getRunExecutionDiffV1, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.searchThreads, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
   [WS_METHODS.serverProbe, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],

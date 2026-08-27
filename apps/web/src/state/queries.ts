@@ -1,7 +1,8 @@
 // apps/web/src/state/queries.ts
 // exposes reactive client query hooks
 
-import { useAtomValue } from '@effect/atom-react'
+import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import { createThreadSearchAtoms } from '@t3tools/client-runtime/state/thread-search'
 import {
   type CheckpointDiffTarget,
   type ComposerPathSearchTarget,
@@ -23,6 +24,7 @@ import { appAtomRegistry } from '../rpc/atomRegistry'
 import { orchestrationEnvironment } from './orchestration'
 import { isPaginatedBranchesNextPagePending } from './paginatedBranches'
 import { projectEnvironment } from './projects'
+import { environmentPresentations } from './presentation'
 import { useEnvironmentQuery } from './query'
 import { useEnvironmentThread } from './threads'
 import { vcsEnvironment } from './vcs'
@@ -35,6 +37,40 @@ export const PROJECT_CONTENT_SEARCH_LIMIT = 500
 const VCS_REF_LIST_LIMIT = 100
 const EMPTY_REFS: ReadonlyArray<VcsRef> = []
 const INITIAL_BRANCH_CURSORS = [undefined] as const
+
+const connectedSearchEnvironmentIds = Atom.make((get) =>
+  [...get(environmentPresentations.presentationsAtom)]
+    .filter(([, presentation]) => presentation.connection.phase === 'connected')
+    .map(([environmentId]) => environmentId),
+)
+
+export function useThreadSearch(query: string)
+{
+  const [search] = useState(() =>
+    createThreadSearchAtoms({
+      connectedEnvironmentIds: connectedSearchEnvironmentIds,
+      getSearchAtom: (environmentId, query) =>
+        orchestrationEnvironment.searchThreads({
+          environmentId,
+          input: { query, limit: 50 },
+        }),
+      labelPrefix: 'web:palette-thread-search',
+    }),
+  )
+  const setQuery = useAtomSet(search.query)
+  const atomQuery = useAtomValue(search.query)
+  const result = useAtomValue(search.results)
+  useEffect(() =>
+  {
+    setQuery(query)
+  }, [query, setQuery])
+  // a prop change must hide previous results before the effect updates the shared atom
+  const isCurrent = atomQuery === query
+  return {
+    matches: isCurrent && !result.isLoading ? result.matches : [],
+    isPending: !isCurrent || result.isLoading,
+  }
+}
 
 export interface ThreadDetailView
 {

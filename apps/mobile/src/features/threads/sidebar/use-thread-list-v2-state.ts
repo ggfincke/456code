@@ -26,6 +26,7 @@ export function useThreadListV2State(input: {
   }> | null
   readonly projectScopeKey: string | null
   readonly searchQuery: string
+  readonly matchedThreadKeys?: ReadonlySet<string>
   readonly autoSettleOnMerge: boolean
 })
 {
@@ -102,6 +103,7 @@ export function useThreadListV2State(input: {
       environmentId: input.environmentId,
       projectRefs: input.projectRefs,
       searchQuery: input.searchQuery,
+      matchedThreadKeys: input.matchedThreadKeys,
       changeRequestStateByKey,
       autoSettleOnMerge: input.autoSettleOnMerge,
       settlementEnvironmentIds,
@@ -117,6 +119,7 @@ export function useThreadListV2State(input: {
     input.environmentId,
     input.projectRefs,
     input.searchQuery,
+    input.matchedThreadKeys,
     input.threads,
     nowMinute,
     settledVisibleCount,
