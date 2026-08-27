@@ -112,6 +112,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage>
   public readonly setMaxThinkingTokensCalls: Array<number | null> = []
   public initializationResultCalls = 0
   public closeCalls = 0
+  public closeError: unknown | undefined
 
   emit(message: SDKMessage): void
   {
@@ -185,6 +186,10 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage>
   readonly close = (): void =>
   {
     this.closeCalls += 1
+    if (this.closeError !== undefined)
+    {
+      throw this.closeError
+    }
     this.finish()
   };
 
@@ -1856,7 +1861,303 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
-  it.effect('stopSession does not throw into the SDK prompt consumer', () =>
+  it.effect('keeps the session available when process close fails', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      harness.query.closeError = new Error('close failed')
+
+      const result = yield* adapter.interruptTurn(session.threadId).pipe(Effect.result)
+
+      assert.equal(result._tag, 'Failure')
+      if (result._tag === 'Failure')
+      {
+        assert.equal(result.failure._tag, 'ProviderAdapterProcessError')
+      }
+      assert.equal(harness.query.closeCalls, 1)
+      assert.equal(yield* adapter.hasSession(session.threadId), true)
+      assert.equal((yield* adapter.listSessions())[0]?.status, 'ready')
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('stopAll attempts every session and returns the first close failure', () =>
+  {
+    const queries: FakeClaudeQuery[] = []
+    const layer = Layer.effect(
+      ClaudeAdapter,
+      Effect.gen(function* ()
+      {
+        const claudeConfig = decodeClaudeSettings({})
+        return yield* makeClaudeAdapter(claudeConfig, {
+          createQuery: () =>
+          {
+            const query = new FakeClaudeQuery()
+            queries.push(query)
+            return query
+          },
+        })
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest('/tmp/claude-adapter-test', '/tmp')),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(NodeServices.layer),
+    )
+
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* startClaudeTestSession(adapter, {
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      const firstError = new Error('first close failed')
+      const secondError = new Error('second close failed')
+      assert.isDefined(queries[0])
+      assert.isDefined(queries[1])
+      queries[0].closeError = firstError
+      queries[1].closeError = secondError
+
+      const result = yield* adapter.stopAll().pipe(Effect.result)
+
+      assert.equal(result._tag, 'Failure')
+      if (result._tag === 'Failure')
+      {
+        assert.equal(result.failure._tag, 'ProviderAdapterProcessError')
+        assert.equal(result.failure.cause, firstError)
+      }
+      assert.equal(queries[0].closeCalls, 1)
+      assert.equal(queries[1].closeCalls, 1)
+      assert.equal(yield* adapter.hasSession(THREAD_ID), true)
+      assert.equal(yield* adapter.hasSession(RESUME_THREAD_ID), true)
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(layer),
+    )
+  })
+
+  it.effect('completes unfinished native tasks as stopped exactly once', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEvents: Array<ProviderRuntimeEvent> = []
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapClaudeRuntimeEvents(adapter),
+        (event) => Effect.sync(() => runtimeEvents.push(event)),
+      ).pipe(Effect.forkChild)
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      harness.query.emit({
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'task-live',
+        description: 'Background work',
+        session_id: 'sdk-session-task-stop',
+        uuid: 'task-started-stop',
+      } as unknown as SDKMessage)
+      yield* Effect.yieldNow
+
+      yield* adapter.interruptTurn(session.threadId)
+      yield* adapter.stopAll()
+      yield* Effect.yieldNow
+      runtimeEventsFiber.interruptUnsafe()
+
+      const completed = runtimeEvents.filter(
+        (event) => event.type === 'task.completed' && event.payload.taskId === 'task-live',
+      )
+      assert.equal(completed.length, 1)
+      assert.equal(completed[0]?.type, 'task.completed')
+      if (completed[0]?.type === 'task.completed')
+      {
+        assert.equal(completed[0].payload.status, 'stopped')
+      }
+      assert.equal(harness.query.closeCalls, 1)
+      assert.equal(yield* adapter.hasSession(session.threadId), false)
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('bounds context usage reads during session stop', () =>
+  {
+    let signalUsageStarted: () => void = () => undefined
+    const usageStarted = new Promise<void>((resolve) =>
+    {
+      signalUsageStarted = resolve
+    })
+    const queries: FakeClaudeQuery[] = []
+    const layer = Layer.effect(
+      ClaudeAdapter,
+      Effect.gen(function* ()
+      {
+        const claudeConfig = decodeClaudeSettings({})
+        return yield* makeClaudeAdapter(claudeConfig, {
+          createQuery: () =>
+          {
+            const query = new FakeClaudeQuery()
+            Object.assign(query, {
+              getContextUsage: async () =>
+              {
+                signalUsageStarted()
+                return await new Promise<never>(() => undefined)
+              },
+            })
+            queries.push(query)
+            return query
+          },
+        })
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest('/tmp/claude-adapter-test', '/tmp')),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(NodeServices.layer),
+    )
+
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: 'hello',
+        attachments: [],
+      })
+
+      const stopFiber = yield* adapter.interruptTurn(session.threadId).pipe(Effect.forkChild)
+      yield* Effect.promise(() => usageStarted)
+      yield* TestClock.adjust('1 second')
+      yield* Fiber.join(stopFiber)
+
+      assert.equal(queries[0]?.closeCalls, 1)
+      assert.equal(yield* adapter.hasSession(session.threadId), false)
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(layer),
+    )
+  })
+
+  it.effect('keeps a resumed replacement session during slow stop cleanup', () =>
+  {
+    const queries: FakeClaudeQuery[] = []
+    let signalUsageStarted: () => void = () => undefined
+    const usageStarted = new Promise<void>((resolve) =>
+    {
+      signalUsageStarted = resolve
+    })
+    const layer = Layer.effect(
+      ClaudeAdapter,
+      Effect.gen(function* ()
+      {
+        const claudeConfig = decodeClaudeSettings({})
+        return yield* makeClaudeAdapter(claudeConfig, {
+          createQuery: () =>
+          {
+            const query = new FakeClaudeQuery()
+            if (queries.length === 0)
+            {
+              Object.assign(query, {
+                getContextUsage: async () =>
+                {
+                  signalUsageStarted()
+                  return await new Promise<never>(() => undefined)
+                },
+              })
+            }
+            queries.push(query)
+            return query
+          },
+        })
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest('/tmp/claude-adapter-test', '/tmp')),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(NodeServices.layer),
+    )
+
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* Stream.take(unwrapClaudeRuntimeEvents(adapter), 8).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+      const firstSession = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: firstSession.threadId,
+        input: 'hello',
+        attachments: [],
+      })
+
+      const interruptFiber = yield* adapter
+        .interruptTurn(firstSession.threadId)
+        .pipe(Effect.forkChild)
+      yield* Effect.promise(() => usageStarted)
+      assert.equal(queries[0]?.closeCalls, 1)
+
+      const replacement = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+        resumeCursor: firstSession.resumeCursor,
+      })
+      yield* TestClock.adjust('1 second')
+      yield* Fiber.join(interruptFiber)
+
+      const activeSessions = yield* adapter.listSessions()
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      assert.equal(queries.length, 2)
+      assert.equal(queries[1]?.closeCalls, 0)
+      assert.equal(activeSessions.length, 1)
+      assert.deepEqual(activeSessions[0]?.resumeCursor, replacement.resumeCursor)
+      assert.deepEqual(
+        runtimeEvents
+          .filter((event) => event.type.startsWith('session.'))
+          .map((event) => event.type),
+        [
+          'session.started',
+          'session.configured',
+          'session.state.changed',
+          'session.started',
+          'session.configured',
+          'session.state.changed',
+        ],
+      )
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(layer),
+    )
+  })
+
+  it.effect('closes the query before ending the SDK prompt consumer', () =>
   {
     // the SDK consumes user messages via `for await (... of prompt)`.
     // stopping a session must end that loop cleanly — not throw an error.
@@ -1864,10 +2165,12 @@ describe('ClaudeAdapterLive', () =>
     // FakeClaudeQuery.close() masks this by resolving pending iterators
     // before the shutdown propagates. Override it to match real SDK behavior
     // where close() does not resolve the prompt consumer.
+    let promptConsumerCompleted = false
     const query = new FakeClaudeQuery()
     ;(query as { close: () => void }).close = () =>
     {
       query.closeCalls += 1
+      assert.equal(promptConsumerCompleted, false)
     }
 
     let promptConsumerError: unknown = undefined
@@ -1893,6 +2196,10 @@ describe('ClaudeAdapterLive', () =>
               catch (error)
               {
                 promptConsumerError = error
+              }
+              finally
+              {
+                promptConsumerCompleted = true
               }
             })()
             return query
@@ -1936,9 +2243,197 @@ describe('ClaudeAdapterLive', () =>
         `Prompt consumer should not receive a thrown error on session stop, ` +
           `but got: "${promptConsumerError instanceof Error ? promptConsumerError.message : String(promptConsumerError)}"`,
       )
+      assert.equal(promptConsumerCompleted, true)
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(layer),
+    )
+  })
+
+  it.effect('uses a nested snapshot model that arrives before task_started', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const taskStartedFiber = yield* Stream.filter(
+        unwrapClaudeRuntimeEvents(adapter),
+        (event) => event.type === 'task.started',
+      ).pipe(Stream.runHead, Effect.forkChild)
+
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make('claudeAgent'),
+          'claude-opus-4-6',
+        ),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: 'spawn an agent',
+        attachments: [],
+      })
+
+      harness.query.emit({
+        type: 'stream_event',
+        parent_tool_use_id: null,
+        session_id: 'sdk-session-task-race',
+        uuid: 'task-tool-start',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'tool_use',
+            id: 'toolu_agent_early',
+            name: 'Agent',
+            input: {
+              name: 'worker',
+              model: 'claude-haiku-4-5',
+            },
+          },
+        },
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'assistant',
+        parent_tool_use_id: 'toolu_agent_early',
+        message: {
+          model: 'claude-sonnet-5[1m]',
+          content: [],
+        },
+        uuid: 'early-snapshot',
+        session_id: 'sdk-session-task-race',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'task-early',
+        description: 'Early worker',
+        task_type: 'local_agent',
+        tool_use_id: 'toolu_agent_early',
+        uuid: 'task-started-early',
+        session_id: 'sdk-session-task-race',
+      } as unknown as SDKMessage)
+
+      const taskStarted = yield* Fiber.join(taskStartedFiber)
+      assert.equal(taskStarted._tag, 'Some')
+      if (taskStarted._tag === 'Some' && taskStarted.value.type === 'task.started')
+      {
+        assert.equal(taskStarted.value.payload.model, 'claude-sonnet-5[1m]')
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('keeps later nested snapshot model refinements through task completion', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const taskEventsFiber = yield* Stream.filter(unwrapClaudeRuntimeEvents(adapter), (event) =>
+        event.type.startsWith('task.'),
+      ).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild)
+
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make('claudeAgent'),
+          'claude-opus-4-6',
+        ),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: 'spawn an agent',
+        attachments: [],
+      })
+
+      harness.query.emit({
+        type: 'stream_event',
+        parent_tool_use_id: null,
+        session_id: 'sdk-session-task-refinement',
+        uuid: 'task-tool-refinement',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'tool_use',
+            id: 'toolu_agent_refinement',
+            name: 'Agent',
+            input: {
+              name: 'worker',
+              model: 'claude-haiku-4-5',
+            },
+          },
+        },
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'task-refinement',
+        description: 'Refining worker',
+        task_type: 'local_agent',
+        tool_use_id: 'toolu_agent_refinement',
+        uuid: 'task-started-refinement',
+        session_id: 'sdk-session-task-refinement',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'assistant',
+        parent_tool_use_id: 'toolu_agent_refinement',
+        message: {
+          model: 'claude-sonnet-5[1m]',
+          content: [],
+        },
+        uuid: 'later-snapshot',
+        session_id: 'sdk-session-task-refinement',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'system',
+        subtype: 'task_progress',
+        task_id: 'task-refinement',
+        description: 'Refining worker',
+        usage: { total_tokens: 100, tool_uses: 1, duration_ms: 10 },
+        uuid: 'task-progress-refinement',
+        session_id: 'sdk-session-task-refinement',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'task-refinement',
+        status: 'completed',
+        summary: 'Finished work.',
+        usage: { total_tokens: 120, tool_uses: 2, duration_ms: 20 },
+        uuid: 'task-completed-refinement',
+        session_id: 'sdk-session-task-refinement',
+      } as unknown as SDKMessage)
+
+      const taskEvents = Array.from(yield* Fiber.join(taskEventsFiber))
+      const started = taskEvents[0]
+      assert.equal(started?.type, 'task.started')
+      if (started?.type === 'task.started')
+      {
+        assert.equal(started.payload.model, 'claude-haiku-4-5')
+      }
+      const progress = taskEvents[1]
+      assert.equal(progress?.type, 'task.progress')
+      if (progress?.type === 'task.progress')
+      {
+        assert.equal(progress.payload.model, 'claude-sonnet-5[1m]')
+      }
+      const completed = taskEvents[2]
+      assert.equal(completed?.type, 'task.completed')
+      if (completed?.type === 'task.completed')
+      {
+        assert.equal(completed.payload.model, 'claude-sonnet-5[1m]')
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
     )
   })
 
@@ -3149,7 +3644,7 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
-  it.effect('keeps accept-for-session permissions scoped and synthesizes missing MCP rules', () =>
+  it.effect('maps accept-always to scoped session permission updates', () =>
   {
     const harness = makeHarness()
     return Effect.gen(function* ()
@@ -3233,7 +3728,7 @@ describe('ClaudeAdapterLive', () =>
         yield* adapter.respondToRequest(
           session.threadId,
           ApprovalRequestId.make(requestId),
-          'acceptForSession',
+          'acceptAlways',
         )
         const resolved = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
         assert.equal(resolved._tag, 'Some')
