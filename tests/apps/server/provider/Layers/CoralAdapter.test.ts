@@ -191,7 +191,7 @@ it.layer(NodeServices.layer)('CoralAdapterLive', (it) =>
       const before = yield* Ref.get(snapshot)
       assert.deepStrictEqual(
         before.models.map((model) => model.slug),
-        ['gemma4:31b-mlx'],
+        ['qwen3.8:27b-mlx'],
       )
 
       yield* startAcpTestSession(adapter, {

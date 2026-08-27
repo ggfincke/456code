@@ -14,7 +14,7 @@ import { expandHomePath } from '../../pathExpansion.ts'
 import * as AcpSessionRuntime from './AcpSessionRuntime.ts'
 
 export const DEFAULT_CORAL_OLLAMA_HOST = 'http://localhost:11434'
-export const DEFAULT_CORAL_MODEL = 'gemma4:31b-mlx'
+export const DEFAULT_CORAL_MODEL = 'qwen3.8:27b-mlx'
 export const CORAL_RUNTIME_MODE_CONFIG_ID = 'coral.runtime-mode'
 
 export type CoralRuntimeMode = Extract<RuntimeMode, 'approval-required'>
