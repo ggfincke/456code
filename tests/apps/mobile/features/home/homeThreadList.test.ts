@@ -455,6 +455,52 @@ describe('buildHomeThreadGroups', () =>
     ])
   })
 
+  it('ranks and retains reactivated old threads in recency mode without changing creation sorting', () =>
+  {
+    const environmentId = EnvironmentId.make('environment-1')
+    const project = makeProject({
+      environmentId,
+      id: ProjectId.make('project-1'),
+      title: '456code',
+    })
+    const reactivated = makeThread({
+      environmentId,
+      id: ThreadId.make('reactivated'),
+      projectId: project.id,
+      title: 'Older reactivated thread',
+      createdAt: '2026-06-15T00:00:00.000Z',
+      latestUserMessageAt: '2026-06-15T01:00:00.000Z',
+      updatedAt: '2026-06-28T03:02:00.000Z',
+      unsettledAt: '2026-06-28T03:02:00.000Z',
+      settledOverride: 'active',
+    })
+    const newer = makeThread({
+      environmentId,
+      id: ThreadId.make('newer-created'),
+      projectId: project.id,
+      title: 'Newer created thread',
+      createdAt: '2026-06-28T02:43:00.000Z',
+      latestUserMessageAt: '2026-06-28T02:43:00.000Z',
+      updatedAt: '2026-06-28T02:43:00.000Z',
+    })
+    const threads = [newer, reactivated]
+    const recencyGroup = buildGroups([project], threads)[0]!
+
+    expect(recencyGroup.threads.map((thread) => thread.id)).toEqual([
+      'reactivated',
+      'newer-created',
+    ])
+    expect(recencyGroup.recentThreads).toEqual(recencyGroup.threads)
+    expect(recencyGroup.threads[0]).toBe(reactivated)
+    expect(reactivated.createdAt).toBe('2026-06-15T00:00:00.000Z')
+    expect(reactivated.latestUserMessageAt).toBe('2026-06-15T01:00:00.000Z')
+    expect(
+      buildGroups([project], threads, { threadSortOrder: 'created_at' })[0]?.threads.map(
+        (thread) => thread.id,
+      ),
+    ).toEqual(['newer-created', 'reactivated'])
+  })
+
   it('supports independent project and thread creation-time sorting', () =>
   {
     const environmentId = EnvironmentId.make('environment-1')

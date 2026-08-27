@@ -37,7 +37,12 @@ describe('activeThreadAnchorTimestampMs', () =>
         unsettledAt: 'malformed',
       }),
     ).toBe(Date.parse('2026-03-09T10:00:00.000Z'))
-    expect(activeThreadAnchorTimestampMs({ createdAt: 'malformed', unsettledAt: null })).toBe(0)
+    expect(activeThreadAnchorTimestampMs({ createdAt: 'malformed', unsettledAt: null })).toBe(
+      Number.NEGATIVE_INFINITY,
+    )
+    expect(
+      activeThreadAnchorTimestampMs({ createdAt: '1960-01-01T00:00:00.000Z', unsettledAt: null }),
+    ).toBe(Date.parse('1960-01-01T00:00:00.000Z'))
   })
 })
 
@@ -65,6 +70,37 @@ function makeProjectThread(overrides: Partial<ProjectThread> = {}): ProjectThrea
 
 describe('sortThreads', () =>
 {
+  it('ignores malformed re-entry dates and breaks invalid timestamp ties by id', () =>
+  {
+    const invalidThread = {
+      createdAt: 'invalid-created-at',
+      updatedAt: 'invalid-updated-at',
+      latestUserMessageAt: 'invalid-message-at',
+      unsettledAt: 'invalid-reentry-at',
+    }
+    const threads = [
+      makeThread({ id: 'invalid-a', ...invalidThread }),
+      makeThread({
+        id: 'valid',
+        createdAt: '1960-01-01T00:00:00.000Z',
+        updatedAt: '1960-01-02T00:00:00.000Z',
+        unsettledAt: 'invalid-reentry-at',
+      }),
+      makeThread({ id: 'invalid-z', ...invalidThread }),
+    ]
+
+    expect(sortThreads(threads, 'updated_at').map((thread) => thread.id)).toEqual([
+      'valid',
+      'invalid-z',
+      'invalid-a',
+    ])
+    expect(sortThreads(threads.toReversed(), 'updated_at').map((thread) => thread.id)).toEqual([
+      'valid',
+      'invalid-z',
+      'invalid-a',
+    ])
+  })
+
   it('falls back to updatedAt and createdAt when latestUserMessageAt is invalid and there are no messages', () =>
   {
     const sorted = sortThreads(

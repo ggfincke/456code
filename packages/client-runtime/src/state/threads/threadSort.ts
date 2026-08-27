@@ -10,6 +10,7 @@ export interface ThreadSortInput
 {
   readonly createdAt: string
   readonly updatedAt: string
+  readonly unsettledAt?: string | null | undefined
   readonly latestUserMessageAt?: string | null
   readonly messages?: ReadonlyArray<{
     readonly createdAt: string
@@ -79,7 +80,11 @@ export function getThreadSortTimestamp(
   {
     return getFirstSortableTimestamp(thread.createdAt, thread.updatedAt) ?? Number.NEGATIVE_INFINITY
   }
-  return getLatestUserMessageTimestamp(thread)
+  const latestUserMessageTimestamp = getLatestUserMessageTimestamp(thread)
+  // re-entry is fresh activity even when the last user message predates it
+  return toSortableTimestamp(thread.unsettledAt ?? undefined) === null
+    ? latestUserMessageTimestamp
+    : Math.max(latestUserMessageTimestamp, activeThreadAnchorTimestampMs(thread))
 }
 
 // creation anchors a new row; a later re-entry stamp moves a previously
@@ -90,8 +95,8 @@ export function activeThreadAnchorTimestampMs(thread: {
 }): number
 {
   return Math.max(
-    toSortableTimestamp(thread.createdAt) ?? 0,
-    toSortableTimestamp(thread.unsettledAt ?? undefined) ?? 0,
+    toSortableTimestamp(thread.createdAt) ?? Number.NEGATIVE_INFINITY,
+    toSortableTimestamp(thread.unsettledAt ?? undefined) ?? Number.NEGATIVE_INFINITY,
   )
 }
 
