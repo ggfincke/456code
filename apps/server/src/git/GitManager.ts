@@ -1091,6 +1091,17 @@ export const make = Effect.gen(function* ()
       return defaultFromProvider
     }
 
+    // provider discovery can fail independently of git; prefer the remote's
+    // symbolic HEAD before assuming a conventional branch name
+    const defaultFromRemote = yield* gitCore.resolvePrimaryRemoteName(cwd).pipe(
+      Effect.flatMap((remoteName) => gitCore.resolveDefaultBranchName(cwd, remoteName)),
+      Effect.orElseSucceed(() => null),
+    )
+    if (defaultFromRemote)
+    {
+      return defaultFromRemote
+    }
+
     return 'main'
   })
 
