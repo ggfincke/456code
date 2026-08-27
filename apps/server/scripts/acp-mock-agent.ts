@@ -19,6 +19,7 @@ import type * as AcpSchema from 'effect-acp/schema'
 const requestLogPath = process.env.T3_ACP_REQUEST_LOG_PATH
 const exitLogPath = process.env.T3_ACP_EXIT_LOG_PATH
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === '1'
+const emitGrowingToolOutput = process.env.T3_ACP_EMIT_GROWING_TOOL_OUTPUT === '1'
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === '1'
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === '1'
@@ -874,6 +875,44 @@ const program = Effect.gen(function* ()
           },
         })
 
+        return { stopReason: 'end_turn' }
+      }
+
+      if (emitGrowingToolOutput)
+      {
+        const toolCallId = 'tool-call-progress'
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId,
+            title: 'Terminal',
+            kind: 'execute',
+            status: 'pending',
+            rawInput: { command: ['echo', 'progress'] },
+          },
+        })
+        for (const length of [0, 300, 301, 301, 600, 601])
+        {
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId,
+              status: 'in_progress',
+              rawOutput: { stdout: 'x'.repeat(length) },
+            },
+          })
+        }
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId,
+            status: 'completed',
+            rawOutput: { stdout: 'x'.repeat(601), exitCode: 0 },
+          },
+        })
         return { stopReason: 'end_turn' }
       }
 

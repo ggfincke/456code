@@ -23,6 +23,8 @@ import {
   resolveCodexAccountUsage,
 } from '../../../../../apps/server/src/provider/Layers/CodexProvider.ts'
 
+const decodeCodexSettings = Schema.decodeEffect(CodexSettings)
+
 it('classifies explicit Codex upgrades while keeping defaults, unknown models, and custom entries current', () =>
 {
   const model = (slug: string) => ({
@@ -62,7 +64,7 @@ it('classifies explicit Codex upgrades while keeping defaults, unknown models, a
   assert.strictEqual(models.at(-1)?.isLegacy, undefined)
 })
 
-const makeStalledUsageSpawner = Effect.fn('makeStalledUsageSpawner')(function* ()
+const makeStalledUsageSpawner = Effect.fn('makeStalledUsageSpawner')(function* (planType: string)
 {
   const stdout = yield* Queue.unbounded<Uint8Array>()
   const rateLimitsRequested = yield* Deferred.make<void>()
@@ -95,7 +97,7 @@ const makeStalledUsageSpawner = Effect.fn('makeStalledUsageSpawner')(function* (
             })
           case 'account/read':
             return respond(message.id, {
-              account: { type: 'chatgpt', email: 'dev@example.com', planType: 'plus' },
+              account: { type: 'chatgpt', email: 'dev@example.com', planType },
               requiresOpenaiAuth: false,
             })
           case 'skills/list':
@@ -205,24 +207,34 @@ it('keeps a missing Codex rate-limit response non-fatal to account status', () =
   })
 })
 
-it.effect('keeps the Codex snapshot ready when the usage request stalls', () =>
-  Effect.gen(function* ()
-  {
-    const { rateLimitsRequested, spawner } = yield* makeStalledUsageSpawner()
-    const settings = yield* Schema.decodeEffect(CodexSettings)({ binaryPath: 'codex' })
-    const statusFiber = yield* checkCodexProviderStatus(settings).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.forkScoped,
-    )
+it.effect.each([
+  { planType: 'plus', label: 'ChatGPT Plus Subscription' },
+  { planType: 'self_serve_business_prolite', label: 'ChatGPT Business Subscription' },
+  { planType: 'ent26', label: 'ChatGPT Enterprise Subscription' },
+  { planType: 'enterprise_cbp_automation', label: 'ChatGPT Enterprise Subscription' },
+  { planType: 'edu_plus', label: 'ChatGPT Edu Subscription' },
+  { planType: 'edu_pro', label: 'ChatGPT Edu Subscription' },
+])(
+  'keeps the Codex snapshot ready with $planType when the usage request stalls',
+  ({ planType, label }) =>
+    Effect.gen(function* ()
+    {
+      const { rateLimitsRequested, spawner } = yield* makeStalledUsageSpawner(planType)
+      const settings = yield* decodeCodexSettings({ binaryPath: 'codex' })
+      const statusFiber = yield* checkCodexProviderStatus(settings).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.forkScoped,
+      )
 
-    yield* Deferred.await(rateLimitsRequested)
-    yield* TestClock.adjust(Duration.seconds(4))
-    const status = yield* Fiber.join(statusFiber)
+      yield* Deferred.await(rateLimitsRequested)
+      yield* TestClock.adjust(Duration.seconds(4))
+      const status = yield* Fiber.join(statusFiber)
 
-    assert.strictEqual(status.status, 'ready')
-    assert.strictEqual(status.auth.status, 'authenticated')
-    assert.strictEqual(status.accountUsage?.status, 'unavailable')
-  }),
+      assert.strictEqual(status.status, 'ready')
+      assert.strictEqual(status.auth.status, 'authenticated')
+      assert.strictEqual(status.auth.label, label)
+      assert.strictEqual(status.accountUsage?.status, 'unavailable')
+    }),
 )
 
 it('maps current Codex model capability fields', () =>

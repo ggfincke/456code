@@ -433,6 +433,7 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<unknown>): bool
     const detail = error.detail.toLowerCase()
     return (
       detail.includes('unknown pending approval request') ||
+      detail.includes('unknown pending codex approval request') ||
       detail.includes('unknown pending permission request') ||
       detail.includes('expired pending approval request') ||
       detail.includes('approval request expired')
@@ -441,6 +442,7 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<unknown>): bool
   const message = Cause.pretty(cause).toLowerCase()
   return (
     message.includes('unknown pending approval request') ||
+    message.includes('unknown pending codex approval request') ||
     message.includes('unknown pending permission request') ||
     message.includes('expired pending approval request') ||
     message.includes('approval request expired')

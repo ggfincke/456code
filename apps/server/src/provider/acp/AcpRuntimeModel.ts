@@ -362,6 +362,29 @@ function toolCallContentText(entry: EffectAcpSchema.ToolCallContent): string | u
   return entry.content.text
 }
 
+// display trimming must not leave oversized whitespace on retained payloads
+function boundToolCallContentEntries(
+  content: ReadonlyArray<EffectAcpSchema.ToolCallContent>,
+): ReadonlyArray<EffectAcpSchema.ToolCallContent>
+{
+  return content.map((entry) =>
+  {
+    if (entry.type !== 'content' || entry.content.type !== 'text')
+    {
+      return entry
+    }
+    const text = entry.content.text
+    if (text.length <= TOOL_CALL_CONTENT_MAX_CHARS) return entry
+    return {
+      ...entry,
+      content: {
+        ...entry.content,
+        text: boundToolCallOutputText(text.trim() || text),
+      },
+    }
+  })
+}
+
 function extractTextContentFromToolCallContent(
   content: ReadonlyArray<EffectAcpSchema.ToolCallContent> | null | undefined,
 ): ExtractedToolCallContent
@@ -381,29 +404,42 @@ function extractTextContentFromToolCallContent(
   }
   if (chunks.length === 0)
   {
-    return { text: undefined, content }
+    return { text: undefined, content: boundToolCallContentEntries(content) }
   }
   const joined = chunks.join('\n')
   if (joined.length <= TOOL_CALL_CONTENT_MAX_CHARS)
   {
-    return { text: joined, content }
+    return { text: joined, content: boundToolCallContentEntries(content) }
   }
   const bounded = boundToolCallOutputText(joined)
-  const lastContributingTextIndex = content.reduce(
-    (lastIndex, entry, index) => (toolCallContentText(entry)?.trim() ? index : lastIndex),
-    -1,
-  )
-  const boundedContent = content.flatMap((entry, index) =>
+  const tailStart = joined.length - TOOL_CALL_CONTENT_MAX_CHARS
+  let offset = 0
+  let seenText = false
+  let markerPending = true
+  // retain each text slice on its original side of interleaved images and diffs
+  const boundedContent = content.flatMap((entry) =>
   {
-    if (toolCallContentText(entry) === undefined)
+    const text = toolCallContentText(entry)?.trim()
+    if (text === undefined)
     {
       return [entry]
     }
-    if (index !== lastContributingTextIndex)
+    if (!text)
     {
       return []
     }
-    return [{ type: 'content', content: { type: 'text', text: bounded } } as const]
+    if (seenText) offset += 1
+    seenText = true
+    const start = offset
+    offset += text.length
+    if (offset <= tailStart) return []
+    let piece = text.slice(Math.max(0, tailStart - start))
+    if (markerPending)
+    {
+      piece = `${TOOL_CALL_CONTENT_TRUNCATION_MARKER}${piece}`
+      markerPending = false
+    }
+    return [{ type: 'content', content: { type: 'text', text: piece } } as const]
   })
   return { text: bounded, content: boundedContent }
 }
@@ -592,6 +628,40 @@ export interface AcpToolCallEmitDecision
   readonly skippedSinceEmit: number
 }
 
+function toolCallOutputUnchanged(previous: AcpToolCallState, next: AcpToolCallState): boolean
+{
+  return (
+    JSON.stringify(previous.data.content) === JSON.stringify(next.data.content) &&
+    JSON.stringify(previous.data.rawOutput) === JSON.stringify(next.data.rawOutput)
+  )
+}
+
+// command detail stays fixed while cumulative stdout grows on the retained payload
+export function toolCallProgressLength(state: AcpToolCallState): number
+{
+  let contentChars = 0
+  if (Array.isArray(state.data.content))
+  {
+    for (const entry of state.data.content)
+    {
+      if (isRecord(entry))
+      {
+        contentChars += toolCallContentText(entry as EffectAcpSchema.ToolCallContent)?.length ?? 0
+      }
+    }
+  }
+  let rawOutputChars = 0
+  if (isRecord(state.data.rawOutput))
+  {
+    for (const field of RAW_OUTPUT_TEXT_FIELDS)
+    {
+      const value = state.data.rawOutput[field]
+      if (typeof value === 'string') rawOutputChars += value.length
+    }
+  }
+  return Math.max(state.detail?.length ?? 0, contentChars, rawOutputChars)
+}
+
 export function decideToolCallUpdateEmission(
   input: AcpToolCallEmitDecisionInput,
 ): AcpToolCallEmitDecision
@@ -601,21 +671,17 @@ export function decideToolCallUpdateEmission(
   {
     return { emit: true, skippedSinceEmit: 0 }
   }
-  if (!next.detail)
-  {
-    return { emit: false, skippedSinceEmit }
-  }
-  if (previous === undefined || previous.title !== next.title)
+  if (previous === undefined || previous.title !== next.title || previous.status !== next.status)
   {
     return { emit: true, skippedSinceEmit: 0 }
   }
-  if (previous.detail === next.detail)
+  if (previous.detail === next.detail && toolCallOutputUnchanged(previous, next))
   {
     return { emit: false, skippedSinceEmit }
   }
   const grewMeaningfully =
     lastEmittedDetailLength === undefined ||
-    Math.abs(next.detail.length - lastEmittedDetailLength) >=
+    Math.abs(toolCallProgressLength(next) - lastEmittedDetailLength) >=
       TOOL_CALL_UPDATE_MIN_DETAIL_GROWTH_CHARS
   if (grewMeaningfully || skippedSinceEmit + 1 >= TOOL_CALL_UPDATE_COALESCE_LIMIT)
   {

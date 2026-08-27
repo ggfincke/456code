@@ -14,6 +14,7 @@ import {
   parseSessionUpdateEvent,
   sessionUpdateIsReplay,
   syntheticLoadSessionResponseFromInitialize,
+  toolCallProgressLength,
   type AcpToolCallState,
 } from '../../../../../apps/server/src/provider/acp/AcpRuntimeModel.ts'
 
@@ -437,7 +438,80 @@ describe('AcpRuntimeModel', () =>
     expect(JSON.stringify(event).length).toBeLessThan(hugeText.length + rawStdout.length)
   })
 
-  it('keeps non-text content in order while collapsing oversized tool text to one tail', () =>
+  it.each([' '.repeat(20_000), `${' '.repeat(12_000)}hello${' '.repeat(12_000)}`])(
+    'bounds whitespace-only and padded text in retained content and raw payloads',
+    (text) =>
+    {
+      const { events } = parseSessionUpdateEvent({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tool-1',
+          status: 'in_progress',
+          content: [{ type: 'content', content: { type: 'text', text } }],
+          rawOutput: { stdout: text },
+        },
+      })
+      const event = events[0]
+      if (event?._tag !== 'ToolCallUpdated') throw new Error('expected tool update')
+      const content = event.toolCall.data.content as ReadonlyArray<EffectAcpSchema.ToolCallContent>
+      const entry = content[0]
+      if (entry?.type !== 'content' || entry.content.type !== 'text')
+        throw new Error('expected text')
+      expect(entry.content.text.length).toBeLessThanOrEqual(8_028)
+      if (text.trim()) expect(entry.content.text).toBe('hello')
+      const raw = event.rawPayload as {
+        update: { content: unknown; rawOutput: { stdout: string } }
+      }
+      expect(raw.update.content).toEqual(content)
+      expect(raw.update.rawOutput.stdout.length).toBeLessThanOrEqual(8_028)
+    },
+  )
+
+  it('keeps retained text on both sides of interleaved images and diffs', () =>
+  {
+    const first = 'a'.repeat(7_000)
+    const last = 'b'.repeat(3_000)
+    const image = {
+      type: 'content',
+      content: { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+    } as const
+    const diff = {
+      type: 'diff',
+      path: '/repo/file.ts',
+      oldText: 'before',
+      newText: 'after',
+    } as const
+    const { events } = parseSessionUpdateEvent({
+      sessionId: 'session-1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        status: 'in_progress',
+        content: [
+          { type: 'content', content: { type: 'text', text: first } },
+          image,
+          diff,
+          { type: 'content', content: { type: 'text', text: last } },
+        ],
+      },
+    })
+    const event = events[0]
+    if (event?._tag !== 'ToolCallUpdated') throw new Error('expected tool update')
+    const expected = [
+      {
+        type: 'content',
+        content: { type: 'text', text: `[Earlier output truncated]\n\n${first.slice(-4_999)}` },
+      },
+      image,
+      diff,
+      { type: 'content', content: { type: 'text', text: last } },
+    ]
+    expect(event.toolCall.data.content).toEqual(expected)
+    expect((event.rawPayload as { update: { content: unknown } }).update.content).toEqual(expected)
+  })
+
+  it('keeps non-text content in order when the retained tail fits the final text entry', () =>
   {
     const hugePrefix = 'x'.repeat(25_000)
     const hugeTail = 'y'.repeat(25_000)
@@ -527,6 +601,14 @@ describe('AcpRuntimeModel', () =>
           skippedSinceEmit: 2,
         }),
       ).toEqual({ emit: true, skippedSinceEmit: 0 })
+      expect(
+        decideToolCallUpdateEmission({
+          previous: toolCall(undefined, 'pending'),
+          next: toolCall(undefined, 'inProgress'),
+          lastEmittedDetailLength: 0,
+          skippedSinceEmit: 0,
+        }),
+      ).toEqual({ emit: true, skippedSinceEmit: 0 })
       for (const status of ['completed', 'failed'] as const)
       {
         expect(
@@ -539,5 +621,53 @@ describe('AcpRuntimeModel', () =>
         ).toEqual({ emit: true, skippedSinceEmit: 0 })
       }
     })
+
+    it.each(['content', 'rawOutput'] as const)(
+      'coalesces changing %s while command detail is fixed',
+      (field) =>
+      {
+        const withOutput = (length: number): AcpToolCallState => ({
+          ...toolCall('echo progress', 'inProgress'),
+          data:
+            field === 'content'
+              ? {
+                  content: [
+                    { type: 'content', content: { type: 'text', text: 'x'.repeat(length) } },
+                  ],
+                }
+              : { rawOutput: { stdout: 'x'.repeat(length) } },
+        })
+        let previous = withOutput(300)
+        let lastEmittedDetailLength = toolCallProgressLength(previous)
+        let skippedSinceEmit = 0
+        const emitted: number[] = []
+        expect(
+          decideToolCallUpdateEmission({
+            previous,
+            next: withOutput(300),
+            lastEmittedDetailLength,
+            skippedSinceEmit: 9,
+          }),
+        ).toEqual({ emit: false, skippedSinceEmit: 9 })
+        for (const length of [301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 566])
+        {
+          const next = withOutput(length)
+          const decision = decideToolCallUpdateEmission({
+            previous,
+            next,
+            lastEmittedDetailLength,
+            skippedSinceEmit,
+          })
+          if (decision.emit)
+          {
+            emitted.push(length)
+            lastEmittedDetailLength = toolCallProgressLength(next)
+          }
+          previous = next
+          skippedSinceEmit = decision.skippedSinceEmit
+        }
+        expect(emitted).toEqual([310, 566])
+      },
+    )
   })
 })
