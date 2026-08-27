@@ -435,6 +435,7 @@ export function ImportSessionsPanel()
         {selectionAnnouncement}
       </div>
       <SettingsSection
+        id="settings-import-sessions"
         title="Import sessions"
         icon={<DownloadIcon className="size-4 text-muted-foreground" />}
         headerAction={

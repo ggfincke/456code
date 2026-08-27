@@ -208,6 +208,7 @@ export function KeybindingsSettingsPanel()
   return (
     <SettingsPageContainer className="max-w-5xl">
       <SettingsSection
+        id="settings-keybindings"
         title="Keybindings"
         headerAction={
           <div className="flex items-center gap-1.5">

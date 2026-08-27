@@ -9,11 +9,12 @@ import {
   useLocation,
   useNavigate,
 } from '@tanstack/react-router'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 
 import { useSettingsRestore } from '../components/settings/SettingsPanels'
+import { SETTINGS_SEARCH_INPUT_ID } from '../components/settings/settingsSearch'
 import { Button } from '../components/ui/button'
-import { SidebarInset } from '../components/ui/sidebar'
+import { SidebarInset, useSidebar } from '../components/ui/sidebar'
 import { isElectron } from '../env'
 import { cn } from '~/lib/utils'
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/lib/workspaceTitlebar'
@@ -40,6 +41,7 @@ function SettingsContentLayout()
   const location = useLocation()
   const navigate = useNavigate()
   const canGoBack = useCanGoBack()
+  const { isMobile, open, setOpen, setOpenMobile } = useSidebar()
   const [restoreSignal, setRestoreSignal] = useState(0)
   const showRestoreDefaults = location.pathname === '/settings/general'
   const handleRestored = () => setRestoreSignal((value) => value + 1)
@@ -53,31 +55,63 @@ function SettingsContentLayout()
     void navigate({ to: '/' })
   }, [canGoBack, navigate])
 
+  // the route stays mounted when the mobile sidebar's contents do not
+  const handleSettingsKeyDown = useEffectEvent((event: KeyboardEvent): boolean =>
+  {
+    if (event.defaultPrevented) return false
+    if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey)
+    {
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.matches('input, textarea, select') ||
+          target.isContentEditable ||
+          (target.closest('[role="dialog"], [aria-modal="true"], [data-slot$="popup"]') !== null &&
+            target.closest('[data-sidebar="sidebar"]') === null))
+      )
+      {
+        return false
+      }
+
+      event.preventDefault()
+      if (isMobile) setOpenMobile(true)
+      else if (!open) setOpen(true)
+      return true
+    }
+    if (event.key === 'Escape')
+    {
+      event.preventDefault()
+      const activeElement = document.activeElement
+      if (activeElement instanceof HTMLElement) activeElement.blur()
+      navigateBackWithinApp()
+    }
+    return false
+  })
+
   useEffect(() =>
   {
+    let focusFrame: number | undefined
     const onKeyDown = (event: KeyboardEvent) =>
     {
-      if (event.defaultPrevented) return
-      if (event.key === 'Escape')
+      if (!handleSettingsKeyDown(event)) return
+      if (focusFrame !== undefined) cancelAnimationFrame(focusFrame)
+      focusFrame = requestAnimationFrame(() =>
       {
-        event.preventDefault()
-
-        const activeElement = document.activeElement
-        if (activeElement instanceof HTMLElement)
+        const input = document.getElementById(SETTINGS_SEARCH_INPUT_ID)
+        if (input instanceof HTMLInputElement)
         {
-          activeElement.blur()
+          input.focus()
+          input.select()
         }
-
-        navigateBackWithinApp()
-      }
+      })
     }
-
     window.addEventListener('keydown', onKeyDown)
     return () =>
     {
       window.removeEventListener('keydown', onKeyDown)
+      if (focusFrame !== undefined) cancelAnimationFrame(focusFrame)
     }
-  }, [navigateBackWithinApp])
+  }, [])
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">

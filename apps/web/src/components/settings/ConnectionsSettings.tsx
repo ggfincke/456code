@@ -1523,7 +1523,7 @@ export function ConnectionsSettings()
     <SettingsPageContainer>
       {canManageLocalBackend ? (
         <>
-          <SettingsSection title="This environment">
+          <SettingsSection id="settings-connections-this-environment" title="This environment">
             {primaryVersionMismatch ? (
               <SettingsRow
                 title="Version drift"
@@ -1561,6 +1561,7 @@ export function ConnectionsSettings()
 
           {isLocalBackendRemotelyReachable ? (
             <SettingsSection
+              id="settings-connections-authorized-clients"
               title="Authorized clients"
               headerAction={
                 <AuthorizedClientsHeaderAction
@@ -1851,7 +1852,7 @@ export function ConnectionsSettings()
           </Dialog>
         </>
       ) : (
-        <SettingsSection title="This environment">
+        <SettingsSection id="settings-connections-this-environment" title="This environment">
           <SettingsRow
             title="Administrative access"
             description="Pairing links and client-session management require the access:write scope for this backend."
@@ -1860,6 +1861,7 @@ export function ConnectionsSettings()
       )}
 
       <SettingsSection
+        id="settings-connections-remote-environments"
         title="Remote environments"
         headerAction={
           <Dialog

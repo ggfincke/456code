@@ -219,6 +219,7 @@ export function DiagnosticsSettingsPanel()
   return (
     <SettingsPageContainer>
       <SettingsSection
+        id="settings-live-processes"
         title="Live Processes"
         headerAction={
           <div className="flex items-center gap-1.5">
@@ -280,6 +281,7 @@ export function DiagnosticsSettingsPanel()
       </SettingsSection>
 
       <SettingsSection
+        id="settings-resource-history"
         title="Resource History"
         headerAction={
           <div className="flex items-center gap-1.5">
@@ -344,6 +346,7 @@ export function DiagnosticsSettingsPanel()
       </SettingsSection>
 
       <SettingsSection
+        id="settings-trace-diagnostics"
         title="Trace Diagnostics"
         headerAction={
           <div className="flex items-center gap-1.5">
