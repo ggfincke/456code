@@ -102,6 +102,76 @@ it.layer(TestLayer, { excludeTestServices: true })('WorkspaceEntries', (it) =>
     vi.restoreAllMocks()
   })
 
+  it.effect(
+    'keeps content indexing lazy and searches native UTF-8, regex and whole-word matches safely',
+    () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* makeTempDir()
+        const outside = yield* makeTempDir()
+        const path = yield* Path.Path
+        const fs = yield* FileSystem.FileSystem
+        const line = 'hé🙂 Needle needle_needles needle ['
+        yield* writeTextFile(cwd, 'spaced file.ts', line)
+        yield* writeTextFile(outside, 'secret.ts', 'outside-secret-needle')
+        yield* fs.symlink(path.join(outside, 'secret.ts'), path.join(cwd, 'escape.ts'))
+        const alias = path.join(outside, 'workspace-alias')
+        yield* fs.symlink(cwd, alias)
+        const create = vi.spyOn(FileFinder, 'create')
+        const entries = yield* WorkspaceEntries.WorkspaceEntries
+        yield* entries.search({ cwd, query: '', kind: 'file', limit: 10 })
+        expect(create).toHaveBeenCalledTimes(1)
+        expect(create.mock.calls[0]![0]!.disableContentIndexing).toBe(true)
+        const base = {
+          cwd: alias,
+          query: 'needle',
+          limit: 20,
+          caseSensitive: false,
+          wholeWord: true,
+          useRegex: false,
+        }
+        const found = yield* entries.searchContents(base)
+        expect(create).toHaveBeenCalledTimes(2)
+        expect(create.mock.calls[1]![0]!.disableContentIndexing).toBe(false)
+        expect(found.matches).toEqual([
+          {
+            path: 'spaced file.ts',
+            lineNumber: 1,
+            lineContent: line,
+            matchRanges: [
+              { start: line.indexOf('Needle'), end: line.indexOf('Needle') + 6 },
+              { start: line.lastIndexOf('needle'), end: line.lastIndexOf('needle') + 6 },
+            ],
+          },
+        ])
+        const sensitive = yield* entries.searchContents({ ...base, cwd, caseSensitive: true })
+        expect(sensitive.matches[0]!.matchRanges).toEqual([
+          {
+            start: line.lastIndexOf('needle'),
+            end: line.lastIndexOf('needle') + 6,
+          },
+        ])
+        const regex = yield* entries.searchContents({ ...base, query: 'n[e]+dle', useRegex: true })
+        expect(regex.matches[0]!.matchRanges).toEqual(found.matches[0]!.matchRanges)
+        const fallback = yield* entries.searchContents({
+          ...base,
+          query: '[',
+          useRegex: true,
+          wholeWord: false,
+        })
+        expect(fallback.regexFallbackError).toBe(
+          'Invalid regular expression; showing literal matches instead.',
+        )
+        expect(fallback.matches[0]!.matchRanges).toEqual([
+          { start: line.length - 1, end: line.length },
+        ])
+        expect(
+          (yield* entries.searchContents({ ...base, query: 'outside-secret' })).matches,
+        ).toEqual([])
+        expect(create).toHaveBeenCalledTimes(2)
+      }),
+  )
+
   describe('list', () =>
   {
     it.effect('returns the complete cached workspace index', () =>

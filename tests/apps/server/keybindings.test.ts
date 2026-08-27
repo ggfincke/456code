@@ -1,7 +1,12 @@
 // tests/apps/server/keybindings.test.ts
 // verify keybindings behavior
 
-import { KeybindingCommand, KeybindingRule, KeybindingsConfig } from '@t3tools/contracts'
+import {
+  KeybindingCommand,
+  KeybindingRule,
+  KeybindingsConfig,
+  MAX_KEYBINDINGS_COUNT,
+} from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import { assertFailure } from '@effect/vitest/utils'
@@ -64,6 +69,21 @@ const readKeybindingsConfig = (configPath: string) =>
 
 it.layer(NodeServices.layer)('keybindings', (it) =>
 {
+  it.effect('does not evict user rules when adding search defaults to a full configuration', () =>
+    Effect.gen(function* ()
+    {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig
+      const rules = Array.from({ length: MAX_KEYBINDINGS_COUNT }, (_, index) => ({
+        key: 'mod+x',
+        command: `script.user-${index}.run` as const,
+      }))
+      yield* writeKeybindingsConfig(keybindingsConfigPath, rules)
+      const keybindings = yield* Keybindings.Keybindings
+      yield* keybindings.syncDefaultKeybindingsOnStartup
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), rules)
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  )
+
   it.effect('parses shortcuts including plus key', () =>
     Effect.sync(() =>
     {

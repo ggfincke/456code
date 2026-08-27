@@ -541,8 +541,9 @@ export function GeneralSettingsPanel()
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="General">
+      <SettingsSection id="settings-general" title="General">
         <SettingsRow
+          id="settings-theme"
           title="Theme"
           description="Choose how 456code looks across the app."
           resetAction={
@@ -583,6 +584,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-glass-opacity"
           title="Glass opacity"
           description="Control how transparent glass surfaces are. Higher values make menus, dialogs, and the composer more solid."
           resetAction={
@@ -631,6 +633,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-project-grouping"
           title="Project Grouping"
           description="Combine matching repositories across environments."
           resetAction={
@@ -669,6 +672,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-time-format"
           title="Time format"
           description="System default follows your browser or OS clock preference."
           resetAction={
@@ -713,6 +717,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-usage-display"
           title="Usage display"
           description="Show provider limits as the percentage left or the percentage used."
           resetAction={
@@ -757,6 +762,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-word-wrap"
           title="Word wrap"
           description="Wrap long lines in code blocks, tables, diffs, and file previews by default."
           resetAction={
@@ -781,6 +787,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-hide-whitespace-changes"
           title="Hide whitespace changes"
           description="Set whether the diff panel ignores whitespace-only edits by default."
           resetAction={
@@ -807,6 +814,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-assistant-output"
           title="Assistant output"
           description="Show token-by-token output while a response is in progress."
           resetAction={
@@ -834,6 +842,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-provider-update-checks"
           title="Provider update checks"
           description="Check installed provider CLIs for newer available versions."
           resetAction={
@@ -861,6 +870,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-auto-open-task-panel"
           title="Auto-open task panel"
           description="Open the right-side plan and task panel automatically when steps appear."
           resetAction={
@@ -919,6 +929,7 @@ export function GeneralSettingsPanel()
         ) : null}
 
         <SettingsRow
+          id="settings-new-threads"
           title="New threads"
           description="Pick the default workspace mode for newly created draft threads."
           resetAction={
@@ -997,6 +1008,7 @@ export function GeneralSettingsPanel()
         ) : null}
 
         <SettingsRow
+          id="settings-add-project-starts-in"
           title="Add project starts in"
           description='Leave empty to use "~/" when the Add Project browser opens.'
           resetAction={
@@ -1025,6 +1037,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-archive-confirmation"
           title="Archive confirmation"
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -1051,6 +1064,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-delete-confirmation"
           title="Delete confirmation"
           description="Ask before deleting a thread and its chat history."
           resetAction={
@@ -1077,6 +1091,7 @@ export function GeneralSettingsPanel()
         />
 
         <SettingsRow
+          id="settings-text-generation-model"
           title="Text generation model"
           description="Default model for generated text like thread titles and source control content. Source control settings can override it with a dedicated source control writer model."
           resetAction={
@@ -1154,7 +1169,7 @@ export function GeneralSettingsPanel()
         />
       </SettingsSection>
 
-      <SettingsSection title="About">
+      <SettingsSection id="settings-about" title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (

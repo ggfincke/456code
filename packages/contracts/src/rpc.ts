@@ -75,6 +75,7 @@ import {
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationRpcSchemas,
+  OrchestrationSearchThreadsError,
 } from './orchestration.ts'
 import { ProviderInstanceId } from './providerInstance.ts'
 import {
@@ -92,6 +93,9 @@ import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectSearchContentsInput,
+  ProjectSearchContentsResult,
+  ProjectSearchContentsError,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
@@ -225,6 +229,7 @@ export const WS_METHODS = {
   projectsReadFile: 'projects.readFile',
   projectsReadMdxDocument: 'projects.readMdxDocument',
   projectsSearchEntries: 'projects.searchEntries',
+  projectsSearchContents: 'projects.searchContents',
   projectsWriteFile: 'projects.writeFile',
 
   // immutable proposal and architecture preview methods
@@ -469,6 +474,12 @@ export const WsSourceControlPublishRepositoryRpc = Rpc.make(
     error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
   },
 )
+
+export const WsProjectsSearchContentsRpc = Rpc.make(WS_METHODS.projectsSearchContents, {
+  payload: ProjectSearchContentsInput,
+  success: ProjectSearchContentsResult,
+  error: Schema.Union([ProjectSearchContentsError, EnvironmentAuthorizationError]),
+})
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
   payload: ProjectSearchEntriesInput,
@@ -913,6 +924,12 @@ export const WsOrchestrationGetRunExecutionDiffV1Rpc = Rpc.make(
   },
 )
 
+export const WsOrchestrationSearchThreadsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.searchThreads, {
+  payload: OrchestrationRpcSchemas.searchThreads.input,
+  success: OrchestrationRpcSchemas.searchThreads.output,
+  error: Schema.Union([OrchestrationSearchThreadsError, EnvironmentAuthorizationError]),
+})
+
 export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,
   {
@@ -1051,6 +1068,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsReadFileRpc,
   WsProjectsReadMdxDocumentRpc,
   WsProjectsSearchEntriesRpc,
+  WsProjectsSearchContentsRpc,
   WsProjectsWriteFileRpc,
   WsProposalsListRpc,
   WsProposalsGetRpc,
@@ -1120,6 +1138,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetRunDiffRpc,
   WsOrchestrationGetRunExecutionDiffV1Rpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
+  WsOrchestrationSearchThreadsRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
 )

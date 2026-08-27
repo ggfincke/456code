@@ -26,6 +26,8 @@ import { useThreadPr, type ThreadPr } from '../../../state/use-thread-pr'
 import type { HomeGroupDisplayAction } from '../../home/homeListItems'
 import { ThreadSwipeable } from '../../home/thread-swipe-actions'
 import { resolveThreadStatus } from '../threadPresentation'
+import type { EnvironmentThreadSearchMatch } from '@t3tools/client-runtime/state/thread-search'
+import { ThreadSearchMatchExcerpt } from './thread-search-match'
 
 // shared presentation for the thread lists: the compact (phone) Home list and
 // the iPad sidebar render the SAME items — group headers with collapse,
@@ -501,6 +503,8 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly environmentLabel: string | null
   readonly projectCwd: string | null
   readonly isLast: boolean
+  readonly searchMatch?: EnvironmentThreadSearchMatch | null
+  readonly searchQuery?: string
   // sidebar only: the thread currently open in the detail pane.
   readonly selected?: boolean
   // defaults to window width minus compact margins.
@@ -541,7 +545,11 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   // be opened, and the composer detail surface is only visible once it is.
   const queuedFailureReason = useThreadOutboxFailureReason(thread.environmentId, thread.id)
   const timestamp = relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)
-  const prAccessibilityLabel = pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title
+  const searchLabel = props.searchMatch
+    ? `, ${props.searchMatch.source === 'user' ? 'You' : 'Agent'}: ${props.searchMatch.snippet}`
+    : ''
+  const prAccessibilityLabel =
+    (pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title) + searchLabel
   const threadAccessibilityLabel =
     queuedFailureReason === null
       ? prAccessibilityLabel
@@ -590,7 +598,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       </View>
     ) : null
 
-  const subtitleRow =
+  const metadataRow =
     queuedFailureReason !== null ? (
       <QueuedFailureSubtitle compact={compact} reason={queuedFailureReason} />
     ) : subtitleParts.length > 0 || pr !== null ? (
@@ -627,6 +635,20 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
         ) : null}
       </View>
     ) : null
+
+  const subtitleRow = (
+    <>
+      {props.searchMatch ? (
+        <ThreadSearchMatchExcerpt
+          match={props.searchMatch}
+          query={props.searchQuery ?? ''}
+          compact={compact}
+          selected={selected}
+        />
+      ) : null}
+      {metadataRow}
+    </>
+  )
 
   const rowContent = (close: () => void) =>
     compact ? (

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import {
   ModelPickerContent,
   MODEL_SEARCH_INPUT_LABEL,
+  groupLegacyModels,
 } from '../../../../../../apps/web/src/components/chat/model-picker/ModelPickerContent'
 import { deriveProviderInstanceEntries } from '../../../../../../apps/web/src/providerInstances'
 
@@ -27,6 +28,17 @@ const codexSnapshot = {
 
 describe('model picker search field', () =>
 {
+  it('partitions explicit legacy rows without dropping models or changing within-group order', () =>
+  {
+    const models = [
+      { slug: 'older-favorite', isLegacy: true },
+      { slug: 'future' },
+      { slug: 'current', isLegacy: false },
+      { slug: 'older', isLegacy: true },
+    ]
+    expect(groupLegacyModels(models)).toEqual([models[1], models[2], models[0], models[3]])
+  })
+
   it('names the search combobox for assistive tech, not just its placeholder', () =>
   {
     const markup = renderToStaticMarkup(

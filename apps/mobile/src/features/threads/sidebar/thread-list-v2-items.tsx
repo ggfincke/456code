@@ -22,6 +22,8 @@ import { useThreadOutboxFailureReason } from '../../../state/use-thread-outbox'
 import { useThreadPr } from '../../../state/use-thread-pr'
 import { ThreadSwipeable } from '../../home/thread-swipe-actions'
 import { resolveThreadListV2Presentation, type ThreadListV2Status } from './threadListV2'
+import type { EnvironmentThreadSearchMatch } from '@t3tools/client-runtime/state/thread-search'
+import { ThreadSearchMatchExcerpt } from './thread-search-match'
 
 // thread List v2 renders one flat native list: rich edge-to-edge rows for
 // active work and a receded settled tail, all with native swipe and
@@ -110,6 +112,8 @@ export const ThreadListV2SettledDivider = memo(function ThreadListV2SettledDivid
 
 export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly thread: EnvironmentThreadShell
+  readonly searchMatch?: EnvironmentThreadSearchMatch | null
+  readonly searchQuery?: string
   readonly variant: 'card' | 'slim'
   readonly showSettledDivider: boolean
   readonly project: EnvironmentProject | null
@@ -181,7 +185,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const sidebarPane = props.pane === 'sidebar'
   const selected = props.selected === true
 
-  const prAccessibilityLabel = pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title
+  const searchLabel = props.searchMatch
+    ? `, ${props.searchMatch.source === 'user' ? 'You' : 'Agent'}: ${props.searchMatch.snippet}`
+    : ''
+  const prAccessibilityLabel =
+    (pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title) + searchLabel
   const presentation = resolveThreadListV2Presentation(
     thread,
     queuedFailureReason,
@@ -190,6 +198,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const status = presentation.status
   const statusLabel = STATUS_LABEL_BY_STATUS[status]
   const timeLabel = threadTimeLabel(thread)
+  const searchExcerpt = props.searchMatch ? (
+    <ThreadSearchMatchExcerpt
+      match={props.searchMatch}
+      query={props.searchQuery ?? ''}
+      selected={selected}
+    />
+  ) : null
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread])
   const handleSettle = useCallback(() => onSettleThread(thread), [onSettleThread, thread])
@@ -286,6 +301,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       >
         {thread.title}
       </Text>
+      {searchExcerpt}
       <View className="mt-1 flex-row items-center gap-2">
         {queuedFailureReason !== null && presentation.failureReason !== null ? (
           <View className="flex-1">
@@ -450,6 +466,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             >
               {thread.title}
             </Text>
+            {searchExcerpt}
             {queuedFailureReason !== null && presentation.failureReason !== null ? (
               <QueuedFailureSubtitle reason={presentation.failureReason} />
             ) : null}

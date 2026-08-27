@@ -97,6 +97,12 @@ export function createProjectEnvironmentAtoms<R, E>(
   }
   return {
     ...diffAnalysis,
+    searchContents: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:projects:search-contents',
+      tag: WS_METHODS.projectsSearchContents,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
     searchEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:projects:search-entries',
       tag: WS_METHODS.projectsSearchEntries,

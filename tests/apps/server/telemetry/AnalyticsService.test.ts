@@ -1,134 +1,187 @@
 // tests/apps/server/telemetry/AnalyticsService.test.ts
-// verify analytics service behavior
+// verify telemetry opt-outs and bounded batch delivery without external requests
 
-import * as NodeHttpServer from '@effect/platform-node/NodeHttpServer'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
-import * as HttpServer from 'effect/unstable/http/HttpServer'
-import * as HttpServerRequest from 'effect/unstable/http/HttpServerRequest'
-import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
+import * as Schema from 'effect/Schema'
+import * as HttpClient from 'effect/unstable/http/HttpClient'
+import * as HttpClientResponse from 'effect/unstable/http/HttpClientResponse'
+import { afterEach, vi } from 'vite-plus/test'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
-import { getTelemetryIdentifier } from '../../../../apps/server/src/telemetry/Identify.ts'
-import * as AnalyticsService from '../../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
 import * as AnalyticsServiceLayers from '../../../../apps/server/src/telemetry/Layers/AnalyticsService.ts'
+import * as AnalyticsService from '../../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
+
+const RecordedBatchBody = Schema.Struct({
+  api_key: Schema.String,
+  batch: Schema.Array(
+    Schema.Struct({
+      event: Schema.String,
+      properties: Schema.Struct({
+        index: Schema.Number,
+        clientType: Schema.String,
+        wsl: Schema.optional(Schema.String),
+      }),
+    }),
+  ),
+})
+const decodeRecordedBatchBody = Schema.decodeUnknownSync(Schema.fromJsonString(RecordedBatchBody))
 
 interface RecordedBatchRequest
 {
-  readonly path: string
-  readonly body: {
-    readonly batch?: ReadonlyArray<{
-      readonly event?: string
-      readonly properties?: {
-        readonly index?: number
-        readonly clientType?: string
-      }
-    }>
-  } | null
+  readonly url: string
+  readonly body: typeof RecordedBatchBody.Type
 }
 
-interface RecordedBatchBody
-{
-  readonly batch: ReadonlyArray<{
-    readonly event?: string
-    readonly properties?: {
-      readonly index?: number
-      readonly clientType?: string
-    }
-  }>
+const optOutKeys = [
+  'T3CODE_POSTHOG_KEY',
+  'T3CODE_POSTHOG_HOST',
+  'T3CODE_TELEMETRY_ENABLED',
+] as const
+
+const explicitConfig = {
+  T3CODE_POSTHOG_KEY: 'phc_test_key',
+  T3CODE_POSTHOG_HOST: 'https://telemetry.test',
+  T3CODE_TELEMETRY_ENABLED: 'true',
 }
+
+const recordEvents = Effect.fn('recordEvents')(function* (
+  provider: ConfigProvider.ConfigProvider,
+  count = 1,
+)
+{
+  const capturedRequests: Array<RecordedBatchRequest> = []
+  const client = HttpClient.make((request) =>
+    Effect.sync(() =>
+    {
+      assert.equal(request.body._tag, 'Uint8Array')
+      if (request.body._tag !== 'Uint8Array') throw new Error('Expected a JSON request body')
+      capturedRequests.push({
+        url: request.url,
+        body: decodeRecordedBatchBody(new TextDecoder().decode(request.body.body)),
+      })
+      return HttpClientResponse.fromWeb(request, Response.json({}))
+    }),
+  )
+  const telemetryLayer = AnalyticsServiceLayers.layer.pipe(
+    Layer.provide(
+      ServerConfig.ServerConfig.layerTest(process.cwd(), {
+        prefix: 't3-telemetry-base-',
+      }),
+    ),
+    Layer.provide(ConfigProvider.layer(provider)),
+    Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
+  )
+
+  yield* Effect.gen(function* ()
+  {
+    const analytics = yield* AnalyticsService.AnalyticsService
+    for (let index = 0; index < count; index += 1)
+    {
+      yield* analytics.record('test.flush', { index })
+    }
+    yield* analytics.flush
+  }).pipe(Effect.provide(telemetryLayer))
+
+  return capturedRequests
+})
+
+afterEach(() => vi.unstubAllEnvs())
 
 it.layer(NodeServices.layer)('AnalyticsService test', (it) =>
 {
-  it.effect('flush drains all buffered events across multiple batches', () =>
+  it.effect('explicit opt-in preserves ambient batching and endpoint settings', () =>
     Effect.gen(function* ()
     {
-      const capturedRequests: Array<RecordedBatchRequest> = []
-      const serverConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-        prefix: 't3-telemetry-base-',
-      })
+      // injected values retain precedence over process-level opt-outs
+      for (const key of optOutKeys) vi.stubEnv(key, '')
+      vi.stubEnv('T3CODE_TELEMETRY_FLUSH_BATCH_SIZE', '1')
+      vi.stubEnv('WSL_DISTRO_NAME', 'ambient-process-value')
 
-      const telemetryLayer = AnalyticsServiceLayers.layer.pipe(
-        Layer.provideMerge(serverConfigLayer),
-      )
-      const configLayer = ConfigProvider.layer(
+      const requests = yield* recordEvents(
         ConfigProvider.fromUnknown({
-          T3CODE_TELEMETRY_ENABLED: true,
-          T3CODE_POSTHOG_KEY: 'phc_test_key',
-          T3CODE_POSTHOG_HOST: '',
+          ...explicitConfig,
           T3CODE_TELEMETRY_FLUSH_BATCH_SIZE: 20,
+          WSL_DISTRO_NAME: 'test-distro',
         }),
-      )
-      const batchServerLayer = HttpServer.serve(
-        Effect.gen(function* ()
-        {
-          const request = yield* HttpServerRequest.HttpServerRequest
-          if (request.method !== 'POST')
-          {
-            return HttpServerResponse.empty({ status: 404 })
-          }
-
-          const payload = yield* request.json.pipe(
-            Effect.map((body) => body as RecordedBatchRequest['body']),
-            Effect.orElseSucceed(() => null),
-          )
-
-          capturedRequests.push({ path: request.url, body: payload })
-
-          return HttpServerResponse.jsonUnsafe({})
-        }),
-      )
-      const runtimeLayer = telemetryLayer.pipe(
-        Layer.provide(configLayer),
-        Layer.provideMerge(NodeHttpServer.layerTest),
+        45,
       )
 
-      yield* Effect.gen(function* ()
-      {
-        yield* Layer.launch(batchServerLayer).pipe(Effect.forkScoped)
-        const telemetryIdentifier = yield* getTelemetryIdentifier
-        assert.equal(telemetryIdentifier !== null, true)
-        const analytics = yield* AnalyticsService.AnalyticsService
-
-        for (let index = 0; index < 45; index += 1)
-        {
-          yield* analytics.record('test.flush.drain', { index })
-        }
-
-        yield* analytics.flush
-      }).pipe(Effect.provide(runtimeLayer))
-
-      const batchRequests = capturedRequests.filter(
-        (request): request is RecordedBatchRequest & { readonly body: RecordedBatchBody } =>
-          Array.isArray(request.body?.batch),
-      )
-      assert.equal(batchRequests.length, 3)
-      assert.equal(
-        batchRequests.every((request) => request.path === '/batch/' || request.path === '/batch'),
-        true,
-      )
-      const deliveredIndexes = batchRequests.flatMap((request) =>
-        request.body.batch
-          .filter((event) => event.event === 'test.flush.drain')
-          .map((event) => event.properties?.index)
-          .filter((index): index is number => typeof index === 'number'),
-      )
-
-      const sorted = deliveredIndexes.toSorted((a, b) => a - b)
-      assert.equal(sorted.length, 45)
+      assert.equal(requests.length, 3)
       assert.deepEqual(
-        sorted,
-        Array.from({ length: 45 }, (_, index) => index),
+        requests.map((request) => request.body.batch.length),
+        [20, 20, 5],
       )
       assert.equal(
-        batchRequests.every((request) =>
-          request.body.batch.every((event) => event.properties?.clientType === 'cli-web-client'),
+        requests.every(
+          (request) =>
+            request.url === 'https://telemetry.test/batch/' &&
+            request.body.api_key === 'phc_test_key',
         ),
         true,
       )
+      const events = requests.flatMap((request) => request.body.batch)
+      assert.deepEqual(
+        events.map((event) => event.properties.index),
+        Array.from({ length: 45 }, (_, index) => index),
+      )
+      assert.equal(
+        events.every(
+          (event) =>
+            event.properties.clientType === 'cli-web-client' &&
+            event.properties.wsl === 'test-distro',
+        ),
+        true,
+      )
+    }),
+  )
+
+  for (const key of optOutKeys)
+  {
+    it.effect(`a blank ${key} disables delivery from the environment provider`, () =>
+      Effect.gen(function* ()
+      {
+        for (const optOutKey of optOutKeys) vi.stubEnv(optOutKey, undefined)
+        vi.stubEnv(key, '')
+        const requests = yield* recordEvents(
+          ConfigProvider.fromEnv({
+            env: { ...explicitConfig, [key]: process.env[key]! },
+          }),
+        )
+        assert.equal(requests.length, 0)
+      }),
+    )
+  }
+
+  it.effect('preserved whitespace enabled and explicit false both disable delivery', () =>
+    Effect.gen(function* ()
+    {
+      for (const key of optOutKeys) vi.stubEnv(key, undefined)
+      for (const enabled of ['  ', 'false'])
+      {
+        const requests = yield* recordEvents(
+          ConfigProvider.fromUnknown({
+            ...explicitConfig,
+            T3CODE_TELEMETRY_ENABLED: enabled,
+          }),
+        )
+        assert.equal(requests.length, 0)
+      }
+    }),
+  )
+
+  it.effect('unset telemetry settings retain shipped defaults through an injected client', () =>
+    Effect.gen(function* ()
+    {
+      // absent injected keys do not inherit process-level opt-outs
+      for (const key of optOutKeys) vi.stubEnv(key, '')
+      const requests = yield* recordEvents(ConfigProvider.fromUnknown({}))
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0]?.url, 'https://us.i.posthog.com/batch/')
+      assert.equal(requests[0]?.body.api_key, 'phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m')
     }),
   )
 })

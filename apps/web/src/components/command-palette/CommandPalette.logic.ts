@@ -18,6 +18,13 @@ export const RECENT_THREAD_LIMIT = 12
 export const ITEM_ICON_CLASS = 'size-4 text-muted-foreground/80'
 export const ADDON_ICON_CLASS = 'size-4'
 
+export interface CommandPaletteThreadContentMatch
+{
+  readonly source: 'user' | 'assistant'
+  readonly snippet: string
+  readonly query: string
+}
+
 export function browseInputEndPaddingClass(input: {
   readonly willCreateProjectPath: boolean
   readonly hasHighlightedBrowseItem: boolean
@@ -41,6 +48,7 @@ export interface CommandPaletteItem
   readonly searchTerms: ReadonlyArray<string>
   readonly title: ReactNode
   readonly description?: ReactNode
+  readonly threadContentMatch?: CommandPaletteThreadContentMatch
   readonly timestamp?: string
   readonly icon: ReactNode
   readonly disabled?: boolean
@@ -204,6 +212,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   renderLeadingContent?: (thread: TThread) => ReactNode
   // optional content rendered inline after the title text per-thread.
   renderTrailingContent?: (thread: TThread) => ReactNode
+  getContentMatch?: (thread: TThread) => CommandPaletteThreadContentMatch | undefined
   runThread: (thread: Pick<SidebarThreadSummary, 'environmentId' | 'id'>) => Promise<void>
   limit?: number
 }): CommandPaletteActionItem[]
@@ -235,12 +244,19 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
 
     const leadingContent = input.renderLeadingContent?.(thread)
     const trailingContent = input.renderTrailingContent?.(thread)
+    const contentMatch = input.getContentMatch?.(thread)
 
     return Object.assign(
       {
         kind: 'action' as const,
         value: `thread:${thread.id}`,
-        searchTerms: [thread.title, projectTitle ?? ``, thread.branch ?? ``],
+        // the verified query admits a content-only match even when its snippet is clipped
+        searchTerms: [
+          thread.title,
+          projectTitle ?? ``,
+          thread.branch ?? ``,
+          contentMatch?.query ?? ``,
+        ],
         title: thread.title,
         description: descriptionParts.join(` · `),
         timestamp: formatRelativeTimeLabel(
@@ -250,6 +266,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
       },
       leadingContent ? { titleLeadingContent: leadingContent } : {},
       trailingContent ? { titleTrailingContent: trailingContent } : {},
+      contentMatch ? { threadContentMatch: contentMatch } : {},
       {
         run: async () =>
         {

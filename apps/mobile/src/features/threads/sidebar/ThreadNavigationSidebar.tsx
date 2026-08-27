@@ -6,6 +6,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from '@t3tools/client-runtime/state/shell'
+import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 import { LegendList } from '@legendapp/list/react-native'
 import type { MenuAction } from '@react-native-menu/menu'
 import { useAtomValue } from '@effect/atom-react'
@@ -29,6 +30,7 @@ import { useThemeColor } from '../../../lib/useThemeColor'
 import { useProjects, useThreadShells } from '../../../state/entities'
 import { mobilePreferencesAtom } from '../../../state/preferences'
 import { usePendingNewTasks, type PendingNewTask } from '../../../state/use-pending-new-tasks'
+import { useThreadSearch } from '../../../state/use-thread-search'
 import { useWorkspaceState } from '../../../state/workspace'
 import { useSavedRemoteConnections } from '../../../state/use-remote-environment-registry'
 import { useHardwareKeyboardCommand } from '../../keyboard/hardwareKeyboardCommands'
@@ -313,6 +315,11 @@ function ThreadNavigationSidebarPane(
           ),
     [pendingTasks, selectedProjectRefs],
   )
+  const contentSearch = useThreadSearch({
+    query: props.searchQuery,
+    environmentId: options.selectedEnvironmentId,
+  })
+  const { matchesByKey, matchedThreadKeys } = contentSearch
   const groups = useMemo(
     () =>
       buildHomeThreadGroups({
@@ -321,11 +328,19 @@ function ThreadNavigationSidebarPane(
         pendingTasks: scopedPendingTasks,
         environmentId: options.selectedEnvironmentId,
         searchQuery: props.searchQuery,
+        matchedThreadKeys,
         projectSortOrder: options.projectSortOrder,
         threadSortOrder: options.threadSortOrder,
         projectGroupingMode: options.projectGroupingMode,
       }),
-    [options, props.searchQuery, scopedPendingTasks, scopedProjects, scopedThreads],
+    [
+      matchedThreadKeys,
+      options,
+      props.searchQuery,
+      scopedPendingTasks,
+      scopedProjects,
+      scopedThreads,
+    ],
   )
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
@@ -381,6 +396,7 @@ function ThreadNavigationSidebarPane(
     projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
     projectScopeKey: selectedProjectKey,
     searchQuery: props.searchQuery,
+    matchedThreadKeys,
     autoSettleOnMerge,
   })
   const listItems = useMemo<readonly SidebarListItem[]>(() =>
@@ -627,8 +643,10 @@ function ThreadNavigationSidebarPane(
       selectedThreadKey: props.selectedThreadKey ?? '',
       savedConnectionsById,
       serverConfigs,
+      matchesByKey,
+      searchQuery: props.searchQuery,
     }),
-    [props.selectedThreadKey, savedConnectionsById, serverConfigs],
+    [props.selectedThreadKey, savedConnectionsById, serverConfigs, matchesByKey, props.searchQuery],
   )
   const sidebarItemsAreEqual = useCallback(
     (previous: SidebarListItem, item: SidebarListItem): boolean =>
@@ -714,6 +732,10 @@ function ThreadNavigationSidebarPane(
           return (
             <ThreadListV2Row
               thread={thread}
+              searchMatch={matchesByKey.get(
+                threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+              )}
+              searchQuery={props.searchQuery}
               variant={item.item.variant}
               showSettledDivider={item.item.showSettledDivider}
               project={projectByKey.get(scopeKey) ?? null}
@@ -804,6 +826,10 @@ function ThreadNavigationSidebarPane(
             <ThreadListRow
               variant="sidebar"
               thread={thread}
+              searchMatch={matchesByKey.get(
+                threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+              )}
+              searchQuery={props.searchQuery}
               environmentLabel={
                 savedConnectionsById[thread.environmentId]?.environmentLabel ?? null
               }
@@ -845,12 +871,14 @@ function ThreadNavigationSidebarPane(
       handleSelectThread,
       handleSwipeableClose,
       handleSwipeableWillOpen,
+      matchesByKey,
       openPendingTask,
       projectByKey,
       projectCwdByKey,
       projectTitleByProjectKey,
       props.onNewThreadInProject,
       props.selectedThreadKey,
+      props.searchQuery,
       props.width,
       savedConnectionsById,
       serverConfigs,
@@ -914,11 +942,13 @@ function ThreadNavigationSidebarPane(
       {catalogState.isLoadingConnections
         ? 'Loading threads…'
         : props.searchQuery.trim().length > 0
-          ? snoozedCount > 0
-            ? snoozedCount === 1
-              ? '1 matching thread snoozed'
-              : 'All matching threads snoozed'
-            : 'No matching threads'
+          ? contentSearch.isLoading
+            ? 'Searching conversations…'
+            : snoozedCount > 0
+              ? snoozedCount === 1
+                ? '1 matching thread snoozed'
+                : 'All matching threads snoozed'
+              : 'No matching threads'
           : snoozedCount > 0
             ? snoozedCount === 1
               ? '1 thread snoozed'

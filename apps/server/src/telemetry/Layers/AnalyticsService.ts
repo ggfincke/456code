@@ -35,7 +35,6 @@ const TelemetryEnvConfig = Config.all({
   posthogHost: Config.string('T3CODE_POSTHOG_HOST').pipe(
     Config.withDefault('https://us.i.posthog.com'),
   ),
-  enabled: Config.boolean('T3CODE_TELEMETRY_ENABLED').pipe(Config.withDefault(true)),
   flushBatchSize: Config.int('T3CODE_TELEMETRY_FLUSH_BATCH_SIZE').pipe(
     Config.map((value) => Math.max(1, value)),
     Config.withDefault(20),
@@ -46,8 +45,22 @@ const TelemetryEnvConfig = Config.all({
   wslDistroName: Config.string('WSL_DISTRO_NAME').pipe(Config.option),
 })
 
+const TelemetryOptOutConfig = Config.all({
+  posthogKey: Config.string('T3CODE_POSTHOG_KEY').pipe(Config.option),
+  posthogHost: Config.string('T3CODE_POSTHOG_HOST').pipe(Config.option),
+  enabled: Config.string('T3CODE_TELEMETRY_ENABLED').pipe(Config.option),
+})
+
 export const make = Effect.gen(function* ()
 {
+  const optOut = yield* TelemetryOptOutConfig
+  // inspect blanks before boolean parsing; a blank enabled flag means off
+  const enabled = Option.exists(optOut.enabled, (raw) => raw.trim().length === 0)
+    ? false
+    : yield* Config.boolean('T3CODE_TELEMETRY_ENABLED').pipe(Config.withDefault(true))
+  const telemetryEnabled =
+    enabled &&
+    !Object.values(optOut).some((value) => Option.exists(value, (raw) => raw.trim().length === 0))
   const telemetryConfig = yield* TelemetryEnvConfig
   const httpClient = yield* HttpClient.HttpClient
   const serverConfig = yield* ServerConfig.ServerConfig
@@ -89,7 +102,7 @@ export const make = Effect.gen(function* ()
     events: ReadonlyArray<BufferedAnalyticsEvent>,
   )
   {
-    if (!telemetryConfig.enabled || !identifier) return
+    if (!telemetryEnabled || !identifier) return
 
     const payload = {
       api_key: telemetryConfig.posthogKey,
@@ -149,7 +162,7 @@ export const make = Effect.gen(function* ()
   const record: AnalyticsService['Service']['record'] = Effect.fn('AnalyticsService.record')(
     function* (event, properties)
     {
-      if (!telemetryConfig.enabled || !identifier) return
+      if (!telemetryEnabled || !identifier) return
 
       const enqueueResult = yield* enqueueBufferedEvent(event, properties)
       if (enqueueResult.dropped)

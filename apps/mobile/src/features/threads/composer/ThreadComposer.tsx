@@ -41,7 +41,11 @@ import {
 import { ControlPill, ControlPillMenu } from '../../../components/ControlPill'
 import { ProviderIcon } from '../../../components/ProviderIcon'
 import type { DraftComposerImageAttachment } from '../../../lib/composerImages'
-import { buildModelOptions, groupByProvider } from '../../../lib/modelOptions'
+import {
+  buildModelMenuActions,
+  buildModelOptions,
+  groupByProvider,
+} from '../../../lib/modelOptions'
 import { useScaledTextRole } from '../../settings/appearance/useScaledTextRole'
 import type { RemoteClientConnectionState } from '../../../lib/connection'
 import { composerCommandReplacement, searchMobileComposerSkills } from './composerCommandItems'
@@ -649,25 +653,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [providerOptionDescriptors],
   )
   const modelMenuActions = useMemo(
-    () =>
-      providerGroups.map((group) => ({
-        id: `provider:${group.providerKey}`,
-        title: group.providerLabel,
-        subtitle: group.models.find(
-          (model) =>
-            model.selection.instanceId === currentModelSelection.instanceId &&
-            model.selection.model === currentModelSelection.model,
-        )?.label,
-        subactions: group.models.map((option) => ({
-          id: `model:${option.key}`,
-          title: option.label,
-          state:
-            option.selection.instanceId === currentModelSelection.instanceId &&
-            option.selection.model === currentModelSelection.model
-              ? ('on' as const)
-              : undefined,
-        })),
-      })),
+    () => buildModelMenuActions(providerGroups, currentModelSelection),
     [providerGroups, currentModelSelection],
   )
 
@@ -978,6 +964,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   />
                 ) : null}
                 <ControlPillMenu
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={`Model: ${currentModelOption?.label ?? currentModelSelection.model}`}
+                  testID="thread-model-menu"
                   actions={modelMenuActions}
                   onPressAction={({ nativeEvent }) => handleModelMenuAction(nativeEvent.event)}
                 >

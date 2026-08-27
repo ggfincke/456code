@@ -1,5 +1,5 @@
 // apps/server/src/workspace/WorkspaceEntries.ts
-// define workspace entries windows path unsupported error
+// resolves workspace roots and routes bounded entry and content searches
 
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from 'node:fs/promises'
@@ -19,6 +19,8 @@ import type {
   ProjectListEntriesResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectSearchContentsInput,
+  ProjectSearchContentsResult,
 } from '@t3tools/contracts'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import { isExplicitRelativePath, isWindowsAbsolutePath } from '@t3tools/shared/path'
@@ -102,6 +104,9 @@ export class WorkspaceEntries extends Context.Service<
     readonly search: (
       input: ProjectSearchEntriesInput,
     ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>
+    readonly searchContents: (
+      input: ProjectSearchContentsInput,
+    ) => Effect.Effect<ProjectSearchContentsResult, WorkspaceEntriesError>
     readonly refresh: (cwd: string) => Effect.Effect<void>
   }
 >()('456code/workspace/WorkspaceEntries')
@@ -154,48 +159,59 @@ export const make = Effect.gen(function* ()
   const path = yield* Path.Path
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths
   const workspaceSearchIndexes = yield* WorkspaceSearchIndex.WorkspaceSearchIndexMap
+  const workspaceContentIndexes = yield* WorkspaceSearchIndex.WorkspaceContentSearchIndexMap
 
   const normalizeWorkspaceRoot = Effect.fn('WorkspaceEntries.normalizeWorkspaceRoot')(function* (
     cwd: string,
   ): Effect.fn.Return<string, WorkspaceEntriesError>
   {
-    return yield* workspacePaths.normalizeWorkspaceRoot(cwd)
+    const normalizedWorkspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(cwd)
+    return yield* Effect.tryPromise({
+      try: () => NodeFSP.realpath(normalizedWorkspaceRoot),
+      catch: (cause) =>
+        new WorkspacePaths.WorkspaceRootStatFailedError({
+          workspaceRoot: cwd,
+          normalizedWorkspaceRoot,
+          phase: 'validate-existing',
+          cause,
+        }),
+    })
   })
 
   const refresh: WorkspaceEntries['Service']['refresh'] = Effect.fn('WorkspaceEntries.refresh')(
     function* (cwd)
     {
       const normalizedCwd = yield* normalizeWorkspaceRoot(cwd).pipe(Effect.orElseSucceed(() => cwd))
-      if (!(yield* RcMap.has(workspaceSearchIndexes.rcMap, normalizedCwd)))
+      for (const indexes of [workspaceSearchIndexes, workspaceContentIndexes])
       {
-        return
-      }
-      const recoverRefreshFailure = (
-        cause:
-          | WorkspaceSearchIndex.WorkspaceSearchIndexCreateFailed
-          | WorkspaceSearchIndex.WorkspaceSearchIndexScanTimedOut
-          | WorkspaceSearchIndex.WorkspaceSearchIndexRefreshFailed,
-      ) =>
-        Effect.gen(function* ()
-        {
-          yield* Effect.logWarning('Failed to refresh workspace search index', {
-            cwd,
-            cause,
+        if (!(yield* RcMap.has(indexes.rcMap, normalizedCwd))) continue
+        const recoverRefreshFailure = (
+          cause:
+            | WorkspaceSearchIndex.WorkspaceSearchIndexCreateFailed
+            | WorkspaceSearchIndex.WorkspaceSearchIndexScanTimedOut
+            | WorkspaceSearchIndex.WorkspaceSearchIndexRefreshFailed,
+        ) =>
+          Effect.gen(function* ()
+          {
+            yield* Effect.logWarning('Failed to refresh workspace search index', {
+              cwd,
+              cause,
+            })
+            yield* indexes.invalidate(normalizedCwd)
           })
-          yield* workspaceSearchIndexes.invalidate(normalizedCwd)
-        })
-      yield* Effect.gen(function* ()
-      {
-        const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex
-        yield* searchIndex.refresh()
-      }).pipe(
-        Effect.provide(workspaceSearchIndexes.get(normalizedCwd)),
-        Effect.catchTags({
-          WorkspaceSearchIndexCreateFailed: recoverRefreshFailure,
-          WorkspaceSearchIndexScanTimedOut: recoverRefreshFailure,
-          WorkspaceSearchIndexRefreshFailed: recoverRefreshFailure,
-        }),
-      )
+        yield* Effect.gen(function* ()
+        {
+          const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex
+          yield* searchIndex.refresh()
+        }).pipe(
+          Effect.provide(indexes.get(normalizedCwd)),
+          Effect.catchTags({
+            WorkspaceSearchIndexCreateFailed: recoverRefreshFailure,
+            WorkspaceSearchIndexScanTimedOut: recoverRefreshFailure,
+            WorkspaceSearchIndexRefreshFailed: recoverRefreshFailure,
+          }),
+        )
+      }
     },
   )
 
@@ -263,10 +279,22 @@ export const make = Effect.gen(function* ()
       return yield* Effect.gen(function* ()
       {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex
-        return yield* searchIndex.search(normalizedQuery, input.limit)
+        return yield* searchIndex.search(normalizedQuery, input.limit, input.kind)
       }).pipe(Effect.provide(workspaceSearchIndexes.get(normalizedCwd)))
     },
   )
+
+  const searchContents: WorkspaceEntries['Service']['searchContents'] = Effect.fn(
+    'WorkspaceEntries.searchContents',
+  )(function* (input)
+  {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd)
+    return yield* Effect.gen(function* ()
+    {
+      const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex
+      return yield* searchIndex.searchContents(input)
+    }).pipe(Effect.provide(workspaceContentIndexes.get(normalizedCwd)))
+  })
 
   const list: WorkspaceEntries['Service']['list'] = Effect.fn('WorkspaceEntries.list')(
     function* (input)
@@ -280,9 +308,10 @@ export const make = Effect.gen(function* ()
     },
   )
 
-  return WorkspaceEntries.of({ browse, list, refresh, search })
+  return WorkspaceEntries.of({ browse, list, refresh, search, searchContents })
 })
 
 export const layer = Layer.effect(WorkspaceEntries, make).pipe(
   Layer.provide(WorkspaceSearchIndex.WorkspaceSearchIndexMap.layer),
+  Layer.provide(WorkspaceSearchIndex.WorkspaceContentSearchIndexMap.layer),
 )

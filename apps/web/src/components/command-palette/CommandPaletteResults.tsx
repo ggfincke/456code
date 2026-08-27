@@ -87,12 +87,20 @@ function CommandPaletteResultContent(props: {
   return (
     <>
       {props.item.icon}
-      {props.item.description ? (
+      {props.item.description || props.item.threadContentMatch ? (
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
             <span className="truncate">{props.item.title}</span>
           </span>
+          {props.item.threadContentMatch ? (
+            <span className="line-clamp-2 text-xs text-muted-foreground">
+              <span className="font-medium">
+                {props.item.threadContentMatch.source === 'user' ? 'You' : 'Assistant'}:{' '}
+              </span>
+              {props.item.threadContentMatch.snippet.slice(0, 240)}
+            </span>
+          ) : null}
           <span className="truncate text-muted-foreground/85 text-xs">
             {props.item.description}
           </span>

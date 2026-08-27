@@ -72,6 +72,10 @@ export function ConnectionEnvironmentRow(props: {
   return (
     <Animated.View layout={LinearTransition.duration(250)} className="bg-card">
       <Pressable
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`Environment ${props.environment.environmentLabel}, ${props.environment.displayUrl}`}
+        accessibilityState={{ expanded: props.expanded }}
         className="flex-row items-center gap-3 px-4 py-3.5 active:opacity-70"
         onPress={props.onToggle}
       >
@@ -203,6 +207,9 @@ export function ConnectionEnvironmentRow(props: {
             </Pressable>
 
             <Pressable
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${props.environment.environmentLabel}, ${props.environment.displayUrl}`}
               className="h-[42px] w-[42px] items-center justify-center rounded-[14px] border border-danger-border bg-danger active:opacity-70"
               onPress={() => props.onRemove(props.environment.environmentId)}
             >

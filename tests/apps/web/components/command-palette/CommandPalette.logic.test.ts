@@ -137,6 +137,41 @@ function makeThread(overrides: Partial<Thread> = {}): Thread
 
 describe('buildThreadActionItems', () =>
 {
+  it('includes content-only conversations once while ranking title matches first and preserving navigation', async () =>
+  {
+    const runThread = vi.fn(
+      async (_thread: { environmentId: EnvironmentId; id: ThreadId }) => undefined,
+    )
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({ id: ThreadId.make('content'), title: 'Unrelated title' }),
+        makeThread({ id: ThreadId.make('title'), title: 'Needle task' }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, 'Project']]),
+      sortOrder: 'updated_at',
+      icon: null,
+      runThread,
+      getContentMatch: () => ({
+        source: 'user',
+        snippet: 'Clipped message excerpt',
+        query: 'needle',
+      }),
+    })
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: 'needle',
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: items,
+    })
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(['thread:title', 'thread:content'])
+    expect(groups[0]?.items[1]?.threadContentMatch?.snippet).toBe('Clipped message excerpt')
+    await items.find((item) => item.value === 'thread:content')!.run()
+    expect(runThread).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: LOCAL_ENVIRONMENT_ID, id: 'content' }),
+    )
+  })
+
   it('orders threads by most recent activity and formats timestamps from updatedAt', () =>
   {
     vi.useFakeTimers()

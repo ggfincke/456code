@@ -30,6 +30,7 @@ import { ProviderIcon } from '../../../components/ProviderIcon'
 import { ComposerSurface } from '../composer/ThreadComposer'
 
 import { makeTurnCommandMetadata } from '../../../lib/commandMetadata'
+import { buildModelMenuActions } from '../../../lib/modelOptions'
 import { convertPastedImagesToAttachments, pickComposerImages } from '../../../lib/composerImages'
 import {
   applyProviderOptionMenuEvent,
@@ -607,27 +608,7 @@ export function NewTaskDraftScreen(props: {
   )
 
   const modelMenuActions = useMemo(
-    () =>
-      flow.providerGroups.map((group) => ({
-        id: `provider:${group.providerKey}`,
-        title: group.providerLabel,
-        subtitle: group.models.find(
-          (model) =>
-            flow.selectedModel &&
-            model.selection.instanceId === flow.selectedModel.instanceId &&
-            model.selection.model === flow.selectedModel.model,
-        )?.label,
-        subactions: group.models.map((option) => ({
-          id: `model:${option.key}`,
-          title: option.label,
-          state:
-            flow.selectedModel &&
-            option.selection.instanceId === flow.selectedModel.instanceId &&
-            option.selection.model === flow.selectedModel.model
-              ? ('on' as const)
-              : undefined,
-        })),
-      })),
+    () => buildModelMenuActions(flow.providerGroups, flow.selectedModel),
     [flow.providerGroups, flow.selectedModel],
   )
   const providerOptionDescriptors = useMemo(
@@ -1211,6 +1192,10 @@ export function NewTaskDraftScreen(props: {
         />
       ) : null}
       <ControlPillMenu
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`Model: ${flow.selectedModelOption?.label ?? 'Model'}`}
+        testID="new-task-model-menu"
         actions={modelMenuActions}
         onPressAction={({ nativeEvent }) => handleModelMenuAction(nativeEvent.event)}
       >

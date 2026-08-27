@@ -13,6 +13,12 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
 )
 {
   return {
+    searchThreads: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:orchestration:search-threads',
+      tag: ORCHESTRATION_WS_METHODS.searchThreads,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
     importScan: createEnvironmentCommand(runtime, {
       label: 'environment-data:orchestration:import-scan',
       execute: importScan,

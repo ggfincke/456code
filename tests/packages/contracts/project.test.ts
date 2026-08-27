@@ -7,11 +7,41 @@ import { describe, expect, it } from 'vite-plus/test'
 import {
   ProjectReadFileError,
   ProjectSearchEntriesError,
+  ProjectSearchEntriesInput,
+  ProjectSearchContentsInput,
   ProjectWriteFileError,
 } from '../../../packages/contracts/src/project.ts'
 
+const decodeContents = Schema.decodeUnknownSync(ProjectSearchContentsInput)
+const decodeEntries = Schema.decodeUnknownSync(ProjectSearchEntriesInput)
+
 describe('project RPC errors', () =>
 {
+  it('bounds content search while preserving literal whitespace and empty file browsing', () =>
+  {
+    const input = {
+      cwd: '/workspace',
+      query: ' ',
+      limit: 500,
+      caseSensitive: false,
+      wholeWord: false,
+      useRegex: false,
+    }
+    expect(decodeContents(input).query).toBe(' ')
+    for (const patch of [{ query: '' }, { query: 'x'.repeat(257) }, { limit: 501 }, { limit: 0 }])
+    {
+      expect(() => decodeContents({ ...input, ...patch })).toThrow()
+    }
+    expect(
+      decodeEntries({
+        cwd: '/workspace',
+        query: '',
+        limit: 10,
+        kind: 'file',
+      }).query,
+    ).toBe('')
+  })
+
   it('derives stable messages from structured request context while retaining causes', () =>
   {
     const cause = new Error('sensitive platform detail')

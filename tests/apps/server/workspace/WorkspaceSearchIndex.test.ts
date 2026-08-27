@@ -6,14 +6,166 @@ import { afterEach, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
+import * as FileSystem from 'effect/FileSystem'
+import * as Schema from 'effect/Schema'
+import * as NodeServices from '@effect/platform-node/NodeServices'
 import { vi } from 'vite-plus/test'
 
 import * as WorkspaceSearchIndex from '../../../../apps/server/src/workspace/WorkspaceSearchIndex.ts'
+
+const encodeSearchError = Schema.encodeEffect(
+  Schema.fromJsonString(WorkspaceSearchIndex.WorkspaceSearchIndexSearchFailed),
+)
 
 afterEach(() =>
 {
   vi.restoreAllMocks()
 })
+
+it.effect('caps native pages across one query and disposes the content index with its scope', () =>
+  Effect.gen(function* ()
+  {
+    const fs = yield* FileSystem.FileSystem
+    const cwd = yield* fs
+      .makeTempDirectoryScoped({ prefix: 't3-search-cap-' })
+      .pipe(Effect.flatMap(fs.realPath))
+    yield* fs.writeFileString(`${cwd}/file.ts`, 'needle')
+    const item = {
+      relativePath: 'file.ts',
+      lineNumber: 1,
+      lineContent: 'needle',
+      matchRanges: [[0, 6]],
+    }
+    const grep = vi
+      .fn()
+      .mockReturnValueOnce({
+        ok: true,
+        value: {
+          items: Array.from({ length: 60 }, (_, index) => ({ ...item, lineNumber: index + 1 })),
+          nextCursor: { __brand: 'GrepCursor', _offset: 1 },
+        },
+      })
+      .mockReturnValueOnce({
+        ok: true,
+        value: {
+          items: Array.from({ length: 60 }, (_, index) => ({ ...item, lineNumber: index + 61 })),
+          nextCursor: null,
+        },
+      })
+    const destroy = vi.fn()
+    const finder = {
+      destroy,
+      grep,
+      waitForIndexReady: vi.fn(async () => ({ ok: true, value: true })),
+    } as unknown as FileFinder
+    vi.spyOn(FileFinder, 'create').mockReturnValueOnce({ ok: true, value: finder })
+    yield* Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const index = yield* WorkspaceSearchIndex.make(cwd, true)
+        const result = yield* index.searchContents({
+          query: 'needle',
+          limit: 500,
+          caseSensitive: true,
+          wholeWord: false,
+          useRegex: false,
+        })
+        expect(result.matches).toHaveLength(100)
+        expect(result.truncated).toBe(true)
+        expect(grep).toHaveBeenCalledTimes(2)
+        for (const [, options] of grep.mock.calls)
+        {
+          expect(options.maxMatchesPerFile).toBe(100)
+          expect(options.timeBudgetMs).toBeGreaterThan(0)
+          expect(options.timeBudgetMs).toBeLessThanOrEqual(250)
+        }
+        expect(destroy).not.toHaveBeenCalled()
+      }),
+    )
+    expect(destroy).toHaveBeenCalledTimes(1)
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect(
+  'bounds containment work and cursor pagination within one budget and sanitizes grep failures',
+  () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const fs = yield* FileSystem.FileSystem
+        const cwd = yield* fs
+          .makeTempDirectoryScoped({ prefix: 't3-search-budget-' })
+          .pipe(Effect.flatMap(fs.realPath))
+        yield* fs.writeFileString(`${cwd}/first.ts`, 'needle')
+        yield* fs.writeFileString(`${cwd}/slow.ts`, 'needle')
+        const now = vi.spyOn(performance, 'now').mockReturnValue(0)
+        const unreachablePath = vi.fn(() => 'unreached.ts')
+        const grep = vi.fn(() =>
+        {
+          return {
+            ok: true,
+            value: {
+              items: [
+                {
+                  relativePath: 'first.ts',
+                  lineNumber: 1,
+                  lineContent: 'needle',
+                  matchRanges: [[0, 6]],
+                },
+                {
+                  relativePath: 'slow.ts',
+                  lineNumber: 1,
+                  get lineContent()
+                  {
+                    now.mockReturnValue(251)
+                    return 'needle'
+                  },
+                  matchRanges: [[0, 6]],
+                },
+                {
+                  get relativePath()
+                  {
+                    return unreachablePath()
+                  },
+                  lineNumber: 1,
+                  lineContent: 'needle',
+                  matchRanges: [[0, 6]],
+                },
+              ],
+              nextCursor: { __brand: 'GrepCursor', _offset: 1 },
+            },
+          }
+        })
+        const finder = {
+          destroy: vi.fn(),
+          grep,
+          waitForIndexReady: vi.fn(async () => ({ ok: true, value: true })),
+        } as unknown as FileFinder
+        vi.spyOn(FileFinder, 'create').mockReturnValueOnce({ ok: true, value: finder })
+        const index = yield* WorkspaceSearchIndex.make(cwd, true)
+        const input = {
+          query: 'private query',
+          limit: 20,
+          caseSensitive: true,
+          wholeWord: false,
+          useRegex: false,
+        }
+        const result = yield* index.searchContents(input)
+        expect(result.truncated).toBe(true)
+        expect(result.matches.map((match) => match.path)).toEqual(['first.ts'])
+        expect(unreachablePath).not.toHaveBeenCalled()
+        expect(grep).toHaveBeenCalledTimes(1)
+        grep.mockImplementationOnce(() =>
+        {
+          throw new Error('private query native stderr')
+        })
+        const error = yield* Effect.flip(index.searchContents(input))
+        expect(error.reason).toBe('Native workspace search failed.')
+        expect(error.cause).toBeUndefined()
+        expect(yield* encodeSearchError(error)).not.toContain('private query')
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+)
 
 it.effect('preserves unexpected FileFinder creation failures', () =>
   Effect.gen(function* ()

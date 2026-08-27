@@ -481,6 +481,7 @@ export function ProviderSettingsPanel()
   return (
     <SettingsPageContainer>
       <SettingsSection
+        id="settings-providers"
         title="Providers"
         headerAction={
           <div className="flex items-center gap-1.5">

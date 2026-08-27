@@ -573,20 +573,20 @@ const make = Effect.gen(function* ()
         })
       }
 
-      const nextConfig = [...customConfig, ...missingDefaults]
-      const cappedConfig =
-        nextConfig.length > MAX_KEYBINDINGS_COUNT
-          ? nextConfig.slice(-MAX_KEYBINDINGS_COUNT)
-          : nextConfig
-      if (nextConfig.length > MAX_KEYBINDINGS_COUNT)
+      const availableSlots = Math.max(0, MAX_KEYBINDINGS_COUNT - customConfig.length)
+      const defaultsToAppend = missingDefaults.slice(0, availableSlots)
+      if (defaultsToAppend.length < missingDefaults.length)
       {
-        yield* Effect.logWarning('truncating keybindings config to max entries', {
+        yield* Effect.logWarning('skipping new default keybindings because user config is full', {
           path: keybindingsConfigPath,
           maxEntries: MAX_KEYBINDINGS_COUNT,
         })
       }
 
-      yield* writeConfigAtomically(cappedConfig)
+      if (defaultsToAppend.length > 0)
+      {
+        yield* writeConfigAtomically([...customConfig, ...defaultsToAppend])
+      }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey)
     }),
   )

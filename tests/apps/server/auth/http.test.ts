@@ -11,23 +11,29 @@ import {
   AuthOrchestrationReadScope,
   AuthOrchestrationRecoverScope,
   AuthAccessWriteScope,
+  AuthAdministrativeScopes,
+  AuthStandardClientScopes,
+  AuthRelayWriteScope,
   AuthSessionId,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
   EnvironmentAuthInvalidError,
   EnvironmentInternalError,
   EnvironmentRequestInvalidError,
+  EnvironmentScopeRequiredError,
   EnvironmentStorageOwnerTokenHeaderName,
 } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
 import * as HttpServerRequest from 'effect/unstable/http/HttpServerRequest'
 
 import * as EnvironmentAuth from '../../../../apps/server/src/auth/EnvironmentAuth.ts'
 import {
   environmentAuthenticatedAuthLayer,
   requirePairingDelegatedScopes,
+  requirePairingIssuer,
 } from '../../../../apps/server/src/auth/http.ts'
 import * as ServerSecretStore from '../../../../apps/server/src/auth/ServerSecretStore.ts'
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
@@ -35,6 +41,9 @@ import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence
 import * as ServerStorageLease from '../../../../apps/server/src/serverStorageLease.ts'
 
 const STORAGE_OWNER_TOKEN = 'storage-owner-token'
+const isPairingDelegationError = Schema.is(
+  Schema.Union([EnvironmentScopeRequiredError, EnvironmentRequestInvalidError]),
+)
 
 const makeEnvironmentAuthLayer = () =>
   EnvironmentAuth.layer.pipe(
@@ -70,12 +79,14 @@ const makeHttpAuthLayer = () =>
 
 const makeRequest = (input: {
   readonly path: string
+  readonly method?: 'GET' | 'POST'
   readonly remoteAddress: string
   readonly storageOwnerToken?: string
   readonly authorization?: string
 }): HttpServerRequest.HttpServerRequest =>
   ({
     originalUrl: input.path,
+    method: input.method ?? 'GET',
     headers: {
       ...(input.storageOwnerToken === undefined
         ? {}
@@ -147,6 +158,76 @@ it.layer(NodeServices.layer)('environment HTTP storage-owner authentication', (i
         const error = yield* authenticateRequest(request).pipe(Effect.flip)
         assert.instanceOf(error, EnvironmentAuthInvalidError)
         assert.equal(error.reason, 'missing_credential')
+      }
+    }).pipe(Effect.provide(makeHttpAuthLayer())),
+  )
+
+  it.effect(
+    'issues standard pairing credentials to the verified local owner without admin scope',
+    () =>
+      Effect.gen(function* ()
+      {
+        const request = makeRequest({
+          path: '/api/auth/pairing-token',
+          method: 'POST',
+          remoteAddress: '127.0.0.1',
+          storageOwnerToken: STORAGE_OWNER_TOKEN,
+        })
+        const principal = yield* authenticateRequest(request)
+        assert.deepStrictEqual([...principal.scopes], [...AuthStandardClientScopes])
+        assert.isFalse(principal.scopes.has(AuthAccessWriteScope))
+        const issuer = yield* requirePairingIssuer().pipe(
+          Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+          Effect.provideService(EnvironmentAuthenticatedPrincipal, principal),
+        )
+        const scopes = yield* requirePairingDelegatedScopes(issuer, AuthStandardClientScopes)
+        const auth = yield* EnvironmentAuth.EnvironmentAuth
+        const issued = yield* auth.issuePairingCredential({ scopes, label: 'local pair test' })
+        const links = yield* auth.listPairingLinks()
+        assert.isTrue(issued.credential.length > 0)
+        assert.deepStrictEqual(links.find((link) => link.id === issued.id)?.scopes, scopes)
+
+        for (const scopes of [
+          AuthAdministrativeScopes,
+          [AuthOrchestrationRecoverScope],
+          [AuthRelayWriteScope],
+        ] as const)
+        {
+          const error = yield* requirePairingDelegatedScopes(issuer, scopes).pipe(Effect.flip)
+          assert.isTrue(isPairingDelegationError(error))
+        }
+      }).pipe(Effect.provide(makeHttpAuthLayer())),
+  )
+
+  it.effect('rejects remote, wrong-token, and wrong-method pairing owner authority', () =>
+    Effect.gen(function* ()
+    {
+      for (const overrides of [
+        { remoteAddress: '203.0.113.10' },
+        { storageOwnerToken: 'wrong-token' },
+        { method: 'GET' as const },
+      ])
+      {
+        const request = makeRequest({
+          path: '/api/auth/pairing-token',
+          method: 'POST',
+          remoteAddress: '127.0.0.1',
+          storageOwnerToken: STORAGE_OWNER_TOKEN,
+          ...overrides,
+        })
+        const error = yield* authenticateRequest(request).pipe(Effect.flip)
+        assert.instanceOf(error, EnvironmentAuthInvalidError)
+        const forgedIssuerError = yield* requirePairingIssuer().pipe(
+          Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+          Effect.provideService(EnvironmentAuthenticatedPrincipal, {
+            sessionId: AuthSessionId.make('server-storage-owner'),
+            subject: 'server-storage-owner',
+            method: 'bearer-access-token',
+            scopes: new Set(AuthStandardClientScopes),
+          }),
+          Effect.flip,
+        )
+        assert.equal(forgedIssuerError.requiredScope, AuthAccessWriteScope)
       }
     }).pipe(Effect.provide(makeHttpAuthLayer())),
   )

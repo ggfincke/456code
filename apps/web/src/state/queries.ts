@@ -1,7 +1,8 @@
 // apps/web/src/state/queries.ts
 // exposes reactive client query hooks
 
-import { useAtomValue } from '@effect/atom-react'
+import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import { createThreadSearchAtoms } from '@t3tools/client-runtime/state/thread-search'
 import {
   type CheckpointDiffTarget,
   type ComposerPathSearchTarget,
@@ -23,15 +24,53 @@ import { appAtomRegistry } from '../rpc/atomRegistry'
 import { orchestrationEnvironment } from './orchestration'
 import { isPaginatedBranchesNextPagePending } from './paginatedBranches'
 import { projectEnvironment } from './projects'
+import { environmentPresentations } from './presentation'
 import { useEnvironmentQuery } from './query'
 import { useEnvironmentThread } from './threads'
 import { vcsEnvironment } from './vcs'
 
 const COMPOSER_PATH_SEARCH_DEBOUNCE_MS = 120
 const COMPOSER_PATH_SEARCH_LIMIT = 80
+const PROJECT_SEARCH_DEBOUNCE_MS = 200
+export const PROJECT_FILE_SEARCH_LIMIT = 200
+export const PROJECT_CONTENT_SEARCH_LIMIT = 500
 const VCS_REF_LIST_LIMIT = 100
 const EMPTY_REFS: ReadonlyArray<VcsRef> = []
 const INITIAL_BRANCH_CURSORS = [undefined] as const
+
+const connectedSearchEnvironmentIds = Atom.make((get) =>
+  [...get(environmentPresentations.presentationsAtom)]
+    .filter(([, presentation]) => presentation.connection.phase === 'connected')
+    .map(([environmentId]) => environmentId),
+)
+
+export function useThreadSearch(query: string)
+{
+  const [search] = useState(() =>
+    createThreadSearchAtoms({
+      connectedEnvironmentIds: connectedSearchEnvironmentIds,
+      getSearchAtom: (environmentId, query) =>
+        orchestrationEnvironment.searchThreads({
+          environmentId,
+          input: { query, limit: 50 },
+        }),
+      labelPrefix: 'web:palette-thread-search',
+    }),
+  )
+  const setQuery = useAtomSet(search.query)
+  const atomQuery = useAtomValue(search.query)
+  const result = useAtomValue(search.results)
+  useEffect(() =>
+  {
+    setQuery(query)
+  }, [query, setQuery])
+  // a prop change must hide previous results before the effect updates the shared atom
+  const isCurrent = atomQuery === query
+  return {
+    matches: isCurrent && !result.isLoading ? result.matches : [],
+    isPending: !isCurrent || result.isLoading,
+  }
+}
 
 export interface ThreadDetailView
 {
@@ -58,6 +97,101 @@ function useDebouncedValue<A>(value: A, delayMs: number): A
   }, [delayMs, value])
 
   return debounced
+}
+
+export function useProjectFileSearch(target: {
+  readonly environmentId: EnvironmentId
+  readonly cwd: string
+  readonly query: string
+})
+{
+  const current = useMemo(
+    () => ({ environmentId: target.environmentId, cwd: target.cwd, query: target.query.trim() }),
+    [target.environmentId, target.cwd, target.query],
+  )
+  const debounced = useDebouncedValue(current, PROJECT_SEARCH_DEBOUNCE_MS)
+  const isDebouncing = current !== debounced
+  const tooLong = current.query.length > 256
+  const result = useEnvironmentQuery(
+    isDebouncing || tooLong
+      ? null
+      : projectEnvironment.searchEntries({
+          environmentId: current.environmentId,
+          input: {
+            cwd: current.cwd,
+            query: current.query,
+            limit: PROJECT_FILE_SEARCH_LIMIT,
+            kind: 'file',
+          },
+        }),
+  )
+  const isPending = !tooLong && (isDebouncing || result.isPending)
+  return {
+    entries:
+      isPending || tooLong
+        ? []
+        : (result.data?.entries ?? []).filter((entry) => entry.kind === 'file'),
+    error: tooLong ? 'Search is limited to 256 characters.' : result.error,
+    isPending,
+    truncated: !isPending && (result.data?.truncated ?? false),
+  }
+}
+
+export function useProjectContentSearch(target: {
+  readonly environmentId: EnvironmentId
+  readonly cwd: string
+  readonly query: string
+  readonly caseSensitive: boolean
+  readonly wholeWord: boolean
+  readonly useRegex: boolean
+})
+{
+  const current = useMemo(
+    () => ({
+      environmentId: target.environmentId,
+      cwd: target.cwd,
+      query: target.query,
+      caseSensitive: target.caseSensitive,
+      wholeWord: target.wholeWord,
+      useRegex: target.useRegex,
+    }),
+    [
+      target.environmentId,
+      target.cwd,
+      target.query,
+      target.caseSensitive,
+      target.wholeWord,
+      target.useRegex,
+    ],
+  )
+  const debounced = useDebouncedValue(current, PROJECT_SEARCH_DEBOUNCE_MS)
+  const isDebouncing = current !== debounced
+  const hasQuery = current.query.length > 0
+  const tooLong = current.query.length > 256
+  const result = useEnvironmentQuery(
+    !hasQuery || tooLong || isDebouncing
+      ? null
+      : projectEnvironment.searchContents({
+          environmentId: current.environmentId,
+          input: {
+            cwd: current.cwd,
+            query: current.query,
+            caseSensitive: current.caseSensitive,
+            wholeWord: current.wholeWord,
+            useRegex: current.useRegex,
+            limit: PROJECT_CONTENT_SEARCH_LIMIT,
+          },
+        }),
+  )
+  const isPending = hasQuery && !tooLong && (isDebouncing || result.isPending)
+  return {
+    matches: isPending || !hasQuery || tooLong ? [] : (result.data?.matches ?? []),
+    error: tooLong ? 'Search is limited to 256 characters.' : result.error,
+    isPending,
+    hasQuery,
+    truncated: !isPending && (result.data?.truncated ?? false),
+    regexFallbackError: !isPending ? (result.data?.regexFallbackError ?? null) : null,
+  }
 }
 
 export function useThreadDetail(

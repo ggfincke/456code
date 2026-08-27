@@ -28,6 +28,7 @@ import * as Order from 'effect/Order'
 
 import { scopedProjectKey } from '../../lib/scopedEntities'
 import type { PendingNewTask } from '../../state/use-pending-new-tasks'
+import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 
 export type HomeProjectSortOrder = Exclude<SidebarProjectSortOrder, 'manual'>
 
@@ -270,6 +271,7 @@ export function buildHomeThreadGroups(input: {
   readonly pendingTasks?: ReadonlyArray<PendingNewTask>
   readonly environmentId: EnvironmentId | null
   readonly searchQuery: string
+  readonly matchedThreadKeys?: ReadonlySet<string>
   readonly projectSortOrder: HomeProjectSortOrder
   readonly threadSortOrder: SidebarThreadSortOrder
   readonly projectGroupingMode: SidebarProjectGroupingMode
@@ -378,7 +380,13 @@ export function buildHomeThreadGroups(input: {
       group.projects.some((project) => project.title.toLocaleLowerCase().includes(query))
     const matchingThreads = groupMatches
       ? group.threads
-      : group.threads.filter((thread) => thread.title.toLocaleLowerCase().includes(query))
+      : group.threads.filter(
+          (thread) =>
+            thread.title.toLocaleLowerCase().includes(query) ||
+            input.matchedThreadKeys?.has(
+              threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+            ) === true,
+        )
     const matchingPendingTasks = groupMatches
       ? group.pendingTasks
       : group.pendingTasks.filter((pendingTask) =>

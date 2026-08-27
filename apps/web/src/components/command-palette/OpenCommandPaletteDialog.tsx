@@ -3,6 +3,7 @@
 
 'use client'
 
+import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 import { scopeProjectRef, scopeThreadRef } from '@t3tools/client-runtime/environment'
 import {
   canCreateProjectInEnvironment,
@@ -37,6 +38,8 @@ import {
   MessageSquareIcon,
   ServerIcon,
   SettingsIcon,
+  SearchIcon,
+  FileSearchIcon,
   SquarePenIcon,
 } from 'lucide-react'
 import {
@@ -58,6 +61,7 @@ import { desktopLocalBackendId } from '../../connection/desktopLocal'
 import { filesystemEnvironment } from '../../state/filesystem'
 import { projectEnvironment } from '../../state/projects'
 import { useEnvironmentQuery } from '../../state/query'
+import { useThreadSearch } from '../../state/queries'
 import { sourceControlEnvironment } from '../../state/sourceControl'
 import { useAtomCommand } from '../../state/use-atom-command'
 import { useAtomQueryRunner } from '../../state/use-atom-query-runner'
@@ -164,6 +168,7 @@ export function CommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null
   readonly setOpen: (open: boolean) => void
   readonly clearOpenIntent: () => void
+  readonly openProjectSearch: (mode: 'files' | 'contents') => void
 })
 {
   return (
@@ -171,6 +176,7 @@ export function CommandPaletteDialog(props: {
       openIntent={props.openIntent}
       setOpen={props.setOpen}
       clearOpenIntent={props.clearOpenIntent}
+      openProjectSearch={props.openProjectSearch}
     />
   )
 }
@@ -179,6 +185,7 @@ export function OpenCommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null
   readonly setOpen: (open: boolean) => void
   readonly clearOpenIntent: () => void
+  readonly openProjectSearch: (mode: 'files' | 'contents') => void
 })
 {
   const navigate = useNavigate()
@@ -210,6 +217,12 @@ export function OpenCommandPaletteDialog(props: {
   const providers = useAtomValue(primaryServerProvidersAtom)
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([])
   const currentView = viewStack.at(-1) ?? null
+  const contentQuery =
+    currentView === null && !query.startsWith('>') && !isFilesystemBrowseQuery(query) ? query : ''
+  const threadSearch = useThreadSearch(contentQuery)
+  const contentMatchByKey = new Map(
+    threadSearch.matches.map((match) => [threadSearchMatchKey(match), match]),
+  )
   const [browseGeneration, setBrowseGeneration] = useState(0)
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(null)
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false)
@@ -670,6 +683,15 @@ export function OpenCommandPaletteDialog(props: {
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
         renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
+        getContentMatch: (thread) =>
+        {
+          const match = contentMatchByKey.get(
+            threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+          )
+          return match
+            ? { source: match.source, snippet: match.snippet, query: contentQuery }
+            : undefined
+        },
         runThread: async (thread) =>
         {
           await navigate({
@@ -678,7 +700,15 @@ export function OpenCommandPaletteDialog(props: {
           })
         },
       }),
-    [activeThreadId, clientSettings.sidebarThreadSortOrder, navigate, projectTitleById, threads],
+    [
+      activeThreadId,
+      clientSettings.sidebarThreadSortOrder,
+      contentMatchByKey,
+      contentQuery,
+      navigate,
+      projectTitleById,
+      threads,
+    ],
   )
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT)
 
@@ -1131,6 +1161,29 @@ export function OpenCommandPaletteDialog(props: {
       await navigate({ to: '/settings' })
     },
   })
+
+  actionItems.push(
+    {
+      kind: 'action',
+      value: 'action:file-picker',
+      searchTerms: ['files', 'filename', 'open file'],
+      title: 'Open file',
+      icon: <FileSearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: 'filePicker.toggle',
+      keepOpen: true,
+      run: async () => props.openProjectSearch('files'),
+    },
+    {
+      kind: 'action',
+      value: 'action:content-search',
+      searchTerms: ['search', 'contents', 'find in files', 'grep'],
+      title: 'Search file contents',
+      icon: <SearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: 'projectSearch.toggle',
+      keepOpen: true,
+      run: async () => props.openProjectSearch('contents'),
+    },
+  )
 
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems })
   const sourceSelectionViewValue =
@@ -2053,7 +2106,9 @@ export function OpenCommandPaletteDialog(props: {
                         emptyStateMessage:
                           'Press Enter to create this folder and add it as a project.',
                       }
-                    : {})}
+                    : threadSearch.isPending
+                      ? { emptyStateMessage: 'Searching thread messages…' }
+                      : {})}
           />
         </CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">

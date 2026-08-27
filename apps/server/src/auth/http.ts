@@ -224,6 +224,9 @@ const STORAGE_OWNER_ENDPOINTS = new Set([
   '/api/orchestration/project-commands/v1',
 ])
 
+const isLocalPairingRequest = (request: HttpServerRequest.HttpServerRequest): boolean =>
+  request.method === 'POST' && request.originalUrl.split('?', 1)[0] === '/api/auth/pairing-token'
+
 const timingSafeEqualString = (left: string, right: string): boolean =>
 {
   const leftBytes = Buffer.from(left)
@@ -243,7 +246,7 @@ const storageOwnerPrincipal = Effect.fn('environment.auth.storageOwnerPrincipal'
   const remoteAddress = deriveAuthClientMetadata({ request }).ipAddress
   if (
     typeof token !== 'string' ||
-    !STORAGE_OWNER_ENDPOINTS.has(path) ||
+    (!STORAGE_OWNER_ENDPOINTS.has(path) && !isLocalPairingRequest(request)) ||
     remoteAddress === undefined ||
     !isLoopbackHost(remoteAddress) ||
     !timingSafeEqualString(token, lease.value.owner.token)
@@ -256,9 +259,27 @@ const storageOwnerPrincipal = Effect.fn('environment.auth.storageOwnerPrincipal'
     sessionId: AuthSessionId.make('server-storage-owner'),
     subject: 'server-storage-owner',
     method: 'bearer-access-token',
-    scopes: new Set([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
+    scopes: new Set(
+      isLocalPairingRequest(request)
+        ? AuthStandardClientScopes
+        : [AuthOrchestrationReadScope, AuthOrchestrationOperateScope],
+    ),
   })
 })
+
+export const requirePairingIssuer = Effect.fn('environment.auth.requirePairingIssuer')(
+  function* ()
+  {
+    const request = yield* HttpServerRequest.HttpServerRequest
+    if (isLocalPairingRequest(request))
+    {
+      // revalidate local authority; subject and session identifiers alone confer no privilege
+      const owner = yield* storageOwnerPrincipal(request)
+      if (Option.isSome(owner)) return owner.value
+    }
+    return yield* requireEnvironmentScope(AuthAccessWriteScope)
+  },
+)
 
 export const environmentAuthenticatedAuthLayer = Layer.effect(
   EnvironmentAuthenticatedAuth,
@@ -435,7 +456,7 @@ export const authHttpApiLayer = HttpApiBuilder.group(
           function* (args)
           {
             yield* annotateEnvironmentRequest(args.endpoint.name)
-            const session = yield* requireEnvironmentScope(AuthAccessWriteScope)
+            const session = yield* requirePairingIssuer()
             const delegatedScopes = args.payload.scopes ?? AuthStandardClientScopes
             yield* requirePairingDelegatedScopes(session, delegatedScopes)
             return yield* serverAuth.issuePairingCredential(args.payload)

@@ -8,6 +8,7 @@ import type { ProjectionSnapshotQueryShape } from '../../../apps/server/src/orch
 export const makeProjectionSnapshotQueryStub = (
   overrides: Partial<ProjectionSnapshotQueryShape> = {},
 ): ProjectionSnapshotQueryShape => ({
+  searchThreads: () => Effect.die('unexpected ProjectionSnapshotQuery.searchThreads'),
   getCommandReadModel: () => Effect.die('unexpected ProjectionSnapshotQuery.getCommandReadModel'),
   getSnapshot: () => Effect.die('unexpected ProjectionSnapshotQuery.getSnapshot'),
   getShellSnapshot: () => Effect.die('unexpected ProjectionSnapshotQuery.getShellSnapshot'),

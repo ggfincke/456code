@@ -2,11 +2,52 @@
 // render settings layout
 
 import { Undo2Icon } from 'lucide-react'
-import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useState } from 'react'
+import { useLocation } from '@tanstack/react-router'
+import {
+  createContext,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
+
+const SettingsSearchTargetContext = createContext<string | null>(null)
+
+export function scrollToSettingsTarget(targetId: string): boolean
+{
+  const target = document.getElementById(targetId)
+  if (!target) return false
+
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  // center the visible section heading, not the middle of a long panel
+  const scrollTarget = target.tagName === 'SECTION' ? (target.firstElementChild ?? target) : target
+  scrollTarget.scrollIntoView({
+    behavior: prefersReducedMotion ? 'auto' : 'smooth',
+    block: 'center',
+  })
+  target.focus({ preventScroll: true })
+  return true
+}
+
+function useSettingsSearchTarget<T extends HTMLElement>(id: string | undefined)
+{
+  const targetId = useContext(SettingsSearchTargetContext)
+  const targetRef = useRef<T>(null)
+  useEffect(() =>
+  {
+    if (id && id === targetId && targetRef.current)
+    {
+      scrollToSettingsTarget(id)
+    }
+  }, [id, targetId])
+  return targetRef
+}
 
 // re-render every `intervalMs`; return a stable timestamp snapshot for render-time relative labels.
 export function useRelativeTimeTick(intervalMs = 1_000)
@@ -34,8 +75,14 @@ export function SettingsSection({
   children: ReactNode
 })
 {
+  const targetRef = useSettingsSearchTarget<HTMLElement>(sectionProps.id)
   return (
-    <section {...sectionProps} className={cn('space-y-3', className)}>
+    <section
+      {...sectionProps}
+      ref={targetRef}
+      tabIndex={sectionProps.id ? -1 : sectionProps.tabIndex}
+      className={cn('space-y-3 scroll-mt-4', className)}
+    >
       <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold tracking-[-0.025em] text-foreground">
           {icon}
@@ -66,9 +113,12 @@ export function SettingsRow({
   children?: ReactNode
 })
 {
+  const targetRef = useSettingsSearchTarget<HTMLDivElement>(rowProps.id)
   return (
     <div
       {...rowProps}
+      ref={targetRef}
+      tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
       className={cn('rounded-xl px-3 sm:px-4', children ? 'pt-3 pb-1' : 'py-3', className)}
     >
       <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-8">
@@ -129,11 +179,15 @@ export function SettingsPageContainer({
   className?: string
 })
 {
+  const hash = useLocation({ select: (location) => location.hash })
+  const targetId = hash.replace(/^#/u, '') || null
   return (
-    <div className="settings-page-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto px-4 pt-10 pb-7 sm:px-8 sm:pt-12 sm:pb-10">
-      <div className={cn('mx-auto flex w-full max-w-4xl flex-col gap-12', className)}>
-        {children}
+    <SettingsSearchTargetContext value={targetId}>
+      <div className="settings-page-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto px-4 pt-10 pb-7 sm:px-8 sm:pt-12 sm:pb-10">
+        <div className={cn('mx-auto flex w-full max-w-4xl flex-col gap-12', className)}>
+          {children}
+        </div>
       </div>
-    </div>
+    </SettingsSearchTargetContext>
   )
 }

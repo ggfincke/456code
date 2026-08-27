@@ -11,6 +11,8 @@ import type {
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
+  OrchestrationSearchThreadsInput,
+  OrchestrationSearchThreadsResult,
   OrchestrateRunExecution,
   OrchestrateRunExecutionIdentity,
   OrchestrationShellSnapshot,
@@ -90,6 +92,10 @@ export interface ProjectionImportReconciliationContext
  */
 export interface ProjectionSnapshotQueryShape
 {
+  readonly searchThreads: (
+    input: OrchestrationSearchThreadsInput,
+  ) => Effect.Effect<OrchestrationSearchThreadsResult, ProjectionRepositoryError>
+
   // read the lightweight command snapshot used to bootstrap the in-memory
   // orchestration engine without hydrating message/activity/checkpoint bodies.
   readonly getCommandReadModel: () => Effect.Effect<

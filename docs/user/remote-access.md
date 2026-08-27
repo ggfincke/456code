@@ -101,6 +101,9 @@ npx 456code serve --tailscale-serve --tailscale-serve-port 8443
 > For now, use `t3 project ...` on the server machine instead.
 > Full GUI support for remote project management is coming soon.
 
+To print a fresh QR code for an already-running local server, use the
+[local pairing CLI](local-pairing-cli.md). It does not configure network exposure or Tailscale.
+
 ### Option 3: Desktop-Managed SSH Launch
 
 Use this when you want the desktop app to start or reuse 456code on another machine over SSH.

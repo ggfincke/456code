@@ -85,6 +85,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
               New
             </span>
           ) : null}
+          {props.model.isLegacy === true ? (
+            <span className="shrink-0 text-[10px] font-normal text-muted-foreground">Legacy</span>
+          ) : null}
         </div>
         {props.showProvider && (
           <div className="mt-1 flex items-center gap-1.5">

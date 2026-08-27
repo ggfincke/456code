@@ -10,6 +10,7 @@ import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
 } from '@t3tools/client-runtime/state/shell'
+import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 import type {
   EnvironmentId,
   SidebarProjectGroupingMode,
@@ -31,6 +32,7 @@ import { scopedProjectKey } from '../../lib/scopedEntities'
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../native/native-glass'
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from '../../state/preferences'
 import type { PendingNewTask } from '../../state/use-pending-new-tasks'
+import { useThreadSearch } from '../../state/use-thread-search'
 import {
   PendingTaskListRow,
   ThreadListGroupHeader,
@@ -329,6 +331,11 @@ export function HomeScreen(props: HomeScreenProps)
     [props.pendingTasks, selectedProjectRefKeys],
   )
 
+  const contentSearch = useThreadSearch({
+    query: props.searchQuery,
+    environmentId: props.selectedEnvironmentId,
+  })
+  const { matchesByKey, matchedThreadKeys } = contentSearch
   const projectGroups = useMemo(
     () =>
       buildHomeThreadGroups({
@@ -337,11 +344,13 @@ export function HomeScreen(props: HomeScreenProps)
         pendingTasks: scopedPendingTasks,
         environmentId: props.selectedEnvironmentId,
         searchQuery: props.searchQuery,
+        matchedThreadKeys,
         projectSortOrder: props.projectSortOrder,
         threadSortOrder: props.threadSortOrder,
         projectGroupingMode: props.projectGroupingMode,
       }),
     [
+      matchedThreadKeys,
       props.projectGroupingMode,
       props.projectSortOrder,
       props.searchQuery,
@@ -465,6 +474,7 @@ export function HomeScreen(props: HomeScreenProps)
     projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
     projectScopeKey: v2ProjectScopeKey,
     searchQuery: props.searchQuery,
+    matchedThreadKeys,
     autoSettleOnMerge,
   })
   const threadListV2Items = threadListV2Layout.items
@@ -473,6 +483,13 @@ export function HomeScreen(props: HomeScreenProps)
     ({ item }: { readonly item: ThreadListV2Item }) => (
       <ThreadListV2Row
         thread={item.thread}
+        searchMatch={matchesByKey.get(
+          threadSearchMatchKey({
+            environmentId: item.thread.environmentId,
+            threadId: item.thread.id,
+          }),
+        )}
+        searchQuery={props.searchQuery}
         variant={item.variant}
         showSettledDivider={item.showSettledDivider}
         project={
@@ -518,11 +535,13 @@ export function HomeScreen(props: HomeScreenProps)
       handleSwipeableClose,
       handleSwipeableWillOpen,
       handleUnsettleThread,
+      matchesByKey,
       projectByKey,
       projectCwdByKey,
       props.onArchiveThread,
       props.onSelectThread,
       props.savedConnectionsById,
+      props.searchQuery,
       serverConfigs,
       settlementEnvironmentIds,
       v2ProjectTitleByProjectKey,
@@ -541,19 +560,28 @@ export function HomeScreen(props: HomeScreenProps)
       projectTitleByProjectKey: v2ProjectTitleByProjectKey,
       serverConfigs,
       savedConnectionsById: props.savedConnectionsById,
+      matchesByKey,
+      searchQuery: props.searchQuery,
     }),
     [
+      matchesByKey,
       projectByKey,
       projectCwdByKey,
       props.savedConnectionsById,
+      props.searchQuery,
       serverConfigs,
       v2ProjectTitleByProjectKey,
     ],
   )
 
   const extraData = useMemo(
-    () => ({ savedConnectionsById: props.savedConnectionsById, projectCwdByKey }),
-    [props.savedConnectionsById, projectCwdByKey],
+    () => ({
+      savedConnectionsById: props.savedConnectionsById,
+      projectCwdByKey,
+      matchesByKey,
+      searchQuery: props.searchQuery,
+    }),
+    [props.savedConnectionsById, projectCwdByKey, matchesByKey, props.searchQuery],
   )
 
   const renderItem = useCallback(
@@ -601,6 +629,10 @@ export function HomeScreen(props: HomeScreenProps)
             <ThreadListRow
               variant="compact"
               thread={thread}
+              searchMatch={matchesByKey.get(
+                threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+              )}
+              searchQuery={props.searchQuery}
               environmentLabel={
                 props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null
               }
@@ -632,6 +664,7 @@ export function HomeScreen(props: HomeScreenProps)
     [
       handleSwipeableClose,
       handleSwipeableWillOpen,
+      matchesByKey,
       projectCwdByKey,
       props.onArchiveThread,
       props.onDeletePendingTask,
@@ -640,6 +673,7 @@ export function HomeScreen(props: HomeScreenProps)
       props.onSelectPendingTask,
       props.onSelectThread,
       props.savedConnectionsById,
+      props.searchQuery,
       updateGroupDisplay,
     ],
   )
@@ -766,7 +800,14 @@ export function HomeScreen(props: HomeScreenProps)
 
   const listEmpty = !hasResults ? (
     hasSearchQuery ? (
-      <EmptyState title="No results" detail={`No threads matching "${props.searchQuery}".`} />
+      <EmptyState
+        title={contentSearch.isLoading ? 'Searching conversations' : 'No results'}
+        detail={
+          contentSearch.isLoading
+            ? 'Checking messages in connected environments.'
+            : `No threads matching "${props.searchQuery}".`
+        }
+      />
     ) : selectedProjectScope !== null ? (
       <EmptyState
         title={`No threads in ${selectedProjectScope.title}`}
@@ -791,7 +832,12 @@ export function HomeScreen(props: HomeScreenProps)
   const v2SnoozedCount = threadListV2Layout.snoozedCount
   const v2ListEmpty =
     v2PendingTasks.length > 0 ? null : hasSearchQuery ? (
-      v2SnoozedCount > 0 ? (
+      contentSearch.isLoading ? (
+        <EmptyState
+          title="Searching conversations"
+          detail="Checking messages in connected environments."
+        />
+      ) : v2SnoozedCount > 0 ? (
         // the snoozed threads already passed this search filter: "No
         // results" would claim nothing matched when matches are merely
         // parked.

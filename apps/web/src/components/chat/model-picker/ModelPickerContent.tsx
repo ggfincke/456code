@@ -43,6 +43,7 @@ type ModelPickerItem = {
   name: string
   shortName?: string
   subProvider?: string
+  isLegacy?: boolean
   instanceId: ProviderInstanceId
   driverKind: ProviderDriverKind
   instanceDisplayName: string
@@ -55,6 +56,14 @@ const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>()
 // the search field has no visible label and its placeholder disappears as soon
 // as the user types, so it carries an explicit accessible name.
 export const MODEL_SEARCH_INPUT_LABEL = 'Search models'
+
+export function groupLegacyModels<T extends { isLegacy?: boolean }>(models: ReadonlyArray<T>): T[]
+{
+  return [
+    ...models.filter((model) => model.isLegacy !== true),
+    ...models.filter((model) => model.isLegacy === true),
+  ]
+}
 
 // split a `${instanceId}:${slug}` combobox key back into its pieces. Slugs
 // can contain colons (e.g. some vendor model ids), so we only split on the
@@ -240,6 +249,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           name: model.name,
           ...(model.shortName ? { shortName: model.shortName } : {}),
           ...(model.subProvider ? { subProvider: model.subProvider } : {}),
+          ...(model.isLegacy === true ? { isLegacy: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: providerInstancePickerLabel(entry),
@@ -418,11 +428,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       result = result.filter((m) => m.instanceId === selectedInstanceId)
     }
 
-    return sortProviderModelItems(result, {
+    const sorted = sortProviderModelItems(result, {
       favoriteModelKeys: favoritesSet,
       groupFavorites: selectedInstanceId !== 'favorites',
       instanceOrder: selectedInstanceId === 'favorites' ? instanceOrder : [],
     })
+    return selectedInstanceId === 'favorites' ? sorted : groupLegacyModels(sorted)
   }, [
     favoritesSet,
     flatModels,
@@ -432,6 +443,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     searchQuery,
     selectedInstanceId,
   ])
+
+  const firstLegacyModel =
+    !isSearching && selectedInstanceId !== 'favorites'
+      ? filteredModels.find((model) => model.isLegacy === true)
+      : undefined
+  const firstLegacyModelKey = firstLegacyModel
+    ? providerModelKey(firstLegacyModel.instanceId, firstLegacyModel.slug)
+    : null
 
   const handleModelSelect = useCallback(
     (modelSlug: string, instanceId: ProviderInstanceId) =>
@@ -763,7 +782,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 <LegendList<string>
                   ref={modelListRef}
                   data={filteredModelKeys}
-                  extraData={favoritesSet}
+                  extraData={{ favoritesSet, firstLegacyModelKey }}
+                  getItemType={(modelKey) =>
+                    modelKey === firstLegacyModelKey ? 'legacy-section' : 'model'
+                  }
                   keyExtractor={(modelKey) => modelKey}
                   renderItem={({ item: modelKey, index }) =>
                   {
@@ -779,25 +801,34 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       threadInstanceId: props.switchableThreadProviderInstanceId ?? null,
                     })
                     return (
-                      <ModelListRow
-                        key={modelKey}
-                        index={index}
-                        model={model}
-                        instanceId={model.instanceId}
-                        driverKind={model.driverKind}
-                        providerDisplayName={model.instanceDisplayName}
-                        providerAccentColor={model.instanceAccentColor}
-                        isFavorite={favoritesSet.has(modelKey)}
-                        isSelected={modelKey === `${props.activeInstanceId}:${props.model}`}
-                        showProvider
-                        preferShortName={!isLocked}
-                        useTriggerLabel={false}
-                        showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
-                        jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
-                        disabledReason={disabledReason}
-                        switchIntent={switchIntent}
-                        onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
-                      />
+                      <div key={modelKey}>
+                        {modelKey === firstLegacyModelKey ? (
+                          <div
+                            aria-hidden="true"
+                            className="px-2 pb-1 pt-3 text-xs font-medium text-muted-foreground"
+                          >
+                            Legacy models
+                          </div>
+                        ) : null}
+                        <ModelListRow
+                          index={index}
+                          model={model}
+                          instanceId={model.instanceId}
+                          driverKind={model.driverKind}
+                          providerDisplayName={model.instanceDisplayName}
+                          providerAccentColor={model.instanceAccentColor}
+                          isFavorite={favoritesSet.has(modelKey)}
+                          isSelected={modelKey === `${props.activeInstanceId}:${props.model}`}
+                          showProvider
+                          preferShortName={!isLocked}
+                          useTriggerLabel={false}
+                          showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
+                          jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
+                          disabledReason={disabledReason}
+                          switchIntent={switchIntent}
+                          onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
+                        />
+                      </div>
                     )
                   }}
                   estimatedItemSize={60}

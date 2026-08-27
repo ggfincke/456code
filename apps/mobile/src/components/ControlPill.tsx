@@ -10,7 +10,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react'
-import { Platform, Pressable, useColorScheme, View } from 'react-native'
+import { Platform, Pressable, useColorScheme, View, type AccessibilityProps } from 'react-native'
 import { useThemeColor } from '../lib/useThemeColor'
 
 import { cn } from '../lib/cn'
@@ -91,10 +91,11 @@ export function ControlPill(props: {
 // AppCompat popup can't be themed past its stock animation, metrics, and
 // submenu chrome.
 export function ControlPillMenu(
-  props: Omit<ComponentProps<typeof MenuView>, 'children' | 'themeVariant'> & {
-    readonly children: ReactNode
-    readonly className?: string
-  },
+  props: Omit<ComponentProps<typeof MenuView>, 'children' | 'themeVariant'> &
+    Pick<AccessibilityProps, 'accessible' | 'accessibilityRole' | 'accessibilityLabel'> & {
+      readonly children: ReactNode
+      readonly className?: string
+    },
 )
 {
   const isDarkMode = useColorScheme() === 'dark'

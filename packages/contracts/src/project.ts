@@ -2,20 +2,22 @@
 // define project contracts
 
 import * as Schema from 'effect/Schema'
-import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from './baseSchemas.ts'
+import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString, TrimmedString } from './baseSchemas.ts'
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512
 
+export const ProjectEntryKind = Schema.Literals(['file', 'directory'])
+export type ProjectEntryKind = typeof ProjectEntryKind.Type
+
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
-  query: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  query: TrimmedString.check(Schema.isMaxLength(256)),
   limit: PositiveInt.check(Schema.isLessThanOrEqualTo(PROJECT_SEARCH_ENTRIES_MAX_LIMIT)),
+  kind: Schema.optionalKey(ProjectEntryKind),
 })
 export type ProjectSearchEntriesInput = typeof ProjectSearchEntriesInput.Type
-
-const ProjectEntryKind = Schema.Literals(['file', 'directory'])
 
 export const ProjectEntry = Schema.Struct({
   path: TrimmedNonEmptyString,
@@ -28,6 +30,36 @@ export const ProjectSearchEntriesResult = Schema.Struct({
   truncated: Schema.Boolean,
 })
 export type ProjectSearchEntriesResult = typeof ProjectSearchEntriesResult.Type
+
+export const ProjectSearchContentsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  limit: PositiveInt.check(Schema.isLessThanOrEqualTo(500)),
+  caseSensitive: Schema.Boolean,
+  wholeWord: Schema.Boolean,
+  useRegex: Schema.Boolean,
+})
+export type ProjectSearchContentsInput = typeof ProjectSearchContentsInput.Type
+
+export const ProjectSearchContentsResult = Schema.Struct({
+  matches: Schema.Array(
+    Schema.Struct({
+      path: TrimmedNonEmptyString,
+      lineNumber: PositiveInt,
+      lineContent: Schema.String,
+      matchRanges: Schema.Array(Schema.Struct({ start: NonNegativeInt, end: NonNegativeInt })),
+    }),
+  ),
+  truncated: Schema.Boolean,
+  regexFallbackError: Schema.optional(Schema.String),
+})
+export type ProjectSearchContentsResult = typeof ProjectSearchContentsResult.Type
+
+export class ProjectSearchContentsError extends Schema.TaggedErrorClass<ProjectSearchContentsError>()(
+  'ProjectSearchContentsError',
+  { message: TrimmedNonEmptyString },
+)
+{}
 
 export const ProjectListEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,

@@ -13,6 +13,7 @@ import {
   ProjectReadFileError,
   ProjectReadMdxDocumentError,
   ProjectSearchEntriesError,
+  ProjectSearchContentsError,
   ProjectWriteFileError,
   WS_METHODS,
   type WsRpcGroup,
@@ -33,6 +34,7 @@ import type { makeRpcAuthorization } from '../rpcAuthorization.ts'
 type WsRpcHandlers = RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof WsRpcGroup>>
 type WorkspaceRpcMethod =
   | typeof WS_METHODS.projectsSearchEntries
+  | typeof WS_METHODS.projectsSearchContents
   | typeof WS_METHODS.projectsListEntries
   | typeof WS_METHODS.projectsReadFile
   | typeof WS_METHODS.projectsReadMdxDocument
@@ -178,6 +180,19 @@ export function makeWorkspaceRpcHandlers({
 }: WorkspaceRpcHandlerDependencies)
 {
   return {
+    [WS_METHODS.projectsSearchContents]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.projectsSearchContents,
+        workspaceEntries.searchContents(input).pipe(
+          Effect.mapError(
+            () =>
+              new ProjectSearchContentsError({
+                message: 'Failed to search workspace contents.',
+              }),
+          ),
+        ),
+        { 'rpc.aggregate': 'workspace' },
+      ),
     [WS_METHODS.projectsSearchEntries]: (input) =>
       observeRpcEffect(
         WS_METHODS.projectsSearchEntries,
