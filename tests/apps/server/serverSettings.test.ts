@@ -5,6 +5,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
   ProviderInstanceId,
+  resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
 } from '@t3tools/contracts'
@@ -19,8 +20,10 @@ import * as Option from 'effect/Option'
 import * as PlatformError from 'effect/PlatformError'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as ServerSecretStore from '../../../apps/server/src/auth/ServerSecretStore.ts'
 import * as ServerConfig from '../../../apps/server/src/config.ts'
+import { SqlitePersistenceMemory } from '../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as ServerSettingsModule from '../../../apps/server/src/serverSettings.ts'
 
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch)
@@ -29,6 +32,7 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings)
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
     Layer.provide(ServerSecretStore.layer),
+    Layer.provideMerge(Layer.fresh(SqlitePersistenceMemory)),
     Layer.provideMerge(
       Layer.fresh(
         ServerConfig.layerTest(process.cwd(), {
@@ -50,6 +54,52 @@ const makeFailingSecretStoreLayer = (cause: ServerSecretStore.SecretStoreError) 
       remove: () => Effect.void,
     }),
   )
+
+const recordProjectedProviderUsage = (provider: string, instanceId: string | null = provider) =>
+  Effect.gen(function* ()
+  {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`
+      INSERT INTO projection_thread_sessions (
+        thread_id,
+        status,
+        provider_name,
+        provider_instance_id,
+        updated_at
+      )
+      VALUES (
+        ${`projected-${provider}-${instanceId ?? 'legacy'}`},
+        ${'ready'},
+        ${provider},
+        ${instanceId},
+        ${'2026-08-25T00:00:00.000Z'}
+      )
+    `
+  })
+
+const recordRuntimeProviderUsage = (provider: string, instanceId: string | null = provider) =>
+  Effect.gen(function* ()
+  {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`
+      INSERT INTO provider_session_runtime (
+        thread_id,
+        provider_name,
+        provider_instance_id,
+        adapter_key,
+        status,
+        last_seen_at
+      )
+      VALUES (
+        ${`runtime-${provider}-${instanceId ?? 'legacy'}`},
+        ${provider},
+        ${instanceId},
+        ${provider},
+        ${'ready'},
+        ${'2026-08-25T00:00:00.000Z'}
+      )
+    `
+  })
 
 it.layer(NodeServices.layer)('server settings', (it) =>
 {
@@ -73,6 +123,7 @@ it.layer(NodeServices.layer)('server settings', (it) =>
     )
     const settingsLayer = ServerSettingsModule.layer.pipe(
       Layer.provide(makeFailingSecretStoreLayer(cause)),
+      Layer.provideMerge(Layer.fresh(SqlitePersistenceMemory)),
       Layer.provideMerge(configLayer),
     )
 
@@ -98,6 +149,24 @@ it.layer(NodeServices.layer)('server settings', (it) =>
       assert.notInclude(error.message, cause.message)
     }).pipe(Effect.provide(settingsLayer))
   })
+
+  it.effect('identifies provider history query failures', () =>
+    Effect.gen(function* ()
+    {
+      const serverConfig = yield* ServerConfig.ServerConfig
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`DROP TABLE projection_thread_sessions`
+
+      const error = yield* Effect.flip(serverSettings.getSettings)
+
+      assert.deepInclude(error, {
+        _tag: 'ServerSettingsError',
+        operation: 'read-provider-history',
+        settingsPath: serverConfig.settingsPath,
+      })
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
 
   it.effect('decodes nested settings patches', () =>
     Effect.gen(function* ()
@@ -478,6 +547,120 @@ it.layer(NodeServices.layer)('server settings', (it) =>
         enabled: true,
         config: { homePath: '~/.codex' },
       })
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
+  it.effect('restores every historically used false-default provider', () =>
+    Effect.gen(function* ()
+    {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
+      yield* recordProjectedProviderUsage('grok')
+      yield* recordProjectedProviderUsage('coral')
+      yield* recordProjectedProviderUsage('gemini')
+      yield* recordRuntimeProviderUsage('antigravity')
+      yield* recordRuntimeProviderUsage('opencode')
+
+      const settings = yield* serverSettings.getSettings
+
+      assert.isTrue(settings.providers.grok.enabled)
+      assert.isTrue(settings.providers.coral.enabled)
+      assert.isTrue(settings.providers.gemini.enabled)
+      assert.isTrue(settings.providers.antigravity.enabled)
+      assert.isTrue(settings.providers.opencode.enabled)
+      assert.isTrue(settings.providers.codex.enabled)
+      assert.isTrue(settings.providers.claudeAgent.enabled)
+      assert.isTrue(settings.providers.cursor.enabled)
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
+  it.effect('restores only matching custom instances and preserves explicit disables', () =>
+    Effect.gen(function* ()
+    {
+      const serverConfig = yield* ServerConfig.ServerConfig
+      const fileSystem = yield* FileSystem.FileSystem
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"providers":{"grok":{"enabled":false}},"providerInstances":{"grok_work":{"driver":"grok","config":{}},"coral_disabled":{"driver":"coral","enabled":false,"config":{}},"gemini_disabled":{"driver":"gemini","config":{"enabled":false}},"opencode_unused":{"driver":"opencode","config":{}}}}',
+      )
+      yield* recordProjectedProviderUsage('grok', 'grok_work')
+      yield* recordRuntimeProviderUsage('coral', 'coral_disabled')
+      yield* recordRuntimeProviderUsage('gemini', 'gemini_disabled')
+
+      const settings = yield* serverSettings.getSettings
+
+      assert.isFalse(settings.providers.grok.enabled)
+      assert.isFalse(settings.providers.antigravity.enabled)
+      assert.isFalse(settings.providers.opencode.enabled)
+      assert.isTrue(settings.providerInstances[ProviderInstanceId.make('grok_work')]?.enabled)
+      assert.isFalse(settings.providerInstances[ProviderInstanceId.make('coral_disabled')]?.enabled)
+      assert.isFalse(
+        settings.providerInstances[ProviderInstanceId.make('gemini_disabled')]?.enabled,
+      )
+      const unused = settings.providerInstances[ProviderInstanceId.make('opencode_unused')]
+      assert.isDefined(unused)
+      assert.isFalse(resolveProviderInstanceEnabled(unused))
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
+  it.effect('preserves explicit provider flags when another persisted field is invalid', () =>
+    Effect.gen(function* ()
+    {
+      const serverConfig = yield* ServerConfig.ServerConfig
+      const fileSystem = yield* FileSystem.FileSystem
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"addProjectBaseDirectory":42,"providers":{"grok":{"enabled":false},"coral":{"enabled":true}}}',
+      )
+      yield* recordProjectedProviderUsage('grok')
+      yield* recordProjectedProviderUsage('gemini')
+
+      const settings = yield* serverSettings.getSettings
+
+      assert.isFalse(settings.providers.grok.enabled)
+      assert.isTrue(settings.providers.coral.enabled)
+      assert.isTrue(settings.providers.gemini.enabled)
+      assert.equal(settings.addProjectBaseDirectory, '')
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
+  it.effect('keeps inferred restoration sparse while persisting explicit provider choices', () =>
+    Effect.gen(function* ()
+    {
+      const serverConfig = yield* ServerConfig.ServerConfig
+      const fileSystem = yield* FileSystem.FileSystem
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"providerInstances":{"opencode_work":{"driver":"opencode","config":{}}}}',
+      )
+      yield* recordProjectedProviderUsage('grok')
+      yield* recordRuntimeProviderUsage('opencode', 'opencode_work')
+
+      const inferred = yield* serverSettings.getSettings
+      assert.isTrue(inferred.providers.grok.enabled)
+      assert.isTrue(inferred.providerInstances[ProviderInstanceId.make('opencode_work')]?.enabled)
+
+      const updated = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: '~/Development',
+        providers: {
+          grok: { enabled: false },
+          coral: { enabled: true },
+        },
+      })
+      assert.isFalse(updated.providers.grok.enabled)
+      assert.isTrue(updated.providers.coral.enabled)
+      assert.isTrue(updated.providerInstances[ProviderInstanceId.make('opencode_work')]?.enabled)
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath)
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const persisted = JSON.parse(raw)
+      assert.deepEqual(persisted.providers, {
+        grok: { enabled: false },
+        coral: { enabled: true },
+      })
+      assert.isUndefined(persisted.providerInstances.opencode_work.enabled)
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   )
 

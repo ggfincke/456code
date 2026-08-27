@@ -6,6 +6,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
+  providerInstanceConfigEnabledFlag,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
   ProviderDriverKind,
@@ -32,6 +33,7 @@ import * as Schema from 'effect/Schema'
 import * as Semaphore from 'effect/Semaphore'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { writeFileStringAtomically } from './atomicWrite.ts'
 import * as ServerConfig from './config.ts'
 import { type DeepPartial, deepMerge } from '@t3tools/shared/Struct'
@@ -57,19 +59,14 @@ const foldProviderInstanceEnabledFlags = (settings: ServerSettings): ServerSetti
   const providerInstances: Record<string, ProviderInstanceConfig> = {}
   for (const [instanceId, instance] of Object.entries(settings.providerInstances))
   {
-    const config = instance.config
-    if (
-      config === null ||
-      typeof config !== 'object' ||
-      Array.isArray(config) ||
-      typeof (config as { readonly enabled?: unknown }).enabled !== 'boolean'
-    )
+    const configEnabled = providerInstanceConfigEnabledFlag(instance.config)
+    if (configEnabled === undefined)
     {
       providerInstances[instanceId] = instance
       continue
     }
 
-    const { enabled: configEnabled, ...restConfig } = config as Record<string, unknown> & {
+    const { enabled: _enabled, ...restConfig } = instance.config as Record<string, unknown> & {
       readonly enabled: boolean
     }
     providerInstances[instanceId] = {
@@ -203,6 +200,227 @@ export const layerTest = (overrides: DeepPartial<ServerSettings> = {}) =>
 
 const ServerSettingsJson = fromLenientJson(ServerSettings)
 const decodeServerSettingsJsonExit = Schema.decodeUnknownExit(ServerSettingsJson)
+const HISTORICALLY_RESTORABLE_PROVIDERS = [
+  'grok',
+  'coral',
+  'gemini',
+  'antigravity',
+  'opencode',
+] as const
+type HistoricallyRestorableProvider = (typeof HISTORICALLY_RESTORABLE_PROVIDERS)[number]
+
+const PersistedProviderEnablement = Schema.Struct({
+  providers: Schema.optionalKey(
+    Schema.Struct({
+      grok: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
+      coral: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
+      gemini: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
+      antigravity: Schema.optionalKey(
+        Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) }),
+      ),
+      opencode: Schema.optionalKey(Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
+    }),
+  ),
+  providerInstances: Schema.optionalKey(
+    Schema.Record(
+      ProviderInstanceId,
+      Schema.Struct({
+        enabled: Schema.optionalKey(Schema.Boolean),
+        config: Schema.optionalKey(Schema.Unknown),
+      }),
+    ),
+  ),
+})
+type PersistedProviderEnablement = typeof PersistedProviderEnablement.Type
+
+const decodePersistedProviderEnablementJsonExit = Schema.decodeUnknownExit(
+  fromLenientJson(PersistedProviderEnablement),
+)
+
+type ProviderHistoryRow = {
+  readonly providerName: string
+  readonly providerInstanceId: string | null
+}
+
+function restoreUsedProviders(
+  settings: ServerSettings,
+  persisted: PersistedProviderEnablement,
+  providerHistory: ReadonlyArray<ProviderHistoryRow>,
+): ServerSettings
+{
+  const usedProviders = new Set(providerHistory.map(({ providerName }) => providerName))
+  const usedProviderInstances = new Set(
+    providerHistory.map(
+      ({ providerName, providerInstanceId }) => providerInstanceId ?? providerName,
+    ),
+  )
+  const providerInstances = Object.fromEntries(
+    Object.entries(settings.providerInstances).map(([instanceId, instance]) => [
+      instanceId,
+      instance.enabled === undefined &&
+      HISTORICALLY_RESTORABLE_PROVIDERS.includes(
+        instance.driver as HistoricallyRestorableProvider,
+      ) &&
+      usedProviderInstances.has(instanceId)
+        ? { ...instance, enabled: true }
+        : instance,
+    ]),
+  )
+
+  return {
+    ...settings,
+    providers: {
+      ...settings.providers,
+      grok: {
+        ...settings.providers.grok,
+        enabled: persisted.providers?.grok?.enabled ?? usedProviders.has('grok'),
+      },
+      coral: {
+        ...settings.providers.coral,
+        enabled: persisted.providers?.coral?.enabled ?? usedProviders.has('coral'),
+      },
+      gemini: {
+        ...settings.providers.gemini,
+        enabled: persisted.providers?.gemini?.enabled ?? usedProviders.has('gemini'),
+      },
+      antigravity: {
+        ...settings.providers.antigravity,
+        enabled: persisted.providers?.antigravity?.enabled ?? usedProviders.has('antigravity'),
+      },
+      opencode: {
+        ...settings.providers.opencode,
+        enabled: persisted.providers?.opencode?.enabled ?? usedProviders.has('opencode'),
+      },
+    },
+    providerInstances: providerInstances as ServerSettings['providerInstances'],
+  }
+}
+
+function explicitProviderEnablementForUpdate(
+  persisted: PersistedProviderEnablement,
+  patch: ServerSettingsPatch,
+): PersistedProviderEnablement
+{
+  const grok = patch.providers?.grok?.enabled ?? persisted.providers?.grok?.enabled
+  const coral = patch.providers?.coral?.enabled ?? persisted.providers?.coral?.enabled
+  const gemini = patch.providers?.gemini?.enabled ?? persisted.providers?.gemini?.enabled
+  const antigravity =
+    patch.providers?.antigravity?.enabled ?? persisted.providers?.antigravity?.enabled
+  const opencode = patch.providers?.opencode?.enabled ?? persisted.providers?.opencode?.enabled
+  const providers = {
+    ...(grok !== undefined ? { grok: { enabled: grok } } : {}),
+    ...(coral !== undefined ? { coral: { enabled: coral } } : {}),
+    ...(gemini !== undefined ? { gemini: { enabled: gemini } } : {}),
+    ...(antigravity !== undefined ? { antigravity: { enabled: antigravity } } : {}),
+    ...(opencode !== undefined ? { opencode: { enabled: opencode } } : {}),
+  } satisfies NonNullable<PersistedProviderEnablement['providers']>
+
+  const sourceInstances =
+    patch.providerInstances === undefined
+      ? persisted.providerInstances
+      : Object.fromEntries(
+          Object.entries(patch.providerInstances).map(([instanceId, instance]) => [
+            instanceId,
+            {
+              ...(instance.enabled !== undefined ? { enabled: instance.enabled } : {}),
+              ...(instance.config !== undefined ? { config: instance.config } : {}),
+            },
+          ]),
+        )
+  const providerInstances = Object.fromEntries(
+    Object.entries(sourceInstances ?? {}).flatMap(([instanceId, instance]) =>
+    {
+      const enabled = instance.enabled ?? providerInstanceConfigEnabledFlag(instance.config)
+      return enabled === undefined ? [] : [[instanceId, { enabled }]]
+    }),
+  )
+
+  return {
+    ...(Object.keys(providers).length > 0 ? { providers } : {}),
+    ...(Object.keys(providerInstances).length > 0 ? { providerInstances } : {}),
+  }
+}
+
+function settingsForSparsePersistence(
+  settings: ServerSettings,
+  persisted: PersistedProviderEnablement,
+): ServerSettings
+{
+  const providerInstances = Object.fromEntries(
+    Object.entries(settings.providerInstances).map(([instanceId, instance]) =>
+    {
+      const enabled = persisted.providerInstances?.[ProviderInstanceId.make(instanceId)]?.enabled
+      if (enabled !== undefined)
+      {
+        return [instanceId, { ...instance, enabled }]
+      }
+      const { enabled: _inferred, ...withoutInferredEnabled } = instance
+      return [instanceId, withoutInferredEnabled]
+    }),
+  )
+  return {
+    ...settings,
+    providers: {
+      ...settings.providers,
+      grok: {
+        ...settings.providers.grok,
+        enabled:
+          persisted.providers?.grok?.enabled ?? DEFAULT_SERVER_SETTINGS.providers.grok.enabled,
+      },
+      coral: {
+        ...settings.providers.coral,
+        enabled:
+          persisted.providers?.coral?.enabled ?? DEFAULT_SERVER_SETTINGS.providers.coral.enabled,
+      },
+      gemini: {
+        ...settings.providers.gemini,
+        enabled:
+          persisted.providers?.gemini?.enabled ?? DEFAULT_SERVER_SETTINGS.providers.gemini.enabled,
+      },
+      antigravity: {
+        ...settings.providers.antigravity,
+        enabled:
+          persisted.providers?.antigravity?.enabled ??
+          DEFAULT_SERVER_SETTINGS.providers.antigravity.enabled,
+      },
+      opencode: {
+        ...settings.providers.opencode,
+        enabled:
+          persisted.providers?.opencode?.enabled ??
+          DEFAULT_SERVER_SETTINGS.providers.opencode.enabled,
+      },
+    },
+    providerInstances: providerInstances as ServerSettings['providerInstances'],
+  }
+}
+
+function addExplicitProviderEnablement(
+  sparseSettings: unknown,
+  persisted: PersistedProviderEnablement,
+): unknown
+{
+  const sparse =
+    sparseSettings !== null && typeof sparseSettings === 'object'
+      ? { ...(sparseSettings as Record<string, unknown>) }
+      : {}
+  const providers =
+    sparse.providers !== null && typeof sparse.providers === 'object'
+      ? { ...(sparse.providers as Record<string, unknown>) }
+      : {}
+
+  for (const provider of HISTORICALLY_RESTORABLE_PROVIDERS)
+  {
+    const enabled = persisted.providers?.[provider]?.enabled
+    if (enabled === undefined) continue
+    const providerSettings =
+      providers[provider] !== null && typeof providers[provider] === 'object'
+        ? { ...(providers[provider] as Record<string, unknown>) }
+        : {}
+    providers[provider] = { ...providerSettings, enabled }
+  }
+
+  return Object.keys(providers).length > 0 ? { ...sparse, providers } : sparse
+}
 
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
 {
@@ -288,10 +506,13 @@ const make = Effect.gen(function* ()
   const fs = yield* FileSystem.FileSystem
   const pathService = yield* Path.Path
   const secretStore = yield* ServerSecretStore.ServerSecretStore
+  const sql = yield* SqlClient.SqlClient
   const writeSemaphore = yield* Semaphore.make(1)
   const cacheKey = 'settings' as const
   const changesPubSub = yield* PubSub.unbounded<ServerSettings>()
   const startedRef = yield* Ref.make(false)
+  const providerEnablementRef = yield* Ref.make<PersistedProviderEnablement>({})
+  const providerHistoryRef = yield* Ref.make<ReadonlyArray<ProviderHistoryRow>>([])
   const startedDeferred = yield* Deferred.make<void, ServerSettingsError>()
   const watcherScope = yield* Scope.make('sequential')
   yield* Effect.addFinalizer(() => Scope.close(watcherScope, Exit.void))
@@ -323,23 +544,59 @@ const make = Effect.gen(function* ()
 
   const loadSettingsFromDisk = Effect.gen(function* ()
   {
-    if (!(yield* readConfigExists))
+    let settings = DEFAULT_SERVER_SETTINGS
+    let persisted: PersistedProviderEnablement = {}
+
+    if (yield* readConfigExists)
     {
-      return DEFAULT_SERVER_SETTINGS
+      const raw = yield* readRawConfig
+      const decoded = decodeServerSettingsJsonExit(raw)
+      const persistedEnablement = decodePersistedProviderEnablementJsonExit(raw)
+      if (persistedEnablement._tag === 'Success')
+      {
+        persisted = persistedEnablement.value
+      }
+
+      if (decoded._tag === 'Failure')
+      {
+        yield* Effect.logWarning('failed to parse settings.json, using defaults', {
+          path: settingsPath,
+          issues: Cause.pretty(decoded.cause),
+          cause: decoded.cause,
+        })
+      }
+      else
+      {
+        settings = foldProviderInstanceEnabledFlags(decoded.value)
+      }
     }
 
-    const raw = yield* readRawConfig
-    const decoded = decodeServerSettingsJsonExit(raw)
-    if (decoded._tag === 'Failure')
-    {
-      yield* Effect.logWarning('failed to parse settings.json, using defaults', {
-        path: settingsPath,
-        issues: Cause.pretty(decoded.cause),
-        cause: decoded.cause,
-      })
-      return DEFAULT_SERVER_SETTINGS
-    }
-    return foldProviderInstanceEnabledFlags(decoded.value)
+    const providerHistory = yield* sql<ProviderHistoryRow>`
+      SELECT DISTINCT
+        provider_name AS "providerName",
+        provider_instance_id AS "providerInstanceId"
+      FROM projection_thread_sessions
+      WHERE provider_name IN ('grok', 'coral', 'gemini', 'antigravity', 'opencode')
+      UNION
+      SELECT DISTINCT
+        provider_name AS "providerName",
+        provider_instance_id AS "providerInstanceId"
+      FROM provider_session_runtime
+      WHERE provider_name IN ('grok', 'coral', 'gemini', 'antigravity', 'opencode')
+    `.pipe(
+      Effect.mapError(
+        (cause) =>
+          new ServerSettingsError({
+            settingsPath,
+            operation: 'read-provider-history',
+            cause,
+          }),
+      ),
+    )
+
+    yield* Ref.set(providerEnablementRef, persisted)
+    yield* Ref.set(providerHistoryRef, providerHistory)
+    return restoreUsedProviders(settings, persisted, providerHistory)
   })
 
   const settingsCache = yield* Cache.make<typeof cacheKey, ServerSettings, ServerSettingsError>({
@@ -510,11 +767,14 @@ const make = Effect.gen(function* ()
     })
 
   const writeSettingsAtomically = Effect.fnUntraced(
-    function* (settings: ServerSettings)
+    function* (settings: ServerSettings, persisted: PersistedProviderEnablement)
     {
-      const sparseSettingsJson = yield* encodeServerSettingsJson(
-        stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {},
+      const settingsForPersistence = settingsForSparsePersistence(settings, persisted)
+      const sparseSettings = addExplicitProviderEnablement(
+        stripDefaultServerSettings(settingsForPersistence, DEFAULT_SERVER_SETTINGS) ?? {},
+        persisted,
       )
+      const sparseSettingsJson = yield* encodeServerSettingsJson(sparseSettings)
 
       return yield* writeFileStringAtomically({
         filePath: settingsPath,
@@ -621,12 +881,22 @@ const make = Effect.gen(function* ()
         Effect.gen(function* ()
         {
           const current = yield* getSettingsFromCache
+          const persisted = explicitProviderEnablementForUpdate(
+            yield* Ref.get(providerEnablementRef),
+            patch,
+          )
           const nextPersisted = yield* persistProviderEnvironmentSecrets(
             current,
             applyServerSettingsPatch(current, patch),
           )
-          const next = yield* normalizeServerSettings(nextPersisted)
-          yield* writeSettingsAtomically(next)
+          const normalized = yield* normalizeServerSettings(nextPersisted)
+          const next = restoreUsedProviders(
+            normalized,
+            persisted,
+            yield* Ref.get(providerHistoryRef),
+          )
+          yield* writeSettingsAtomically(next, persisted)
+          yield* Ref.set(providerEnablementRef, persisted)
           yield* Cache.set(settingsCache, cacheKey, next)
           yield* emitChange(next)
           const materialized = yield* materializeProviderEnvironmentSecrets(next)

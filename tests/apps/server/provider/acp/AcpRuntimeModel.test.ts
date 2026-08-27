@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import type * as EffectAcpSchema from 'effect-acp/schema'
 
 import {
+  decideToolCallUpdateEmission,
   extractModelConfigId,
   mergeToolCallState,
   parsePermissionRequest,
@@ -13,6 +14,7 @@ import {
   parseSessionUpdateEvent,
   sessionUpdateIsReplay,
   syntheticLoadSessionResponseFromInitialize,
+  type AcpToolCallState,
 } from '../../../../../apps/server/src/provider/acp/AcpRuntimeModel.ts'
 
 describe('AcpRuntimeModel', () =>
@@ -388,6 +390,154 @@ describe('AcpRuntimeModel', () =>
         status: 'pending',
         command: 'cat package.json',
       },
+    })
+  })
+
+  it('bounds cumulative tool output and its raw payload to the latest 8,000 characters', () =>
+  {
+    const hugeText = Array.from(
+      { length: 2_000 },
+      (_, index) => `line ${index}: ${'x'.repeat(50)}`,
+    ).join('\n')
+    const rawStdout = `prefix-${'y'.repeat(20_000)}`
+    const result = parseSessionUpdateEvent({
+      sessionId: 'session-1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        kind: 'other',
+        status: 'in_progress',
+        rawOutput: { stdout: rawStdout },
+        content: [{ type: 'content', content: { type: 'text', text: hugeText } }],
+      },
+    } satisfies EffectAcpSchema.SessionNotification)
+
+    const event = result.events[0]
+    if (event?._tag !== 'ToolCallUpdated')
+    {
+      throw new Error('expected a ToolCallUpdated event')
+    }
+    expect(event.toolCall.detail).toHaveLength(8_028)
+    expect(event.toolCall.detail?.startsWith('[Earlier output truncated]')).toBe(true)
+    expect(event.toolCall.detail?.endsWith(hugeText.slice(-100))).toBe(true)
+    const rawOutput = event.toolCall.data.rawOutput as { readonly stdout: string }
+    expect(rawOutput.stdout).toHaveLength(8_028)
+    expect(rawOutput.stdout.endsWith(rawStdout.slice(-100))).toBe(true)
+
+    const rawUpdate = (
+      event.rawPayload as {
+        readonly update: {
+          readonly content: ReadonlyArray<{ readonly content: { readonly text: string } }>
+          readonly rawOutput: { readonly stdout: string }
+        }
+      }
+    ).update
+    expect(rawUpdate.content[0]?.content.text).toHaveLength(8_028)
+    expect(rawUpdate.rawOutput.stdout).toHaveLength(8_028)
+    expect(JSON.stringify(event).length).toBeLessThan(hugeText.length + rawStdout.length)
+  })
+
+  it('keeps non-text content in order while collapsing oversized tool text to one tail', () =>
+  {
+    const hugePrefix = 'x'.repeat(25_000)
+    const hugeTail = 'y'.repeat(25_000)
+    const result = parseSessionUpdateEvent({
+      sessionId: 'session-1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tool-1',
+        kind: 'edit',
+        status: 'in_progress',
+        content: [
+          { type: 'content', content: { type: 'text', text: hugePrefix } },
+          { type: 'diff', path: '/repo/file.ts', oldText: 'before', newText: 'after' },
+          { type: 'content', content: { type: 'text', text: hugeTail } },
+          { type: 'diff', path: '/repo/other.ts', oldText: 'old', newText: 'new' },
+          { type: 'content', content: { type: 'text', text: '   ' } },
+        ],
+      },
+    } satisfies EffectAcpSchema.SessionNotification)
+
+    const event = result.events[0]
+    if (event?._tag !== 'ToolCallUpdated')
+    {
+      throw new Error('expected a ToolCallUpdated event')
+    }
+    const content = event.toolCall.data.content as ReadonlyArray<EffectAcpSchema.ToolCallContent>
+    expect(content).toHaveLength(3)
+    expect(content[0]).toMatchObject({ type: 'diff', path: '/repo/file.ts' })
+    expect(content[2]).toMatchObject({ type: 'diff', path: '/repo/other.ts' })
+    const boundedText = content[1]
+    if (boundedText?.type !== 'content' || boundedText.content.type !== 'text')
+    {
+      throw new Error('expected bounded text content')
+    }
+    expect(boundedText.content.text).toHaveLength(8_028)
+    expect(boundedText.content.text.endsWith(hugeTail.slice(-100))).toBe(true)
+  })
+
+  describe('decideToolCallUpdateEmission', () =>
+  {
+    const toolCall = (
+      detail: string | undefined,
+      status?: AcpToolCallState['status'],
+    ): AcpToolCallState => ({
+      toolCallId: 'tool-1',
+      title: 'Grok Tool',
+      ...(status ? { status } : {}),
+      ...(detail ? { detail } : {}),
+      data: {},
+    })
+
+    it('coalesces small redraws until the tenth skipped update', () =>
+    {
+      let previous: AcpToolCallState | undefined
+      let lastEmittedDetailLength: number | undefined = 0
+      let skippedSinceEmit = 0
+      const emittedIndices: Array<number> = []
+
+      for (let index = 1; index <= 12; index += 1)
+      {
+        const next = toolCall('x'.repeat(index), 'inProgress')
+        const decision = decideToolCallUpdateEmission({
+          previous,
+          next,
+          lastEmittedDetailLength,
+          skippedSinceEmit,
+        })
+        if (decision.emit)
+        {
+          emittedIndices.push(index)
+          lastEmittedDetailLength = next.detail?.length
+        }
+        skippedSinceEmit = decision.skippedSinceEmit
+        previous = next
+      }
+
+      expect(emittedIndices).toEqual([1, 11])
+    })
+
+    it('emits meaningful growth and every terminal state immediately', () =>
+    {
+      expect(
+        decideToolCallUpdateEmission({
+          previous: toolCall('x', 'inProgress'),
+          next: toolCall('x'.repeat(257), 'inProgress'),
+          lastEmittedDetailLength: 1,
+          skippedSinceEmit: 2,
+        }),
+      ).toEqual({ emit: true, skippedSinceEmit: 0 })
+      for (const status of ['completed', 'failed'] as const)
+      {
+        expect(
+          decideToolCallUpdateEmission({
+            previous: toolCall('same', 'inProgress'),
+            next: toolCall('same', status),
+            lastEmittedDetailLength: 4,
+            skippedSinceEmit: 3,
+          }),
+        ).toEqual({ emit: true, skippedSinceEmit: 0 })
+      }
     })
   })
 })

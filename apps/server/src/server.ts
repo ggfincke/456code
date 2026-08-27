@@ -248,6 +248,11 @@ const PersistenceLayerLive = ImportReplacementIntentRepositoryLive.pipe(
   Layer.provideMerge(SqlitePersistenceLayerLive),
 )
 
+const ServerSettingsLayerLive = ServerSettings.layer.pipe(
+  Layer.provide(ServerSecretStore.layer),
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+)
+
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
 )
@@ -455,7 +460,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // no longer transitively provides it. Exposing it at the runtime level
   // keeps a single Live for all opencode consumers.
   Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
-  Layer.provideMerge(ServerSettings.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+  Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),
