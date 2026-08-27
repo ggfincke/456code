@@ -406,8 +406,31 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
   const plan: BootServicePlan = {
     nodePath: host.execPath,
     t3EntryPath: plannedEntryPath,
-    environmentPath:
-      hostEnvironment.PATH?.trim() === '' || hostEnvironment.PATH === undefined
+    environmentPath: isLaunchd
+      ? [
+          ...new Set(
+            [
+              ...(hostEnvironment.PATH?.split(':') ?? []),
+              path.dirname(host.execPath),
+              '/opt/homebrew/bin',
+              ...DEFAULT_BOOT_SERVICE_PATH.split(':'),
+            ].filter(
+              (entry) =>
+                entry.trim().length > 0 &&
+                !Array.from(entry).some((character) =>
+                  {
+                  const code = character.codePointAt(0)!
+                  return (
+                    (code < 0x20 && code !== 9 && code !== 10 && code !== 13) ||
+                    (code >= 0xd800 && code <= 0xdfff) ||
+                    code === 0xfffe ||
+                    code === 0xffff
+                  )
+                }),
+            ),
+          ),
+        ].join(':')
+      : hostEnvironment.PATH?.trim() === '' || hostEnvironment.PATH === undefined
         ? DEFAULT_BOOT_SERVICE_PATH
         : hostEnvironment.PATH,
     baseDir: input.baseDir,
@@ -757,7 +780,15 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
         ? fs.exists(runtimePaths.sentinelPath)
         : Effect.succeed(true),
     ])
-    const definitionCurrent = unit === renderServiceDefinition() && entryExists && sentinelExists
+    // installer shells vary; only launchd's persisted PATH is installation-specific.
+    const normalizeDefinition = (definition: string) =>
+      isLaunchd
+        ? definition.replace(/(<key>PATH<\/key>\s*<string>)[^<]*(<\/string>)/u, '$1$2')
+        : definition
+    const definitionCurrent =
+      normalizeDefinition(unit) === normalizeDefinition(renderServiceDefinition()) &&
+      entryExists &&
+      sentinelExists
     const active = yield* runner
       .run(
         isLaunchd

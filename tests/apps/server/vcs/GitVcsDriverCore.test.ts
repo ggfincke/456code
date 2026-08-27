@@ -1744,6 +1744,56 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
       }),
     )
 
+    it.effect('gives worktree creation a bounded five-minute timeout', () =>
+      Effect.gen(function* ()
+      {
+        const delegate = yield* ChildProcessSpawner.ChildProcessSpawner
+        for (const delay of [299, 301])
+        {
+          const started = yield* Deferred.make<void>()
+          const delayedSpawner = ChildProcessSpawner.make((command) =>
+            Effect.gen(function* ()
+            {
+              if (
+                ChildProcess.isStandardCommand(command) &&
+                command.args[0] === 'worktree' &&
+                command.args[1] === 'add'
+              )
+              {
+                yield* Deferred.succeed(started, undefined)
+                yield* Effect.sleep(`${delay} seconds`)
+              }
+              return yield* delegate.spawn(command)
+            }),
+          )
+          const driver = yield* makeGitVcsDriverCore().pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, delayedSpawner),
+            Effect.provide(ServerConfigLayer),
+          )
+          const cwd = yield* makeTmpDir()
+          const { initialBranch } = yield* initRepoWithCommit(cwd)
+          const pathService = yield* Path.Path
+          const worktreePath = pathService.join(yield* makeTmpDir('git-worktrees-'), 'slow')
+          const creating = yield* driver
+            .createWorktree({
+              cwd,
+              newRefName: `slow-${delay}`,
+              path: worktreePath,
+              refName: initialBranch,
+            })
+            .pipe(Effect.result, Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(started)
+          yield* TestClock.adjust(`${delay} seconds`)
+          const result = yield* Fiber.join(creating)
+          assert.equal(result._tag, delay === 299 ? 'Success' : 'Failure')
+          if (result._tag === 'Success')
+          {
+            yield* driver.removeWorktree({ cwd, path: result.success.worktree.path, force: true })
+          }
+        }
+      }),
+    )
+
     it.effect('allows pushes to run longer than the default command timeout', () =>
       Effect.gen(function* ()
       {

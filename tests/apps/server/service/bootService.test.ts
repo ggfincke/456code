@@ -421,6 +421,41 @@ it.layer(NodeServices.layer)('BootService', (it) =>
     }),
   )
 
+  it.effect('keeps launchd PATH safe and ignores only PATH drift when checking currentness', () =>
+    Effect.gen(function* ()
+    {
+      const { dirs, fs } = yield* makeTestContext()
+      const makeService = (environmentPath: string) =>
+        BootService.make({
+          baseDir: dirs.baseDir,
+          logsDir: dirs.logsDir,
+          cliVersion: '0.0.27',
+          host: { ...makeHost(dirs.stableEntry), execPath: '/custom/node/bin/node' },
+        }).pipe(
+          Effect.provide(makeRecordingRunnerLayer([])),
+          provideHostRefs(dirs.home, 'darwin', 501, { PATH: environmentPath }),
+        )
+      const service = yield* makeService('/tools&more::/bad\u0001path:/tools&more:/space tools')
+      const plan = yield* service.install
+      assert.equal(
+        plan.environmentPath,
+        '/tools&more:/space tools:/custom/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin',
+      )
+      const definition = yield* fs.readFileString(plan.unitPath)
+      assert.include(definition, '/tools&amp;more:/space tools')
+      const otherShell = yield* makeService('/another/shell/bin')
+      assert.isTrue((yield* otherShell.status).current)
+      yield* fs.writeFileString(
+        plan.unitPath,
+        definition.replace('/custom/node/bin/node', '/stale/node'),
+      )
+      assert.isFalse((yield* otherShell.status).current)
+      yield* fs.writeFileString(plan.unitPath, definition)
+      yield* fs.remove(dirs.stableEntry)
+      assert.isFalse((yield* otherShell.status).current)
+    }),
+  )
+
   it.effect('persists the installer PATH in both service formats with a safe fallback', () =>
     Effect.gen(function* ()
     {
@@ -454,7 +489,18 @@ it.layer(NodeServices.layer)('BootService', (it) =>
           const plan = yield* service.install
           const definition = yield* fs.readFileString(plan.unitPath)
 
-          assert.equal(plan.environmentPath, expectedPath)
+          const persistedPath =
+            platform === 'darwin'
+              ? [
+                  ...new Set([
+                    ...(environment.PATH?.trim() ? environment.PATH.split(':') : []),
+                    '/usr/local/bin',
+                    '/opt/homebrew/bin',
+                    ...fallbackPath.split(':'),
+                  ]),
+                ].join(':')
+              : expectedPath
+          assert.equal(plan.environmentPath, persistedPath)
           if (platform === 'linux')
           {
             const escapedPath = expectedPath.replaceAll('%', '%%')
@@ -467,7 +513,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
           {
             assert.include(
               definition,
-              `<key>PATH</key>\n    <string>${BootService.escapeXmlText(expectedPath)}</string>`,
+              `<key>PATH</key>\n    <string>${BootService.escapeXmlText(persistedPath)}</string>`,
             )
           }
           assert.isTrue((yield* service.status).current)
