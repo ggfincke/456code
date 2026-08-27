@@ -15,11 +15,52 @@ import { CodexSettings } from '@t3tools/contracts'
 
 import {
   applyPreferredCodexDefaultModel,
+  appendCustomCodexModels,
   checkCodexProviderStatus,
   mapCodexAccountUsage,
   mapCodexModelCapabilities,
+  parseCodexModelListResponse,
   resolveCodexAccountUsage,
 } from '../../../../../apps/server/src/provider/Layers/CodexProvider.ts'
+
+it('classifies explicit Codex upgrades while keeping defaults, unknown models, and custom entries current', () =>
+{
+  const model = (slug: string) => ({
+    id: slug,
+    model: slug,
+    displayName: slug,
+    description: '',
+    hidden: false,
+    isDefault: false,
+    defaultReasoningEffort: 'medium' as const,
+    supportedReasoningEfforts: [],
+  })
+  const models = appendCustomCodexModels(
+    applyPreferredCodexDefaultModel(
+      parseCodexModelListResponse({
+        data: [
+          { ...model('superseded'), upgrade: ' future ' },
+          { ...model('superseded-info'), upgradeInfo: { model: 'future' } },
+          model('future'),
+          { ...model('self'), upgrade: ' self ' },
+          { ...model('blank'), upgrade: ' ' },
+          { ...model('provider-default'), isDefault: true, upgrade: 'future' },
+          { ...model('gpt-5.6-sol'), upgrade: 'future' },
+        ],
+        nextCursor: null,
+      }),
+    ),
+    [' superseded ', 'custom-old-model'],
+  )
+  assert.deepStrictEqual(
+    models.filter((entry) => entry.isLegacy).map((entry) => entry.slug),
+    ['superseded', 'superseded-info'],
+  )
+  assert.strictEqual(models.filter((entry) => entry.slug === 'superseded').length, 1)
+  assert.strictEqual(models.find((entry) => entry.slug === 'gpt-5.6-sol')?.isDefault, true)
+  assert.strictEqual(models.at(-1)?.isCustom, true)
+  assert.strictEqual(models.at(-1)?.isLegacy, undefined)
+})
 
 const makeStalledUsageSpawner = Effect.fn('makeStalledUsageSpawner')(function* ()
 {

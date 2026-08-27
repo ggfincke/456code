@@ -2,6 +2,7 @@
 // build model options
 
 import type { ModelCapabilities, ModelSelection, ServerConfig } from '@t3tools/contracts'
+import type { MenuAction } from '@react-native-menu/menu'
 import {
   buildProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
@@ -15,6 +16,7 @@ export type ModelOption = {
   readonly providerLabel: string
   readonly providerDriver: string
   readonly isDefault: boolean
+  readonly isLegacy?: boolean
   readonly capabilities: ModelCapabilities | null
   readonly selection: ModelSelection
 }
@@ -93,6 +95,7 @@ export function buildModelOptions(
         providerLabel,
         providerDriver: provider.driver,
         isDefault: model.isDefault === true,
+        ...(model.isLegacy === true && !model.isCustom ? { isLegacy: true } : {}),
         capabilities: model.capabilities,
         selection: normalizeSelectionOptions(
           {
@@ -160,4 +163,48 @@ export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyAr
     providerLabel: group.providerLabel,
     models: group.models,
   }))
+}
+
+export function buildModelMenuActions(
+  groups: ReadonlyArray<ProviderGroup>,
+  selectedModel: ModelSelection | null,
+): MenuAction[]
+{
+  const isSelected = (option: ModelOption) =>
+    option.selection.instanceId === selectedModel?.instanceId &&
+    option.selection.model === selectedModel?.model
+  const modelAction = (option: ModelOption): MenuAction => ({
+    id: `model:${option.key}`,
+    title: option.label,
+    state: isSelected(option) ? 'on' : undefined,
+  })
+
+  // android menus support only one submenu level, so legacy groups are siblings
+  return groups.flatMap((group) =>
+  {
+    const currentModels = group.models.filter((model) => model.isLegacy !== true)
+    const legacyModels = group.models.filter((model) => model.isLegacy === true)
+    return [
+      ...(currentModels.length > 0
+        ? [
+            {
+              id: `provider:${group.providerKey}`,
+              title: group.providerLabel,
+              subtitle: currentModels.find(isSelected)?.label,
+              subactions: currentModels.map(modelAction),
+            },
+          ]
+        : []),
+      ...(legacyModels.length > 0
+        ? [
+            {
+              id: `legacy:${group.providerKey}`,
+              title: `${group.providerLabel} · Legacy models`,
+              subtitle: legacyModels.find(isSelected)?.label,
+              subactions: legacyModels.map(modelAction),
+            },
+          ]
+        : []),
+    ]
+  })
 }

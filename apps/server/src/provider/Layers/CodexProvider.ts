@@ -384,7 +384,7 @@ const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string =>
   )
 }
 
-function parseCodexModelListResponse(
+export function parseCodexModelListResponse(
   response: CodexSchema.V2ModelListResponse,
 ): ReadonlyArray<ServerProviderModel>
 {
@@ -393,6 +393,12 @@ function parseCodexModelListResponse(
     name: toDisplayName(model),
     isCustom: false,
     ...(model.isDefault ? { isDefault: true } : {}),
+    ...(!model.isDefault &&
+    [model.upgrade, model.upgradeInfo?.model].some(
+      (target) => target?.trim() && target.trim() !== model.model.trim(),
+    )
+      ? { isLegacy: true }
+      : {}),
     capabilities: mapCodexModelCapabilities(model),
   }))
 }
@@ -414,7 +420,8 @@ export function applyPreferredCodexDefaultModel(
   {
     if (model.slug === preferredSlug)
     {
-      return model.isDefault ? model : { ...model, isDefault: true }
+      const { isLegacy: _isLegacy, ...currentModel } = model
+      return { ...currentModel, isDefault: true }
     }
     if (!model.isDefault)
     {
@@ -425,7 +432,7 @@ export function applyPreferredCodexDefaultModel(
   })
 }
 
-function appendCustomCodexModels(
+export function appendCustomCodexModels(
   models: ReadonlyArray<ServerProviderModel>,
   customModels: ReadonlyArray<string>,
 ): ReadonlyArray<ServerProviderModel>

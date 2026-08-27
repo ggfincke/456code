@@ -61,6 +61,35 @@ function settingsWithProviderInstances(): UnifiedSettings
 
 describe('instance-scoped model selection', () =>
 {
+  it('preserves explicit legacy selection while unknown and custom models remain normal', () =>
+  {
+    const snapshot = {
+      ...provider({ instanceId: 'claude_openrouter', models: [] }),
+      models: [
+        { slug: 'claude-sonnet-4-6', name: 'Sonnet 4.6', isLegacy: true },
+        { slug: 'future', name: 'Future' },
+        { slug: 'custom-wire', name: 'Custom wire', isCustom: true, isLegacy: true },
+      ].map((model) => ({ isCustom: false, capabilities: null, ...model })),
+    }
+    const settings = settingsWithProviderInstances()
+    const [entry] = deriveProviderInstanceEntries([snapshot])
+    const options = getAppModelOptionsForInstance(settings, entry!)
+    expect(options.filter((option) => option.isLegacy).map((option) => option.slug)).toEqual([
+      'claude-sonnet-4-6',
+    ])
+    expect(options.find((option) => option.slug === 'openai/gpt-5.5')).toMatchObject({
+      isCustom: true,
+    })
+    expect(
+      resolveAppModelSelectionForInstance(
+        snapshot.instanceId,
+        settings,
+        [snapshot],
+        'claude-sonnet-4-6',
+      ),
+    ).toBe('claude-sonnet-4-6')
+  })
+
   it('keeps custom models on the provider instance that declared them', () =>
   {
     const providers = [

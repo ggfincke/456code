@@ -21,6 +21,25 @@ const baseProvider = {
 
 describe('ServerProvider', () =>
 {
+  it('preserves optional explicit legacy metadata without classifying older snapshots', () =>
+  {
+    const parsed = decodeServerProvider({
+      ...baseProvider,
+      models: [
+        { slug: 'old-wire', name: 'Old wire', isCustom: false, capabilities: null },
+        {
+          slug: 'superseded',
+          name: 'Superseded',
+          isCustom: false,
+          isLegacy: true,
+          capabilities: null,
+        },
+        { slug: 'future', name: 'Future', isCustom: false, isLegacy: false, capabilities: null },
+      ],
+    })
+    expect(parsed.models.map((model) => model.isLegacy)).toEqual([undefined, true, false])
+  })
+
   it.each([
     {
       label: 'keeps capabilities absent on older cached snapshots',
