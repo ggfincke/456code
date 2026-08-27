@@ -152,6 +152,32 @@ const ManualSchemas: Record<string, Schema.Json> = {
   },
 }
 
+// keep every response namespace compatible with codex 0.150 multi-agent values
+const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
+  CollabAgentTool: {
+    type: 'string',
+    enum: [
+      'spawnAgent',
+      'sendInput',
+      'resumeAgent',
+      'wait',
+      'closeAgent',
+      'sendMessage',
+      'followupTask',
+      'interruptAgent',
+      'listAgents',
+    ],
+  },
+  CollabAgentToolCallStatus: {
+    type: 'string',
+    enum: ['inProgress', 'completed', 'failed', 'interrupted'],
+  },
+  SubAgentActivityKind: {
+    type: 'string',
+    enum: ['started', 'interacted', 'interrupted', 'completed'],
+  },
+}
+
 const getGeneratedPaths = Effect.fn('getGeneratedPaths')(function* ()
 {
   const path = yield* Path.Path
@@ -621,7 +647,7 @@ const generateFiles = Effect.fn('generateFiles')(function* ()
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
-            definitionSchema,
+            Codex0150DefinitionSchemas[definitionName] ?? definitionSchema,
             localDefinitionNames,
             file.namespace,
             exportNameByQualifiedName,
@@ -820,9 +846,21 @@ const generateFiles = Effect.fn('generateFiles')(function* ()
 
   yield* Effect.log(`Generated Codex App Server schemas from ${UPSTREAM_REF}`)
 
+  // generated output owns its stable formatting outside the repository source rules
+  const path = yield* Path.Path
   yield* Effect.service(ChildProcessSpawner.ChildProcessSpawner).pipe(
     Effect.flatMap((spawner) =>
-      spawner.spawn(ChildProcess.make('vp', ['fmt', generatedDir, '--write'])),
+      spawner.spawn(
+        ChildProcess.make('prettier', [
+          '--no-config',
+          '--ignore-path',
+          path.resolve(import.meta.dirname, '../../../.gitignore'),
+          '--print-width',
+          '100',
+          '--write',
+          generatedDir,
+        ]),
+      ),
     ),
     Effect.flatMap((child) => child.exitCode),
     Effect.tap((code) =>
@@ -830,7 +868,7 @@ const generateFiles = Effect.fn('generateFiles')(function* ()
         ? Effect.void
         : Effect.fail(
             new GeneratorError({
-              detail: `vp fmt failed with exit code ${code}`,
+              detail: `prettier failed with exit code ${code}`,
             }),
           ),
     ),
