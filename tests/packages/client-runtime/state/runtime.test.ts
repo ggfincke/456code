@@ -326,6 +326,39 @@ describe('environmentRpcKey', () =>
 
 describe('environment query lifecycle', () =>
 {
+  it.effect('retains fresh query data across a completed unmount', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        let executions = 0
+        const harness = yield* makeEnvironmentQueryHarness(
+          Effect.sync(() => queryStatus(`result-${++executions}`)),
+        )
+        const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+          Effect.sync(() => registry.dispose()),
+        )
+        const unmount = registry.mount(harness.atom)
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, { suspendOnWaiting: true }),
+        ).toEqual(queryStatus('result-1'))
+        const unmounted = Latch.makeUnsafe()
+        registry.onNodeRemoved = (node) =>
+        {
+          if (node.atom === harness.atom) unmounted.openUnsafe()
+        }
+        unmount()
+        yield* unmounted.await
+
+        const unmountAgain = registry.mount(harness.atom)
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, { suspendOnWaiting: true }),
+        ).toEqual(queryStatus('result-1'))
+        expect(executions).toBe(1)
+        unmountAgain()
+      }),
+    ),
+  )
+
   it.effect(
     'retries an interrupted query without exposing a failure during session replacement',
     () =>

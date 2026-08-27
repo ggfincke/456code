@@ -595,17 +595,18 @@ function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
         }
       })
       .pipe(
+        // retain query data, but rebuild the mount wrapper so stale remounts revalidate
+        Atom.setIdleTTL(idleTtlMs),
         Atom.swr({
           staleTime: options.staleTimeMs ?? 30_000,
           revalidateOnMount: true,
         }),
-        Atom.setIdleTTL(idleTtlMs),
       )
     return (
       options.refreshIntervalMs === undefined
         ? queryAtom
         : queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs))
-    ).pipe(Atom.setIdleTTL(idleTtlMs), Atom.withLabel(`${options.label}:${key}`))
+    ).pipe(Atom.withLabel(`${options.label}:${key}`))
   })
   return (target) => family(environmentRpcKey(target))
 }

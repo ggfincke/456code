@@ -17,6 +17,7 @@ import {
 import { describe, expect, it } from '@effect/vitest'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
+import * as Latch from 'effect/Latch'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Stream from 'effect/Stream'
@@ -322,17 +323,22 @@ describe('project atlas environment atoms', () =>
           )
 
         const unsubscribeFirst = subscribe()
-        for (let attempt = 0; attempt < 20 && inputs.length < 1; attempt += 1)
+        expect(
+          yield* AtomRegistry.getResult(registry, impactAtom, { suspendOnWaiting: true }),
+        ).toBe(IMPACT_RESULT)
+        expect(inputs).toHaveLength(1)
+        const firstUnmounted = Latch.makeUnsafe()
+        registry.onNodeRemoved = (node) =>
         {
-          yield* TestClock.withLive(Effect.sleep('1 millis'))
+          if (node.atom === impactAtom) firstUnmounted.openUnsafe()
         }
         unsubscribeFirst()
+        yield* firstUnmounted.await
 
         const unsubscribeSecond = subscribe()
-        for (let attempt = 0; attempt < 20 && inputs.length < 2; attempt += 1)
-        {
-          yield* TestClock.withLive(Effect.sleep('1 millis'))
-        }
+        expect(
+          yield* AtomRegistry.getResult(registry, impactAtom, { suspendOnWaiting: true }),
+        ).toBe(IMPACT_RESULT)
         unsubscribeSecond()
 
         expect(inputs).toEqual([
