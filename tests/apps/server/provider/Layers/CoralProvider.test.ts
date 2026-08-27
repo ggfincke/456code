@@ -51,7 +51,7 @@ describe('buildInitialCoralProviderSnapshot', () =>
       expect(snapshot.status).toBe('disabled')
       expect(snapshot.auth.status).toBe('not-applicable')
       expect(snapshot.badgeLabel).toBe('Early Access')
-      expect(snapshot.models.map((model) => model.slug)).toEqual(['gemma4:31b-mlx'])
+      expect(snapshot.models.map((model) => model.slug)).toEqual(['qwen3.8:27b-mlx'])
     }),
   )
 })
@@ -91,7 +91,7 @@ describe('checkCoralProviderStatus', () =>
       expect(snapshot.status).toBe('ready')
       expect(snapshot.version).toBe('0.1.0')
       expect(snapshot.auth.status).toBe('not-applicable')
-      expect(snapshot.models.map((model) => model.slug)).toEqual(['gemma4:31b-mlx'])
+      expect(snapshot.models.map((model) => model.slug)).toEqual(['qwen3.8:27b-mlx'])
       expect(snapshot.capabilities?.sessionModelSwitch).toBe('in-session')
       expect(snapshot.capabilities?.orchestrateInstructionDelivery).toBe('unsupported')
     }).pipe(Effect.provide(NodeServices.layer)),

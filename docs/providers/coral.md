@@ -51,10 +51,10 @@ attached files, tool results, and conversation context are sent to that host.
 456code does not start Ollama. Pull a model first:
 
 ```bash
-ollama pull gemma4:31b-mlx
+ollama pull qwen3.8:27b-mlx
 ```
 
-Before a Coral session starts, 456code advertises the fallback model `gemma4:31b-mlx`. Once a
+Before a Coral session starts, 456code advertises the fallback model `qwen3.8:27b-mlx`. Once a
 session is open, Coral reports the models actually installed on that Ollama host.
 
 ## No Telemetry
