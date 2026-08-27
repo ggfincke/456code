@@ -8,8 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { SymbolView } from '../../components/AppSymbol'
 import { useThemeColor } from '../../lib/useThemeColor'
 
-// android-only wrapper that overlays a bottom-right new-task FAB on the home
-// screen. Other platforms render children unchanged.
+// android-only wrapper that overlays a bottom-right new-task fab on a thread
+// list. other platforms render children unchanged.
 export function AndroidHomeFabLayout(props: {
   readonly onStartNewTask: () => void
   readonly children: ReactNode

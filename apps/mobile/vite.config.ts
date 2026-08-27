@@ -12,6 +12,7 @@ export default mergeConfig(
     resolve: {
       dedupe: [
         '@clerk/expo',
+        '@effect/atom-react',
         '@expo/ui',
         '@legendapp/list',
         '@pierre/diffs',
@@ -29,6 +30,8 @@ export default mergeConfig(
         'react-dom',
         'react-native',
         'react-native-nitro-markdown',
+        'react-native-reanimated',
+        'react-native-safe-area-context',
       ],
     },
     test: {

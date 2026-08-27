@@ -10,12 +10,10 @@ import {
   type OrchestrationThreadShell,
   type RuntimeMode,
   type ServerConfig,
-  type ServerProviderSkill,
 } from '@t3tools/contracts'
 import {
   detectComposerTrigger,
   replaceTextRange,
-  serializeComposerFileLink,
   type ComposerTrigger,
 } from '@t3tools/shared/composerTrigger'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
@@ -46,11 +44,7 @@ import type { DraftComposerImageAttachment } from '../../../lib/composerImages'
 import { buildModelOptions, groupByProvider } from '../../../lib/modelOptions'
 import { useScaledTextRole } from '../../settings/appearance/useScaledTextRole'
 import type { RemoteClientConnectionState } from '../../../lib/connection'
-import {
-  insertRankedSearchResult,
-  normalizeSearchQuery,
-  scoreQueryMatch,
-} from '@t3tools/shared/searchRanking'
+import { composerCommandReplacement, searchMobileComposerSkills } from './composerCommandItems'
 import {
   applyProviderOptionMenuEvent,
   buildProviderOptionMenuActions,
@@ -67,96 +61,6 @@ import { composerConnectionStatus, type ComposerStatusPillState } from './thread
 import { resolveComposerSubmitHandler } from './threadComposerSubmit'
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from './composerSurface'
 export { ComposerSurface } from './composerSurface'
-
-function searchMobileComposerSkills(
-  skills: ReadonlyArray<ServerProviderSkill>,
-  query: string,
-): ComposerCommandItem[]
-{
-  const enabledSkills = skills.filter((s) => s.enabled)
-  const normalizedQuery = normalizeSearchQuery(query, {
-    trimLeadingPattern: /^\$+/,
-  })
-
-  if (!normalizedQuery)
-  {
-    return enabledSkills.slice(0, 20).map((skill) => ({
-      id: `skill:${skill.name}`,
-      type: 'skill' as const,
-      skill,
-      label: skill.displayName ?? skill.name,
-      description: skill.shortDescription ?? skill.description ?? '',
-    }))
-  }
-
-  const ranked: Array<{
-    item: (typeof enabledSkills)[number]
-    score: number
-    tieBreaker: string
-  }> = []
-  for (const skill of enabledSkills)
-  {
-    const displayLabel = (skill.displayName ?? skill.name).toLowerCase()
-    const scores = [
-      scoreQueryMatch({
-        value: skill.name.toLowerCase(),
-        query: normalizedQuery,
-        exactBase: 0,
-        prefixBase: 2,
-        boundaryBase: 4,
-        includesBase: 6,
-        fuzzyBase: 100,
-        boundaryMarkers: ['-', '_', '/'],
-      }),
-      scoreQueryMatch({
-        value: displayLabel,
-        query: normalizedQuery,
-        exactBase: 1,
-        prefixBase: 3,
-        boundaryBase: 5,
-        includesBase: 7,
-        fuzzyBase: 110,
-      }),
-      scoreQueryMatch({
-        value: skill.shortDescription?.toLowerCase() ?? '',
-        query: normalizedQuery,
-        exactBase: 20,
-        prefixBase: 22,
-        boundaryBase: 24,
-        includesBase: 26,
-      }),
-      scoreQueryMatch({
-        value: skill.description?.toLowerCase() ?? '',
-        query: normalizedQuery,
-        exactBase: 30,
-        prefixBase: 32,
-        boundaryBase: 34,
-        includesBase: 36,
-      }),
-    ].filter((s): s is number => s !== null)
-
-    if (scores.length > 0)
-    {
-      insertRankedSearchResult(
-        ranked,
-        {
-          item: skill,
-          score: Math.min(...scores),
-          tieBreaker: `${displayLabel}\u0000${skill.name}`,
-        },
-        20,
-      )
-    }
-  }
-
-  return ranked.map(({ item: skill }) => ({
-    id: `skill:${skill.name}`,
-    type: 'skill' as const,
-    skill,
-    label: skill.displayName ?? skill.name,
-    description: skill.shortDescription ?? skill.description ?? '',
-  }))
-}
 
 // height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
 // exported so the parent can compute feed overlap / content insets.
@@ -701,23 +605,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         return
       }
 
-      let replacement = ''
-      if (item.type === 'path')
-      {
-        replacement = `${serializeComposerFileLink(item.path)} `
-      }
-      else if (item.type === 'skill')
-      {
-        replacement = `$${item.skill.name} `
-      }
-      else if (item.type === 'slash-command')
-      {
-        replacement = `/${item.command} `
-      }
-      else if (item.type === 'provider-slash-command')
-      {
-        replacement = `/${item.command.name} `
-      }
+      const replacement = composerCommandReplacement(item)
 
       const result = replaceTextRange(
         draftMessage,
