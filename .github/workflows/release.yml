@@ -9,7 +9,8 @@ on:
       - "v*.*.*"
       - "!v*-nightly.*"
   schedule:
-    - cron: "0 */3 * * *"
+    # offset scheduled runs from GitHub's busiest minute
+    - cron: "7 */3 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -24,6 +25,12 @@ on:
         description: "Release version (for example 1.2.3 or v1.2.3)"
         required: false
         type: string
+
+# stable and nightly publishers serialize independently without dropping queued runs
+concurrency:
+  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly') && 'nightly' || 'stable' }}
+  cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
@@ -171,8 +178,10 @@ jobs:
 
   relay_public_config:
     name: Resolve release public configuration
-    needs: preflight
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    needs: [check_changes]
+    if: |
+      !failure() && !cancelled() &&
+      (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 5
     environment:
@@ -220,15 +229,17 @@ jobs:
   # machine. node-pty is N-API, so one binary works across all WSL Node versions.
   build_wsl_node_pty:
     name: Build WSL node-pty (linux-x64)
-    needs: [preflight]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    needs: [check_changes]
+    if: |
+      !failure() && !cancelled() &&
+      (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.preflight.outputs.ref }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Setup Vite+

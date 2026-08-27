@@ -2,19 +2,36 @@
 // verify settle async result behavior
 
 import { describe, expect, it } from '@effect/vitest'
-import { EnvironmentId } from '@t3tools/contracts'
+import { EnvironmentId, WS_METHODS, type RelayClientStatus } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as Latch from 'effect/Latch'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
+import * as SubscriptionRef from 'effect/SubscriptionRef'
 import { AsyncResult, Atom, AtomRegistry } from 'effect/unstable/reactivity'
 
 import {
+  AVAILABLE_CONNECTION_STATE,
+  ConnectionBlockedError,
+  ConnectionTransientError,
+  PrimaryConnectionTarget,
+  type PreparedConnection,
+  type SupervisorConnectionState,
+} from '../../../../packages/client-runtime/src/connection/model.ts'
+import * as EnvironmentRegistry from '../../../../packages/client-runtime/src/connection/registry.ts'
+import * as EnvironmentSupervisor from '../../../../packages/client-runtime/src/connection/supervisor.ts'
+import { EnvironmentRpcUnavailableError } from '../../../../packages/client-runtime/src/rpc/client.ts'
+import type { WsRpcProtocolClient } from '../../../../packages/client-runtime/src/rpc/protocol.ts'
+import type { RpcSession } from '../../../../packages/client-runtime/src/rpc/session.ts'
+import {
   environmentRpcKey,
   createAtomCommandScheduler,
+  createEnvironmentRpcQueryAtomFamily,
   createRuntimeCommand,
   executeAtomCommand,
   executeAtomQuery,
@@ -25,6 +42,127 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from '../../../../packages/client-runtime/src/state/runtime.ts'
+
+const QUERY_ENVIRONMENT = new PrimaryConnectionTarget({
+  environmentId: EnvironmentId.make('query-environment'),
+  label: 'Query environment',
+  httpBaseUrl: 'https://query.example.test',
+  wsBaseUrl: 'wss://query.example.test',
+})
+
+class TestQueryError extends Schema.TaggedErrorClass<TestQueryError>()('TestQueryError', {
+  message: Schema.String,
+})
+{}
+
+const OFFLINE_QUERY_FAILURE = new ConnectionTransientError({
+  reason: 'transport',
+  detail: 'Relay is unavailable.',
+})
+
+const BLOCKED_QUERY_FAILURE = new ConnectionBlockedError({
+  reason: 'permission',
+  detail: 'Access denied.',
+})
+
+function queryStatus(version: string): RelayClientStatus
+{
+  return {
+    status: 'available',
+    executablePath: '/test/tailscale',
+    source: 'path',
+    version,
+  }
+}
+
+function querySession(client: WsRpcProtocolClient): RpcSession
+{
+  return {
+    client,
+    initialConfig: Effect.never,
+    ready: Effect.void,
+    probe: Effect.void,
+    closed: Effect.never,
+  }
+}
+
+function queryConnectionState(
+  overrides: Partial<SupervisorConnectionState> = {},
+): SupervisorConnectionState
+{
+  return {
+    ...AVAILABLE_CONNECTION_STATE,
+    desired: true,
+    network: 'online',
+    phase: 'connected',
+    attempt: 1,
+    generation: 1,
+    ...overrides,
+  }
+}
+
+const makeEnvironmentQueryHarness = Effect.fn('TestEnvironmentQuery.makeHarness')(function* <E>(
+  execute: Effect.Effect<RelayClientStatus, E>,
+)
+{
+  const supervisorState = yield* SubscriptionRef.make(queryConnectionState())
+  const client = {
+    [WS_METHODS.cloudGetRelayClientStatus]: () => execute,
+  } as unknown as WsRpcProtocolClient
+  const supervisorSession = yield* SubscriptionRef.make<Option.Option<RpcSession>>(
+    Option.some(querySession(client)),
+  )
+  const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+    target: QUERY_ENVIRONMENT,
+    state: supervisorState,
+    session: supervisorSession,
+    prepared: yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(Option.none()),
+    connect: Effect.void,
+    disconnect: Effect.void,
+    retryNow: Effect.void,
+  } satisfies EnvironmentSupervisor.EnvironmentSupervisor['Service'])
+  const run: EnvironmentRegistry.EnvironmentRegistry['Service']['run'] = (_environmentId, effect) =>
+    Effect.provideService(effect, EnvironmentSupervisor.EnvironmentSupervisor, supervisor)
+  const followStream: EnvironmentRegistry.EnvironmentRegistry['Service']['followStream'] = (
+    _environmentId,
+    stream,
+  ) => Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor)
+  const environmentRegistry = EnvironmentRegistry.EnvironmentRegistry.of({
+    run,
+    followStream,
+    stateChanges: () => SubscriptionRef.changes(supervisorState),
+  } as unknown as EnvironmentRegistry.EnvironmentRegistry['Service'])
+  const runtime = Atom.runtime(
+    Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+  )
+  const family = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: 'test.environment-query',
+    tag: WS_METHODS.cloudGetRelayClientStatus,
+    staleTimeMs: 60_000,
+  })
+
+  return {
+    atom: family({ environmentId: QUERY_ENVIRONMENT.environmentId, input: {} }),
+    supervisorSession,
+    supervisorState,
+  }
+})
+
+const mountEnvironmentQuery = Effect.fn('TestEnvironmentQuery.mount')(function* <A, E>(
+  atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
+)
+{
+  const registry = AtomRegistry.make()
+  const unmount = registry.mount(atom)
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() =>
+    {
+      unmount()
+      registry.dispose()
+    }),
+  )
+  return registry
+})
 
 describe('settleAsyncResult', () =>
 {
@@ -184,6 +322,341 @@ describe('environmentRpcKey', () =>
       }),
     ).not.toBe(environmentRpcKey(originalTarget))
   })
+})
+
+describe('environment query lifecycle', () =>
+{
+  it.effect('retains fresh query data across a completed unmount', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        let executions = 0
+        const harness = yield* makeEnvironmentQueryHarness(
+          Effect.sync(() => queryStatus(`result-${++executions}`)),
+        )
+        const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+          Effect.sync(() => registry.dispose()),
+        )
+        const unmount = registry.mount(harness.atom)
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, { suspendOnWaiting: true }),
+        ).toEqual(queryStatus('result-1'))
+        const unmounted = Latch.makeUnsafe()
+        registry.onNodeRemoved = (node) =>
+        {
+          if (node.atom === harness.atom) unmounted.openUnsafe()
+        }
+        unmount()
+        yield* unmounted.await
+
+        const unmountAgain = registry.mount(harness.atom)
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, { suspendOnWaiting: true }),
+        ).toEqual(queryStatus('result-1'))
+        expect(executions).toBe(1)
+        unmountAgain()
+      }),
+    ),
+  )
+
+  it.effect(
+    'retries an interrupted query without exposing a failure during session replacement',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const firstStarted = Latch.makeUnsafe()
+          const failFirst = Latch.makeUnsafe()
+          const firstSettled = Latch.makeUnsafe()
+          const unavailable = new EnvironmentRpcUnavailableError({
+            environmentId: QUERY_ENVIRONMENT.environmentId,
+            message: 'Query environment is not connected.',
+          })
+          let executions = 0
+          const execute = Effect.suspend(() =>
+          {
+            executions += 1
+            if (executions > 1)
+            {
+              return Effect.succeed(queryStatus('recovered'))
+            }
+            firstStarted.openUnsafe()
+            return failFirst.await.pipe(
+              Effect.andThen(Effect.fail(unavailable)),
+              Effect.ensuring(
+                Effect.sync(() =>
+                {
+                  firstSettled.openUnsafe()
+                }),
+              ),
+            )
+          })
+          const harness = yield* makeEnvironmentQueryHarness(execute)
+          const registry = AtomRegistry.make()
+          const observed: Array<AsyncResult.AsyncResult<RelayClientStatus, unknown>> = []
+          const unsubscribe = registry.subscribe(
+            harness.atom,
+            (result) =>
+            {
+              observed.push(result)
+            },
+            { immediate: true },
+          )
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() =>
+            {
+              unsubscribe()
+              registry.dispose()
+            }),
+          )
+
+          yield* firstStarted.await
+          yield* SubscriptionRef.set(harness.supervisorSession, Option.none())
+          yield* firstSettled.await
+          failFirst.openUnsafe()
+          yield* Effect.yieldNow
+
+          expect(observed.filter(AsyncResult.isFailure)).toEqual([])
+
+          yield* SubscriptionRef.set(
+            harness.supervisorState,
+            queryConnectionState({ phase: 'connecting', stage: 'preparing' }),
+          )
+          yield* Effect.yieldNow
+          yield* SubscriptionRef.set(
+            harness.supervisorState,
+            queryConnectionState({
+              phase: 'backoff',
+              stage: null,
+              lastFailure: new ConnectionTransientError({
+                reason: 'transport',
+                detail: 'Relay session is reconnecting.',
+              }),
+              retryAt: 1,
+            }),
+          )
+          yield* Effect.yieldNow
+
+          const reconnectClient = {
+            [WS_METHODS.cloudGetRelayClientStatus]: () => execute,
+          } as unknown as WsRpcProtocolClient
+          yield* SubscriptionRef.set(
+            harness.supervisorSession,
+            Option.some(querySession(reconnectClient)),
+          )
+          yield* SubscriptionRef.set(
+            harness.supervisorState,
+            queryConnectionState({ generation: 2 }),
+          )
+          expect(
+            yield* AtomRegistry.getResult(registry, harness.atom, {
+              suspendOnWaiting: true,
+            }),
+          ).toEqual(queryStatus('recovered'))
+          expect(executions).toBe(2)
+        }),
+      ),
+  )
+
+  it.effect.each([
+    {
+      condition: 'after a manual disconnect',
+      state: queryConnectionState({
+        desired: false,
+        phase: 'available',
+        stage: null,
+        attempt: 0,
+      }),
+      expectedFailure: null,
+    },
+    {
+      condition: 'while the environment is offline',
+      state: queryConnectionState({
+        network: 'offline',
+        phase: 'offline',
+        stage: null,
+        lastFailure: OFFLINE_QUERY_FAILURE,
+      }),
+      expectedFailure: OFFLINE_QUERY_FAILURE,
+    },
+    {
+      condition: 'when connection recovery is blocked',
+      state: queryConnectionState({
+        phase: 'blocked',
+        stage: null,
+        lastFailure: BLOCKED_QUERY_FAILURE,
+      }),
+      expectedFailure: BLOCKED_QUERY_FAILURE,
+    },
+  ] as const)('settles as unavailable $condition', ({ state, expectedFailure }) =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const harness = yield* makeEnvironmentQueryHarness(Effect.succeed(queryStatus('connected')))
+        const registry = yield* mountEnvironmentQuery(harness.atom)
+
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, {
+            suspendOnWaiting: true,
+          }),
+        ).toEqual(queryStatus('connected'))
+
+        yield* SubscriptionRef.set(harness.supervisorState, state)
+        yield* Effect.yieldNow
+
+        const result = registry.get(harness.atom)
+        expect(AsyncResult.isFailure(result)).toBe(true)
+        expect(result.waiting).toBe(false)
+        if (AsyncResult.isFailure(result))
+        {
+          const failure = Cause.squash(result.cause)
+          if (expectedFailure === null)
+          {
+            expect(failure).toBeInstanceOf(EnvironmentRpcUnavailableError)
+          }
+          else
+          {
+            expect(failure).toBe(expectedFailure)
+          }
+        }
+      }),
+    ),
+  )
+
+  it.effect('keeps a genuine query failure settled while reconnecting', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const expectedFailure = new TestQueryError({ message: 'Query failed.' })
+        const firstStarted = Latch.makeUnsafe()
+        const failFirst = Latch.makeUnsafe()
+        const refreshStarted = Latch.makeUnsafe()
+        const finishRefresh = Latch.makeUnsafe()
+        let executions = 0
+        const execute = Effect.suspend(() =>
+        {
+          executions += 1
+          if (executions === 1)
+          {
+            firstStarted.openUnsafe()
+            return failFirst.await.pipe(Effect.andThen(Effect.fail(expectedFailure)))
+          }
+          refreshStarted.openUnsafe()
+          return finishRefresh.await.pipe(Effect.as(queryStatus('recovered')))
+        })
+        const harness = yield* makeEnvironmentQueryHarness(execute)
+        const registry = yield* mountEnvironmentQuery(harness.atom)
+
+        yield* firstStarted.await
+        failFirst.openUnsafe()
+        const initial = yield* AtomRegistry.getResult(registry, harness.atom, {
+          suspendOnWaiting: true,
+        }).pipe(Effect.exit)
+        expect(Exit.isFailure(initial)).toBe(true)
+        if (Exit.isFailure(initial))
+        {
+          expect(Cause.squash(initial.cause)).toBe(expectedFailure)
+        }
+
+        yield* SubscriptionRef.set(
+          harness.supervisorState,
+          queryConnectionState({ phase: 'connecting', stage: 'opening' }),
+        )
+        yield* Effect.yieldNow
+
+        const refreshing = registry.get(harness.atom)
+        expect(AsyncResult.isFailure(refreshing)).toBe(true)
+        expect(refreshing.waiting).toBe(true)
+        if (AsyncResult.isFailure(refreshing))
+        {
+          expect(Cause.squash(refreshing.cause)).toBe(expectedFailure)
+        }
+
+        yield* SubscriptionRef.set(harness.supervisorState, queryConnectionState({ generation: 2 }))
+        yield* refreshStarted.await
+        finishRefresh.openUnsafe()
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, {
+            suspendOnWaiting: true,
+          }),
+        ).toEqual(queryStatus('recovered'))
+      }),
+    ),
+  )
+
+  it.effect('retains the last successful value while reconnecting', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const refreshStarted = Latch.makeUnsafe()
+        const finishRefresh = Latch.makeUnsafe()
+        let executions = 0
+        const execute = Effect.suspend(() =>
+        {
+          executions += 1
+          if (executions === 1)
+          {
+            return Effect.succeed(queryStatus('cached'))
+          }
+          refreshStarted.openUnsafe()
+          return finishRefresh.await.pipe(Effect.as(queryStatus('updated')))
+        })
+        const harness = yield* makeEnvironmentQueryHarness(execute)
+        const registry = yield* mountEnvironmentQuery(harness.atom)
+
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, {
+            suspendOnWaiting: true,
+          }),
+        ).toEqual(queryStatus('cached'))
+
+        yield* SubscriptionRef.set(
+          harness.supervisorState,
+          queryConnectionState({ phase: 'connecting', stage: 'opening' }),
+        )
+        yield* Effect.yieldNow
+        expect(registry.get(harness.atom)).toMatchObject({
+          _tag: 'Success',
+          value: queryStatus('cached'),
+          waiting: true,
+        })
+
+        yield* SubscriptionRef.set(
+          harness.supervisorState,
+          queryConnectionState({
+            phase: 'backoff',
+            stage: null,
+            lastFailure: new ConnectionTransientError({
+              reason: 'transport',
+              detail: 'Retrying.',
+            }),
+            retryAt: 1,
+          }),
+        )
+        yield* Effect.yieldNow
+        expect(registry.get(harness.atom)).toMatchObject({
+          _tag: 'Success',
+          value: queryStatus('cached'),
+          waiting: true,
+        })
+
+        yield* SubscriptionRef.set(harness.supervisorState, queryConnectionState({ generation: 2 }))
+        yield* refreshStarted.await
+        expect(registry.get(harness.atom)).toMatchObject({
+          _tag: 'Success',
+          value: queryStatus('cached'),
+          waiting: true,
+        })
+
+        finishRefresh.openUnsafe()
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, {
+            suspendOnWaiting: true,
+          }),
+        ).toEqual(queryStatus('updated'))
+      }),
+    ),
+  )
 })
 
 describe('Atom.fn mutation semantics', () =>

@@ -2221,3 +2221,63 @@ describe('deriveActiveWorkStartedAt', () =>
     ).toBe('2026-02-27T21:11:00.000Z')
   })
 })
+
+describe('work log entry identity', () =>
+{
+  it('reuses unchanged standalone entries when activity is appended', () =>
+  {
+    const activities = ['status', 'diff', 'log'].map((command, index) =>
+      makeActivity({
+        id: `stable-tool-${index}`,
+        createdAt: new Date(1_700_000_000_000 + index).toISOString(),
+        kind: 'tool.completed',
+        sequence: index,
+        payload: {
+          itemType: 'command_execution',
+          toolCallId: `stable-tool-${index}`,
+          status: 'completed',
+          data: { item: { command: ['git', command] } },
+        },
+      }),
+    )
+
+    const initial = deriveWorkLogEntries(activities.slice(0, 2))
+    const appended = deriveWorkLogEntries(activities)
+
+    expect(appended[0]).toBe(initial[0])
+    expect(appended[1]).toBe(initial[1])
+  })
+
+  it('rematerializes a collapsed lifecycle row when its terminal state changes', () =>
+  {
+    const progress = makeActivity({
+      id: 'streaming-tool-progress',
+      kind: 'tool.updated',
+      sequence: 1,
+      payload: {
+        itemType: 'command_execution',
+        toolCallId: 'streaming-tool',
+        status: 'inProgress',
+        data: { item: { command: ['git', 'status'] } },
+      },
+    })
+    const completed = makeActivity({
+      id: 'streaming-tool-completed',
+      kind: 'tool.completed',
+      sequence: 2,
+      payload: {
+        itemType: 'command_execution',
+        toolCallId: 'streaming-tool',
+        status: 'completed',
+        data: { item: { command: ['git', 'status'], status: 'completed' } },
+      },
+    })
+
+    const [runningEntry] = deriveWorkLogEntries([progress])
+    const [completedEntry] = deriveWorkLogEntries([progress, completed])
+
+    expect(completedEntry).not.toBe(runningEntry)
+    expect(runningEntry?.toolLifecycleStatus).toBe('inProgress')
+    expect(completedEntry?.toolLifecycleStatus).toBe('completed')
+  })
+})

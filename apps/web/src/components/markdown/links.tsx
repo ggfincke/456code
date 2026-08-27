@@ -24,6 +24,8 @@ import {
   looksLikeInlineCodeFilePath,
   normalizeMarkdownLinkDestination,
   rewriteMarkdownFileUriHref,
+  shouldOpenMarkdownFileLinkInBrowserByDefault,
+  shouldOpenMarkdownFileLinkInEditor,
 } from '../../lib/markdown/links'
 import {
   resolveWorkspaceFilePrimaryAction,
@@ -54,7 +56,8 @@ export interface MarkdownFileLinkProps
   className?: string | undefined
 }
 
-const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g
+const MARKDOWN_LINK_HREF_PATTERN =
+  /\[[^\]]*]\(\s*(?:<([^>\n]+)>|([^\s)]+))(?:\s+["'][^"']*["'])?\s*\)/g
 const MARKDOWN_FILE_LINK_CLASS_NAME =
   'chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70'
 
@@ -134,7 +137,7 @@ export function extractMarkdownLinkHrefs(text: string): string[]
   const hrefs: string[] = []
   for (const match of text.matchAll(MARKDOWN_LINK_HREF_PATTERN))
   {
-    const href = match[1]?.trim()
+    const href = (match[1] ?? match[2])?.trim()
     if (!href) continue
     hrefs.push(href)
   }
@@ -509,7 +512,8 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
           resolveTarget,
           hasThreadContext: Boolean(threadRef),
           canOpenInBrowser: (resolvedFilePath) =>
-            Boolean(onOpenInBrowser) && isBrowserPreviewFile(resolvedFilePath),
+            Boolean(onOpenInBrowser) &&
+            shouldOpenMarkdownFileLinkInBrowserByDefault(resolvedFilePath),
         })
         if (!action) return
         if (action.kind === 'editor')
@@ -680,6 +684,11 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             {
               event.preventDefault()
               event.stopPropagation()
+              if (shouldOpenMarkdownFileLinkInEditor(event))
+              {
+                handleOpenInEditor()
+                return
+              }
               handleOpenPrimary()
             }}
             onContextMenu={handleContextMenu}

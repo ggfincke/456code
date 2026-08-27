@@ -248,17 +248,28 @@ export function toWireInteractionMode(mode: CollaborationMode): {
     orchestrate: mode.orchestrate,
   }
 }
-export const ProviderRequestKind = Schema.Literals(['command', 'file-read', 'file-change'])
+export const ProviderRequestKind = Schema.Literals([
+  'command',
+  'file-read',
+  'file-change',
+  'mcp-elicitation',
+])
 export type ProviderRequestKind = typeof ProviderRequestKind.Type
 export const AssistantDeliveryMode = Schema.Literals(['buffered', 'streaming'])
 export type AssistantDeliveryMode = typeof AssistantDeliveryMode.Type
 export const ProviderApprovalDecision = Schema.Literals([
   'accept',
   'acceptForSession',
+  'acceptAlways',
   'decline',
   'cancel',
 ])
 export type ProviderApprovalDecision = typeof ProviderApprovalDecision.Type
+export const ProviderApprovalOption = Schema.Struct({
+  decision: ProviderApprovalDecision,
+  label: TrimmedNonEmptyString,
+})
+export type ProviderApprovalOption = typeof ProviderApprovalOption.Type
 export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unknown)
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type
 
@@ -703,6 +714,10 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // last re-entry into the active list; old payloads decode to null
+  unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // snooze is an overlay on the active lifecycle, not a fourth destination:
   // a snoozed thread stays "active" in the model and is only suppressed from
   // the inbox until snoozedUntil passes (or the thread raises its hand).
@@ -780,6 +795,10 @@ export const OrchestrationThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // see OrchestrationThread.unsettledAt
+  unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   session: Schema.NullOr(OrchestrationSession),

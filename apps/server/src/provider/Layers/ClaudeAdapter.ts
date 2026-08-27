@@ -276,6 +276,7 @@ interface ClaudeNativeTaskState
   subagentType?: string
   taskType?: string
   workflowName?: string
+  authoritativeModel?: string
   completion?: ClaudeNativeTaskCompletion
 }
 
@@ -306,6 +307,7 @@ interface ClaudeSessionContext
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>
   readonly userInputEventGate: Semaphore.Semaphore
+  readonly stopGate: Semaphore.Semaphore
   readonly sessionStopped: Deferred.Deferred<void>
   readonly turns: Array<{
     id: TurnId
@@ -315,6 +317,7 @@ interface ClaudeSessionContext
   readonly claudeTasks: Map<string, ClaudeTaskState>
   readonly nativeTaskTools: Map<string, ClaudeNativeTaskTool>
   readonly nativeTasks: Map<string, ClaudeNativeTaskState>
+  readonly pendingNativeTaskModels: Map<string, string>
   turnState: ClaudeTurnState | undefined
   lastKnownContextWindow: number | undefined
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined
@@ -327,6 +330,7 @@ interface ClaudeSessionContext
   terminalRefusal: string | undefined
   lastAssistantUuid: string | undefined
   lastThreadStartedId: string | undefined
+  stopping: boolean
   stopped: boolean
 }
 
@@ -498,6 +502,43 @@ function asCanonicalTurnId(value: TurnId): TurnId
 function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId
 {
   return RuntimeRequestId.make(value)
+}
+
+const PENDING_NATIVE_TASK_MODEL_CAP = 64
+
+// snapshots can beat task_started; retain only the newest bounded FIFO window
+function rememberPendingNativeTaskModel(
+  pending: Map<string, string>,
+  toolUseId: string,
+  model: string,
+): void
+{
+  pending.set(toolUseId, model)
+  if (pending.size <= PENDING_NATIVE_TASK_MODEL_CAP)
+  {
+    return
+  }
+
+  const oldest = pending.keys().next()
+  if (!oldest.done)
+  {
+    pending.delete(oldest.value)
+  }
+}
+
+function nativeTaskModel(
+  context: ClaudeSessionContext,
+  state: ClaudeNativeTaskState,
+): string | undefined
+{
+  const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
+  return (
+    state.authoritativeModel ??
+    taskTool?.agentCompletion?.resolvedModel ??
+    taskTool?.requestedModel ??
+    context.session.model ??
+    undefined
+  )
 }
 
 // merge sdk task frames into the per-session native task state, preferring
@@ -1499,14 +1540,14 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       {
         return undefined
       }
-    })
-    if (!usage)
+    }).pipe(Effect.timeoutOption('1 second'))
+    if (Option.isNone(usage) || !usage.value)
     {
       return undefined
     }
 
-    context.lastKnownContextWindow = usage.maxTokens
-    return normalizeClaudeContextUsageApiSnapshot(usage, totalProcessedTokens)
+    context.lastKnownContextWindow = usage.value.maxTokens
+    return normalizeClaudeContextUsageApiSnapshot(usage.value, totalProcessedTokens)
   })
 
   const emitProposedPlanCompleted = Effect.fn('emitProposedPlanCompleted')(function* (
@@ -2133,6 +2174,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
     const agentCompletion = taskTool?.agentCompletion
+    const model = nativeTaskModel(context, state)
     const stamp = yield* makeEventStamp()
     yield* offerRuntimeEvent(context, {
       type: 'task.completed',
@@ -2156,11 +2198,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         ...((state.subagentType ?? taskTool?.subagentType)
           ? { subagentType: state.subagentType ?? taskTool?.subagentType }
           : {}),
-        ...((agentCompletion?.resolvedModel ?? taskTool?.requestedModel)
-          ? {
-              model: agentCompletion?.resolvedModel ?? taskTool?.requestedModel,
-            }
-          : {}),
+        ...(model ? { model } : {}),
         ...(agentCompletion
           ? {
               totalToolUseCount: agentCompletion.totalToolUseCount,
@@ -2357,6 +2395,27 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
     {
+      const snapshotModel = readString(message.message.model)
+      if (snapshotModel)
+      {
+        const nativeTask = Array.from(context.nativeTasks.values()).find(
+          (state) => state.toolUseId === message.parent_tool_use_id,
+        )
+        if (nativeTask)
+        {
+          nativeTask.authoritativeModel = snapshotModel
+        }
+        else
+        {
+          rememberPendingNativeTaskModel(
+            context.pendingNativeTaskModels,
+            message.parent_tool_use_id,
+            snapshotModel,
+          )
+        }
+      }
+      context.lastAssistantUuid = message.uuid
+      yield* updateResumeCursor(context)
       return
     }
 
@@ -2641,6 +2700,13 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         return
       case 'task_started':
       {
+        const bufferedModel = message.tool_use_id
+          ? context.pendingNativeTaskModels.get(message.tool_use_id)
+          : undefined
+        if (message.tool_use_id)
+        {
+          context.pendingNativeTaskModels.delete(message.tool_use_id)
+        }
         const state = updateClaudeNativeTaskState(context, {
           taskId: message.task_id,
           ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
@@ -2648,7 +2714,11 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           ...(message.task_type ? { taskType: message.task_type } : {}),
           ...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
         })
-        const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
+        if (bufferedModel)
+        {
+          state.authoritativeModel = bufferedModel
+        }
+        const model = nativeTaskModel(context, state)
         yield* offerRuntimeEvent(context, {
           ...base,
           type: 'task.started',
@@ -2659,7 +2729,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             ...(state.workflowName ? { workflowName: state.workflowName } : {}),
             ...(state.toolUseId ? { toolUseId: state.toolUseId } : {}),
             ...(state.subagentType ? { subagentType: state.subagentType } : {}),
-            ...(taskTool?.requestedModel ? { model: taskTool.requestedModel } : {}),
+            ...(model ? { model } : {}),
           },
         })
         return
@@ -2671,7 +2741,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
           ...(message.subagent_type ? { subagentType: message.subagent_type } : {}),
         })
-        const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
+        const model = nativeTaskModel(context, state)
         const tokenUsage = normalizeClaudeTaskUsage(message.usage)
         yield* emitThreadTokenUsage(
           context,
@@ -2693,7 +2763,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             ...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
             ...(state.toolUseId ? { toolUseId: state.toolUseId } : {}),
             ...(state.subagentType ? { subagentType: state.subagentType } : {}),
-            ...(taskTool?.requestedModel ? { model: taskTool.requestedModel } : {}),
+            ...(model ? { model } : {}),
           },
         })
         return
@@ -3063,7 +3133,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           cause,
         }),
     ).pipe(
-      Stream.takeWhile(() => !context.stopped),
+      Stream.takeWhile(() => !context.stopped && !context.stopping),
       Stream.runForEach((message) =>
         handleSdkMessage(context, message).pipe(
           Effect.tap(() =>
@@ -3098,7 +3168,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     exit: Exit.Exit<void, ProviderAdapterProcessError>,
   )
   {
-    if (context.stopped)
+    if (context.stopped || context.stopping)
     {
       return
     }
@@ -3153,7 +3223,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       Effect.exit(runSdkStream(context)).pipe(
         Effect.flatMap((exit) =>
         {
-          if (context.stopped || context.streamFiber !== streamFiber)
+          if (context.stopped || context.stopping || context.streamFiber !== streamFiber)
           {
             return Effect.void
           }
@@ -3256,99 +3326,121 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     options?: { readonly emitExitEvent?: boolean },
   )
   {
-    const startedStopping = yield* context.userInputEventGate.withPermit(
-      Effect.uninterruptible(
-        Effect.gen(function* ()
+    if (context.stopped)
+    {
+      return
+    }
+    yield* context.stopGate.withPermit(
+      Effect.gen(function* ()
+      {
+        if (context.stopped)
         {
-          if (context.stopped)
+          return
+        }
+
+        context.stopping = true
+        const streamFiber = context.streamFiber
+        yield* closeClaudeQueryResources(
+          context.session.threadId,
+          context.promptQueue,
+          streamFiber,
+          context.query,
+          'Failed to close Claude runtime query.',
+        ).pipe(
+          Effect.tap(() =>
+            Effect.sync(() =>
+            {
+              context.streamFiber = undefined
+              context.stopped = true
+              context.stopping = false
+            }),
+          ),
+          Effect.tap(() => Deferred.succeed(context.sessionStopped, undefined)),
+          Effect.tapError(() =>
+            Effect.sync(() =>
+            {
+              context.stopping = false
+            }),
+          ),
+        )
+
+        for (const state of context.nativeTasks.values())
+        {
+          if (state.completion)
           {
-            return false
+            continue
           }
-          context.stopped = true
-          yield* Deferred.succeed(context.sessionStopped, undefined)
-          return true
-        }),
-      ),
+          state.completion = { status: 'stopped' }
+          yield* emitClaudeNativeTaskCompleted(context, state, {
+            rawMethod: 'claude/session/stop',
+            rawPayload: { reason: 'session-stopped' },
+          })
+        }
+
+        for (const [requestId, pending] of context.pendingApprovals)
+        {
+          yield* Deferred.succeed(pending.decision, 'cancel')
+          const stamp = yield* makeEventStamp()
+          yield* offerRuntimeEvent(context, {
+            type: 'request.resolved',
+            eventId: stamp.eventId,
+            provider: PROVIDER,
+            createdAt: stamp.createdAt,
+            threadId: context.session.threadId,
+            ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+            requestId: asRuntimeRequestId(requestId),
+            payload: {
+              requestType: pending.requestType,
+              decision: 'cancel',
+            },
+            providerRefs: nativeProviderRefs(context),
+          })
+        }
+        context.pendingApprovals.clear()
+
+        // requests cannot be answered after teardown, so release every SDK waiter
+        for (const pending of context.pendingUserInputs.values())
+        {
+          yield* pending.cancel
+        }
+
+        if (context.turnState)
+        {
+          yield* completeTurn(context, 'interrupted', 'Session stopped.')
+        }
+
+        const updatedAt = yield* nowIso
+        context.session = {
+          ...context.session,
+          status: 'closed',
+          activeTurnId: undefined,
+          updatedAt,
+        }
+
+        const isCurrentSession = sessions.get(context.session.threadId) === context
+        if (options?.emitExitEvent !== false && isCurrentSession)
+        {
+          const stamp = yield* makeEventStamp()
+          yield* offerRuntimeEvent(context, {
+            type: 'session.exited',
+            eventId: stamp.eventId,
+            provider: PROVIDER,
+            createdAt: stamp.createdAt,
+            threadId: context.session.threadId,
+            payload: {
+              reason: 'Session stopped',
+              exitKind: 'graceful',
+            },
+            providerRefs: {},
+          })
+        }
+
+        if (isCurrentSession)
+        {
+          sessions.delete(context.session.threadId)
+        }
+      }),
     )
-    if (!startedStopping) return
-
-    for (const [requestId, pending] of context.pendingApprovals)
-    {
-      yield* Deferred.succeed(pending.decision, 'cancel')
-      const stamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent(context, {
-        type: 'request.resolved',
-        eventId: stamp.eventId,
-        provider: PROVIDER,
-        createdAt: stamp.createdAt,
-        threadId: context.session.threadId,
-        ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-        requestId: asRuntimeRequestId(requestId),
-        payload: {
-          requestType: pending.requestType,
-          decision: 'cancel',
-        },
-        providerRefs: nativeProviderRefs(context),
-      })
-    }
-    context.pendingApprovals.clear()
-
-    // requests cannot be answered after teardown, so release every SDK waiter.
-    for (const pending of context.pendingUserInputs.values())
-    {
-      yield* pending.cancel
-    }
-
-    if (context.turnState)
-    {
-      yield* completeTurn(context, 'interrupted', 'Session stopped.')
-    }
-
-    const streamFiber = context.streamFiber
-    context.streamFiber = undefined
-    yield* closeClaudeQueryResources(
-      context.session.threadId,
-      context.promptQueue,
-      streamFiber,
-      context.query,
-      'Failed to close Claude runtime query.',
-    ).pipe(
-      Effect.catch((error) =>
-        emitRuntimeError(context, 'Failed to close Claude runtime query.', {
-          errorTag: error._tag,
-          provider: error.provider,
-          threadId: error.threadId,
-          detail: error.detail,
-        }),
-      ),
-    )
-
-    const updatedAt = yield* nowIso
-    context.session = {
-      ...context.session,
-      status: 'closed',
-      activeTurnId: undefined,
-      updatedAt,
-    }
-
-    if (options?.emitExitEvent !== false)
-    {
-      const stamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent(context, {
-        type: 'session.exited',
-        eventId: stamp.eventId,
-        provider: PROVIDER,
-        createdAt: stamp.createdAt,
-        threadId: context.session.threadId,
-        payload: {
-          reason: 'Session stopped',
-          exitKind: 'graceful',
-        },
-        providerRefs: {},
-      })
-    }
-
-    sessions.delete(context.session.threadId)
   })
 
   const requireSession = (
@@ -3365,7 +3457,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         }),
       )
     }
-    if (context.stopped || context.session.status === 'closed')
+    if (context.stopping || context.stopped || context.session.status === 'closed')
     {
       return Effect.fail(
         new ProviderAdapterSessionClosedError({
@@ -3410,16 +3502,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         })
         yield* stopSessionInternal(existingContext, {
           emitExitEvent: false,
-        }).pipe(
-          // replacement cleanup is best-effort: never block the new session on
-          // either typed failures or unexpected defects from tearing down the old one.
-          Effect.catchCause((cause) =>
-            Effect.logWarning('claude.session.replace.stop-failed', {
-              threadId: input.threadId,
-              cause,
-            }),
-          ),
-        )
+        })
       }
 
       const startedAt = yield* nowIso
@@ -3437,11 +3520,13 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>()
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>()
       const userInputEventGate = yield* Semaphore.make(1)
+      const stopGate = yield* Semaphore.make(1)
       const sessionStopped = yield* Deferred.make<void>()
       const inFlightTools = new Map<number, ToolInFlight>()
       const claudeTasks = new Map<string, ClaudeTaskState>()
       const nativeTaskTools = new Map<string, ClaudeNativeTaskTool>()
       const nativeTasks = new Map<string, ClaudeNativeTaskState>()
+      const pendingNativeTaskModels = new Map<string, string>()
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined)
 
@@ -3810,12 +3895,16 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           },
         })
 
-        if (decision === 'accept' || decision === 'acceptForSession')
+        if (
+          decision === 'accept' ||
+          decision === 'acceptForSession' ||
+          decision === 'acceptAlways'
+        )
         {
           return {
             behavior: 'allow',
             updatedInput: toolInput,
-            ...(decision === 'acceptForSession'
+            ...(decision === 'acceptForSession' || decision === 'acceptAlways'
               ? {
                   updatedPermissions: toSessionPermissionUpdates(
                     toolName,
@@ -4004,12 +4093,14 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         pendingApprovals,
         pendingUserInputs,
         userInputEventGate,
+        stopGate,
         sessionStopped,
         turns: [],
         inFlightTools,
         claudeTasks,
         nativeTaskTools,
         nativeTasks,
+        pendingNativeTaskModels,
         turnState: undefined,
         lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,
@@ -4018,6 +4109,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         terminalRefusal: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
+        stopping: false,
         stopped: false,
       }
       yield* Ref.set(contextRef, context)
@@ -4197,9 +4289,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     function* (threadId, _turnId)
     {
       const context = yield* requireSession(threadId)
-      yield* Effect.tryPromise({
-        try: () => context.query.interrupt(),
-        catch: (cause) => toRequestError(threadId, 'turn/interrupt', cause),
+      yield* stopSessionInternal(context, {
+        emitExitEvent: true,
       })
     },
   )
@@ -4288,31 +4379,34 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     Effect.sync(() =>
     {
       const context = sessions.get(threadId)
-      return context !== undefined && !context.stopped
+      return context !== undefined && !context.stopping && !context.stopped
     })
 
   const getSessionRuntimeBinding: ClaudeAdapterShape['getSessionRuntimeBinding'] = (threadId) =>
     Effect.sync(() => sessions.get(threadId)?.runtimeSessionBinding)
 
-  const stopAll: ClaudeAdapterShape['stopAll'] = () =>
-    Effect.forEach(
-      sessions,
-      ([, context]) =>
-        stopSessionInternal(context, {
-          emitExitEvent: true,
-        }),
-      { discard: true },
+  const stopSessions = Effect.fn('stopSessions')(function* (
+    contexts: ReadonlyArray<ClaudeSessionContext>,
+    emitExitEvent: boolean,
+  )
+  {
+    const results = yield* Effect.forEach(contexts, (context) =>
+      stopSessionInternal(context, { emitExitEvent }).pipe(Effect.result),
     )
+    for (const result of results)
+    {
+      if (result._tag === 'Failure')
+      {
+        return yield* result.failure
+      }
+    }
+  })
+
+  const stopAll: ClaudeAdapterShape['stopAll'] = () =>
+    stopSessions(Array.from(sessions.values()), true)
 
   yield* Effect.addFinalizer(() =>
-    Effect.forEach(
-      sessions,
-      ([, context]) =>
-        stopSessionInternal(context, {
-          emitExitEvent: false,
-        }),
-      { discard: true },
-    ).pipe(
+    stopSessions(Array.from(sessions.values()), false).pipe(
       Effect.catch((cause) =>
         Effect.logError('Failed to emit Claude session shutdown event.', { cause }),
       ),

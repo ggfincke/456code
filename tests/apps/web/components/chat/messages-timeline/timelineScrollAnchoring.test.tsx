@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import {
   getAnchoredTurnMetrics,
   getRowBottom,
+  shouldKeepTimelineEndVisibleAfterOverlayGrowth,
 } from '../../../../../../apps/web/src/components/chat/messages-timeline/timelineScrollAnchoring'
 
 function buildState({
@@ -30,6 +31,31 @@ function buildState({
 
 describe('timeline scroll anchoring', () =>
 {
+  it('keeps the live end visible only when the overlay grows while following', () =>
+  {
+    expect(
+      shouldKeepTimelineEndVisibleAfterOverlayGrowth({
+        previousOverlayHeight: 100,
+        overlayHeight: 180,
+        followingEnd: true,
+      }),
+    ).toBe(true)
+    expect(
+      shouldKeepTimelineEndVisibleAfterOverlayGrowth({
+        previousOverlayHeight: 100,
+        overlayHeight: 180,
+        followingEnd: false,
+      }),
+    ).toBe(false)
+    expect(
+      shouldKeepTimelineEndVisibleAfterOverlayGrowth({
+        previousOverlayHeight: 180,
+        overlayHeight: 100,
+        followingEnd: true,
+      }),
+    ).toBe(false)
+  })
+
   it('measures row bottoms from LegendList row position and size', () =>
   {
     const state = buildState({

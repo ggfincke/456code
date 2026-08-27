@@ -1,0 +1,21 @@
+// apps/server/src/persistence/Migrations/071_ProjectionThreadsUnsettledAt.ts
+// adds the active-list re-entry timestamp to projected threads
+
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
+  const columns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_threads)
+  `
+
+  if (!columns.some((column) => column.name === 'unsettled_at'))
+  {
+    yield* sql`
+      ALTER TABLE projection_threads
+      ADD COLUMN unsettled_at TEXT
+    `
+  }
+})

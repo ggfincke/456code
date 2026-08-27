@@ -46,6 +46,7 @@ export function threadDetailToShell(
     origin: thread.origin,
     settledOverride: thread.settledOverride,
     settledAt: thread.settledAt,
+    unsettledAt: thread.unsettledAt ?? null,
     snoozedUntil: thread.snoozedUntil ?? null,
     snoozedAt: thread.snoozedAt ?? null,
     session: thread.session,

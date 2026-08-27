@@ -7,6 +7,7 @@ import { hasBlockingApprovalOutcome } from '@t3tools/client-runtime/state/thread
 import { isThreadAwarenessStale } from '@t3tools/shared/agentAwareness'
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from '@t3tools/contracts/settings'
 import {
+  activeThreadAnchorTimestampMs,
   getThreadSortTimestamp,
   sortThreads,
   toSortableTimestamp,
@@ -598,17 +599,19 @@ export function firstValidTimestamp(
   return null
 }
 
-// v2 sort: static creation order, newest thread on top. Activity NEVER
-// reorders the list — a row holds its position from open until settled, so
-// the screen only moves at lifecycle transitions. Status (including pending
-// approval) is carried by each card's edge strip, not by position.
+// v2 sort: static active-list order, re-anchored only when a thread re-enters
+// after settling; routine activity never moves an already-active row
 export function sortThreadsForSidebarV2<
-  T extends { readonly id: string; readonly createdAt: string },
+  T extends {
+    readonly id: string
+    readonly createdAt: string
+    readonly unsettledAt?: string | null | undefined
+  },
 >(threads: readonly T[]): T[]
 {
   return [...threads].toSorted(
     (left, right) =>
-      parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt) ||
+      activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
       left.id.localeCompare(right.id),
   )
 }

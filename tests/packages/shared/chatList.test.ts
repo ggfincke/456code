@@ -24,10 +24,10 @@ const getAnchorId = (row: Row) => (row.anchorable ? row.id : null)
 
 describe('resolveChatListAnchoredEndSpace', () =>
 {
-  it('anchors the matching row using its measured height', () =>
+  it('anchors the first eligible row', () =>
   {
-    expect(resolveChatListAnchoredEndSpace(rows, 'latest', getAnchorId)).toEqual({
-      anchorIndex: 2,
+    expect(resolveChatListAnchoredEndSpace(rows, 'first', getAnchorId)).toEqual({
+      anchorIndex: 0,
       anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
     })
   })
@@ -35,12 +35,21 @@ describe('resolveChatListAnchoredEndSpace', () =>
   it('allows a surface to keep the anchor below its own header', () =>
   {
     expect(
-      resolveChatListAnchoredEndSpace(rows, 'latest', getAnchorId, {
+      resolveChatListAnchoredEndSpace(rows, 'first', getAnchorId, {
         anchorOffset: 132,
       }),
     ).toEqual({
-      anchorIndex: 2,
+      anchorIndex: 0,
       anchorOffset: 132,
+    })
+  })
+
+  it('does not anchor a later eligible row until earlier rows leave the list', () =>
+  {
+    expect(resolveChatListAnchoredEndSpace(rows, 'latest', getAnchorId)).toBeUndefined()
+    expect(resolveChatListAnchoredEndSpace(rows.slice(1), 'latest', getAnchorId)).toEqual({
+      anchorIndex: 1,
+      anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
     })
   })
 

@@ -126,7 +126,7 @@ function selectPermissionOptionId(
   {
     return request.options.find((option) => option.kind === 'reject_once')?.optionId.trim()
   }
-  if (decision === 'acceptForSession')
+  if (decision === 'acceptForSession' || decision === 'acceptAlways')
   {
     const always = request.options.find((option) => option.kind === 'allow_always')
     if (always?.optionId.trim()) return always.optionId.trim()

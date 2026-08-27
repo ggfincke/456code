@@ -521,6 +521,12 @@ it.layer(NodeServices.layer)('CoralAdapterLive', (it) =>
           expectedOptionId: 'coral-agent-allow-once',
         },
         {
+          label: 'allow-always',
+          decision: 'acceptAlways' as const,
+          optionEnvironment: { T3_ACP_ALLOW_ALWAYS_OPTION_ID: 'coral-agent-allow-always' },
+          expectedOptionId: 'coral-agent-allow-always',
+        },
+        {
           label: 'reject',
           decision: 'decline' as const,
           optionEnvironment: { T3_ACP_REJECT_ONCE_OPTION_ID: 'coral-agent-reject-once' },

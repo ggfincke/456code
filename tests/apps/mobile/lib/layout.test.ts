@@ -10,10 +10,43 @@ import {
   deriveFileInspectorPaneLayout,
   deriveLayout,
   deriveStableFormSheetDetent,
+  deriveThreadFeedInitialContentInset,
   deriveWorkspacePaneLayout,
   SPLIT_LAYOUT_MIN_HEIGHT,
   SPLIT_LAYOUT_MIN_WIDTH,
 } from '../../../../apps/mobile/src/lib/layout'
+
+describe('deriveThreadFeedInitialContentInset', () =>
+{
+  it('seeds the initial Android bottom inset before the composer reports its height', () =>
+  {
+    expect(
+      deriveThreadFeedInitialContentInset({
+        platform: 'android',
+        usesNativeAutomaticInsets: false,
+        bottomContentInset: 174,
+      }),
+    ).toEqual({ bottom: 174 })
+  })
+
+  it('leaves iOS and native automatic inset modes to the platform', () =>
+  {
+    expect(
+      deriveThreadFeedInitialContentInset({
+        platform: 'ios',
+        usesNativeAutomaticInsets: false,
+        bottomContentInset: 174,
+      }),
+    ).toBeUndefined()
+    expect(
+      deriveThreadFeedInitialContentInset({
+        platform: 'android',
+        usesNativeAutomaticInsets: true,
+        bottomContentInset: 174,
+      }),
+    ).toBeUndefined()
+  })
+})
 
 describe('resizable pane constraints', () =>
 {

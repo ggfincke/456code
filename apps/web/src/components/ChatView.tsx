@@ -290,6 +290,7 @@ import {
   hasEnvironmentReconnectWarningGraceElapsed,
   handleImportContinuationSendBlock,
   hasServerAcknowledgedLocalDispatch,
+  shouldReleaseTimelineAnchorForToolActivity,
   importContinuationConsentToken,
   isImportContinuationSendBlocked,
   isBranchMismatchDismissedForSession,
@@ -1100,6 +1101,9 @@ function ChatViewContent(props: ChatViewProps)
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey))
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys])
   const activeLatestTurn = activeThread?.latestTurn ?? null
+  const activeRunningTurnId =
+    (activeThread?.session?.status === 'running' ? activeThread.session.activeTurnId : null) ??
+    (activeLatestTurn?.state === 'running' ? activeLatestTurn.turnId : null)
   const [acceptedImportConsentToken, setAcceptedImportConsentToken] = useState<string | null>(null)
   const [importBlockedAnnouncementCount, setImportBlockedAnnouncementCount] = useState(0)
   const sourcePlanThreadRef = useMemo(() =>
@@ -3411,12 +3415,33 @@ function ChatViewContent(props: ChatViewProps)
     timelineScrollModeRef.current = 'following-end'
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current
     pendingTimelineAnchorRef.current = null
+    positionedTimelineAnchorRef.current = null
+    settledTimelineAnchorRef.current = null
     activeTimelineAnchorIndexRef.current = null
     setTimelineAnchor(releaseChatTimelineAnchor)
     showScrollDebouncer.current.cancel()
     setShowScrollToBottom(false)
     void legendListRef.current?.scrollToEnd?.({ animated })
   }, [])
+  useLayoutEffect(() =>
+  {
+    if (timelineScrollModeRef.current !== 'anchoring-new-turn')
+    {
+      return
+    }
+    if (
+      shouldReleaseTimelineAnchorForToolActivity({
+        anchorMessageId: timelineAnchorMessageId,
+        liveFollowEnabled:
+          liveFollowUserScrollGenerationRef.current === anchorUserScrollGenerationRef.current,
+        runningTurnId: activeRunningTurnId,
+        timelineEntries,
+      })
+    )
+    {
+      scrollToEnd()
+    }
+  }, [activeRunningTurnId, scrollToEnd, timelineAnchorMessageId, timelineEntries])
   useEffect(() =>
   {
     let removeListeners: (() => void) | null = null
@@ -5057,18 +5082,28 @@ function ChatViewContent(props: ChatViewProps)
       beginLocalDispatch({ preparingWorktree: false })
       setThreadError(threadIdForSend, null)
 
-      // position this sent row once LegendList has measured the anchored tail.
-      isAtEndRef.current = true
-      timelineScrollModeRef.current = 'anchoring-new-turn'
-      liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current
-      pendingTimelineAnchorRef.current = messageIdForSend
-      activeTimelineAnchorIndexRef.current = null
-      showScrollDebouncer.current.cancel()
-      setShowScrollToBottom(false)
-      setTimelineAnchor({
-        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
-        messageId: messageIdForSend,
-      })
+      const shouldAnchorFirstMessage =
+        activeThread.latestTurn === null &&
+        !timelineMessages.some((message) => message.role === 'user')
+      if (shouldAnchorFirstMessage)
+      {
+        // position the first sent row once LegendList has measured the anchored tail.
+        isAtEndRef.current = true
+        timelineScrollModeRef.current = 'anchoring-new-turn'
+        liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current
+        pendingTimelineAnchorRef.current = messageIdForSend
+        activeTimelineAnchorIndexRef.current = null
+        showScrollDebouncer.current.cancel()
+        setShowScrollToBottom(false)
+        setTimelineAnchor({
+          threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+          messageId: messageIdForSend,
+        })
+      }
+      else
+      {
+        scrollToEnd()
+      }
 
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -6029,11 +6064,7 @@ function ChatViewContent(props: ChatViewProps)
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
                 latestTurn={activeLatestTurn}
-                runningTurnId={
-                  activeThread.session?.status === 'running'
-                    ? activeThread.session.activeTurnId
-                    : null
-                }
+                runningTurnId={activeRunningTurnId}
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
@@ -6054,6 +6085,11 @@ function ChatViewContent(props: ChatViewProps)
                 onAnchorReady={onTimelineAnchorReady}
                 onAnchorSizeChanged={onTimelineAnchorSizeChanged}
                 contentInsetEndAdjustment={composerOverlayHeight}
+                followingEnd={
+                  timelineScrollModeRef.current === 'following-end' &&
+                  liveFollowUserScrollGenerationRef.current ===
+                    anchorUserScrollGenerationRef.current
+                }
                 onIsAtEndChange={onIsAtEndChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}

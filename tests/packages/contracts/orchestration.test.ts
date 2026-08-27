@@ -805,10 +805,22 @@ it.effect('defaults settled fields when decoding historical thread data', () =>
 
     assert.strictEqual(thread.settledOverride, null)
     assert.strictEqual(thread.settledAt, null)
+    assert.strictEqual(thread.unsettledAt, null)
     assert.strictEqual(thread.origin, null)
     assert.strictEqual(shell.settledOverride, null)
     assert.strictEqual(shell.settledAt, null)
+    assert.strictEqual(shell.unsettledAt, null)
     assert.strictEqual(shell.origin, null)
+
+    const explicitNullShell = yield* decodeOrchestrationThreadShell({
+      ...common,
+      unsettledAt: null,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    })
+    assert.strictEqual(explicitNullShell.unsettledAt, null)
   }),
 )
 

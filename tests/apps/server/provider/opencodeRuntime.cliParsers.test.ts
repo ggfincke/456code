@@ -253,7 +253,6 @@ describe('parseSkillsCliOutput', () =>
           name: 'review-pr',
           description: 'Review a pull request.',
           location: '/tmp/review-pr/SKILL.md',
-          content: '---\nname: review-pr\n---\n',
         },
       ],
     )

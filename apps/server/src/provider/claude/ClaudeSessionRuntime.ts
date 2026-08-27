@@ -110,11 +110,6 @@ export const closeClaudeQueryResources = Effect.fn('closeClaudeQueryResources')(
   failureDetail: string,
 )
 {
-  yield* Queue.shutdown(promptQueue)
-  if (streamFiber && streamFiber.pollUnsafe() === undefined)
-  {
-    yield* Fiber.interrupt(streamFiber)
-  }
   yield* Effect.try({
     try: () => queryRuntime.close(),
     catch: (cause) =>
@@ -125,4 +120,9 @@ export const closeClaudeQueryResources = Effect.fn('closeClaudeQueryResources')(
         cause,
       }),
   })
+  yield* Queue.shutdown(promptQueue)
+  if (streamFiber && streamFiber.pollUnsafe() === undefined)
+  {
+    yield* Fiber.interrupt(streamFiber)
+  }
 })

@@ -70,7 +70,11 @@ import {
 } from '../../../promptStashStore'
 import { ComposerStashBadge } from './ComposerStashBadge'
 import { ComposerStashMenu } from './ComposerStashMenu'
-import { compressImageForStash, compressImageToByteLimit } from '../../../lib/imageCompression'
+import {
+  compressImageForStash,
+  isHeicImageFile,
+  prepareImageForAttachment,
+} from '../../../lib/imageCompression'
 import { isCommandPaletteOpen } from '../../../commandPaletteBus'
 import { getTerminalFocusOwner } from '../../../lib/terminalFocus'
 import { resolveShortcutCommand } from '../../../keybindings'
@@ -2352,14 +2356,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     let error: string | null = null
     for (const file of files)
     {
-      if (!file.type.startsWith('image/'))
+      const isHeic = isHeicImageFile(file)
+      if (!file.type.startsWith('image/') && !isHeic)
       {
         error = `Unsupported file type for '${file.name}'. Please attach image files only.`
         continue
       }
-      if (!isProviderSendTurnSupportedImageMimeType(file.type))
+      if (!isHeic && !isProviderSendTurnSupportedImageMimeType(file.type))
       {
-        error = `'${file.name}' is not a supported image type. Attach GIF, JPEG, PNG, or WebP images.`
+        error = `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`
         continue
       }
       if (reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS)
@@ -2380,8 +2385,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       let compressionError: string | null = null
       for (const file of acceptedFiles)
       {
-        // downscale over-cap images and preserve smaller files byte-for-byte
-        const compressed = await compressImageToByteLimit(file, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)
+        // heic converts first; ordinary supported images keep the existing pass-through path
+        const compressed = await prepareImageForAttachment(file, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)
         if (!compressed.ok)
         {
           compressionError =
@@ -2441,7 +2446,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   {
     const files = Array.from(event.clipboardData.files)
     if (files.length === 0) return
-    const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+    const imageFiles = files.filter(
+      (file) => file.type.startsWith('image/') || isHeicImageFile(file),
+    )
     if (imageFiles.length === 0) return
     event.preventDefault()
     void addComposerImages(imageFiles)
@@ -2833,6 +2840,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   requestId={activePendingApproval.requestId}
                   isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
                   onRespondToApproval={onRespondToApproval}
+                  options={activePendingApproval.options}
                 />
               </div>
             </div>
@@ -3237,6 +3245,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 requestId={activePendingApproval.requestId}
                 isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
                 onRespondToApproval={onRespondToApproval}
+                options={activePendingApproval.options}
               />
             </div>
           ) : (

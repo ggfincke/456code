@@ -2,6 +2,7 @@
 // provide the stable web facade for shared thread sort helpers
 
 export {
+  activeThreadAnchorTimestampMs,
   getLatestThreadForProject,
   getThreadSortTimestamp,
   sortThreads,

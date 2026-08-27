@@ -7,6 +7,7 @@ import {
   ApprovalRequestId,
   type OrchestrationThreadActivity,
   type ProviderApprovalDecision,
+  type ProviderApprovalOption,
   type UserInputQuestion,
 } from '@t3tools/contracts'
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
@@ -14,12 +15,14 @@ import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrat
 export interface PendingApproval
 {
   readonly requestId: ApprovalRequestId
-  readonly requestKind: 'command' | 'file-read' | 'file-change'
+  readonly requestKind: 'command' | 'file-read' | 'file-change' | 'mcp-elicitation'
   readonly createdAt: string
   readonly status?: ApprovalOutcomeStatus
   readonly requestedDecision?: ProviderApprovalDecision
   readonly detail?: string
   readonly actionId?: string
+  readonly appName?: string
+  readonly options?: ReadonlyArray<ProviderApprovalOption>
 }
 
 export interface PendingUserInput
@@ -44,6 +47,8 @@ export function requestKindFromRequestType(
     case 'file_change_approval':
     case 'apply_patch_approval':
       return 'file-change'
+    case 'mcp_elicitation_approval':
+      return 'mcp-elicitation'
     default:
       return null
   }
@@ -70,6 +75,29 @@ function isStalePendingRequestFailureDetail(detail: string | undefined): boolean
 function parseRequestId(value: unknown): ApprovalRequestId | null
 {
   return typeof value === 'string' && value.length > 0 ? ApprovalRequestId.make(value) : null
+}
+
+function parseApprovalOptions(value: unknown): ReadonlyArray<ProviderApprovalOption> | undefined
+{
+  if (!Array.isArray(value))
+  {
+    return undefined
+  }
+
+  const options = value.filter((entry): entry is ProviderApprovalOption =>
+  {
+    if (!entry || typeof entry !== 'object') return false
+    const option = entry as Record<string, unknown>
+    return (
+      typeof option.label === 'string' &&
+      (option.decision === 'accept' ||
+        option.decision === 'acceptForSession' ||
+        option.decision === 'acceptAlways' ||
+        option.decision === 'decline' ||
+        option.decision === 'cancel')
+    )
+  })
+  return options.length > 0 ? options : undefined
 }
 
 function parseUserInputQuestions(
@@ -148,10 +176,13 @@ export function derivePendingApprovals(
     const requestKind =
       payload?.requestKind === 'command' ||
       payload?.requestKind === 'file-read' ||
-      payload?.requestKind === 'file-change'
+      payload?.requestKind === 'file-change' ||
+      payload?.requestKind === 'mcp-elicitation'
         ? payload.requestKind
         : requestKindFromRequestType(payload?.requestType)
     const detail = typeof payload?.detail === 'string' ? payload.detail : undefined
+    const appName = typeof payload?.appName === 'string' ? payload.appName : undefined
+    const options = parseApprovalOptions(payload?.options)
 
     if (activity.kind === 'approval.requested' && requestId && requestKind)
     {
@@ -160,6 +191,8 @@ export function derivePendingApprovals(
         requestKind,
         createdAt: activity.createdAt,
         ...(detail ? { detail } : {}),
+        ...(appName ? { appName } : {}),
+        ...(options ? { options } : {}),
       })
       continue
     }

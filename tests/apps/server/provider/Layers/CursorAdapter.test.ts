@@ -918,9 +918,17 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         const runtimeEvents: Array<ProviderRuntimeEvent> = []
         const settledEventTypes = new Set<string>()
         const settledEventsReady = yield* Deferred.make<void>()
+        const tempDir = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), 'cursor-approval-log-')),
+        )
+        const requestLogPath = NodePath.join(tempDir, 'requests.ndjson')
 
         const wrapperPath = yield* Effect.promise(() =>
-          makeMockAgentWrapper({ T3_ACP_EMIT_TOOL_CALLS: '1' }),
+          makeMockAgentWrapper({
+            T3_ACP_EMIT_TOOL_CALLS: '1',
+            T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+            T3_ACP_ALLOW_ALWAYS_OPTION_ID: 'cursor-agent-allow-always',
+          }),
         )
         yield* serverSettings.updateSettings({
           providers: { cursor: { binaryPath: wrapperPath } },
@@ -939,7 +947,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
               yield* adapter.respondToRequest(
                 threadId,
                 ApprovalRequestId.make(String(event.requestId)),
-                'accept',
+                'acceptAlways',
               )
             }
             if (
@@ -1027,7 +1035,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           {
             assert.equal(String(requestResolved.turnId), String(turn.turnId))
             assert.equal(requestResolved.payload.requestType, 'exec_command_approval')
-            assert.equal(requestResolved.payload.decision, 'accept')
+            assert.equal(requestResolved.payload.decision, 'acceptAlways')
           }
 
           const toolCompleted = turnEvents.find(
@@ -1055,6 +1063,21 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
               /^assistant:mock-session-1:runtime:[^:]+:segment:0$/,
             )
           }
+
+          const requests = yield* Effect.promise(() => readJsonLines(requestLogPath))
+          assert.isTrue(
+            requests.some(
+              (entry) =>
+                !('method' in entry) &&
+                typeof entry.result === 'object' &&
+                entry.result !== null &&
+                'outcome' in entry.result &&
+                typeof entry.result.outcome === 'object' &&
+                entry.result.outcome !== null &&
+                'optionId' in entry.result.outcome &&
+                entry.result.outcome.optionId === 'cursor-agent-allow-always',
+            ),
+          )
         })
 
         yield* program.pipe(

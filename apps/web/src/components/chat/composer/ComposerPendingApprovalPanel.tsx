@@ -12,12 +12,21 @@ interface ComposerPendingApprovalPanelProps
 
 function requestedDecisionLabel(approval: PendingApproval): string | null
 {
+  const optionLabel = approval.options?.find(
+    (option) => option.decision === approval.requestedDecision,
+  )?.label
+  if (optionLabel)
+  {
+    return optionLabel
+  }
   switch (approval.requestedDecision)
   {
     case 'accept':
       return 'Approve once'
     case 'acceptForSession':
       return 'Always allow this session'
+    case 'acceptAlways':
+      return 'Always allow'
     case 'decline':
       return 'Decline'
     case 'cancel':
@@ -33,17 +42,21 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
 }: ComposerPendingApprovalPanelProps)
 {
   const approvalSummary =
-    approval.requestKind === 'command'
-      ? 'Command approval requested'
-      : approval.requestKind === 'file-read'
-        ? 'File-read approval requested'
-        : 'File-change approval requested'
+    approval.requestKind === 'mcp-elicitation'
+      ? `${approval.appName ?? 'App'} approval requested`
+      : approval.requestKind === 'command'
+        ? 'Command approval requested'
+        : approval.requestKind === 'file-read'
+          ? 'File-read approval requested'
+          : 'File-change approval requested'
   const detailLabel =
-    approval.requestKind === 'command'
-      ? 'Command'
-      : approval.requestKind === 'file-read'
-        ? 'File to read'
-        : 'File change'
+    approval.requestKind === 'mcp-elicitation'
+      ? (approval.appName ?? 'Request')
+      : approval.requestKind === 'command'
+        ? 'Command'
+        : approval.requestKind === 'file-read'
+          ? 'File to read'
+          : 'File change'
   const decisionLabel = requestedDecisionLabel(approval)
   const lifecycleLine =
     approval.status === 'responding'

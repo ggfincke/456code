@@ -2,6 +2,7 @@
 // resolve version mismatch
 
 import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from '@t3tools/contracts'
+import { compareSemverVersions, parseSemver } from '@t3tools/shared/semver'
 import * as Schema from 'effect/Schema'
 
 import { APP_VERSION } from './branding/branding'
@@ -28,6 +29,17 @@ function normalizeVersion(version: string | null | undefined): string | null
   return trimmed && trimmed.length > 0 ? trimmed : null
 }
 
+function comparableVersion(clientVersion: string, serverVersion: string): [string, string]
+{
+  const client = parseSemver(clientVersion)
+  const server = parseSemver(serverVersion)
+  if (client?.prerelease[0] === 'nightly' && server?.prerelease[0] === 'nightly')
+  {
+    return [clientVersion, serverVersion]
+  }
+  return [clientVersion.replace(/[-+].*$/, ''), serverVersion.replace(/[-+].*$/, '')]
+}
+
 export function resolveVersionMismatch(
   serverVersion: string | null | undefined,
 ): VersionMismatch | null
@@ -38,6 +50,19 @@ export function resolveVersionMismatch(
     !normalizedClientVersion ||
     !normalizedServerVersion ||
     normalizedClientVersion === normalizedServerVersion
+  )
+  {
+    return null
+  }
+
+  const [comparableClientVersion, comparableServerVersion] = comparableVersion(
+    normalizedClientVersion,
+    normalizedServerVersion,
+  )
+  if (
+    parseSemver(comparableClientVersion) &&
+    parseSemver(comparableServerVersion) &&
+    compareSemverVersions(comparableServerVersion, comparableClientVersion) >= 0
   )
   {
     return null
