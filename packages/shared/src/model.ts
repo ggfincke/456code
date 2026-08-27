@@ -394,6 +394,7 @@ export function resolvePromptInjectedEffort(
 export function applyClaudePromptEffortPrefix(
   text: string,
   effort: string | null | undefined,
+  preserveSlashCommand = true,
 ): string
 {
   const trimmed = text.trim()
@@ -405,7 +406,10 @@ export function applyClaudePromptEffortPrefix(
   {
     return trimmed
   }
-  if (trimmed.startsWith('Ultrathink:'))
+  if (
+    trimmed.startsWith('Ultrathink:') ||
+    (preserveSlashCommand && /^\/[^\s/]+(?:\s|$)/u.test(trimmed))
+  )
   {
     return trimmed
   }

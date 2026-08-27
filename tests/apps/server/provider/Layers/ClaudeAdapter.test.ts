@@ -810,7 +810,7 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
-  it.effect('sends a bare slash command as the sole exact Claude text block', () =>
+  it.effect('sends an extended slash command as the sole exact Claude text block', () =>
   {
     const harness = makeHarness()
     return Effect.gen(function* ()
@@ -830,14 +830,16 @@ describe('ClaudeAdapterLive', () =>
 
       yield* adapter.sendTurn({
         threadId: session.threadId,
-        input: '/compact',
+        input: '/plugin:review changes',
         attachments: [],
         modelSelection,
       })
 
       const createInput = harness.getLastCreateQueryInput()
       const promptMessage = yield* Effect.promise(() => readFirstPromptMessage(createInput))
-      assert.deepEqual(promptMessage?.message.content, [{ type: 'text', text: '/compact' }])
+      assert.deepEqual(promptMessage?.message.content, [
+        { type: 'text', text: '/plugin:review changes' },
+      ])
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -3575,11 +3577,13 @@ describe('ClaudeAdapterLive', () =>
         return
       }
 
+      const controller = new AbortController()
+      const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
       const permissionPromise = canUseTool(
         'Bash',
         { command: 'pwd' },
         {
-          signal: new AbortController().signal,
+          signal: controller.signal,
           suggestions: [
             {
               type: 'setMode',
@@ -3638,6 +3642,7 @@ describe('ClaudeAdapterLive', () =>
 
       const permissionResult = yield* Effect.promise(() => permissionPromise)
       assert.equal((permissionResult as PermissionResult).behavior, 'allow')
+      assert.equal(removeListener.mock.calls.filter(([type]) => type === 'abort').length, 1)
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -5151,6 +5156,214 @@ describe('ClaudeAdapterLive', () =>
       Effect.provide(harness.layer),
     )
   })
+
+  for (const answerBeforeClose of [false, true])
+  {
+    it.effect(
+      `resolves published approval once when async close awaits its callback (answered: ${answerBeforeClose})`,
+      () =>
+      {
+        const harness = makeHarness()
+        return Effect.gen(function* ()
+        {
+          const adapter = yield* ClaudeAdapter
+          const session = yield* startClaudeTestSession(adapter, {
+            threadId: THREAD_ID,
+            provider: ProviderDriverKind.make('claudeAgent'),
+            runtimeMode: 'approval-required',
+          })
+          yield* Stream.take(unwrapClaudeRuntimeEvents(adapter), 3).pipe(Stream.runDrain)
+          const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool
+          assert.isDefined(canUseTool)
+          if (!canUseTool) return
+          const controller = new AbortController()
+          const permission = canUseTool(
+            'Bash',
+            { command: 'pwd' },
+            {
+              signal: controller.signal,
+              toolUseID: 'close-approval',
+              requestId: 'close-approval',
+            },
+          )
+          const opened = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
+          assert.equal(opened._tag === 'Some' ? opened.value.type : undefined, 'request.opened')
+          if (answerBeforeClose && opened._tag === 'Some' && opened.value.requestId)
+          {
+            yield* adapter.respondToRequest(
+              session.threadId,
+              ApprovalRequestId.make(opened.value.requestId),
+              'accept',
+            )
+          }
+          Object.assign(harness.query, {
+            close: async () =>
+            {
+              controller.abort()
+              await permission
+              harness.query.finish()
+            },
+          })
+          yield* adapter
+            .stopSession(session.threadId)
+            .pipe(Effect.timeout('1 second'), TestClock.withLive)
+          const permissionResult = yield* Effect.promise(() => permission)
+          if (!answerBeforeClose)
+          {
+            assert.deepEqual(permissionResult, {
+              behavior: 'deny',
+              message: 'User cancelled tool execution.',
+            })
+          }
+          const events = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+            Stream.take(2),
+            Stream.runCollect,
+          )
+          assert.deepEqual(
+            events.map((event) => event.type),
+            ['request.resolved', 'session.exited'],
+          )
+          const resolved = events[0]
+          assert.equal(
+            resolved?.type === 'request.resolved' ? resolved.payload.decision : undefined,
+            permissionResult?.behavior === 'allow' ? 'accept' : 'cancel',
+          )
+        }).pipe(
+          Effect.provideService(Random.Random, makeDeterministicRandomService()),
+          Effect.provide(harness.layer),
+        )
+      },
+    )
+  }
+
+  it.effect('denies an already-aborted ordinary approval without publishing a request', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const session = yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'approval-required',
+      })
+      yield* Stream.take(unwrapClaudeRuntimeEvents(adapter), 3).pipe(Stream.runDrain)
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool
+      assert.isDefined(canUseTool)
+      if (!canUseTool) return
+      const controller = new AbortController()
+      controller.abort()
+      const result = yield* Effect.promise(() =>
+        canUseTool(
+          'Bash',
+          { command: 'pwd' },
+          {
+            signal: controller.signal,
+            toolUseID: 'aborted-approval',
+            requestId: 'aborted-approval',
+          },
+        ),
+      ).pipe(Effect.timeout('1 second'), TestClock.withLive)
+      assert.deepEqual(result, { behavior: 'deny', message: 'User cancelled tool execution.' })
+      yield* adapter.stopSession(session.threadId)
+      const event = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter))
+      assert.equal(event._tag === 'Some' ? event.value.type : undefined, 'session.exited')
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  for (const abortFirst of [false, true])
+  {
+    it.effect(
+      `cancels ordinary approval during publication without leaking pending state (abort: ${abortFirst})`,
+      () =>
+      {
+        const uuidGate = makeControlledUuidCrypto()
+        const harness = makeHarness({ crypto: uuidGate.crypto })
+        return Effect.gen(function* ()
+        {
+          const adapter = yield* ClaudeAdapter
+          const session = yield* startClaudeTestSession(adapter, {
+            threadId: THREAD_ID,
+            provider: ProviderDriverKind.make('claudeAgent'),
+            runtimeMode: 'approval-required',
+          })
+
+          yield* Stream.take(unwrapClaudeRuntimeEvents(adapter), 3).pipe(Stream.runDrain)
+          const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool
+          assert.equal(typeof canUseTool, 'function')
+          if (!canUseTool)
+          {
+            return
+          }
+
+          // request id generation completes; requested-event id generation pauses.
+          const publicationBlocked = uuidGate.blockAfter(1)
+          const controller = new AbortController()
+          const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+          const permissionPromise = canUseTool(
+            'Bash',
+            { command: 'echo test' },
+            {
+              signal: controller.signal,
+              toolUseID: 'tool-ask-stop-requested',
+              requestId: 'request-ask-stop-requested',
+            },
+          )
+
+          yield* Effect.promise(() => publicationBlocked).pipe(
+            Effect.timeout('1 second'),
+            TestClock.withLive,
+          )
+          if (abortFirst)
+          {
+            controller.abort()
+          }
+          const stopFiber = yield* adapter.stopSession(session.threadId).pipe(Effect.forkChild)
+
+          // cancellation and stop must finish while UUID generation is still blocked.
+          const result = yield* Effect.promise(() => permissionPromise).pipe(
+            Effect.timeout('1 second'),
+            TestClock.withLive,
+          )
+          yield* Fiber.join(stopFiber).pipe(Effect.timeout('1 second'), TestClock.withLive)
+          assert.deepEqual(result, {
+            behavior: 'deny',
+            message: 'User cancelled tool execution.',
+          } satisfies PermissionResult)
+
+          const exited = yield* Stream.runHead(unwrapClaudeRuntimeEvents(adapter)).pipe(
+            Effect.timeout('1 second'),
+            TestClock.withLive,
+          )
+          assert.equal(exited._tag === 'Some' ? exited.value.type : undefined, 'session.exited')
+
+          const lateEvents: Array<ProviderRuntimeEvent> = []
+          const lateEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() =>
+              {
+                lateEvents.push(event)
+              }),
+            ),
+            Effect.forkChild,
+          )
+          uuidGate.release()
+          yield* Effect.yieldNow
+          yield* Effect.yieldNow
+          yield* Fiber.interrupt(lateEventsFiber)
+          assert.deepEqual(lateEvents, [])
+          assert.equal(removeListener.mock.calls.filter(([type]) => type === 'abort').length, 1)
+        }).pipe(
+          Effect.ensuring(Effect.sync(() => uuidGate.release())),
+          Effect.provideService(Random.Random, makeDeterministicRandomService()),
+          Effect.provide(harness.layer),
+        )
+      },
+    )
+  }
 
   it.effect('settles AskUserQuestion before a blocked requested-event stamp is released', () =>
   {

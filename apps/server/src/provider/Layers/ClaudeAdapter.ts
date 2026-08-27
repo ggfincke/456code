@@ -199,6 +199,7 @@ interface AssistantTextBlockState
 
 interface PendingApproval
 {
+  readonly cancel: Effect.Effect<void>
   readonly requestType: CanonicalRequestType
   readonly detail?: string
   readonly suggestions?: ReadonlyArray<PermissionUpdate>
@@ -3377,24 +3378,9 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           })
         }
 
-        for (const [requestId, pending] of context.pendingApprovals)
+        for (const pending of context.pendingApprovals.values())
         {
-          yield* Deferred.succeed(pending.decision, 'cancel')
-          const stamp = yield* makeEventStamp()
-          yield* offerRuntimeEvent(context, {
-            type: 'request.resolved',
-            eventId: stamp.eventId,
-            provider: PROVIDER,
-            createdAt: stamp.createdAt,
-            threadId: context.session.threadId,
-            ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-            requestId: asRuntimeRequestId(requestId),
-            payload: {
-              requestType: pending.requestType,
-              decision: 'cancel',
-            },
-            providerRefs: nativeProviderRefs(context),
-          })
+          yield* pending.cancel
         }
         context.pendingApprovals.clear()
 
@@ -3813,88 +3799,135 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         const requestType = classifyRequestType(toolName)
         const detail = summarizeToolRequest(toolName, toolInput)
         const decisionDeferred = yield* Deferred.make<ProviderApprovalDecision>()
+        let published = false
+        let resolved = false
+        let resolvedEventId: EventId | undefined
+        const resolveApproval = Effect.fn('resolveClaudeApproval')(function* (
+          decision: ProviderApprovalDecision,
+        )
+        {
+          yield* Deferred.succeed(decisionDeferred, decision)
+          const createdAt = yield* nowIso
+          // one synchronous queue offer owns resolution even when teardown removed the map entry.
+          yield* Effect.sync(() =>
+          {
+            if (!published || resolved || resolvedEventId === undefined) return
+            resolved = true
+            Queue.offerUnsafe(runtimeEventQueue, {
+              binding: context.runtimeSessionBinding,
+              event: {
+                type: 'request.resolved',
+                eventId: resolvedEventId,
+                provider: PROVIDER,
+                createdAt,
+                threadId: context.session.threadId,
+                ...(context.turnState
+                  ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                  : {}),
+                requestId: asRuntimeRequestId(requestId),
+                payload: { requestType, decision },
+                providerRefs: nativeProviderRefs(context, {
+                  providerItemId: callbackOptions.toolUseID,
+                }),
+                raw: {
+                  source: 'claude.sdk.permission',
+                  method: 'canUseTool/decision',
+                  payload: { decision },
+                },
+              },
+            })
+          })
+        })
         const pendingApproval: PendingApproval = {
           requestType,
           detail,
           decision: decisionDeferred,
+          cancel: resolveApproval('cancel'),
           ...(callbackOptions.suggestions ? { suggestions: callbackOptions.suggestions } : {}),
         }
 
-        const requestedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent(context, {
-          type: 'request.opened',
-          eventId: requestedStamp.eventId,
-          provider: PROVIDER,
-          createdAt: requestedStamp.createdAt,
-          threadId: context.session.threadId,
-          ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-          requestId: asRuntimeRequestId(requestId),
-          payload: {
-            requestType,
-            detail,
-            args: {
-              toolName,
-              input: toolInput,
-              ...(callbackOptions.toolUseID ? { toolUseId: callbackOptions.toolUseID } : {}),
-            },
-          },
-          providerRefs: nativeProviderRefs(context, {
-            providerItemId: callbackOptions.toolUseID,
-          }),
-          raw: {
-            source: 'claude.sdk.permission',
-            method: 'canUseTool/request',
-            payload: {
-              toolName,
-              input: toolInput,
-            },
-          },
-        })
-
-        pendingApprovals.set(requestId, pendingApproval)
-
+        // register cancellation before event-id allocation or publication can yield.
         const onAbort = () =>
         {
-          if (!pendingApprovals.has(requestId))
-          {
-            return
-          }
-          pendingApprovals.delete(requestId)
-          runFork(Deferred.succeed(decisionDeferred, 'cancel'))
+          runFork(resolveApproval('cancel'))
         }
-
-        callbackOptions.signal.addEventListener('abort', onAbort, {
-          once: true,
-        })
-
-        const decision = yield* Deferred.await(decisionDeferred)
-        pendingApprovals.delete(requestId)
-
-        const resolvedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent(context, {
-          type: 'request.resolved',
-          eventId: resolvedStamp.eventId,
-          provider: PROVIDER,
-          createdAt: resolvedStamp.createdAt,
-          threadId: context.session.threadId,
-          ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-          requestId: asRuntimeRequestId(requestId),
-          payload: {
-            requestType,
-            decision,
-          },
-          providerRefs: nativeProviderRefs(context, {
-            providerItemId: callbackOptions.toolUseID,
-          }),
-          raw: {
-            source: 'claude.sdk.permission',
-            method: 'canUseTool/decision',
-            payload: {
-              decision,
-            },
-          },
-        })
-
+        pendingApprovals.set(requestId, pendingApproval)
+        callbackOptions.signal.addEventListener('abort', onAbort, { once: true })
+        const decision = yield* Effect.gen(function* ()
+        {
+          if (callbackOptions.signal.aborted || context.stopped || context.stopping)
+          {
+            return 'cancel' as const
+          }
+          const publication = yield* Effect.raceFirst(
+            Effect.all({ requestedStamp: makeEventStamp(), resolvedEventId: nextEventId }).pipe(
+              Effect.map(Option.some),
+            ),
+            Effect.raceFirst(
+              Deferred.await(decisionDeferred),
+              Deferred.await(context.sessionStopped),
+            ).pipe(Effect.as(Option.none())),
+          )
+          if (Option.isNone(publication)) return 'cancel' as const
+          const { requestedStamp } = publication.value
+          resolvedEventId = publication.value.resolvedEventId
+          // publication and its ownership flag cannot interleave with another fiber.
+          yield* Effect.sync(() =>
+          {
+            if (callbackOptions.signal.aborted || context.stopped || context.stopping) return
+            published = Queue.offerUnsafe(runtimeEventQueue, {
+              binding: context.runtimeSessionBinding,
+              event: {
+                type: 'request.opened',
+                eventId: requestedStamp.eventId,
+                provider: PROVIDER,
+                createdAt: requestedStamp.createdAt,
+                threadId: context.session.threadId,
+                ...(context.turnState
+                  ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                  : {}),
+                requestId: asRuntimeRequestId(requestId),
+                payload: {
+                  requestType,
+                  detail,
+                  args: {
+                    toolName,
+                    input: toolInput,
+                    ...(callbackOptions.toolUseID ? { toolUseId: callbackOptions.toolUseID } : {}),
+                  },
+                },
+                providerRefs: nativeProviderRefs(context, {
+                  providerItemId: callbackOptions.toolUseID,
+                }),
+                raw: {
+                  source: 'claude.sdk.permission',
+                  method: 'canUseTool/request',
+                  payload: {
+                    toolName,
+                    input: toolInput,
+                  },
+                },
+              },
+            })
+          })
+          if (!published) return 'cancel' as const
+          const answer = yield* Deferred.await(decisionDeferred)
+          const decision =
+            callbackOptions.signal.aborted || context.stopped || context.stopping
+              ? 'cancel'
+              : answer
+          yield* resolveApproval(decision)
+          return decision
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() =>
+            {
+              callbackOptions.signal.removeEventListener('abort', onAbort)
+              if (pendingApprovals.get(requestId) === pendingApproval)
+                pendingApprovals.delete(requestId)
+            }),
+          ),
+        )
         if (
           decision === 'accept' ||
           decision === 'acceptForSession' ||
