@@ -16,6 +16,7 @@ export const PersistedServerRuntimeState = Schema.Struct({
   host: Schema.optional(Schema.String),
   port: Schema.Int,
   origin: Schema.String,
+  devUrl: Schema.optional(Schema.String),
   startedAt: Schema.String,
   storageLeaseToken: Schema.optional(Schema.String),
 })
@@ -51,7 +52,8 @@ const runtimeOriginForConfig = (
 }
 
 export const makePersistedServerRuntimeState = (input: {
-  readonly config: Pick<ServerConfig.ServerConfig['Service'], 'host'>
+  readonly config: Pick<ServerConfig.ServerConfig['Service'], 'host'> &
+    Partial<Pick<ServerConfig.ServerConfig['Service'], 'devUrl'>>
   readonly port: number
   readonly storageLeaseToken?: string | undefined
 }): Effect.Effect<PersistedServerRuntimeState> =>
@@ -61,6 +63,7 @@ export const makePersistedServerRuntimeState = (input: {
     ...(input.config.host ? { host: input.config.host } : {}),
     port: input.port,
     origin: runtimeOriginForConfig(input.config, input.port),
+    ...(input.config.devUrl === undefined ? {} : { devUrl: input.config.devUrl.toString() }),
     startedAt: DateTime.formatIso(now),
     ...(input.storageLeaseToken === undefined
       ? {}
@@ -121,6 +124,7 @@ const runtimeStatesMatch = (
   left.host === right.host &&
   left.port === right.port &&
   left.origin === right.origin &&
+  left.devUrl === right.devUrl &&
   left.startedAt === right.startedAt &&
   left.storageLeaseToken === right.storageLeaseToken
 

@@ -13,6 +13,7 @@ import { authCommand } from './cli/auth.ts'
 import { sharedServerCommandFlags } from './cli/config.ts'
 import { isEntrypoint } from './entrypoint.ts'
 import { projectCommand } from './cli/project.ts'
+import { pairCommand } from './cli/pair.ts'
 import { runServerCommand, serveCommand, startCommand } from './cli/server.ts'
 import { serviceCommand } from './cli/service.ts'
 
@@ -28,6 +29,7 @@ export const makeCli = () =>
       startCommand,
       serveCommand,
       authCommand,
+      pairCommand,
       projectCommand,
       serviceCommand,
     ]),

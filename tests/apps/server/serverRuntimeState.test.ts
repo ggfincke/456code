@@ -32,21 +32,23 @@ describe('serverRuntimeState', () =>
         prefix: 't3-server-runtime-state-test-',
       })
       const statePath = path.join(root, 'runtime', 'server.json')
-      const state: ServerRuntimeState.PersistedServerRuntimeState = {
-        version: 1,
-        pid: 123,
-        host: '127.0.0.1',
+      const state = yield* ServerRuntimeState.makePersistedServerRuntimeState({
+        config: { host: '127.0.0.1', devUrl: new URL('http://localhost:5733') },
         port: 4_971,
-        origin: 'http://127.0.0.1:4971',
-        startedAt: '2026-06-20T00:00:00.000Z',
         storageLeaseToken: 'test-owner-token',
-      }
+      })
 
       yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state })
       const restored = yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)
 
       assert.deepEqual(Option.getOrThrow(restored), state)
+      assert.equal(Option.getOrThrow(restored).devUrl, 'http://localhost:5733/')
       assert.equal((yield* fileSystem.stat(statePath)).mode & 0o777, 0o600)
+      const removed = yield* ServerRuntimeState.clearPersistedServerRuntimeStateIfOwned({
+        path: statePath,
+        expectedState: { ...state, devUrl: 'http://localhost:5734/' },
+      })
+      assert.isFalse(removed)
     }).pipe(Effect.provide(NodeServices.layer)),
   )
 

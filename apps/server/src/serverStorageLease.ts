@@ -285,7 +285,7 @@ const observedProcessStartedAt = Effect.fn('ServerStorageLease.observedProcessSt
   },
 )
 
-const incumbentProcessLiveness = Effect.fn('ServerStorageLease.incumbentProcessLiveness')(
+export const incumbentProcessLiveness = Effect.fn('ServerStorageLease.incumbentProcessLiveness')(
   function* (incumbent: ServerStorageLeaseOwner)
   {
     const liveness = processLiveness(incumbent.pid)
