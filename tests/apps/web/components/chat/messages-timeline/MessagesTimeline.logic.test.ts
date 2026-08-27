@@ -553,6 +553,7 @@ describe('deriveMessagesTimelineRows', () =>
     expect(foldRow?.label).toBe('Worked for 22s')
     expect(collapsedRows.map((row) => row.id)).toEqual([
       'user-entry',
+      'assistant-thought-entry',
       'turn-fold:turn-1',
       'assistant-final-entry',
     ])
@@ -568,8 +569,8 @@ describe('deriveMessagesTimelineRows', () =>
 
     expect(expandedRows.map((row) => row.id)).toEqual([
       'user-entry',
-      'turn-fold:turn-1',
       'assistant-thought-entry',
+      'turn-fold:turn-1',
       'work-toggle:work-entry-1',
       'assistant-final-entry',
     ])
@@ -669,7 +670,7 @@ describe('deriveMessagesTimelineRows', () =>
 
     expect(rows.map((row) => row.id)).toEqual([
       'user-entry',
-      'turn-fold:turn-1',
+      'assistant-thought-entry',
       'task-entry',
       'orchestrate-plan:run-42:1',
       'assistant-final-entry',
@@ -1218,6 +1219,46 @@ describe('deriveMessagesTimelineRows', () =>
     ])
     expect(expandedRows.find((row) => row.kind === 'work-toggle')).toMatchObject({
       expanded: true,
+    })
+  })
+  it.each([
+    ['a later success is hidden', ['failed', 'completed', 'info'], false],
+    ['a later success is visible', ['failed', 'info', 'completed'], false],
+    ['the final failure is hidden', ['completed', 'failed', 'info'], true],
+    ['the only failure is visible', ['completed', 'info', 'failed'], false],
+  ] as const)('uses the final tool result when %s', (_, statuses, hasFailure) =>
+  {
+    const timelineEntries = statuses.map((status, index) =>
+    {
+      const id = `work-${index}`
+      const createdAt = `2026-01-01T00:00:0${index}Z`
+      return {
+        id: `work-entry-${index}`,
+        kind: 'work' as const,
+        createdAt,
+        entry:
+          status === 'info'
+            ? { id, createdAt, label: 'Status updated', tone: 'info' as const }
+            : {
+                id,
+                createdAt,
+                label: 'Ran command',
+                tone: 'tool' as const,
+                toolLifecycleStatus: status,
+              },
+      }
+    })
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    })
+
+    expect(rows.find((row) => row.kind === 'work-toggle')).toMatchObject({
+      hiddenCount: 2,
+      hasFailure,
     })
   })
 })

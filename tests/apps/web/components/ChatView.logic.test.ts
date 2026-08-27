@@ -45,6 +45,7 @@ import {
   resolveSendEnvMode,
   scheduleEnvironmentReconnectWarning,
   shouldRestoreComposerDraftAfterSendFailure,
+  shouldReleaseTimelineAnchorForToolActivity,
   shouldSuppressTransientEnvironmentReconnectWarning,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
@@ -1577,6 +1578,78 @@ describe('hasServerAcknowledgedLocalDispatch', () =>
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true)
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true)
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: 'failed' })).toBe(true)
+  })
+
+  it('does not treat reconnecting state as server acknowledgment', () =>
+  {
+    const localDispatch = createLocalDispatchSnapshot(makeThread())
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: 'connecting',
+        latestTurn: null,
+        latestUserMessageId: MessageId.make('server-message'),
+        session: null,
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('shouldReleaseTimelineAnchorForToolActivity', () =>
+{
+  const anchorMessageId = MessageId.make('anchor-message')
+  const runningTurnId = TurnId.make('turn-running')
+  const toolEntry = {
+    id: 'work-entry',
+    kind: 'work' as const,
+    createdAt: '2026-08-26T00:00:00.000Z',
+    entry: {
+      id: 'work-1',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      turnId: runningTurnId,
+      label: 'Run tests',
+      tone: 'tool' as const,
+    },
+  }
+
+  it('releases a live first-message anchor when its running turn starts tool activity', () =>
+  {
+    expect(
+      shouldReleaseTimelineAnchorForToolActivity({
+        anchorMessageId,
+        liveFollowEnabled: true,
+        runningTurnId,
+        timelineEntries: [toolEntry],
+      }),
+    ).toBe(true)
+  })
+
+  it('keeps the anchor for history, a different turn, or disabled live follow', () =>
+  {
+    expect(
+      shouldReleaseTimelineAnchorForToolActivity({
+        anchorMessageId,
+        liveFollowEnabled: true,
+        runningTurnId,
+        timelineEntries: [
+          {
+            ...toolEntry,
+            entry: { ...toolEntry.entry, turnId: TurnId.make('turn-previous') },
+          },
+        ],
+      }),
+    ).toBe(false)
+    expect(
+      shouldReleaseTimelineAnchorForToolActivity({
+        anchorMessageId,
+        liveFollowEnabled: false,
+        runningTurnId,
+        timelineEntries: [toolEntry],
+      }),
+    ).toBe(false)
   })
 })
 

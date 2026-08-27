@@ -24,6 +24,15 @@ export interface AnchoredTurnMetrics
   readonly scrollDeltaToRevealEnd: number
 }
 
+export function shouldKeepTimelineEndVisibleAfterOverlayGrowth(input: {
+  readonly previousOverlayHeight: number
+  readonly overlayHeight: number
+  readonly followingEnd: boolean
+}): boolean
+{
+  return input.followingEnd && input.overlayHeight > input.previousOverlayHeight
+}
+
 export function getRowBottom(state: TimelineListMeasurementState, index: number): number | null
 {
   const top = state.positionAtIndex(index)

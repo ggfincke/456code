@@ -10,7 +10,7 @@ import {
 } from '@t3tools/contracts'
 import { type TimestampFormat } from '@t3tools/contracts/settings'
 import { resolveChatListAnchoredEndSpace } from '@t3tools/shared/chatList'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { cn } from '~/lib/utils'
 import { deriveTimelineEntries } from '../../../session-logic'
@@ -39,6 +39,7 @@ import {
   type StableMessagesTimelineRowsState,
   type TimelineLatestTurn,
 } from './MessagesTimeline.logic'
+import { shouldKeepTimelineEndVisibleAfterOverlayGrowth } from './timelineScrollAnchoring'
 
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />
 const TIMELINE_LIST_FADE_HEADER = <div className="h-10 sm:h-12" />
@@ -74,6 +75,7 @@ interface MessagesTimelineProps
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void
   contentInsetEndAdjustment: number
+  followingEnd: boolean
   onIsAtEndChange: (isAtEnd: boolean) => void
   onManualNavigation: () => void
   hideEmptyPlaceholder?: boolean
@@ -109,6 +111,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onAnchorReady,
   onAnchorSizeChanged,
   contentInsetEndAdjustment,
+  followingEnd,
   onIsAtEndChange,
   onManualNavigation,
   hideEmptyPlaceholder = false,
@@ -270,12 +273,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const anchoredEndSpace = useMemo(() =>
   {
     const config = resolveChatListAnchoredEndSpace(rows, anchorMessageId, (row) =>
-      row.kind === 'message' ? row.message.id : null,
+      row.kind === 'message' && row.message.role === 'user' ? row.message.id : null,
     )
     return config
       ? { ...config, onReady: handleAnchorReady, onSizeChanged: handleAnchorSizeChanged }
       : undefined
   }, [anchorMessageId, handleAnchorReady, handleAnchorSizeChanged, rows])
+  const previousContentInsetEndAdjustmentRef = useRef(contentInsetEndAdjustment)
+  useLayoutEffect(() =>
+  {
+    const previousOverlayHeight = previousContentInsetEndAdjustmentRef.current
+    previousContentInsetEndAdjustmentRef.current = contentInsetEndAdjustment
+    if (
+      shouldKeepTimelineEndVisibleAfterOverlayGrowth({
+        previousOverlayHeight,
+        overlayHeight: contentInsetEndAdjustment,
+        followingEnd,
+      })
+    )
+    {
+      void listRef.current?.scrollToEnd?.({ animated: false })
+    }
+  }, [contentInsetEndAdjustment, followingEnd, listRef])
 
   const handleScroll = useCallback(() =>
   {

@@ -224,6 +224,7 @@ function buildProps()
     onAnchorSizeChanged: () =>
     {},
     contentInsetEndAdjustment: 0,
+    followingEnd: true,
     onIsAtEndChange: () =>
     {},
     onManualNavigation: () =>
@@ -462,7 +463,7 @@ describe('MessagesTimeline', () =>
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
-        anchorMessageId={secondEntry.message.id}
+        anchorMessageId={firstEntry.message.id}
         onAnchorReady={onAnchorReady}
         onAnchorSizeChanged={onAnchorSizeChanged}
         contentInsetEndAdjustment={144}
@@ -470,7 +471,7 @@ describe('MessagesTimeline', () =>
       />,
     )
 
-    expect(markup).toContain('data-anchor-index="1"')
+    expect(markup).toContain('data-anchor-index="0"')
     expect(markup).toContain('data-anchor-offset="16"')
     expect(markup).toContain('data-anchor-on-ready="true"')
     expect(markup).not.toContain('data-anchor-max-size=')
@@ -481,8 +482,8 @@ describe('MessagesTimeline', () =>
     expect(markup).toContain('data-maintain-visible-content-position-data="true"')
     expect(markup).toContain('data-maintain-visible-content-position-size="false"')
     expect(onAnchorReady).toHaveBeenCalledOnce()
-    expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1)
-    expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240)
+    expect(onAnchorReady).toHaveBeenCalledWith(firstEntry.message.id, 0)
+    expect(onAnchorSizeChanged).toHaveBeenCalledWith(firstEntry.message.id, 240)
   })
 
   it('renders collapse controls for long user messages', () =>

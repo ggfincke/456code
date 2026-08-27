@@ -465,7 +465,7 @@ function timelineEntryTurnId(entry: TimelineEntry): TurnId | null
 
 // settled turns fold their commentary and tool activity behind a
 // "Worked for ..." row anchored at the turn's first foldable entry; the
-// terminal assistant message stays visible below the fold.
+// first and terminal assistant messages stay visible around the fold.
 function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>
   terminalAssistantMessageIds: ReadonlySet<string>
@@ -476,6 +476,7 @@ function deriveTurnFolds(input: {
   interface TurnGroup
   {
     entries: Array<TimelineEntry>
+    firstAssistantEntry: Extract<TimelineEntry, { kind: 'message' }> | null
     terminalEntry: Extract<TimelineEntry, { kind: 'message' }> | null
     hasStreamingMessage: boolean
     // the user message that kicked the turn off. Entry timestamps alone
@@ -509,6 +510,7 @@ function deriveTurnFolds(input: {
     {
       group = {
         entries: [],
+        firstAssistantEntry: null,
         terminalEntry: null,
         hasStreamingMessage: false,
         // each user boundary starts at most one turn; a second turn after the
@@ -522,6 +524,7 @@ function deriveTurnFolds(input: {
     group.entries.push(entry)
     if (entry.kind === 'message')
     {
+      group.firstAssistantEntry ??= entry
       if (input.terminalAssistantMessageIds.has(entry.message.id))
       {
         group.terminalEntry = entry
@@ -548,7 +551,11 @@ function deriveTurnFolds(input: {
     for (const entry of group.entries)
     {
       const isForkTaskRow = entry.kind === 'work' && entry.entry.taskId !== undefined
-      if (entry.id !== group.terminalEntry?.id && !isForkTaskRow)
+      if (
+        entry.id !== group.firstAssistantEntry?.id &&
+        entry.id !== group.terminalEntry?.id &&
+        !isForkTaskRow
+      )
       {
         hiddenEntryIds.add(entry.id)
       }
@@ -559,8 +566,9 @@ function deriveTurnFolds(input: {
     }
 
     const firstEntry = group.entries[0]
+    const firstHiddenEntry = group.entries.find((entry) => hiddenEntryIds.has(entry.id))
     const lastEntry = group.entries.at(-1)
-    if (!firstEntry || !lastEntry)
+    if (!firstEntry || !firstHiddenEntry || !lastEntry)
     {
       continue
     }
@@ -590,10 +598,10 @@ function deriveTurnFolds(input: {
         ? `Worked for ${duration}`
         : 'Worked'
 
-    foldsByAnchorEntryId.set(firstEntry.id, {
+    foldsByAnchorEntryId.set(firstHiddenEntry.id, {
       turnId,
-      anchorEntryId: firstEntry.id,
-      createdAt: firstEntry.createdAt,
+      anchorEntryId: firstHiddenEntry.id,
+      createdAt: firstHiddenEntry.createdAt,
       hiddenEntryIds,
       label,
     })
@@ -914,6 +922,7 @@ export function deriveMessagesTimelineRows(input: {
           const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false
           const hiddenEntries = visibleGroupedEntries.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES)
           const visibleEntries = visibleGroupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
+          const latestToolEntry = visibleGroupedEntries.findLast(workLogEntryIsToolLike)
           const renderedEntries = expanded ? [...hiddenEntries, ...visibleEntries] : visibleEntries
 
           for (const workEntry of renderedEntries)
@@ -938,7 +947,10 @@ export function deriveMessagesTimelineRows(input: {
             onlyToolEntries: visibleGroupedEntries.every((entry) => workLogEntryIsToolLike(entry)),
             summary: null,
             summaryKind: null,
-            hasFailure: hiddenEntries.some(workEntryDisplayIndicatesToolFailure),
+            hasFailure:
+              latestToolEntry !== undefined &&
+              workEntryDisplayIndicatesToolFailure(latestToolEntry) &&
+              hiddenEntries.some(workEntryDisplayIndicatesToolFailure),
           })
         }
       }

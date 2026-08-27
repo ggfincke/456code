@@ -2,7 +2,11 @@
 // verify version skew behavior
 
 import { EnvironmentId } from '@t3tools/contracts'
-import { describe, expect, it } from 'vite-plus/test'
+import { describe, expect, it, vi } from 'vite-plus/test'
+
+vi.mock('../../../../apps/web/src/lib/branding/branding', () => ({
+  APP_VERSION: '2.1.111-nightly.20260826.10',
+}))
 
 import { APP_VERSION } from '../../../../apps/web/src/lib/branding/branding'
 import {
@@ -23,13 +27,23 @@ describe('versionSkew', () =>
     expect(resolveVersionMismatch(APP_VERSION)).toBeNull()
   })
 
-  it('returns a mismatch when the server version differs from the client', () =>
+  it('warns only when the server is behind', () =>
   {
-    expect(resolveVersionMismatch('9.9.9')).toEqual({
+    expect(resolveVersionMismatch('2.1.110')).toEqual({
       clientVersion: APP_VERSION,
-      serverVersion: '9.9.9',
+      serverVersion: '2.1.110',
       hint: 'Version mismatch. Try syncing the client and server to the same 456code version.',
     })
+    expect(resolveVersionMismatch('2.1.112')).toBeNull()
+  })
+
+  it('compares nightly sequence numbers within the same release', () =>
+  {
+    expect(resolveVersionMismatch('2.1.111-nightly.20260826.9')).toMatchObject({
+      serverVersion: '2.1.111-nightly.20260826.9',
+    })
+    expect(resolveVersionMismatch('2.1.111-nightly.20260826.11')).toBeNull()
+    expect(resolveVersionMismatch('2.1.111')).toBeNull()
   })
 
   it('reads the server version from config descriptors', () =>
@@ -43,14 +57,14 @@ describe('versionSkew', () =>
             os: 'darwin',
             arch: 'arm64',
           },
-          serverVersion: '9.9.9',
+          serverVersion: '2.1.110',
           capabilities: {
             repositoryIdentity: true,
           },
         },
       }),
     ).toMatchObject({
-      serverVersion: '9.9.9',
+      serverVersion: '2.1.110',
     })
   })
 
@@ -59,10 +73,10 @@ describe('versionSkew', () =>
     const environmentId = EnvironmentId.make('environment-dismissal')
     const key = buildVersionMismatchDismissalKey(environmentId, {
       clientVersion: APP_VERSION,
-      serverVersion: '9.9.9',
+      serverVersion: '2.1.110',
     })
 
-    expect(key).toBe(`${environmentId}:${APP_VERSION}:9.9.9`)
+    expect(key).toBe(`${environmentId}:${APP_VERSION}:2.1.110`)
     expect(isVersionMismatchDismissed(key)).toBe(false)
 
     dismissVersionMismatch(key)
@@ -80,7 +94,7 @@ describe('versionSkew', () =>
 
   it('appends a hint to connection errors when versions differ', () =>
   {
-    const mismatch = resolveVersionMismatch('9.9.9')
+    const mismatch = resolveVersionMismatch('2.1.110')
 
     expect(appendVersionMismatchHint('Socket closed.', mismatch)).toBe(
       'Socket closed. Hint: Version mismatch. Try syncing the client and server to the same 456code version.',
