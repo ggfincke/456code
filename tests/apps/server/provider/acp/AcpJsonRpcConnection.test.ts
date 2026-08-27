@@ -407,7 +407,7 @@ describe('AcpSessionRuntime', () =>
     ),
   )
 
-  it.effect('suppresses generic placeholder tool updates until completion', () =>
+  it.effect('emits status-only tool updates through completion', () =>
     Effect.gen(function* ()
     {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime
@@ -418,14 +418,18 @@ describe('AcpSessionRuntime', () =>
       })
       expect(promptResult).toMatchObject({ stopReason: 'end_turn' })
 
-      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 1)))
-      expect(notes.map((note) => note._tag)).toEqual(['ToolCallUpdated'])
-      const toolCall = notes[0]
-      expect(toolCall?._tag).toBe('ToolCallUpdated')
-      if (toolCall?._tag === 'ToolCallUpdated')
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 3)))
+      const toolCalls = notes.flatMap((note) =>
+        note._tag === 'ToolCallUpdated' ? [note.toolCall] : [],
+      )
+      expect(toolCalls.map((toolCall) => toolCall.status)).toEqual([
+        'pending',
+        'inProgress',
+        'completed',
+      ])
+      for (const toolCall of toolCalls)
       {
-        expect(toolCall.toolCall.status).toBe('completed')
-        expect(toolCall.toolCall.title).toBe('Read file')
+        expect(toolCall.title).toBe('Read file')
       }
     }).pipe(
       Effect.provide(
@@ -436,6 +440,55 @@ describe('AcpSessionRuntime', () =>
             env: {
               T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS: '1',
             },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: 't3-test', version: '0.0.0' },
+          authMethodId: 'test',
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  )
+
+  it.effect('tracks emitted stdout length while command detail stays fixed', () =>
+    Effect.gen(function* ()
+    {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime
+      yield* runtime.start()
+      yield* runtime.prompt({ prompt: [{ type: 'text', text: 'progress' }] })
+      const notes = yield* Stream.runCollect(
+        runtime
+          .getEvents()
+          .pipe(
+            Stream.takeUntil(
+              (event) => event._tag === 'ToolCallUpdated' && event.toolCall.status === 'completed',
+            ),
+          ),
+      )
+      const toolCalls = notes.flatMap((note) =>
+        note._tag === 'ToolCallUpdated' ? [note.toolCall] : [],
+      )
+      expect(
+        toolCalls.map((toolCall) => ({
+          status: toolCall.status,
+          stdout: (toolCall.data.rawOutput as { stdout: string } | undefined)?.stdout.length,
+        })),
+      ).toEqual([
+        { status: 'pending', stdout: undefined },
+        { status: 'inProgress', stdout: 0 },
+        { status: 'inProgress', stdout: 300 },
+        { status: 'inProgress', stdout: 600 },
+        { status: 'completed', stdout: 601 },
+      ])
+      expect(toolCalls.every((toolCall) => toolCall.detail === 'echo progress')).toBe(true)
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { T3_ACP_EMIT_GROWING_TOOL_OUTPUT: '1' },
           },
           cwd: process.cwd(),
           clientInfo: { name: 't3-test', version: '0.0.0' },
