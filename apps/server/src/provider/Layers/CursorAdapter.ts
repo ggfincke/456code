@@ -357,7 +357,7 @@ function selectPermissionOptionId(
 ): string | undefined
 {
   const kind =
-    decision === 'acceptForSession'
+    decision === 'acceptForSession' || decision === 'acceptAlways'
       ? 'allow_always'
       : decision === 'accept'
         ? 'allow_once'

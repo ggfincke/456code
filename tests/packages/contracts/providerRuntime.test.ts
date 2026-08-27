@@ -10,6 +10,42 @@ const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent)
 
 describe('ProviderRuntimeEvent', () =>
 {
+  it('decodes MCP elicitation approvals with persistent decision options', () =>
+  {
+    const parsed = decodeRuntimeEvent({
+      type: 'request.opened',
+      eventId: 'event-mcp-elicitation',
+      provider: 'codex',
+      createdAt: '2026-08-24T00:00:00.000Z',
+      threadId: 'thread-1',
+      requestId: 'request-safari',
+      payload: {
+        requestType: 'mcp_elicitation_approval',
+        detail: 'Allow ChatGPT to use Safari?',
+        appName: 'Safari',
+        options: [
+          { decision: 'decline', label: 'Decline' },
+          { decision: 'acceptAlways', label: 'Always allow Safari' },
+          { decision: 'accept', label: 'Approve' },
+        ],
+      },
+    })
+
+    expect(parsed.type).toBe('request.opened')
+    if (parsed.type !== 'request.opened')
+    {
+      throw new Error('expected request.opened')
+    }
+    expect(parsed.payload).toMatchObject({
+      requestType: 'mcp_elicitation_approval',
+      appName: 'Safari',
+    })
+    expect(parsed.payload.options?.[1]).toEqual({
+      decision: 'acceptAlways',
+      label: 'Always allow Safari',
+    })
+  })
+
   it('accepts fork-provided driver kinds as branded slugs', () =>
   {
     const parsed = decodeRuntimeEvent({

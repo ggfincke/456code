@@ -35,6 +35,7 @@ import * as Crypto from 'effect/Crypto'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Equal from 'effect/Equal'
+import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
@@ -486,6 +487,7 @@ const make = Effect.gen(function* ()
   const checkpointStore = yield* CheckpointStore.CheckpointStore
   const checkpointIdentity = yield* CheckpointIdentityResolver
   const gitWorkflow = yield* GitWorkflowService
+  const fileSystem = yield* FileSystem.FileSystem
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster
   const textGeneration = yield* TextGeneration
   const serverSettingsService = yield* ServerSettingsService
@@ -643,7 +645,8 @@ const make = Effect.gen(function* ()
     readonly approvalOutcome?: {
       readonly requestId: string
       readonly status: 'stale-terminal' | 'unknown'
-      readonly requestedDecision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
+      readonly requestedDecision:
+        'accept' | 'acceptForSession' | 'acceptAlways' | 'decline' | 'cancel'
       readonly detail: string
       readonly actionId?: string
       readonly updatedAt: string
@@ -714,7 +717,7 @@ const make = Effect.gen(function* ()
   const appendApprovalAcceptedActivity = (input: {
     readonly thread: OrchestrationThread
     readonly requestId: string
-    readonly decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel'
+    readonly decision: 'accept' | 'acceptForSession' | 'acceptAlways' | 'decline' | 'cancel'
     readonly createdAt: string
   }) =>
     Effect.all({
@@ -878,6 +881,56 @@ const make = Effect.gen(function* ()
   {
     const thread = requireActiveEnvironment().thread
     return thread?.id === threadId ? thread : undefined
+  })
+
+  const resolveLatestThread = Effect.fnUntraced(function* (threadId: ThreadId)
+  {
+    return Option.getOrUndefined(yield* projectionSnapshotQuery.getThreadDetailById(threadId))
+  })
+
+  const ensureThreadWorktree = Effect.fnUntraced(function* (thread: OrchestrationThread)
+  {
+    if (!thread.worktreePath || !thread.branch)
+    {
+      return
+    }
+    const exists = yield* fileSystem
+      .exists(thread.worktreePath)
+      .pipe(Effect.orElseSucceed(() => true))
+    if (exists)
+    {
+      return
+    }
+
+    const project = requireActiveEnvironment().project
+    if (!project || project.id !== thread.projectId)
+    {
+      return
+    }
+
+    yield* Effect.logWarning('provider command reactor recreating missing worktree', {
+      threadId: thread.id,
+      worktreePath: thread.worktreePath,
+      branch: thread.branch,
+    })
+    yield* gitWorkflow.pruneWorktrees({ cwd: project.workspaceRoot }).pipe(
+      Effect.andThen(
+        gitWorkflow.createWorktree({
+          cwd: project.workspaceRoot,
+          refName: thread.branch,
+          path: thread.worktreePath,
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning('provider command reactor failed to recreate worktree', {
+              threadId: thread.id,
+              worktreePath: thread.worktreePath,
+              cause: Cause.pretty(cause),
+            }),
+      ),
+    )
   })
 
   const scheduleProviderSwitchCleanup = Effect.fnUntraced(function* (input: {
@@ -1556,6 +1609,8 @@ const make = Effect.gen(function* ()
       return
     }
 
+    yield* ensureThreadWorktree(thread)
+
     const handleTurnStartFailure = (cause: Cause.Cause<unknown>) =>
     {
       if (Cause.hasInterruptsOnly(cause))
@@ -1660,8 +1715,8 @@ const make = Effect.gen(function* ()
     {
       return
     }
-    const hasSession = thread.session && thread.session.status !== 'stopped'
-    if (!hasSession)
+    const session = thread.session
+    if (!session || session.status === 'stopped')
     {
       return yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1673,10 +1728,87 @@ const make = Effect.gen(function* ()
       })
     }
 
-    // orchestration turn ids are not provider turn ids, so interrupt by session.
+    const recoverInterruptFailure = (cause: Cause.Cause<unknown>) =>
+    {
+      if (Cause.hasInterruptsOnly(cause))
+      {
+        return Effect.interrupt
+      }
+
+      const detail = formatFailureDetail(cause)
+      const isRecoverableSession = (
+        candidate: OrchestrationSession | null | undefined,
+      ): candidate is OrchestrationSession =>
+        candidate !== null &&
+        candidate !== undefined &&
+        candidate.status !== 'stopped' &&
+        candidate.status !== 'ready' &&
+        candidate.updatedAt === session.updatedAt &&
+        candidate.providerInstanceId === session.providerInstanceId &&
+        (event.payload.turnId === undefined ||
+          candidate.activeTurnId === null ||
+          candidate.activeTurnId === event.payload.turnId)
+
+      return Effect.gen(function* ()
+      {
+        const latestSession = (yield* resolveLatestThread(event.payload.threadId))?.session
+        if (!isRecoverableSession(latestSession))
+        {
+          return
+        }
+
+        yield* invokeProvider(
+          providerService.stopSession({ threadId: event.payload.threadId }, activeEffectContext),
+        ).pipe(
+          Effect.catchCause((stopCause) =>
+          {
+            if (Cause.hasInterruptsOnly(stopCause))
+            {
+              return Effect.interrupt
+            }
+            return Effect.logWarning(
+              'provider command reactor failed to stop session after interrupt failure',
+              {
+                threadId: event.payload.threadId,
+                cause: Cause.pretty(stopCause),
+                originalCause: Cause.pretty(cause),
+              },
+            )
+          }),
+        )
+
+        const stoppedSession = (yield* resolveLatestThread(event.payload.threadId))?.session
+        if (!isRecoverableSession(stoppedSession))
+        {
+          return
+        }
+
+        yield* setThreadSession({
+          threadId: event.payload.threadId,
+          session: {
+            ...stoppedSession,
+            status: 'stopped',
+            activeTurnId: null,
+            lastError: detail,
+            updatedAt: event.payload.createdAt,
+          },
+          createdAt: event.payload.createdAt,
+        })
+        yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: 'provider.turn.interrupt.failed',
+          summary: 'Provider turn interrupt failed',
+          detail,
+          turnId: event.payload.turnId ?? null,
+          createdAt: event.payload.createdAt,
+        })
+      })
+    }
+
+    // orchestration turn ids are not provider turn ids, so interrupt by session
     yield* invokeProvider(
       providerService.interruptTurn({ threadId: event.payload.threadId }, activeEffectContext),
-    )
+    ).pipe(Effect.catchCause(recoverInterruptFailure))
   })
 
   const isCurrentProviderSwitchRequest = Effect.fnUntraced(function* (

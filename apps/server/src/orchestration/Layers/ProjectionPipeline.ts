@@ -2684,6 +2684,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             const resolvedDecision =
               resolvedDecisionRaw === 'accept' ||
               resolvedDecisionRaw === 'acceptForSession' ||
+              resolvedDecisionRaw === 'acceptAlways' ||
               resolvedDecisionRaw === 'decline' ||
               resolvedDecisionRaw === 'cancel'
                 ? resolvedDecisionRaw
@@ -2718,6 +2719,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               requestedDecision:
                 payload?.requestedDecision === 'accept' ||
                 payload?.requestedDecision === 'acceptForSession' ||
+                payload?.requestedDecision === 'acceptAlways' ||
                 payload?.requestedDecision === 'decline' ||
                 payload?.requestedDecision === 'cancel'
                   ? payload.requestedDecision
@@ -2765,6 +2767,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               requestedDecision:
                 embeddedOutcome?.requestedDecision === 'accept' ||
                 embeddedOutcome?.requestedDecision === 'acceptForSession' ||
+                embeddedOutcome?.requestedDecision === 'acceptAlways' ||
                 embeddedOutcome?.requestedDecision === 'decline' ||
                 embeddedOutcome?.requestedDecision === 'cancel'
                   ? embeddedOutcome.requestedDecision

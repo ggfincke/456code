@@ -731,6 +731,71 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     }),
   )
 
+  it.effect('preserves failed and declined outcomes on completed tool items', () =>
+    Effect.gen(function* ()
+    {
+      const { adapter, runtime } = yield* startLifecycleRuntime()
+      const items = [
+        {
+          type: 'commandExecution',
+          id: 'failed-command',
+          command: 'vp test run',
+          commandActions: [],
+          cwd: '/tmp',
+          exitCode: 1,
+          status: 'failed',
+        },
+        {
+          type: 'mcpToolCall',
+          id: 'failed-mcp',
+          server: 'simulator',
+          tool: 'build',
+          arguments: {},
+          error: { message: 'Build failed' },
+          status: 'failed',
+        },
+        {
+          type: 'fileChange',
+          id: 'declined-change',
+          changes: [],
+          status: 'declined',
+        },
+      ] as const
+
+      for (const item of items)
+      {
+        const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+          Effect.forkChild,
+        )
+
+        yield* runtime.emit({
+          id: asEventId(`evt-${item.id}`),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          method: 'item/completed',
+          threadId: asThreadId('thread-1'),
+          turnId: asTurnId('turn-1'),
+          itemId: asItemId(item.id),
+          payload: {
+            completedAtMs: 1_778_000_000_000,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item,
+          },
+        })
+
+        const firstEvent = yield* Fiber.join(firstEventFiber)
+        NodeAssert.equal(firstEvent._tag, 'Some')
+        if (firstEvent._tag !== 'Some' || firstEvent.value.type !== 'item.completed')
+        {
+          return
+        }
+        NodeAssert.equal(firstEvent.value.payload.status, item.status)
+      }
+    }),
+  )
+
   it.effect('labels MCP lifecycle entries with server and tool names', () =>
     Effect.gen(function* ()
     {
@@ -1115,6 +1180,78 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
         firstEvent.value.payload.message,
         '2026-03-31T18:14:06.833399Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 503 Service Unavailable, url: wss://chatgpt.com/backend-api/codex/responses',
       )
+    }),
+  )
+
+  it.effect('maps MCP elicitation requests and resolutions into app access approvals', () =>
+    Effect.gen(function* ()
+    {
+      const { adapter, runtime } = yield* startLifecycleRuntime()
+      const openedFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
+
+      yield* runtime.emit({
+        id: asEventId('evt-mcp-elicitation'),
+        kind: 'request',
+        provider: ProviderDriverKind.make('codex'),
+        threadId: asThreadId('thread-1'),
+        createdAt: '2026-08-24T00:00:00.000Z',
+        method: 'mcpServer/elicitation/request',
+        requestKind: 'mcp-elicitation',
+        requestId: ApprovalRequestId.make('req-safari'),
+        turnId: asTurnId('turn-1'),
+        payload: {
+          mode: 'form',
+          message: 'Allow ChatGPT to use Safari?',
+          serverName: 'computer-use',
+          threadId: 'provider-thread-1',
+          turnId: 'turn-1',
+          _meta: { app_name: 'Safari', persist: ['session', 'always'] },
+          requestedSchema: { type: 'object', properties: {} },
+        },
+      } satisfies ProviderEvent)
+
+      const opened = yield* Fiber.join(openedFiber)
+      NodeAssert.equal(opened._tag, 'Some')
+      if (opened._tag !== 'Some' || opened.value.type !== 'request.opened')
+      {
+        return
+      }
+      NodeAssert.equal(opened.value.payload.requestType, 'mcp_elicitation_approval')
+      NodeAssert.equal(opened.value.payload.appName, 'Safari')
+      NodeAssert.equal(opened.value.payload.detail, 'Allow ChatGPT to use Safari?')
+      NodeAssert.deepStrictEqual(opened.value.payload.options, [
+        { decision: 'cancel', label: 'Cancel' },
+        { decision: 'decline', label: 'Decline' },
+        { decision: 'acceptForSession', label: 'Always allow this session' },
+        { decision: 'acceptAlways', label: 'Always allow' },
+        { decision: 'accept', label: 'Approve' },
+      ])
+
+      const resolvedFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
+      yield* runtime.emit({
+        id: asEventId('evt-mcp-elicitation-resolved'),
+        kind: 'notification',
+        provider: ProviderDriverKind.make('codex'),
+        threadId: asThreadId('thread-1'),
+        createdAt: '2026-08-24T00:00:01.000Z',
+        method: 'item/requestApproval/decision',
+        requestKind: 'mcp-elicitation',
+        requestId: ApprovalRequestId.make('req-safari'),
+        payload: { decision: 'acceptAlways' },
+      } satisfies ProviderEvent)
+
+      const resolved = yield* Fiber.join(resolvedFiber)
+      NodeAssert.equal(resolved._tag, 'Some')
+      if (resolved._tag !== 'Some' || resolved.value.type !== 'request.resolved')
+      {
+        return
+      }
+      NodeAssert.equal(resolved.value.payload.requestType, 'mcp_elicitation_approval')
+      NodeAssert.equal(resolved.value.payload.decision, 'acceptAlways')
     }),
   )
 

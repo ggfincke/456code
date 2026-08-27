@@ -1549,7 +1549,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
     }),
   )
 
-  it.effect('responds to ACP approvals using provider-supplied option ids', () =>
+  it.effect('maps persistent approvals to provider-supplied allow-always option ids', () =>
     Effect.gen(function* ()
     {
       const threadId = ThreadId.make('grok-custom-approval-option-id')
@@ -1561,7 +1561,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         makeMockGrokWrapper({
           T3_ACP_REQUEST_LOG_PATH: requestLogPath,
           T3_ACP_EMIT_TOOL_CALLS: '1',
-          T3_ACP_ALLOW_ONCE_OPTION_ID: 'agent-defined-approval-id',
+          T3_ACP_ALLOW_ALWAYS_OPTION_ID: 'agent-defined-always-approval-id',
         }),
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
@@ -1570,7 +1570,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
           ? adapter.respondToRequest(
               threadId,
               ApprovalRequestId.make(String(event.requestId)),
-              'accept',
+              'acceptAlways',
             )
           : Effect.void,
       ).pipe(Effect.forkChild)
@@ -1594,7 +1594,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
             typeof entry.result.outcome === 'object' &&
             entry.result.outcome !== null &&
             'optionId' in entry.result.outcome &&
-            entry.result.outcome.optionId === 'agent-defined-approval-id',
+            entry.result.outcome.optionId === 'agent-defined-always-approval-id',
         ),
       )
 

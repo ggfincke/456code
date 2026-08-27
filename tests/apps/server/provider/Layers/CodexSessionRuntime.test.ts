@@ -21,10 +21,12 @@ import {
 import { codexSessionAppServerArgs } from '../../../../../apps/server/src/provider/Layers/codexLaunchArgs.ts'
 import {
   buildTurnStartParams,
+  describeMcpElicitation,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
+  toMcpElicitationResponse,
 } from '../../../../../apps/server/src/provider/Layers/CodexSessionRuntime.ts'
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError)
 
@@ -281,6 +283,101 @@ describe('buildTurnStartParams', () =>
         },
       ],
     })
+  })
+})
+
+describe('Codex MCP elicitation approvals', () =>
+{
+  const request = {
+    mode: 'form',
+    message: 'Allow ChatGPT to use Safari?',
+    serverName: 'computer-use',
+    threadId: 'provider-thread-1',
+    turnId: 'turn-1',
+    _meta: {
+      app_name: 'Safari',
+      persist: ['session', 'always'],
+    },
+    requestedSchema: {
+      type: 'object',
+      properties: {
+        approval: {
+          type: 'string',
+          oneOf: [
+            { const: 'once', title: 'Allow once' },
+            { const: 'session', title: 'Allow for this session' },
+            { const: 'always', title: 'Always allow Safari' },
+          ],
+        },
+      },
+      required: ['approval'],
+    },
+  } satisfies EffectCodexSchema.McpServerElicitationRequestParams
+
+  it('advertises and returns only persistence choices supported by the form schema', () =>
+  {
+    NodeAssert.deepStrictEqual(describeMcpElicitation(request), {
+      appName: 'Safari',
+      options: [
+        { decision: 'cancel', label: 'Cancel' },
+        { decision: 'decline', label: 'Decline' },
+        { decision: 'acceptForSession', label: 'Allow for this session' },
+        { decision: 'acceptAlways', label: 'Always allow Safari' },
+        { decision: 'accept', label: 'Approve' },
+      ],
+    })
+    NodeAssert.deepStrictEqual(toMcpElicitationResponse(request, 'acceptAlways'), {
+      action: 'accept',
+      _meta: { persist: 'always' },
+      content: { approval: 'always' },
+    })
+
+    const onceOnlyRequest = {
+      ...request,
+      requestedSchema: {
+        type: 'object',
+        properties: { approval: { type: 'string', enum: ['once'] } },
+        required: ['approval'],
+      },
+    } satisfies EffectCodexSchema.McpServerElicitationRequestParams
+    NodeAssert.deepStrictEqual(describeMcpElicitation(onceOnlyRequest).options, [
+      { decision: 'cancel', label: 'Cancel' },
+      { decision: 'decline', label: 'Decline' },
+      { decision: 'accept', label: 'Approve' },
+    ])
+  })
+
+  it('declines URL elicitations and required form fields the approval UI cannot collect', () =>
+  {
+    NodeAssert.deepStrictEqual(
+      toMcpElicitationResponse(
+        {
+          mode: 'url',
+          message: 'Finish signing in to continue.',
+          serverName: 'computer-use',
+          threadId: 'provider-thread-1',
+          turnId: 'turn-1',
+          elicitationId: 'sign-in-1',
+          url: 'https://example.com/authorize',
+        },
+        'accept',
+      ),
+      { action: 'decline' },
+    )
+    NodeAssert.deepStrictEqual(
+      toMcpElicitationResponse(
+        {
+          ...request,
+          requestedSchema: {
+            type: 'object',
+            properties: { email: { type: 'string', format: 'email' } },
+            required: ['email'],
+          },
+        },
+        'accept',
+      ),
+      { action: 'decline' },
+    )
   })
 })
 

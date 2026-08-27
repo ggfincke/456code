@@ -206,6 +206,27 @@ describe('projectActivityPayload', () =>
     })
   })
 
+  it('preserves only the failed and declined outcomes in mixed completed tool activity', () =>
+  {
+    const activities = [
+      makeActivity('failed-command', 'command_execution', {
+        item: { command: 'vp test run', status: 'failed' },
+      }),
+      makeActivity('declined-change', 'file_change', {
+        item: { changes: [], status: 'declined' },
+      }),
+      makeActivity('completed-command', 'command_execution', {
+        item: { command: 'vp lint', status: 'completed' },
+      }),
+    ]
+
+    expect(
+      activities.map(
+        (activity) => (projectActivityPayload(activity).payload as Record<string, unknown>).status,
+      ),
+    ).toEqual(['failed', 'declined', 'completed'])
+  })
+
   it('normalizes provider-specific command inputs before slimming tool data', () =>
   {
     const claude = projectActivityPayload({

@@ -7,6 +7,7 @@ import {
   normalizeCollaborationMode,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderApprovalDecision,
   type ProviderRuntimeEvent,
   type ProviderSession,
   RuntimeItemId,
@@ -377,14 +378,16 @@ function mapPermissionToRequestType(
   }
 }
 
-function mapPermissionDecision(reply: 'once' | 'always' | 'reject'): string
+export function mapOpenCodePermissionDecision(
+  reply: 'once' | 'always' | 'reject',
+): ProviderApprovalDecision
 {
   switch (reply)
   {
     case 'once':
       return 'accept'
     case 'always':
-      return 'acceptForSession'
+      return 'acceptAlways'
     case 'reject':
     default:
       return 'decline'
@@ -1097,7 +1100,7 @@ export function makeOpenCodeAdapter(
             type: 'request.resolved',
             payload: {
               requestType: 'unknown',
-              decision: mapPermissionDecision(event.properties.reply),
+              decision: mapOpenCodePermissionDecision(event.properties.reply),
             },
           })
           break

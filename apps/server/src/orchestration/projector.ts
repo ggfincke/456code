@@ -131,6 +131,7 @@ function approvalOutcomeFromActivity(
     const decision =
       payload?.decision === 'accept' ||
       payload?.decision === 'acceptForSession' ||
+      payload?.decision === 'acceptAlways' ||
       payload?.decision === 'decline' ||
       payload?.decision === 'cancel'
         ? payload.decision

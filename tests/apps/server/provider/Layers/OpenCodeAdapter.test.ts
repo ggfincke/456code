@@ -34,11 +34,13 @@ import {
   OpenCodeRuntime,
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
+  toOpenCodePermissionReply,
 } from '../../../../../apps/server/src/provider/opencodeRuntime.ts'
 import {
   appendOpenCodeAssistantTextDelta,
   isOpenCodeNotFound,
   isSameOpenCodeDirectory,
+  mapOpenCodePermissionDecision,
   makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
   toToolLifecycleItemType,
@@ -56,6 +58,12 @@ class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterSh
 {}
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value)
+
+it('maps accept-always approvals to OpenCode persistent permission replies', () =>
+{
+  NodeAssert.equal(toOpenCodePermissionReply('acceptAlways'), 'always')
+  NodeAssert.equal(mapOpenCodePermissionDecision('always'), 'acceptAlways')
+})
 
 type OpenCodeTestSessionStartInput = Omit<
   Parameters<OpenCodeAdapterShape['startSession']>[0],

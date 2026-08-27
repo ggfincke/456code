@@ -11,7 +11,7 @@ import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrat
 import { isToolLifecycleItemType } from '@t3tools/shared/toolActivity'
 import { collectToolMutationTargets } from '@t3tools/shared/toolMutationTargets'
 
-export type WorkLogRequestKind = 'command' | 'file-read' | 'file-change'
+export type WorkLogRequestKind = 'command' | 'file-read' | 'file-change' | 'mcp-elicitation'
 
 export type WorkLogToolLifecycleStatus =
   'inProgress' | 'completed' | 'failed' | 'declined' | 'stopped'
@@ -325,7 +325,8 @@ export function extractWorkLogRequestKind(
   if (
     payload?.requestKind === 'command' ||
     payload?.requestKind === 'file-read' ||
-    payload?.requestKind === 'file-change'
+    payload?.requestKind === 'file-change' ||
+    payload?.requestKind === 'mcp-elicitation'
   )
   {
     return payload.requestKind

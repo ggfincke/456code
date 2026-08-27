@@ -669,6 +669,12 @@ it.layer(NodeServices.layer)('GeminiAdapterLive', (it) =>
           expectedOptionId: 'gemini-agent-allow-once',
         },
         {
+          label: 'allow-always',
+          decision: 'acceptAlways' as const,
+          optionEnvironment: { T3_ACP_ALLOW_ALWAYS_OPTION_ID: 'gemini-agent-allow-always' },
+          expectedOptionId: 'gemini-agent-allow-always',
+        },
+        {
           label: 'reject',
           decision: 'decline' as const,
           optionEnvironment: { T3_ACP_REJECT_ONCE_OPTION_ID: 'gemini-agent-reject-once' },
