@@ -7,6 +7,7 @@ import {
   resolveMarkdownFileLinkMeta,
   resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
+  shouldOpenMarkdownFileLinkInBrowserByDefault,
 } from '../../../../../apps/web/src/lib/markdown/links'
 
 describe('rewriteMarkdownFileUriHref', () =>
@@ -72,6 +73,19 @@ describe('resolveMarkdownFileLinkTarget', () =>
     expect(resolveMarkdownFileLinkTarget('AGENTS.md', '/Users/julius/project')).toBe(
       '/Users/julius/project/AGENTS.md',
     )
+  })
+
+  it('resolves percent-decoded filenames and paths containing spaces', () =>
+  {
+    expect(resolveMarkdownFileLinkTarget('Release%20Notes.md', '/Users/julius/project')).toBe(
+      '/Users/julius/project/Release Notes.md',
+    )
+    expect(
+      resolveMarkdownFileLinkTarget(
+        'docs/Release%20Notes/Upgrade%20Guide.md:12',
+        '/Users/julius/project',
+      ),
+    ).toBe('/Users/julius/project/docs/Release Notes/Upgrade Guide.md:12')
   })
 
   it('maps #L line anchors to editor line suffixes', () =>
@@ -149,6 +163,17 @@ describe('resolveMarkdownFileLinkTarget', () =>
   it('does not treat app routes as file links', () =>
   {
     expect(resolveMarkdownFileLinkTarget('/chat/settings')).toBeNull()
+  })
+})
+
+describe('default file routing', () =>
+{
+  it('opens only PDFs in the browser by default', () =>
+  {
+    expect(shouldOpenMarkdownFileLinkInBrowserByDefault('/repo/report.PDF')).toBe(true)
+    expect(shouldOpenMarkdownFileLinkInBrowserByDefault('/repo/index.html')).toBe(false)
+    expect(shouldOpenMarkdownFileLinkInBrowserByDefault('/repo/schema.xml')).toBe(false)
+    expect(shouldOpenMarkdownFileLinkInBrowserByDefault('/repo/source.ts')).toBe(false)
   })
 })
 

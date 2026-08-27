@@ -45,6 +45,7 @@
     "expo-sqlite": "~56.0.5",
     "expo-widgets": "~56.0.19",
     "happy-dom": "^20.11.2",
+    "heic-to": "^1.5.2",
     "jose": "catalog:",
     "lexical": "^0.41.0",
     "node-pty": "^1.1.0",

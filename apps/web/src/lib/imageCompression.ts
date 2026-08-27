@@ -7,10 +7,22 @@ const MAX_DIMENSION = 2048
 export const MAX_STASH_IMAGE_DATA_URL_CHARS = 1_300_000
 // avoid decoding source files large enough to exhaust the tab
 export const MAX_COMPRESSIBLE_SOURCE_BYTES = 50 * 1024 * 1024
+// bound rgba allocation before loading the heic decoder
+const MAX_HEIC_DECODE_PIXELS = 64_000_000
+// heic dimensions live in the leading iso-bmff metadata
+const MAX_HEIC_METADATA_BYTES = 1024 * 1024
 // reduce quality before resolution to preserve readable ui screenshots
 const QUALITY_STEPS = [0.92, 0.85, 0.78, 0.68] as const
 // reduces resolution when the quality floor still exceeds the budget
 const FALLBACK_SCALE_STEPS = [0.75, 0.55] as const
+const HEIC_IMAGE_MIME_TYPE = /^image\/hei(?:c|f)$/i
+const HEIC_IMAGE_EXTENSION = /\.(?:heic|heif)$/i
+const ISO_BOX_FTYP = 0x66747970
+const ISO_BOX_META = 0x6d657461
+const ISO_BOX_IPRP = 0x69707270
+const ISO_BOX_IPCO = 0x6970636f
+const ISO_BOX_ISPE = 0x69737065
+const HEIC_SEQUENCE_BRANDS = new Set([0x68657663, 0x68657678, 0x6d736631])
 
 export interface CompressedStashImage
 {
@@ -30,6 +42,96 @@ export type CompressStashImageResult =
 export type CompressImageFileResult =
   | { ok: true; file: File; recompressed: boolean }
   | { ok: false; reason: ImageCompressionFailureReason }
+
+// finder and some browsers omit heic mime types during paste and drag
+export function isHeicImageFile(file: Pick<File, 'name' | 'type'>): boolean
+{
+  if (HEIC_IMAGE_MIME_TYPE.test(file.type)) return true
+  return (
+    (file.type === '' || file.type.toLowerCase() === 'application/octet-stream') &&
+    HEIC_IMAGE_EXTENSION.test(file.name)
+  )
+}
+
+interface IsoBox
+{
+  payloadOffset: number
+  endOffset: number
+}
+
+// walk one bounded iso-bmff box range without reading media payloads
+function findIsoBox(
+  view: DataView,
+  startOffset: number,
+  endOffset: number,
+  type: number,
+): IsoBox | null
+{
+  let offset = startOffset
+  while (offset + 8 <= endOffset)
+  {
+    let size = view.getUint32(offset)
+    let headerSize = 8
+    if (size === 1)
+    {
+      if (offset + 16 > endOffset) return null
+      const extendedSize = view.getBigUint64(offset + 8)
+      if (extendedSize > BigInt(Number.MAX_SAFE_INTEGER)) return null
+      size = Number(extendedSize)
+      headerSize = 16
+    }
+    else if (size === 0)
+    {
+      size = endOffset - offset
+    }
+    if (size < headerSize || size > endOffset - offset) return null
+
+    const nextOffset = offset + size
+    if (view.getUint32(offset + 4) === type)
+    {
+      return { payloadOffset: offset + headerSize, endOffset: nextOffset }
+    }
+    offset = nextOffset
+  }
+  return null
+}
+
+// validate container kind and dimensions before allocating decoder memory
+async function validateHeicMetadata(file: File): Promise<ImageCompressionFailureReason | null>
+{
+  const metadata = await file.slice(0, MAX_HEIC_METADATA_BYTES).arrayBuffer()
+  const view = new DataView(metadata)
+  const fileType = findIsoBox(view, 0, view.byteLength, ISO_BOX_FTYP)
+  if (!fileType || fileType.payloadOffset + 8 > fileType.endOffset) return 'unreadable'
+  for (let offset = fileType.payloadOffset; offset + 4 <= fileType.endOffset; offset += 4)
+  {
+    if (offset === fileType.payloadOffset + 4) continue
+    if (HEIC_SEQUENCE_BRANDS.has(view.getUint32(offset))) return 'unreadable'
+  }
+
+  const meta = findIsoBox(view, 0, view.byteLength, ISO_BOX_META)
+  if (!meta || meta.payloadOffset + 4 > meta.endOffset) return 'unreadable'
+  const properties = findIsoBox(view, meta.payloadOffset + 4, meta.endOffset, ISO_BOX_IPRP)
+  if (!properties) return 'unreadable'
+  const containers = findIsoBox(view, properties.payloadOffset, properties.endOffset, ISO_BOX_IPCO)
+  if (!containers) return 'unreadable'
+
+  let offset = containers.payloadOffset
+  let foundDimensions = false
+  while (offset < containers.endOffset)
+  {
+    const dimensions = findIsoBox(view, offset, containers.endOffset, ISO_BOX_ISPE)
+    if (!dimensions) break
+    if (dimensions.payloadOffset + 12 > dimensions.endOffset) return 'unreadable'
+    const width = view.getUint32(dimensions.payloadOffset + 4)
+    const height = view.getUint32(dimensions.payloadOffset + 8)
+    if (width === 0 || height === 0) return 'unreadable'
+    if (width > MAX_HEIC_DECODE_PIXELS / height) return 'too-large'
+    foundDimensions = true
+    offset = dimensions.endOffset
+  }
+  return foundDimensions ? null : 'unreadable'
+}
 
 // chunks input to stay below the fromcharcode argument limit
 const BASE64_CHUNK_SIZE = 0x8000
@@ -62,7 +164,12 @@ function dataUrlByteLength(dataUrl: string): number
 }
 
 // decode a base64 data url into a file
-function dataUrlToFile(dataUrl: string, name: string, mimeType: string): File
+function dataUrlToFile(
+  dataUrl: string,
+  name: string,
+  mimeType: string,
+  lastModified: number,
+): File
 {
   const payload = dataUrl.slice(dataUrl.indexOf(',') + 1)
   const binary = atob(payload)
@@ -71,7 +178,7 @@ function dataUrlToFile(dataUrl: string, name: string, mimeType: string): File
   {
     bytes[index] = binary.charCodeAt(index)
   }
-  return new File([bytes], name, { type: mimeType })
+  return new File([bytes], name, { type: mimeType, lastModified })
 }
 
 // keep the file extension aligned with its re-encoded container
@@ -142,6 +249,7 @@ async function encodeWithinBudget(
   bitmap: ImageBitmap,
   maxDimension: number,
   budgetChars: number,
+  preferredMimeType?: 'image/jpeg',
 ): Promise<{ dataUrl: string; mimeType: string } | null>
 {
   const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
@@ -151,8 +259,11 @@ async function encodeWithinBudget(
   if (!target) return null
 
   // probe webp before drawing because jpeg needs a white matte
-  const probe = await encodeCanvas(target.canvas, QUALITY_STEPS[0], 'image/webp', 0)
-  const mimeType = probe ? 'image/webp' : 'image/jpeg'
+  const mimeType =
+    preferredMimeType ??
+    ((await encodeCanvas(target.canvas, QUALITY_STEPS[0], 'image/webp', 0))
+      ? 'image/webp'
+      : 'image/jpeg')
 
   if (mimeType === 'image/jpeg')
   {
@@ -178,7 +289,11 @@ type ReencodeResult =
   | { ok: false; reason: ImageCompressionFailureReason }
 
 // decode once and try each quality and resolution step against the budget
-async function reencodeWithinBudget(file: File, budgetChars: number): Promise<ReencodeResult>
+async function reencodeWithinBudget(
+  file: File,
+  budgetChars: number,
+  preferredMimeType?: 'image/jpeg',
+): Promise<ReencodeResult>
 {
   if (!canRecompress())
   {
@@ -207,7 +322,7 @@ async function reencodeWithinBudget(file: File, budgetChars: number): Promise<Re
       let encoded: { dataUrl: string; mimeType: string } | null
       try
       {
-        encoded = await encodeWithinBudget(bitmap, targetDimension, budgetChars)
+        encoded = await encodeWithinBudget(bitmap, targetDimension, budgetChars, preferredMimeType)
       }
       catch
       {
@@ -276,19 +391,20 @@ export async function compressImageForStash(
 export async function compressImageToByteLimit(
   file: File,
   maxBytes: number,
+  options?: { preferredMimeType?: 'image/jpeg'; sourceSizeBytes?: number },
 ): Promise<CompressImageFileResult>
 {
   if (file.size <= maxBytes)
   {
     return { ok: true, file, recompressed: false }
   }
-  if (file.size > MAX_COMPRESSIBLE_SOURCE_BYTES)
+  if ((options?.sourceSizeBytes ?? file.size) > MAX_COMPRESSIBLE_SOURCE_BYTES)
   {
     return { ok: false, reason: 'too-large' }
   }
   // base64 expands three bytes to four chars; floor for a conservative cap
   const budgetChars = Math.floor(maxBytes / 3) * 4
-  const reencoded = await reencodeWithinBudget(file, budgetChars)
+  const reencoded = await reencodeWithinBudget(file, budgetChars, options?.preferredMimeType)
   if (!reencoded.ok)
   {
     return reencoded
@@ -299,7 +415,53 @@ export async function compressImageToByteLimit(
       reencoded.dataUrl,
       fileNameForMimeType(file.name || 'image', reencoded.mimeType),
       reencoded.mimeType,
+      file.lastModified,
     ),
     recompressed: true,
   }
+}
+
+// convert heic/heif before applying the provider attachment byte budget
+export async function prepareImageForAttachment(
+  file: File,
+  maxBytes: number,
+): Promise<CompressImageFileResult>
+{
+  if (!isHeicImageFile(file)) return compressImageToByteLimit(file, maxBytes)
+  if (file.size > MAX_COMPRESSIBLE_SOURCE_BYTES)
+  {
+    return { ok: false, reason: 'too-large' }
+  }
+
+  let converted: Blob
+  try
+  {
+    const metadataError = await validateHeicMetadata(file)
+    if (metadataError) return { ok: false, reason: metadataError }
+    const { heicTo } = await import('heic-to/csp')
+    const decoded: unknown = await heicTo({
+      blob: file,
+      type: 'image/jpeg',
+      quality: QUALITY_STEPS[0],
+    })
+    if (!(decoded instanceof Blob) || decoded.size === 0 || decoded.type !== 'image/jpeg')
+    {
+      return { ok: false, reason: 'unreadable' }
+    }
+    converted = decoded
+  }
+  catch
+  {
+    return { ok: false, reason: 'unreadable' }
+  }
+
+  const jpeg = new File([converted], fileNameForMimeType(file.name || 'image', 'image/jpeg'), {
+    type: 'image/jpeg',
+    lastModified: file.lastModified,
+  })
+  const compressed = await compressImageToByteLimit(jpeg, maxBytes, {
+    preferredMimeType: 'image/jpeg',
+    sourceSizeBytes: file.size,
+  })
+  return compressed.ok ? { ...compressed, recompressed: true } : compressed
 }

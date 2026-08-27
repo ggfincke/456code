@@ -57,6 +57,23 @@ describe('resolveMarkdownLinkPresentation', () =>
     })
   })
 
+  it('recognizes percent-decoded filenames and paths containing spaces', () =>
+  {
+    expect(resolveMarkdownLinkPresentation('Release%20Notes.md')).toMatchObject({
+      kind: 'file',
+      label: 'Release Notes.md',
+      path: 'Release Notes.md',
+    })
+    expect(
+      resolveMarkdownLinkPresentation('docs/Release%20Notes/Upgrade%20Guide.md:12'),
+    ).toMatchObject({
+      kind: 'file',
+      label: 'Upgrade Guide.md:12',
+      path: 'docs/Release Notes/Upgrade Guide.md',
+      line: 12,
+    })
+  })
+
   it('extracts line fragments from relative file links', () =>
   {
     expect(resolveMarkdownLinkPresentation('src/main.ts#L18C2')).toMatchObject({

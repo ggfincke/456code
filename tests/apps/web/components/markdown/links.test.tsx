@@ -33,7 +33,10 @@ vi.mock('../../../../../apps/web/src/browser/openFileInPreview', () => ({
   isBrowserPreviewFile: (path: string) => /\.(?:html?|pdf)$/i.test(path),
 }))
 
-import { MarkdownFileLink } from '../../../../../apps/web/src/components/markdown/links'
+import {
+  extractMarkdownLinkHrefs,
+  MarkdownFileLink,
+} from '../../../../../apps/web/src/components/markdown/links'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -62,6 +65,81 @@ async function flushMicrotasks(): Promise<void>
 
 describe('MarkdownFileLink', () =>
 {
+  it('extracts angle-bracketed markdown destinations containing spaces', () =>
+  {
+    expect(extractMarkdownLinkHrefs('[notes](<docs/Release Notes.md>)')).toEqual([
+      'docs/Release Notes.md',
+    ])
+  })
+
+  it('routes source files to the panel and preserves the editor modifier', async () =>
+  {
+    const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
+    const openInBrowser = vi.fn(async () => AsyncResult.success(undefined))
+    const openInEditor = vi.fn(async () => AsyncResult.success(undefined))
+    const openInPanel = vi.fn()
+    const resolveTarget = vi.fn(async () => ({
+      filePath: '/repo/src/My File.ts',
+      targetPath: '/repo/src/My File.ts:10',
+      workspaceRelativePath: 'src/My File.ts',
+    }))
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    try
+    {
+      await act(async () =>
+      {
+        root.render(
+          <MarkdownFileLink
+            href="/repo/src/My File.ts:10"
+            filePath="/repo/src/My File.ts"
+            targetPath="/repo/src/My File.ts:10"
+            iconPath="/repo/src/My File.ts"
+            displayPath="src/My File.ts:10"
+            workspaceRelativePath="src/My File.ts"
+            line={10}
+            label="My File.ts"
+            copyMarkdown="[My File.ts](<src/My File.ts:10>)"
+            theme="dark"
+            threadRef={THREAD_REF}
+            onOpen={openInEditor}
+            onResolveTarget={resolveTarget}
+            onOpenInPanel={openInPanel}
+            onOpenInBrowser={openInBrowser}
+          />,
+        )
+      })
+      const link = container.querySelector<HTMLAnchorElement>('a')
+      expect(link).not.toBeNull()
+
+      await act(async () =>
+      {
+        link?.click()
+        await flushMicrotasks()
+      })
+      expect(openInPanel).toHaveBeenCalledWith('src/My File.ts', 10)
+      expect(openInBrowser).not.toHaveBeenCalled()
+      expect(openInEditor).not.toHaveBeenCalled()
+
+      await act(async () =>
+      {
+        link?.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true }))
+        await flushMicrotasks()
+      })
+      expect(openInEditor).toHaveBeenCalledWith('/repo/src/My File.ts:10')
+      expect(openInPanel).toHaveBeenCalledTimes(1)
+      expect(openInBrowser).not.toHaveBeenCalled()
+    }
+    finally
+    {
+      platform.mockRestore()
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+
   it('awaits bare preview resolution and prevents an older click from winning', async () =>
   {
     const firstSearch = deferred<ReadonlyArray<WorkspaceEntryCandidate>>()
