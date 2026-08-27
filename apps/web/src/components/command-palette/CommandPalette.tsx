@@ -5,7 +5,7 @@
 
 import { useAtomValue } from '@effect/atom-react'
 import { useParams } from '@tanstack/react-router'
-import { useCallback, useEffect, useReducer, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 
 import { onOpenCommandPalette } from '../../commandPaletteBus'
 import { isTerminalFocused } from '../../lib/terminalFocus'
@@ -18,6 +18,8 @@ import { resolveShortcutCommand } from '../../keybindings'
 import { CommandDialog } from '../ui/command'
 import { CommandPaletteDialog } from './OpenCommandPaletteDialog'
 import { reduceCommandPaletteUiState } from './uiState'
+import { ProjectFilePicker } from '../files/ProjectFilePicker'
+import { ProjectContentSearch } from '../search/ProjectContentSearch'
 
 export function CommandPalette({ children }: { children: ReactNode })
 {
@@ -31,6 +33,19 @@ export function CommandPalette({ children }: { children: ReactNode })
   const openAddProject = useCallback(() => dispatch({ _tag: 'OpenAddProject' }), [])
   const openNewThreadIn = useCallback(() => dispatch({ _tag: 'OpenNewThreadIn' }), [])
   const clearOpenIntent = useCallback(() => dispatch({ _tag: 'ClearOpenIntent' }), [])
+  const [projectSearchMode, setProjectSearchMode] = useState<'files' | 'contents' | null>(null)
+  const openProjectSearch = useCallback(
+    (mode: 'files' | 'contents') =>
+    {
+      setOpen(false)
+      setProjectSearchMode(mode)
+    },
+    [setOpen],
+  )
+  const closeProjectSearch = useCallback((open: boolean) =>
+  {
+    if (!open) setProjectSearchMode(null)
+  }, [])
   const keybindings = useAtomValue(primaryServerKeybindingsAtom)
   const composerHandleRef = useRef<ChatComposerHandle | null>(null)
   const routeTarget = useParams({
@@ -55,22 +70,37 @@ export function CommandPalette({ children }: { children: ReactNode })
           terminalOpen,
         },
       })
-      if (command !== 'commandPalette.toggle')
+      if (
+        command !== 'commandPalette.toggle' &&
+        command !== 'filePicker.toggle' &&
+        command !== 'projectSearch.toggle'
+      )
       {
         return
       }
       event.preventDefault()
       event.stopPropagation()
-      toggleOpen()
+      if (command === 'commandPalette.toggle')
+      {
+        setProjectSearchMode(null)
+        toggleOpen()
+      }
+      else
+      {
+        setOpen(false)
+        const mode = command === 'filePicker.toggle' ? 'files' : 'contents'
+        setProjectSearchMode((current) => (current === mode ? null : mode))
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [keybindings, terminalOpen, toggleOpen])
+  }, [keybindings, setOpen, terminalOpen, toggleOpen])
 
   useEffect(
     () =>
       onOpenCommandPalette((detail) =>
       {
+        setProjectSearchMode(null)
         if (detail.open === 'new-thread-in')
         {
           openNewThreadIn()
@@ -89,14 +119,24 @@ export function CommandPalette({ children }: { children: ReactNode })
 
   return (
     <ComposerHandleContext value={composerHandleRef}>
-      <CommandDialog open={state.open} onOpenChange={setOpen}>
+      <CommandDialog
+        open={state.open || projectSearchMode !== null}
+        onOpenChange={projectSearchMode === null ? setOpen : closeProjectSearch}
+      >
         {children}
-        <CommandPaletteDialog
-          key={state.openGeneration}
-          openIntent={state.openIntent}
-          setOpen={setOpen}
-          clearOpenIntent={clearOpenIntent}
-        />
+        {projectSearchMode === 'files' ? (
+          <ProjectFilePicker onOpenChange={closeProjectSearch} />
+        ) : projectSearchMode === 'contents' ? (
+          <ProjectContentSearch onOpenChange={closeProjectSearch} />
+        ) : state.open ? (
+          <CommandPaletteDialog
+            key={state.openGeneration}
+            openIntent={state.openIntent}
+            setOpen={setOpen}
+            clearOpenIntent={clearOpenIntent}
+            openProjectSearch={openProjectSearch}
+          />
+        ) : null}
       </CommandDialog>
     </ComposerHandleContext>
   )

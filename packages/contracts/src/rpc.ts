@@ -92,6 +92,9 @@ import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectSearchContentsInput,
+  ProjectSearchContentsResult,
+  ProjectSearchContentsError,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
@@ -225,6 +228,7 @@ export const WS_METHODS = {
   projectsReadFile: 'projects.readFile',
   projectsReadMdxDocument: 'projects.readMdxDocument',
   projectsSearchEntries: 'projects.searchEntries',
+  projectsSearchContents: 'projects.searchContents',
   projectsWriteFile: 'projects.writeFile',
 
   // immutable proposal and architecture preview methods
@@ -469,6 +473,12 @@ export const WsSourceControlPublishRepositoryRpc = Rpc.make(
     error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
   },
 )
+
+export const WsProjectsSearchContentsRpc = Rpc.make(WS_METHODS.projectsSearchContents, {
+  payload: ProjectSearchContentsInput,
+  success: ProjectSearchContentsResult,
+  error: Schema.Union([ProjectSearchContentsError, EnvironmentAuthorizationError]),
+})
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
   payload: ProjectSearchEntriesInput,
@@ -1051,6 +1061,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsReadFileRpc,
   WsProjectsReadMdxDocumentRpc,
   WsProjectsSearchEntriesRpc,
+  WsProjectsSearchContentsRpc,
   WsProjectsWriteFileRpc,
   WsProposalsListRpc,
   WsProposalsGetRpc,

@@ -37,6 +37,8 @@ import {
   MessageSquareIcon,
   ServerIcon,
   SettingsIcon,
+  SearchIcon,
+  FileSearchIcon,
   SquarePenIcon,
 } from 'lucide-react'
 import {
@@ -164,6 +166,7 @@ export function CommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null
   readonly setOpen: (open: boolean) => void
   readonly clearOpenIntent: () => void
+  readonly openProjectSearch: (mode: 'files' | 'contents') => void
 })
 {
   return (
@@ -171,6 +174,7 @@ export function CommandPaletteDialog(props: {
       openIntent={props.openIntent}
       setOpen={props.setOpen}
       clearOpenIntent={props.clearOpenIntent}
+      openProjectSearch={props.openProjectSearch}
     />
   )
 }
@@ -179,6 +183,7 @@ export function OpenCommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null
   readonly setOpen: (open: boolean) => void
   readonly clearOpenIntent: () => void
+  readonly openProjectSearch: (mode: 'files' | 'contents') => void
 })
 {
   const navigate = useNavigate()
@@ -1131,6 +1136,29 @@ export function OpenCommandPaletteDialog(props: {
       await navigate({ to: '/settings' })
     },
   })
+
+  actionItems.push(
+    {
+      kind: 'action',
+      value: 'action:file-picker',
+      searchTerms: ['files', 'filename', 'open file'],
+      title: 'Open file',
+      icon: <FileSearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: 'filePicker.toggle',
+      keepOpen: true,
+      run: async () => props.openProjectSearch('files'),
+    },
+    {
+      kind: 'action',
+      value: 'action:content-search',
+      searchTerms: ['search', 'contents', 'find in files', 'grep'],
+      title: 'Search file contents',
+      icon: <SearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: 'projectSearch.toggle',
+      keepOpen: true,
+      run: async () => props.openProjectSearch('contents'),
+    },
+  )
 
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems })
   const sourceSelectionViewValue =
