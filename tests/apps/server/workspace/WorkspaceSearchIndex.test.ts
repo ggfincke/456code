@@ -7,10 +7,15 @@ import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as FileSystem from 'effect/FileSystem'
+import * as Schema from 'effect/Schema'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { vi } from 'vite-plus/test'
 
 import * as WorkspaceSearchIndex from '../../../../apps/server/src/workspace/WorkspaceSearchIndex.ts'
+
+const encodeSearchError = Schema.encodeEffect(
+  Schema.fromJsonString(WorkspaceSearchIndex.WorkspaceSearchIndexSearchFailed),
+)
 
 afterEach(() =>
 {
@@ -157,7 +162,7 @@ it.effect(
         const error = yield* Effect.flip(index.searchContents(input))
         expect(error.reason).toBe('Native workspace search failed.')
         expect(error.cause).toBeUndefined()
-        expect(JSON.stringify(error)).not.toContain('private query')
+        expect(yield* encodeSearchError(error)).not.toContain('private query')
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
 )

@@ -26,6 +26,7 @@ import {
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
 import * as HttpServerRequest from 'effect/unstable/http/HttpServerRequest'
 
 import * as EnvironmentAuth from '../../../../apps/server/src/auth/EnvironmentAuth.ts'
@@ -40,6 +41,9 @@ import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence
 import * as ServerStorageLease from '../../../../apps/server/src/serverStorageLease.ts'
 
 const STORAGE_OWNER_TOKEN = 'storage-owner-token'
+const isPairingDelegationError = Schema.is(
+  Schema.Union([EnvironmentScopeRequiredError, EnvironmentRequestInvalidError]),
+)
 
 const makeEnvironmentAuthLayer = () =>
   EnvironmentAuth.layer.pipe(
@@ -190,10 +194,7 @@ it.layer(NodeServices.layer)('environment HTTP storage-owner authentication', (i
         ] as const)
         {
           const error = yield* requirePairingDelegatedScopes(issuer, scopes).pipe(Effect.flip)
-          assert.isTrue(
-            error instanceof EnvironmentScopeRequiredError ||
-              error instanceof EnvironmentRequestInvalidError,
-          )
+          assert.isTrue(isPairingDelegationError(error))
         }
       }).pipe(Effect.provide(makeHttpAuthLayer())),
   )

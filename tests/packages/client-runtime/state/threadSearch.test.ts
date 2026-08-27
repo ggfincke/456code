@@ -32,14 +32,9 @@ import { createThreadSearchAtoms } from '../../../../packages/client-runtime/src
 
 it('debounces connected-only queries, aborts replaced work and suppresses late old results', async () =>
 {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  const atomRegistry = AtomRegistry.make({
-    scheduleTask: (run) =>
-    {
-      const timer = setTimeout(run, 0)
-      return () => clearTimeout(timer)
-    },
-  })
+  // keep the effect dispatcher and debounce on the same deterministic clock
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setImmediate', 'clearImmediate'] })
+  const atomRegistry = AtomRegistry.make()
   const online = EnvironmentId.make('online')
   const offline = EnvironmentId.make('offline')
   const started: string[] = []

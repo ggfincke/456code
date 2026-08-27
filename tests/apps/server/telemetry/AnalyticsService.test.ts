@@ -6,6 +6,7 @@ import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
 import * as HttpClient from 'effect/unstable/http/HttpClient'
 import * as HttpClientResponse from 'effect/unstable/http/HttpClientResponse'
 import { afterEach, vi } from 'vite-plus/test'
@@ -14,20 +15,25 @@ import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import * as AnalyticsServiceLayers from '../../../../apps/server/src/telemetry/Layers/AnalyticsService.ts'
 import * as AnalyticsService from '../../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
 
+const RecordedBatchBody = Schema.Struct({
+  api_key: Schema.String,
+  batch: Schema.Array(
+    Schema.Struct({
+      event: Schema.String,
+      properties: Schema.Struct({
+        index: Schema.Number,
+        clientType: Schema.String,
+        wsl: Schema.optional(Schema.String),
+      }),
+    }),
+  ),
+})
+const decodeRecordedBatchBody = Schema.decodeUnknownSync(Schema.fromJsonString(RecordedBatchBody))
+
 interface RecordedBatchRequest
 {
   readonly url: string
-  readonly body: {
-    readonly api_key: string
-    readonly batch: ReadonlyArray<{
-      readonly event: string
-      readonly properties: {
-        readonly index: number
-        readonly clientType: string
-        readonly wsl?: string
-      }
-    }>
-  }
+  readonly body: typeof RecordedBatchBody.Type
 }
 
 const optOutKeys = [
@@ -55,7 +61,7 @@ const recordEvents = Effect.fn('recordEvents')(function* (
       if (request.body._tag !== 'Uint8Array') throw new Error('Expected a JSON request body')
       capturedRequests.push({
         url: request.url,
-        body: JSON.parse(new TextDecoder().decode(request.body.body)),
+        body: decodeRecordedBatchBody(new TextDecoder().decode(request.body.body)),
       })
       return HttpClientResponse.fromWeb(request, Response.json({}))
     }),

@@ -3,8 +3,9 @@
 
 # Held upstream reconciliation
 
-Status: implementation, focused source gates, and required web/native integration passed.
-Six approved feature commits and publication are next; GitHub CI and held-ref retirement remain gated.
+Status: six feature commits are published in [PR #78](https://github.com/ggfincke/456code/pull/78).
+Focused source gates and required web/native integration passed. Current-head GitHub CI, merge,
+main verification, and held-ref retirement remain gated.
 
 ## Bound state and authority
 
@@ -313,3 +314,25 @@ methods when conversation search lands. Other changed files belong wholly to one
 Verify each staged diff is coherent and the final committed tree equals the verified working
 tree; do not create an archive or recovery branch. Publication and exact held-ref retirement
 remain coordinator-gated until all integrated and GitHub checks pass.
+
+## CI fixture compatibility repair
+
+The first PR run passed all application/server test jobs, formatting, comment checks, and lint,
+but the patched client-runtime compiler rejected a custom test scheduler's global timer call.
+The earlier local `tsc6` invocation did not exercise that package's declared Effect diagnostics.
+The regression now uses AtomRegistry's normal scheduler and fakes immediate dispatch together
+with debounce timers. Its assertions and public-RPC behavior coverage are unchanged.
+
+Rechecking the declared server compiler also identified schema-instance checks, JSON fixture
+serialization, and date construction in new tests. These fixtures now use the existing Schema
+and DateTime APIs without disabling diagnostics. Pairing retains real wall-clock process-birth
+fixtures because the service intentionally validates a real live process, not virtual test time.
+No application source changed, so the primary's integrated web/native evidence remains valid.
+
+The repair passed four focused server files / 23 tests and two client-runtime files / 26 tests.
+The declared `tsc --noEmit` gates passed for server, contracts, client-runtime, shared, and web;
+mobile's declared `tsc6 --noEmit` passed. An exploratory mobile `tsc` invocation used the wrong
+compiler for that package and reported navigation-type incompatibilities; it is not a passing
+gate and did not prompt unrelated source edits. Changed-file formatting, lint, headers, and diff
+checks passed. This small test-only CI repair is appended after the six feature commits, with
+no published history rewrite. A fresh complete current-head CI run is required before merge.

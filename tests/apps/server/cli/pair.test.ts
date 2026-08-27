@@ -11,10 +11,12 @@ import {
   EnvironmentStorageOwnerTokenHeaderName,
 } from '@t3tools/contracts'
 import * as ConfigProvider from 'effect/ConfigProvider'
+import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 import { FetchHttpClient } from 'effect/unstable/http'
 
 import {
@@ -26,6 +28,8 @@ import {
 import { deriveServerPaths } from '../../../../apps/server/src/config.ts'
 import { SERVER_STORAGE_LEASE_FILE } from '../../../../apps/server/src/serverStorageLease.ts'
 import { renderTerminalQrCode } from '../../../../apps/server/src/startupAccess.ts'
+
+const encodeUnknownJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 
 const descriptor = {
   environmentId: 'pair-test-environment',
@@ -48,8 +52,8 @@ const writeRuntime = Effect.fn('writeRuntime')(function* (baseDir: string)
     token: 'test-local-owner-capability',
     pid: process.pid,
     hostname: NodeOS.hostname(),
-    acquiredAt: new Date().toISOString(),
-    processStartedAt: new Date(NodePerfHooks.performance.timeOrigin).toISOString(),
+    acquiredAt: DateTime.formatIso(DateTime.nowUnsafe()),
+    processStartedAt: DateTime.formatIso(DateTime.makeUnsafe(NodePerfHooks.performance.timeOrigin)),
     canonicalBaseDir,
   }
   const state = {
@@ -59,12 +63,12 @@ const writeRuntime = Effect.fn('writeRuntime')(function* (baseDir: string)
     host: '127.0.0.1',
     origin: 'http://127.0.0.1:4971',
     devUrl: 'https://web.test',
-    startedAt: new Date().toISOString(),
+    startedAt: DateTime.formatIso(DateTime.nowUnsafe()),
     storageLeaseToken: owner.token,
   }
   const leasePath = path.join(canonicalBaseDir, SERVER_STORAGE_LEASE_FILE)
-  yield* fs.writeFileString(leasePath, JSON.stringify(owner))
-  yield* fs.writeFileString(paths.serverRuntimeStatePath, JSON.stringify(state))
+  yield* fs.writeFileString(leasePath, encodeUnknownJson(owner))
+  yield* fs.writeFileString(paths.serverRuntimeStatePath, encodeUnknownJson(state))
   yield* fs.writeFileString(paths.environmentIdPath, descriptor.environmentId)
   return { baseDir: canonicalBaseDir, paths, leasePath, owner, state }
 })
@@ -126,20 +130,20 @@ it.layer(NodeServices.layer)('pair CLI', (it) =>
         // the PID is still alive, but its birth does not match the selected owner
         yield* fs.writeFileString(
           selected.leasePath,
-          JSON.stringify({
+          encodeUnknownJson({
             ...selected.owner,
             processStartedAt: '2000-01-01T00:00:00.000Z',
           }),
         )
         assert.instanceOf(yield* discover.pipe(Effect.flip), PairCommandError)
-        yield* fs.writeFileString(selected.leasePath, JSON.stringify(selected.owner))
+        yield* fs.writeFileString(selected.leasePath, encodeUnknownJson(selected.owner))
         yield* fs.writeFileString(
           selected.paths.serverRuntimeStatePath,
-          JSON.stringify({ storageLeaseToken: selected.owner.token }),
+          encodeUnknownJson({ storageLeaseToken: selected.owner.token }),
         )
         const error = yield* discover.pipe(Effect.flip)
         assert.instanceOf(error, PairCommandError)
-        assert.notInclude(JSON.stringify(error), selected.owner.token)
+        assert.notInclude(encodeUnknownJson(error), selected.owner.token)
       }),
   )
 
@@ -163,7 +167,7 @@ it.layer(NodeServices.layer)('pair CLI', (it) =>
       assert.equal(requests.length, 1)
       assert.equal(requests[0]?.url, `${runtime.state.origin}/.well-known/t3/environment`)
       assert.isFalse(requests[0]!.headers.has(EnvironmentStorageOwnerTokenHeaderName))
-      assert.notInclude(JSON.stringify(error), runtime.owner.token)
+      assert.notInclude(encodeUnknownJson(error), runtime.owner.token)
     }),
   )
 
