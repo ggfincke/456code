@@ -57,6 +57,7 @@ import {
   BrowserRecordingOperationError,
   BrowserRecordingRequiresVisibleTabError,
   findActiveBrowserRecordingRuntimeTabId,
+  readActiveBrowserRecordingTabId,
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
   stopBrowserRecording,
@@ -131,9 +132,21 @@ describe('browser recording', () =>
   {
     await startBrowserRecording('recording-tab')
 
-    expect(events).toEqual(['start-screencast', 'publish:recording-tab'])
+    expect(events).toEqual(['publish:recording-tab', 'start-screencast'])
 
     await stopBrowserRecording('recording-tab')
+    expect(events.at(-1)).toBe('clear')
+  })
+
+  it('clears the published starting target when native startup fails', async () =>
+  {
+    startScreencast.mockRejectedValueOnce(new Error('native startup failed'))
+
+    await expect(startBrowserRecording('recording-tab')).rejects.toMatchObject({
+      operation: 'start-screencast',
+    })
+    expect(events).toEqual(['publish:recording-tab', 'clear'])
+    expect(readActiveBrowserRecordingTabId()).toBeNull()
   })
 
   it('keeps the runtime recording key mapped to its server tab', async () =>

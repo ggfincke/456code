@@ -341,6 +341,7 @@ export async function startBrowserRecording(
     lifecycle: { phase: 'starting' },
   }
   active = recording
+  appAtomRegistry.set(activeBrowserRecordingTabIdAtom, tabId)
   try
   {
     try
@@ -429,7 +430,6 @@ export async function startBrowserRecording(
       throw recordingStartupCancelledError(recording)
     }
     recording.lifecycle = { phase: 'recording' }
-    appAtomRegistry.set(activeBrowserRecordingTabIdAtom, tabId)
     return startedAt
   }
   finally

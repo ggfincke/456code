@@ -34,6 +34,8 @@ export interface BrowserSurfaceContentPresentation
 interface BrowserSurfaceStoreState
 {
   readonly byTabId: Record<string, BrowserSurfacePresentation>
+  readonly activityByTabId: Record<string, number>
+  readonly acquireActivity: (tabId: string) => () => void
   readonly claim: (tabId: string, owner: symbol) => void
   readonly present: (
     tabId: string,
@@ -83,6 +85,31 @@ const rectEquals = (left: BrowserSurfaceRect | null, right: BrowserSurfaceRect):
 
 export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) => ({
   byTabId: {},
+  activityByTabId: {},
+  acquireActivity: (tabId) =>
+  {
+    set((state) => ({
+      activityByTabId: {
+        ...state.activityByTabId,
+        [tabId]: (state.activityByTabId[tabId] ?? 0) + 1,
+      },
+    }))
+    let released = false
+    return () =>
+    {
+      if (released) return
+      released = true
+      set((state) =>
+      {
+        const count = state.activityByTabId[tabId] ?? 0
+        if (count === 0) return state
+        const activityByTabId = { ...state.activityByTabId }
+        if (count === 1) delete activityByTabId[tabId]
+        else activityByTabId[tabId] = count - 1
+        return { activityByTabId }
+      })
+    }
+  },
   claim: (tabId, owner) =>
     set((state) =>
     {
@@ -167,6 +194,11 @@ export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) =
       }
     }),
 }))
+
+export function acquireBrowserSurfaceActivity(tabId: string): () => void
+{
+  return useBrowserSurfaceStore.getState().acquireActivity(tabId)
+}
 
 export function acquireBrowserSurface(tabId: string): BrowserSurfaceLease
 {

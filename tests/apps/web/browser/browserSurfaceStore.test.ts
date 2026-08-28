@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
 import {
   acquireBrowserSurface,
+  acquireBrowserSurfaceActivity,
   resolveBrowserSurfacePanelRect,
   useBrowserSurfaceStore,
 } from '../../../../apps/web/src/browser/browserSurfaceStore'
@@ -13,7 +14,25 @@ describe('browserSurfaceStore', () =>
 {
   beforeEach(() =>
   {
-    useBrowserSurfaceStore.setState({ byTabId: {} })
+    useBrowserSurfaceStore.setState({ byTabId: {}, activityByTabId: {} })
+  })
+
+  it('holds activity until every lease releases without changing surface ownership', () =>
+  {
+    const tabId = 'leased-activity'
+    const surface = acquireBrowserSurface(tabId)
+    surface.present({ x: 0, y: 0, width: 800, height: 600 }, false)
+    const presentation = useBrowserSurfaceStore.getState().byTabId[tabId]
+    const releaseFirst = acquireBrowserSurfaceActivity(tabId)
+    const releaseSecond = acquireBrowserSurfaceActivity(tabId)
+
+    expect(useBrowserSurfaceStore.getState().activityByTabId[tabId]).toBe(2)
+    releaseFirst()
+    releaseFirst()
+    expect(useBrowserSurfaceStore.getState().activityByTabId[tabId]).toBe(1)
+    releaseSecond()
+    expect(useBrowserSurfaceStore.getState().activityByTabId[tabId]).toBeUndefined()
+    expect(useBrowserSurfaceStore.getState().byTabId[tabId]).toBe(presentation)
   })
 
   it('tracks content dimensions for a browser that has never been visible', () =>

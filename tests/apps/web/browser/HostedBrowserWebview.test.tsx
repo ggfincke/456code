@@ -1,5 +1,5 @@
 // tests/apps/web/browser/HostedBrowserWebview.test.tsx
-// verify hosted browser teardown behavior
+// verify hosted browser rendering and teardown behavior
 
 // @vitest-environment happy-dom
 
@@ -20,7 +20,7 @@ vi.mock('../../../../apps/web/src/browser/browserRecording', () => ({
 vi.mock('../../../../apps/web/src/browser/browserSurfaceStore', () => ({
   resolveBrowserSurfacePanelRect: () => null,
   useBrowserSurfaceStore: (select: (state: unknown) => unknown) =>
-    select({ byTabId: { 'runtime-tab-1': { visible: true } } }),
+    select({ byTabId: { 'runtime-tab-1': { visible: true } }, activityByTabId: {} }),
 }))
 vi.mock('../../../../apps/web/src/browser/BrowserDeviceToolbar', () => ({
   BrowserDeviceToolbar: () => null,

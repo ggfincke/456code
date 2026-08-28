@@ -15,6 +15,7 @@ describe('resolveHostedBrowserWebviewWrapperStyle', () =>
     expect(
       resolveHostedBrowserWebviewWrapperStyle({
         active: true,
+        renderingActive: true,
         rect: { x: 12, y: 34, width: 800, height: 600 },
         hiddenSize: { width: 1280, height: 800 },
       }),
@@ -28,10 +29,11 @@ describe('resolveHostedBrowserWebviewWrapperStyle', () =>
     })
   })
 
-  it('keeps an inactive webview paintable while moving it offscreen', () =>
+  it('suspends an idle offscreen webview and conceals active work inside the viewport', () =>
   {
     const style = resolveHostedBrowserWebviewWrapperStyle({
       active: false,
+      renderingActive: false,
       rect: { x: 12, y: 34, width: 800, height: 600 },
       hiddenSize: { width: 393, height: 852 },
     })
@@ -43,7 +45,16 @@ describe('resolveHostedBrowserWebviewWrapperStyle', () =>
       height: 852,
       zIndex: -1,
       pointerEvents: 'none',
-      visibility: 'visible',
+      visibility: 'hidden',
+      opacity: 0,
     })
+    expect(
+      resolveHostedBrowserWebviewWrapperStyle({
+        active: false,
+        renderingActive: true,
+        rect: null,
+        hiddenSize: { width: 393, height: 852 },
+      }),
+    ).toEqual({ ...style, left: 0, top: 0, visibility: 'visible' })
   })
 })
