@@ -1,9 +1,11 @@
 // apps/server/src/provider/Layers/AntigravityProvider.ts
-// probe antigravity availability and degrade discovery independently
+// probe Antigravity availability, discovery, and account quotas independently
 
 import type {
   AntigravitySettings,
   ModelCapabilities,
+  ServerProvider,
+  ServerProviderAccountUsage,
   ServerProviderModel,
 } from '@t3tools/contracts'
 import { createModelCapabilities } from '@t3tools/shared/model'
@@ -19,6 +21,7 @@ import {
   ANTIGRAVITY_MINIMUM_VERSION,
   isAntigravityVersionSupported,
   parseAntigravityDiscoveryOutput,
+  parseAntigravityUsageOutput,
 } from '../antigravity/AntigravityCli.ts'
 import {
   buildServerProvider,
@@ -35,6 +38,12 @@ const PRESENTATION = {
   showInteractionModeToggle: false,
   requiresNewThreadForModelChange: true,
 } as const
+
+// keep Usage mounted while a fresh quota snapshot replaces the previous reading.
+const ACCOUNT_USAGE_CHECKING = {
+  status: 'unavailable',
+  message: 'Checking Antigravity account limits...',
+} as const satisfies ServerProviderAccountUsage
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({ optionDescriptors: [] })
 export const DEFAULT_ANTIGRAVITY_MODEL = ANTIGRAVITY_DEFAULT_MODEL
@@ -100,6 +109,7 @@ export const buildInitialAntigravityProviderSnapshot = Effect.fn(
     enabled: settings.enabled,
     checkedAt,
     models: fallbackModels(settings),
+    ...(settings.enabled ? { accountUsage: ACCOUNT_USAGE_CHECKING } : {}),
     probe: {
       installed: settings.enabled,
       version: null,
@@ -133,6 +143,7 @@ export const checkAntigravityProviderStatus = Effect.fn('checkAntigravityProvide
         enabled: true,
         checkedAt,
         models: fallbackModels(settings),
+        accountUsage: ACCOUNT_USAGE_CHECKING,
         probe: {
           installed: !isCommandMissingCause(error),
           version: null,
@@ -151,6 +162,7 @@ export const checkAntigravityProviderStatus = Effect.fn('checkAntigravityProvide
         enabled: true,
         checkedAt,
         models: fallbackModels(settings),
+        accountUsage: ACCOUNT_USAGE_CHECKING,
         probe: {
           installed: true,
           version: null,
@@ -170,6 +182,7 @@ export const checkAntigravityProviderStatus = Effect.fn('checkAntigravityProvide
         enabled: true,
         checkedAt,
         models: fallbackModels(settings),
+        accountUsage: ACCOUNT_USAGE_CHECKING,
         probe: {
           installed: true,
           version,
@@ -200,6 +213,7 @@ export const checkAntigravityProviderStatus = Effect.fn('checkAntigravityProvide
         enabled: true,
         checkedAt,
         models: fallbackModels(settings),
+        accountUsage: ACCOUNT_USAGE_CHECKING,
         probe: {
           installed: true,
           version,
@@ -243,6 +257,7 @@ export const checkAntigravityProviderStatus = Effect.fn('checkAntigravityProvide
       presentation: PRESENTATION,
       enabled: true,
       checkedAt,
+      accountUsage: ACCOUNT_USAGE_CHECKING,
       models:
         models === undefined
           ? fallbackModels(settings)
@@ -261,6 +276,46 @@ export const checkAntigravityProviderStatus = Effect.fn('checkAntigravityProvide
     })
   },
 )
+
+export const enrichAntigravitySnapshot = Effect.fn('enrichAntigravitySnapshot')(function* (input: {
+  readonly settings: AntigravitySettings
+  readonly environment: NodeJS.ProcessEnv
+  readonly snapshot: ServerProvider
+  readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>
+}): Effect.fn.Return<void, never, ChildProcessSpawner.ChildProcessSpawner>
+{
+  if (!input.snapshot.enabled) return
+
+  // only compatible CLIs may interpret /usage as a native command instead of a prompt.
+  const result =
+    input.snapshot.installed &&
+    isAntigravityVersionSupported(input.snapshot.version) &&
+    (input.snapshot.status === 'ready' || input.snapshot.status === 'warning')
+      ? yield* run(input.settings, input.environment, [
+          '--output-format',
+          'json',
+          '-p',
+          '/usage',
+        ]).pipe(Effect.timeoutOption('4 seconds'), Effect.result)
+      : undefined
+  const windows =
+    result &&
+    Result.isSuccess(result) &&
+    Option.isSome(result.success) &&
+    result.success.value.code === 0
+      ? parseAntigravityUsageOutput(result.success.value.stdout)
+      : undefined
+  const observedAt = DateTime.formatIso(yield* DateTime.now)
+  const accountUsage: ServerProviderAccountUsage = windows
+    ? { status: 'available', observedAt, windows }
+    : {
+        status: 'unavailable',
+        observedAt,
+        message:
+          'Antigravity account limits are temporarily unavailable. Check /usage in Antigravity CLI.',
+      }
+  yield* input.publishSnapshot({ ...input.snapshot, accountUsage })
+})
 
 // return an inventory only after a successful exact discovery command.
 export const discoverAntigravityAgents = Effect.fn('discoverAntigravityAgents')(function* (

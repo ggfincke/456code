@@ -11,6 +11,7 @@ import {
   isAntigravityVersionSupported,
   parseAntigravityDiscoveryOutput,
   parseAntigravityStreamLine,
+  parseAntigravityUsageOutput,
 } from '../../../../../apps/server/src/provider/antigravity/AntigravityCli.ts'
 import * as Schema from 'effect/Schema'
 
@@ -18,6 +19,127 @@ const isAntigravityResumeCursor = Schema.is(AntigravityResumeCursor)
 
 describe('AntigravityCli', () =>
 {
+  it('maps native quota groups without combining their limits or losing exhausted buckets', () =>
+  {
+    const windows = parseAntigravityUsageOutput(
+      JSON.stringify({
+        status: 'SUCCESS',
+        command: {
+          name: 'usage',
+          data: {
+            groups: [
+              {
+                name: 'Gemini Models',
+                buckets: [
+                  {
+                    id: 'weekly',
+                    window: 'weekly',
+                    remaining_fraction: 0.75,
+                    reset_time: '2026-09-04T12:00:00Z',
+                  },
+                  {
+                    id: '5h',
+                    window: '5h',
+                    remaining_fraction: 0,
+                    reset_time: '2026-08-28T17:00:00Z',
+                  },
+                ],
+              },
+              {
+                name: 'Claude and GPT models',
+                buckets: [
+                  { id: 'weekly', window: 'weekly', remaining_fraction: 1 },
+                  { id: '5h', window: '5h', remaining_fraction: 0.5 },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+    )
+    expect(windows).toEqual([
+      {
+        id: '["Gemini Models","weekly"]',
+        label: 'Week',
+        scopeLabel: 'Gemini Models',
+        usedPercent: 25,
+        resetsAt: '2026-09-04T12:00:00.000Z',
+      },
+      {
+        id: '["Gemini Models","5h"]',
+        label: '5h',
+        scopeLabel: 'Gemini Models',
+        usedPercent: 100,
+        resetsAt: '2026-08-28T17:00:00.000Z',
+      },
+      {
+        id: '["Claude and GPT models","weekly"]',
+        label: 'Week',
+        scopeLabel: 'Claude and GPT models',
+        usedPercent: 0,
+        resetsAt: null,
+      },
+      {
+        id: '["Claude and GPT models","5h"]',
+        label: '5h',
+        scopeLabel: 'Claude and GPT models',
+        usedPercent: 50,
+        resetsAt: null,
+      },
+    ])
+  })
+
+  it('omits invalid quotas and never treats turn usage or response text as account limits', () =>
+  {
+    const payload = {
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            {
+              name: 'Gemini Models',
+              buckets: [
+                { id: 'missing-fraction', window: 'weekly' },
+                { id: 'invalid-fraction', window: '5h', remaining_fraction: 1.5 },
+                {
+                  id: 'valid',
+                  window: '5h',
+                  remaining_fraction: 0.25,
+                  reset_time: 'not a timestamp',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    }
+    expect(parseAntigravityUsageOutput(JSON.stringify(payload))).toEqual([
+      {
+        id: '["Gemini Models","valid"]',
+        label: '5h',
+        scopeLabel: 'Gemini Models',
+        usedPercent: 75,
+        resetsAt: null,
+      },
+    ])
+    expect(
+      parseAntigravityUsageOutput(JSON.stringify({ ...payload, status: 'ERROR' })),
+    ).toBeUndefined()
+    expect(
+      parseAntigravityUsageOutput(
+        JSON.stringify({
+          status: 'SUCCESS',
+          usage: { total_tokens: 100 },
+          response: JSON.stringify(payload.command.data),
+        }),
+      ),
+    ).toBeUndefined()
+    payload.command.data.groups[0]!.buckets.splice(2, 1)
+    expect(parseAntigravityUsageOutput(JSON.stringify(payload))).toBeUndefined()
+    expect(parseAntigravityUsageOutput('{invalid json')).toBeUndefined()
+  })
+
   it('pins the persistent stream flags and runtime mode mapping', () =>
   {
     expect(buildAntigravityLaunchArgs({ runtimeMode: 'auto-accept-edits', sandbox: true })).toEqual(

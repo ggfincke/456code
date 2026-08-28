@@ -106,6 +106,65 @@ describe('provider usage presentation', () =>
     expect(markup).toContain('16% left')
   })
 
+  it('keeps both healthy quota groups visible with five-hour limits before weekly limits', () =>
+  {
+    const usage: ServerProviderAccountUsage = {
+      status: 'available',
+      observedAt: '2026-08-28T12:00:00.000Z',
+      windows: [
+        window('gemini-week', 'Week', 25, 'Gemini Models'),
+        window('gemini-5h', '5h', 20, 'Gemini Models'),
+        window('other-week', 'Week', 40, 'Claude and GPT models'),
+        window('other-5h', '5h', 0, 'Claude and GPT models'),
+      ],
+    }
+    const markup = renderToStaticMarkup(<ProviderUsageStrip usage={usage} groupByScope />)
+    expect(markup).toMatch(/Gemini Models.*?5h.*?80% left.*?Week.*?75% left/)
+    expect(markup).toMatch(/Claude and GPT models.*?5h.*?100% left.*?Week.*?60% left/)
+    expect(markup).not.toContain('text-destructive')
+  })
+
+  it('preserves the used-percent preference, exhaustion warnings, and grouped reset details', () =>
+  {
+    const usage: ServerProviderAccountUsage = {
+      status: 'available',
+      observedAt: '2026-08-28T12:00:00.000Z',
+      windows: [
+        window('gemini-5h', '5h', 100, 'Gemini Models'),
+        window('other-week', 'Week', 25, 'Claude and GPT models'),
+      ],
+    }
+    const markup = renderToStaticMarkup(
+      <ProviderUsageStrip usage={usage} displayMode="percent-used" groupByScope />,
+    )
+    expect(markup).toContain('text-destructive')
+    expect(markup).toContain('100% used')
+    expect(markup).toContain('25% used')
+    const details = renderToStaticMarkup(<ProviderUsageDetails usage={usage} />)
+    expect(details).toContain('Gemini Models')
+    expect(details).toContain('Claude and GPT models')
+    expect(details).toContain('Resets ')
+    expect(details).toContain('0% left')
+  })
+
+  it('keeps Codex and Claude scoped-only readings in the existing compact layout', () =>
+  {
+    const usage: ServerProviderAccountUsage = {
+      status: 'available',
+      observedAt: '2026-08-28T12:00:00.000Z',
+      windows: [
+        window('healthy', 'Week', 25, 'Healthy model'),
+        window('spent', 'Week', 95, 'Spent model'),
+      ],
+    }
+    const markup = renderToStaticMarkup(<ProviderUsageStrip usage={usage} />)
+    expect(markup).toContain('Usage')
+    expect(markup).toContain('5% left')
+    expect(markup).not.toContain('75% left')
+    expect(markup).not.toContain('Healthy model')
+    expect(markup).not.toContain('Spent model')
+  })
+
   it('renders the Cursor dashboard as a safe new-tab link', () =>
   {
     const usage: ServerProviderAccountUsage = {

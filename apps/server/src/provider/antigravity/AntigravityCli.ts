@@ -1,9 +1,15 @@
 // apps/server/src/provider/antigravity/AntigravityCli.ts
 // define the closed antigravity headless cli boundary
 
-import { NonNegativeInt, TrimmedNonEmptyString } from '@t3tools/contracts'
+import {
+  NonNegativeInt,
+  TrimmedNonEmptyString,
+  type ServerProviderAccountUsageWindow,
+} from '@t3tools/contracts'
 import { extractJsonObject } from '@t3tools/shared/schemaJson'
 import { compareSemverVersions } from '@t3tools/shared/semver'
+import * as DateTime from 'effect/DateTime'
+import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 
 export const ANTIGRAVITY_MINIMUM_VERSION = '1.1.15'
@@ -343,6 +349,73 @@ export function parseAntigravityDiscoveryOutput(
   {
     return undefined
   }
+}
+
+export function parseAntigravityUsageOutput(
+  output: string,
+): ReadonlyArray<ServerProviderAccountUsageWindow> | undefined
+{
+  let value: unknown
+  try
+  {
+    value = JSON.parse(extractJsonObject(output))
+  }
+  catch
+  {
+    return undefined
+  }
+  if (!isRecord(value) || value.status !== 'SUCCESS') return undefined
+  const command = value.command
+  if (!isRecord(command) || command.name !== 'usage' || !isRecord(command.data))
+  {
+    return undefined
+  }
+  if (!Array.isArray(command.data.groups)) return undefined
+
+  const windows: Array<ServerProviderAccountUsageWindow> = []
+  const seen = new Set<string>()
+  for (const group of command.data.groups)
+  {
+    if (!isRecord(group) || typeof group.name !== 'string' || !Array.isArray(group.buckets))
+    {
+      continue
+    }
+    const scopeLabel = group.name.trim()
+    if (!scopeLabel) continue
+    for (const bucket of group.buckets)
+    {
+      if (
+        !isRecord(bucket) ||
+        typeof bucket.id !== 'string' ||
+        !bucket.id.trim() ||
+        typeof bucket.window !== 'string' ||
+        !bucket.window.trim() ||
+        typeof bucket.remaining_fraction !== 'number' ||
+        !Number.isFinite(bucket.remaining_fraction) ||
+        bucket.remaining_fraction < 0 ||
+        bucket.remaining_fraction > 1
+      )
+      {
+        continue
+      }
+      const id = JSON.stringify([scopeLabel, bucket.id.trim()])
+      if (seen.has(id)) continue
+      seen.add(id)
+      const label = bucket.window.trim()
+      const resetsAt =
+        typeof bucket.reset_time === 'string'
+          ? DateTime.make(bucket.reset_time).pipe(Option.map(DateTime.formatIso), Option.getOrNull)
+          : null
+      windows.push({
+        id,
+        label: label === 'weekly' ? 'Week' : label,
+        scopeLabel,
+        usedPercent: (1 - bucket.remaining_fraction) * 100,
+        resetsAt,
+      })
+    }
+  }
+  return windows.length > 0 ? windows : undefined
 }
 
 export function conversationIdFromStreamMessage(

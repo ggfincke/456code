@@ -67,7 +67,7 @@ function usageWindowDurationMinutes(label: string): number | null
   }
 }
 
-// a scoped window measures one model, so it is not comparable to an aggregate one and stays out
+// a scoped window measures a model or group, so it is not comparable to an aggregate one and stays out
 // of the duration ranking. it is re-admitted once it is nearly spent, because the blanket
 // exclusion meant no compact surface could ever say a model's own window was exhausted -- the
 // picker offered a model that had nothing left and the run kept choosing it
@@ -276,33 +276,77 @@ export function ProviderUsageDetails(props: {
 export function ProviderUsageStrip(props: {
   usage: ServerProviderAccountUsage
   displayMode?: ProviderUsageDisplayMode
+  groupByScope?: boolean
 })
 {
   const displayMode = props.displayMode ?? DEFAULT_PROVIDER_USAGE_DISPLAY_MODE
   if (props.usage.status === 'available')
   {
-    const windows = selectCompactProviderUsageWindows(props.usage.windows)
-    if (windows.length === 0) return null
+    const allScoped =
+      props.groupByScope === true &&
+      props.usage.windows.every((window) => window.scopeLabel !== undefined)
+    const groups = new Map<string, Array<ServerProviderAccountUsageWindow>>()
+    if (allScoped)
+    {
+      for (const window of props.usage.windows)
+      {
+        if (window.scopeLabel === undefined) continue
+        const group = groups.get(window.scopeLabel)
+        if (group) group.push(window)
+        else groups.set(window.scopeLabel, [window])
+      }
+    }
+    const rows = allScoped
+      ? Array.from(groups, ([label, windows]) => ({
+          label,
+          windows: windows.toSorted(
+            (left, right) =>
+              (usageWindowDurationMinutes(left.label) ?? Number.MAX_SAFE_INTEGER) -
+              (usageWindowDurationMinutes(right.label) ?? Number.MAX_SAFE_INTEGER),
+          ),
+        }))
+      : [{ label: 'Usage', windows: selectCompactProviderUsageWindows(props.usage.windows) }]
+    if (rows.every((row) => row.windows.length === 0)) return null
     return (
       <div
-        className="flex min-h-8 items-center gap-2 overflow-hidden border-b border-border/55 px-4 py-1.5 text-[11px]"
+        className="flex min-h-8 flex-col justify-center gap-1 overflow-hidden border-b border-border/55 px-4 py-1.5 text-[11px]"
         data-model-picker-usage="available"
         aria-label="Provider plan usage"
       >
-        <span className="shrink-0 text-muted-foreground/50">Usage</span>
-        <span className="min-w-0 truncate font-medium text-muted-foreground/85">
-          {windows.map((window, index) => (
-            <span key={window.id}>
-              {index > 0 ? <span className="mx-1.5 text-muted-foreground/35">·</span> : null}
-              <span>{window.label}</span>
-              <span
-                className={cn('ml-1', isProviderUsageWindowDanger(window) && 'text-destructive')}
-              >
-                {formatProviderUsagePercent(window, displayMode)}
-              </span>
+        {rows.map((row) => (
+          <div key={row.label} className="flex min-w-0 items-center gap-2">
+            <span
+              className={cn(
+                'text-muted-foreground/50',
+                allScoped ? 'min-w-0 truncate' : 'shrink-0',
+              )}
+              title={row.label}
+            >
+              {row.label}
             </span>
-          ))}
-        </span>
+            <span
+              className={cn(
+                'min-w-0 truncate font-medium text-muted-foreground/85',
+                allScoped && 'shrink-0',
+              )}
+            >
+              {row.windows.map((window, index) => (
+                <span key={window.id}>
+                  {index > 0 ? <span className="mx-1.5 text-muted-foreground/35">·</span> : null}
+                  <span>{window.label}</span>
+                  <span
+                    className={cn(
+                      'ml-1',
+                      isProviderUsageWindowDanger(window) && 'text-destructive',
+                    )}
+                  >
+                    {formatProviderUsagePercent(window, displayMode)}
+                  </span>
+                </span>
+              ))}
+            </span>
+          </div>
+        ))}
       </div>
     )
   }
