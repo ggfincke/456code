@@ -72,6 +72,25 @@ const ULTRATHINK_FRAME_CLASSES = {
 
 describe('getComposerProviderState', () =>
 {
+  it('preserves unavailable OpenCode options but resumes catalog normalization on recovery', () =>
+  {
+    const saved = selections(['variant', 'high'], ['thinking', true])
+    const input = {
+      provider: ProviderDriverKind.make('opencode'),
+      model: MODEL,
+      models: [],
+      modelOptions: saved,
+    }
+    expect(getComposerProviderState(input).modelOptionsForDispatch).toEqual(saved)
+    expect(
+      getComposerProviderState({ ...input, provider: PROVIDER }).modelOptionsForDispatch,
+    ).toBeUndefined()
+    expect(
+      getComposerProviderState({ ...input, models: modelWith([booleanDescriptor('thinking')]) })
+        .modelOptionsForDispatch,
+    ).toEqual(selections(['thinking', true]))
+  })
+
   it('derives a stable prompt injection state for ordinary prompt edits', () =>
   {
     expect(getComposerPromptInjectionState('Investigate this failure')).toBe('none')

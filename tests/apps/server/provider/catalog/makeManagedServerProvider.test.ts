@@ -10,6 +10,7 @@ import * as Fiber from 'effect/Fiber'
 import * as PubSub from 'effect/PubSub'
 import * as Ref from 'effect/Ref'
 import * as Stream from 'effect/Stream'
+import * as TestClock from 'effect/testing/TestClock'
 
 import { makeManagedServerProvider } from '../../../../../apps/server/src/provider/catalog/makeManagedServerProvider.ts'
 
@@ -193,6 +194,58 @@ describe('makeManagedServerProvider', () =>
         assert.strictEqual(yield* Ref.get(checkCalls), 2)
       }),
     ),
+  )
+
+  it.effect(
+    'opts out of interval and settings probes while retaining enrichment and manual refresh',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const settingsRef = yield* Ref.make<TestSettings>({ enabled: true })
+          const settingsChanges = yield* PubSub.unbounded<TestSettings>()
+          const initialEnrichment = yield* Deferred.make<void>()
+          const settingsEnrichment = yield* Deferred.make<void>()
+          const checkCalls = yield* Ref.make(0)
+          const publishCallbacks: Array<(snapshot: ServerProvider) => Effect.Effect<void>> = []
+          const provider = yield* makeManagedServerProvider<TestSettings>({
+            maintenanceCapabilities,
+            getSettings: Ref.get(settingsRef),
+            streamSettings: Stream.fromPubSub(settingsChanges),
+            haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+            checkProviderOnSettingsChange: () => false,
+            refreshOnInterval: false,
+            refreshInterval: '1 second',
+            initialSnapshot: () => Effect.succeed(initialSnapshot),
+            checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+              Effect.as(refreshedSnapshot),
+            ),
+            enrichSnapshot: ({ settings, publishSnapshot }) =>
+              Effect.gen(function* ()
+              {
+                publishCallbacks.push(publishSnapshot)
+                yield* publishSnapshot(settings.enabled ? enrichedSnapshot : enrichedSnapshotSecond)
+                yield* Deferred.succeed(
+                  settings.enabled ? initialEnrichment : settingsEnrichment,
+                  undefined,
+                )
+              }),
+          })
+          yield* Deferred.await(initialEnrichment)
+          yield* TestClock.adjust('1 minute')
+          assert.strictEqual(yield* Ref.get(checkCalls), 1)
+
+          yield* Ref.set(settingsRef, { enabled: false })
+          yield* PubSub.publish(settingsChanges, { enabled: false })
+          yield* Deferred.await(settingsEnrichment)
+          assert.strictEqual(yield* Ref.get(checkCalls), 1)
+          yield* publishCallbacks[0]!(enrichedSnapshot)
+          assert.deepStrictEqual(yield* provider.getSnapshot, enrichedSnapshotSecond)
+
+          yield* provider.refresh
+          assert.strictEqual(yield* Ref.get(checkCalls), 2)
+        }),
+      ),
   )
 
   it.effect('streams supplemental snapshot updates after the base provider check completes', () =>

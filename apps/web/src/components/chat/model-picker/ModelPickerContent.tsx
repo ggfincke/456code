@@ -44,6 +44,7 @@ type ModelPickerItem = {
   shortName?: string
   subProvider?: string
   isLegacy?: boolean
+  isUnavailable?: boolean
   instanceId: ProviderInstanceId
   driverKind: ProviderDriverKind
   instanceDisplayName: string
@@ -52,6 +53,26 @@ type ModelPickerItem = {
 }
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>()
+
+export function shouldIncludeModelPickerOption(input: {
+  entry: ProviderInstanceEntry
+  option: ModelEsque
+  activeInstanceId: ProviderInstanceId
+  activeModel: string
+}): boolean
+{
+  const { entry, option, activeInstanceId, activeModel } = input
+  if (isProviderInstancePickerReady(entry)) return true
+  return (
+    entry.enabled &&
+    entry.isAvailable &&
+    entry.status !== 'disabled' &&
+    entry.driverKind === 'opencode' &&
+    entry.instanceId === activeInstanceId &&
+    option.slug === activeModel &&
+    option.isUnavailable === true
+  )
+}
 
 // the search field has no visible label and its placeholder disappears as soon
 // as the user types, so it carries an explicit accessible name.
@@ -128,13 +149,24 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const highlightedModelKeyRef = useRef<string | null>(null)
   const favorites = useClientSettings((s) => s.favorites ?? [])
   const usageDisplayMode = useClientSettings((s) => s.providerUsageDisplayMode)
+  const activeEntry = instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId)
+  const activeInstanceHasSelectableUnavailableModel =
+    activeEntry !== undefined &&
+    !isProviderInstancePickerReady(activeEntry) &&
+    (modelOptionsByInstance.get(props.activeInstanceId) ?? []).some((option) =>
+      shouldIncludeModelPickerOption({
+        entry: activeEntry,
+        option,
+        activeInstanceId: props.activeInstanceId,
+        activeModel: props.model,
+      }),
+    )
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | 'favorites'>(
     () =>
     {
-      if (props.lockedProvider !== null)
+      if (props.lockedProvider !== null || activeInstanceHasSelectableUnavailableModel)
       {
-        // when locked, prime the sidebar to the currently-active instance
-        // so jumping into the picker keeps the focused instance visible.
+        // keep the active instance visible for locked or unavailable selections
         return props.activeInstanceId
       }
       return favorites.length > 0 ? 'favorites' : props.activeInstanceId
@@ -209,18 +241,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [props.lockedContinuationGroupKey, props.lockedProvider],
   )
 
-  const readyInstanceSet = useMemo(() =>
-  {
-    const ready = new Set<ProviderInstanceId>()
-    for (const entry of instanceEntries)
-    {
-      if (isProviderInstancePickerReady(entry))
-      {
-        ready.add(entry.instanceId)
-      }
-    }
-    return ready
-  }, [instanceEntries])
+  const selectableUnavailableInstanceIds = useMemo(
+    () => new Set(activeInstanceHasSelectableUnavailableModel ? [props.activeInstanceId] : []),
+    [activeInstanceHasSelectableUnavailableModel, props.activeInstanceId],
+  )
 
   // flatten models into a searchable array. One pass over the
   // instance-keyed map; each model carries its instance id + driver kind
@@ -238,18 +262,24 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         // its models — stale options shouldn't appear in the picker.
         continue
       }
-      if (!readyInstanceSet.has(instanceId))
-      {
-        continue
-      }
       for (const model of models)
       {
+        if (
+          !shouldIncludeModelPickerOption({
+            entry,
+            option: model,
+            activeInstanceId: props.activeInstanceId,
+            activeModel: props.model,
+          })
+        )
+          continue
         out.push({
           slug: model.slug,
           name: model.name,
           ...(model.shortName ? { shortName: model.shortName } : {}),
           ...(model.subProvider ? { subProvider: model.subProvider } : {}),
           ...(model.isLegacy === true ? { isLegacy: true } : {}),
+          ...(model.isUnavailable === true ? { isUnavailable: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: providerInstancePickerLabel(entry),
@@ -261,7 +291,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
     }
     return out
-  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet])
+  }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, props.model])
 
   const isLocked = props.lockedProvider !== null
   const isSearching = searchQuery.trim().length > 0
@@ -646,6 +676,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         {/* Sidebar */}
         {showSidebar && (
           <ModelPickerSidebar
+            selectableUnavailableInstanceIds={selectableUnavailableInstanceIds}
             selectedInstanceId={selectedInstanceId}
             onSelectInstance={handleSelectInstance}
             instanceEntries={sidebarInstanceEntries}

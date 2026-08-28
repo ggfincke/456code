@@ -18,6 +18,7 @@ import {
   type OpenCodeRuntimeShape,
 } from '../../../../../apps/server/src/provider/opencodeRuntime.ts'
 import { checkOpenCodeProviderStatus } from '../../../../../apps/server/src/provider/Layers/OpenCodeProvider.ts'
+import { OpenCodeServerOwner } from '../../../../../apps/server/src/provider/OpenCodeServerOwner.ts'
 import type { OpenCodeInventory } from '../../../../../apps/server/src/provider/opencodeRuntime.ts'
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings)
 
@@ -35,7 +36,10 @@ const runtimeMock = {
     runVersionError: null as Error | null,
     versionStdout: DEFAULT_VERSION_STDOUT,
     inventoryError: null as Error | null,
-    closeCalls: 0,
+    ownerBorrows: 0,
+    cliInventoryCalls: 0,
+    connections: [] as Array<Parameters<OpenCodeRuntimeShape['connectToOpenCodeServer']>[0]>,
+    clients: [] as Array<Parameters<OpenCodeRuntimeShape['createOpenCodeSdkClient']>[0]>,
     inventory: {
       providerList: { connected: [] as string[], all: [] as unknown[], default: {} },
       agents: [] as unknown[],
@@ -47,7 +51,10 @@ const runtimeMock = {
     this.state.runVersionError = null
     this.state.versionStdout = DEFAULT_VERSION_STDOUT
     this.state.inventoryError = null
-    this.state.closeCalls = 0
+    this.state.ownerBorrows = 0
+    this.state.cliInventoryCalls = 0
+    this.state.connections.length = 0
+    this.state.clients.length = 0
     this.state.inventory = {
       providerList: { connected: [], all: [] as unknown[], default: {} },
       agents: [] as unknown[],
@@ -60,24 +67,20 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   startOpenCodeServerProcess: () =>
     Effect.succeed({
       url: 'http://127.0.0.1:4301',
+      version: '1.15.13',
+      isRunning: Effect.succeed(true),
       exitCode: Effect.never,
     }),
-  connectToOpenCodeServer: ({ serverUrl }) =>
-    Effect.gen(function* ()
+  connectToOpenCodeServer: (input) =>
+    Effect.sync(() =>
     {
-      if (!serverUrl)
-      {
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() =>
-          {
-            runtimeMock.state.closeCalls += 1
-          }),
-        )
-      }
+      runtimeMock.state.connections.push(input)
       return {
-        url: serverUrl ?? 'http://127.0.0.1:4301',
+        url: input.serverUrl ?? 'http://127.0.0.1:4301',
+        version: '1.15.13',
+        ...(input.serverPassword !== undefined ? { serverPassword: input.serverPassword } : {}),
         exitCode: null,
-        external: Boolean(serverUrl),
+        external: Boolean(input.serverUrl),
       }
     }),
   runOpenCodeCommand: () =>
@@ -90,8 +93,11 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           }),
         )
       : Effect.succeed({ stdout: runtimeMock.state.versionStdout, stderr: '', code: 0 }),
-  createOpenCodeSdkClient: () =>
-    ({}) as unknown as ReturnType<OpenCodeRuntimeShape['createOpenCodeSdkClient']>,
+  createOpenCodeSdkClient: (input) =>
+  {
+    runtimeMock.state.clients.push(input)
+    return {} as unknown as ReturnType<OpenCodeRuntimeShape['createOpenCodeSdkClient']>
+  },
   loadOpenCodeInventory: () =>
     runtimeMock.state.inventoryError
       ? Effect.fail(
@@ -103,15 +109,11 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         )
       : Effect.succeed(runtimeMock.state.inventory as OpenCodeInventory),
   loadInventoryFromCli: () =>
-    runtimeMock.state.inventoryError
-      ? Effect.fail(
-          new OpenCodeRuntimeError({
-            operation: 'loadInventoryFromCli',
-            detail: runtimeMock.state.inventoryError.message,
-            cause: runtimeMock.state.inventoryError,
-          }),
-        )
-      : Effect.succeed(runtimeMock.state.inventory as OpenCodeInventory),
+    Effect.sync(() =>
+    {
+      runtimeMock.state.cliInventoryCalls += 1
+      return runtimeMock.state.inventory as OpenCodeInventory
+    }),
 }
 
 beforeEach(() =>
@@ -120,6 +122,22 @@ beforeEach(() =>
 })
 
 const testLayer = Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble).pipe(
+  Layer.merge(
+    Layer.succeed(OpenCodeServerOwner, {
+      withServer: (use) =>
+        Effect.suspend(() =>
+        {
+          runtimeMock.state.ownerBorrows += 1
+          return use({
+            url: 'http://127.0.0.1:4301',
+            serverPassword: 'local-password',
+            version: '1.15.13',
+            isRunning: Effect.succeed(true),
+            exitCode: Effect.never,
+          })
+        }),
+    }),
+  ),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
   Layer.provideMerge(NodeServices.layer),
 )
@@ -144,6 +162,7 @@ it.layer(testLayer)('checkOpenCodeProviderStatus', (it) =>
 
       NodeAssert.equal(snapshot.status, 'error')
       NodeAssert.equal(snapshot.installed, false)
+      NodeAssert.equal(runtimeMock.state.ownerBorrows, 0)
       NodeAssert.equal(
         snapshot.message,
         'OpenCode CLI (`opencode`) is not installed or not on PATH.',
@@ -220,13 +239,25 @@ it.layer(testLayer)('checkOpenCodeProviderStatus', (it) =>
     }),
   )
 
-  it.effect('does not spawn a local server for health check (uses CLI instead)', () =>
-    Effect.gen(function* ()
-    {
-      yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd())
+  it.effect(
+    'loads local inventory through the shared owner with its verified version and password',
+    () =>
+      Effect.gen(function* ()
+      {
+        const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd())
 
-      NodeAssert.equal(runtimeMock.state.closeCalls, 0)
-    }),
+        NodeAssert.equal(snapshot.version, '1.15.13')
+        NodeAssert.equal(runtimeMock.state.ownerBorrows, 1)
+        NodeAssert.equal(runtimeMock.state.cliInventoryCalls, 0)
+        NodeAssert.deepEqual(runtimeMock.state.connections, [])
+        NodeAssert.deepEqual(runtimeMock.state.clients, [
+          {
+            baseUrl: 'http://127.0.0.1:4301',
+            directory: process.cwd(),
+            serverPassword: 'local-password',
+          },
+        ])
+      }),
   )
 
   it.effect('publishes only valid discovered skills', () =>
@@ -262,7 +293,7 @@ it.layer(testLayer)('checkOpenCodeProviderStatus', (it) =>
   it.effect('reports local model inventory failures without treating them as empty', () =>
     Effect.gen(function* ()
     {
-      runtimeMock.state.inventoryError = new Error('opencode models failed')
+      runtimeMock.state.inventoryError = new Error('plugin inventory ENOENT')
       const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd())
 
       NodeAssert.equal(snapshot.status, 'error')
@@ -270,7 +301,7 @@ it.layer(testLayer)('checkOpenCodeProviderStatus', (it) =>
       NodeAssert.equal(snapshot.models.length, 0)
       NodeAssert.equal(
         snapshot.message,
-        'Failed to execute OpenCode CLI health check: opencode models failed',
+        'Failed to load OpenCode provider inventory: plugin inventory ENOENT',
       )
     }),
   )
@@ -292,6 +323,15 @@ it.layer(testLayer)('checkOpenCodeProviderStatus with configured server URL', (i
 
       NodeAssert.equal(snapshot.status, 'error')
       NodeAssert.equal(snapshot.installed, true)
+      NodeAssert.equal(runtimeMock.state.ownerBorrows, 0)
+      NodeAssert.deepEqual(runtimeMock.state.connections, [
+        {
+          binaryPath: 'opencode',
+          directory: process.cwd(),
+          serverUrl: 'http://127.0.0.1:9999',
+          serverPassword: 'secret-password',
+        },
+      ])
       NodeAssert.equal(
         snapshot.message,
         'OpenCode server rejected authentication. Check the server URL and password.',

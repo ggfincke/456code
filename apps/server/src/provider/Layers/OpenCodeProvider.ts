@@ -22,10 +22,13 @@ import {
   type ServerProviderDraft,
 } from '../providerSnapshot.ts'
 import {
+  MINIMUM_OPENCODE_VERSION,
   OpenCodeRuntime,
   openCodeRuntimeErrorDetail,
   type OpenCodeInventory,
+  type OpenCodeServerConnection,
 } from '../opencodeRuntime.ts'
+import { OpenCodeServerOwner } from '../OpenCodeServerOwner.ts'
 import type { Agent, ProviderListResponse } from '@opencode-ai/sdk/v2'
 import { OPENCODE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
@@ -34,7 +37,6 @@ const OPENCODE_PRESENTATION = {
   capabilities: OPENCODE_PROVIDER_CAPABILITIES,
   showInteractionModeToggle: false,
 } as const
-const MINIMUM_OPENCODE_VERSION = '1.14.19'
 
 class OpenCodeProbeError extends Data.TaggedError('OpenCodeProbeError')<{
   readonly cause: unknown
@@ -78,6 +80,7 @@ function formatOpenCodeProbeError(input: {
   readonly cause: unknown
   readonly isExternalServer: boolean
   readonly serverUrl: string
+  readonly phase: 'version' | 'inventory'
 }): { readonly installed: boolean; readonly message: string }
 {
   const detail = normalizedErrorMessage(input.cause)
@@ -120,7 +123,7 @@ function formatOpenCodeProbeError(input: {
     }
   }
 
-  if (lower.includes('enoent') || lower.includes('notfound'))
+  if (input.phase === 'version' && (lower.includes('enoent') || lower.includes('notfound')))
   {
     return {
       installed: false,
@@ -146,11 +149,13 @@ function formatOpenCodeProbeError(input: {
     }
   }
 
+  const failureLabel =
+    input.phase === 'inventory'
+      ? 'Failed to load OpenCode provider inventory'
+      : 'Failed to execute OpenCode CLI health check'
   return {
     installed: true,
-    message: detail
-      ? `Failed to execute OpenCode CLI health check: ${detail}`
-      : 'Failed to execute OpenCode CLI health check.',
+    message: detail ? `${failureLabel}: ${detail}` : `${failureLabel}.`,
   }
 }
 
@@ -360,20 +365,26 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
   openCodeSettings: OpenCodeSettings,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
-): Effect.fn.Return<ServerProviderDraft, never, OpenCodeRuntime>
+): Effect.fn.Return<ServerProviderDraft, never, OpenCodeRuntime | OpenCodeServerOwner>
 {
   const openCodeRuntime = yield* OpenCodeRuntime
+  const serverOwner = yield* OpenCodeServerOwner
   const resolvedEnvironment = environment ?? process.env
   const checkedAt = DateTime.formatIso(yield* DateTime.now)
   const customModels = openCodeSettings.customModels
   const isExternalServer = openCodeSettings.serverUrl.trim().length > 0
 
-  const fallback = (cause: unknown, version: string | null = null) =>
+  const fallback = (
+    cause: unknown,
+    version: string | null = null,
+    phase: 'version' | 'inventory' = 'version',
+  ) =>
   {
     const failure = formatOpenCodeProbeError({
       cause,
       isExternalServer,
       serverUrl: openCodeSettings.serverUrl,
+      phase,
     })
     return buildServerProvider({
       presentation: OPENCODE_PRESENTATION,
@@ -458,6 +469,19 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
     }
   }
 
+  const loadInventory = (
+    server: Pick<OpenCodeServerConnection, 'url' | 'serverPassword' | 'version'>,
+  ) =>
+    openCodeRuntime
+      .loadOpenCodeInventory(
+        openCodeRuntime.createOpenCodeSdkClient({
+          baseUrl: server.url,
+          directory: cwd,
+          ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
+        }),
+      )
+      .pipe(Effect.map((inventory) => ({ inventory, version: server.version })))
+
   const inventoryExit = yield* Effect.exit(
     (isExternalServer
       ? Effect.scoped(
@@ -465,25 +489,14 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
             {
             const server = yield* openCodeRuntime.connectToOpenCodeServer({
               binaryPath: openCodeSettings.binaryPath,
+              directory: cwd,
               serverUrl: openCodeSettings.serverUrl,
-              environment: resolvedEnvironment,
+              serverPassword: openCodeSettings.serverPassword,
             })
-            return yield* openCodeRuntime.loadOpenCodeInventory(
-              openCodeRuntime.createOpenCodeSdkClient({
-                baseUrl: server.url,
-                directory: cwd,
-                ...(openCodeSettings.serverPassword
-                  ? { serverPassword: openCodeSettings.serverPassword }
-                  : {}),
-              }),
-            )
+            return yield* loadInventory(server)
           }),
         )
-      : openCodeRuntime.loadInventoryFromCli({
-          binaryPath: openCodeSettings.binaryPath,
-          cwd,
-          environment: resolvedEnvironment,
-        })
+      : serverOwner.withServer(loadInventory)
     ).pipe(
       Effect.mapError(
         (cause) => new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
@@ -492,16 +505,17 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
   )
   if (inventoryExit._tag === 'Failure')
   {
-    return fallback(Cause.squash(inventoryExit.cause), version)
+    return fallback(Cause.squash(inventoryExit.cause), version, 'inventory')
   }
 
+  const { inventory, version: serverVersion } = inventoryExit.value
   const models = providerModelsFromSettings(
-    flattenOpenCodeModels(inventoryExit.value),
+    flattenOpenCodeModels(inventory),
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   )
-  const connectedCount = inventoryExit.value.providerList.connected.length
-  const skills = flattenOpenCodeSkills(inventoryExit.value)
+  const connectedCount = inventory.providerList.connected.length
+  const skills = flattenOpenCodeSkills(inventory)
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
@@ -510,7 +524,7 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
     skills,
     probe: {
       installed: true,
-      version,
+      version: serverVersion,
       status: connectedCount > 0 ? 'ready' : 'warning',
       auth: {
         status: connectedCount > 0 ? 'authenticated' : 'unknown',

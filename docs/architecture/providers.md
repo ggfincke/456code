@@ -50,6 +50,26 @@ copy credentials between them, extract Google tokens, or redirect one CLI throug
 backend. Antigravity's headless protocol is not ACP, so it has a dedicated runtime rather than an
 ACP compatibility shim.
 
+## OpenCode server and inventory ownership
+
+Each OpenCode provider instance owns one scoped local server shared by inventory probes and text
+generation. Concurrent borrowers reuse that server; a dead process is discarded, and the server
+closes 30 seconds after its final borrower leaves. Thread adapters retain separate scoped servers,
+including their thread-specific MCP credentials and continuation identity. Local launches use the
+instance's normalized runtime environment.
+
+Local probes first check the CLI version, then load inventory through the SDK over HTTP. Both
+local and configured external servers must pass an authenticated health check within five seconds
+and report OpenCode 1.14.19 or newer. External connections use only the explicitly configured
+password, never a password inherited from the local environment, and do not borrow a local server.
+
+OpenCode probes run on instance creation or configuration replacement and on manual refresh, not
+on periodic timers or unrelated update-check settings changes. Pending or failed inventory probes
+retain previous models, commands, and skills. Successful inventories, including empty results
+after logout or plugin removal, are authoritative; disabled and missing-CLI snapshots also clear
+the previous inventory. An inventory/plugin failure after a successful CLI version check does not
+classify the CLI as missing.
+
 ## Google CLI capability boundary
 
 The two Google providers intentionally expose different runtime contracts:

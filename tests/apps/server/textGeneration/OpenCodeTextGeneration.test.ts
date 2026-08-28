@@ -5,7 +5,9 @@ import { OpenCodeSettings, ProviderInstanceId, TextGenerationError } from '@t3to
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
@@ -14,6 +16,8 @@ import { beforeEach, expect } from 'vite-plus/test'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import * as OpenCodeRuntime from '../../../../apps/server/src/provider/opencodeRuntime.ts'
+import * as OpenCodeServerOwner from '../../../../apps/server/src/provider/OpenCodeServerOwner.ts'
+import { checkOpenCodeProviderStatus } from '../../../../apps/server/src/provider/Layers/OpenCodeProvider.ts'
 import * as OpenCodeTextGeneration from '../../../../apps/server/src/textGeneration/OpenCodeTextGeneration.ts'
 import * as TextGeneration from '../../../../apps/server/src/textGeneration/TextGeneration.ts'
 
@@ -23,6 +27,12 @@ const runtimeMock = {
     promptUrls: [] as string[],
     authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
+    connectCalls: [] as Array<
+      Parameters<OpenCodeRuntime.OpenCodeRuntimeShape['connectToOpenCodeServer']>[0]
+    >,
+    requests: [] as Array<{ kind: 'create' | 'prompt'; input: unknown; signal: AbortSignal }>,
+    hangingRequest: undefined as 'create' | 'prompt' | undefined,
+    requestStarted: undefined as Deferred.Deferred<void> | undefined,
     sessionCreateError: undefined as unknown,
     sessionResult: undefined as { data?: { id: string } } | undefined,
     promptRequestError: undefined as unknown,
@@ -35,6 +45,10 @@ const runtimeMock = {
     this.state.promptUrls.length = 0
     this.state.authHeaders.length = 0
     this.state.closeCalls.length = 0
+    this.state.connectCalls.length = 0
+    this.state.requests.length = 0
+    this.state.hangingRequest = undefined
+    this.state.requestStarted = undefined
     this.state.sessionCreateError = undefined
     this.state.sessionResult = undefined
     this.state.promptRequestError = undefined
@@ -59,29 +73,52 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
       )
       return {
         url,
+        serverPassword: 'local-password',
+        version: '1.15.13',
+        isRunning: Effect.succeed(true),
         exitCode: Effect.never,
       }
     }),
-  connectToOpenCodeServer: ({ serverUrl }) =>
-    Effect.succeed({
-      url: serverUrl ?? 'http://127.0.0.1:4301',
-      exitCode: null,
-      external: Boolean(serverUrl),
+  connectToOpenCodeServer: (input) =>
+    Effect.sync(() =>
+    {
+      runtimeMock.state.connectCalls.push(input)
+      return {
+        url: input.serverUrl ?? 'http://127.0.0.1:4301',
+        version: '1.15.13',
+        ...(input.serverPassword !== undefined ? { serverPassword: input.serverPassword } : {}),
+        exitCode: null,
+        external: Boolean(input.serverUrl),
+      }
     }),
-  runOpenCodeCommand: () => Effect.succeed({ stdout: '', stderr: '', code: 0 }),
+  runOpenCodeCommand: () => Effect.succeed({ stdout: '1.15.13', stderr: '', code: 0 }),
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
       session: {
-        create: async () =>
+        create: async (input: unknown, options: { signal: AbortSignal }) =>
         {
+          runtimeMock.state.requests.push({ kind: 'create', input, signal: options.signal })
+          if (runtimeMock.state.hangingRequest === 'create')
+          {
+            Deferred.doneUnsafe(runtimeMock.state.requestStarted!, Effect.void)
+            return await new Promise(() =>
+            {})
+          }
           if (runtimeMock.state.sessionCreateError !== undefined)
           {
             throw runtimeMock.state.sessionCreateError
           }
           return runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } }
         },
-        prompt: async () =>
+        prompt: async (input: unknown, options: { signal: AbortSignal }) =>
         {
+          runtimeMock.state.requests.push({ kind: 'prompt', input, signal: options.signal })
+          if (runtimeMock.state.hangingRequest === 'prompt')
+          {
+            Deferred.doneUnsafe(runtimeMock.state.requestStarted!, Effect.void)
+            return await new Promise(() =>
+            {})
+          }
           runtimeMock.state.promptUrls.push(baseUrl)
           runtimeMock.state.authHeaders.push(
             serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
@@ -109,13 +146,11 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
       },
     }) as unknown as ReturnType<OpenCodeRuntime.OpenCodeRuntimeShape['createOpenCodeSdkClient']>,
   loadOpenCodeInventory: () =>
-    Effect.fail(
-      new OpenCodeRuntime.OpenCodeRuntimeError({
-        operation: 'loadOpenCodeInventory',
-        detail: 'OpenCodeRuntimeTestDouble.loadOpenCodeInventory not used in this test',
-        cause: null,
-      }),
-    ),
+    Effect.succeed({
+      providerList: { all: [], connected: [], default: {} },
+      agents: [],
+      skills: [],
+    }),
   loadInventoryFromCli: () =>
     Effect.fail(
       new OpenCodeRuntime.OpenCodeRuntimeError({
@@ -177,13 +212,22 @@ const EXISTING_SERVER_OPENCODE_SETTINGS = Schema.decodeSync(OpenCodeSettings)({
 
 function withOpenCodeTextGeneration<A, E, R>(
   settings: OpenCodeSettings,
-  effectFn: (textGeneration: TextGeneration.TextGeneration['Service']) => Effect.Effect<A, E, R>,
+  effectFn: (
+    textGeneration: TextGeneration.TextGeneration['Service'],
+    owner: OpenCodeServerOwner.OpenCodeServerOwner['Service'],
+  ) => Effect.Effect<A, E, R>,
 )
 {
   return Effect.gen(function* ()
   {
-    const textGeneration = yield* OpenCodeTextGeneration.makeOpenCodeTextGeneration(settings)
-    return yield* effectFn(textGeneration)
+    const owner = yield* OpenCodeServerOwner.make({
+      binaryPath: settings.binaryPath,
+      directory: process.cwd(),
+    })
+    const textGeneration = yield* OpenCodeTextGeneration.makeOpenCodeTextGeneration(settings).pipe(
+      Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, owner),
+    )
+    return yield* effectFn(textGeneration, owner)
   }).pipe(Effect.scoped)
 }
 
@@ -201,10 +245,13 @@ const advanceIdleClock = Effect.gen(function* ()
 
 it.layer(OpenCodeTextGenerationTestLayer)('OpenCodeTextGeneration', (it) =>
 {
-  it.effect('reuses a warm server across back-to-back requests and closes it after idling', () =>
-    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+  it.effect('shares the inventory server across text requests and closes it after idling', () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration, owner) =>
       Effect.gen(function* ()
       {
+        yield* checkOpenCodeProviderStatus(DEFAULT_OPENCODE_SETTINGS, process.cwd()).pipe(
+          Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, owner),
+        )
         yield* textGeneration.generateCommitMessage({
           cwd: process.cwd(),
           branch: 'feature/opencode-reuse',
@@ -226,12 +273,53 @@ it.layer(OpenCodeTextGenerationTestLayer)('OpenCodeTextGeneration', (it) =>
           'http://127.0.0.1:4301',
         ])
         expect(runtimeMock.state.closeCalls).toEqual([])
+        expect(runtimeMock.state.authHeaders).toEqual([
+          `Basic ${btoa('opencode:local-password')}`,
+          `Basic ${btoa('opencode:local-password')}`,
+        ])
+        expect(runtimeMock.state.requests[0]?.input).toEqual({
+          title: '456code generateCommitMessage',
+          permission: [{ permission: '*', pattern: '*', action: 'deny' }],
+        })
+        expect(
+          runtimeMock.state.requests.every((request) => request.signal instanceof AbortSignal),
+        ).toBe(true)
 
         yield* advanceIdleClock
 
         expect(runtimeMock.state.closeCalls).toEqual(['http://127.0.0.1:4301'])
       }),
     ).pipe(Effect.provide(TestClock.layer())),
+  )
+
+  it.effect('aborts timed-out SDK session and prompt requests with their diagnostic errors', () =>
+    Effect.gen(function* ()
+    {
+      for (const kind of ['create', 'prompt'] as const)
+      {
+        yield* withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+          Effect.gen(function* ()
+          {
+            runtimeMock.state.hangingRequest = kind
+            runtimeMock.state.requestStarted = yield* Deferred.make<void>()
+            const resultFiber = yield* textGeneration
+              .generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT)
+              .pipe(Effect.flip, Effect.forkChild)
+            yield* Deferred.await(runtimeMock.state.requestStarted)
+            yield* Effect.yieldNow
+            yield* TestClock.adjust('180 seconds')
+            const error = yield* Fiber.join(resultFiber)
+            expect(error).toBeInstanceOf(TextGenerationError)
+            expect(error.cause).toBeInstanceOf(
+              kind === 'create'
+                ? OpenCodeTextGeneration.OpenCodeTextGenerationSessionRequestError
+                : OpenCodeTextGeneration.OpenCodeTextGenerationPromptRequestError,
+            )
+            expect(runtimeMock.state.requests.at(-1)?.signal.aborted).toBe(true)
+          }),
+        )
+      }
+    }).pipe(Effect.provide(TestClock.layer())),
   )
 
   it.effect('starts a new server after the warm server idles out', () =>
@@ -461,6 +549,20 @@ it.layer(OpenCodeTextGenerationExistingServerTestLayer)(
           })
 
           expect(runtimeMock.state.startCalls).toEqual([])
+          expect(runtimeMock.state.connectCalls).toEqual([
+            {
+              binaryPath: 'fake-opencode',
+              directory: process.cwd(),
+              serverUrl: 'http://127.0.0.1:9999',
+              serverPassword: 'secret-password',
+            },
+            {
+              binaryPath: 'fake-opencode',
+              directory: process.cwd(),
+              serverUrl: 'http://127.0.0.1:9999',
+              serverPassword: 'secret-password',
+            },
+          ])
           expect(runtimeMock.state.promptUrls).toEqual([
             'http://127.0.0.1:9999',
             'http://127.0.0.1:9999',

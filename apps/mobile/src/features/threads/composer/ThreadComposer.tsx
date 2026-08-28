@@ -54,6 +54,7 @@ import {
 } from '../../../lib/thread-activity/provider-switch'
 import { ComposerCommandPopover } from './ComposerCommandPopover'
 import { useComposerCommandMenu } from './use-composer-command-menu'
+import { REFRESH_MODELS_ACTION, useProviderCatalogRefresh } from './provider-catalog-refresh'
 import { composerConnectionStatus, type ComposerStatusPillState } from './threadComposerStatus'
 import { resolveComposerSubmitHandler } from './threadComposerSubmit'
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from './composerSurface'
@@ -423,9 +424,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     () => providerOptionsConfigurationLabel(providerOptionDescriptors),
     [providerOptionDescriptors],
   )
+  const { refreshModels, refreshAction } = useProviderCatalogRefresh(props.environmentId)
   const modelMenuActions = useMemo(
-    () => buildModelMenuActions(providerGroups, currentModelSelection),
-    [providerGroups, currentModelSelection],
+    () => [...buildModelMenuActions(providerGroups, currentModelSelection), refreshAction],
+    [providerGroups, currentModelSelection, refreshAction],
   )
 
   // ── Options menu ─────────────────────────────────────────
@@ -516,6 +518,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   // ── Menu handlers ────────────────────────────────────────
   function handleModelMenuAction(event: string)
   {
+    if (event === REFRESH_MODELS_ACTION)
+    {
+      void refreshModels()
+      return
+    }
     if (!event.startsWith('model:'))
     {
       return

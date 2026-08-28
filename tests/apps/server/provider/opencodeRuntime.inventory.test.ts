@@ -5,7 +5,11 @@ import * as NodeAssert from 'node:assert/strict'
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
@@ -47,6 +51,55 @@ it.layer(testLayer)('loadOpenCodeInventory', (it) =>
       NodeAssert.deepEqual(inventory.providerList.connected, ['openai'])
       NodeAssert.deepEqual(inventory.agents, [])
       NodeAssert.deepEqual(inventory.skills, [])
+    }),
+  )
+
+  it.effect('keeps provider inventory when optional agent discovery fails', () =>
+    Effect.gen(function* ()
+    {
+      const runtime = yield* OpenCodeRuntime
+      const client = {
+        provider: {
+          list: () => Promise.resolve({ data: { connected: ['openai'], all: [], default: {} } }),
+        },
+        app: {
+          agents: () => Promise.reject(new Error('agents endpoint unavailable')),
+          skills: () => Promise.resolve({ data: [] }),
+        },
+      } as unknown as Parameters<OpenCodeRuntimeShape['loadOpenCodeInventory']>[0]
+      const inventory = yield* runtime.loadOpenCodeInventory(client)
+      NodeAssert.deepEqual(inventory.providerList.connected, ['openai'])
+      NodeAssert.deepEqual(inventory.agents, [])
+    }),
+  )
+
+  it.effect('aborts every in-flight SDK inventory request when its borrower is interrupted', () =>
+    Effect.gen(function* ()
+    {
+      const runtime = yield* OpenCodeRuntime
+      const entered = yield* Deferred.make<void>()
+      const signals: AbortSignal[] = []
+      const pending = (_parameters?: unknown, options?: { signal?: AbortSignal }) =>
+      {
+        if (options?.signal) signals.push(options.signal)
+        if (signals.length === 3) Deferred.doneUnsafe(entered, Effect.void)
+        return new Promise(() => undefined)
+      }
+      const client = {
+        provider: { list: pending },
+        app: { agents: pending, skills: pending },
+      } as unknown as Parameters<OpenCodeRuntimeShape['loadOpenCodeInventory']>[0]
+      const fiber = yield* runtime.loadOpenCodeInventory(client).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(fiber)
+      const result = yield* Fiber.await(fiber)
+      NodeAssert.equal(Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause), true)
+      NodeAssert.equal(signals.length, 3)
+      NodeAssert.equal(
+        signals.every((signal) => signal.aborted),
+        true,
+      )
     }),
   )
 

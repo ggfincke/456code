@@ -53,6 +53,10 @@ import { useCreateProjectThread } from '../use-project-actions'
 import { useIncomingShare } from '../../sharing/IncomingShareProvider'
 import { ComposerCommandPopover } from '../composer/ComposerCommandPopover'
 import { useComposerCommandMenu } from '../composer/use-composer-command-menu'
+import {
+  REFRESH_MODELS_ACTION,
+  useProviderCatalogRefresh,
+} from '../composer/provider-catalog-refresh'
 
 function formatWorkspaceLabel(input: {
   readonly workspaceMode: string
@@ -600,9 +604,13 @@ export function NewTaskDraftScreen(props: {
     [flow.environments, flow.selectedEnvironmentId, isIncomingShareTransferPending],
   )
 
+  const { refreshModels, refreshAction } = useProviderCatalogRefresh(
+    flow.selectedEnvironmentId,
+    isIncomingShareTransferPending,
+  )
   const modelMenuActions = useMemo(
-    () => buildModelMenuActions(flow.providerGroups, flow.selectedModel),
-    [flow.providerGroups, flow.selectedModel],
+    () => [...buildModelMenuActions(flow.providerGroups, flow.selectedModel), refreshAction],
+    [flow.providerGroups, flow.selectedModel, refreshAction],
   )
   const providerOptionDescriptors = useMemo(
     () =>
@@ -823,6 +831,11 @@ export function NewTaskDraftScreen(props: {
   )
   function handleModelMenuAction(event: string)
   {
+    if (event === REFRESH_MODELS_ACTION)
+    {
+      void refreshModels()
+      return
+    }
     if (isIncomingShareTransferPending || !event.startsWith('model:'))
     {
       return

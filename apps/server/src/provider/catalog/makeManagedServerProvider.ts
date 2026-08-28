@@ -28,6 +28,7 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
   readonly getSettings: Effect.Effect<Settings, ServerSettingsError>
   readonly streamSettings: Stream.Stream<Settings>
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean
+  readonly checkProviderOnSettingsChange?: (previous: Settings, next: Settings) => boolean
   readonly initialSnapshot: (settings: Settings) => Effect.Effect<ServerProvider>
   readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>
   readonly enrichSnapshot?: (input: {
@@ -37,6 +38,7 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
     readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>
   }) => Effect.Effect<void>
   readonly refreshInterval?: Duration.Input
+  readonly refreshOnInterval?: boolean
 }): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope>
 {
   const refreshSemaphore = yield* Semaphore.make(1)
@@ -122,6 +124,20 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot))
     }
 
+    if (
+      !forceRefresh &&
+      input.checkProviderOnSettingsChange?.(previousSettings, nextSettings) === false
+    )
+    {
+      const state = yield* Ref.updateAndGet(snapshotStateRef, (state) => ({
+        ...state,
+        enrichmentGeneration: state.enrichmentGeneration + 1,
+      }))
+      yield* Ref.set(settingsRef, nextSettings)
+      yield* restartSnapshotEnrichment(nextSettings, state.snapshot, state.enrichmentGeneration)
+      return state.snapshot
+    }
+
     const nextSnapshot = yield* input.checkProvider
     const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) =>
     {
@@ -154,12 +170,15 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
     Effect.asVoid(applySnapshot(nextSettings)),
   ).pipe(Effect.forkScoped)
 
-  yield* Effect.forever(
-    Effect.sleep(input.refreshInterval ?? '60 seconds').pipe(
-      Effect.flatMap(() => refreshSnapshot()),
-      Effect.ignoreCause({ log: true }),
-    ),
-  ).pipe(Effect.forkScoped)
+  if (input.refreshOnInterval !== false)
+  {
+    yield* Effect.forever(
+      Effect.sleep(input.refreshInterval ?? '60 seconds').pipe(
+        Effect.flatMap(() => refreshSnapshot()),
+        Effect.ignoreCause({ log: true }),
+      ),
+    ).pipe(Effect.forkScoped)
+  }
 
   yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
     Effect.ignoreCause({ log: true }),

@@ -3,7 +3,15 @@
 
 import { describe, expect, it } from 'vite-plus/test'
 import type { ProviderOptionDescriptor } from '@t3tools/contracts'
-import { buildTraitsTriggerDisplay } from '../../../../../../apps/web/src/components/chat/composer/TraitsPicker'
+import {
+  buildTraitsTriggerDisplay,
+  buildUnavailableModelOptionDescriptors,
+  TraitsMenuContent,
+} from '../../../../../../apps/web/src/components/chat/composer/TraitsPicker'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { ProviderDriverKind } from '@t3tools/contracts'
+import { Menu } from '../../../../../../apps/web/src/components/ui/menu'
 
 function selectDescriptor(
   id: string,
@@ -50,6 +58,67 @@ function display(descriptors: ReadonlyArray<ProviderOptionDescriptor>, fastModeE
 
 describe('buildTraitsTriggerDisplay', () =>
 {
+  it('shows saved unavailable traits read-only and restores controls with metadata', () =>
+  {
+    const saved = [
+      { id: 'variant', value: 'high' },
+      { id: 'customToggle', value: true },
+    ]
+    const descriptors = buildUnavailableModelOptionDescriptors(saved)
+    expect(descriptors).toEqual([
+      {
+        id: 'variant',
+        label: 'Variant',
+        type: 'select',
+        options: [{ id: 'high', label: 'high' }],
+        currentValue: 'high',
+      },
+      { id: 'customToggle', label: 'Custom Toggle', type: 'boolean', currentValue: true },
+    ])
+    const props = {
+      provider: ProviderDriverKind.make('opencode'),
+      model: 'vendor/saved',
+      models: [],
+      prompt: '',
+      onPromptChange: () =>
+      {},
+      onModelOptionsChange: () =>
+      {},
+      modelOptions: saved,
+    }
+    const render = (models: Parameters<typeof TraitsMenuContent>[0]['models']) =>
+      renderToStaticMarkup(
+        createElement(Menu, null, createElement(TraitsMenuContent, { ...props, models })),
+      )
+    const unavailable = render([])
+    expect(unavailable).toContain('Variant')
+    expect(unavailable).toContain('high')
+    expect(unavailable).toContain('Custom Toggle')
+    expect(unavailable).not.toContain('menuitemradio')
+    const recovered = render([
+      {
+        slug: props.model,
+        name: 'Saved',
+        isCustom: false,
+        capabilities: {
+          optionDescriptors: [
+            {
+              id: 'variant',
+              label: 'Variant',
+              type: 'select',
+              options: [
+                { id: 'high', label: 'High' },
+                { id: 'low', label: 'Low' },
+              ],
+            },
+          ],
+        },
+      },
+    ])
+    expect(recovered).toContain('menuitemradio')
+    expect(recovered).toContain('Low')
+  })
+
   it('omits fast mode from the label entirely when it is off', () =>
   {
     expect(display([EFFORT, fastModeDescriptor(false), CONTEXT_WINDOW], false)).toEqual({
