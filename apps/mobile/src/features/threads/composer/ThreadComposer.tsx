@@ -44,6 +44,7 @@ import type { DraftComposerImageAttachment } from '../../../lib/composerImages'
 import {
   buildModelMenuActions,
   buildModelOptions,
+  filterModelOptions,
   groupByProvider,
 } from '../../../lib/modelOptions'
 import { useScaledTextRole } from '../../settings/appearance/useScaledTextRole'
@@ -479,16 +480,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
     if (composerTrigger.kind === 'slash-model')
     {
-      const query = composerTrigger.query.toLowerCase()
-      return modelOptions
-        .filter((option) => `${option.label} ${option.providerLabel}`.toLowerCase().includes(query))
-        .map((option) => ({
-          id: `model:${option.key}`,
-          type: 'model' as const,
-          selection: option.selection,
-          label: option.label,
-          description: option.providerLabel,
-        }))
+      return filterModelOptions(modelOptions, composerTrigger.query).map((option) => ({
+        id: `model:${option.key}`,
+        type: 'model' as const,
+        selection: option.selection,
+        label: option.label,
+        description: option.subtitle,
+      }))
     }
 
     if (composerTrigger.kind === 'skill')
