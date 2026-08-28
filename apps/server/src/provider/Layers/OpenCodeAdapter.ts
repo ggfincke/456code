@@ -3083,6 +3083,7 @@ export function makeOpenCodeAdapter(
 
       const text = input.input?.trim()
       // image attachments use the existing OpenCode file-part contract
+      // unsupported native formats retain only ProviderService's verified path context
       const fileParts = toOpenCodeFileParts({
         attachments: input.attachments,
         resolveAttachmentPath: (attachment) =>

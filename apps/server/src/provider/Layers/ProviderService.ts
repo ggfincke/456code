@@ -53,6 +53,11 @@ import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
 
 import {
+  inspectManagedAttachmentFile,
+  parsePendingAttachmentId,
+} from '../../attachments/attachmentStore.ts'
+import { ServerConfig } from '../../config.ts'
+import {
   increment,
   providerMetricAttributes,
   providerRuntimeEventsTotal,
@@ -107,6 +112,7 @@ import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
 const isModelSelection = Schema.is(ModelSelection)
 const isProviderContinuationIdentity = Schema.is(ProviderContinuationIdentity)
 const isProviderRuntimeInboxAdmissionError = Schema.is(ProviderRuntimeInboxAdmissionError)
+const encodeAttachmentPath = Schema.encodeSync(Schema.fromJsonString(Schema.String))
 
 /**
  * Construction overrides for focused service tests. Production wiring
@@ -402,6 +408,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
 )
 {
   const analytics = yield* Effect.service(AnalyticsService.AnalyticsService)
+  const serverConfig = yield* ServerConfig
   const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers
   // options-provided logger wins (test overrides); otherwise we take whatever
   // the `ProviderEventLoggers` tag exposes — `undefined` means "no canonical
@@ -2772,6 +2779,54 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
               `Provider instance '${routed.instanceId}' cannot switch models within an active session.`,
             )
           }
+          if (
+            input.attachments.some((attachment) => attachment.type === 'image') &&
+            !capabilities.supportedAttachmentTypes.includes('image')
+          )
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              `Provider instance '${routed.instanceId}' does not support image attachments.`,
+            )
+          }
+          // tools receive verified managed paths; adapters own native attachment ingestion
+          const attachmentPaths = new Set<string>()
+          for (const attachment of input.attachments)
+          {
+            if (parsePendingAttachmentId(attachment.id) !== null)
+            {
+              return yield* toValidationError(
+                'ProviderService.sendTurn',
+                'Pending uploads must be normalized before provider dispatch.',
+              )
+            }
+            const managedFile = yield* inspectManagedAttachmentFile({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachment,
+            })
+            if (managedFile === null || managedFile.sizeBytes !== attachment.sizeBytes)
+            {
+              return yield* toValidationError(
+                'ProviderService.sendTurn',
+                'A managed attachment is missing or invalid.',
+              )
+            }
+            attachmentPaths.add(managedFile.path)
+          }
+          const inputWithAttachmentPaths =
+            attachmentPaths.size === 0
+              ? input
+              : {
+                  ...input,
+                  input: [
+                    input.input,
+                    [...attachmentPaths]
+                      .map((path) => `[Attached file: ${encodeAttachmentPath(path)}]`)
+                      .join('\n'),
+                  ]
+                    .filter((part) => part !== undefined)
+                    .join('\n\n'),
+                }
           yield* Effect.annotateCurrentSpan({
             'provider.kind': routed.adapter.provider,
             ...(input.modelSelection?.model
@@ -2783,7 +2838,9 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           // clear the prior turn before starting another so overlapping mcp calls fail closed
           yield* mcpSessionRegistry.bindActiveTurn(input.threadId)
           const adapterInput =
-            routed.adapter.provider === 'codex' ? input : applyOrchestrateModeInstructions(input)
+            routed.adapter.provider === 'codex'
+              ? inputWithAttachmentPaths
+              : applyOrchestrateModeInstructions(inputWithAttachmentPaths)
           const turn = yield* context === undefined
             ? routed.adapter.sendTurn(adapterInput)
             : routed.adapter.sendTurn(adapterInput, context)

@@ -2,7 +2,9 @@
 // defines shared web session, thread, and composer defaults
 
 import type {
+  ChatFileAttachment as ContractChatFileAttachment,
   ChatImageAttachment as ContractChatImageAttachment,
+  ChatUnknownAttachment as ContractChatUnknownAttachment,
   CollaborationMode,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointSummary,
@@ -14,7 +16,12 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
 } from '@t3tools/contracts'
-import { normalizeCollaborationMode } from '@t3tools/contracts'
+import {
+  ChatFileAttachment as ChatFileAttachmentSchema,
+  ChatImageAttachment as ChatImageAttachmentSchema,
+  normalizeCollaborationMode,
+} from '@t3tools/contracts'
+import * as Schema from 'effect/Schema'
 import type {
   EnvironmentProject,
   EnvironmentThread,
@@ -45,7 +52,19 @@ export interface ChatImageAttachment extends ContractChatImageAttachment
   readonly previewUrl?: string
 }
 
-export type ChatAttachment = ChatImageAttachment
+export interface ChatFileAttachment extends ContractChatFileAttachment
+{
+  readonly previewUrl?: string
+  readonly downloadable?: boolean
+}
+
+export type ChatUnknownAttachment = ContractChatUnknownAttachment
+export type ChatAttachment = ChatImageAttachment | ChatFileAttachment | ChatUnknownAttachment
+
+export const isImageAttachment: (attachment: ChatAttachment) => attachment is ChatImageAttachment =
+  Schema.is(ChatImageAttachmentSchema)
+export const isFileAttachment: (attachment: ChatAttachment) => attachment is ChatFileAttachment =
+  Schema.is(ChatFileAttachmentSchema)
 
 export interface ChatMessage extends Omit<OrchestrationMessage, 'attachments'>
 {

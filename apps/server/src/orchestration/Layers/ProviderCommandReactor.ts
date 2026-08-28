@@ -2,6 +2,7 @@
 // executes persisted provider intents against provider runtimes
 import {
   type ChatAttachment,
+  ChatKnownAttachment,
   CommandId,
   EventId,
   ModelSelection,
@@ -98,6 +99,7 @@ import {
 } from './ProviderSwitchPolicy.ts'
 import { DurableReactorInfrastructureLive } from './OrchestrationReactor.ts'
 
+const isKnownAttachment = Schema.is(ChatKnownAttachment)
 const isProviderAdapterSessionClosedError = Schema.is(ProviderAdapterSessionClosedError)
 const isProviderAdapterSessionNotFoundError = Schema.is(ProviderAdapterSessionNotFoundError)
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError)
@@ -1679,9 +1681,15 @@ const make = Effect.gen(function* ()
       return
     }
 
+    const { attachments, ...request } = sendTurnRequest.value.request
     const delivered = yield* invokeProvider(
       providerService.sendTurn(
-        sendTurnRequest.value.request,
+        {
+          ...request,
+          ...(attachments === undefined
+            ? {}
+            : { attachments: attachments.filter(isKnownAttachment) }),
+        },
         event.payload.importContinuationAuthority === undefined
           ? undefined
           : {
@@ -2243,9 +2251,23 @@ const make = Effect.gen(function* ()
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.flatMap((built) =>
-        invokeProvider(providerService.sendTurn(built.request, undefined, activeEffectContext), {
-          trackIndeterminate: false,
-        }).pipe(
+      {
+        const { attachments, ...request } = built.request
+        return invokeProvider(
+          providerService.sendTurn(
+            {
+              ...request,
+              ...(attachments === undefined
+                ? {}
+                : { attachments: attachments.filter(isKnownAttachment) }),
+            },
+            undefined,
+            activeEffectContext,
+          ),
+          {
+            trackIndeterminate: false,
+          },
+        ).pipe(
           Effect.flatMap(() =>
             built.handoffDeliveryMarker === undefined
               ? Effect.void
@@ -2255,8 +2277,8 @@ const make = Effect.gen(function* ()
                   createdAt: event.payload.createdAt,
                 }),
           ),
-        ),
-      ),
+        )
+      }),
       Effect.catchCause((cause) =>
         appendProviderFailureActivity({
           threadId: event.payload.threadId,

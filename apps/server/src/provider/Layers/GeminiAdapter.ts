@@ -858,7 +858,10 @@ export function makeGeminiAdapter(
                 issue: `Gemini ACP did not advertise model '${modelSelection.model}'.`,
               })
             }
-            const imagePromptParts = yield* Effect.forEach(input.attachments ?? [], (attachment) =>
+            const imageAttachments = (input.attachments ?? []).filter(
+              (attachment) => attachment.type === 'image',
+            )
+            const imagePromptParts = yield* Effect.forEach(imageAttachments, (attachment) =>
               Effect.gen(function* ()
               {
                 if (!attachment.mimeType.startsWith('image/'))

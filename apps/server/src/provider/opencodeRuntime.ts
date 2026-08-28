@@ -458,6 +458,23 @@ export function openCodeQuestionId(
   return header.length > 0 ? `question-${index}-${header}` : `question-${index}`
 }
 
+const OPENCODE_NATIVE_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+export const OPENCODE_NATIVE_FILE_PART_MAX_BYTES = 20 * 1024 * 1024
+
+export function isOpenCodeNativeFilePart(input: {
+  readonly mimeType: string
+  readonly sizeBytes: number
+}): boolean
+{
+  if (input.sizeBytes > OPENCODE_NATIVE_FILE_PART_MAX_BYTES) return false
+  const mimeType = input.mimeType.trim().toLowerCase()
+  return (
+    OPENCODE_NATIVE_IMAGE_MIMES.has(mimeType) ||
+    mimeType.startsWith('text/') ||
+    mimeType === 'application/pdf'
+  )
+}
+
 export function toOpenCodeFileParts(input: {
   readonly attachments: ReadonlyArray<ChatAttachment> | undefined
   readonly resolveAttachmentPath: (attachment: ChatAttachment) => string | null
@@ -467,6 +484,11 @@ export function toOpenCodeFileParts(input: {
 
   for (const attachment of input.attachments ?? [])
   {
+    if (
+      (attachment.type !== 'image' && attachment.type !== 'file') ||
+      !isOpenCodeNativeFilePart(attachment)
+    )
+      continue
     const attachmentPath = input.resolveAttachmentPath(attachment)
     if (!attachmentPath)
     {

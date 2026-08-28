@@ -73,7 +73,7 @@ import {
   workLogEntryIsToolLike,
 } from '../../../session-logic'
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from '../../../timestampFormat'
-import { type TurnDiffSummary } from '../../../types'
+import { isImageAttachment, type ChatImageAttachment, type TurnDiffSummary } from '../../../types'
 import ChatMarkdown from '../../ChatMarkdown'
 import { Button } from '../../ui/button'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
@@ -107,7 +107,6 @@ import {
 import {
   TimelineRowActivityCtx,
   TimelineRowCtx,
-  type TimelineMessage,
   type TimelineRow,
   type TimelineWorkEntry,
 } from './timelineRowContext'
@@ -146,7 +145,7 @@ function splitTrailingReviewComments(value: string): {
 export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'message' }> })
 {
   const ctx = use(TimelineRowCtx)
-  const userImages = row.message.attachments ?? []
+  const userImages = (row.message.attachments ?? []).filter(isImageAttachment)
   const reviewCommentState = splitTrailingReviewComments(row.message.text)
   const architectureContexts: ArchitectureConcernContext[] = []
   let promptWithoutArchitectureContexts = reviewCommentState.promptText
@@ -187,7 +186,7 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
       <div className="relative max-w-[80%] rounded-2xl bg-accent p-3">
         {regularImages.length > 0 && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image: NonNullable<TimelineMessage['attachments']>[number]) => (
+            {regularImages.map((image) => (
               <div
                 key={image.id}
                 className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
@@ -358,7 +357,7 @@ const UserMessageArchitectureConcernChip = memo(function UserMessageArchitecture
 
 function UserMessagePreviewAnnotationCard(props: {
   annotation: ParsedPreviewAnnotation
-  image: NonNullable<TimelineMessage['attachments']>[number] | null
+  image: ChatImageAttachment | null
 })
 {
   const ctx = use(TimelineRowCtx)

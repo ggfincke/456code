@@ -167,6 +167,10 @@ export type AttachmentLifecycleError = PersistenceSqlError | AttachmentStagingCo
 
 export interface AttachmentLifecycleRepositoryShape
 {
+  readonly withCommandPermit: <A, E, R>(
+    commandId: string,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>
   readonly stage: (
     input: StageAttachmentInput,
   ) => Effect.Effect<AttachmentStaging, AttachmentLifecycleError>

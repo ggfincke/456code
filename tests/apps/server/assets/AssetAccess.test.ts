@@ -18,6 +18,8 @@ import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import * as ProjectFaviconResolver from '../../../../apps/server/src/project/ProjectFaviconResolver.ts'
 import * as ProjectFileLoader from '../../../../apps/server/src/project/ProjectFileLoader.ts'
 import * as WorkspacePaths from '../../../../apps/server/src/workspace/WorkspacePaths.ts'
+import { assetResponseHeaders } from '../../../../apps/server/src/http.ts'
+import { createPendingAttachmentId } from '../../../../apps/server/src/attachments/attachmentStore.ts'
 import {
   ASSET_ROUTE_PREFIX,
   issueAssetUrl,
@@ -39,6 +41,41 @@ const testLayer = Layer.mergeAll(
 
 describe('AssetAccess', () =>
 {
+  it.effect('forces a signed generic HTML asset to download even without caller metadata', () =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const config = yield* ServerConfig.ServerConfig
+      const id = createPendingAttachmentId('file', '.html')
+      yield* fs.makeDirectory(config.attachmentsDir, { recursive: true })
+      yield* fs.writeFileString(`${config.attachmentsDir}/${id}.html`, '<script>unsafe()</script>')
+      const url = yield* issueAssetUrl({
+        resource: {
+          _tag: 'attachment',
+          attachmentId: id,
+          fileName: 'report.html',
+          mimeType: 'text/html',
+        },
+      })
+      const token = url.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length).split('/')[0]!
+      const asset = yield* resolveAsset(token, 'report.html')
+      expect(asset?.kind).toBe('file')
+      if (!asset || asset.kind !== 'file') throw new Error('Expected a file asset.')
+      expect(assetResponseHeaders(asset.path, asset)).toMatchObject({
+        'Content-Type': 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+      })
+      expect(assetResponseHeaders(asset.path, asset)['Content-Disposition']).toContain(
+        'attachment;',
+      )
+      const legacyUrl = yield* issueAssetUrl({ resource: { _tag: 'attachment', attachmentId: id } })
+      const legacyToken = legacyUrl.relativeUrl
+        .slice(`${ASSET_ROUTE_PREFIX}/`.length)
+        .split('/')[0]!
+      expect(yield* resolveAsset(legacyToken, 'ignored.html')).toMatchObject({ download: true })
+    }).pipe(Effect.provide(testLayer)),
+  )
   it.effect('issues workspace URLs that resolve the entry file and sibling assets', () =>
     Effect.gen(function* ()
     {

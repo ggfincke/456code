@@ -2,6 +2,7 @@
 // renders thread timelines, composer state, and guarded provider dispatch
 import {
   type ApprovalRequestId,
+  type AssetResource,
   type ArchitectureGraphProjection,
   type ArchitectureStandingAnchor,
   type CollaborationMode,
@@ -116,6 +117,8 @@ import {
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
+  isImageAttachment,
+  isFileAttachment,
   type SessionPhase,
   type Thread,
   type TurnDiffSummary,
@@ -1960,25 +1963,28 @@ function ChatViewContent(props: ChatViewProps)
     })
   }, [])
   const serverMessages = activeThread?.messages
-  const serverAttachmentIds = useMemo(() =>
+  const serverAttachmentResources = useMemo(() =>
   {
-    const attachmentIds = new Set<string>()
+    const resources = new Map<string, Extract<AssetResource, { _tag: 'attachment' }>>()
     for (const message of serverMessages ?? [])
     {
       for (const attachment of message.attachments ?? [])
       {
-        attachmentIds.add(attachment.id)
+        if (!isImageAttachment(attachment) && !isFileAttachment(attachment)) continue
+        resources.set(attachment.id, {
+          _tag: 'attachment',
+          attachmentId: attachment.id,
+          ...(isFileAttachment(attachment)
+            ? { fileName: attachment.name, mimeType: attachment.mimeType }
+            : {}),
+        })
       }
     }
-    return [...attachmentIds]
+    return [...resources.values()]
   }, [serverMessages])
-  const serverAttachmentResources = useMemo(
-    () =>
-      serverAttachmentIds.map((attachmentId) => ({
-        _tag: 'attachment' as const,
-        attachmentId,
-      })),
-    [serverAttachmentIds],
+  const serverAttachmentIds = useMemo(
+    () => serverAttachmentResources.map((resource) => resource.attachmentId),
+    [serverAttachmentResources],
   )
   const serverAttachmentUrls = useAssetUrls(environmentId, serverAttachmentResources)
   const serverAttachmentUrlById = useMemo(
@@ -2005,8 +2011,15 @@ function ChatViewContent(props: ChatViewProps)
         ...message,
         attachments: message.attachments.map((attachment) =>
         {
+          if (!isImageAttachment(attachment) && !isFileAttachment(attachment)) return attachment
           const previewUrl = serverAttachmentUrlById.get(attachment.id)
-          return previewUrl ? { ...attachment, previewUrl } : attachment
+          return previewUrl
+            ? {
+                ...attachment,
+                previewUrl,
+                ...(isFileAttachment(attachment) ? { downloadable: true } : {}),
+              }
+            : attachment
         }),
       }
     })
@@ -2041,7 +2054,7 @@ function ChatViewContent(props: ChatViewProps)
       }
 
       const serverPreviewUrls = serverMessage.attachments.flatMap((attachment) =>
-        attachment.type === 'image' && attachment.previewUrl ? [attachment.previewUrl] : [],
+        isImageAttachment(attachment) && attachment.previewUrl ? [attachment.previewUrl] : [],
       )
       if (
         serverPreviewUrls.length === 0 ||
@@ -2137,7 +2150,7 @@ function ChatViewContent(props: ChatViewProps)
             let imageIndex = 0
             const attachments = message.attachments.map((attachment) =>
               {
-              if (attachment.type !== 'image')
+              if (!isImageAttachment(attachment))
                 {
                 return attachment
               }

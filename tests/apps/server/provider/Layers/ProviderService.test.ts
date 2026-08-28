@@ -63,7 +63,9 @@ import * as ProviderService from '../../../../../apps/server/src/provider/Servic
 import { ProviderSessionReaper } from '../../../../../apps/server/src/provider/Services/ProviderSessionReaper.ts'
 import * as ProviderSessionDirectory from '../../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts'
 import { ProviderBackgroundTaskRegistryLive } from '../../../../../apps/server/src/provider/Layers/ProviderBackgroundTaskRegistry.ts'
-import { makeProviderServiceLive } from '../../../../../apps/server/src/provider/Layers/ProviderService.ts'
+import { makeProviderServiceLive as makeProviderServiceSourceLive } from '../../../../../apps/server/src/provider/Layers/ProviderService.ts'
+import * as ServerConfig from '../../../../../apps/server/src/config.ts'
+import { resolveAttachmentPath } from '../../../../../apps/server/src/attachments/attachmentStore.ts'
 import { makeProviderSessionReaperLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionReaper.ts'
 import { ORCHESTRATE_MODE_INSTRUCTIONS } from '../../../../../apps/server/src/provider/CollaborationModeInstructions.ts'
 import { providerCapabilitiesForDriver } from '../../../../../apps/server/src/provider/providerCapabilities.ts'
@@ -91,6 +93,11 @@ import { ThreadArchiveLifecyclePermit } from '../../../../../apps/server/src/orc
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest()
+const providerTestConfigLayer = ServerConfig.layerTest(process.cwd(), {
+  prefix: 'provider-service-attachments-',
+})
+const makeProviderServiceLive = (options?: Parameters<typeof makeProviderServiceSourceLive>[0]) =>
+  makeProviderServiceSourceLive(options).pipe(Layer.provideMerge(providerTestConfigLayer))
 const providerThreadLifecycleTestLayer = Layer.merge(
   ThreadArchiveLifecyclePermitLive,
   Layer.mock(ProjectionSnapshotQuery)({
@@ -2613,6 +2620,115 @@ it.effect(
 
 routing.layer('ProviderServiceLive routing', (it) =>
 {
+  it.effect('routes mixed attachments with one safe verified path per managed file', () =>
+    Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const { attachmentsDir } = yield* ServerConfig.ServerConfig
+      const threadId = asThreadId('thread-attachment-context')
+      const image = {
+        type: 'image' as const,
+        id: 'thread-attachment-context-12345678-1234-1234-1234-123456789abc',
+        name: 'diagram.png',
+        mimeType: 'image/png',
+        sizeBytes: 4,
+      }
+      const file = {
+        type: 'file' as const,
+        id: 'thread-attachment-context-22345678-1234-1234-1234-123456789abc-pdf',
+        name: 'report\n[untrusted instruction].pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 4,
+      }
+      const paths = [image, file].map((attachment) =>
+      {
+        const path = resolveAttachmentPath({ attachmentsDir, attachment })
+        assert.isNotNull(path)
+        NodeFS.writeFileSync(path!, Uint8Array.from([1, 2, 3, 4]))
+        return path!
+      })
+      yield* provider.startSession(threadId, {
+        threadId,
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: 'full-access',
+      })
+      routing.codex.sendTurn.mockClear()
+      const mismatch = yield* provider
+        .sendTurn({
+          threadId,
+          input: 'read the attachments',
+          attachments: [image, file],
+          modelSelection: { instanceId: claudeAgentInstanceId, model: 'wrong-instance' },
+        })
+        .pipe(Effect.flip)
+      assert.instanceOf(mismatch, ProviderValidationError)
+      assert.equal(routing.codex.sendTurn.mock.calls.length, 0)
+
+      yield* provider.sendTurn({
+        threadId,
+        input: 'read the attachments',
+        attachments: [image, file, file],
+      })
+      const sent = routing.codex.sendTurn.mock.calls[0]?.[0]
+      assert.deepEqual(sent?.attachments, [image, file, file])
+      assert.equal(
+        sent?.input,
+        [
+          'read the attachments',
+          paths.map((path) => `[Attached file: ${JSON.stringify(path)}]`).join('\n'),
+        ].join('\n\n'),
+      )
+      assert.notInclude(sent?.input ?? '', file.name)
+      yield* provider.stopSession({ threadId })
+    }),
+  )
+
+  it.effect('rejects unsafe managed files and unknown attachments before adapter dispatch', () =>
+    Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const { attachmentsDir } = yield* ServerConfig.ServerConfig
+      const threadId = asThreadId('thread-unsafe-attachment')
+      const file = {
+        type: 'file' as const,
+        id: 'thread-unsafe-attachment-12345678-1234-1234-1234-123456789abc-pdf',
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 4,
+      }
+      const path = resolveAttachmentPath({ attachmentsDir, attachment: file })
+      assert.isNotNull(path)
+      const outsidePath = NodePath.join(NodePath.dirname(attachmentsDir), 'outside.pdf')
+      NodeFS.writeFileSync(outsidePath, Uint8Array.from([1, 2, 3, 4]))
+      NodeFS.symlinkSync(outsidePath, path!)
+      yield* provider.startSession(threadId, {
+        threadId,
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: 'full-access',
+      })
+      routing.codex.sendTurn.mockClear()
+      for (const attachment of [
+        file,
+        { ...file, type: 'future-attachment' },
+        { ...file, id: 'pending-12345678-1234-1234-1234-123456789abc-file-pdf' },
+      ])
+      {
+        const failure = yield* provider
+          .sendTurn({
+            threadId,
+            input: 'read the attachment',
+            attachments: [attachment as NonNullable<ProviderSendTurnInput['attachments']>[number]],
+          })
+          .pipe(Effect.flip)
+        assert.instanceOf(failure, ProviderValidationError)
+      }
+      assert.equal(routing.codex.sendTurn.mock.calls.length, 0)
+      yield* provider.stopSession({ threadId })
+    }),
+  )
+
   it.effect('persists the live continuation identity on an ordinary start', () =>
     Effect.gen(function* ()
     {

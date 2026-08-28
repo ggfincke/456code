@@ -245,6 +245,43 @@ const advanceIdleClock = Effect.gen(function* ()
 
 it.layer(OpenCodeTextGenerationTestLayer)('OpenCodeTextGeneration', (it) =>
 {
+  it.effect('uses only image file parts for title generation from mixed attachments', () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* ()
+      {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: 'text', text: '{"title":"Attachment review"}' }] },
+        }
+        yield* textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: 'review these attachments',
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          attachments: [
+            {
+              type: 'image',
+              id: 'thread-title-12345678-1234-1234-1234-123456789abc',
+              name: 'diagram.png',
+              mimeType: 'image/png',
+              sizeBytes: 4,
+            },
+            {
+              type: 'file',
+              id: 'thread-title-22345678-1234-1234-1234-123456789abc-pdf',
+              name: 'report.pdf',
+              mimeType: 'application/pdf',
+              sizeBytes: 4,
+            },
+          ],
+        })
+        const prompt = runtimeMock.state.requests.find((request) => request.kind === 'prompt')
+          ?.input as { parts: Array<{ type: string; mime?: string; filename?: string }> }
+        expect(prompt.parts.filter((part) => part.type === 'file')).toEqual([
+          expect.objectContaining({ type: 'file', mime: 'image/png', filename: 'diagram.png' }),
+        ])
+      }),
+    ),
+  )
+
   it.effect('shares the inventory server across text requests and closes it after idling', () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration, owner) =>
       Effect.gen(function* ()

@@ -20,6 +20,7 @@ import { describe, expect } from 'vite-plus/test'
 
 import { ServerConfig } from '../../../../apps/server/src/config.ts'
 import {
+  createPendingAttachmentId,
   resolveAttachmentPath,
   resolveAttachmentStagingPath,
 } from '../../../../apps/server/src/attachments/attachmentStore.ts'
@@ -171,6 +172,66 @@ describe('canonicalizeClientCommandTimestamps', () =>
 
 it.layer(normalizerTestLayer)('normalizeDispatchCommand', (it) =>
 {
+  it.effect(
+    'serializes uploaded retries, preserves rejection sources, and keeps accepted copies immutable',
+    () =>
+      Effect.gen(function* ()
+      {
+        const fs = yield* FileSystem.FileSystem
+        const { attachmentsDir } = yield* ServerConfig
+        const repository = yield* AttachmentLifecycleRepository
+        const id = createPendingAttachmentId('file', '.pdf')
+        const pendingPath = `${attachmentsDir}/${id}.pdf`
+        yield* fs.makeDirectory(attachmentsDir, { recursive: true })
+        yield* fs.writeFileString(pendingPath, 'safe file contents')
+        const base = makeTurnStartCommand({
+          commandId: 'generic-upload-retry',
+          messageId: 'generic-upload-message',
+        })
+        if (base.type !== 'thread.turn.start') throw new Error('Expected a turn command.')
+        const command = {
+          ...base,
+          message: {
+            ...base.message,
+            attachments: [
+              {
+                type: 'file' as const,
+                id,
+                name: 'report.pdf',
+                mimeType: 'application/pdf',
+                sizeBytes: 18,
+              },
+            ],
+          },
+        }
+        const results = yield* Effect.all(
+          [normalizeDispatchCommand(command), normalizeDispatchCommand(command)],
+          { concurrency: 2 },
+        )
+        expect(results[0]).toEqual(results[1])
+        yield* repository.markDispatchFailure({
+          commandId: command.commandId,
+          reason: 'test rejection',
+          now: serverReceivedAt,
+        })
+        expect(yield* fs.readFileString(pendingPath)).toBe('safe file contents')
+        const retry = yield* normalizeDispatchCommand(command)
+        const rows = yield* repository.getByCommandId(command.commandId)
+        expect(rows[0]?.generation).toBe(1)
+        expect(rows[0]?.stagingRelativePath).toContain(`/pending-upload/${id}.pdf`)
+        yield* repository.associateAccepted({
+          commandId: command.commandId,
+          ownerSequence: 7,
+          ownerEventType: 'thread.message-sent',
+          now: serverReceivedAt,
+        })
+        yield* fs.remove(pendingPath)
+        expect(yield* normalizeDispatchCommand(command)).toEqual(retry)
+        expect(yield* fs.readFileString(`${attachmentsDir}/${rows[0]!.relativePath}`)).toBe(
+          'safe file contents',
+        )
+      }),
+  )
   it.effect('nulls forged provenance and replaces client timestamps on thread.create', () =>
     Effect.gen(function* ()
     {

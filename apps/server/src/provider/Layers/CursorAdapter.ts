@@ -1082,6 +1082,7 @@ export function makeCursorAdapter(
           {
             for (const attachment of input.attachments)
             {
+              if (attachment.type !== 'image') continue
               const attachmentPath = resolveAttachmentPath({
                 attachmentsDir: serverConfig.attachmentsDir,
                 attachment,

@@ -83,10 +83,11 @@ const stageOwnedAttachment = Effect.fn('stageOwnedAttachment')(function* (input:
   readonly attachmentId: string
   readonly ownerSequence: number
   readonly now: string
+  readonly extension?: string
 })
 {
   const repository = yield* AttachmentLifecycleRepository
-  const relativePath = `${input.attachmentId}.png`
+  const relativePath = `${input.attachmentId}${input.extension ?? '.png'}`
   yield* repository.stage({
     stagingKey: input.stagingKey,
     commandId: CommandId.make(input.commandId),
@@ -1340,7 +1341,7 @@ it.layer(
       const now = '2026-01-01T00:00:00.000Z'
       const threadId = ThreadId.make('Thread Revert.Files')
       const keepAttachmentId = 'thread-revert-files-00000000-0000-4000-8000-000000000001'
-      const removeAttachmentId = 'thread-revert-files-00000000-0000-4000-8000-000000000002'
+      const removeAttachmentId = 'thread-revert-files-00000000-0000-4000-8000-000000000002-pdf'
       const otherThreadAttachmentId =
         'thread-revert-files-extra-00000000-0000-4000-8000-000000000003'
 
@@ -1359,6 +1360,7 @@ it.layer(
         threadId,
         messageId: 'message-revert-remove-staging',
         attachmentId: removeAttachmentId,
+        extension: '.pdf',
         ownerSequence: 6,
         now,
       })
@@ -1516,10 +1518,10 @@ it.layer(
           text: 'Remove',
           attachments: [
             {
-              type: 'image',
+              type: 'file',
               id: removeAttachmentId,
-              name: 'remove.png',
-              mimeType: 'image/png',
+              name: 'remove.pdf',
+              mimeType: 'application/pdf',
               sizeBytes: 5,
             },
           ],
@@ -1531,7 +1533,7 @@ it.layer(
       })
 
       const keepPath = path.join(attachmentsDir, `${keepAttachmentId}.png`)
-      const removePath = path.join(attachmentsDir, `${removeAttachmentId}.png`)
+      const removePath = path.join(attachmentsDir, `${removeAttachmentId}.pdf`)
       yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true })
       yield* fileSystem.writeFileString(keepPath, 'keep')
       yield* fileSystem.writeFileString(removePath, 'remove')

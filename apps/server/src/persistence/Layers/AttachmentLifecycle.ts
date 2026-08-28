@@ -9,6 +9,7 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 
 import { toPersistenceSqlError } from '../Errors.ts'
+import { makeKeyedSemaphore } from '../../provider/Layers/KeyedSemaphore.ts'
 import {
   AttachmentCleanup,
   AttachmentLifecycleRepository,
@@ -72,6 +73,7 @@ const isAttachmentStagingConflictError = Schema.is(AttachmentStagingConflictErro
 const makeAttachmentLifecycleRepository = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
+  const commandPermits = yield* makeKeyedSemaphore<string>()
 
   const findByStagingKey = SqlSchema.findOneOption({
     Request: StagingLookupInput,
@@ -281,21 +283,33 @@ const makeAttachmentLifecycleRepository = Effect.gen(function* ()
     `.pipe(Effect.mapError(toPersistenceSqlError('AttachmentLifecycleRepository.markPromoted')))
 
   const associateAccepted: AttachmentLifecycleRepositoryShape['associateAccepted'] = (input) =>
-    sql`
-      UPDATE attachment_staging
-      SET
-        state = 'owned',
-        owner_sequence = ${input.ownerSequence},
-        owner_event_type = ${input.ownerEventType},
-        cleanup_reason = NULL,
-        next_attempt_at = NULL,
-        last_error = NULL,
-        updated_at = ${input.now}
-      WHERE command_id = ${input.commandId}
-        AND state = 'staged'
-    `.pipe(
-      Effect.mapError(toPersistenceSqlError('AttachmentLifecycleRepository.associateAccepted')),
-    )
+    sql
+      .withTransaction(
+        Effect.gen(function* ()
+        {
+          yield* sql`
+        UPDATE attachment_staging
+        SET state = 'owned', owner_sequence = ${input.ownerSequence}, owner_event_type = ${input.ownerEventType}, cleanup_reason = NULL, next_attempt_at = NULL, last_error = NULL, updated_at = ${input.now}
+        WHERE command_id = ${input.commandId} AND state = 'staged'
+      `
+          yield* sql`
+        INSERT INTO attachment_cleanup (
+          cleanup_key, staging_key, target_kind, staging_relative_path, reason,
+          source_sequence, staging_generation, state, created_at, updated_at
+        )
+        SELECT 'pending-source:' || staging_key, staging_key, 'path', staging_relative_path,
+          'accepted pending upload source', owner_sequence, generation, 'pending', ${input.now}, ${input.now}
+        FROM attachment_staging
+        WHERE command_id = ${input.commandId}
+          AND state = 'owned'
+          AND staging_relative_path LIKE '.staging/' || staging_key || '/pending-upload/%'
+        ON CONFLICT(cleanup_key) DO NOTHING
+      `
+        }),
+      )
+      .pipe(
+        Effect.mapError(toPersistenceSqlError('AttachmentLifecycleRepository.associateAccepted')),
+      )
 
   const markDispatchFailure: AttachmentLifecycleRepositoryShape['markDispatchFailure'] = (input) =>
     sql
@@ -601,6 +615,7 @@ const makeAttachmentLifecycleRepository = Effect.gen(function* ()
     )
 
   return {
+    withCommandPermit: commandPermits.withPermit,
     stage,
     markPromoted,
     associateAccepted,
