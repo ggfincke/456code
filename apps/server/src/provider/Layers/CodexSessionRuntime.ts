@@ -65,6 +65,8 @@ const CODEX_APP_SERVER_FORCE_KILL_AFTER = '2 seconds' as const
 const CODEX_SESSION_START_TIMEOUT = '120 seconds' as const
 const CODEX_TURN_START_TIMEOUT = '60 seconds' as const
 const CODEX_MCP_RELOAD_TIMEOUT = '15 seconds' as const
+const CODEX_CHILD_METADATA_LOOKUP_TIMEOUT = '5 seconds' as const
+const PENDING_COLLAB_CHILD_METADATA_CAP = 64
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   'not found',
   'missing thread',
@@ -150,6 +152,12 @@ const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartP
 const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffect(
   CodexTurnStartParamsWithCollaborationMode,
 )
+const CodexChildResumeMetadata = Schema.Struct({
+  thread: Schema.Struct({ id: Schema.String }),
+  model: Schema.String,
+  reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.String)),
+})
+const decodeCodexChildResumeMetadata = Schema.decodeUnknownEffect(CodexChildResumeMetadata)
 
 export type CodexTurnStartParamsWithCollaborationMode =
   typeof CodexTurnStartParamsWithCollaborationMode.Type
@@ -832,7 +840,9 @@ function readNotificationThreadId(notification: CodexServerNotification): string
     case 'thread/unarchived':
     case 'thread/closed':
     case 'thread/name/updated':
+    case 'thread/settings/updated':
     case 'thread/tokenUsage/updated':
+    case 'model/rerouted':
     case 'turn/started':
     case 'hook/started':
     case 'turn/completed':
@@ -957,7 +967,11 @@ function readRouteFields(notification: CodexServerNotification): {
     case 'item/completed':
       return {
         turnId: TurnId.make(notification.params.turnId),
-        itemId: ProviderItemId.make(notification.params.item.id),
+        itemId: ProviderItemId.make(
+          notification.params.item.type === 'subAgentActivity'
+            ? notification.params.item.agentThreadId
+            : notification.params.item.id,
+        ),
       }
     case 'item/agentMessage/delta':
     case 'item/plan/delta':
@@ -980,31 +994,232 @@ function readRouteFields(notification: CodexServerNotification): {
   }
 }
 
-function rememberCollabReceiverTurns(
-  collabReceiverTurns: Map<string, TurnId>,
-  notification: CodexServerNotification,
-  parentTurnId: TurnId | undefined,
+interface CollabReceiverLifecycle
+{
+  readonly parentTurnId: TurnId
+  readonly itemId: ProviderItemId
+  readonly rowEstablished: boolean
+}
+
+interface CollabChildMetadataState
+{
+  readonly model: string | undefined
+  readonly effort: string | null | undefined
+  readonly lookupAttempts: number
+  readonly activeLookupAttempts: number
+  readonly closed: boolean
+  readonly lifecycleRevision: number
+}
+
+interface CollabChildMetadataUpdate
+{
+  readonly model?: string | null
+  readonly effort?: string | null
+}
+
+interface CollabChildMetadataReceipt
+{
+  readonly childThreadId: string
+  readonly update: CollabChildMetadataUpdate
+}
+
+interface CollabChildMetadataEmissionState
+{
+  readonly parentTurnId: TurnId
+  readonly itemId: ProviderItemId
+  readonly model: string | undefined
+  readonly effort: string | null | undefined
+}
+
+function mergeCollabChildMetadataUpdate(
+  previous: CollabChildMetadataUpdate | undefined,
+  update: CollabChildMetadataUpdate,
+): CollabChildMetadataUpdate
+{
+  return {
+    ...(previous && Object.hasOwn(previous, 'model') ? { model: previous.model } : {}),
+    ...(previous && Object.hasOwn(previous, 'effort') ? { effort: previous.effort } : {}),
+    ...(Object.hasOwn(update, 'model') ? { model: update.model } : {}),
+    ...(Object.hasOwn(update, 'effort') ? { effort: update.effort } : {}),
+  }
+}
+
+// settings can beat subAgentActivity; retain only the newest bounded FIFO window
+function rememberPendingCollabChildMetadata(
+  pending: Map<string, CollabChildMetadataUpdate>,
+  childThreadId: string,
+  update: CollabChildMetadataUpdate,
 ): void
 {
-  if (!parentTurnId)
+  pending.set(childThreadId, mergeCollabChildMetadataUpdate(pending.get(childThreadId), update))
+  if (pending.size <= PENDING_COLLAB_CHILD_METADATA_CAP)
   {
     return
+  }
+
+  const oldest = pending.keys().next()
+  if (!oldest.done)
+  {
+    pending.delete(oldest.value)
+  }
+}
+
+function initialCollabChildMetadataState(): CollabChildMetadataState
+{
+  return {
+    model: undefined,
+    effort: undefined,
+    lookupAttempts: 0,
+    activeLookupAttempts: 0,
+    closed: false,
+    lifecycleRevision: 0,
+  }
+}
+
+function applyCollabChildMetadataUpdate(
+  previous: CollabChildMetadataState,
+  update: CollabChildMetadataUpdate,
+  overwriteKnown: boolean,
+): CollabChildMetadataState
+{
+  const model =
+    Object.hasOwn(update, 'model') && (overwriteKnown || !previous.model)
+      ? (update.model ?? undefined)
+      : previous.model
+  const effort =
+    Object.hasOwn(update, 'effort') && (overwriteKnown || previous.effort === undefined)
+      ? update.effort
+      : previous.effort
+  return { ...previous, model, effort }
+}
+
+function nonEmptyMetadataValue(value: unknown): string | undefined
+{
+  if (typeof value !== 'string')
+  {
+    return undefined
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+function metadataRecord(value: unknown): Record<string, unknown> | undefined
+{
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function collabChildMetadataReceipt(payload: unknown): CollabChildMetadataReceipt | undefined
+{
+  const notification = metadataRecord(payload)
+  if (!notification)
+  {
+    return undefined
+  }
+  const method = notification.method
+  if (method !== 'thread/settings/updated' && method !== 'model/rerouted')
+  {
+    return undefined
+  }
+  const params = metadataRecord(notification.params)
+  const childThreadId = nonEmptyMetadataValue(params?.threadId)
+  if (!childThreadId)
+  {
+    return undefined
+  }
+
+  const threadSettings = metadataRecord(params?.threadSettings)
+  const collaborationMode = metadataRecord(threadSettings?.collaborationMode)
+  const collaborationSettings = metadataRecord(collaborationMode?.settings)
+  const model = nonEmptyMetadataValue(
+    method === 'thread/settings/updated'
+      ? (threadSettings?.model ?? collaborationSettings?.model)
+      : params?.toModel,
+  )
+  const rawEffort =
+    method === 'thread/settings/updated'
+      ? Object.hasOwn(threadSettings ?? {}, 'effort')
+        ? threadSettings?.effort
+        : collaborationSettings?.reasoning_effort
+      : undefined
+  const effort = nonEmptyMetadataValue(rawEffort)
+  const update = {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : rawEffort === null ? { effort: null } : {}),
+  } satisfies CollabChildMetadataUpdate
+  return Object.hasOwn(update, 'model') || Object.hasOwn(update, 'effort')
+    ? { childThreadId, update }
+    : undefined
+}
+
+function collabItemMetadataUpdate(
+  notification: CodexServerNotification,
+): CollabChildMetadataUpdate | undefined
+{
+  if (notification.method !== 'item/started' && notification.method !== 'item/completed')
+  {
+    return undefined
+  }
+  const item = notification.params.item
+  if (item.type !== 'collabAgentToolCall')
+  {
+    return undefined
+  }
+  const model = nonEmptyMetadataValue(item.model)
+  const effort = nonEmptyMetadataValue(item.reasoningEffort)
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : item.reasoningEffort === null ? { effort: null } : {}),
+  }
+}
+
+function rememberCollabChildLifecycles(
+  collabReceiverLifecycles: Map<string, CollabReceiverLifecycle>,
+  notification: CodexServerNotification,
+  parentTurnId: TurnId | undefined,
+  itemId: ProviderItemId | undefined,
+  rootProviderThreadId: string | undefined,
+): ReadonlyArray<string>
+{
+  if (!parentTurnId || !itemId)
+  {
+    return []
   }
 
   if (notification.method !== 'item/started' && notification.method !== 'item/completed')
   {
-    return
+    return []
   }
 
-  if (notification.params.item.type !== 'collabAgentToolCall')
+  const item = notification.params.item
+  const childThreadIds =
+    item.type === 'collabAgentToolCall'
+      ? item.receiverThreadIds
+      : item.type === 'subAgentActivity' &&
+          item.agentThreadId !== rootProviderThreadId &&
+          item.agentPath !== '/root' &&
+          item.agentPath !== '/'
+        ? [item.agentThreadId]
+        : []
+  if (childThreadIds.length === 0)
   {
-    return
+    return []
   }
 
-  for (const receiverThreadId of notification.params.item.receiverThreadIds)
+  for (const childThreadId of childThreadIds)
   {
-    collabReceiverTurns.set(receiverThreadId, parentTurnId)
+    const previous = collabReceiverLifecycles.get(childThreadId)
+    collabReceiverLifecycles.set(childThreadId, {
+      parentTurnId,
+      itemId,
+      rowEstablished:
+        previous?.rowEstablished === true ||
+        item.type !== 'subAgentActivity' ||
+        notification.method === 'item/completed',
+    })
   }
+  return childThreadIds
 }
 
 function shouldSuppressChildConversationNotification(
@@ -1019,7 +1234,9 @@ function shouldSuppressChildConversationNotification(
     method === 'thread/closed' ||
     method === 'thread/compacted' ||
     method === 'thread/name/updated' ||
+    method === 'thread/settings/updated' ||
     method === 'thread/tokenUsage/updated' ||
+    method === 'model/rerouted' ||
     method === 'turn/started' ||
     method === 'turn/completed' ||
     method === 'turn/plan/updated' ||
@@ -1118,7 +1335,16 @@ export const makeCodexSessionRuntime = (
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>())
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>())
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>())
-    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>())
+    const collabReceiverLifecyclesRef = yield* Ref.make(new Map<string, CollabReceiverLifecycle>())
+    const collabChildMetadataRef = yield* Ref.make(new Map<string, CollabChildMetadataState>())
+    const collabChildMetadataEmissionRef = yield* Ref.make(
+      new Map<string, CollabChildMetadataEmissionState>(),
+    )
+    const pendingCollabChildMetadataRef = yield* Ref.make(
+      new Map<string, CollabChildMetadataUpdate>(),
+    )
+    const collabChildMetadataEmissionQueue = yield* Queue.unbounded<string>()
+    const rootProviderThreadIdRef = yield* Ref.make(readResumeCursorThreadId(options.resumeCursor))
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter()
     const closedRef = yield* Ref.make(false)
 
@@ -1157,10 +1383,97 @@ export const makeCodexSessionRuntime = (
         ),
       )
 
-    const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
-      Layer.build,
-      Effect.provideService(Scope.Scope, runtimeScope),
-    )
+    const recordProtocolChildMetadata = Effect.fn(
+      'CodexSessionRuntime.recordProtocolChildMetadata',
+    )(function* (receipt: CollabChildMetadataReceipt)
+    {
+      if (receipt.childThreadId === (yield* Ref.get(rootProviderThreadIdRef)))
+      {
+        return
+      }
+      const lifecycles = yield* Ref.get(collabReceiverLifecyclesRef)
+      if (!lifecycles.has(receipt.childThreadId))
+      {
+        yield* Ref.update(pendingCollabChildMetadataRef, (current) =>
+        {
+          const next = new Map(current)
+          rememberPendingCollabChildMetadata(next, receipt.childThreadId, receipt.update)
+          return next
+        })
+        return
+      }
+
+      const changed = yield* Ref.modify(collabChildMetadataRef, (current) =>
+      {
+        const previous = current.get(receipt.childThreadId) ?? initialCollabChildMetadataState()
+        const updated = applyCollabChildMetadataUpdate(previous, receipt.update, true)
+        const next = new Map(current)
+        next.set(receipt.childThreadId, {
+          ...updated,
+          lifecycleRevision: previous.lifecycleRevision + 1,
+        })
+        return [
+          updated.model !== previous.model || updated.effort !== previous.effort,
+          next,
+        ] as const
+      })
+      if (changed)
+      {
+        yield* Queue.offer(collabChildMetadataEmissionQueue, receipt.childThreadId)
+      }
+    })
+
+    const clientContext = yield* CodexClient.layerChildProcess(child, {
+      logIncoming: true,
+      logger: (event) =>
+      {
+        if (event.stage !== 'decoded' || typeof event.payload !== 'object' || !event.payload)
+        {
+          return Effect.void
+        }
+        const metadataReceipt = collabChildMetadataReceipt(event.payload)
+        if (metadataReceipt)
+        {
+          return recordProtocolChildMetadata(metadataReceipt)
+        }
+        const notification = event.payload as {
+          readonly method?: unknown
+          readonly params?: { readonly threadId?: unknown }
+        }
+        const threadId = notification.params?.threadId
+        if (typeof threadId !== 'string')
+        {
+          return Effect.void
+        }
+
+        const method = notification.method
+        if (
+          method !== 'thread/closed' &&
+          method !== 'turn/started' &&
+          method !== 'thread/settings/updated' &&
+          method !== 'model/rerouted'
+        )
+        {
+          return Effect.void
+        }
+
+        // record receipt before response delivery can overtake notification handling
+        return Ref.update(collabChildMetadataRef, (current) =>
+        {
+          const previous = current.get(threadId)
+          if (!previous)
+          {
+            return current
+          }
+          const next = new Map(current)
+          next.set(threadId, {
+            ...previous,
+            lifecycleRevision: previous.lifecycleRevision + 1,
+          })
+          return next
+        })
+      },
+    }).pipe(Layer.build, Effect.provideService(Scope.Scope, runtimeScope))
     const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
       Effect.provide(clientContext),
     )
@@ -1213,6 +1526,208 @@ export const makeCodexSessionRuntime = (
         method,
         message,
       })
+
+    const updateCollabChildMetadata = (
+      childThreadId: string,
+      update: CollabChildMetadataUpdate,
+      overwriteKnown: boolean,
+    ) =>
+      Ref.modify(collabChildMetadataRef, (current) =>
+      {
+        const previous = current.get(childThreadId) ?? initialCollabChildMetadataState()
+        const updated = applyCollabChildMetadataUpdate(previous, update, overwriteKnown)
+        if (updated.model === previous.model && updated.effort === previous.effort)
+        {
+          return [false, current] as const
+        }
+        const next = new Map(current)
+        next.set(childThreadId, updated)
+        return [true, next] as const
+      })
+
+    const bufferCollabChildMetadata = (childThreadId: string, update: CollabChildMetadataUpdate) =>
+      Ref.update(pendingCollabChildMetadataRef, (current) =>
+      {
+        const next = new Map(current)
+        rememberPendingCollabChildMetadata(next, childThreadId, update)
+        return next
+      })
+
+    const takePendingCollabChildMetadata = (childThreadIds: ReadonlyArray<string>) =>
+      Ref.modify(pendingCollabChildMetadataRef, (current) =>
+      {
+        const pending = new Map<string, CollabChildMetadataUpdate>()
+        const next = new Map(current)
+        for (const childThreadId of childThreadIds)
+        {
+          const metadata = next.get(childThreadId)
+          if (metadata)
+          {
+            pending.set(childThreadId, metadata)
+            next.delete(childThreadId)
+          }
+        }
+        return [pending, next] as const
+      })
+
+    const setCollabChildClosed = (childThreadId: string, closed: boolean) =>
+      Ref.update(collabChildMetadataRef, (current) =>
+      {
+        const previous = current.get(childThreadId) ?? initialCollabChildMetadataState()
+        if (previous.closed === closed)
+        {
+          return current
+        }
+        const next = new Map(current)
+        next.set(childThreadId, { ...previous, closed })
+        return next
+      })
+
+    const emitCollabChildMetadataUpdated = Effect.fn(
+      'CodexSessionRuntime.emitCollabChildMetadataUpdated',
+    )(function* (childThreadId: string)
+    {
+      const lifecycle = (yield* Ref.get(collabReceiverLifecyclesRef)).get(childThreadId)
+      const metadata = (yield* Ref.get(collabChildMetadataRef)).get(childThreadId)
+      if (
+        !lifecycle ||
+        !lifecycle.rowEstablished ||
+        !metadata ||
+        metadata.closed ||
+        (!metadata.model && metadata.effort === undefined)
+      )
+      {
+        return
+      }
+      const shouldEmit = yield* Ref.modify(collabChildMetadataEmissionRef, (current) =>
+      {
+        const previous = current.get(childThreadId)
+        if (
+          previous?.parentTurnId === lifecycle.parentTurnId &&
+          previous.itemId === lifecycle.itemId &&
+          previous.model === metadata.model &&
+          previous.effort === metadata.effort
+        )
+        {
+          return [false, current] as const
+        }
+        const next = new Map(current)
+        next.set(childThreadId, {
+          parentTurnId: lifecycle.parentTurnId,
+          itemId: lifecycle.itemId,
+          model: metadata.model,
+          effort: metadata.effort,
+        })
+        return [true, next] as const
+      })
+      if (!shouldEmit)
+      {
+        return
+      }
+      yield* emitEvent({
+        kind: 'notification',
+        threadId: options.threadId,
+        turnId: lifecycle.parentTurnId,
+        itemId: lifecycle.itemId,
+        method: 'collabAgent/metadataUpdated',
+        payload: {
+          ...(metadata.model ? { model: metadata.model } : {}),
+          ...(metadata.effort !== undefined ? { effort: metadata.effort } : {}),
+        },
+      })
+    })
+
+    yield* Stream.fromQueue(collabChildMetadataEmissionQueue).pipe(
+      Stream.runForEach(emitCollabChildMetadataUpdated),
+      Effect.forkIn(runtimeScope),
+    )
+
+    const startCollabChildMetadataLookup = Effect.fn(
+      'CodexSessionRuntime.startCollabChildMetadataLookup',
+    )(function* (childThreadId: string, maxAttempts: 1 | 2)
+    {
+      const lookupLifecycleRevision = yield* Ref.modify(collabChildMetadataRef, (current) =>
+      {
+        const previous = current.get(childThreadId) ?? initialCollabChildMetadataState()
+        if (
+          previous.lookupAttempts >= maxAttempts ||
+          previous.closed ||
+          (previous.model !== undefined && previous.effort !== undefined)
+        )
+        {
+          return [undefined, current] as const
+        }
+        const next = new Map(current)
+        next.set(childThreadId, {
+          ...previous,
+          lookupAttempts: previous.lookupAttempts + 1,
+          activeLookupAttempts: previous.activeLookupAttempts + 1,
+        })
+        return [previous.lifecycleRevision, next] as const
+      })
+      if (lookupLifecycleRevision === undefined)
+      {
+        return
+      }
+
+      const finishLookup = Ref.update(collabChildMetadataRef, (current) =>
+      {
+        const previous = current.get(childThreadId)
+        if (!previous || previous.activeLookupAttempts === 0)
+        {
+          return current
+        }
+        const next = new Map(current)
+        next.set(childThreadId, {
+          ...previous,
+          activeLookupAttempts: previous.activeLookupAttempts - 1,
+        })
+        return next
+      })
+
+      // the child is already loaded; excludeTurns avoids replaying its conversation
+      yield* client.raw
+        .request('thread/resume', { threadId: childThreadId, excludeTurns: true })
+        .pipe(
+          Effect.flatMap(decodeCodexChildResumeMetadata),
+          Effect.timeout(CODEX_CHILD_METADATA_LOOKUP_TIMEOUT),
+          Effect.flatMap((response) =>
+            Effect.gen(function* ()
+            {
+              if (response.thread.id !== childThreadId)
+              {
+                return
+              }
+              const metadata = (yield* Ref.get(collabChildMetadataRef)).get(childThreadId)
+              if (metadata?.closed || metadata?.lifecycleRevision !== lookupLifecycleRevision)
+              {
+                return
+              }
+              const model = nonEmptyMetadataValue(response.model)
+              const effort = nonEmptyMetadataValue(response.reasoningEffort)
+              const changed = yield* updateCollabChildMetadata(
+                childThreadId,
+                {
+                  ...(model ? { model } : {}),
+                  ...(effort
+                    ? { effort }
+                    : response.reasoningEffort === null
+                      ? { effort: null }
+                      : {}),
+                },
+                false,
+              )
+              if (changed)
+              {
+                yield* emitCollabChildMetadataUpdated(childThreadId)
+              }
+            }),
+          ),
+          Effect.ignore,
+          Effect.ensuring(finishLookup),
+          Effect.forkIn(runtimeScope),
+        )
+    })
 
     const settlePendingApprovals = (decision: ProviderApprovalDecision) =>
       Ref.get(pendingApprovalsRef).pipe(
@@ -1268,20 +1783,100 @@ export const makeCodexSessionRuntime = (
           suppressMemoryConsolidationNotification(notification)
         const payload = notification.params
         const route = readRouteFields(notification)
-        const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef)
-        const childParentTurnId = (() =>
-        {
-          const providerConversationId = readNotificationThreadId(notification)
-          return providerConversationId
-            ? collabReceiverTurns.get(providerConversationId)
-            : undefined
-        })()
+        const providerConversationId = readNotificationThreadId(notification)
+        const rootProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef))
+        const collabReceiverLifecycles = yield* Ref.get(collabReceiverLifecyclesRef)
+        const registeredChildThreadIds = rememberCollabChildLifecycles(
+          collabReceiverLifecycles,
+          notification,
+          route.turnId,
+          route.itemId,
+          rootProviderThreadId,
+        )
+        yield* Ref.set(collabReceiverLifecyclesRef, collabReceiverLifecycles)
+        const itemMetadata = collabItemMetadataUpdate(notification)
+        const pendingMetadataByChild =
+          yield* takePendingCollabChildMetadata(registeredChildThreadIds)
+        yield* Effect.forEach(
+          registeredChildThreadIds,
+          (childThreadId) =>
+            Effect.gen(function* ()
+            {
+              if (itemMetadata)
+              {
+                yield* updateCollabChildMetadata(childThreadId, itemMetadata, false)
+              }
+              const pendingMetadata = pendingMetadataByChild.get(childThreadId)
+              if (pendingMetadata)
+              {
+                yield* updateCollabChildMetadata(childThreadId, pendingMetadata, true)
+              }
+            }),
+          { discard: true },
+        )
+        const childLifecycle = providerConversationId
+          ? collabReceiverLifecycles.get(providerConversationId)
+          : undefined
+        const childParentTurnId = childLifecycle?.parentTurnId
 
-        rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId)
-        if (childParentTurnId && shouldSuppressChildConversationNotification(notification.method))
+        if (
+          !isMemoryConsolidationNotification &&
+          providerConversationId &&
+          rootProviderThreadId &&
+          providerConversationId !== rootProviderThreadId &&
+          (notification.method === 'thread/settings/updated' ||
+            notification.method === 'model/rerouted')
+        )
         {
-          yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns)
+          const model = nonEmptyMetadataValue(
+            notification.method === 'thread/settings/updated'
+              ? notification.params.threadSettings.model
+              : notification.params.toModel,
+          )
+          const rawEffort =
+            notification.method === 'thread/settings/updated'
+              ? notification.params.threadSettings.effort
+              : undefined
+          const effort = nonEmptyMetadataValue(rawEffort)
+          const metadataUpdate = {
+            ...(model ? { model } : {}),
+            ...(effort ? { effort } : rawEffort === null ? { effort: null } : {}),
+          } satisfies CollabChildMetadataUpdate
+          if (!Object.hasOwn(metadataUpdate, 'model') && !Object.hasOwn(metadataUpdate, 'effort'))
+          {
+            return
+          }
+          if (!collabReceiverLifecycles.has(providerConversationId))
+          {
+            yield* bufferCollabChildMetadata(providerConversationId, metadataUpdate)
+            return
+          }
+          const changed = yield* updateCollabChildMetadata(
+            providerConversationId,
+            metadataUpdate,
+            true,
+          )
+          if (changed)
+          {
+            yield* emitCollabChildMetadataUpdated(providerConversationId)
+          }
           return
+        }
+
+        if (childLifecycle && providerConversationId && !isMemoryConsolidationNotification)
+        {
+          if (notification.method === 'thread/closed')
+          {
+            yield* setCollabChildClosed(providerConversationId, true)
+          }
+          else if (notification.method === 'turn/started')
+          {
+            yield* setCollabChildClosed(providerConversationId, false)
+          }
+          if (shouldSuppressChildConversationNotification(notification.method))
+          {
+            return
+          }
         }
 
         let requestId: ApprovalRequestId | undefined
@@ -1313,7 +1908,6 @@ export const makeCodexSessionRuntime = (
           }
         }
 
-        yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns)
         if (isMemoryConsolidationNotification)
         {
           return
@@ -1331,6 +1925,30 @@ export const makeCodexSessionRuntime = (
             : {}),
           ...(payload !== undefined ? { payload } : {}),
         })
+        yield* Effect.forEach(
+          registeredChildThreadIds,
+          (childThreadId) =>
+            Effect.gen(function* ()
+            {
+              if (notification.method === 'item/started')
+              {
+                yield* setCollabChildClosed(childThreadId, false)
+              }
+              yield* emitCollabChildMetadataUpdated(childThreadId)
+              const item =
+                notification.method === 'item/started' || notification.method === 'item/completed'
+                  ? notification.params.item
+                  : undefined
+              const maxLookupAttempts =
+                notification.method === 'item/completed' &&
+                item?.type === 'subAgentActivity' &&
+                item.kind === 'completed'
+                  ? 2
+                  : 1
+              yield* startCollabChildMetadataLookup(childThreadId, maxLookupAttempts)
+            }),
+          { discard: true },
+        )
       })
 
     const currentSessionProviderThreadId = Effect.map(Ref.get(sessionRef), currentProviderThreadId)
@@ -1783,6 +2401,17 @@ export const makeCodexSessionRuntime = (
       )
 
       const providerThreadId = opened.thread.id
+      yield* Ref.set(rootProviderThreadIdRef, providerThreadId)
+      yield* Ref.update(pendingCollabChildMetadataRef, (current) =>
+      {
+        if (!current.has(providerThreadId))
+        {
+          return current
+        }
+        const next = new Map(current)
+        next.delete(providerThreadId)
+        return next
+      })
       const session = {
         ...(yield* Ref.get(sessionRef)),
         status: 'ready',
@@ -1827,6 +2456,7 @@ export const makeCodexSessionRuntime = (
         ),
       )
       yield* Scope.close(runtimeScope, Exit.void)
+      yield* Queue.shutdown(collabChildMetadataEmissionQueue)
       yield* Queue.shutdown(serverNotifications)
       yield* Queue.shutdown(events)
     })

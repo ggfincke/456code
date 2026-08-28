@@ -751,26 +751,35 @@ function formatTokenCount(totalTokens: number): string
   return `${compact.replace(/\.0$/, '')}m tok`
 }
 
-// model / tokens / tool count / duration / live last-tool line under subagent rows
-function taskMetadataParts(workEntry: TimelineWorkEntry): string[]
+// model / effort / usage / duration / live last-tool line under subagent rows
+export function subagentMetadataLabel(workEntry: TimelineWorkEntry): string | null
 {
-  if (!workEntry.taskId)
+  const isTask = workEntry.taskId !== undefined
+  const isCollabTool = workEntry.itemType === 'collab_agent_tool_call'
+  if (!isTask && !isCollabTool)
   {
-    return []
+    return null
   }
   const parts: string[] = []
   if (workEntry.model) parts.push(workEntry.model)
-  if (workEntry.totalTokens !== undefined) parts.push(formatTokenCount(workEntry.totalTokens))
-  if (workEntry.toolUses !== undefined)
+  if (workEntry.effort) parts.push(workEntry.effort)
+  if (isTask && workEntry.totalTokens !== undefined)
+  {
+    parts.push(formatTokenCount(workEntry.totalTokens))
+  }
+  if (isTask && workEntry.toolUses !== undefined)
   {
     parts.push(`${workEntry.toolUses} ${workEntry.toolUses === 1 ? 'tool' : 'tools'}`)
   }
-  if (workEntry.durationMs !== undefined) parts.push(formatDuration(workEntry.durationMs))
-  if (workEntry.toolLifecycleStatus === 'inProgress' && workEntry.lastToolName)
+  if (isTask && workEntry.durationMs !== undefined)
+  {
+    parts.push(formatDuration(workEntry.durationMs))
+  }
+  if (isTask && workEntry.toolLifecycleStatus === 'inProgress' && workEntry.lastToolName)
   {
     parts.push(workEntry.lastToolName)
   }
-  return parts
+  return parts.length > 0 ? parts.join(' · ') : null
 }
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation()
@@ -799,7 +808,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       ? null
       : rawPreview
   const displayText = preview ? `${heading} - ${preview}` : heading
-  const metadataParts = taskMetadataParts(workEntry)
+  const metadataLabel = subagentMetadataLabel(workEntry)
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot)
   const canExpand = expandedBody !== null
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry)
@@ -872,10 +881,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{preview}</span>
               )}
             </p>
-            {metadataParts.length > 0 || runningSince ? (
+            {metadataLabel || runningSince ? (
               <p className="truncate text-[11px] leading-4 text-muted-foreground/55">
-                {metadataParts.length > 0 ? metadataParts.join(' · ') : null}
-                {metadataParts.length > 0 && runningSince ? ' · ' : null}
+                {metadataLabel}
+                {metadataLabel && runningSince ? ' · ' : null}
                 {runningSince ? (
                   <>
                     Running for <WorkingTimer createdAt={runningSince} />

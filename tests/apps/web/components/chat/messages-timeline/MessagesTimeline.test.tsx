@@ -142,6 +142,7 @@ function matchMedia()
 }
 
 let MessagesTimeline: typeof import('../../../../../../apps/web/src/components/chat/MessagesTimeline').MessagesTimeline
+let subagentMetadataLabel: typeof import('../../../../../../apps/web/src/components/chat/messages-timeline/WorkTimelineRows').subagentMetadataLabel
 
 beforeAll(async () =>
 {
@@ -188,6 +189,8 @@ beforeAll(async () =>
 
   ;({ MessagesTimeline } =
     await import('../../../../../../apps/web/src/components/chat/MessagesTimeline'))
+  ;({ subagentMetadataLabel } =
+    await import('../../../../../../apps/web/src/components/chat/messages-timeline/WorkTimelineRows'))
 }, 30_000)
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make('environment-local')
@@ -670,6 +673,23 @@ describe('MessagesTimeline', () =>
 
     expect(markup).toContain('Context compacted')
     expect(markup).toContain('Work Log')
+  })
+
+  it('formats model and effort metadata for collab agent rows', () =>
+  {
+    expect(
+      subagentMetadataLabel({
+        id: 'work-collab-model',
+        createdAt: MESSAGE_CREATED_AT,
+        label: 'Spawn agent',
+        tone: 'tool',
+        itemType: 'collab_agent_tool_call',
+        toolCallId: 'collab-model',
+        toolLifecycleStatus: 'completed',
+        model: 'gpt-5.6-sol',
+        effort: 'high',
+      }),
+    ).toBe('gpt-5.6-sol · high')
   })
 
   it('summarizes changed files in one line', () =>

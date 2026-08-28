@@ -91,6 +91,12 @@ click the blurred email to reveal it.
 
 Use display names and accent colors to make accounts easy to tell apart in the model picker.
 
+## Sub-Agent Models
+
+The work timeline shows a Codex sub-agent's model and reasoning effort when Codex reports them. If
+Codex reports only one value, 456code shows that value by itself. It does not substitute the parent
+agent's settings when the child metadata is unavailable.
+
 ## I Need A Different API Key Or Endpoint
 
 Use the provider's Environment variables section in Settings.

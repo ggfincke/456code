@@ -430,6 +430,8 @@ export const ItemLifecyclePayload = Schema.Struct({
   status: Schema.optional(RuntimeItemStatus),
   title: Schema.optional(TrimmedNonEmptyStringSchema),
   detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  model: Schema.optional(TrimmedNonEmptyStringSchema),
+  effort: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
   data: Schema.optional(Schema.Unknown),
 })
 export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type

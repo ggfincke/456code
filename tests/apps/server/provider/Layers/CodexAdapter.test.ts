@@ -683,6 +683,218 @@ function startLifecycleRuntime()
 
 lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
 {
+  it.effect(
+    'uses one stable subAgentActivity row for child metadata and ignores an empty wait',
+    () =>
+      Effect.gen(function* ()
+      {
+        const { adapter, runtime } = yield* startLifecycleRuntime()
+        const eventsFiber = yield* Stream.runCollect(
+          Stream.take(unwrapCodexRuntimeEvents(adapter), 4),
+        ).pipe(Effect.forkChild)
+        const identity = {
+          threadId: asThreadId('thread-1'),
+          turnId: asTurnId('turn-1'),
+          itemId: asItemId('provider-child'),
+        }
+
+        yield* runtime.emit({
+          id: asEventId('evt-subagent-started-snapshot'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          method: 'item/started',
+          ...identity,
+          payload: {
+            startedAtMs: 1_778_000_000_000,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'subAgentActivity',
+              id: 'call_D9',
+              agentPath: '/root/package_metadata',
+              agentThreadId: 'provider-child',
+              kind: 'started',
+            },
+          },
+        } satisfies ProviderEvent)
+        yield* runtime.emit({
+          id: asEventId('evt-subagent-completed'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          method: 'item/completed',
+          ...identity,
+          payload: {
+            completedAtMs: 1_778_000_000_000,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'subAgentActivity',
+              id: 'call_D9',
+              agentPath: '/root/package_metadata',
+              agentThreadId: 'provider-child',
+              kind: 'started',
+            },
+          },
+        } satisfies ProviderEvent)
+        yield* runtime.emit({
+          id: asEventId('evt-subagent-finished-snapshot'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:00.250Z',
+          method: 'item/started',
+          ...identity,
+          payload: {
+            startedAtMs: 1_778_000_000_250,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'subAgentActivity',
+              id: 'subagent-completed-child-turn',
+              agentPath: '/root/package_metadata',
+              agentThreadId: 'provider-child',
+              kind: 'completed',
+            },
+          },
+        } satisfies ProviderEvent)
+        yield* runtime.emit({
+          id: asEventId('evt-subagent-finished'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:00.250Z',
+          method: 'item/completed',
+          ...identity,
+          payload: {
+            completedAtMs: 1_778_000_000_250,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'subAgentActivity',
+              id: 'subagent-completed-child-turn',
+              agentPath: '/root/package_metadata',
+              agentThreadId: 'provider-child',
+              kind: 'completed',
+            },
+          },
+        } satisfies ProviderEvent)
+        yield* runtime.emit({
+          id: asEventId('evt-empty-wait-completed'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:00.500Z',
+          method: 'item/completed',
+          threadId: asThreadId('thread-1'),
+          turnId: asTurnId('turn-1'),
+          itemId: asItemId('call-wait-empty'),
+          payload: {
+            completedAtMs: 1_778_000_000_500,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'collabAgentToolCall',
+              id: 'call-wait-empty',
+              tool: 'wait',
+              status: 'completed',
+              senderThreadId: 'provider-root',
+              receiverThreadIds: [],
+              agentsStates: {},
+              model: null,
+              reasoningEffort: null,
+            },
+          },
+        } satisfies ProviderEvent)
+        yield* runtime.emit({
+          id: asEventId('evt-subagent-model-updated'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:01.000Z',
+          method: 'collabAgent/metadataUpdated',
+          ...identity,
+          payload: {
+            model: ' actual-model ',
+            effort: ' high ',
+          },
+        } satisfies ProviderEvent)
+        yield* runtime.emit({
+          id: asEventId('evt-subagent-effort-cleared'),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:02.000Z',
+          method: 'collabAgent/metadataUpdated',
+          ...identity,
+          payload: {
+            model: ' actual-model ',
+            effort: null,
+          },
+        } satisfies ProviderEvent)
+
+        const events = Array.from(yield* Fiber.join(eventsFiber))
+        const lifecycleEvents = events.filter(
+          (event) => event.type === 'item.started' || event.type === 'item.completed',
+        )
+        NodeAssert.equal(lifecycleEvents.length, 2)
+        NodeAssert.deepEqual(
+          lifecycleEvents.map((event) => event.itemId),
+          [asItemId('provider-child'), asItemId('provider-child')],
+        )
+        NodeAssert.equal(events[0]?.type, 'item.started')
+        NodeAssert.deepEqual(events[0]?.payload, {
+          itemType: 'collab_agent_tool_call',
+          status: 'inProgress',
+          title: 'package_metadata',
+          data: {
+            completedAtMs: 1_778_000_000_000,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'subAgentActivity',
+              id: 'call_D9',
+              agentPath: '/root/package_metadata',
+              agentThreadId: 'provider-child',
+              kind: 'started',
+            },
+          },
+        })
+        NodeAssert.equal(events[1]?.type, 'item.completed')
+        NodeAssert.deepEqual(events[1]?.payload, {
+          itemType: 'collab_agent_tool_call',
+          status: 'completed',
+          title: 'package_metadata',
+          data: {
+            completedAtMs: 1_778_000_000_250,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'subAgentActivity',
+              id: 'subagent-completed-child-turn',
+              agentPath: '/root/package_metadata',
+              agentThreadId: 'provider-child',
+              kind: 'completed',
+            },
+          },
+        })
+        NodeAssert.equal(events[2]?.type, 'item.updated')
+        NodeAssert.deepEqual(events[2]?.payload, {
+          itemType: 'collab_agent_tool_call',
+          model: 'actual-model',
+          effort: 'high',
+        })
+        NodeAssert.equal(events[3]?.type, 'item.updated')
+        NodeAssert.deepEqual(events[3]?.payload, {
+          itemType: 'collab_agent_tool_call',
+          model: 'actual-model',
+          effort: null,
+        })
+        NodeAssert.equal(events[0]?.itemId, events[1]?.itemId)
+        NodeAssert.equal(events[0]?.turnId, events[1]?.turnId)
+        NodeAssert.equal(events[1]?.itemId, events[2]?.itemId)
+        NodeAssert.equal(events[1]?.turnId, events[2]?.turnId)
+        NodeAssert.equal(events[2]?.itemId, events[3]?.itemId)
+        NodeAssert.equal(events[2]?.turnId, events[3]?.turnId)
+      }),
+  )
+
   it.effect('maps completed agent message items to canonical item.completed events', () =>
     Effect.gen(function* ()
     {

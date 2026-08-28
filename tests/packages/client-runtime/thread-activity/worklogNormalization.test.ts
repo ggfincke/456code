@@ -50,4 +50,129 @@ describe('deriveNormalizedWorkLogEntries caching', () =>
     expect(appended[0]).toBe(initial[0])
     expect(uncached[0]).not.toBe(initial[0])
   })
+
+  it('merges and clears late child metadata without reopening a terminal collab row', () =>
+  {
+    const completed: OrchestrationThreadActivity = {
+      id: EventId.make('collab-completed'),
+      createdAt: '2026-08-26T00:00:01.000Z',
+      kind: 'tool.completed',
+      summary: 'Agent completed',
+      tone: 'tool',
+      payload: {
+        itemType: 'collab_agent_tool_call',
+        toolCallId: 'collab-call',
+        status: 'completed',
+      },
+      turnId: TurnId.make('turn-collab'),
+      sequence: 1,
+    }
+    const metadata: OrchestrationThreadActivity = {
+      id: EventId.make('collab-metadata'),
+      createdAt: '2026-08-26T00:00:02.000Z',
+      kind: 'tool.updated',
+      summary: 'Tool updated',
+      tone: 'tool',
+      payload: {
+        itemType: 'collab_agent_tool_call',
+        toolCallId: 'collab-call',
+        model: 'gpt-5.6-sol',
+        effort: 'high',
+      },
+      turnId: TurnId.make('turn-collab'),
+      sequence: 2,
+    }
+    const clearedEffort: OrchestrationThreadActivity = {
+      id: EventId.make('collab-metadata-clear'),
+      createdAt: '2026-08-26T00:00:03.000Z',
+      kind: 'tool.updated',
+      summary: 'Tool updated',
+      tone: 'tool',
+      payload: {
+        itemType: 'collab_agent_tool_call',
+        toolCallId: 'collab-call',
+        model: 'gpt-5.6-sol',
+        effort: null,
+      },
+      turnId: TurnId.make('turn-collab'),
+      sequence: 3,
+    }
+
+    const entries = deriveNormalizedWorkLogEntries([completed, metadata, clearedEffort], {
+      requestKindFromRequestType: () => null,
+    })
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      id: 'collab-completed',
+      activityKind: 'tool.completed',
+      toolLifecycleStatus: 'completed',
+      toolCallId: 'collab-call',
+      model: 'gpt-5.6-sol',
+      effort: null,
+    })
+  })
+
+  it('retains child metadata that arrives before the visible lifecycle row', () =>
+  {
+    const activities: ReadonlyArray<OrchestrationThreadActivity> = [
+      {
+        id: EventId.make('collab-started'),
+        createdAt: '2026-08-26T00:00:01.000Z',
+        kind: 'tool.started',
+        summary: 'Agent started',
+        tone: 'tool',
+        payload: {
+          itemType: 'collab_agent_tool_call',
+          toolCallId: 'collab-race',
+          status: 'inProgress',
+        },
+        turnId: TurnId.make('turn-collab-race'),
+        sequence: 1,
+      },
+      {
+        id: EventId.make('collab-metadata-before-row'),
+        createdAt: '2026-08-26T00:00:02.000Z',
+        kind: 'tool.updated',
+        summary: 'Tool updated',
+        tone: 'tool',
+        payload: {
+          itemType: 'collab_agent_tool_call',
+          toolCallId: 'collab-race',
+          model: 'gpt-5.6-sol',
+          effort: 'low',
+        },
+        turnId: TurnId.make('turn-collab-race'),
+        sequence: 2,
+      },
+      {
+        id: EventId.make('collab-completed-after-metadata'),
+        createdAt: '2026-08-26T00:00:03.000Z',
+        kind: 'tool.completed',
+        summary: 'Agent completed',
+        tone: 'tool',
+        payload: {
+          itemType: 'collab_agent_tool_call',
+          toolCallId: 'collab-race',
+          status: 'completed',
+        },
+        turnId: TurnId.make('turn-collab-race'),
+        sequence: 3,
+      },
+    ]
+
+    const entries = deriveNormalizedWorkLogEntries(activities, {
+      requestKindFromRequestType: () => null,
+    })
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      id: 'collab-completed-after-metadata',
+      activityKind: 'tool.completed',
+      toolLifecycleStatus: 'completed',
+      toolCallId: 'collab-race',
+      model: 'gpt-5.6-sol',
+      effort: 'low',
+    })
+  })
 })
