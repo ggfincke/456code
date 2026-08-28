@@ -281,6 +281,36 @@ const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   { key: 'w', meta: true, shift: false, control: false },
 ])
 
+// popups bypass webview-attach hardening and must not inherit the picker guest's
+// relaxed context isolation. Preserve the opener and session for OAuth replies.
+const POPUP_WINDOW_OPTIONS = {
+  webPreferences: {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  },
+} satisfies Electron.BrowserWindowConstructorOptions
+
+// reject non-web URLs before either route; about:blank also bypasses Electron's
+// popup preference overrides. Ordinary target=_blank links stay in the preview.
+const previewWindowOpenAction = (details: {
+  readonly url: string
+  readonly disposition: Electron.HandlerDetails['disposition']
+}): 'popup' | 'navigate' | 'deny' =>
+{
+  let url: URL
+  try
+  {
+    url = new URL(details.url)
+  }
+  catch
+  {
+    return 'deny'
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'deny'
+  return details.disposition === 'new-window' ? 'popup' : 'navigate'
+}
+
 const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal =>
 {
   if (typeof value !== 'object' || value === null || !('kind' in value)) return false
@@ -1295,6 +1325,12 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   {
     const scope = yield* Scope.fork(parentScope, 'sequential')
     const attachmentToken = Symbol()
+    let attachmentClosed = false
+    const isCurrentAttachment = () =>
+      !attachmentClosed &&
+      !wc.isDestroyed() &&
+      webContents.fromId(wc.id) === wc &&
+      Ref.getUnsafe(attachedRef).get(wc.id)?.attachmentToken === attachmentToken
     let documentGeneration = 0
     let nextRequestId = 0
     let activeCapture: {
@@ -1596,10 +1632,18 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       runFork(forwardShortcut(event, input))
     }
+    const windowCreated = (window: BrowserWindow): void =>
+    {
+      if (!isCurrentAttachment()) return
+      window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    }
     yield* Scope.addFinalizer(
       scope,
       Effect.gen(function* ()
       {
+        // the handler remains installed; close its own authority without replacing
+        // a handler that a newer attachment may already own.
+        attachmentClosed = true
         cancelFaviconCapture()
         yield* attempt({ operation: 'detachListeners', tabId, webContentsId: wc.id }, () =>
         {
@@ -1612,6 +1656,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           wc.off('did-stop-loading', sync)
           wc.off('did-fail-load', failed as never)
           wc.off('audio-state-changed', audioStateChanged)
+          wc.off('did-create-window', windowCreated)
           wc.off('before-input-event', beforeInput)
           wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput)
           wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
@@ -1663,11 +1708,19 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         wc.on('audio-state-changed', audioStateChanged)
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput)
         wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
-        wc.setWindowOpenHandler(({ url }) =>
+        wc.on('did-create-window', windowCreated)
+        wc.setWindowOpenHandler((details) =>
         {
+          if (!isCurrentAttachment()) return { action: 'deny' }
+          const action = previewWindowOpenAction(details)
+          if (action === 'deny') return { action: 'deny' }
+          if (action === 'popup')
+          {
+            return { action: 'allow', overrideBrowserWindowOptions: POPUP_WINDOW_OPTIONS }
+          }
           runFork(
             attemptPromise({ operation: 'openPreviewWindow', tabId, webContentsId: wc.id }, () =>
-              wc.loadURL(url),
+              isCurrentAttachment() ? wc.loadURL(details.url) : Promise.resolve(),
             ).pipe(Effect.ignore),
           )
           return { action: 'deny' }
