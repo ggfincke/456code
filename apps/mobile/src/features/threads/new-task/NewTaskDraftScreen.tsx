@@ -51,6 +51,8 @@ import { useRemoteConnectionStatus } from '../../../state/use-remote-environment
 import { branchBadgeLabel, useNewTaskFlow } from './new-task-flow-provider'
 import { useCreateProjectThread } from '../use-project-actions'
 import { useIncomingShare } from '../../sharing/IncomingShareProvider'
+import { ComposerCommandPopover } from '../composer/ComposerCommandPopover'
+import { useComposerCommandMenu } from '../composer/use-composer-command-menu'
 
 function formatWorkspaceLabel(input: {
   readonly workspaceMode: string
@@ -100,6 +102,7 @@ export function NewTaskDraftScreen(props: {
       (environment) => environment.environmentId === selectedProject.environmentId,
     )?.connectionState === 'connected'
   const promptInputRef = useRef<ComposerEditorHandle>(null)
+  const [isComposerFocused, setIsComposerFocused] = useState(false)
   const loadedBranchesProjectKeyRef = useRef<string | null>(null)
   const [importingShareKey, setImportingShareKey] = useState<string | null>(null)
   const [isCancellingShareImport, setIsCancellingShareImport] = useState(false)
@@ -626,6 +629,23 @@ export function NewTaskDraftScreen(props: {
     showPlanMode && flow.interactionMode.baseMode === 'plan' ? 'plan' : 'default',
     showOrchestrate && flow.interactionMode.orchestrate,
   )
+  const composerMenu = useComposerCommandMenu({
+    draftMessage: flow.prompt,
+    environmentId: selectedProject?.environmentId ?? null,
+    projectCwd:
+      (flow.workspaceMode === 'worktree'
+        ? selectedProject?.workspaceRoot
+        : (flow.selectedWorktreePath ?? selectedProject?.workspaceRoot)) || null,
+    selectedProviderStatus: flow.selectedProviderStatus,
+    modelOptions: flow.modelOptions,
+    interactionMode: effectiveInteractionMode,
+    hasThread: false,
+    enabled: isComposerFocused && !isIncomingShareTransferPending,
+    onChangeDraftMessage: flow.setPrompt,
+    onUpdateInteractionMode: flow.setInteractionMode,
+    onUpdateModelSelection: (selection) =>
+      flow.setSelectedModelKey(`${selection.instanceId}:${selection.model}`),
+  })
 
   const optionsMenuActions = useMemo(
     () => [
@@ -1139,7 +1159,11 @@ export function NewTaskDraftScreen(props: {
       scrollEnabled
       value={flow.prompt}
       skills={flow.selectedProviderSkills}
+      selection={composerMenu.selection}
       onChangeText={flow.setPrompt}
+      onSelectionChange={composerMenu.onSelectionChange}
+      onFocus={() => setIsComposerFocused(true)}
+      onBlur={() => setIsComposerFocused(false)}
       onPasteImages={
         supportsImageAttachments ? (uris) => void handleNativePasteImages(uris) : undefined
       }
@@ -1231,6 +1255,16 @@ export function NewTaskDraftScreen(props: {
         <View className="min-h-0 flex-1 px-5 pt-2">{promptEditor}</View>
 
         <View className="border-t border-border" style={{ paddingBottom: controlsBottomPadding }}>
+          {composerMenu.trigger ? (
+            <View className="px-4 pt-2">
+              <ComposerCommandPopover
+                items={composerMenu.items}
+                triggerKind={composerMenu.trigger.kind}
+                isLoading={composerMenu.isLoading}
+                onSelect={composerMenu.onSelect}
+              />
+            </View>
+          ) : null}
           {flow.attachments.length > 0 ? (
             <View className="px-4 pt-3">
               <ComposerAttachmentStrip

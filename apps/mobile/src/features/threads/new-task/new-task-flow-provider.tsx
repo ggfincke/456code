@@ -11,6 +11,7 @@ import type {
   ProviderRuntimeCapabilities,
   ProviderRuntimeModeWarningId,
   RuntimeMode,
+  ServerProvider,
   ServerProviderSkill,
 } from '@t3tools/contracts'
 import {
@@ -124,6 +125,7 @@ type NewTaskFlowContextValue = {
   readonly selectedModel: ModelSelection | null
   readonly selectedModelOption: ModelOption | null
   readonly selectedProviderSkills: ReadonlyArray<ServerProviderSkill>
+  readonly selectedProviderStatus: ServerProvider | null
   readonly selectedProviderRuntimeCapabilities: ProviderRuntimeCapabilities
   readonly providerGroups: ReadonlyArray<ProviderGroup>
   readonly filteredBranches: ReadonlyArray<VcsRef>
@@ -994,6 +996,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       selectedModel,
       selectedModelOption,
       selectedProviderSkills,
+      selectedProviderStatus: selectedProvider,
       selectedProviderRuntimeCapabilities,
       providerGroups,
       filteredBranches,
@@ -1050,6 +1053,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       selectedModelOption,
       selectedProjectDraftKey,
       selectedProviderSkills,
+      selectedProvider,
       selectedProviderRuntimeCapabilities,
       setSelectedModelOptions,
       selectedProject,

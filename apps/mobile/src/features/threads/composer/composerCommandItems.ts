@@ -1,9 +1,16 @@
 // apps/mobile/src/features/threads/composer/composerCommandItems.ts
 // search and group mobile commands and resolve their insertion text
 
-import type { ServerProviderSkill } from '@t3tools/contracts'
+import {
+  CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
+  type CollaborationMode,
+  type ProjectSearchEntriesResult,
+  type ServerProvider,
+  type ServerProviderSkill,
+} from '@t3tools/contracts'
 import {
   serializeComposerFileLink,
+  type ComposerTrigger,
   type ComposerTriggerKind,
 } from '@t3tools/shared/composerTrigger'
 import {
@@ -12,11 +19,118 @@ import {
   scoreQueryMatch,
 } from '@t3tools/shared/searchRanking'
 import type { ComposerCommandItem } from './ComposerCommandPopover'
+import { filterModelOptions, type ModelOption } from '../../../lib/modelOptions'
 
 type ComposerCommandGroup = {
   readonly id: string
   readonly label: string | null
   readonly items: ReadonlyArray<ComposerCommandItem>
+}
+
+export function buildMobileComposerCommandItems(input: {
+  readonly trigger: ComposerTrigger | null
+  readonly selectedProviderStatus: ServerProvider | null
+  readonly modelOptions: ReadonlyArray<ModelOption>
+  readonly interactionMode: CollaborationMode
+  readonly hasThread: boolean
+  readonly pathEntries: ProjectSearchEntriesResult['entries']
+}): ComposerCommandItem[]
+{
+  const { trigger, selectedProviderStatus } = input
+  if (!trigger) return []
+  const providerSkills = (selectedProviderStatus?.skills ?? []).filter(
+    (skill) => skill.name.toLowerCase() !== 'orchestrate',
+  )
+
+  if (trigger.kind === 'slash-command')
+  {
+    const query = trigger.query.toLowerCase()
+    const capabilities =
+      selectedProviderStatus?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+    const supportsPlan = capabilities.supportedInteractionModes.includes('plan')
+    const supportsOrchestrate =
+      capabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+      capabilities.orchestrateBaseModes.includes(input.interactionMode.baseMode)
+    const builtIn = [
+      { command: 'model', description: 'Switch model' },
+      { command: 'plan', description: 'Switch to plan mode' },
+      { command: 'orchestrate', description: 'Enable orchestration' },
+      { command: 'default', description: 'Switch to default mode' },
+    ]
+      .filter(
+        (item) =>
+          item.command.includes(query) &&
+          (item.command !== 'plan' || supportsPlan) &&
+          (item.command !== 'orchestrate' || supportsOrchestrate),
+      )
+      .map((item) => ({
+        ...item,
+        id: `cmd:${item.command}`,
+        type: 'slash-command' as const,
+        label: `/${item.command}`,
+      }))
+    const collidingSkillNames = new Set(
+      providerSkills.filter((skill) => skill.enabled).map((skill) => skill.name.toLowerCase()),
+    )
+    const providerCommands: ComposerCommandItem[] = []
+    for (const command of selectedProviderStatus?.slashCommands ?? [])
+    {
+      if (collidingSkillNames.has(command.name.toLowerCase())) continue
+      if (!command.name.toLowerCase().includes(query)) continue
+      // feedback for Codex needs the session and logs of an existing thread
+      if (
+        !input.hasThread &&
+        selectedProviderStatus?.driver === 'codex' &&
+        command.name === 'feedback'
+      )
+      {
+        continue
+      }
+      providerCommands.push({
+        id: `pcmd:${command.name}`,
+        type: 'provider-slash-command',
+        command,
+        label: `/${command.name}`,
+        description: command.description ?? '',
+      })
+    }
+    return [
+      ...builtIn,
+      ...providerCommands,
+      ...searchMobileComposerSkills(providerSkills, trigger.query),
+    ]
+  }
+
+  if (trigger.kind === 'slash-model')
+  {
+    return filterModelOptions(input.modelOptions, trigger.query).map((option) => ({
+      id: `model:${option.key}`,
+      type: 'model',
+      selection: option.selection,
+      label: option.label,
+      description: option.subtitle,
+    }))
+  }
+  if (trigger.kind === 'skill')
+  {
+    return searchMobileComposerSkills(providerSkills, trigger.query)
+  }
+  if (trigger.kind === 'path')
+  {
+    return input.pathEntries.map((entry) =>
+    {
+      const parts = entry.path.split('/')
+      return {
+        id: `path:${entry.path}`,
+        type: 'path',
+        path: entry.path,
+        kind: entry.kind,
+        label: parts[parts.length - 1] ?? entry.path,
+        description: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
+      }
+    })
+  }
+  return []
 }
 
 export function searchMobileComposerSkills(

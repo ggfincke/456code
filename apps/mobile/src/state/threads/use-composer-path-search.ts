@@ -55,11 +55,16 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget)
         })
       : null,
   )
+  const targetPending =
+    normalizedTarget.environmentId !== debouncedTarget.environmentId ||
+    normalizedTarget.cwd !== debouncedTarget.cwd ||
+    normalizedTarget.query !== debouncedTarget.query
+  const targetEnabled = normalizedTarget.environmentId !== null && normalizedTarget.cwd !== null
 
   return {
-    entries: result.data?.entries ?? [],
+    entries: targetEnabled && !targetPending ? (result.data?.entries ?? []) : [],
     error: result.error,
-    isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
+    isPending: targetPending || result.isPending,
     refresh: result.refresh,
   }
 }

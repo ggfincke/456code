@@ -11,12 +11,7 @@ import {
   type RuntimeMode,
   type ServerConfig,
 } from '@t3tools/contracts'
-import {
-  detectComposerTrigger,
-  replaceTextRange,
-  type ComposerTrigger,
-} from '@t3tools/shared/composerTrigger'
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { memo, useCallback, useMemo, useRef, useState, type RefObject } from 'react'
 import { ActivityIndicator, Image, Pressable, useColorScheme, View } from 'react-native'
 import ImageViewing from 'react-native-image-viewing'
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native-reanimated'
@@ -30,7 +25,6 @@ import {
   ComposerEditor,
   composerEditorCapabilities,
   type ComposerEditorHandle,
-  type ComposerEditorSelection,
 } from '../../../components/ComposerEditor'
 import {
   ComposerToolbarButton,
@@ -44,12 +38,10 @@ import type { DraftComposerImageAttachment } from '../../../lib/composerImages'
 import {
   buildModelMenuActions,
   buildModelOptions,
-  filterModelOptions,
   groupByProvider,
 } from '../../../lib/modelOptions'
 import { useScaledTextRole } from '../../settings/appearance/useScaledTextRole'
 import type { RemoteClientConnectionState } from '../../../lib/connection'
-import { composerCommandReplacement, searchMobileComposerSkills } from './composerCommandItems'
 import {
   applyProviderOptionMenuEvent,
   buildProviderOptionMenuActions,
@@ -60,8 +52,8 @@ import {
   providerSwitchSuppressesStop,
   type ThreadProviderSwitchNotice,
 } from '../../../lib/thread-activity/provider-switch'
-import { useComposerPathSearch } from '../../../state/use-composer-path-search'
-import { ComposerCommandPopover, type ComposerCommandItem } from './ComposerCommandPopover'
+import { ComposerCommandPopover } from './ComposerCommandPopover'
+import { useComposerCommandMenu } from './use-composer-command-menu'
 import { composerConnectionStatus, type ComposerStatusPillState } from './threadComposerStatus'
 import { resolveComposerSubmitHandler } from './threadComposerSubmit'
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from './composerSurface'
@@ -360,175 +352,23 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
             ? 'Queue'
             : 'Send'
-  const providerSkills = useMemo(
-    () =>
-      (selectedProviderStatus?.skills ?? []).filter(
-        (skill) => skill.name.toLowerCase() !== 'orchestrate',
-      ),
-    [selectedProviderStatus],
-  )
   const modelOptions = useMemo(
     () => buildModelOptions(props.serverConfig, currentModelSelection),
     [props.serverConfig, currentModelSelection],
   )
-
-  // ── Trigger detection ────────────────────────────────────
-  const [composerSelection, setComposerSelection] = useState(() => ({
-    start: props.draftMessage.length,
-    end: props.draftMessage.length,
-  }))
-
-  const handleSelectionChange = useCallback((selection: ComposerEditorSelection) =>
-  {
-    setComposerSelection(selection)
-  }, [])
-  useEffect(() =>
-  {
-    const end = props.draftMessage.length
-    setComposerSelection((selection) =>
-    {
-      const start = Math.min(selection.start, end)
-      const selectionEnd = Math.min(selection.end, end)
-      if (start === selection.start && selectionEnd === selection.end)
-      {
-        return selection
-      }
-      return { start, end: selectionEnd }
-    })
-  }, [props.draftMessage.length])
-
-  const composerTrigger = useMemo<ComposerTrigger | null>(() =>
-  {
-    if (composerSelection.start !== composerSelection.end)
-    {
-      return null
-    }
-    return detectComposerTrigger(props.draftMessage, composerSelection.end)
-  }, [composerSelection, props.draftMessage])
-  const pathSearch = useComposerPathSearch({
+  const commandMenu = useComposerCommandMenu({
+    draftMessage: props.draftMessage,
     environmentId: props.environmentId,
-    cwd: composerTrigger?.kind === 'path' ? props.projectCwd : null,
-    query: composerTrigger?.kind === 'path' ? composerTrigger.query : null,
-  })
-
-  const composerMenuItems: ComposerCommandItem[] = useMemo(() =>
-  {
-    if (!composerTrigger) return []
-
-    if (composerTrigger.kind === 'slash-command')
-    {
-      const q = composerTrigger.query.toLowerCase()
-      const allBuiltIn = [
-        {
-          id: 'cmd:model',
-          type: 'slash-command' as const,
-          command: 'model',
-          label: '/model',
-          description: 'Switch model',
-        },
-        {
-          id: 'cmd:plan',
-          type: 'slash-command' as const,
-          command: 'plan',
-          label: '/plan',
-          description: 'Switch to plan mode',
-        },
-        {
-          id: 'cmd:orchestrate',
-          type: 'slash-command' as const,
-          command: 'orchestrate',
-          label: '/orchestrate',
-          description: 'Enable orchestration',
-        },
-        {
-          id: 'cmd:default',
-          type: 'slash-command' as const,
-          command: 'default',
-          label: '/default',
-          description: 'Switch to default mode',
-        },
-      ]
-      const builtIn = allBuiltIn.filter(
-        (item) =>
-          item.command.includes(q) &&
-          (item.command !== 'plan' || showPlanMode) &&
-          (item.command !== 'orchestrate' || showOrchestrate),
-      )
-
-      const collidingSkillNames = new Set(
-        providerSkills.filter((skill) => skill.enabled).map((skill) => skill.name.toLowerCase()),
-      )
-
-      const providerCommands: ComposerCommandItem[] = []
-      for (const cmd of selectedProviderStatus?.slashCommands ?? [])
-      {
-        if (collidingSkillNames.has(cmd.name.toLowerCase())) continue
-        if (!cmd.name.toLowerCase().includes(q)) continue
-        providerCommands.push({
-          id: `pcmd:${cmd.name}`,
-          type: 'provider-slash-command' as const,
-          command: cmd,
-          label: `/${cmd.name}`,
-          description: cmd.description ?? '',
-        })
-      }
-
-      const skillItems = searchMobileComposerSkills(providerSkills, composerTrigger.query)
-
-      return [...builtIn, ...providerCommands, ...skillItems]
-    }
-
-    if (composerTrigger.kind === 'slash-model')
-    {
-      return filterModelOptions(modelOptions, composerTrigger.query).map((option) => ({
-        id: `model:${option.key}`,
-        type: 'model' as const,
-        selection: option.selection,
-        label: option.label,
-        description: option.subtitle,
-      }))
-    }
-
-    if (composerTrigger.kind === 'skill')
-    {
-      return searchMobileComposerSkills(providerSkills, composerTrigger.query)
-    }
-
-    if (composerTrigger.kind === 'path')
-    {
-      return pathSearch.entries.map((entry) =>
-      {
-        const parts = entry.path.split('/')
-        return {
-          id: `path:${entry.path}`,
-          type: 'path' as const,
-          path: entry.path,
-          kind: entry.kind,
-          label: parts[parts.length - 1] ?? entry.path,
-          description: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
-        }
-      })
-    }
-
-    return []
-  }, [
-    composerTrigger,
-    modelOptions,
-    pathSearch.entries,
-    providerSkills,
+    projectCwd: props.projectCwd,
     selectedProviderStatus,
-    showOrchestrate,
-    showPlanMode,
-  ])
-
-  // ── Handle command selection ──────────────────────────────
-  const {
-    onChangeDraftMessage,
-    onUpdateInteractionMode,
-    onUpdateModelSelection,
-    draftMessage,
-    onSendMessage,
-  } = props
+    modelOptions,
+    interactionMode: currentInteractionMode,
+    hasThread: true,
+    onChangeDraftMessage: props.onChangeDraftMessage,
+    onUpdateInteractionMode: props.onUpdateInteractionMode,
+    onUpdateModelSelection: props.onUpdateModelSelection,
+  })
+  const { onSendMessage } = props
 
   const handleSend = useCallback(async () =>
   {
@@ -563,73 +403,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.selectedThread.title,
     providerRejectsActiveInput,
   ])
-  const handleCommandSelect = useCallback(
-    (item: ComposerCommandItem) =>
-    {
-      if (!composerTrigger) return
-
-      if (item.type === 'model')
-      {
-        const result = replaceTextRange(
-          draftMessage,
-          composerTrigger.rangeStart,
-          composerTrigger.rangeEnd,
-          '',
-        )
-        setComposerSelection({ start: result.cursor, end: result.cursor })
-        onChangeDraftMessage(result.text)
-        onUpdateModelSelection(item.selection)
-        return
-      }
-
-      if (
-        item.type === 'slash-command' &&
-        (item.command === 'plan' || item.command === 'orchestrate' || item.command === 'default')
-      )
-      {
-        if (item.command === 'plan' && !showPlanMode) return
-        if (item.command === 'orchestrate' && !showOrchestrate) return
-        const result = replaceTextRange(
-          draftMessage,
-          composerTrigger.rangeStart,
-          composerTrigger.rangeEnd,
-          '',
-        )
-        setComposerSelection({ start: result.cursor, end: result.cursor })
-        onChangeDraftMessage(result.text)
-        onUpdateInteractionMode(
-          item.command === 'default'
-            ? { baseMode: 'default', orchestrate: false }
-            : item.command === 'plan'
-              ? { ...currentInteractionMode, baseMode: 'plan' }
-              : { ...currentInteractionMode, orchestrate: true },
-        )
-        return
-      }
-
-      const replacement = composerCommandReplacement(item)
-
-      const result = replaceTextRange(
-        draftMessage,
-        composerTrigger.rangeStart,
-        composerTrigger.rangeEnd,
-        replacement,
-      )
-      setComposerSelection({ start: result.cursor, end: result.cursor })
-      onChangeDraftMessage(result.text)
-    },
-    [
-      composerTrigger,
-      currentInteractionMode,
-      draftMessage,
-      onChangeDraftMessage,
-      onUpdateInteractionMode,
-      onUpdateModelSelection,
-      showOrchestrate,
-      showPlanMode,
-    ],
-  )
-
   // ── Model menu ───────────────────────────────────────────
   const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions])
   const currentModelOption =
@@ -806,13 +579,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         layout={COMPOSER_LAYOUT_TRANSITION}
         style={{ maxWidth: props.contentMaxWidth }}
       >
-        {composerTrigger && composerMenuItems.length > 0 ? (
+        {commandMenu.trigger ? (
           <View className="absolute inset-x-0 bottom-full z-10 mb-2">
             <ComposerCommandPopover
-              items={composerMenuItems}
-              triggerKind={composerTrigger.kind}
-              isLoading={pathSearch.isPending}
-              onSelect={handleCommandSelect}
+              items={commandMenu.items}
+              triggerKind={commandMenu.trigger.kind}
+              isLoading={commandMenu.isLoading}
+              onSelect={commandMenu.onSelect}
             />
           </View>
         ) : null}
@@ -874,9 +647,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               multiline
               value={props.draftMessage}
               skills={selectedProviderStatus?.skills ?? []}
-              selection={composerSelection}
+              selection={commandMenu.selection}
               onChangeText={props.onChangeDraftMessage}
-              onSelectionChange={handleSelectionChange}
+              onSelectionChange={commandMenu.onSelectionChange}
               onPasteImages={
                 supportsImageAttachments
                   ? (uris) => void props.onNativePasteImages(uris)
