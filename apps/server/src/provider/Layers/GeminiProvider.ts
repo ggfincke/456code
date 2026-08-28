@@ -5,6 +5,7 @@ import type {
   GeminiSettings,
   ModelCapabilities,
   ServerProvider,
+  ServerProviderAccountUsage,
   ServerProviderModel,
 } from '@t3tools/contracts'
 import { causeErrorTag } from '@t3tools/shared/observability'
@@ -44,6 +45,12 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 })
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000
+
+const GEMINI_ACCOUNT_USAGE = {
+  status: 'unavailable',
+  message:
+    'Gemini account limits aren’t available through this integration. Check /stats in Gemini CLI.',
+} as const satisfies ServerProviderAccountUsage
 
 export const DEFAULT_GEMINI_MODEL = 'auto'
 
@@ -125,6 +132,7 @@ export function buildInitialGeminiProviderSnapshot(
       enabled: true,
       checkedAt,
       models,
+      accountUsage: GEMINI_ACCOUNT_USAGE,
       probe: {
         installed: true,
         version: null,
@@ -188,6 +196,7 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
       enabled: true,
       checkedAt,
       models: geminiModelsFromSettings(geminiSettings.customModels),
+      accountUsage: GEMINI_ACCOUNT_USAGE,
       probe: {
         installed: !isCommandMissingCause(error),
         version: null,
@@ -207,6 +216,7 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
       enabled: true,
       checkedAt,
       models: geminiModelsFromSettings(geminiSettings.customModels),
+      accountUsage: GEMINI_ACCOUNT_USAGE,
       probe: {
         installed: true,
         version: null,
@@ -231,6 +241,7 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
       enabled: true,
       checkedAt,
       models: geminiModelsFromSettings(geminiSettings.customModels),
+      accountUsage: GEMINI_ACCOUNT_USAGE,
       probe: {
         installed: true,
         version,
@@ -246,6 +257,7 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
     enabled: true,
     checkedAt,
     models: geminiModelsFromSettings(geminiSettings.customModels),
+    accountUsage: GEMINI_ACCOUNT_USAGE,
     probe: {
       installed: true,
       version,

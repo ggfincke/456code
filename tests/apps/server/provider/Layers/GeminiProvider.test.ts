@@ -38,6 +38,15 @@ it.effect('uses stable CLI aliases and starts with model switching unadvertised'
     expect(snapshot.models.map((model) => model.slug)).toEqual(['auto', 'flash', 'pro'])
     expect(snapshot.requiresNewThreadForModelChange).toBeUndefined()
     expect(snapshot.capabilities?.sessionModelSwitch).toBe('unsupported')
+    expect(snapshot.accountUsage).toBeUndefined()
+    const enabled = yield* buildInitialGeminiProviderSnapshot(
+      decodeGeminiSettings({ enabled: true }),
+    )
+    expect(enabled.accountUsage).toEqual({
+      status: 'unavailable',
+      message:
+        'Gemini account limits aren’t available through this integration. Check /stats in Gemini CLI.',
+    })
   }),
 )
 
@@ -48,12 +57,14 @@ it.layer(NodeServices.layer)('GeminiProviderLive', (it) =>
     {
       const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'gemini-version-probe-'))
       const envPath = NodePath.join(tempDir, 'env.txt')
+      const argsPath = NodePath.join(tempDir, 'args.txt')
       const binaryPath = NodePath.join(tempDir, 'gemini')
       NodeFS.writeFileSync(
         binaryPath,
         [
           '#!/bin/sh',
           `printf '%s\\n' "${'$'}{GEMINI_API_KEY-unset}" "${'$'}{GOOGLE_API_KEY-unset}" > '${envPath}'`,
+          `printf '%s\\n' "$@" >> '${argsPath}'`,
           `printf '%s\\n' '1.2.3'`,
           '',
         ].join('\n'),
@@ -72,6 +83,8 @@ it.layer(NodeServices.layer)('GeminiProviderLive', (it) =>
           { PATH: process.env.PATH },
         )
         expect(snapshot.version).toBe('1.2.3')
+        expect(snapshot.accountUsage?.status).toBe('unavailable')
+        expect(NodeFS.readFileSync(argsPath, 'utf8').trim().split('\n')).toEqual(['--version'])
         expect(NodeFS.readFileSync(envPath, 'utf8').trim().split('\n')).toEqual(['unset', 'unset'])
       }
       finally

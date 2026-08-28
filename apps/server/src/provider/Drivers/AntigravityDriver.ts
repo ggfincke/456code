@@ -20,6 +20,7 @@ import {
   buildInitialAntigravityProviderSnapshot,
   checkAntigravityProviderStatus,
   discoverAntigravityAgents,
+  enrichAntigravitySnapshot,
 } from '../Layers/AntigravityProvider.ts'
 import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
@@ -140,7 +141,12 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
           ),
         checkProvider,
         enrichSnapshot: ({ snapshot: currentSnapshot, publishSnapshot }) =>
-          Effect.succeed(currentSnapshot).pipe(Effect.flatMap(publishSnapshot)),
+          enrichAntigravitySnapshot({
+            settings: effectiveConfig,
+            environment: processEnv,
+            snapshot: currentSnapshot,
+            publishSnapshot,
+          }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(
