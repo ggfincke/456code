@@ -304,10 +304,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return [...available, ...disabled]
   }, [instanceEntries, isLocked, matchesLockedProvider])
   const showSidebar = !isSearching && sidebarInstanceEntries.length > 0
-  const selectedAccountUsage =
+  const selectedProviderSnapshot =
     selectedInstanceId === 'favorites'
       ? undefined
-      : entryByInstanceId.get(selectedInstanceId)?.snapshot.accountUsage
+      : entryByInstanceId.get(selectedInstanceId)?.snapshot
+  const selectedAccountUsage = selectedProviderSnapshot?.accountUsage
   const showProviderUsage = shouldShowProviderUsageStrip({
     usage: selectedAccountUsage,
     selectedInstanceId,
@@ -751,7 +752,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             </div>
 
             {showProviderUsage && selectedAccountUsage ? (
-              <ProviderUsageStrip usage={selectedAccountUsage} displayMode={usageDisplayMode} />
+              <ProviderUsageStrip
+                usage={selectedAccountUsage}
+                displayMode={usageDisplayMode}
+                groupByScope={selectedProviderSnapshot?.driver === 'antigravity'}
+              />
             ) : null}
 
             {/* unlike the usage strip this stays visible while searching: a pick
