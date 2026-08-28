@@ -167,16 +167,18 @@ Android does not use serve-sim. Use a browser-compatible Android mirror when the
 
 ## Verify and clean up
 
-Exercise only the affected flow on one representative device unless the change specifically concerns platform, OS version, or screen size. Before finishing:
+Exercise only the affected flow on one representative device unless the change specifically concerns platform, OS version, or screen size. Follow the shared environment lifecycle in `test-t3-app`: keep a backend only while the identified web/mobile verification or explicitly requested human review is still active, then stop owned processes as required by `AGENTS.md`. Finishing mobile alone does not authorize stopping a backend still needed by web.
+
+At the end of that focused loop:
 
 1. Confirm the app connected to the intended disposable environment instead of merely rendering an empty disconnected state.
 2. Capture the relevant final state.
-3. Remove the disposable environment from 456code Dev.
+3. Remove the disposable environment from 456code Dev when it is no longer needed for the identified review window.
 4. Remove any `adb reverse` rule created for this test with `adb -s <emulator-serial> reverse --remove tcp:<metro-port>`.
-5. Stop only the serve-sim, Metro, backend, emulator, and log processes started by this test.
+5. Stop only the serve-sim, Metro, backend, emulator, and log processes started by this test after their participating client checks finish; never stop another task's processes.
 6. Remove only base directories and temporary Git repositories deliberately created for this test. Preserve them when they contain useful reproduction evidence.
 
-Keep local verification focused. Do not turn this workflow into a full repository test run.
+Preserve useful base-directory state for restart rather than keeping processes alive for unspecified future work. Keep local verification focused. Do not turn this workflow into a full repository test run.
 
 ## Troubleshoot predictable failures
 

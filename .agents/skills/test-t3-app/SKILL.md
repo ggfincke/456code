@@ -11,24 +11,24 @@ Use this skill for the web client. For iOS Simulator, Android Emulator, or physi
 
 1. Run commands from the repository root.
 2. Choose a base directory that belongs only to the current worktree or test:
-   - Use the repository's ignored `.t3` directory for reusable worktree-local state.
+   - Use the repository's ignored `.456code` directory for reusable worktree-local state.
    - Use `mktemp -d /tmp/t3code-test.XXXXXX` for disposable state and retain the printed absolute path.
 3. Start the full web stack with `vp run dev --home-dir <base-dir>`.
 4. Keep the terminal session alive and read the selected server port, web port, base directory, and pairing URL from its output.
 
-Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
+Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.456code` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
 
 The dev runner disables browser auto-open by default. Do not pass `--browser` during automated testing: an automatically opened page can consume the one-time bootstrap token before the controlled browser uses it.
 
-## Preserve the environment while iterating
+## Reuse the environment during focused verification
 
-Treat the overall testing or implementation loop—not an assistant turn or one verification pass—as the environment lifecycle boundary.
+Follow the current repository `AGENTS.md`: stop verification processes when the focused verification is complete. An active loop can include both web and mobile or an explicitly requested human review window; the end of an assistant turn alone does not end that loop.
 
-- Keep the dev process, base directory, selected ports, authenticated browser tab, registered projects, and seeded fixtures alive while the user may inspect the result or request follow-up changes.
-- Do not stop the server merely because one verification pass completed or because you are yielding a response to the user.
+- Reuse the owned dev process, base directory, selected ports, authenticated browser tab, registered projects, and fixtures while the identified verification loop is active.
+- When web and mobile share one backend, agree on the remaining client checks before teardown. Finishing one client must not stop the backend while the other still needs it.
 - Before starting another environment, check whether the existing process and browser tab still serve the task. Reuse them when healthy instead of discarding useful state.
 - On a later turn, verify that the existing process is alive and reuse its printed ports and base directory. If it exited, restart with the same base directory; create a new pairing token only when the browser session is no longer valid.
-- Tell the user when a test environment remains available, including its non-secret web URL when useful. Never include a pairing token.
+- State the live review window or remaining checks when retaining processes, and include only a non-secret web URL. A possible future follow-up is not a reason to keep servers running indefinitely.
 
 ## Authenticate the browser on the first navigation
 
@@ -66,19 +66,19 @@ Read [references/sqlite-fixtures.md](references/sqlite-fixtures.md) before chang
 - Seed projection tables only for disposable UI fixtures. Use application commands and APIs when testing business behavior or projection correctness.
 - Use the auth CLI, not direct `auth_*` table edits, for pairing and sessions.
 
-The helper refuses to write to the shared `~/.t3` directory by default and creates a database backup before each mutation.
+The helper refuses to write to the shared `~/.456code` directory by default and creates a database backup before each mutation.
 
-## Tear down only when the testing loop is finished
+## Tear down when focused verification is finished
 
-Tear down when the user explicitly asks, confirms the iteration is finished, or the overall task is genuinely complete with no pending human review. Do not infer completion from the end of an assistant turn.
+Stop the processes owned by this test when the focused verification and any explicitly pending client/human review are complete, or when the user asks. Do not tear down another task's process or a backend still serving the other client. An explicit request to retain an environment should name its purpose and boundary.
 
 When teardown is appropriate:
 
-1. Stop the dev process with its terminal interrupt.
+1. Stop the owned dev process with its terminal interrupt after all participating client checks finish.
 2. Preserve the isolated base directory when it contains useful reproduction evidence or state for a likely follow-up.
 3. Otherwise remove only a path created for this test after resolving and verifying the exact target.
 
-If completion is uncertain, keep the environment alive and mention that it is retained for further iteration. A fresh isolated base directory remains the safest reset when authentication, migrations, or fixture state becomes ambiguous.
+Preserve useful isolated state for a later restart without requiring the process to stay alive. Record the non-secret base directory and restart command. A fresh isolated base directory remains the safest reset when authentication, migrations, or fixture state becomes ambiguous.
 
 ## Troubleshoot predictably
 
