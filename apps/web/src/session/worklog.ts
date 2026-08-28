@@ -146,6 +146,15 @@ export function workEntryDisplayIndicatesToolFailure(entry: WorkLogEntry): boole
   return normalizedWorkEntryDisplayIndicatesToolFailure(entry)
 }
 
+// runtime and orchestration failures need stronger emphasis than a command exiting nonzero
+export function workEntrySignalsSevereFailure(entry: WorkLogEntry): boolean
+{
+  return (
+    entry.sourceActivityKind === 'runtime.error' ||
+    entry.sourceActivityKind?.endsWith('.failed') === true
+  )
+}
+
 export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean
 {
   return normalizedWorkEntryIndicatesToolSuccess(entry)

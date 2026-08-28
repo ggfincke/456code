@@ -66,6 +66,7 @@ export {
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
+  workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
   type WorkLogEntry,
   type WorkLogToolLifecycleStatus,

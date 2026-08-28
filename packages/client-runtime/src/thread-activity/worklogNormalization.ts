@@ -915,6 +915,11 @@ export function deriveNormalizedWorkLogEntries<
     if (activity.kind === 'task.started' && options.includeTaskStarted !== true) continue
     if (options.excludedActivityKinds?.has(activity.kind)) continue
     if (activity.summary === 'Checkpoint captured' || isPlanBoundaryToolActivity(activity)) continue
+    if (
+      activity.kind === 'runtime.warning' &&
+      activity.summary.endsWith('(no displayable text content)')
+    )
+      continue
 
     const cached = options.entryCache?.get(activity)
     if (cached)

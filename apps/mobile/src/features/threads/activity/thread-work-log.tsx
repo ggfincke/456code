@@ -259,7 +259,7 @@ export function ThreadWorkLog(props: {
                         <SymbolView
                           name={workRowStatusSymbolName(row.status)}
                           size={11}
-                          tintColor={row.status === 'failure' ? '#e11d48' : props.iconSubtleColor}
+                          tintColor={props.iconSubtleColor}
                           type="monochrome"
                         />
                       ) : null}

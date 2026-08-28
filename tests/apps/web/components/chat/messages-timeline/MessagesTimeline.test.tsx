@@ -823,6 +823,7 @@ describe('MessagesTimeline', () =>
     expect(markup).toContain('Running vp')
     expect(markup).toContain('aria-label="Running vp, tool call failed"')
     expect(markup).toContain('aria-label="Tool call failed"')
+    expect(markup).not.toContain('text-destructive')
   })
 
   it('shows compact Thinking only while active work has no visible content', () =>
@@ -948,12 +949,131 @@ describe('MessagesTimeline', () =>
     expect(markup).not.toContain('data-testid="file-diff"')
   })
 
-  it('renders a failure marker for failed tool lifecycle entries', () =>
+  it('keeps a failed command group summary neutral and semantically recognizable', () =>
+  {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={(['completed', 'failed'] as const).map((status, index) => ({
+          id: `entry-command-${index}`,
+          kind: 'work' as const,
+          createdAt: MESSAGE_CREATED_AT,
+          entry: {
+            id: `work-command-${index}`,
+            createdAt: MESSAGE_CREATED_AT,
+            label: index === 0 ? 'Run tests' : 'Run lint',
+            tone: 'tool' as const,
+            itemType: 'command_execution' as const,
+            toolLifecycleStatus: status,
+          },
+        }))}
+      />,
+    )
+
+    expect(markup).toContain('Ran 2 commands')
+    expect(markup).toContain('lucide-terminal')
+    expect(markup).toContain('tool call failed')
+    expect(markup).not.toContain('lucide-x')
+    expect(markup).not.toContain('text-destructive')
+  })
+
+  it('keeps hidden failure groups on their neutral disclosure chevron', () =>
   {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
         timelineEntries={[
+          {
+            id: 'entry-hidden-failure',
+            kind: 'work',
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: 'work-hidden-failure',
+              createdAt: MESSAGE_CREATED_AT,
+              label: 'Run lint',
+              tone: 'tool',
+              toolLifecycleStatus: 'failed',
+            },
+          },
+          {
+            id: 'entry-visible-info',
+            kind: 'work',
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: 'work-visible-info',
+              createdAt: MESSAGE_CREATED_AT,
+              label: 'Status updated',
+              tone: 'info',
+            },
+          },
+        ]}
+      />,
+    )
+
+    expect(markup).toContain('previous log entry, includes a failure')
+    expect(markup).toContain('lucide-chevron-down')
+    expect(markup).not.toContain('lucide-x')
+    expect(markup).not.toContain('text-destructive')
+  })
+
+  it.each(['runtime.error', 'provider.turn.start.failed', 'runtime.warning'])(
+    'preserves explicit severity styling for %s',
+    (sourceActivityKind) =>
+    {
+      const warning = sourceActivityKind === 'runtime.warning'
+      const markup = renderToStaticMarkup(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[
+            {
+              id: 'entry-status',
+              kind: 'work',
+              createdAt: MESSAGE_CREATED_AT,
+              entry: {
+                id: 'work-status',
+                createdAt: MESSAGE_CREATED_AT,
+                label: 'Status updated',
+                tone: 'info',
+              },
+            },
+            {
+              id: 'entry-severe',
+              kind: 'work',
+              createdAt: MESSAGE_CREATED_AT,
+              entry: {
+                id: 'work-severe',
+                createdAt: MESSAGE_CREATED_AT,
+                label: warning ? 'Reconnecting... 2/5' : 'Provider failed',
+                tone: warning ? 'info' : 'error',
+                sourceActivityKind,
+              },
+            },
+          ]}
+        />,
+      )
+
+      expect(markup).toContain(warning ? 'text-warning' : 'text-destructive')
+      if (warning) expect(markup).not.toContain('text-destructive')
+    },
+  )
+
+  it('renders a muted failure marker for failed tool lifecycle entries', () =>
+  {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: 'entry-info',
+            kind: 'work',
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: 'work-info',
+              createdAt: MESSAGE_CREATED_AT,
+              label: 'Status updated',
+              tone: 'info',
+            },
+          },
           {
             id: 'entry-1',
             kind: 'work',
@@ -973,5 +1093,6 @@ describe('MessagesTimeline', () =>
 
     expect(markup).toContain('lucide-x')
     expect(markup).toContain('aria-label="Tool call failed"')
+    expect(markup).not.toContain('text-destructive')
   })
 })
