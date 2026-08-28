@@ -1406,7 +1406,7 @@ export default function SidebarV2()
     snoozeThread,
     unsnoozeThread,
     pinThread,
-    unpinThread,
+    confirmAndUnpinThread,
     deleteThread,
   } = useThreadActions()
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -2406,7 +2406,7 @@ export default function SidebarV2()
     {
       void (async () =>
       {
-        const result = await unpinThread(threadRef)
+        const result = await confirmAndUnpinThread(threadRef)
         if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
         {
           const error = squashAtomCommandFailure(result)
@@ -2420,7 +2420,7 @@ export default function SidebarV2()
         }
       })()
     },
-    [unpinThread],
+    [confirmAndUnpinThread],
   )
   const attemptUnsnooze = useCallback(
     (threadRef: ScopedThreadRef) =>

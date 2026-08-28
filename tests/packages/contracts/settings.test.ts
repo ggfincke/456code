@@ -103,6 +103,15 @@ describe('ClientSettings glass opacity', () =>
 
 describe('ClientSettings sidebar v2', () =>
 {
+  it('keeps unpin confirmation opt-in and patchable', () =>
+  {
+    expect(decodeClientSettings({}).confirmThreadUnpin).toBe(false)
+    expect(decodeClientSettingsPatch({ confirmThreadUnpin: true })).toEqual({
+      confirmThreadUnpin: true,
+    })
+    expect(() => decodeClientSettingsPatch({ confirmThreadUnpin: 'yes' })).toThrow()
+  })
+
   it('defaults the beta off with a three-day threshold and merged-PR settling on', () =>
   {
     const settings = decodeClientSettings({})

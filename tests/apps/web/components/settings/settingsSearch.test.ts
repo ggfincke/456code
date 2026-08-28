@@ -11,6 +11,19 @@ import {
 
 describe('searchSettings', () =>
 {
+  it('lists thread confirmations in panel order with the unpin anchor', () =>
+  {
+    expect(searchSettings('confirmation').map((item) => item.id)).toEqual([
+      'unpin-confirmation',
+      'archive-confirmation',
+      'delete-confirmation',
+    ])
+    expect(searchSettings('unpin')[0]).toMatchObject({
+      to: '/settings/general',
+      anchorId: 'settings-unpin-confirmation',
+    })
+  })
+
   it('folds case, accents and whitespace without returning matches for an empty query', () =>
   {
     expect(searchSettings('  THÈME  ').map((item) => item.id)).toContain('theme')

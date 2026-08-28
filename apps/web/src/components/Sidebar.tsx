@@ -1211,7 +1211,7 @@ interface SidebarProjectItemProps
   archiveThread: ReturnType<typeof useThreadActions>['archiveThread']
   deleteThread: ReturnType<typeof useThreadActions>['deleteThread']
   pinThread: ReturnType<typeof useThreadActions>['pinThread']
-  unpinThread: ReturnType<typeof useThreadActions>['unpinThread']
+  unpinThread: ReturnType<typeof useThreadActions>['confirmAndUnpinThread']
   threadJumpLabelByKey: ReadonlyMap<string, string>
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void
   expandThreadListForProject: (projectKey: string) => void
@@ -3163,7 +3163,7 @@ interface SidebarProjectsContentProps
   archiveThread: ReturnType<typeof useThreadActions>['archiveThread']
   deleteThread: ReturnType<typeof useThreadActions>['deleteThread']
   pinThread: ReturnType<typeof useThreadActions>['pinThread']
-  unpinThread: ReturnType<typeof useThreadActions>['unpinThread']
+  unpinThread: ReturnType<typeof useThreadActions>['confirmAndUnpinThread']
   sortedProjects: readonly SidebarProjectSnapshot[]
   expandedThreadListsByProject: ReadonlySet<string>
   activeRouteProjectKey: string | null
@@ -3427,7 +3427,7 @@ function ProjectSidebar()
   const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount)
   const updateSettings = useUpdateClientSettings()
   const handleNewThread = useNewThreadHandler()
-  const { archiveThread, deleteThread, pinThread, unpinThread } = useThreadActions()
+  const { archiveThread, deleteThread, pinThread, confirmAndUnpinThread } = useThreadActions()
   const { isMobile, setOpenMobile } = useSidebar()
   const routeTarget = useParams({
     strict: false,
@@ -4100,7 +4100,7 @@ function ProjectSidebar()
         archiveThread={archiveThread}
         deleteThread={deleteThread}
         pinThread={pinThread}
-        unpinThread={unpinThread}
+        unpinThread={confirmAndUnpinThread}
         sortedProjects={sortedProjects}
         expandedThreadListsByProject={expandedThreadListsByProject}
         activeRouteProjectKey={activeRouteProjectKey}

@@ -660,7 +660,7 @@ function ChatViewContent(props: ChatViewProps)
   // snapshot can still be missing history
   const threadDetailSynchronized = routeKind === 'server' && threadSyncPhase === null
   const handleNewThread = useNewThreadHandler()
-  const { pinThread, unpinThread } = useThreadActions()
+  const { pinThread, confirmAndUnpinThread } = useThreadActions()
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -4527,18 +4527,20 @@ function ChatViewContent(props: ChatViewProps)
         event.stopPropagation()
         if (!isServerThread || !activeThreadRef || !canPinActiveThread) return
         const pinned = activeThreadPinned
-        void (pinned ? unpinThread(activeThreadRef) : pinThread(activeThreadRef)).then((result) =>
-        {
-          if (result._tag !== 'Failure' || isAtomCommandInterrupted(result)) return
-          const error = squashAtomCommandFailure(result)
-          toastManager.add(
-            stackedThreadToast({
-              type: 'error',
-              title: pinned ? 'Failed to unpin thread' : 'Failed to pin thread',
-              description: error instanceof Error ? error.message : 'An error occurred.',
-            }),
-          )
-        })
+        void (pinned ? confirmAndUnpinThread(activeThreadRef) : pinThread(activeThreadRef)).then(
+          (result) =>
+          {
+            if (result._tag !== 'Failure' || isAtomCommandInterrupted(result)) return
+            const error = squashAtomCommandFailure(result)
+            toastManager.add(
+              stackedThreadToast({
+                type: 'error',
+                title: pinned ? 'Failed to unpin thread' : 'Failed to pin thread',
+                description: error instanceof Error ? error.message : 'An error occurred.',
+              }),
+            )
+          },
+        )
         return
       }
 
@@ -4670,7 +4672,7 @@ function ChatViewContent(props: ChatViewProps)
     canPinActiveThread,
     isServerThread,
     pinThread,
-    unpinThread,
+    confirmAndUnpinThread,
     requestCloseTerminal,
     requestClosePanelTerminal,
     createNewTerminal,

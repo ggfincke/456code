@@ -122,6 +122,28 @@ export class ThreadPinningUnsupportedError extends Schema.TaggedErrorClass<Threa
   }
 }
 
+export async function requestThreadUnpinConfirmation(input: {
+  enabled: boolean
+  title: string
+  confirm: ((message: string) => Promise<boolean>) | null
+})
+{
+  const { confirm } = input
+  if (!input.enabled || confirm === null)
+  {
+    return AsyncResult.success(true)
+  }
+
+  return settlePromise(() =>
+    confirm(
+      [
+        `Unpin thread "${input.title}"?`,
+        'This will move the thread out of your pinned section.',
+      ].join('\n'),
+    ),
+  )
+}
+
 export function useThreadActions()
 {
   const closeTerminal = useAtomCommand(terminalEnvironment.close)
@@ -161,6 +183,7 @@ export function useThreadActions()
   })
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder)
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete)
+  const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin)
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread)
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
@@ -588,6 +611,23 @@ export function useThreadActions()
     [unpinThreadMutation],
   )
 
+  const confirmAndUnpinThread = useCallback(
+    async (target: ScopedThreadRef) =>
+    {
+      const localApi = readLocalApi()
+      const resolved = resolveThreadTarget(target)
+      const confirmationResult = await requestThreadUnpinConfirmation({
+        enabled: confirmThreadUnpin,
+        title: resolved?.thread.title ?? 'this thread',
+        confirm: localApi ? (message) => localApi.dialogs.confirm(message) : null,
+      })
+      if (confirmationResult._tag === 'Failure') return confirmationResult
+      if (!confirmationResult.value) return AsyncResult.success(undefined)
+      return unpinThread(target)
+    },
+    [confirmThreadUnpin, resolveThreadTarget, unpinThread],
+  )
+
   const snoozeThread = useCallback(
     async (target: ScopedThreadRef, snoozedUntil: string) =>
     {
@@ -692,10 +732,12 @@ export function useThreadActions()
       unsnoozeThread,
       pinThread,
       unpinThread,
+      confirmAndUnpinThread,
     }),
     [
       archiveThread,
       confirmAndDeleteThread,
+      confirmAndUnpinThread,
       deleteThread,
       pinThread,
       settleThread,

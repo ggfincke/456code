@@ -28,6 +28,7 @@ const clientSettings: ClientSettings = {
   browserAutoShowFloatingPreview: false,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
+  confirmThreadUnpin: false,
   desktopNotificationsEnabled: true,
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
