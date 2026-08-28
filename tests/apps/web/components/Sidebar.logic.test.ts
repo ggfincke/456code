@@ -8,6 +8,7 @@ import {
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
   estimateSidebarV2HeaderSize,
+  filterSidebarProjectScopeItems,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -18,6 +19,7 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   partitionLegacySidebarProjectThreads,
+  reduceSidebarProjectScopeMenuState,
   resolveProjectStatusIndicator,
   resolveSidebarV2LifecycleSection,
   resolveSidebarV2Status,
@@ -48,6 +50,58 @@ import {
 } from '../../../../apps/web/src/types'
 
 const localEnvironmentId = EnvironmentId.make('environment-local')
+
+describe('sidebar project scope combobox', () =>
+{
+  it('filters project labels in source order and only offers an unqueried scope reset', () =>
+  {
+    const items = [
+      { value: 'all', label: 'All projects' },
+      { value: 'alpha', label: 'Alpha workspace' },
+      { value: 'beta', label: 'Beta tools' },
+      { value: 'gamma', label: 'Gamma tools' },
+    ] as const
+    const filter = (activeScopeKey: string | null, query: string) =>
+      filterSidebarProjectScopeItems({
+        items,
+        activeScopeKey,
+        query,
+        matches: (item, candidate) =>
+          item.label.toLocaleLowerCase().includes(candidate.toLocaleLowerCase()),
+      })
+
+    expect(filter(null, '')).toEqual(items.slice(1))
+    expect(filter('alpha', ' ')).toEqual(items)
+    expect(filter(null, ' TOOL ')).toEqual([items[2], items[3]])
+    expect(filter('alpha', 'all')).toEqual([])
+  })
+
+  it('keeps typing open and clears stale queries on close, reopen, and project actions', () =>
+  {
+    const queriedOpenState = reduceSidebarProjectScopeMenuState(
+      { open: true, query: '' },
+      { type: 'query-changed', query: 'alpha' },
+    )
+    expect(queriedOpenState).toEqual({ open: true, query: 'alpha' })
+    expect(
+      reduceSidebarProjectScopeMenuState(queriedOpenState, {
+        type: 'open-changed',
+        open: false,
+      }),
+    ).toEqual({ open: false, query: '' })
+    expect(
+      reduceSidebarProjectScopeMenuState(queriedOpenState, {
+        type: 'project-settings-opened',
+      }),
+    ).toEqual({ open: false, query: '' })
+    expect(
+      reduceSidebarProjectScopeMenuState(
+        { open: false, query: 'stale' },
+        { type: 'open-changed', open: true },
+      ),
+    ).toEqual({ open: true, query: '' })
+  })
+})
 
 describe('sortThreadsForSidebarV2', () =>
 {
