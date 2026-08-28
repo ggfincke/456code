@@ -1089,6 +1089,12 @@ function normalizePersistedDraftThreads(
       {
         environmentIdByThreadId.set(parsedThreadRef.threadId, parsedThreadRef.environmentId)
       }
+      // logical keys can contain workspace paths; matching persisted metadata
+      // remains authoritative for the concrete project ref
+      if (draftThreadsByThreadKey[threadKey]?.logicalProjectKey === logicalProjectKey)
+      {
+        continue
+      }
       if (!projectRef)
       {
         const existingDraftThread = draftThreadsByThreadKey[threadKey]

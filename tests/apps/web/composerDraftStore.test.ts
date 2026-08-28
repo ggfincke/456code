@@ -1900,6 +1900,50 @@ describe('composerDraftStore sticky composer settings', () =>
     )
   })
 
+  it.each(['', 'Keep this pending work.'])(
+    'preserves concrete project metadata when a path-keyed explicit draft reloads with prompt %j',
+    (prompt) =>
+    {
+      const store = useComposerDraftStore.getState()
+      const draftId = DraftId.make('persisted-path-keyed-draft')
+      const projectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make('project-alpha'))
+      const logicalProjectKey = `${TEST_ENVIRONMENT_ID}:/workspace/alpha`
+      const selection = createModelSelection(CODEX_SECONDARY_INSTANCE, 'custom-saved-model')
+      store.setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
+        threadId: ThreadId.make('path-keyed-thread'),
+        createdAt: '2026-08-29T12:00:00.000Z',
+        branch: 'feature/alpha',
+        envMode: 'worktree',
+        startFromOrigin: true,
+        collaborationMode: { baseMode: 'plan', orchestrate: true },
+      })
+      store.setModelSelection(draftId, selection, { explicit: true })
+      store.setPrompt(draftId, prompt)
+      const before = store.getDraftSession(draftId)
+      const persistApi = useComposerDraftStore.persist as unknown as {
+        getOptions: () => {
+          merge: (
+            persistedState: unknown,
+            currentState: ReturnType<typeof useComposerDraftStore.getState>,
+          ) => ReturnType<typeof useComposerDraftStore.getState>
+          partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
+        }
+      }
+      const { merge, partialize } = persistApi.getOptions()
+      const hydrated = merge(partialize(useComposerDraftStore.getState()), store)
+      expect(hydrated.draftThreadsByThreadKey[draftId]).toEqual(before)
+      expect(hydrated.logicalProjectDraftThreadKeyByLogicalProjectKey[logicalProjectKey]).toBe(
+        draftId,
+      )
+      expect(hydrated.draftsByThreadKey[draftId]).toMatchObject({
+        prompt,
+        activeProvider: CODEX_SECONDARY_INSTANCE,
+        modelSelectionByProvider: { [CODEX_SECONDARY_INSTANCE]: selection },
+        modelSelectionExplicit: true,
+      })
+    },
+  )
+
   it('retains composer content and execution modes when a late project default replaces a seed', () =>
   {
     const store = useComposerDraftStore.getState()
