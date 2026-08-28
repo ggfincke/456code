@@ -228,7 +228,7 @@ export function ThreadWorkLog(props: {
                     <Text
                       className={cn(
                         'font-sans-medium text-foreground',
-                        iconIsDestructive && 'text-rose-600 dark:text-rose-400',
+                        iconIsDestructive && 'text-adaptive-rose-600-400',
                       )}
                     >
                       {row.summary}
@@ -240,7 +240,7 @@ export function ThreadWorkLog(props: {
 
                   <View className="shrink-0 flex-row items-center gap-px">
                     {props.copiedRowId === row.id ? (
-                      <Text className="pr-1 font-sans-medium text-3xs text-emerald-600 dark:text-emerald-400">
+                      <Text className="pr-1 font-sans-medium text-3xs text-adaptive-emerald-600-400">
                         Copied
                       </Text>
                     ) : null}
@@ -269,7 +269,7 @@ export function ThreadWorkLog(props: {
               </Pressable>
 
               {fullDetail ? (
-                <View className="ml-7 border-l border-neutral-300/60 pb-1 pl-3 pt-0.5 dark:border-white/[0.12]">
+                <View className="ml-7 border-l border-adaptive-neutral-300-a60-white-a12 pb-1 pl-3 pt-0.5">
                   <ScrollView
                     directionalLockEnabled
                     showsVerticalScrollIndicator

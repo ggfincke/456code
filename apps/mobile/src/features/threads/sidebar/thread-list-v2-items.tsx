@@ -38,10 +38,10 @@ const MONO_FONT = 'Menlo'
 const STATUS_LABEL_BY_STATUS: Partial<
   Record<ThreadListV2Status, { label: string; className: string }>
 > = {
-  approval: { label: 'Approval', className: 'text-amber-700 dark:text-amber-300' },
-  input: { label: 'Input', className: 'text-indigo-600 dark:text-indigo-300' },
-  working: { label: 'Working', className: 'text-sky-600 dark:text-sky-400' },
-  failed: { label: 'Failed', className: 'text-red-700 dark:text-red-300' },
+  approval: { label: 'Approval', className: 'text-adaptive-amber-700-300' },
+  input: { label: 'Input', className: 'text-adaptive-indigo-600-300' },
+  working: { label: 'Working', className: 'text-adaptive-sky-600-400' },
+  failed: { label: 'Failed', className: 'text-adaptive-red-700-300' },
 }
 
 function QueuedFailureSubtitle(props: { readonly reason: string })
@@ -307,9 +307,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <Text
             className={cn(
               'flex-1 text-xs',
-              selected
-                ? 'text-user-bubble-foreground-muted'
-                : 'text-red-600/80 dark:text-red-400/80',
+              selected ? 'text-user-bubble-foreground-muted' : 'text-adaptive-red-600-a80-400-a80',
             )}
             numberOfLines={1}
           >

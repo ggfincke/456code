@@ -40,7 +40,6 @@ import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from '../cloud/pu
 import { withNativeGlassHeaderItem } from '../layout/native-glass-header-items'
 import { WorkspaceSidebarToolbar } from '../layout/workspace-sidebar-toolbar'
 import { runtime } from '../../lib/runtime'
-import { useThemeColor } from '../../lib/useThemeColor'
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from '../../state/preferences'
 import { useSavedRemoteConnections } from '../../state/use-remote-environment-registry'
 import { SettingsRow } from './components/SettingsRow'
@@ -662,8 +661,6 @@ function BetaSettingsSection()
 
 function AppSettingsSection()
 {
-  const icon = useThemeColor('--color-icon')
-
   const version = Constants.expoConfig?.version ?? '0.0.0'
   // fall back to "production" to match resolveAppVariant in app.config.ts, so a
   // missing variant never mislabels a production build as development.
@@ -688,7 +685,7 @@ function AppSettingsSection()
         <SymbolView
           name="info.circle"
           size={22}
-          tintColor={icon}
+          tintColorClassName="accent-icon"
           type="monochrome"
           weight="regular"
         />

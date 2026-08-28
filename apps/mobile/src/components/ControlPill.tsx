@@ -4,7 +4,6 @@
 import { MenuView } from '@react-native-menu/menu'
 import { type ComponentProps, type ReactNode } from 'react'
 import { Pressable, useColorScheme, View, type AccessibilityProps } from 'react-native'
-import { useThemeColor } from '../lib/useThemeColor'
 
 import { cn } from '../lib/cn'
 import { SymbolView } from './AppSymbol'
@@ -22,18 +21,14 @@ export function ControlPill(props: {
 {
   const variant = props.variant ?? 'circle'
 
-  const iconColor = useThemeColor('--color-icon')
-  const iconSubtle = useThemeColor('--color-icon-subtle')
-  const primaryFg = useThemeColor('--color-primary-foreground')
-  const dangerFg = useThemeColor('--color-danger-foreground')
-  const iconTintColor =
+  const iconTintClassName =
     variant === 'primary'
       ? props.disabled
-        ? iconSubtle
-        : primaryFg
+        ? 'accent-icon-subtle'
+        : 'accent-primary-foreground'
       : variant === 'danger'
-        ? dangerFg
-        : iconColor
+        ? 'accent-danger-foreground'
+        : 'accent-icon'
 
   const isCircle =
     variant === 'circle' || variant === 'danger' || (variant === 'primary' && !props.label)
@@ -71,7 +66,12 @@ export function ControlPill(props: {
       {props.iconNode ? (
         <View className="h-4 w-4 items-center justify-center">{props.iconNode}</View>
       ) : props.icon ? (
-        <SymbolView name={props.icon} size={16} tintColor={iconTintColor} type="monochrome" />
+        <SymbolView
+          name={props.icon}
+          size={16}
+          tintColorClassName={iconTintClassName}
+          type="monochrome"
+        />
       ) : null}
       {props.label ? <Text className={labelClassName}>{props.label}</Text> : null}
     </Pressable>

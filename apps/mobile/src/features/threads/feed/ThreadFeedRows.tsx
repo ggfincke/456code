@@ -134,7 +134,7 @@ export function renderFeedEntry(
         accessibilityState={{ expanded: entry.expanded }}
         onPress={() => props.onToggleTurnFold(entry.turnId)}
         hitSlop={4}
-        className="mb-3 min-h-11 flex-row items-center gap-2 border-b border-neutral-200/80 px-2 dark:border-white/[0.08]"
+        className="mb-3 min-h-11 flex-row items-center gap-2 border-b border-adaptive-neutral-200-a80-white-a8 px-2"
       >
         <Text className="font-sans-medium text-sm tabular-nums text-foreground-muted">
           {entry.label}
@@ -219,7 +219,7 @@ export function renderFeedEntry(
             })}
           </View>
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
-            <Text className="font-sans-medium text-xs tabular-nums text-neutral-600 dark:text-neutral-400">
+            <Text className="font-sans-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
             </Text>
             {message.text.trim().length > 0 ? (
@@ -275,7 +275,7 @@ export function renderFeedEntry(
               key={attachment.id}
               environmentId={props.environmentId}
               attachmentId={attachment.id}
-              className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-neutral-200 dark:bg-neutral-800"
+              className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-adaptive-neutral-200-800"
               onPressImage={props.onPressImage}
             />
           )
@@ -289,7 +289,7 @@ export function renderFeedEntry(
               buttonSize={28}
               iconSize={13}
             />
-            <Text className="font-sans-medium text-xs tabular-nums text-neutral-600 dark:text-neutral-400">
+            <Text className="font-sans-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
             </Text>
           </View>
@@ -328,11 +328,11 @@ const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly st
   return (
     <View className="mb-4 flex-row items-center gap-2 px-1.5 py-1">
       <View className="flex-row items-center gap-1">
-        <View className="h-1 w-1 rounded-full bg-neutral-400 dark:bg-neutral-500" />
-        <View className="h-1 w-1 rounded-full bg-neutral-400/80 dark:bg-neutral-500/80" />
-        <View className="h-1 w-1 rounded-full bg-neutral-400/60 dark:bg-neutral-500/60" />
+        <View className="h-1 w-1 rounded-full bg-adaptive-neutral-400-500" />
+        <View className="h-1 w-1 rounded-full bg-adaptive-neutral-400-a80-500-a80" />
+        <View className="h-1 w-1 rounded-full bg-adaptive-neutral-400-a60-500-a60" />
       </View>
-      <Text className="font-sans-medium text-xs tabular-nums text-neutral-600 dark:text-neutral-400">
+      <Text className="font-sans-medium text-xs tabular-nums text-adaptive-neutral-600-400">
         Working for {durationLabel}
       </Text>
     </View>

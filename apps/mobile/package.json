@@ -31,6 +31,7 @@
     "config:prod": "APP_VARIANT=production expo config",
     "sync:pierre-icons": "node modules/code456-markdown-text/scripts/sync-pierre-file-icons.mjs",
     "check:pierre-icons": "node modules/code456-markdown-text/scripts/sync-pierre-file-icons.mjs --check",
+    "generate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-uniwind-themes.mts",
     "test": "pnpm run check:pierre-icons && vp test run",
     "typecheck": "tsc6 --noEmit"
   },

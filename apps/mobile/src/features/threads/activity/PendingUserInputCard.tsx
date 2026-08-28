@@ -27,11 +27,11 @@ export interface PendingUserInputCardProps
 export function PendingUserInputCard(props: PendingUserInputCardProps)
 {
   return (
-    <View className="gap-2.5 rounded-[20px] border border-neutral-200 bg-neutral-100/80 p-4 dark:border-white/6 dark:bg-neutral-900/80">
-      <Text className="font-sans-bold text-2xs uppercase tracking-[1.1px] text-sky-700 dark:text-sky-300">
+    <View className="gap-2.5 rounded-[20px] border border-adaptive-neutral-200-white-a6 bg-adaptive-neutral-100-a80-900-a80 p-4">
+      <Text className="font-sans-bold text-2xs uppercase tracking-[1.1px] text-adaptive-sky-700-300">
         User input needed
       </Text>
-      <Text className="font-sans-bold text-lg text-neutral-950 dark:text-neutral-50">
+      <Text className="font-sans-bold text-lg text-adaptive-neutral-950-50">
         Fill in the pending answers
       </Text>
       {props.pendingUserInput.questions.map((question) =>
@@ -39,10 +39,10 @@ export function PendingUserInputCard(props: PendingUserInputCardProps)
         const draft = props.drafts[question.id]
         return (
           <View key={question.id} className="gap-2 pt-1">
-            <Text className="font-sans-bold text-xs uppercase tracking-[1px] text-neutral-500 dark:text-neutral-500">
+            <Text className="font-sans-bold text-xs uppercase tracking-[1px] text-adaptive-neutral-500-500">
               {question.header}
             </Text>
-            <Text className="font-sans text-base leading-snug text-neutral-950 dark:text-neutral-50">
+            <Text className="font-sans text-base leading-snug text-adaptive-neutral-950-50">
               {question.question}
             </Text>
             <View className="flex-row flex-wrap gap-2.5">
@@ -57,8 +57,8 @@ export function PendingUserInputCard(props: PendingUserInputCardProps)
                     className={cn(
                       'rounded-full border px-3 py-2.5 ',
                       selected
-                        ? 'border-blue-300/50 bg-blue-50 dark:border-blue-400/28 dark:bg-blue-400/14'
-                        : 'border-neutral-200 bg-white dark:border-white/6 dark:bg-neutral-950/70',
+                        ? 'border-adaptive-blue-300-a50-blue-400-a28 bg-adaptive-blue-50-blue-400-a14'
+                        : 'border-adaptive-neutral-200-white-a6 bg-adaptive-white-neutral-950-a70',
                     )}
                     onPress={() =>
                       props.onSelectOption(
@@ -71,9 +71,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps)
                     <Text
                       className={cn(
                         'font-sans-bold text-sm',
-                        selected
-                          ? 'text-sky-700 dark:text-sky-300'
-                          : 'text-neutral-600 dark:text-neutral-300',
+                        selected ? 'text-adaptive-sky-700-300' : 'text-adaptive-neutral-600-300',
                       )}
                     >
                       {option.label}
@@ -88,7 +86,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps)
                 props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
               }
               placeholder="Or type a custom answer"
-              className="min-h-[54px] rounded-2xl border border-neutral-200 bg-white px-3.5 py-3 font-sans text-base text-neutral-950 dark:border-white/8 dark:bg-neutral-950/70 dark:text-neutral-50"
+              className="min-h-[54px] rounded-2xl border border-adaptive-neutral-200-white-a8 bg-adaptive-white-neutral-950-a70 px-3.5 py-3 font-sans text-base text-adaptive-neutral-950-50"
             />
           </View>
         )
@@ -96,7 +94,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps)
       <Pressable
         className={cn(
           'items-center justify-center rounded-2xl px-4 py-3.5',
-          props.answers ? 'bg-blue-500' : 'bg-neutral-200 dark:bg-neutral-700/60',
+          props.answers ? 'bg-blue-500' : 'bg-adaptive-neutral-200-700-a60',
         )}
         disabled={
           props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId

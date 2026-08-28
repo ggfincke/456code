@@ -142,7 +142,7 @@ function OverlayContent(props: { readonly progress: GitActionProgress })
 
   const bgClass =
     progress.phase === 'error'
-      ? 'bg-red-50 dark:bg-red-950/80 border-red-200 dark:border-red-800'
+      ? 'bg-adaptive-red-50-950-a80 border-adaptive-red-200-800'
       : 'bg-card border-border'
 
   return (

@@ -8,7 +8,6 @@ import { Pressable, View } from 'react-native'
 import { SymbolView } from '../../../components/AppSymbol'
 
 import { AppText as Text } from '../../../components/AppText'
-import { useThemeColor } from '../../../lib/useThemeColor'
 import type { SettingsSheetTarget } from './settings-sheet-targets'
 
 type SymbolName = ComponentProps<typeof SymbolView>['name']
@@ -23,8 +22,6 @@ export function SettingsRow(props: {
 })
 {
   const navigation = useNavigation()
-  const icon = useThemeColor('--color-icon')
-  const chevron = useThemeColor('--color-chevron')
   const content = (
     <View
       className={
@@ -33,7 +30,13 @@ export function SettingsRow(props: {
           : 'flex-row items-center gap-4 p-4'
       }
     >
-      <SymbolView name={props.icon} size={22} tintColor={icon} type="monochrome" weight="regular" />
+      <SymbolView
+        name={props.icon}
+        size={22}
+        tintColorClassName="accent-icon"
+        type="monochrome"
+        weight="regular"
+      />
       <Text className="shrink-0 text-lg text-foreground" numberOfLines={1}>
         {props.label}
       </Text>
@@ -51,7 +54,7 @@ export function SettingsRow(props: {
       <SymbolView
         name="chevron.right"
         size={16}
-        tintColor={chevron}
+        tintColorClassName="accent-chevron"
         type="monochrome"
         weight="semibold"
       />
