@@ -1028,7 +1028,10 @@ export function NewTaskDraftScreen(props: {
       }
       else
       {
-        clearComposerDraftContent(draftKey)
+        clearComposerDraftContent(draftKey, {
+          clearModelSelection: true,
+          clearWorkspaceSelection: true,
+        })
       }
       navigation.getParent()?.goBack()
       return
@@ -1095,7 +1098,10 @@ export function NewTaskDraftScreen(props: {
     }
     else
     {
-      clearComposerDraftContent(draftKey)
+      clearComposerDraftContent(draftKey, {
+        clearModelSelection: true,
+        clearWorkspaceSelection: true,
+      })
     }
     navigation.dispatch(
       StackActions.replace('Thread', {

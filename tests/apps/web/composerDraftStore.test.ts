@@ -1780,6 +1780,146 @@ describe('composerDraftStore sticky composer settings', () =>
       activeProvider: 'claudeAgent',
     })
   })
+
+  it('uses project defaults above sticky state and replaces stale draft seeds on reuse', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    const draftId = DraftId.make('project-default-draft')
+    const sticky = modelSelection(CODEX_DRIVER, 'gpt-5.4', { reasoningEffort: 'high' })
+    const projectDefault = modelSelection(CODEX_DRIVER, 'gpt-5.3-codex')
+    store.setStickyModelSelection(sticky)
+    store.applyStickyState(draftId, projectDefault)
+    expect(draftByKey(draftId)?.modelSelectionByProvider[CODEX_INSTANCE]).toEqual(projectDefault)
+    expect(draftByKey(draftId)?.modelSelectionExplicit).not.toBe(true)
+
+    // an old viewed-thread seed must not become another precedence tier
+    store.setModelSelection(draftId, modelSelection(CLAUDE_AGENT_DRIVER, 'claude-opus-4-6'))
+    store.applyStickyState(draftId, null)
+    expect(draftByKey(draftId)?.activeProvider).toBe(CODEX_INSTANCE)
+    expect(draftByKey(draftId)?.modelSelectionByProvider).toEqual({ [CODEX_INSTANCE]: sticky })
+
+    const updatedDefault = createModelSelection(CODEX_SECONDARY_INSTANCE, 'custom-project-model')
+    store.applyStickyState(draftId, updatedDefault)
+    expect(draftByKey(draftId)?.activeProvider).toBe(CODEX_SECONDARY_INSTANCE)
+    expect(draftByKey(draftId)?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE]).toEqual(
+      updatedDefault,
+    )
+    store.applyStickyState(draftId, updatedDefault)
+    expect(draftByKey(draftId)?.modelSelectionExplicit).not.toBe(true)
+
+    resetComposerDraftStore()
+    store.applyStickyState(draftId)
+    expect(draftByKey(draftId)).toBeUndefined()
+  })
+
+  it('pins an identical human model re-selection and keeps unavailable custom choices', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    const draftId = DraftId.make('explicit-project-default-draft')
+    const selection = createModelSelection(CODEX_SECONDARY_INSTANCE, 'temporarily-unavailable', [
+      { id: 'reasoningEffort', value: 'high' },
+    ])
+    store.applyStickyState(draftId, selection)
+    store.setModelSelection(draftId, selection, { explicit: true })
+    expect(draftByKey(draftId)?.modelSelectionExplicit).toBe(true)
+
+    store.setStickyModelSelection(modelSelection(CLAUDE_AGENT_DRIVER, 'claude-opus-4-6'))
+    store.applyStickyState(draftId, modelSelection(CODEX_DRIVER, 'gpt-5.4'))
+    expect(draftByKey(draftId)?.activeProvider).toBe(CODEX_SECONDARY_INSTANCE)
+    expect(draftByKey(draftId)?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE]).toEqual(
+      selection,
+    )
+    store.clearComposerContent(draftId)
+    expect(draftByKey(draftId)?.modelSelectionExplicit).toBe(true)
+  })
+
+  it('pins identical human trait choices, including the default options of a fresh draft', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    const draftId = DraftId.make('explicit-traits-draft')
+    const selection = modelSelection(CODEX_DRIVER, 'gpt-5.4', { reasoningEffort: 'high' })
+    store.applyStickyState(draftId, selection)
+    store.setProviderModelOptions(draftId, CODEX_DRIVER, selection.options, {
+      instanceId: CODEX_INSTANCE,
+      model: selection.model,
+    })
+    expect(draftByKey(draftId)?.modelSelectionExplicit).toBe(true)
+    store.applyStickyState(draftId, modelSelection(CLAUDE_AGENT_DRIVER, 'claude-opus-4-6'))
+    expect(draftByKey(draftId)?.modelSelectionByProvider[CODEX_INSTANCE]).toEqual(selection)
+
+    const freshDraftId = DraftId.make('explicit-default-traits-draft')
+    store.setProviderModelOptions(freshDraftId, CODEX_DRIVER, undefined, {
+      instanceId: CODEX_SECONDARY_INSTANCE,
+      model: 'custom-default-model',
+    })
+    store.applyStickyState(freshDraftId, selection)
+    expect(draftByKey(freshDraftId)).toMatchObject({
+      activeProvider: CODEX_SECONDARY_INSTANCE,
+      modelSelectionExplicit: true,
+      modelSelectionByProvider: {
+        [CODEX_SECONDARY_INSTANCE]: createModelSelection(
+          CODEX_SECONDARY_INSTANCE,
+          'custom-default-model',
+        ),
+      },
+    })
+  })
+
+  it('round-trips explicit intent while legacy selections remain replaceable seeds', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    const draftId = DraftId.make('persisted-explicit-draft')
+    const legacyDraftId = DraftId.make('persisted-legacy-seed')
+    const selection = createModelSelection(CODEX_SECONDARY_INSTANCE, 'custom-saved-model')
+    store.setModelSelection(draftId, selection, { explicit: true })
+    store.setModelSelection(legacyDraftId, selection)
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        version: number
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
+      }
+    }
+    const { merge, partialize, version } = persistApi.getOptions()
+    expect(version).toBe(11)
+    const hydrated = merge(partialize(useComposerDraftStore.getState()), store)
+    expect(hydrated.draftsByThreadKey[draftId]?.modelSelectionExplicit).toBe(true)
+    expect(hydrated.draftsByThreadKey[legacyDraftId]?.modelSelectionExplicit).not.toBe(true)
+    useComposerDraftStore.setState(hydrated)
+    const projectDefault = modelSelection(CODEX_DRIVER, 'gpt-5.4')
+    store.applyStickyState(draftId, projectDefault)
+    store.applyStickyState(legacyDraftId, projectDefault)
+    expect(draftByKey(draftId)?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE]).toEqual(
+      selection,
+    )
+    expect(draftByKey(legacyDraftId)?.modelSelectionByProvider[CODEX_INSTANCE]).toEqual(
+      projectDefault,
+    )
+  })
+
+  it('retains composer content and execution modes when a late project default replaces a seed', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    const draftId = DraftId.make('late-project-default-draft')
+    store.setProjectDraftThreadId(
+      scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make('project')),
+      draftId,
+    )
+    store.setPrompt(draftId, 'Keep this pending work.')
+    store.addImage(draftId, makeImage({ id: 'pending-image', previewUrl: 'blob:pending-image' }))
+    store.addTerminalContext(draftId, makeTerminalContext({ id: 'pending-terminal' }))
+    store.setRuntimeMode(draftId, 'full-access')
+    store.setInteractionMode(draftId, { baseMode: 'plan', orchestrate: true })
+    store.applyStickyState(draftId, modelSelection(CODEX_DRIVER, 'gpt-5.4'))
+    const before = draftByKey(draftId)!
+    const { activeProvider: _active, modelSelectionByProvider: _models, ...content } = before
+    store.applyStickyState(draftId, createModelSelection(CODEX_SECONDARY_INSTANCE, 'custom-model'))
+    expect(draftByKey(draftId)).toMatchObject(content)
+    expect(draftByKey(draftId)?.activeProvider).toBe(CODEX_SECONDARY_INSTANCE)
+  })
 })
 
 describe('composerDraftStore provider-scoped option updates', () =>

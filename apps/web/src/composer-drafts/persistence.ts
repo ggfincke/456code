@@ -156,6 +156,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   // an entry already encodes "no selection for this instance".
   modelSelectionByProvider: Schema.optionalKey(Schema.Record(ProviderInstanceId, ModelSelection)),
   activeProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
+  modelSelectionExplicit: Schema.optionalKey(Schema.Boolean),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
   orchestrate: Schema.optionalKey(Schema.Boolean),
@@ -288,6 +289,8 @@ export interface ComposerThreadDraftState
   modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>
   // routing key of the last picked instance (see `modelSelectionByProvider`).
   activeProvider: ProviderInstanceId | null
+  // only human model or trait choices pin a selection; legacy drafts remain seeds
+  modelSelectionExplicit?: boolean
   runtimeMode: RuntimeMode | null
   collaborationMode: CollaborationMode | null
 }
@@ -1233,6 +1236,7 @@ function normalizePersistedDraftsByThreadId(
     const legacyDraftCandidate = draftValue as LegacyPersistedComposerThreadDraftState
     let modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>> = {}
     let activeProvider: ProviderInstanceId | null = null
+    let modelSelectionExplicit = false
 
     if (
       draftCandidate.modelSelectionByProvider &&
@@ -1244,6 +1248,7 @@ function normalizePersistedDraftsByThreadId(
         Record<ProviderInstanceId, ModelSelection>
       >
       activeProvider = normalizeProviderInstanceId(draftCandidate.activeProvider)
+      modelSelectionExplicit = draftCandidate.modelSelectionExplicit === true
     }
     else
     {
@@ -1326,6 +1331,7 @@ function normalizePersistedDraftsByThreadId(
         ? {
             modelSelectionByProvider: compactModelSelectionByProvider(modelSelectionByProvider),
             activeProvider,
+            ...(modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
           }
         : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
@@ -1481,6 +1487,7 @@ export function partializeComposerDraftStoreState(
               draft.modelSelectionByProvider,
             ),
             activeProvider: draft.activeProvider,
+            ...(draft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
           }
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
@@ -1773,6 +1780,7 @@ export function toHydratedThreadDraft(
     reviewComments: persistedDraft.reviewComments?.map((comment) => ({ ...comment })) ?? [],
     modelSelectionByProvider,
     activeProvider,
+    ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
     collaborationMode: normalizePersistedCollaborationMode(
       persistedDraft.interactionMode,

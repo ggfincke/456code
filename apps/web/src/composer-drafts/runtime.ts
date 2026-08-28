@@ -55,6 +55,7 @@ import {
   type ComposerDraftModelState,
   EMPTY_COMPOSER_DRAFT_MODEL_STATE,
   type EffectiveComposerModelState,
+  compactModelSelectionByProvider,
   deriveEffectiveComposerModelState,
   isRuntimeMode,
   normalizeModelSelection,
@@ -194,6 +195,7 @@ export interface ComposerDraftStoreState
     threadRef: ComposerThreadTarget,
     modelSelection: ModelSelection | null | undefined,
     opts?: {
+      explicit?: boolean
       // replace the stored entry outright instead of preserving its
       // existing options when the incoming selection has none. Used when
       // the selection is a complete snapshot (e.g. carried from another
@@ -207,7 +209,11 @@ export interface ComposerDraftStoreState
     modelOptions:
       Partial<Record<string, ReadonlyArray<ProviderOptionSelection>>> | null | undefined,
   ) => void
-  applyStickyState: (threadRef: ComposerThreadTarget) => void
+  // seed a draft atomically, with the target project's default above sticky state
+  applyStickyState: (
+    threadRef: ComposerThreadTarget,
+    projectDefaultSelection?: ModelSelection | null,
+  ) => void
   setProviderModelOptions: (
     threadRef: ComposerThreadTarget,
     provider: ProviderDriverKind,
@@ -678,7 +684,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
           })
         },
-        applyStickyState: (threadRef) =>
+        applyStickyState: (threadRef, projectDefaultSelection) =>
         {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? ''
           if (threadKey.length === 0)
@@ -689,31 +695,21 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           {
             const stickyMap = state.stickyModelSelectionByProvider
             const stickyActiveProvider = state.stickyActiveProvider
-            if (Object.keys(stickyMap).length === 0 && stickyActiveProvider === null)
+            const existing = state.draftsByThreadKey[threadKey]
+            const base = existing ?? createEmptyThreadDraft()
+            if (base.modelSelectionExplicit === true)
             {
               return state
             }
-            const existing = state.draftsByThreadKey[threadKey]
-            const base = existing ?? createEmptyThreadDraft()
-            const nextMap = { ...base.modelSelectionByProvider }
-            for (const [provider, selection] of Object.entries(stickyMap))
-            {
-              if (selection)
-              {
-                // iteration key comes from the instance-keyed sticky map,
-                // so coerce the string back to `ProviderInstanceId` for
-                // the typed lookup.
-                const instanceKey = provider as ProviderInstanceId
-                const current = nextMap[instanceKey]
-                nextMap[instanceKey] = {
-                  ...selection,
-                  model: current?.model ?? selection.model,
-                }
-              }
-            }
+            const projectSelection = normalizeModelSelection(projectDefaultSelection)
+            const nextMap = compactModelSelectionByProvider({
+              ...stickyMap,
+              ...(projectSelection ? { [projectSelection.instanceId]: projectSelection } : {}),
+            })
+            const nextActiveProvider = projectSelection?.instanceId ?? stickyActiveProvider
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
-              base.activeProvider === stickyActiveProvider
+              base.activeProvider === nextActiveProvider
             )
             {
               return state
@@ -721,7 +717,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextDraft: ComposerThreadDraftState = {
               ...base,
               modelSelectionByProvider: nextMap,
-              activeProvider: stickyActiveProvider,
+              activeProvider: nextActiveProvider,
             }
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
             if (shouldRemoveDraft(nextDraft))
@@ -831,9 +827,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               }
             }
             const nextActiveProvider = normalized?.instanceId ?? base.activeProvider
+            const nextExplicit = normalized !== null && opts?.explicit === true
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
-              base.activeProvider === nextActiveProvider
+              base.activeProvider === nextActiveProvider &&
+              (base.modelSelectionExplicit ?? false) === nextExplicit
             )
             {
               return state
@@ -842,6 +840,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...base,
               modelSelectionByProvider: nextMap,
               activeProvider: nextActiveProvider,
+              modelSelectionExplicit: nextExplicit,
             }
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
             if (shouldRemoveDraft(nextDraft))
@@ -953,6 +952,14 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               const { options: _, ...rest } = currentForProvider
               nextMap[instanceKey] = rest as ModelSelection
             }
+            else if (!currentForProvider && options?.instanceId)
+            {
+              nextMap[instanceKey] = createModelSelection(instanceKey, fallbackModel)
+            }
+
+            const nextActiveProvider = options?.instanceId ? instanceKey : base.activeProvider
+            const nextExplicit =
+              nextActiveProvider === instanceKey || base.modelSelectionExplicit === true
 
             // handle sticky persistence
             let nextStickyMap = state.stickyModelSelectionByProvider
@@ -985,7 +992,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
               Equal.equals(state.stickyModelSelectionByProvider, nextStickyMap) &&
-              state.stickyActiveProvider === nextStickyActiveProvider
+              state.stickyActiveProvider === nextStickyActiveProvider &&
+              base.activeProvider === nextActiveProvider &&
+              (base.modelSelectionExplicit ?? false) === nextExplicit
             )
             {
               return state
@@ -993,8 +1002,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
             const nextDraft: ComposerThreadDraftState = {
               ...base,
-              ...(options?.instanceId ? { activeProvider: instanceKey } : {}),
+              activeProvider: nextActiveProvider,
               modelSelectionByProvider: nextMap,
+              modelSelectionExplicit: nextExplicit,
             }
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey }
             if (shouldRemoveDraft(nextDraft))

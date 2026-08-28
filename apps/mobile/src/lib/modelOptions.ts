@@ -69,6 +69,23 @@ function normalizeSelectionOptions(
       }
 }
 
+export function resolveNewTaskModelSelection(input: {
+  readonly draftSelection: ModelSelection | null
+  readonly projectDefaultSelection: ModelSelection | null
+  readonly stickySelection: ModelSelection | null
+  readonly modelOptions: ReadonlyArray<ModelOption>
+}): ModelSelection | null
+{
+  return (
+    input.draftSelection ??
+    input.projectDefaultSelection ??
+    input.stickySelection ??
+    input.modelOptions.find((option) => option.isDefault)?.selection ??
+    input.modelOptions[0]?.selection ??
+    null
+  )
+}
+
 export function buildModelOptions(
   config: ServerConfig | null | undefined,
   fallbackModelSelection: ModelSelection | null,

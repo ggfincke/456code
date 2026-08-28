@@ -29,7 +29,11 @@ import { useEnvironmentServerConfig, useProjects, useThreadShells } from '../../
 import type { TurnCommandMetadata } from '../../../lib/commandMetadata'
 import type { DraftComposerImageAttachment } from '../../../lib/composerImages'
 import type { ModelOption, ProviderGroup } from '../../../lib/modelOptions'
-import { buildModelOptions, groupByProvider } from '../../../lib/modelOptions'
+import {
+  buildModelOptions,
+  groupByProvider,
+  resolveNewTaskModelSelection,
+} from '../../../lib/modelOptions'
 import { groupProjectsByRepository } from '../../../lib/repositoryGroups'
 import { scopedProjectKey } from '../../../lib/scopedEntities'
 import { appAtomRegistry } from '../../../state/atom-registry'
@@ -41,8 +45,10 @@ import {
   removeComposerDraftAttachment,
   replaceComposerDraftAttachments,
   setComposerDraftText,
+  setStickyComposerModelSelection,
   updateComposerDraftSettings,
   useComposerDraft,
+  useStickyComposerModelSelection,
 } from '../../../state/use-composer-drafts'
 import { useBranches } from '../../../state/queries'
 import {
@@ -369,25 +375,29 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     [selectedProjectDraft.interactionMode, selectedProjectDraft.orchestrate],
   )
 
+  const stickyModelSelection = useStickyComposerModelSelection()
   const modelOptions = useMemo(
     () =>
       buildModelOptions(
         selectedEnvironmentServerConfig,
-        selectedProjectDraft.modelSelection ?? selectedProject?.defaultModelSelection ?? null,
+        selectedProjectDraft.modelSelection ??
+          selectedProject?.defaultModelSelection ??
+          stickyModelSelection,
       ),
     [
       selectedEnvironmentServerConfig,
       selectedProject?.defaultModelSelection,
       selectedProjectDraft.modelSelection,
+      stickyModelSelection,
     ],
   )
 
-  const selectedModel =
-    selectedProjectDraft.modelSelection ??
-    selectedProject?.defaultModelSelection ??
-    modelOptions.find((option) => option.isDefault)?.selection ??
-    modelOptions[0]?.selection ??
-    null
+  const selectedModel = resolveNewTaskModelSelection({
+    draftSelection: selectedProjectDraft.modelSelection ?? null,
+    projectDefaultSelection: selectedProject?.defaultModelSelection ?? null,
+    stickySelection: stickyModelSelection,
+    modelOptions,
+  })
   const selectedModelKey = selectedModel
     ? `${selectedModel.instanceId}:${selectedModel.model}`
     : null
@@ -441,6 +451,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
           ? { runtimeMode: targetDefaultRuntimeMode }
           : {}),
       })
+      setStickyComposerModelSelection(option.selection)
     },
     [
       modelOptions,
@@ -465,6 +476,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       updateComposerDraftSettings(selectedProjectDraftKey, {
         modelSelection: nextSelection,
       })
+      setStickyComposerModelSelection(nextSelection)
     },
     [selectedModel, selectedProjectDraftKey],
   )
