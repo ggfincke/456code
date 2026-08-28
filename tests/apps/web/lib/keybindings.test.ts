@@ -9,6 +9,7 @@ import {
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
 } from '@t3tools/contracts'
+import { DEFAULT_RESOLVED_KEYBINDINGS } from '@t3tools/shared/keybindings'
 import {
   formatShortcutLabel,
   isChatNewShortcut,
@@ -627,6 +628,30 @@ describe('cross-command precedence', () =>
 
 describe('resolveShortcutCommand', () =>
 {
+  it.each([
+    { platform: 'MacIntel', modifiers: { metaKey: true } },
+    { platform: 'Linux', modifiers: { ctrlKey: true } },
+  ])(
+    'resolves the shipped pin shortcut only outside terminal focus on $platform',
+    ({ platform, modifiers }) =>
+    {
+      const pinEvent = event({ key: 'P', shiftKey: true, ...modifiers })
+      assert.strictEqual(
+        resolveShortcutCommand(pinEvent, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { terminalFocus: false },
+        }),
+        'thread.pin',
+      )
+      assert.isNull(
+        resolveShortcutCommand(pinEvent, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { terminalFocus: true },
+        }),
+      )
+    },
+  )
+
   it('returns dynamic script commands', () =>
   {
     const keybindings = compile([{ shortcut: modShortcut('r'), command: 'script.setup.run' }])

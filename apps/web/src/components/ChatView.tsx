@@ -186,6 +186,7 @@ import {
 import { useClientSettings, useEnvironmentSettings } from '../hooks/useSettings'
 import { useNowMinute } from '../hooks/useNowMinute'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
+import { useThreadActions } from '../hooks/useThreadActions'
 import { type AppModelOption, getAppModelOptionsForInstance } from '../modelSelection'
 import { getTerminalFocusOwner } from '../lib/terminalFocus'
 import { resolveNewDraftStartFromOrigin } from '../lib/chatThreadActions'
@@ -659,6 +660,7 @@ function ChatViewContent(props: ChatViewProps)
   // snapshot can still be missing history
   const threadDetailSynchronized = routeKind === 'server' && threadSyncPhase === null
   const handleNewThread = useNewThreadHandler()
+  const { pinThread, unpinThread } = useThreadActions()
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -3919,6 +3921,11 @@ function ChatViewContent(props: ChatViewProps)
   ])
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true
+  const canPinActiveThread =
+    serverConfig?.environment.capabilities.threadPinning === true &&
+    activeThreadShell !== null &&
+    (activeThreadShell.origin === null || activeThreadShell.latestTurn !== null)
+  const activeThreadPinned = activeThreadShell?.pinnedAt != null
   const nowMinute = useNowMinute()
   const activeThreadSnoozed =
     activeThreadShell !== null &&
@@ -4514,6 +4521,27 @@ function ChatViewContent(props: ChatViewProps)
       })
       if (!command) return
 
+      if (command === 'thread.pin')
+      {
+        event.preventDefault()
+        event.stopPropagation()
+        if (!isServerThread || !activeThreadRef || !canPinActiveThread) return
+        const pinned = activeThreadPinned
+        void (pinned ? unpinThread(activeThreadRef) : pinThread(activeThreadRef)).then((result) =>
+        {
+          if (result._tag !== 'Failure' || isAtomCommandInterrupted(result)) return
+          const error = squashAtomCommandFailure(result)
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title: pinned ? 'Failed to unpin thread' : 'Failed to pin thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+            }),
+          )
+        })
+        return
+      }
+
       if (command === 'terminal.toggle')
       {
         event.preventDefault()
@@ -4637,6 +4665,12 @@ function ChatViewContent(props: ChatViewProps)
     terminalUiState.terminalOpen,
     terminalUiState.activeTerminalId,
     activeThreadId,
+    activeThreadPinned,
+    activeThreadRef,
+    canPinActiveThread,
+    isServerThread,
+    pinThread,
+    unpinThread,
     requestCloseTerminal,
     requestClosePanelTerminal,
     createNewTerminal,
