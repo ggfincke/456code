@@ -495,6 +495,49 @@ describe('ThreadDeletionReactor', () =>
     )
   })
 
+  it.effect('drains prior deletion cleanup through a re-created thread sequence', () =>
+  {
+    const state = makeState(false)
+    return Effect.scoped(
+      Effect.gen(function* ()
+      {
+        yield* TestClock.setTime(FIXTURE_TIME_MS)
+        const engine = yield* OrchestrationEngineService
+        const reactor = yield* ThreadDeletionReactor
+        yield* reactor.start()
+        yield* seedThread(engine)
+        yield* deleteThread(engine)
+        const recreated = yield* engine.dispatch({
+          type: 'thread.create',
+          commandId: CommandId.make('cmd-thread-deletion-recreate'),
+          threadId,
+          projectId: ProjectId.make('thread-deletion-project'),
+          title: 'Thread deletion retry',
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          branch: null,
+          worktreePath: null,
+          createdAt: FIXTURE_TIME,
+        })
+
+        yield* reactor.drainThrough(recreated.sequence)
+
+        expect(state.calls).toEqual([
+          'architecture-admission',
+          'proposal-generation',
+          'current-worktree-architecture',
+          'provider-session',
+          'terminals',
+        ])
+        expect(yield* readCursor()).toBe(recreated.sequence)
+      }).pipe(Effect.provide(makeLayer(state))),
+    )
+  })
+
   it.effect('stops every planned and newly-open provider generation exactly', () =>
   {
     const state = makeState(false)

@@ -104,6 +104,7 @@ import * as Keybindings from '../../../apps/server/src/keybindings.ts'
 import * as ExternalLauncher from '../../../apps/server/src/process/externalLauncher.ts'
 import * as RemoteOpenTargets from '../../../apps/server/src/environment/RemoteOpenTargets.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
+import { ThreadDeletionReactor } from '../../../apps/server/src/orchestration/Services/ThreadDeletionReactor.ts'
 import { OrchestrationListenerCallbackError } from '../../../apps/server/src/orchestration/Errors.ts'
 import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { SqlitePersistenceMemory } from '../../../apps/server/src/persistence/Layers/Sqlite.ts'
@@ -400,6 +401,7 @@ const buildAppUnderTest = (options?: {
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunner.ProjectSetupScriptRunner['Service']>
     terminalManager?: Partial<TerminalManager.TerminalManager['Service']>
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService['Service']>
+    threadDeletionReactor?: Partial<ThreadDeletionReactor['Service']>
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery['Service']>
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery['Service']>
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector['Service']>
@@ -931,6 +933,12 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(AttachmentLifecycleRepository)({
             markDispatchFailure: () => Effect.void,
+          }),
+          Layer.mock(ThreadDeletionReactor)({
+            start: () => Effect.void,
+            drain: Effect.void,
+            drainThrough: () => Effect.void,
+            ...options?.layers?.threadDeletionReactor,
           }),
         ),
       ),
@@ -7203,6 +7211,104 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           assert.equal(finalCommand.bootstrap, undefined)
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('drains deletion cleanup through the re-created thread event', () =>
+    Effect.gen(function* ()
+    {
+      const trace: Array<string> = []
+      const drainRequested = yield* Deferred.make<void>()
+      const cleanupDone = yield* Deferred.make<void>()
+      yield* buildAppUnderTest({
+        layers: {
+          threadDeletionReactor: {
+            drainThrough: (sequence) =>
+              Effect.gen(function* ()
+              {
+                trace.push(`drain:${sequence}`)
+                yield* Deferred.succeed(drainRequested, undefined)
+                yield* Deferred.await(cleanupDone)
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() =>
+              {
+                trace.push(command.type)
+                return { sequence: trace.length }
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      })
+
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      const threadId = ThreadId.make('thread-retry-after-delete')
+      const wsUrl = yield* getWsServerUrl('/ws')
+
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* ()
+          {
+            const directCreate = yield* Effect.forkChild(
+              client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+                type: 'thread.create',
+                commandId: CommandId.make('cmd-retry-create'),
+                threadId,
+                projectId: defaultProjectId,
+                title: 'Retry',
+                modelSelection: defaultModelSelection,
+                runtimeMode: 'full-access',
+                interactionMode: 'default',
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              }),
+            )
+            yield* Deferred.await(drainRequested)
+            assert.deepEqual(trace, ['thread.create', 'drain:1'])
+            yield* Deferred.succeed(cleanupDone, undefined)
+            yield* Fiber.join(directCreate)
+          }),
+        ),
+      )
+      assert.deepEqual(trace, ['thread.create', 'drain:1'])
+
+      trace.length = 0
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: 'thread.turn.start',
+            commandId: CommandId.make('cmd-retry-bootstrap'),
+            threadId,
+            message: {
+              messageId: MessageId.make('msg-retry-bootstrap'),
+              role: 'user',
+              text: 'hello',
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: 'Retry',
+                modelSelection: defaultModelSelection,
+                runtimeMode: 'full-access',
+                interactionMode: 'default',
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+              runSetupScript: false,
+            },
+            createdAt,
+          }),
+        ),
+      )
+      assert.deepEqual(trace, ['thread.create', 'drain:1', 'thread.turn.start'])
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
   it.effect('falls back to the local base branch when startFromOrigin is set without origin', () =>

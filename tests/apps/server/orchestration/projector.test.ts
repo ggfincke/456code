@@ -125,6 +125,85 @@ describe('orchestration projector', () =>
     ])
   })
 
+  it.effect('clears stale orchestrate state when a deleted thread id is re-created', () =>
+    Effect.gen(function* ()
+    {
+      const now = '2026-01-01T00:00:00.000Z'
+      const threadId = ThreadId.make('thread-recreated-orchestrate')
+      const createEvent = (sequence: number, commandId: string) =>
+        makeEvent({
+          sequence,
+          type: 'thread.created',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId,
+          payload: {
+            threadId,
+            projectId: 'project-1',
+            title: 'Recreated orchestrate thread',
+            modelSelection: { instanceId: 'codex', model: 'gpt-5-codex' },
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        })
+
+      let model = yield* projectEvent(createEmptyReadModel(now), createEvent(1, 'cmd-create-1'))
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: 'thread.orchestrate-run-execution-admitted',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-admit-orchestrate-run',
+          payload: {
+            threadId,
+            execution: {
+              threadId,
+              runId: 'run-stale',
+              planRevision: 1,
+              sourceTurnId: TurnId.make('turn-stale'),
+              sourceSequence: 2,
+              repositoryRoot: '/tmp/project-1',
+              repositoryCommonDir: '/tmp/project-1/.git',
+              baseOid: 'base-oid',
+              lifecycle: 'active',
+              availability: 'available',
+              integrationRoot: '/tmp/project-1/worktrees/stale',
+              integrationCommonDir: '/tmp/project-1/.git',
+              integrationBranch: 't3code/stale',
+              integrationOid: 'integration-oid',
+              observedHeadOid: 'integration-oid',
+              finalHeadOid: null,
+              closeReason: null,
+              current: true,
+              admittedAt: now,
+              updatedAt: now,
+              terminalAt: null,
+              jobs: [],
+            },
+          },
+        }),
+      )
+
+      expect(model.orchestrateRuns).toHaveLength(1)
+      expect(model.orchestrateRunExecutions).toHaveLength(1)
+
+      model = yield* projectEvent(model, createEvent(3, 'cmd-create-2'))
+
+      expect(model.orchestrateRuns).toEqual([])
+      expect(model.orchestrateRunExecutions).toEqual([])
+      expect(model.threads[0]?.orchestrateRunExecution).toBeUndefined()
+    }),
+  )
+
   it.effect('projects provider switch outcomes from their terminal events', () =>
     Effect.gen(function* ()
     {

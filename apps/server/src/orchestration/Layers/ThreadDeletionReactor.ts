@@ -303,6 +303,7 @@ const make = Effect.gen(function* ()
   return {
     start,
     drain: durableRunner.drain(REACTOR_ID),
+    drainThrough: (sequence) => durableRunner.drainThrough(REACTOR_ID, sequence),
   } satisfies ThreadDeletionReactorShape
 })
 

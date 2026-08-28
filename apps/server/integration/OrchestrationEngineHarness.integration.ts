@@ -440,6 +440,7 @@ export const makeOrchestrationIntegrationHarness = (
         Layer.succeed(ThreadDeletionReactor, {
           start: () => Effect.void,
           drain: Effect.void,
+          drainThrough: () => Effect.void,
         }),
       ),
     )
