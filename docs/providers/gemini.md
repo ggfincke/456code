@@ -72,6 +72,16 @@ terminal before enabling the instance.
 456code does not share credentials with Antigravity, extract Google tokens, or call a Google
 backend directly. The official CLI remains the owner of authentication and native session files.
 
+## Account usage
+
+The current Gemini CLI integration does not expose account quota percentages or reset times to
+456code. Enabled instances show “Gemini account limits aren’t available through this integration.
+Check /stats in Gemini CLI.” in the model picker and Usage popover.
+
+Run `/stats` inside the interactive Gemini CLI to inspect the usage it reports. 456code keeps
+version-only health probes: it does not send headless `/stats` prompts, scrape terminal output, or
+read Google credentials to obtain account limits. This limitation does not block sending.
+
 ## Troubleshooting
 
 - **"is not installed or not on PATH."** — check `gemini --version` in your shell,

@@ -57,6 +57,24 @@ or use a Python SDK/sidecar.
 Model and agent discovery are best-effort. A temporary discovery failure marks the provider as
 limited but preserves configured values so the CLI remains the authority on whether they are valid.
 
+## Account usage
+
+456code reads account quotas through `agy --output-format json -p /usage`. This native command
+does not start an agent turn or consume inference quota. It uses the configured provider instance's
+executable, environment, and existing CLI login; 456code does not read the login credentials.
+
+The model picker shows one row for each group reported by Antigravity, including the Gemini group
+and the Claude/GPT group when both are available. Each row shows its five-hour and weekly limits,
+including healthy quotas. The Usage popover includes every reported reset time. Limits remain
+separate between groups and follow your percentage-left or percentage-used display preference.
+
+Quota reads run in the background at startup, on the existing five-minute provider refresh cycle,
+and on manual provider refresh. Each read has a four-second timeout. Usage stays open with a
+checking message while fresh quotas load. Failed reads or responses without valid quota buckets
+show an unavailable message instead of stale or estimated percentages;
+they do not change provider readiness. Missing reset times remain unavailable. Disabled or
+incompatible instances do not run quota commands. Usage is informational and never blocks sending.
+
 ## Runtime safety
 
 `auto-accept-edits` is the default and launches Antigravity with `--mode accept-edits`.
