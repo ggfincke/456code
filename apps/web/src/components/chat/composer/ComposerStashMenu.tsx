@@ -37,6 +37,7 @@ function stashEntrySnippet(entry: PromptStashEntry): string
 // lists the current provider's stash with capture-phase keyboard navigation
 export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
   entries: ReadonlyArray<PromptStashEntry>
+  stashShortcutLabel: string | null
   providerLabel: string
   otherScopesCount: number
   onRestore: (entry: PromptStashEntry) => void
@@ -44,7 +45,7 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
   onClose: () => void
 })
 {
-  const { entries, onRestore, onDelete, onClose } = props
+  const { entries, stashShortcutLabel, onRestore, onDelete, onClose } = props
   const [highlightedId, setHighlightedId] = useState<string | null>(entries[0]?.id ?? null)
   const resolvedHighlightedId = entries.some((entry) => entry.id === highlightedId)
     ? highlightedId
@@ -110,8 +111,10 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
             </CommandGroupLabel>
             {entries.length === 0 ? (
               <p className="px-3 pb-3 pt-1 text-muted-foreground/70 text-xs">
-                Nothing stashed for this method yet. Press ⌘S with a prompt in the composer to stash
-                it.
+                Nothing stashed for this method yet.
+                {stashShortcutLabel
+                  ? ` Press ${stashShortcutLabel} with a prompt in the composer to stash it.`
+                  : null}
               </p>
             ) : (
               entries.map((entry) => (
