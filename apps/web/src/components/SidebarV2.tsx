@@ -3322,7 +3322,7 @@ export default function SidebarV2()
                   </span>
                   <ChevronDownIcon className="size-4 shrink-0 text-sidebar-muted-foreground/70" />
                 </ComboboxTrigger>
-                <ComboboxPopup align="start" className="w-(--anchor-width)">
+                <ComboboxPopup align="start" className="w-(--anchor-width) min-w-0 overflow-hidden">
                   <div className="shrink-0 px-3 pt-2.5">
                     <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
                       <SearchIcon
