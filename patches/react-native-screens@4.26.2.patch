@@ -1,15 +1,17 @@
 diff --git a/ios/RNSBarButtonItem.h b/ios/RNSBarButtonItem.h
-index ea5325ea8d17b1ddfa790ff8dab48ce83142d4d3..acd2fd7ceb7162ed300abc4d3c9f0c24f4d63898 100644
+index a26d1254eafd89268f65d968988cf6a3b8c1e457..62eea42ac26c532801189556c5f51012c3df3a52 100644
 --- a/ios/RNSBarButtonItem.h
 +++ b/ios/RNSBarButtonItem.h
-@@ -13,4 +13,8 @@ typedef void (^RNSBarButtonMenuItemAction)(NSString *menuId);
+@@ -15,6 +15,10 @@ typedef void (^RNSBarButtonMenuItemAction)(NSString *menuId);
+                         action:(RNSBarButtonItemAction)action
                      menuAction:(RNSBarButtonMenuItemAction)menuAction
                     imageLoader:(RCTImageLoader *)imageLoader;
- 
++
 ++ (UIMenu *)initUIMenuWithDict:(NSDictionary<NSString *, id> *)dict
 +                    menuAction:(RNSBarButtonMenuItemAction)menuAction
 +                   imageLoader:(RCTImageLoader *)imageLoader;
-+
+ #endif // defined(__cplusplus)
+ 
  @end
 diff --git a/ios/RNSBarButtonItem.mm b/ios/RNSBarButtonItem.mm
 index 0eb1f09dee82edd99e3e614938233db5cdeaebfe..73298f10807520970f625e166d7f5dd1338206f1 100644
@@ -75,10 +77,10 @@ index 0eb1f09dee82edd99e3e614938233db5cdeaebfe..73298f10807520970f625e166d7f5dd1
  #if !TARGET_OS_TV || __TV_OS_VERSION_MAX_ALLOWED >= 170000
    if (@available(tvOS 17.0, *)) {
 diff --git a/ios/RNSScreenStackHeaderConfig.h b/ios/RNSScreenStackHeaderConfig.h
-index 919b984edc9f91ee9ac26faf257d8a721e26457c..5bb0cd6736ed6bc51db57e2a9326f758f22c51d8 100644
+index 8a41697223f6c4b5cb2dd6d450fc58cbb3b27536..309ba2f762068dcf452c172f7c7cbf2a55d03cb2 100644
 --- a/ios/RNSScreenStackHeaderConfig.h
 +++ b/ios/RNSScreenStackHeaderConfig.h
-@@ -21,6 +21,8 @@
+@@ -23,6 +23,8 @@
  NS_ASSUME_NONNULL_BEGIN
  
  @property (nonatomic, retain) NSString *title;
@@ -87,7 +89,7 @@ index 919b984edc9f91ee9ac26faf257d8a721e26457c..5bb0cd6736ed6bc51db57e2a9326f758
  @property (nonatomic, retain) NSString *titleFontFamily;
  @property (nonatomic, retain) NSNumber *titleFontSize;
  @property (nonatomic, retain) NSString *titleFontWeight;
-@@ -45,9 +47,12 @@ NS_ASSUME_NONNULL_BEGIN
+@@ -47,9 +49,12 @@ NS_ASSUME_NONNULL_BEGIN
  @property (nonatomic) BOOL backButtonInCustomView;
  @property (nonatomic) UISemanticContentAttribute direction;
  @property (nonatomic) UINavigationItemBackButtonDisplayMode backButtonDisplayMode;
@@ -101,10 +103,15 @@ index 919b984edc9f91ee9ac26faf257d8a721e26457c..5bb0cd6736ed6bc51db57e2a9326f758
  
  NS_ASSUME_NONNULL_END
 diff --git a/ios/RNSScreenStackHeaderConfig.mm b/ios/RNSScreenStackHeaderConfig.mm
-index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf985715073979 100644
+index 1c844846a5c66e31cfa530ca462774d2fb6bbea1..d36bda28552e5ac75088e18d0fde338eff90c694 100644
 --- a/ios/RNSScreenStackHeaderConfig.mm
 +++ b/ios/RNSScreenStackHeaderConfig.mm
-@@ -28,8 +28,40 @@
+@@ -24,11 +24,46 @@
+ #import "RNSSearchBar.h"
+ #import "UINavigationBar+RNSUtility.h"
+ 
++#import <objc/runtime.h>
++
  namespace react = facebook::react;
  
  static const NSNumber *const DEFAULT_TITLE_FONT_SIZE = @17;
@@ -126,6 +133,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +  return YES;
 +}
 +#endif
++static char RNSAppliedToolbarConfigsKey;
  static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
  
 +static NSInteger navigationItemStyleFromCppEquivalent(
@@ -145,7 +153,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  @interface RCTImageLoader (Private)
  - (id<RCTImageCache>)imageCache;
  @end
-@@ -47,6 +79,9 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
+@@ -46,6 +81,9 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
  @end
  
  @interface RNSScreenStackHeaderConfig () <RCTMountingTransactionObserving>
@@ -155,15 +163,15 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  @end
  
  @implementation RNSScreenStackHeaderConfig {
-@@ -81,6 +116,7 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
+@@ -80,6 +118,7 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
    self.hidden = YES;
    _reactSubviews = [NSMutableArray new];
    _backTitleVisible = YES;
 +  _navigationItemStyle = UINavigationItemStyleNavigator;
    _blurEffect = RNSBlurEffectStyleNone;
+   _synchronousShadowStateUpdatesEnabled = YES;
  }
- 
-@@ -496,6 +532,10 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -507,6 +546,10 @@ RNS_IGNORE_SUPER_CALL_END
  
    if (shouldHide) {
      navitem.title = config.title;
@@ -174,7 +182,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  
      // Setting navigation bar visibility is split to mitigate iOS 26 bug with bar button items.
      [navctr setNavigationBarHidden:YES animated:animated];
-@@ -512,11 +552,19 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -523,11 +566,19 @@ RNS_IGNORE_SUPER_CALL_END
    }
    navitem.largeTitleDisplayMode =
        config.largeTitle ? UINavigationItemLargeTitleDisplayModeAlways : UINavigationItemLargeTitleDisplayModeNever;
@@ -194,7 +202,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  
  // appearance does not apply to the tvOS so we need to use lagacy customization
  #if TARGET_OS_TV
-@@ -548,8 +596,6 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -559,8 +610,6 @@ RNS_IGNORE_SUPER_CALL_END
    navitem.leftItemsSupplementBackButton = config.backButtonInCustomView;
  #endif
    navitem.titleView = nil;
@@ -203,7 +211,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  
  #if !TARGET_OS_TV
    // We want to set navitem.searchController to nil only if we are sure
-@@ -557,22 +603,18 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -568,22 +617,18 @@ RNS_IGNORE_SUPER_CALL_END
    bool searchBarPresent = false;
  #endif /* !TARGET_OS_TV */
  
@@ -230,7 +238,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
          break;
        }
        case RNSScreenStackHeaderSubviewTypeCenter:
-@@ -637,10 +679,311 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -648,10 +693,453 @@ RNS_IGNORE_SUPER_CALL_END
    // This assignment should be done after `navitem.titleView = ...` assignment (iOS 16.0 bug).
    // See: https://github.com/software-mansion/react-native-screens/issues/1570 (comments)
    navitem.title = config.title;
@@ -311,9 +319,24 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +  if (existingMailSearchToolbar == nil) {
 +    existingMailSearchToolbar = [vc.view viewWithTag:RNSMailSearchToolbarViewTag];
 +  }
-+  [existingMailSearchToolbar removeFromSuperview];
++  // Reuse the live toolbar when nothing it was built from changed: rebuilding
++  // replaces the fallback UISearchTextField with a fresh empty one, dropping
++  // the user's in-progress search text and first responder on every unrelated
++  // header update. Keyed on the config instance (the button/search blocks
++  // capture its event emitter), the toolbar config values, and the host width
++  // (the width constraint constant is resolved from it at build time).
++  static char RNSAppliedMailSearchToolbarConfigKey;
++  NSArray *mailSearchToolbarKey = mailSearchToolbarConfig != nil
++      ? @[ @((uintptr_t)config), mailSearchToolbarConfig, @(chromeHostView.bounds.size.width) ]
++      : nil;
++  BOOL reuseMailSearchToolbar = existingMailSearchToolbar != nil && mailSearchToolbarKey != nil &&
++      [objc_getAssociatedObject(existingMailSearchToolbar, &RNSAppliedMailSearchToolbarConfigKey)
++          isEqual:mailSearchToolbarKey];
++  if (!reuseMailSearchToolbar) {
++    [existingMailSearchToolbar removeFromSuperview];
++  }
 +
-+  if (mailSearchToolbarConfig != nil) {
++  if (mailSearchToolbarConfig != nil && !reuseMailSearchToolbar) {
 +#if RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
 +    if (@available(iOS 26.0, *)) {
 +      CGFloat horizontalInset = 18.0;
@@ -346,21 +369,24 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +
 +      UIView *toolbarHost = [[UIView alloc] init];
 +      toolbarHost.tag = RNSMailSearchToolbarViewTag;
++      objc_setAssociatedObject(
++          toolbarHost,
++          &RNSAppliedMailSearchToolbarConfigKey,
++          mailSearchToolbarKey,
++          OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 +      toolbarHost.translatesAutoresizingMaskIntoConstraints = NO;
 +      [chromeHostView addSubview:toolbarHost];
-+      // Keyboard avoidance is best-effort: on the iOS 27 beta the keyboard
-+      // layout guide no longer rests at the bottom safe-area edge while the
-+      // keyboard is hidden, which pushed the toolbar offscreen. The required
-+      // resting position is the safe area; the keyboard guide only pulls the
-+      // toolbar up when it actually tracks a visible keyboard.
++      // The screen stays mounted beneath pushed routes, so its keyboard layout
++      // guide can track a keyboard owned by another screen. Keep the toolbar at
++      // rest unless its own search field is editing.
 +      NSLayoutConstraint *keyboardAvoidConstraint =
 +          [toolbarHost.bottomAnchor constraintEqualToAnchor:keyboardLayoutGuide.topAnchor
 +                                                   constant:-toolbarBottomSpacing];
-+      keyboardAvoidConstraint.priority = UILayoutPriorityDefaultHigh;
++      keyboardAvoidConstraint.priority = UILayoutPriorityDefaultLow;
 +      NSLayoutConstraint *restingBottomConstraint =
 +          [toolbarHost.bottomAnchor constraintEqualToAnchor:chromeHostView.safeAreaLayoutGuide.bottomAnchor
 +                                                   constant:-toolbarBottomSpacing];
-+      restingBottomConstraint.priority = UILayoutPriorityDefaultLow;
++      restingBottomConstraint.priority = UILayoutPriorityDefaultHigh;
 +      [NSLayoutConstraint activateConstraints:@[
 +        [toolbarHost.centerXAnchor constraintEqualToAnchor:chromeHostView.centerXAnchor],
 +        [toolbarHost.bottomAnchor constraintLessThanOrEqualToAnchor:chromeHostView.safeAreaLayoutGuide.bottomAnchor
@@ -385,9 +411,13 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +          mailSearchToolbarConfig[@"composeButtonId"] != nil || mailSearchToolbarConfig[@"composeMenu"] != nil;
 +      CGFloat glassLeadingInset = hasFilterButton ? sideButtonReserve : 0.0;
 +      CGFloat glassTrailingInset = hasComposeButton ? -sideButtonReserve : 0.0;
++      NSLayoutConstraint *glassLeadingConstraint =
++          [glassView.leadingAnchor constraintEqualToAnchor:toolbarHost.leadingAnchor constant:glassLeadingInset];
++      NSLayoutConstraint *glassTrailingConstraint =
++          [glassView.trailingAnchor constraintEqualToAnchor:toolbarHost.trailingAnchor constant:glassTrailingInset];
 +      [NSLayoutConstraint activateConstraints:@[
-+        [glassView.leadingAnchor constraintEqualToAnchor:toolbarHost.leadingAnchor constant:glassLeadingInset],
-+        [glassView.trailingAnchor constraintEqualToAnchor:toolbarHost.trailingAnchor constant:glassTrailingInset],
++        glassLeadingConstraint,
++        glassTrailingConstraint,
 +        [glassView.centerYAnchor constraintEqualToAnchor:toolbarHost.centerYAnchor],
 +        [glassView.heightAnchor constraintEqualToConstant:toolbarHeight],
 +      ]];
@@ -437,6 +467,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +      UISearchBar *searchBar =
 +          !useFallbackSearchField && navitem.searchController != nil ? navitem.searchController.searchBar : nil;
 +      NSString *placeholder = mailSearchToolbarConfig[@"placeholder"];
++      UITextField *resolvedSearchTextField = nil;
 +      if (searchBar != nil) {
 +        if (placeholder != nil) {
 +          searchBar.placeholder = placeholder;
@@ -453,6 +484,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +        searchBar.searchTextField.adjustsFontForContentSizeCategory = YES;
 +        searchBar.searchTextField.textColor = UIColor.labelColor;
 +        searchBar.searchTextField.tintColor = UIColor.labelColor;
++        resolvedSearchTextField = searchBar.searchTextField;
 +        if (placeholder != nil) {
 +          searchBar.searchTextField.attributedPlaceholder =
 +              [[NSAttributedString alloc] initWithString:placeholder attributes:placeholderAttributes];
@@ -485,6 +517,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +        searchField.adjustsFontForContentSizeCategory = YES;
 +        searchField.textColor = UIColor.labelColor;
 +        searchField.tintColor = UIColor.labelColor;
++        resolvedSearchTextField = searchField;
 +        searchField.translatesAutoresizingMaskIntoConstraints = NO;
 +        [glassView.contentView addSubview:searchField];
 +        [NSLayoutConstraint activateConstraints:@[
@@ -495,8 +528,9 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +        ]];
 +      }
 +
++      UIButton *filterButton = nil;
 +      if (hasFilterButton) {
-+        UIButton *filterButton = makeGlassButton(
++        filterButton = makeGlassButton(
 +            mailSearchToolbarConfig[@"filterSystemImageName"] ?: @"line.3.horizontal.decrease",
 +            mailSearchToolbarConfig[@"filterButtonId"],
 +            mailSearchToolbarConfig[@"filterMenu"]);
@@ -510,8 +544,9 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +        ]];
 +      }
 +
++      UIButton *composeButton = nil;
 +      if (hasComposeButton) {
-+        UIButton *composeButton = makeGlassButton(
++        composeButton = makeGlassButton(
 +            mailSearchToolbarConfig[@"composeSystemImageName"] ?: @"square.and.pencil",
 +            mailSearchToolbarConfig[@"composeButtonId"],
 +            mailSearchToolbarConfig[@"composeMenu"]);
@@ -524,6 +559,107 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +          [composeButton.heightAnchor constraintEqualToConstant:buttonSize],
 +        ]];
 +      }
++
++      BOOL showsSearchDismissButton =
++          [mailSearchToolbarConfig[@"showsSearchDismissButton"] boolValue] && resolvedSearchTextField != nil;
++      UIButton *searchDismissButton = nil;
++      if (showsSearchDismissButton) {
++        searchDismissButton = makeGlassButton(@"xmark", nil, nil);
++        searchDismissButton.accessibilityLabel = @"Dismiss search keyboard";
++        searchDismissButton.alpha = 0.0;
++        searchDismissButton.hidden = YES;
++        searchDismissButton.translatesAutoresizingMaskIntoConstraints = NO;
++        [toolbarHost addSubview:searchDismissButton];
++        [NSLayoutConstraint activateConstraints:@[
++          [searchDismissButton.trailingAnchor constraintEqualToAnchor:toolbarHost.trailingAnchor],
++          [searchDismissButton.centerYAnchor constraintEqualToAnchor:toolbarHost.centerYAnchor],
++          [searchDismissButton.widthAnchor constraintEqualToConstant:buttonSize],
++          [searchDismissButton.heightAnchor constraintEqualToConstant:buttonSize],
++        ]];
++        __weak UITextField *weakSearchTextField = resolvedSearchTextField;
++        [searchDismissButton
++            addAction:[UIAction actionWithHandler:^(__kindof UIAction *_Nonnull action) {
++                        [weakSearchTextField resignFirstResponder];
++                      }]
++            forControlEvents:UIControlEventTouchUpInside];
++      }
++
++      __weak UIButton *weakFilterButton = filterButton;
++      __weak UIButton *weakComposeButton = composeButton;
++      __weak UIButton *weakSearchDismissButton = searchDismissButton;
++      __weak NSLayoutConstraint *weakGlassLeadingConstraint = glassLeadingConstraint;
++      __weak NSLayoutConstraint *weakGlassTrailingConstraint = glassTrailingConstraint;
++      __weak NSLayoutConstraint *weakKeyboardAvoidConstraint = keyboardAvoidConstraint;
++      __weak NSLayoutConstraint *weakRestingBottomConstraint = restingBottomConstraint;
++      __weak UIView *weakToolbarHost = toolbarHost;
++      __weak UITextField *weakSearchTextField = resolvedSearchTextField;
++      void (^setSearchEditingAppearance)(BOOL, BOOL) = ^(BOOL isEditing, BOOL animated) {
++        weakKeyboardAvoidConstraint.priority =
++            isEditing ? UILayoutPriorityDefaultHigh : UILayoutPriorityDefaultLow;
++        weakRestingBottomConstraint.priority =
++            isEditing ? UILayoutPriorityDefaultLow : UILayoutPriorityDefaultHigh;
++
++        if (showsSearchDismissButton) {
++          if (isEditing) {
++            weakSearchDismissButton.hidden = NO;
++          } else {
++            weakFilterButton.hidden = NO;
++            weakComposeButton.hidden = NO;
++          }
++          weakGlassLeadingConstraint.constant = isEditing ? 0.0 : glassLeadingInset;
++          weakGlassTrailingConstraint.constant = isEditing ? -sideButtonReserve : glassTrailingInset;
++
++          void (^changes)(void) = ^{
++            weakFilterButton.alpha = isEditing ? 0.0 : 1.0;
++            weakComposeButton.alpha = isEditing ? 0.0 : 1.0;
++            weakSearchDismissButton.alpha = isEditing ? 1.0 : 0.0;
++            [weakToolbarHost layoutIfNeeded];
++          };
++          void (^completion)(BOOL) = ^(BOOL finished) {
++            if (!finished || weakSearchTextField.isFirstResponder != isEditing) {
++              return;
++            }
++            weakFilterButton.hidden = isEditing;
++            weakComposeButton.hidden = isEditing;
++            weakSearchDismissButton.hidden = !isEditing;
++          };
++          if (animated) {
++            [UIView animateWithDuration:0.2
++                                  delay:0.0
++                                options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseInOut
++                             animations:changes
++                             completion:completion];
++          } else {
++            changes();
++            completion(YES);
++          }
++        }
++        [weakToolbarHost setNeedsLayout];
++      };
++
++      setSearchEditingAppearance(resolvedSearchTextField.isFirstResponder, NO);
++      NSString *beginActionIdentifier = @"org.react-native-screens.mail-search-toolbar.keyboard-begin";
++      NSString *endActionIdentifier = @"org.react-native-screens.mail-search-toolbar.keyboard-end";
++      [resolvedSearchTextField removeActionForIdentifier:beginActionIdentifier
++                                       forControlEvents:UIControlEventEditingDidBegin];
++      [resolvedSearchTextField removeActionForIdentifier:endActionIdentifier
++                                       forControlEvents:UIControlEventEditingDidEnd];
++      [resolvedSearchTextField
++          addAction:[UIAction actionWithTitle:@""
++                                        image:nil
++                                   identifier:beginActionIdentifier
++                                      handler:^(__kindof UIAction *_Nonnull action) {
++                                                setSearchEditingAppearance(YES, YES);
++                                              }]
++          forControlEvents:UIControlEventEditingDidBegin];
++      [resolvedSearchTextField
++          addAction:[UIAction actionWithTitle:@""
++                                        image:nil
++                                   identifier:endActionIdentifier
++                                      handler:^(__kindof UIAction *_Nonnull action) {
++                                                setSearchEditingAppearance(NO, YES);
++                                              }]
++          forControlEvents:UIControlEventEditingDidEnd];
 +    }
 +#endif
 +  }
@@ -533,20 +669,34 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +    navigationToolbarConfigs = @[];
 +  }
 +
-+  NSArray<UIBarButtonItem *> *toolbarItems = [config barButtonItemsFromConfigs:navigationToolbarConfigs
-+                                                               withCurrentItems:@[]
-+                                                                 navigationItem:navitem];
-+  if (toolbarItems.count > 0) {
-+    vc.toolbarItems = toolbarItems;
-+    [navctr setToolbarHidden:NO animated:animated];
-+  } else {
-+    vc.toolbarItems = nil;
-+    [navctr setToolbarHidden:YES animated:animated];
++  NSArray *toolbarConfigsKey = navigationToolbarConfigs ?: @[];
++  // Same reuse rule as the header item groups above (including the config
++  // identity — cached toolbar items capture this config's event emitter).
++  // The top-view-controller and hidden-state checks scope the skip to
++  // same-screen refreshes, so transitions between screens with different
++  // toolbars still reapply.
++  NSArray *toolbarCacheKey = @[ @((uintptr_t)config), toolbarConfigsKey ];
++  BOOL reuseToolbarItems = navctr.topViewController == vc &&
++      navctr.isToolbarHidden == (toolbarConfigsKey.count == 0) &&
++      [objc_getAssociatedObject(navitem, &RNSAppliedToolbarConfigsKey) isEqual:toolbarCacheKey];
++  if (!reuseToolbarItems) {
++    NSArray<UIBarButtonItem *> *toolbarItems = [config barButtonItemsFromConfigs:navigationToolbarConfigs
++                                                                 withCurrentItems:@[]
++                                                                   navigationItem:navitem];
++    if (toolbarItems.count > 0) {
++      vc.toolbarItems = toolbarItems;
++      [navctr setToolbarHidden:NO animated:animated];
++    } else {
++      vc.toolbarItems = nil;
++      [navctr setToolbarHidden:YES animated:animated];
++    }
++    objc_setAssociatedObject(
++        navitem, &RNSAppliedToolbarConfigsKey, toolbarCacheKey, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 +  }
  
    // Setting navigation bar visibility is split to mitigate iOS 26 bug with bar button items
    // (setting nav bar visibility should be done after `navitem.*BarButtonItems`).
-@@ -773,6 +1116,7 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -784,6 +1272,7 @@ RNS_IGNORE_SUPER_CALL_END
  
  - (NSArray<UIBarButtonItem *> *)barButtonItemsFromConfigs:(NSArray<NSDictionary<NSString *, id> *> *)dicts
                                           withCurrentItems:(NSArray<UIBarButtonItem *> *)currentItems
@@ -554,7 +704,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  {
    if (dicts.count == 0) {
      return currentItems;
-@@ -781,7 +1125,197 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -792,7 +1281,197 @@ RNS_IGNORE_SUPER_CALL_END
    [items addObjectsFromArray:currentItems];
    for (NSUInteger i = 0; i < dicts.count; i++) {
      NSDictionary *dict = dicts[i];
@@ -742,7 +892,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +          }
 +        }
 +#endif
-+        if (index != nil && index.integerValue < items.count) {
++        if (index != nil && index.integerValue >= 0 && index.integerValue < items.count) {
 +          [items insertObject:item atIndex:index.integerValue];
 +        } else {
 +          [items addObject:item];
@@ -753,7 +903,14 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
        RNSBarButtonItem *item = [[RNSBarButtonItem alloc] initWithConfig:dict
            action:^(NSString *buttonId) {
              auto eventEmitter = std::static_pointer_cast<const facebook::react::RNSScreenStackHeaderConfigEventEmitter>(
-@@ -809,11 +1343,15 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -814,19 +1493,23 @@ RNS_IGNORE_SUPER_CALL_END
+           }
+           imageLoader:_imageLoader];
+       NSNumber *index = dict[@"index"];
+-      if (index.integerValue < items.count) {
++      if (index != nil && index.integerValue >= 0 && index.integerValue < items.count) {
+         [items insertObject:item atIndex:index.integerValue];
+       } else {
          [items addObject:item];
        }
      } else if (dict[@"spacing"]) {
@@ -771,9 +928,12 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
 +        item.width = [spacingValue doubleValue];
 +      }
        NSNumber *index = dict[@"index"];
-       if (index.integerValue < items.count) {
+-      if (index.integerValue < items.count) {
++      if (index != nil && index.integerValue >= 0 && index.integerValue < items.count) {
          [items insertObject:item atIndex:index.integerValue];
-@@ -825,6 +1363,47 @@ RNS_IGNORE_SUPER_CALL_END
+       } else {
+         [items addObject:item];
+@@ -836,6 +1519,47 @@ RNS_IGNORE_SUPER_CALL_END
    return items;
  }
  
@@ -821,7 +981,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  RNS_IGNORE_SUPER_CALL_BEGIN
  - (void)insertReactSubview:(RNSScreenStackHeaderSubview *)subview atIndex:(NSInteger)atIndex
  {
-@@ -1013,6 +1592,8 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
+@@ -1023,6 +1747,8 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
    }
  
    _title = RCTNSStringFromStringNilIfEmpty(newScreenProps.title);
@@ -830,7 +990,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
    if (newScreenProps.titleFontFamily != oldScreenProps.titleFontFamily) {
      _titleFontFamily = RCTNSStringFromStringNilIfEmpty(newScreenProps.titleFontFamily);
    }
-@@ -1038,6 +1619,7 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
+@@ -1048,6 +1774,7 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
    _disableBackButtonMenu = newScreenProps.disableBackButtonMenu;
    _backButtonDisplayMode =
        [RNSConvert UINavigationItemBackButtonDisplayModeFromCppEquivalent:newScreenProps.backButtonDisplayMode];
@@ -838,7 +998,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  
    if (newScreenProps.userInterfaceStyle != oldScreenProps.userInterfaceStyle) {
      _userInterfaceStyle = [RNSConvert UIUserInterfaceStyleFromCppEquivalent:newScreenProps.userInterfaceStyle];
-@@ -1084,6 +1666,30 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
+@@ -1094,6 +1821,30 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
      _headerRightBarButtonItems = array;
    }
  
@@ -870,11 +1030,11 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf9857
  
    if (needsNavigationControllerLayout) {
 diff --git a/lib/commonjs/components/ScreenStackHeaderConfig.js b/lib/commonjs/components/ScreenStackHeaderConfig.js
-index 16b979bb3dfb41ff247403f1632c300a9a60d549..01415d4cba66086a8d8e5af728f809aee5190d91 100644
+index 8c509f2657105cfd86448347c1a01fb73651ff9e..d1f53322a7d2401852732ce46bfc6f32ba1aca64 100644
 --- a/lib/commonjs/components/ScreenStackHeaderConfig.js
 +++ b/lib/commonjs/components/ScreenStackHeaderConfig.js
-@@ -23,18 +23,42 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
-   } = (0, _TopInsetApplicationContext.useTopInsetApplication)(!props.hidden, props.disableTopInsetApplication ?? false);
+@@ -26,18 +26,42 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
+   } = (0, _EdgeInsetApplicationContext.useEdgeInsetApplication)(!props.hidden, props.disableTopInsetApplication ?? false, props.disableLeftInsetApplication ?? false, props.disableRightInsetApplication ?? false, props.disableBottomInsetApplication ?? false);
    const {
      headerLeftBarButtonItems,
 -    headerRightBarButtonItems
@@ -919,7 +1079,7 @@ index 16b979bb3dfb41ff247403f1632c300a9a60d549..01415d4cba66086a8d8e5af728f809ae
    } : undefined;
  
    // Handle bar button menu item presses by deep-searching nested menus
-@@ -56,7 +80,7 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
+@@ -59,7 +83,7 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
      };
  
      // Check each bar-button item with a menu
@@ -928,7 +1088,7 @@ index 16b979bb3dfb41ff247403f1632c300a9a60d549..01415d4cba66086a8d8e5af728f809ae
      for (const item of allItems) {
        if (item && item.type === 'menu' && item.menu) {
          const action = findInMenu(item.menu, event.nativeEvent.menuId);
-@@ -64,6 +88,15 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
+@@ -67,6 +91,15 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
            action.onPress();
            return;
          }
@@ -944,7 +1104,7 @@ index 16b979bb3dfb41ff247403f1632c300a9a60d549..01415d4cba66086a8d8e5af728f809ae
        }
      }
    } : undefined;
-@@ -71,6 +104,8 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
+@@ -74,6 +107,8 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
      userInterfaceStyle: props.experimental_userInterfaceStyle,
      headerLeftBarButtonItems: preparedHeaderLeftBarButtonItems,
      headerRightBarButtonItems: preparedHeaderRightBarButtonItems,
@@ -991,11 +1151,11 @@ index ab93f62e4a7049d63c6681cecbd6cf8b1d07ce10..b5ea122473b023f84eabdb1914aef09a
      if (item.icon?.type === 'imageSource') {
        imageSource = _reactNative.Image.resolveAssetSource(item.icon.imageSource);
 diff --git a/lib/module/components/ScreenStackHeaderConfig.js b/lib/module/components/ScreenStackHeaderConfig.js
-index cf15f36f25e51d95c896fbc3a31ccba90156a5b6..dd66167c4ab0e5640ad27400e08dcfb4d20dce2a 100644
+index 68e3ba6a78314aba908d07098bb6982d11e6ee80..05cb8563d3a7d3811860058df23bbd1f2f4bca00 100644
 --- a/lib/module/components/ScreenStackHeaderConfig.js
 +++ b/lib/module/components/ScreenStackHeaderConfig.js
-@@ -19,18 +19,42 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
-   } = useTopInsetApplication(!props.hidden, props.disableTopInsetApplication ?? false);
+@@ -22,18 +22,42 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
+   } = useEdgeInsetApplication(!props.hidden, props.disableTopInsetApplication ?? false, props.disableLeftInsetApplication ?? false, props.disableRightInsetApplication ?? false, props.disableBottomInsetApplication ?? false);
    const {
      headerLeftBarButtonItems,
 -    headerRightBarButtonItems
@@ -1040,7 +1200,7 @@ index cf15f36f25e51d95c896fbc3a31ccba90156a5b6..dd66167c4ab0e5640ad27400e08dcfb4
    } : undefined;
  
    // Handle bar button menu item presses by deep-searching nested menus
-@@ -52,7 +76,7 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
+@@ -55,7 +79,7 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
      };
  
      // Check each bar-button item with a menu
@@ -1049,7 +1209,7 @@ index cf15f36f25e51d95c896fbc3a31ccba90156a5b6..dd66167c4ab0e5640ad27400e08dcfb4
      for (const item of allItems) {
        if (item && item.type === 'menu' && item.menu) {
          const action = findInMenu(item.menu, event.nativeEvent.menuId);
-@@ -60,6 +84,15 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
+@@ -63,6 +87,15 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
            action.onPress();
            return;
          }
@@ -1065,7 +1225,7 @@ index cf15f36f25e51d95c896fbc3a31ccba90156a5b6..dd66167c4ab0e5640ad27400e08dcfb4
        }
      }
    } : undefined;
-@@ -67,6 +100,8 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
+@@ -70,6 +103,8 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
      userInterfaceStyle: props.experimental_userInterfaceStyle,
      headerLeftBarButtonItems: preparedHeaderLeftBarButtonItems,
      headerRightBarButtonItems: preparedHeaderRightBarButtonItems,
@@ -1112,7 +1272,7 @@ index 8a70ffd78617147418d628c03c580bb7ff9a8a72..8dbd0ba2ee61ee54d44cdf286a720ce2
      if (item.icon?.type === 'imageSource') {
        imageSource = Image.resolveAssetSource(item.icon.imageSource);
 diff --git a/lib/typescript/fabric/ScreenStackHeaderConfigNativeComponent.d.ts b/lib/typescript/fabric/ScreenStackHeaderConfigNativeComponent.d.ts
-index b7568ecfebd4f4420f2a8d3fec5184d7fc728dd1..41ca1f273f0175929e73105faa463978323837e3 100644
+index a51d8648567cff29cd2be0d5262bd15c6fc69c61..8b7439aff4d7e6fe8a72bf0bac93c3c19568b1a6 100644
 --- a/lib/typescript/fabric/ScreenStackHeaderConfigNativeComponent.d.ts
 +++ b/lib/typescript/fabric/ScreenStackHeaderConfigNativeComponent.d.ts
 @@ -9,6 +9,7 @@ type OnPressHeaderBarButtonMenuItemEvent = Readonly<{
@@ -1146,9 +1306,9 @@ index b7568ecfebd4f4420f2a8d3fec5184d7fc728dd1..41ca1f273f0175929e73105faa463978
 +    headerToolbarItems?: CT.UnsafeMixed[] | undefined;
      onPressHeaderBarButtonItem?: CT.DirectEventHandler<OnPressHeaderBarButtonItemEvent> | undefined;
      onPressHeaderBarButtonMenuItem?: CT.DirectEventHandler<OnPressHeaderBarButtonMenuItemEvent> | undefined;
-     synchronousShadowStateUpdatesEnabled?: CT.WithDefault<boolean, false>;
+     synchronousShadowStateUpdatesEnabled?: CT.WithDefault<boolean, true>;
 diff --git a/lib/typescript/types.d.ts b/lib/typescript/types.d.ts
-index 3b384e03891e38e936f370372a682d73440e7ec2..861ffed850e90f27916c427853b503dbe6ee9840 100644
+index 10a31341f4eff258a7f8ea6abae3eddf0dd21218..086d66aac18da1fffc05ecf0a2c76118ebeb7b00 100644
 --- a/lib/typescript/types.d.ts
 +++ b/lib/typescript/types.d.ts
 @@ -10,6 +10,7 @@ export type SearchBarCommands = {
@@ -1222,7 +1382,7 @@ index 3b384e03891e38e936f370372a682d73440e7ec2..861ffed850e90f27916c427853b503db
      /**
       * Allows for setting text color of the title.
       */
-@@ -1001,6 +1044,11 @@ interface SharedHeaderBarButtonItem {
+@@ -1037,6 +1080,11 @@ interface SharedHeaderBarButtonItem {
       * Read more: https://developer.apple.com/documentation/uikit/uibarbuttonitem/style-swift.property
       */
      variant?: 'plain' | 'done' | 'prominent' | undefined;
@@ -1234,7 +1394,7 @@ index 3b384e03891e38e936f370372a682d73440e7ec2..861ffed850e90f27916c427853b503db
      /**
       * The tint color to apply to the item.
       *
-@@ -1145,8 +1193,37 @@ export interface HeaderBarButtonItemWithMenu extends SharedHeaderBarButtonItem {
+@@ -1181,8 +1229,38 @@ export interface HeaderBarButtonItemWithMenu extends SharedHeaderBarButtonItem {
  export interface HeaderBarButtonItemSpacing {
      type: 'spacing';
      spacing: number;
@@ -1265,6 +1425,7 @@ index 3b384e03891e38e936f370372a682d73440e7ec2..861ffed850e90f27916c427853b503db
 +    onSearchTextChange?: ((text: string) => void) | undefined;
 +    placeholder?: string | undefined;
 +    searchTextChangeId?: string | undefined;
++    showsSearchDismissButton?: boolean | undefined;
 +    useFallbackSearchField?: boolean | undefined;
 +    width?: number | undefined;
  }
@@ -1274,11 +1435,11 @@ index 3b384e03891e38e936f370372a682d73440e7ec2..861ffed850e90f27916c427853b503db
   * Custom Screen Transition
   */
 diff --git a/src/components/ScreenStackHeaderConfig.tsx b/src/components/ScreenStackHeaderConfig.tsx
-index 421b3c2545426ae957271bd6515bcf827437541c..0ca6f1d7f324eaf257891a3bbb0aab210aa30f6f 100644
+index c3a88b6f6c8362cf717372a35cdc35a6b397bdd0..9da8553b2c2e81fa13ef4f5b3e805efc0004ef29 100644
 --- a/src/components/ScreenStackHeaderConfig.tsx
 +++ b/src/components/ScreenStackHeaderConfig.tsx
-@@ -39,7 +39,12 @@ export const ScreenStackHeaderConfig = React.forwardRef<
-     props.disableTopInsetApplication ?? false,
+@@ -48,7 +48,12 @@ export const ScreenStackHeaderConfig = React.forwardRef<
+     props.disableBottomInsetApplication ?? false,
    );
  
 -  const { headerLeftBarButtonItems, headerRightBarButtonItems } = props;
@@ -1291,7 +1452,7 @@ index 421b3c2545426ae957271bd6515bcf827437541c..0ca6f1d7f324eaf257891a3bbb0aab21
  
    const preparedHeaderLeftBarButtonItems =
      headerLeftBarButtonItems && isHeaderBarButtonsAvailableForCurrentPlatform
-@@ -49,22 +54,36 @@ export const ScreenStackHeaderConfig = React.forwardRef<
+@@ -58,22 +63,36 @@ export const ScreenStackHeaderConfig = React.forwardRef<
      headerRightBarButtonItems && isHeaderBarButtonsAvailableForCurrentPlatform
        ? prepareHeaderBarButtonItems(headerRightBarButtonItems, 'right')
        : undefined;
@@ -1332,7 +1493,7 @@ index 421b3c2545426ae957271bd6515bcf827437541c..0ca6f1d7f324eaf257891a3bbb0aab21
          );
          if (
            pressedItem &&
-@@ -73,6 +92,31 @@ export const ScreenStackHeaderConfig = React.forwardRef<
+@@ -82,6 +101,31 @@ export const ScreenStackHeaderConfig = React.forwardRef<
          ) {
            pressedItem.onPress();
          }
@@ -1364,7 +1525,7 @@ index 421b3c2545426ae957271bd6515bcf827437541c..0ca6f1d7f324eaf257891a3bbb0aab21
        }
      : undefined;
  
-@@ -102,6 +146,8 @@ export const ScreenStackHeaderConfig = React.forwardRef<
+@@ -111,6 +155,8 @@ export const ScreenStackHeaderConfig = React.forwardRef<
          const allItems = [
            ...(preparedHeaderLeftBarButtonItems ?? []),
            ...(preparedHeaderRightBarButtonItems ?? []),
@@ -1373,7 +1534,7 @@ index 421b3c2545426ae957271bd6515bcf827437541c..0ca6f1d7f324eaf257891a3bbb0aab21
          ];
          for (const item of allItems) {
            if (item && item.type === 'menu' && item.menu) {
-@@ -110,6 +156,17 @@ export const ScreenStackHeaderConfig = React.forwardRef<
+@@ -119,6 +165,17 @@ export const ScreenStackHeaderConfig = React.forwardRef<
                action.onPress();
                return;
              }
@@ -1391,7 +1552,7 @@ index 421b3c2545426ae957271bd6515bcf827437541c..0ca6f1d7f324eaf257891a3bbb0aab21
            }
          }
        }
-@@ -121,6 +178,8 @@ export const ScreenStackHeaderConfig = React.forwardRef<
+@@ -130,6 +187,8 @@ export const ScreenStackHeaderConfig = React.forwardRef<
        userInterfaceStyle={props.experimental_userInterfaceStyle}
        headerLeftBarButtonItems={preparedHeaderLeftBarButtonItems}
        headerRightBarButtonItems={preparedHeaderRightBarButtonItems}
@@ -1451,7 +1612,7 @@ index be2c24dfee77f5883b5ab1d7473be80933b5dc6f..0b038d2005b2d51bbb2ab1d7dba7eacc
      if (item.icon?.type === 'imageSource') {
        imageSource = Image.resolveAssetSource(item.icon.imageSource);
 diff --git a/src/fabric/ScreenStackHeaderConfigNativeComponent.ts b/src/fabric/ScreenStackHeaderConfigNativeComponent.ts
-index ba2479de0f49c112470f78c5084059ddd9e2f3e8..8677583a8f8daa4839340467466bfab8d73111ab 100644
+index a80d9fef0c0ab5ce8221c5e0c7fae65162bc6164..fc16f51425702a418c09de553a54753331f19d15 100644
 --- a/src/fabric/ScreenStackHeaderConfigNativeComponent.ts
 +++ b/src/fabric/ScreenStackHeaderConfigNativeComponent.ts
 @@ -14,6 +14,7 @@ type OnPressHeaderBarButtonItemEvent = Readonly<{ buttonId: string }>;
@@ -1488,7 +1649,7 @@ index ba2479de0f49c112470f78c5084059ddd9e2f3e8..8677583a8f8daa4839340467466bfab8
      | CT.DirectEventHandler<OnPressHeaderBarButtonItemEvent>
      | undefined;
 diff --git a/src/types.tsx b/src/types.tsx
-index 76a83f3acb6fd3f0af7f027798848b7124100286..9e4499f076f9988e3266df4be7201e131d21242b 100644
+index 9c3ab4c3653ee1769addda8a6464cdf49695a601..8e016176e011918ecc0a8729877a3de0a155f7ff 100644
 --- a/src/types.tsx
 +++ b/src/types.tsx
 @@ -26,6 +26,7 @@ export type SearchBarCommands = {
@@ -1562,7 +1723,7 @@ index 76a83f3acb6fd3f0af7f027798848b7124100286..9e4499f076f9988e3266df4be7201e13
    /**
     * Allows for setting text color of the title.
     */
-@@ -1125,6 +1168,11 @@ interface SharedHeaderBarButtonItem {
+@@ -1161,6 +1204,11 @@ interface SharedHeaderBarButtonItem {
     * Read more: https://developer.apple.com/documentation/uikit/uibarbuttonitem/style-swift.property
     */
    variant?: 'plain' | 'done' | 'prominent' | undefined;
@@ -1574,7 +1735,7 @@ index 76a83f3acb6fd3f0af7f027798848b7124100286..9e4499f076f9988e3266df4be7201e13
    /**
     * The tint color to apply to the item.
     *
-@@ -1279,11 +1327,46 @@ export interface HeaderBarButtonItemWithMenu extends SharedHeaderBarButtonItem {
+@@ -1315,11 +1363,47 @@ export interface HeaderBarButtonItemWithMenu extends SharedHeaderBarButtonItem {
  export interface HeaderBarButtonItemSpacing {
    type: 'spacing';
    spacing: number;
@@ -1608,6 +1769,7 @@ index 76a83f3acb6fd3f0af7f027798848b7124100286..9e4499f076f9988e3266df4be7201e13
 +  onSearchTextChange?: ((text: string) => void) | undefined;
 +  placeholder?: string | undefined;
 +  searchTextChangeId?: string | undefined;
++  showsSearchDismissButton?: boolean | undefined;
 +  useFallbackSearchField?: boolean | undefined;
 +  width?: number | undefined;
  }
