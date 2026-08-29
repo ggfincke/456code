@@ -2638,6 +2638,118 @@ describe('ProviderCommandReactor', () =>
     expect(thread?.title).toBe('Reconnect spinner resume bug')
   })
 
+  it('retries first-turn title generation after a transient failure', async () =>
+  {
+    const harness = await createHarness()
+    const seededTitle = 'Please investigate reconnect failures after restar...'
+    let attempts = 0
+    harness.generateThreadTitle.mockImplementation(() =>
+      Effect.suspend(() =>
+      {
+        attempts += 1
+        return attempts === 1
+          ? Effect.fail(
+              new TextGenerationError({
+                operation: 'generateThreadTitle',
+                detail: 'transient title generation failure',
+              }),
+            )
+          : Effect.succeed({ title: 'Generated reconnect title' })
+      }),
+    )
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.meta.update',
+        commandId: CommandId.make('cmd-thread-title-retry-seed'),
+        threadId: ThreadId.make('thread-1'),
+        title: seededTitle,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-title-retry'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-title-retry'),
+          role: 'user',
+          text: 'Please investigate reconnect failures after restarting the session.',
+          attachments: [],
+        },
+        titleSeed: seededTitle,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+
+    await waitFor(async () =>
+    {
+      const readModel = await harness.readModel()
+      return (
+        readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))?.title ===
+        'Generated reconnect title'
+      )
+    })
+    expect(attempts).toBe(2)
+  })
+
+  it('leaves the seeded title unchanged after three failed generation attempts', async () =>
+  {
+    const harness = await createHarness()
+    const seededTitle = 'Please investigate reconnect failures after restar...'
+    let attempts = 0
+    harness.generateThreadTitle.mockImplementation(() =>
+      Effect.sync(() =>
+      {
+        attempts += 1
+      }).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new TextGenerationError({
+              operation: 'generateThreadTitle',
+              detail: 'persistent title generation failure',
+            }),
+          ),
+        ),
+      ),
+    )
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.meta.update',
+        commandId: CommandId.make('cmd-thread-title-exhaustion-seed'),
+        threadId: ThreadId.make('thread-1'),
+        title: seededTitle,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-title-exhaustion'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-title-exhaustion'),
+          role: 'user',
+          text: 'Please investigate reconnect failures after restarting the session.',
+          attachments: [],
+        },
+        titleSeed: seededTitle,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+    await harness.drain()
+
+    const readModel = await harness.readModel()
+    expect(attempts).toBe(3)
+    expect(readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))?.title).toBe(
+      seededTitle,
+    )
+  })
+
   it('generates a worktree branch name for the first turn', async () =>
   {
     const harness = await createHarness()
