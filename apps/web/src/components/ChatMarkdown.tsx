@@ -3,22 +3,31 @@
 
 import { useAtomValue } from '@effect/atom-react'
 import { type DiffsThemeNames } from '@pierre/diffs'
-import { CircleAlertIcon } from 'lucide-react'
+import {
+  CircleAlertIcon,
+  TriangleAlertIcon,
+} from 'lucide-react'
 import type {
   OrchestratePlanRevision,
   ScopedThreadRef,
   ServerProviderSkill,
 } from '@t3tools/contracts'
 import { isAtomCommandInterrupted } from '@t3tools/client-runtime/state/runtime'
+import {
+  classifyMarkdownImageSource,
+  markdownImageSourceFragment,
+} from '@t3tools/client-runtime/markdown-images'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import React, {
   Suspense,
+  type CSSProperties,
   type ClipboardEvent as ReactClipboardEvent,
   type ComponentPropsWithoutRef,
   useCallback,
   memo,
   useMemo,
+  useState,
   type ReactNode,
 } from 'react'
 import type { Components, ExtraProps, Options as ReactMarkdownOptions } from 'react-markdown'
@@ -48,7 +57,12 @@ import { useSyntaxThemeName } from '../hooks/useSyntaxThemeName'
 import { chatMarkdownClipboardPayload } from '../lib/markdown/clipboard'
 import { remarkLinkInlineCodePaths } from '../lib/markdown/inline-code-paths'
 import { remarkNormalizeListItemIndentation } from '../lib/markdown/list-indentation'
-import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from '../lib/markdown/links'
+import {
+  isWindowsDrivePathHref,
+  normalizeMarkdownLinkDestination,
+  resolveMarkdownFileLinkMeta,
+  rewriteMarkdownFileUriHref,
+} from '../lib/markdown/links'
 import {
   resolveWorkspaceFileActionTarget,
   WORKSPACE_BASENAME_LOOKUP_LIMIT,
@@ -56,6 +70,7 @@ import {
 } from '../lib/workspaceBasenameLookup'
 import { readLocalApi } from '../localApi'
 import { cn } from '../lib/utils'
+import { useAssetUrlState } from '../assets/assetUrls'
 import { useRightPanelStore } from '../rightPanelStore'
 import { useActiveEnvironmentId } from '../state/entities'
 import { projectEnvironment } from '../state/projects'
@@ -137,6 +152,7 @@ interface ChatMarkdownProps
   lineBreaks?: boolean
   // parse sanitized raw HTML; user-authored messages disable this.
   parseRawHtml?: boolean
+  imageBaseDir?: string | undefined
   orchestratePlanActions?: OrchestratePlanActions | undefined
 }
 
@@ -188,6 +204,14 @@ type MarkdownAstNode = {
   children?: MarkdownAstNode[]
 }
 
+type MarkdownImageHastNode = {
+  type?: string
+  value?: string
+  tagName?: string
+  properties?: Record<string, unknown>
+  children?: MarkdownImageHastNode[]
+}
+
 function remarkPreserveCodeMeta()
 {
   return (tree: MarkdownAstNode) =>
@@ -211,6 +235,30 @@ function remarkPreserveCodeMeta()
   }
 }
 
+// carry authored image paths and titles through the raw HTML sanitizer.
+function rehypePreserveImageSourceMeta()
+{
+  return (tree: MarkdownImageHastNode) =>
+  {
+    const visit = (node: MarkdownImageHastNode) =>
+    {
+      const src = node.properties?.src
+      const title = node.properties?.title
+      if (node.type === 'element' && node.tagName === 'img')
+      {
+        node.properties = {
+          ...node.properties,
+          ...(typeof src === 'string' && isWindowsDrivePathHref(src) ? { dataLocalSrc: src } : {}),
+          ...(typeof title === 'string' ? { dataMarkdownTitle: title } : {}),
+        }
+      }
+      node.children?.forEach(visit)
+    }
+
+    visit(tree)
+  }
+}
+
 const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   ...defaultSchema,
   attributes: {
@@ -218,6 +266,11 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     '*': (defaultSchema.attributes?.['*'] ?? []).filter((attribute) => attribute !== 'title'),
     code: [...(defaultSchema.attributes?.code ?? []), 'dataCodeMeta'],
     a: [...(defaultSchema.attributes?.a ?? []), 'dataFilePathChip'],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      'dataLocalSrc',
+      'dataMarkdownTitle',
+    ],
   },
   protocols: {
     ...defaultSchema.protocols,
@@ -242,6 +295,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
+  rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions['rehypePlugins']>
 
@@ -295,14 +349,125 @@ const MarkdownDocument = memo(function MarkdownDocument(props: {
   )
 })
 
-function MarkdownImage({
-  node: _node,
-  title: _title,
-  ...props
-}: ComponentPropsWithoutRef<'img'> & { readonly node?: unknown })
+const CHAT_MARKDOWN_IMAGE_BOUNDS_CLASS_NAME = 'max-h-[30rem] max-w-[min(100%,30rem)]'
+const CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME = cn(
+  'h-auto w-auto object-contain',
+  CHAT_MARKDOWN_IMAGE_BOUNDS_CLASS_NAME,
+)
+const CHAT_MARKDOWN_WORKSPACE_IMAGE_LAYOUT_CLASS_NAME = 'inline-block!'
+const CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME = cn(
+  CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME,
+  CHAT_MARKDOWN_WORKSPACE_IMAGE_LAYOUT_CLASS_NAME,
+  'rounded-lg border border-border/40',
+)
+
+function markdownImageCopy(alt: string, src: string, title: string | undefined): string
 {
-  return <img {...props} />
+  const escapedAlt = alt.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')
+  const titleSuffix =
+    title === undefined ? '' : ` "${title.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
+  return `![${escapedAlt}](${src}${titleSuffix})`
 }
+
+function authoredImageSizeStyle(
+  width: string | number | undefined,
+  height: string | number | undefined,
+): CSSProperties | undefined
+{
+  const parsedWidth = Number(width)
+  const parsedHeight = Number(height)
+  const hasWidth = Number.isFinite(parsedWidth) && parsedWidth > 0
+  const hasHeight = Number.isFinite(parsedHeight) && parsedHeight > 0
+  if (hasWidth && hasHeight)
+  {
+    return {
+      width: parsedWidth,
+      height: 'auto',
+      aspectRatio: `${parsedWidth} / ${parsedHeight}`,
+      maxWidth: `min(100%, 30rem, ${(30 * parsedWidth) / parsedHeight}rem)`,
+    }
+  }
+  if (hasWidth) return { maxWidth: `min(100%, 30rem, ${parsedWidth}px)` }
+  if (hasHeight) return { maxHeight: `min(30rem, ${parsedHeight}px)` }
+  return undefined
+}
+
+function ChatMarkdownImageFallback(props: {
+  readonly alt: string
+  readonly copyMarkdown?: string | undefined
+})
+{
+  return (
+    <span
+      data-markdown-copy={props.copyMarkdown}
+      className={cn(
+        CHAT_MARKDOWN_WORKSPACE_IMAGE_LAYOUT_CLASS_NAME,
+        'rounded-md border border-border/40 bg-muted/40 px-2 py-1 text-xs text-muted-foreground',
+      )}
+    >
+      <span className="inline-flex items-center gap-1.5">
+        <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
+        {props.alt.length > 0 ? `Image unavailable · ${props.alt}` : 'Image unavailable'}
+      </span>
+    </span>
+  )
+}
+
+function ChatMarkdownImage(props: {
+  readonly src: string | null
+  readonly failed?: boolean | undefined
+  readonly alt: string
+  readonly copyMarkdown: string
+  readonly style?: CSSProperties | undefined
+  readonly imageProps?: ComponentPropsWithoutRef<'img'> | undefined
+})
+{
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  if (props.failed || (props.src !== null && props.src === failedSrc))
+    return <ChatMarkdownImageFallback alt={props.alt} copyMarkdown={props.copyMarkdown} />
+  if (!props.src) return null
+  return (
+    <img
+      {...props.imageProps}
+      src={props.src}
+      alt={props.alt}
+      loading="lazy"
+      draggable={false}
+      data-markdown-copy={props.copyMarkdown}
+      className={cn(
+        CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME,
+        props.imageProps?.className,
+      )}
+      style={props.style}
+      onError={() => setFailedSrc(props.src)}
+    />
+  )
+}
+
+const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(props: {
+  readonly threadRef: ScopedThreadRef
+  readonly path: string
+  readonly alt: string
+  readonly copyMarkdown: string
+  readonly srcFragment: string
+  readonly style?: CSSProperties | undefined
+})
+{
+  const assetUrl = useAssetUrlState(props.threadRef.environmentId, {
+    _tag: 'workspace-file',
+    threadId: props.threadRef.threadId,
+    path: props.path,
+  })
+  return (
+    <ChatMarkdownImage
+      src={assetUrl._tag === 'Success' ? assetUrl.url + props.srcFragment : null}
+      failed={assetUrl._tag === 'Failure'}
+      alt={props.alt}
+      copyMarkdown={props.copyMarkdown}
+      style={props.style}
+    />
+  )
+})
 
 function useChatMarkdownState({
   text,
@@ -314,6 +479,7 @@ function useChatMarkdownState({
   className,
   lineBreaks = false,
   parseRawHtml = true,
+  imageBaseDir,
   orchestratePlanActions,
 }: ChatMarkdownProps)
 {
@@ -377,6 +543,7 @@ function useChatMarkdownState({
   }, [markdownFileLinkMetaByHref])
   const markdownUrlTransform = useCallback((href: string) =>
   {
+    if (isWindowsDrivePathHref(href)) return href
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href)
   }, [])
   // re-emit highlighted content as markdown so copying out of the rendered
@@ -476,7 +643,9 @@ function useChatMarkdownState({
     markdownUrlTransform,
     handleCopy,
     codeThemeName,
+    cwd,
     fileLinkParentSuffixByPath,
+    imageBaseDir,
     markdownFileLinkMetaByHref,
     onTaskListChange,
     orchestratePlanActions,
@@ -694,7 +863,49 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
   {
     return <MarkdownTable {...props} />
   },
-  img: MarkdownImage,
+  img: function MarkdownImage({ node, title, src, alt, ...props })
+  {
+    const { imageBaseDir, cwd, threadRef } = useMarkdownRendererState()
+    const localSrc = node?.properties?.dataLocalSrc
+    const markdownTitle = node?.properties?.dataMarkdownTitle
+    const authoredSrc = typeof localSrc === 'string' ? localSrc : src
+    const authoredTitle = typeof markdownTitle === 'string' ? markdownTitle : title
+    const srcString =
+      typeof authoredSrc === 'string' ? normalizeMarkdownLinkDestination(authoredSrc) : ''
+    const classifiedSrc = typeof localSrc === 'string' ? srcString.replaceAll('\\', '/') : srcString
+    const altText = alt ?? ''
+    const copyMarkdown = markdownImageCopy(altText, srcString, authoredTitle)
+    const authoredSizeStyle = authoredImageSizeStyle(props.width, props.height)
+    const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd)
+    if (imageSource._tag === 'Direct')
+    {
+      return (
+        <ChatMarkdownImage
+          key={imageSource.uri}
+          imageProps={props}
+          src={imageSource.uri}
+          alt={altText}
+          copyMarkdown={copyMarkdown}
+          style={authoredSizeStyle}
+        />
+      )
+    }
+    if (imageSource._tag === 'WorkspaceFile' && threadRef)
+    {
+      return (
+        <ChatMarkdownWorkspaceImage
+          key={`${threadRef.environmentId}:${threadRef.threadId}:${imageSource.path}`}
+          threadRef={threadRef}
+          path={imageSource.path}
+          alt={altText}
+          copyMarkdown={copyMarkdown}
+          srcFragment={markdownImageSourceFragment(classifiedSrc)}
+          style={authoredSizeStyle}
+        />
+      )
+    }
+    return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} />
+  },
   details({ node: _node, children, open: detailsOpen })
   {
     return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>

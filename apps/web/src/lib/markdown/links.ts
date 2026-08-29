@@ -31,6 +31,11 @@ const POSIX_FILE_ROOT_PREFIXES = [
   '/root/',
 ] as const
 
+export function isWindowsDrivePathHref(href: string): boolean
+{
+  return WINDOWS_DRIVE_PATH_PATTERN.test(href)
+}
+
 export interface MarkdownFileLinkMeta
 {
   filePath: string
