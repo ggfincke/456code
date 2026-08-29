@@ -17,7 +17,7 @@ import {
   type ComposerTrigger,
 } from '@t3tools/shared/composerTrigger'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { ActivityIndicator, Image, Platform, Pressable, useColorScheme, View } from 'react-native'
+import { ActivityIndicator, Image, Pressable, useColorScheme, View } from 'react-native'
 import ImageViewing from 'react-native-image-viewing'
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native-reanimated'
 import { useThemeColor } from '../../../lib/useThemeColor'
@@ -889,10 +889,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               onBlur={handleBlur}
               onSubmit={resolveComposerSubmitHandler(composerEditorCapabilities, handleSend)}
               scrollEnabled={isExpanded}
-              // android: collapsed single line centers natively (gravity) in
-              // a pill-height box matching the send button; iOS keeps insets.
-              singleLineCentered={!isExpanded}
-              contentInsetVertical={isExpanded || Platform.OS === 'android' ? 0 : 6}
+              contentInsetVertical={isExpanded ? 0 : 6}
               style={
                 isExpanded
                   ? {

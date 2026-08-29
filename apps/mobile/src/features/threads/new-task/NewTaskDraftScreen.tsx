@@ -4,11 +4,9 @@
 import { NativeStackScreenOptions } from '../../../native/StackHeader'
 import { StackActions, useNavigation, usePreventRemove } from '@react-navigation/native'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, InteractionManager, Platform, View, useColorScheme } from 'react-native'
+import { Alert, InteractionManager, View, useColorScheme } from 'react-native'
 import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useThemeColor } from '../../../lib/useThemeColor'
-import { useFontFamily } from '../../../lib/useFontFamily'
 
 import { EnvironmentId, normalizeCollaborationMode } from '@t3tools/contracts'
 import {
@@ -23,11 +21,9 @@ import {
   ComposerToolbarScroller,
   ComposerToolbarTrigger,
 } from '../../../components/ComposerToolbarTrigger'
-import { AndroidScreenHeader } from '../../../components/AndroidScreenHeader'
 import { ComposerAttachmentStrip } from '../../../components/ComposerAttachmentStrip'
-import { ControlPill, ControlPillMenu } from '../../../components/ControlPill'
+import { ControlPillMenu } from '../../../components/ControlPill'
 import { ProviderIcon } from '../../../components/ProviderIcon'
-import { ComposerSurface } from '../composer/ThreadComposer'
 
 import { makeTurnCommandMetadata } from '../../../lib/commandMetadata'
 import { buildModelMenuActions } from '../../../lib/modelOptions'
@@ -105,7 +101,6 @@ export function NewTaskDraftScreen(props: {
     )?.connectionState === 'connected'
   const promptInputRef = useRef<ComposerEditorHandle>(null)
   const loadedBranchesProjectKeyRef = useRef<string | null>(null)
-  const [isComposerFocused, setIsComposerFocused] = useState(false)
   const [importingShareKey, setImportingShareKey] = useState<string | null>(null)
   const [isCancellingShareImport, setIsCancellingShareImport] = useState(false)
   const [cancelledIncomingShareId, setCancelledIncomingShareId] = useState<string | null>(null)
@@ -239,9 +234,6 @@ export function NewTaskDraftScreen(props: {
     }
   }, [props.pendingTaskId, cancelEditingPendingTask])
 
-  const foregroundColor = useThemeColor('--color-foreground')
-  const regularFontFamily = useFontFamily('regular')
-  const bodyText = useScaledTextRole('body')
   const headlineText = useScaledTextRole('headline')
   const sheetFadeOpaque = colorScheme === 'dark' ? 'rgba(14,14,14,0.98)' : 'rgba(242,242,247,0.98)'
   const sheetFadeTransparent = colorScheme === 'dark' ? 'rgba(14,14,14,0)' : 'rgba(242,242,247,0)'
@@ -572,9 +564,7 @@ export function NewTaskDraftScreen(props: {
 
   useEffect(() =>
   {
-    // android starts with the collapsed composer pill (like an open thread)
-    // and only expands/focuses when tapped.
-    if (!selectedProject || Platform.OS === 'android')
+    if (!selectedProject)
     {
       return
     }
@@ -1119,23 +1109,11 @@ export function NewTaskDraftScreen(props: {
   {
     return (
       <View className="flex-1 bg-sheet">
-        {Platform.OS === 'android' ? (
-          <>
-            <NativeStackScreenOptions options={{ headerShown: false }} />
-            <AndroidScreenHeader title="New Thread" onBack={() => navigation.goBack()} />
-          </>
-        ) : (
-          <NativeStackScreenOptions options={{ title: 'Loading task' }} />
-        )}
+        <NativeStackScreenOptions options={{ title: 'Loading task' }} />
       </View>
     )
   }
 
-  const isAndroid = Platform.OS === 'android'
-  const isDarkMode = colorScheme === 'dark'
-  // android expansion follows native editor focus so relayout cannot race
-  // the touch gesture that opens the keyboard.
-  const isExpanded = !isAndroid || isComposerFocused
   const canStart =
     Boolean(flow.selectedProject) &&
     Boolean(flow.selectedModel) &&
@@ -1152,32 +1130,16 @@ export function NewTaskDraftScreen(props: {
       autoFocus={false}
       editable={!isIncomingShareTransferPending}
       multiline
-      scrollEnabled={isExpanded}
+      scrollEnabled
       value={flow.prompt}
       skills={flow.selectedProviderSkills}
       onChangeText={flow.setPrompt}
-      onFocus={() => setIsComposerFocused(true)}
-      onBlur={() => setIsComposerFocused(false)}
       onPasteImages={
         supportsImageAttachments ? (uris) => void handleNativePasteImages(uris) : undefined
       }
       placeholder={`Describe a coding task in ${selectedProject.title}`}
-      // same collapsed centering as ThreadComposer: native vertical gravity
-      // in a pill-height box.
-      singleLineCentered={!isExpanded}
-      contentInsetVertical={isAndroid ? 0 : undefined}
-      style={
-        isAndroid
-          ? isExpanded
-            ? { minHeight: 80, maxHeight: 160, paddingHorizontal: 4, paddingVertical: 4 }
-            : { height: 36 }
-          : { flex: 1, minHeight: 0 }
-      }
-      textStyle={
-        isAndroid
-          ? { ...bodyText, color: foregroundColor, fontFamily: regularFontFamily }
-          : headlineText
-      }
+      style={{ flex: 1, minHeight: 0 }}
+      textStyle={headlineText}
     />
   )
 
@@ -1254,87 +1216,6 @@ export function NewTaskDraftScreen(props: {
       disabled={!canStart}
     />
   )
-
-  if (isAndroid)
-  {
-    // the draft is a thread that doesn't exist yet, so it mirrors the thread
-    // page: in-screen header, empty feed canvas above, and the same floating
-    // composer chrome as ThreadComposer (collapsed pill -> expanded card).
-    return (
-      <View className="flex-1 bg-screen">
-        <NativeStackScreenOptions options={{ headerShown: false }} />
-        <AndroidScreenHeader title="New Thread" onBack={() => navigation.goBack()} />
-
-        <KeyboardAvoidingView automaticOffset behavior="padding" className="flex-1">
-          <View className="flex-1" />
-
-          <View
-            className="px-4 pt-2"
-            style={{
-              paddingBottom: controlsBottomPadding,
-              experimental_backgroundImage: isDarkMode
-                ? 'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.95) 100%)'
-                : 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 40%, rgba(255,255,255,0.95) 100%)',
-            }}
-          >
-            <ComposerSurface
-              isDarkMode={isDarkMode}
-              style={
-                isExpanded
-                  ? {
-                      borderRadius: 20,
-                      overflow: 'hidden',
-                      paddingHorizontal: 14,
-                      paddingVertical: 12,
-                    }
-                  : {
-                      borderRadius: 999,
-                      overflow: 'hidden',
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingLeft: 18,
-                      paddingRight: 5,
-                      paddingVertical: 5,
-                    }
-              }
-            >
-              {isExpanded && flow.attachments.length > 0 ? (
-                <View className="pb-2.5">
-                  <ComposerAttachmentStrip
-                    attachments={flow.attachments}
-                    onRemove={
-                      isIncomingShareTransferPending ? () => undefined : flow.removeAttachment
-                    }
-                  />
-                </View>
-              ) : null}
-              <View className={isExpanded ? undefined : 'min-w-0 flex-1'}>{promptEditor}</View>
-              {!isExpanded ? (
-                <ControlPill
-                  icon="arrow.up"
-                  variant="primary"
-                  disabled={!canStart}
-                  onPress={() => void handleStart()}
-                />
-              ) : null}
-            </ComposerSurface>
-
-            {isExpanded ? (
-              <ComposerToolbarRow paddingBottom={8} paddingHorizontal={0} paddingTop={8}>
-                <ComposerToolbarScroller
-                  fadeOpaque={isDarkMode ? 'rgba(0,0,0,0.95)' : 'rgba(255,255,255,0.95)'}
-                  fadeTransparent={isDarkMode ? 'rgba(0,0,0,0)' : 'rgba(255,255,255,0)'}
-                >
-                  {toolbarPills}
-                </ComposerToolbarScroller>
-                {startButton}
-              </ComposerToolbarRow>
-            ) : null}
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    )
-  }
 
   return (
     <View className="flex-1 bg-sheet">

@@ -7,7 +7,6 @@ module.exports = {
       ios: {
         podspecPath: 'Code456MarkdownText.podspec',
       },
-      android: null,
     },
   },
 }

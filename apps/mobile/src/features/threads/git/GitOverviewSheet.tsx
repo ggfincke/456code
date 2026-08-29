@@ -14,16 +14,13 @@ import {
   useNavigation,
   type StaticScreenProps,
 } from '@react-navigation/native'
-import { SymbolView } from '../../../components/AppSymbol'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native'
+import { Alert, Platform, RefreshControl, ScrollView, View } from 'react-native'
 
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from 'react-native-screens'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useThemeColor } from '../../../lib/useThemeColor'
 
-import { AndroidSheetHeader } from '../../../components/AndroidScreenHeader'
-import { AppText as Text } from '../../../components/AppText'
 import { nativeHeaderScrollEdgeEffects } from '../../../native/StackHeader'
 import { tryOpenExternalUrl } from '../../../lib/openExternalUrl'
 import { useEnvironmentQuery } from '../../../state/query'
@@ -33,7 +30,7 @@ import { useSelectedThreadGitState } from '../../../state/use-selected-thread-gi
 import { useSelectedThreadWorktree } from '../../../state/use-selected-thread-worktree'
 import { vcsEnvironment } from '../../../state/vcs'
 import { resolveGitOverviewReviewNavigationAction } from './git-overview-navigation'
-import { MetaCard, SheetListRow, menuItemIconName, statusSummary } from './gitSheetComponents'
+import { MetaCard, SheetListRow, menuItemIconName } from './gitSheetComponents'
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version)
 
@@ -41,7 +38,6 @@ type GitOverviewSheetProps = StaticScreenProps<{
   readonly environmentId: string
   readonly threadId: string
 }> & {
-  readonly headerInset?: number
   readonly presentation?: 'sheet' | 'inspector'
 }
 
@@ -58,7 +54,6 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
   const gitState = useSelectedThreadGitState()
   const gitActions = useSelectedThreadGitActions()
 
-  const iconColor = useThemeColor('--color-icon')
   const foregroundColor = String(useThemeColor('--color-foreground'))
   const sheetColor = String(useThemeColor('--color-sheet'))
 
@@ -72,7 +67,6 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
   )
 
   const currentBranchLabel = gitStatus.data?.refName ?? selectedThread?.branch ?? 'Detached HEAD'
-  const currentStatusSummary = statusSummary(gitStatus.data)
   const currentWorktreePath = selectedThreadWorktreePath
   const gitOperationLabel = gitState.gitOperationLabel
   const busy = gitOperationLabel !== null
@@ -238,7 +232,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
   const content = (
     <ScrollView
       className="flex-1 bg-screen"
-      contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'automatic' : 'never'}
+      contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
       contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
       contentContainerStyle={{
@@ -316,7 +310,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
     </ScrollView>
   )
 
-  if (isInspector && Platform.OS === 'ios')
+  if (isInspector)
   {
     return (
       <View collapsable={false} className="flex-1 border-l border-border bg-sheet">
@@ -348,101 +342,34 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
     )
   }
 
-  if (Platform.OS === 'ios')
-  {
-    // compact form sheet: a plain screen presented as formSheet never renders a
-    // stack header, so — like the Settings sheet — the header must come from a
-    // nested native stack INSIDE the sheet. This reuses the exact structure of the
-    // inspector branch below: branch as the title, status summary as the native
-    // subtitle, refresh as a header button.
-    return (
-      <View collapsable={false} className="flex-1 bg-sheet">
-        <ScreenStack style={{ flex: 1 }}>
-          <Screen
-            activityState={2}
-            enabled
-            isNativeStack
-            screenId="thread-git-sheet-native"
-            scrollEdgeEffects={HEADER_SCROLL_EDGE_EFFECTS}
-            style={{ backgroundColor: sheetColor, flex: 1 }}
-          >
-            {content}
-            <ScreenStackHeaderConfig
-              backgroundColor="rgba(0,0,0,0)"
-              color={foregroundColor}
-              hideBackButton
-              hideShadow={false}
-              navigationItemStyle="editor"
-              title={currentBranchLabel}
-              titleColor={foregroundColor}
-              titleFontSize={18}
-              titleFontWeight="800"
-              translucent
-            />
-          </Screen>
-        </ScreenStack>
-      </View>
-    )
-  }
-
+  // a plain form sheet never renders a stack header, so host a nested native
+  // stack inside the sheet for the branch title and toolbar.
   return (
-    <View
-      collapsable={false}
-      className={isInspector ? 'flex-1 border-l border-border bg-sheet' : 'flex-1 bg-sheet'}
-    >
-      {isInspector ? (
-        <View
-          style={{
-            minHeight: props.headerInset ?? 0,
-            paddingTop: props.headerInset ?? 0,
-          }}
-        />
-      ) : null}
-
-      {isInspector ? (
-        <View className="gap-1 border-b border-border px-4 pb-4 pt-3">
-          <Pressable
-            className={
-              busy
-                ? 'absolute right-3 top-4 z-[1] h-9 w-9 items-center justify-center rounded-full bg-subtle opacity-[0.45]'
-                : 'absolute right-3 top-4 z-[1] h-9 w-9 items-center justify-center rounded-full bg-subtle'
-            }
-            disabled={busy}
-            onPress={() => void gitActions.refreshSelectedThreadGitStatus()}
-          >
-            <SymbolView
-              name="arrow.clockwise"
-              size={16}
-              tintColor={iconColor}
-              type="monochrome"
-              weight="medium"
-            />
-          </Pressable>
-          <Text className="text-xs font-sans-bold tracking-[1px] uppercase text-foreground-muted">
-            Repository
-          </Text>
-          <Text className="pr-10 text-xl font-sans-bold">{currentBranchLabel}</Text>
-          <Text className="text-foreground-secondary text-sm font-medium leading-normal">
-            {currentStatusSummary}
-          </Text>
-        </View>
-      ) : (
-        <AndroidSheetHeader
-          title={currentBranchLabel}
-          subtitle={currentStatusSummary}
-          onBack={() => navigation.goBack()}
-          actions={[
-            {
-              accessibilityLabel: 'Refresh repository status',
-              disabled: busy,
-              icon: 'arrow.clockwise',
-              onPress: () => void gitActions.refreshSelectedThreadGitStatus(),
-            },
-          ]}
-        />
-      )}
-
-      {content}
+    <View collapsable={false} className="flex-1 bg-sheet">
+      <ScreenStack style={{ flex: 1 }}>
+        <Screen
+          activityState={2}
+          enabled
+          isNativeStack
+          screenId="thread-git-sheet-native"
+          scrollEdgeEffects={HEADER_SCROLL_EDGE_EFFECTS}
+          style={{ backgroundColor: sheetColor, flex: 1 }}
+        >
+          {content}
+          <ScreenStackHeaderConfig
+            backgroundColor="rgba(0,0,0,0)"
+            color={foregroundColor}
+            hideBackButton
+            hideShadow={false}
+            navigationItemStyle="editor"
+            title={currentBranchLabel}
+            titleColor={foregroundColor}
+            titleFontSize={18}
+            titleFontWeight="800"
+            translucent
+          />
+        </Screen>
+      </ScreenStack>
     </View>
   )
 }

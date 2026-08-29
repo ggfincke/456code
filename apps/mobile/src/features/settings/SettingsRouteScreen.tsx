@@ -12,7 +12,7 @@ import { SymbolView } from '../../components/AppSymbol'
 import * as Effect from 'effect/Effect'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Alert, AppState, Linking, Platform, ScrollView, View } from 'react-native'
+import { Alert, AppState, Linking, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import {
@@ -22,7 +22,6 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from '@t3tools/client-runtime/state/runtime'
-import { AndroidScreenHeader } from '../../components/AndroidScreenHeader'
 import { AppText as Text } from '../../components/AppText'
 import { supportsAgentAwarenessPush } from '../agent-awareness/capabilities'
 import {
@@ -72,31 +71,20 @@ export function SettingsRouteScreen()
   return (
     <>
       <WorkspaceSidebarToolbar />
-      {Platform.OS === 'android' ? (
-        <>
-          {/* Android renders its own in-screen header instead of the native bar. */}
-          <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader title="Settings" onBack={() => navigation.goBack()} />
-        </>
-      ) : (
-        <NativeStackScreenOptions
-          options={{
-            unstable_headerRightItems:
-              Platform.OS === 'ios'
-                ? () => [
-                    withNativeGlassHeaderItem({
-                      accessibilityLabel: 'Close settings',
-                      icon: { name: 'xmark', type: 'sfSymbol' } as const,
-                      identifier: 'settings-close',
-                      label: '',
-                      onPress: () => navigation.goBack(),
-                      type: 'button',
-                    }),
-                  ]
-                : undefined,
-          }}
-        />
-      )}
+      <NativeStackScreenOptions
+        options={{
+          unstable_headerRightItems: () => [
+            withNativeGlassHeaderItem({
+              accessibilityLabel: 'Close settings',
+              icon: { name: 'xmark', type: 'sfSymbol' } as const,
+              identifier: 'settings-close',
+              label: '',
+              onPress: () => navigation.goBack(),
+              type: 'button',
+            }),
+          ],
+        }}
+      />
       {hasCloudPublicConfig() ? <ConfiguredSettingsRouteScreen /> : <LocalSettingsRouteScreen />}
     </>
   )

@@ -19,7 +19,7 @@ import type {
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, Platform, Pressable, View } from 'react-native'
+import { ActivityIndicator, FlatList, Pressable, View } from 'react-native'
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useThemeColor } from '../../lib/useThemeColor'
@@ -101,10 +101,6 @@ interface HomeScreenProps
 // ─── Layout constants ─────────────────────────────────────────────────
 
 const ESTIMATED_THREAD_ROW_HEIGHT = 72
-// top spacing between the list and the Android custom header. The Android
-// header (AndroidHomeHeader) is rendered in-flow above this screen and
-// already consumes the top safe-area inset, so the list only needs breathing
-// room here.
 
 function deriveEmptyState(props: {
   readonly catalogState: WorkspaceState
@@ -173,11 +169,6 @@ function deriveEmptyState(props: {
     detail: 'Create a task to start a new coding session in one of your connected projects.',
     loading: false,
   }
-}
-
-function HomeTopContentSpacer()
-{
-  return <View className="h-4" />
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────
@@ -698,15 +689,6 @@ export function HomeScreen(props: HomeScreenProps)
     catalogState: props.catalogState,
     projectCount: props.projects.length,
   })
-  const connectionStatus =
-    shouldShowConnectionStatus && Platform.OS !== 'ios' ? (
-      <View
-        className="absolute left-0 right-0 items-center"
-        style={{ bottom: Math.max(insets.bottom, 18) + 76 }}
-      >
-        <WorkspaceConnectionStatus state={props.catalogState} onPress={props.onOpenEnvironments} />
-      </View>
-    ) : null
 
   if (!hasAnyThreads)
   {
@@ -731,7 +713,7 @@ export function HomeScreen(props: HomeScreenProps)
               <ActivityIndicator color={accentColor} />
             </View>
           ) : null}
-          {shouldShowConnectionStatus && Platform.OS === 'ios' ? (
+          {shouldShowConnectionStatus ? (
             <View className="mt-4">
               <WorkspaceConnectionStatus
                 state={props.catalogState}
@@ -741,16 +723,13 @@ export function HomeScreen(props: HomeScreenProps)
             </View>
           ) : null}
         </View>
-        {connectionStatus}
       </View>
     )
   }
 
   const listHeader = (
     <>
-      {Platform.OS === 'ios' ? null : <HomeTopContentSpacer />}
-
-      {shouldShowConnectionStatus && Platform.OS === 'ios' ? (
+      {shouldShowConnectionStatus ? (
         <View className="pb-4">
           <WorkspaceConnectionStatus
             state={props.catalogState}
@@ -892,22 +871,18 @@ export function HomeScreen(props: HomeScreenProps)
             }
             ListEmptyComponent={v2ListEmpty}
             style={{ flex: 1 }}
-            automaticallyAdjustsScrollIndicatorInsets={Platform.OS === 'ios'}
-            contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'automatic' : 'never'}
+            automaticallyAdjustsScrollIndicatorInsets
+            contentInsetAdjustmentBehavior="automatic"
             showsVerticalScrollIndicator={false}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
             {...scrollGateHandlers}
             scrollEventThrottle={16}
             contentContainerStyle={{
-              paddingBottom:
-                Platform.OS === 'ios'
-                  ? Math.max(insets.bottom, 24) + 96
-                  : Math.max(insets.bottom, 16) + 88,
+              paddingBottom: Math.max(insets.bottom, 24) + 96,
             }}
           />
         </SwipeableScrollGateProvider>
-        {connectionStatus}
       </View>
     )
   }
@@ -942,24 +917,14 @@ export function HomeScreen(props: HomeScreenProps)
           recycleItems
           scrollEventThrottle={16}
           contentContainerStyle={{
-            // android reserves room for the floating new-task FAB
-            // (56 button + 16 gap + bottom inset).
-            paddingBottom:
-              Platform.OS === 'ios'
-                ? Math.max(insets.bottom, 24) + 24
-                : Math.max(insets.bottom, 16) + 88,
+            paddingBottom: Math.max(insets.bottom, 24) + 24,
           }}
-          scrollIndicatorInsets={
-            Platform.OS === 'ios'
-              ? {
-                  bottom: Math.max(insets.bottom, 16) + 24,
-                  top: 0,
-                }
-              : undefined
-          }
+          scrollIndicatorInsets={{
+            bottom: Math.max(insets.bottom, 16) + 24,
+            top: 0,
+          }}
         />
       </SwipeableScrollGateProvider>
-      {connectionStatus}
     </View>
   )
 }

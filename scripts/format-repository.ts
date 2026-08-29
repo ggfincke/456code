@@ -37,7 +37,6 @@ const isIgnoredPath = (repoPath: string): boolean =>
   return (
     repoPath.startsWith('.plans/') ||
     repoPath.startsWith('dev-docs/') ||
-    repoPath.startsWith('apps/mobile/android/') ||
     repoPath.startsWith('apps/mobile/ios/') ||
     repoPath.endsWith('.tsbuildinfo') ||
     parts.some((part) => ignoredSegments.has(part) || part.endsWith('.icon')) ||

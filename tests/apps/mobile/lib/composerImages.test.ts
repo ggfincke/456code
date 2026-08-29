@@ -141,8 +141,8 @@ describe('native pasted image cleanup', () =>
 
   it('releases failed slots and derives MIME type from pasted image data', async () =>
   {
-    const unreadable = 'content://clipboard/unreadable'
-    const jpeg = 'content://clipboard/image-without-extension'
+    const unreadable = 'clipboard-image://unreadable'
+    const jpeg = 'clipboard-image://image-without-extension'
     files.set(jpeg, { base64: '/9j/AA==', deleted: false })
 
     const attachments = await convertPastedImagesToAttachments({

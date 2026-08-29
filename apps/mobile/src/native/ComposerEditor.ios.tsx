@@ -27,13 +27,18 @@ import {
   resolveComposerControlledEventCount,
   type ComposerNativeEventSnapshot,
 } from './composerEditorRevision'
-import type { ComposerEditorProps, ComposerEditorSelection } from './ComposerEditor.types'
-import { resolveComposerEditorCapabilities } from './composerEditorCapabilities'
+import type {
+  ComposerEditorCapabilities,
+  ComposerEditorProps,
+  ComposerEditorSelection,
+} from './ComposerEditor.types'
 
 const NATIVE_MODULE_NAME = 'Code456ComposerEditor'
 const EMPTY_SKILLS: NonNullable<ComposerEditorProps['skills']> = []
 
-export const composerEditorCapabilities = resolveComposerEditorCapabilities('ios')
+export const composerEditorCapabilities: ComposerEditorCapabilities = {
+  supportsHardwareSubmit: true,
+}
 
 type NativeEditorEvent = NativeSyntheticEvent<{
   readonly value: string

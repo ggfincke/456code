@@ -7,7 +7,7 @@ import type {
 } from '@t3tools/client-runtime/state/shell'
 import type { MenuAction } from '@react-native-menu/menu'
 import { memo, useCallback, useEffect, useMemo, type ComponentProps } from 'react'
-import { Platform, Pressable, useWindowDimensions, View } from 'react-native'
+import { Pressable, useWindowDimensions, View } from 'react-native'
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable'
 
 import { AppText as Text } from '../../../components/AppText'
@@ -30,11 +30,7 @@ import { ThreadSearchMatchExcerpt } from './thread-search-match'
 // long-press actions. State reads through colored status labels and text
 // hierarchy rather than card fills.
 
-const MONO_FONT = Platform.select({
-  ios: 'Menlo',
-  android: 'monospace',
-  default: 'monospace',
-})
+const MONO_FONT = 'Menlo'
 
 // status hues follow the system-wide convention set by sidebar v1 and the
 // live Activity/widgets (amber approval, indigo input, sky working) so a

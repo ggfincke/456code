@@ -16,15 +16,6 @@ on:
         options:
           - build
           - update
-      platform:
-        description: "Target platform"
-        required: true
-        type: choice
-        default: ios
-        options:
-          - ios
-          - android
-          - all
       message:
         description: "OTA update message (mode=update only)"
         required: false
@@ -97,7 +88,7 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform ${{ inputs.platform }} --profile production --auto-submit --non-interactive --no-wait
+        run: eas build --platform ios --profile production --auto-submit --non-interactive --no-wait
 
       - name: Publish OTA update
         if: steps.expo-token.outputs.present == 'true' && inputs.mode == 'update'
@@ -108,6 +99,6 @@ jobs:
           eas update \
             --channel production \
             --environment production \
-            --platform ${{ inputs.platform }} \
+            --platform ios \
             --message "${{ inputs.message || format('Production OTA ({0})', github.sha) }}" \
             --non-interactive

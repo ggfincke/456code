@@ -18,7 +18,7 @@ import type {
 } from '@t3tools/contracts'
 import * as Haptics from 'expo-haptics'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Platform, View, type GestureResponderEvent } from 'react-native'
+import { View, type GestureResponderEvent } from 'react-native'
 import { KeyboardController, KeyboardStickyView } from 'react-native-keyboard-controller'
 import Animated, { FadeInDown, FadeOut } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -241,9 +241,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   // hands LegendList the same delta via contentInsetEndStaticAdjustment so
   // its end-scroll math matches the real resting position.
   const nativeInsetOvercount =
-    showComposer && props.usesAutomaticContentInsets === true && Platform.OS === 'ios'
-      ? insets.bottom
-      : 0
+    showComposer && props.usesAutomaticContentInsets === true ? insets.bottom : 0
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
     composerOverlayRef,

@@ -5,19 +5,16 @@ import { assert, it } from '@effect/vitest'
 import { PNG } from 'pngjs'
 
 import showcaseConfig, {
-  resolveShowcaseAndroidAbi,
   type ShowcaseConfig,
   type ShowcaseStoreAssetSpec,
 } from '../../scripts/mobile-showcase.config.ts'
 import {
-  encodeAndroidPairingUrls,
   normalizeStorePng,
   parseShowcaseCliArgs,
   parsePairingCredentialOutput,
   planShowcaseCaptures,
   readPngDimensions,
   readPngMetadata,
-  resolveAndroidSdkRoot,
   selectLanIpv4Address,
   showcaseCaptureDirectory,
   validateStoreAsset,
@@ -33,16 +30,6 @@ const appleSpec: ShowcaseStoreAssetSpec = {
   maximumUploadCount: 10,
 }
 
-const googleSpec: ShowcaseStoreAssetSpec = {
-  store: 'google-play',
-  directory: 'google-play/phone',
-  width: 1080,
-  height: 1920,
-  minimumUploadCount: 2,
-  maximumUploadCount: 8,
-  maximumFileSizeBytes: 8 * 1024 * 1024,
-}
-
 const config: ShowcaseConfig = {
   outputDirectory: 'artifacts',
   metroPort: 8199,
@@ -55,14 +42,6 @@ const config: ShowcaseConfig = {
       appearance: 'dark',
       scenes: ['thread', 'review'],
       storeAsset: appleSpec,
-    },
-    {
-      id: 'pixel',
-      platform: 'android',
-      avd: 'Pixel_Test',
-      appearance: 'light',
-      scenes: ['thread', 'terminal'],
-      storeAsset: googleSpec,
     },
   ],
 }
@@ -97,35 +76,9 @@ it('rejects unsupported system appearances', () =>
   )
 })
 
-it('selects an explicit CI Android ABI without changing the local default', () =>
-{
-  assert.equal(resolveShowcaseAndroidAbi(undefined), 'arm64-v8a')
-  assert.equal(resolveShowcaseAndroidAbi('x86_64'), 'x86_64')
-  assert.throws(() => resolveShowcaseAndroidAbi('mips'), /Unsupported T3_SHOWCASE_ANDROID_ABI/u)
-})
-
-it('uses platform-correct default Android SDK roots', () =>
-{
-  assert.equal(
-    resolveAndroidSdkRoot({ HOME: '/Users/showcase' }, 'darwin'),
-    '/Users/showcase/Library/Android/sdk',
-  )
-  assert.equal(
-    resolveAndroidSdkRoot({ HOME: '/home/showcase' }, 'linux'),
-    '/home/showcase/Android/Sdk',
-  )
-  assert.equal(
-    resolveAndroidSdkRoot(
-      { HOME: '/home/showcase', ANDROID_SDK_ROOT: '/opt/android-sdk' },
-      'linux',
-    ),
-    '/opt/android-sdk',
-  )
-})
-
 it('plans only scenes supported by each selected device', () =>
 {
-  const options = parseShowcaseCliArgs(['--platform', 'all', '--scene', 'terminal'])
+  const options = parseShowcaseCliArgs(['--platform', 'ios', '--scene', 'review'])
   const captures = planShowcaseCaptures(config, options)
   assert.deepStrictEqual(
     captures.map((capture) => ({
@@ -133,7 +86,7 @@ it('plans only scenes supported by each selected device', () =>
       appearance: capture.appearance,
       scenes: capture.scenes,
     })),
-    [{ id: 'pixel', appearance: 'light', scenes: ['terminal'] }],
+    [{ id: 'phone', appearance: 'dark', scenes: ['review'] }],
   )
 })
 
@@ -198,12 +151,10 @@ it('converts simulator RGBA captures to upload-safe 24-bit RGB PNGs', () =>
   })
 })
 
-it('validates exact Apple and Google Play upload assets', () =>
+it('validates exact Apple upload assets', () =>
 {
   const apple = normalizeStorePng(rgbaPng(appleSpec.width, appleSpec.height))
-  const google = normalizeStorePng(rgbaPng(googleSpec.width, googleSpec.height))
   assert.equal(validateStoreAsset(appleSpec, apple).width, 1284)
-  assert.equal(validateStoreAsset(googleSpec, google).height, 1920)
 })
 
 it('rejects wrong dimensions and alpha-bearing PNGs', () =>
@@ -215,9 +166,9 @@ it('rejects wrong dimensions and alpha-bearing PNGs', () =>
 
 it('enforces store screenshot count limits', () =>
 {
-  assert.doesNotThrow(() => validateStoreAssetCount(googleSpec, 5, true))
-  assert.throws(() => validateStoreAssetCount(googleSpec, 1, true), /requires at least 2/u)
-  assert.throws(() => validateStoreAssetCount(googleSpec, 9, false), /allows at most 8/u)
+  assert.doesNotThrow(() => validateStoreAssetCount(appleSpec, 5, true))
+  assert.throws(() => validateStoreAssetCount(appleSpec, 0, true), /requires at least 1/u)
+  assert.throws(() => validateStoreAssetCount(appleSpec, 11, false), /allows at most 10/u)
 })
 
 it('configures every default device with an exact upload-ready store target', () =>
@@ -233,9 +184,6 @@ it('configures every default device with an exact upload-ready store target', ()
       ['iphone-6.9', 'apple/iphone-6.9', 1320, 2868],
       ['iphone-6.5', 'apple/iphone-6.5', 1284, 2778],
       ['ipad-13', 'apple/ipad-13', 2064, 2752],
-      ['pixel', 'google-play/phone', 1080, 1920],
-      ['android-tablet-7', 'google-play/tablet-7', 1080, 1920],
-      ['android-tablet-10', 'google-play/tablet-10', 1440, 2560],
     ],
   )
 })
@@ -259,13 +207,4 @@ it('reads multiline JSON from the pairing CLI', () =>
     parsePairingCredentialOutput('server log\n{\n  "credential": "PAIR-ME"\n}\n'),
     'PAIR-ME',
   )
-})
-
-it('encodes Android pairing URLs without shell-sensitive JSON quotes', () =>
-{
-  const urls = ['http://10.0.2.2:65164/#token=ONE', 'http://10.0.2.2:65198/#token=TWO']
-  const encoded = encodeAndroidPairingUrls(urls)
-  assert.equal(encoded.startsWith('json-uri:'), true)
-  assert.deepStrictEqual(JSON.parse(decodeURIComponent(encoded.slice('json-uri:'.length))), urls)
-  assert.equal(encoded.includes('"'), false)
 })

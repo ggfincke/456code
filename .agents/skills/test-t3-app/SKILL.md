@@ -5,7 +5,7 @@ description: Launch, retain, and test the 456code web app in isolated developmen
 
 # Test T3 App
 
-Use this skill for the web client. For iOS Simulator, Android Emulator, or physical-device testing against an isolated T3 backend, use the sibling [`test-t3-mobile`](../test-t3-mobile/SKILL.md) skill.
+Use this skill for the web client. For iOS Simulator or physical-device testing against an isolated T3 backend, use the sibling [`test-t3-mobile`](../test-t3-mobile/SKILL.md) skill.
 
 ## Start an isolated web environment
 

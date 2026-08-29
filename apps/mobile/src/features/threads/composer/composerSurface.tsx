@@ -3,16 +3,12 @@
 
 import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import type { ReactNode } from 'react'
-import { Platform, View, type ViewStyle } from 'react-native'
+import { View, type ViewStyle } from 'react-native'
 import Animated, { LinearTransition } from 'react-native-reanimated'
 
 // one timing for every piece of the expanded↔compact morph so the surface,
 // toolbar, and siblings move together instead of popping between layouts.
-// android gets NO layout transition: the composer rides the keyboard via
-// KeyboardStickyView (frame-synced to the IME), and a time-based morph
-// running alongside that translate reads as jitter.
-export const COMPOSER_LAYOUT_TRANSITION =
-  Platform.OS === 'android' ? undefined : LinearTransition.duration(220)
+export const COMPOSER_LAYOUT_TRANSITION = LinearTransition.duration(220)
 
 export function ComposerSurface(props: {
   readonly children: ReactNode
@@ -28,7 +24,6 @@ export function ComposerSurface(props: {
     shadowOpacity: props.isDarkMode ? 0.35 : 0.12,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 10,
   }
 
   if (isLiquidGlassSupported)

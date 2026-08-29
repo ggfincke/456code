@@ -10,10 +10,8 @@ type NativeMailSearchToolbarInput = Omit<
 
 // builds the patched react-native-screens Mail-style bottom search toolbar.
 //
-// keeping this behind an app-level helper makes the iOS-only RNS patch an
-// explicit layout primitive instead of a per-screen object literal. Android can
-// keep using platform-specific header/search primitives without depending on
-// this helper.
+// keeping this behind an app-level helper makes the RNS patch an explicit
+// layout primitive instead of a per-screen object literal.
 export function createNativeMailSearchToolbarItem(
   input: NativeMailSearchToolbarInput,
 ): HeaderBarButtonMailSearchToolbarItem

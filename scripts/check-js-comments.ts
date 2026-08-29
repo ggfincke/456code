@@ -34,7 +34,6 @@ const ignorePatterns = [
   '**/*.generated.ts',
   '**/*.generated.tsx',
   '**/_generated/**',
-  'apps/mobile/android/**',
   'apps/mobile/ios/**',
   'apps/mobile/uniwind-types.d.ts',
   'packages/shared/src/qrCode.ts',

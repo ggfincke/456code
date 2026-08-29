@@ -2,19 +2,11 @@
 // render control pill
 
 import { MenuView } from '@react-native-menu/menu'
-import * as Haptics from 'expo-haptics'
-import {
-  cloneElement,
-  isValidElement,
-  type ComponentProps,
-  type ReactElement,
-  type ReactNode,
-} from 'react'
-import { Platform, Pressable, useColorScheme, View, type AccessibilityProps } from 'react-native'
+import { type ComponentProps, type ReactNode } from 'react'
+import { Pressable, useColorScheme, View, type AccessibilityProps } from 'react-native'
 import { useThemeColor } from '../lib/useThemeColor'
 
 import { cn } from '../lib/cn'
-import { AndroidAnchoredMenu } from './AndroidAnchoredMenu'
 import { SymbolView } from './AppSymbol'
 import { AppText as Text } from './AppText'
 
@@ -86,10 +78,7 @@ export function ControlPill(props: {
   )
 }
 
-// iOS renders the native UIMenu (standard checkmark for `state: "on"`);
-// android renders the token-styled AndroidAnchoredMenu, since the native
-// AppCompat popup can't be themed past its stock animation, metrics, and
-// submenu chrome.
+// render the native UIMenu, including the standard checkmark for `state: "on"`.
 export function ControlPillMenu(
   props: Omit<ComponentProps<typeof MenuView>, 'children' | 'themeVariant'> &
     Pick<AccessibilityProps, 'accessible' | 'accessibilityRole' | 'accessibilityLabel'> & {
@@ -99,47 +88,6 @@ export function ControlPillMenu(
 )
 {
   const isDarkMode = useColorScheme() === 'dark'
-
-  if (Platform.OS === 'android')
-  {
-    // long-press menus keep their child interactive: the child element gets
-    // an injected onLongPress (mirroring the iOS context-menu interaction)
-    // so its own tap handling still works.
-    if (props.shouldOpenOnLongPress && isValidElement(props.children))
-    {
-      const child = props.children as ReactElement<{ onLongPress?: () => void }>
-      return (
-        <AndroidAnchoredMenu
-          actions={props.actions}
-          className={props.className}
-          title={props.title}
-          style={props.style}
-          onPressAction={props.onPressAction}
-        >
-          {(open) =>
-            cloneElement(child, {
-              onLongPress: () =>
-              {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-                open()
-              },
-            })
-          }
-        </AndroidAnchoredMenu>
-      )
-    }
-    return (
-      <AndroidAnchoredMenu
-        actions={props.actions}
-        className={props.className}
-        title={props.title}
-        style={props.style}
-        onPressAction={props.onPressAction}
-      >
-        {props.children}
-      </AndroidAnchoredMenu>
-    )
-  }
 
   const { className: _className, ...menuProps } = props
   return (

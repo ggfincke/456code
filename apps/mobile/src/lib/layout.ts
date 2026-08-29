@@ -57,20 +57,6 @@ export interface FileInspectorPaneLayout
   readonly width: number | null
 }
 
-export function deriveThreadFeedInitialContentInset(input: {
-  readonly platform: string
-  readonly usesNativeAutomaticInsets: boolean
-  readonly bottomContentInset: number
-}): { readonly bottom: number } | undefined
-{
-  if (input.platform !== 'android' || input.usesNativeAutomaticInsets)
-  {
-    return undefined
-  }
-
-  return { bottom: Math.max(0, input.bottomContentInset) }
-}
-
 export type WorkspaceAuxiliaryPaneRole = 'supplementary' | 'inspector'
 
 export function deriveLayout(input: { readonly width: number; readonly height: number }): Layout

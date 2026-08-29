@@ -4,10 +4,9 @@
 import { sanitizeFeatureBranchName } from '@t3tools/shared/git'
 import { useNavigation, type StaticScreenProps } from '@react-navigation/native'
 import { useState } from 'react'
-import { Platform, Pressable, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { AndroidSheetHeader } from '../../../components/AndroidScreenHeader'
 import { AppText as Text, AppTextInput as TextInput } from '../../../components/AppText'
 import { cn } from '../../../lib/cn'
 import { useEnvironmentQuery } from '../../../state/query'
@@ -65,9 +64,6 @@ export function GitBranchesSheet(_props: GitBranchesSheetProps)
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === 'android' ? (
-        <AndroidSheetHeader title="Branches & worktrees" onBack={() => navigation.goBack()} />
-      ) : null}
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}

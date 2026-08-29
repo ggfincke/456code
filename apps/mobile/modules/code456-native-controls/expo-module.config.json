@@ -1,9 +1,6 @@
 {
-  "platforms": ["apple", "android"],
+  "platforms": ["apple"],
   "apple": {
     "modules": ["Code456NativeControlsModule", "Code456KeyboardCommandsModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.code456nativecontrols.Code456NativeControlsModule"]
   }
 }

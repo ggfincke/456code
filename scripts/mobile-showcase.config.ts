@@ -10,14 +10,13 @@ export type ShowcaseAppearance = 'light' | 'dark'
 
 export interface ShowcaseStoreAssetSpec
 {
-  readonly store: 'apple' | 'google-play'
+  readonly store: 'apple'
   // device directory relative to ShowcaseConfig.outputDirectory.
   readonly directory: string
   readonly width: number
   readonly height: number
   readonly minimumUploadCount: number
   readonly maximumUploadCount: number
-  readonly maximumFileSizeBytes?: number
 }
 
 export interface ShowcaseIosDevice
@@ -34,27 +33,7 @@ export interface ShowcaseIosDevice
   readonly storeAsset: ShowcaseStoreAssetSpec
 }
 
-export interface ShowcaseAndroidDevice
-{
-  readonly id: string
-  readonly platform: 'android'
-  // exact name from `emulator -list-avds`.
-  readonly avd: string
-  // appearance used when the CLI does not pass --appearance.
-  readonly appearance: ShowcaseAppearance
-  // native ABI used by the AVD, from its config.ini `abi.type`.
-  readonly abi?: 'arm64-v8a' | 'x86_64' | 'x86' | 'armeabi-v7a'
-  readonly scenes: ReadonlyArray<ShowcaseScene>
-  // optional capture viewport. Omit to use the AVD's native size and density.
-  readonly viewport?: {
-    readonly width: number
-    readonly height: number
-    readonly density?: number
-  }
-  readonly storeAsset: ShowcaseStoreAssetSpec
-}
-
-export type ShowcaseDevice = ShowcaseIosDevice | ShowcaseAndroidDevice
+export type ShowcaseDevice = ShowcaseIosDevice
 
 export interface ShowcaseConfig
 {
@@ -64,24 +43,10 @@ export interface ShowcaseConfig
   readonly devices: ReadonlyArray<ShowcaseDevice>
 }
 
-const ANDROID_ABIS = ['arm64-v8a', 'x86_64', 'x86', 'armeabi-v7a'] as const
-
-export function resolveShowcaseAndroidAbi(
-  value: string | undefined,
-): NonNullable<ShowcaseAndroidDevice['abi']>
-{
-  if (!value) return 'arm64-v8a'
-  if (ANDROID_ABIS.some((abi) => abi === value))
-  {
-    return value as NonNullable<ShowcaseAndroidDevice['abi']>
-  }
-  throw new Error(`Unsupported T3_SHOWCASE_ANDROID_ABI '${value}'. Use ${ANDROID_ABIS.join(', ')}.`)
-}
-
-// the defaults cover every App Store Connect and Google Play upload slot used
-// by the mobile app. Edit this matrix (or pass --device / --scene) without
+// the defaults cover every App Store Connect upload slot used by the mobile
+// app. Edit this matrix (or pass --device / --scene) without
 // changing the runner. Every target declares and validates its exact upload
-// dimensions so SDK or emulator changes cannot silently produce invalid files.
+// dimensions so SDK or simulator changes cannot silently produce invalid files.
 const config: ShowcaseConfig = {
   outputDirectory: 'artifacts/app-store/screenshots',
   // dedicated port so the harness cannot attach to a normal mobile dev server
@@ -135,74 +100,6 @@ const config: ShowcaseConfig = {
         height: 2752,
         minimumUploadCount: 1,
         maximumUploadCount: 10,
-      },
-    },
-    {
-      id: 'pixel',
-      platform: 'android',
-      avd: 'Pixel_10_Pro',
-      // apple Silicon uses ARM64 locally; CI overrides this with x86_64 so its
-      // blacksmith Linux runner can use KVM acceleration.
-      abi: resolveShowcaseAndroidAbi(process.env.T3_SHOWCASE_ANDROID_ABI),
-      appearance: 'dark',
-      viewport: {
-        width: 1080,
-        height: 1920,
-        density: 420,
-      },
-      scenes: ['thread', 'terminal', 'review', 'threads', 'environments'],
-      storeAsset: {
-        store: 'google-play',
-        directory: 'google-play/phone',
-        width: 1080,
-        height: 1920,
-        minimumUploadCount: 2,
-        maximumUploadCount: 8,
-        maximumFileSizeBytes: 8 * 1024 * 1024,
-      },
-    },
-    {
-      id: 'android-tablet-7',
-      platform: 'android',
-      avd: 'Pixel_10_Pro',
-      abi: resolveShowcaseAndroidAbi(process.env.T3_SHOWCASE_ANDROID_ABI),
-      appearance: 'dark',
-      viewport: {
-        width: 1080,
-        height: 1920,
-        density: 288,
-      },
-      scenes: ['thread', 'terminal', 'review', 'threads', 'environments'],
-      storeAsset: {
-        store: 'google-play',
-        directory: 'google-play/tablet-7',
-        width: 1080,
-        height: 1920,
-        minimumUploadCount: 4,
-        maximumUploadCount: 8,
-        maximumFileSizeBytes: 8 * 1024 * 1024,
-      },
-    },
-    {
-      id: 'android-tablet-10',
-      platform: 'android',
-      avd: 'Pixel_10_Pro',
-      abi: resolveShowcaseAndroidAbi(process.env.T3_SHOWCASE_ANDROID_ABI),
-      appearance: 'dark',
-      viewport: {
-        width: 1440,
-        height: 2560,
-        density: 288,
-      },
-      scenes: ['thread', 'terminal', 'review', 'threads', 'environments'],
-      storeAsset: {
-        store: 'google-play',
-        directory: 'google-play/tablet-10',
-        width: 1440,
-        height: 2560,
-        minimumUploadCount: 4,
-        maximumUploadCount: 8,
-        maximumFileSizeBytes: 8 * 1024 * 1024,
       },
     },
   ],

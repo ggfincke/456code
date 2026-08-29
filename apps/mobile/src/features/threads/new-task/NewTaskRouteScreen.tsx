@@ -6,12 +6,11 @@ import { useIsFocused, useNavigation, type StaticScreenProps } from '@react-navi
 import { SymbolView } from '../../../components/AppSymbol'
 import type { EnvironmentId, ProjectId } from '@t3tools/contracts'
 import { useEffect, useMemo, useRef } from 'react'
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, View } from 'react-native'
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useThemeColor } from '../../../lib/useThemeColor'
 import { cn } from '../../../lib/cn'
 
-import { AndroidScreenHeader } from '../../../components/AndroidScreenHeader'
 import { AppText as Text } from '../../../components/AppText'
 import { ProjectFavicon } from '../../../components/ProjectFavicon'
 import { useProjects, useThreadShells } from '../../../state/entities'
@@ -217,54 +216,29 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === 'android' ? (
-        <>
-          {/* Android renders its own in-screen header instead of the native bar. */}
-          <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader
-            title={screenTitle}
-            subtitle={incomingShareSubtitle}
-            onBack={layout.usesSplitView ? () => navigation.goBack() : undefined}
-            actions={
-              catalogState.hasReadyEnvironment
-                ? [
-                    {
-                      accessibilityLabel: 'Add project',
-                      icon: 'plus',
-                      onPress: () => navigation.navigate('NewTaskSheet', { screen: 'AddProject' }),
-                    },
-                  ]
-                : []
-            }
+      <NativeStackScreenOptions
+        options={{
+          title: screenTitle,
+          unstable_headerSubtitle: incomingShareSubtitle ?? undefined,
+        }}
+      />
+      <NativeHeaderToolbar placement="right">
+        {layout.usesSplitView ? (
+          <NativeHeaderToolbar.Button
+            accessibilityLabel="Close new task"
+            icon="xmark"
+            onPress={() => navigation.goBack()}
+            separateBackground
           />
-        </>
-      ) : (
-        <>
-          <NativeStackScreenOptions
-            options={{
-              title: screenTitle,
-              unstable_headerSubtitle: incomingShareSubtitle ?? undefined,
-            }}
+        ) : null}
+        {catalogState.hasReadyEnvironment ? (
+          <NativeHeaderToolbar.Button
+            icon="plus"
+            onPress={() => navigation.navigate('NewTaskSheet', { screen: 'AddProject' })}
+            separateBackground
           />
-          <NativeHeaderToolbar placement="right">
-            {layout.usesSplitView ? (
-              <NativeHeaderToolbar.Button
-                accessibilityLabel="Close new task"
-                icon="xmark"
-                onPress={() => navigation.goBack()}
-                separateBackground
-              />
-            ) : null}
-            {catalogState.hasReadyEnvironment ? (
-              <NativeHeaderToolbar.Button
-                icon="plus"
-                onPress={() => navigation.navigate('NewTaskSheet', { screen: 'AddProject' })}
-                separateBackground
-              />
-            ) : null}
-          </NativeHeaderToolbar>
-        </>
-      )}
+        ) : null}
+      </NativeHeaderToolbar>
 
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"

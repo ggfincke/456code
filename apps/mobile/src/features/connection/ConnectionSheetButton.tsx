@@ -2,31 +2,25 @@
 // render connection sheet button
 
 import { SymbolView } from '../../components/AppSymbol'
-import { Platform, Pressable } from 'react-native'
+import { Pressable } from 'react-native'
 import { useThemeColor } from '../../lib/useThemeColor'
 
 import { AppText as Text } from '../../components/AppText'
 import { cn } from '../../lib/cn'
 
-const CARD_SHADOW = Platform.select({
-  ios: {
-    shadowColor: 'rgba(23,23,23,0.08)',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 16,
-  },
-  android: { elevation: 3 },
-})
+const CARD_SHADOW = {
+  shadowColor: 'rgba(23,23,23,0.08)',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 1,
+  shadowRadius: 16,
+}
 
-const CARD_SHADOW_DARK = Platform.select({
-  ios: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-  },
-  android: { elevation: 4 },
-})
+const CARD_SHADOW_DARK = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.18,
+  shadowRadius: 8,
+}
 
 export { CARD_SHADOW, CARD_SHADOW_DARK }
 
@@ -49,15 +43,12 @@ export function ConnectionSheetButton(props: {
 
   const primaryShadow =
     tone === 'primary'
-      ? Platform.select({
-          ios: {
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 3 },
-            shadowOpacity: 0.14,
-            shadowRadius: 6,
-          },
-          android: { elevation: 3 },
-        })
+      ? {
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 3 },
+          shadowOpacity: 0.14,
+          shadowRadius: 6,
+        }
       : undefined
 
   return (

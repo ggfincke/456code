@@ -23,7 +23,6 @@ import {
 // ─── Component ────────────────────────────────────────────────────────
 export function ProjectFavicon(props: {
   readonly environmentId: EnvironmentId
-  readonly open?: boolean
   readonly size?: number
   readonly projectTitle: string
   readonly workspaceRoot?: string | null
@@ -48,7 +47,6 @@ export function ProjectFavicon(props: {
       key={cacheKey}
       cacheKey={cacheKey}
       faviconUrl={renderableFaviconUrl}
-      open={props.open}
       projectTitle={props.projectTitle}
       size={size}
     />
@@ -58,7 +56,6 @@ export function ProjectFavicon(props: {
 function ProjectFaviconImage(props: {
   readonly cacheKey: string | null
   readonly faviconUrl: string | null
-  readonly open?: boolean
   readonly projectTitle: string
   readonly size: number
 })
@@ -97,7 +94,7 @@ function ProjectFaviconImage(props: {
       {/* Folder icon fallback (matches web's FolderIcon) */}
       {!showImage ? (
         <SymbolView
-          name={{ ios: 'folder.fill', android: props.open ? 'folder_open' : 'folder' }}
+          name="folder.fill"
           size={props.size * 0.78}
           tintColor={iconMuted}
           type="monochrome"

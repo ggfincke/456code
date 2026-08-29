@@ -9,10 +9,11 @@ import { useThemeColor } from '../lib/useThemeColor'
 import { useFontFamily } from '../lib/useFontFamily'
 import { useScaledTextRole } from '../features/settings/appearance/useScaledTextRole'
 import { useNativePaste } from '../lib/useNativePaste'
-import type { ComposerEditorProps } from './ComposerEditor.types'
-import { resolveComposerEditorCapabilities } from './composerEditorCapabilities'
+import type { ComposerEditorCapabilities, ComposerEditorProps } from './ComposerEditor.types'
 
-export const composerEditorCapabilities = resolveComposerEditorCapabilities('fallback')
+export const composerEditorCapabilities: ComposerEditorCapabilities = {
+  supportsHardwareSubmit: false,
+}
 
 export function ComposerEditor({
   ref,
@@ -22,7 +23,6 @@ export function ComposerEditor({
   style,
   textStyle,
   contentInsetVertical = 0,
-  singleLineCentered: _singleLineCentered,
   ...props
 }: ComposerEditorProps)
 {

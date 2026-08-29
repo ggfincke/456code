@@ -75,27 +75,6 @@ export function validateStoreAsset(
       `${label} must be an 8-bit, 24-bit RGB PNG without alpha (found bit depth ${metadata.bitDepth}, color type ${metadata.colorType}).`,
     )
   }
-  if (spec.maximumFileSizeBytes && bytes.byteLength > spec.maximumFileSizeBytes)
-  {
-    throw new Error(
-      `${label} is ${bytes.byteLength} bytes; ${spec.store} allows at most ${spec.maximumFileSizeBytes} bytes.`,
-    )
-  }
-  if (spec.store === 'google-play')
-  {
-    const shortestSide = Math.min(metadata.width, metadata.height)
-    const longestSide = Math.max(metadata.width, metadata.height)
-    if (shortestSide < 320 || longestSide > 3_840 || longestSide > shortestSide * 2)
-    {
-      throw new Error(
-        `${label} does not meet Google Play's 320–3,840 px bounds and 2:1 maximum aspect ratio.`,
-      )
-    }
-    if (metadata.width * 16 !== metadata.height * 9)
-    {
-      throw new Error(`${label} must use Google Play's recommended portrait 9:16 aspect ratio.`)
-    }
-  }
   return metadata
 }
 

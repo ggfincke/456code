@@ -54,7 +54,6 @@ export function GlassSurface({
             width: 0,
             height: 14,
           },
-    elevation: chrome === 'none' ? 0 : 12,
   }
 
   if (supportsGlass)

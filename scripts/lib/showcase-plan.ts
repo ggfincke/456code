@@ -3,9 +3,6 @@
 
 // @effect-diagnostics nodeBuiltinImport:off - Host-side showcase planning uses Node path and process APIs directly.
 
-import * as NodePath from 'node:path'
-import * as NodeProcess from 'node:process'
-
 import type {
   ShowcaseAppearance,
   ShowcaseConfig,
@@ -16,17 +13,6 @@ import { SHOWCASE_SCENES } from '../mobile-showcase.config.ts'
 import { SHOWCASE_TERMINAL_ID, SHOWCASE_THREAD_ID } from '../mobile-showcase-environment.ts'
 
 export const APP_SCHEME = 'code456-dev'
-
-export function resolveAndroidSdkRoot(
-  environment: Readonly<Record<string, string | undefined>>,
-  platform: NodeJS.Platform = NodeProcess.platform,
-): string
-{
-  const configured = environment.ANDROID_HOME ?? environment.ANDROID_SDK_ROOT
-  if (configured) return configured
-  const home = environment.HOME ?? environment.USERPROFILE ?? ''
-  return NodePath.join(home, platform === 'darwin' ? 'Library/Android/sdk' : 'Android/Sdk')
-}
 
 interface NetworkAddress
 {
@@ -93,19 +79,11 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions
     if (argument === '--platform')
     {
       const value = argumentValue(args, index, argument)
-      if (value !== 'ios' && value !== 'android' && value !== 'all')
+      if (value !== 'ios')
       {
-        throw new Error(`Unsupported platform '${value}'. Use ios, android, or all.`)
+        throw new Error(`Unsupported platform '${value}'. Use ios.`)
       }
-      if (value === 'all')
-      {
-        platforms.add('ios')
-        platforms.add('android')
-      }
-      else
-      {
-        platforms.add(value)
-      }
+      platforms.add(value)
       index += 1
     }
     else if (argument === '--device')
@@ -250,9 +228,4 @@ export function showcaseSceneUrl(scene: ShowcaseScene, environmentId: string): s
     return `${APP_SCHEME}://${threadPath}/terminal?terminalId=${SHOWCASE_TERMINAL_ID}`
   }
   return `${APP_SCHEME}://${threadPath}/review`
-}
-
-export function encodeAndroidPairingUrls(pairingUrls: ReadonlyArray<string>): string
-{
-  return `json-uri:${encodeURIComponent(JSON.stringify(pairingUrls))}`
 }

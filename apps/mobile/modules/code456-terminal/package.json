@@ -7,11 +7,6 @@
       "modules": [
         "Code456TerminalModule"
       ]
-    },
-    "android": {
-      "modules": [
-        "expo.modules.code456terminal.Code456TerminalModule"
-      ]
     }
   }
 }
