@@ -2,7 +2,7 @@
 // scripts/mobile-showcase.ts
 // run the mobile showcase repository workflow
 
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Host-side simulator automation uses Node subprocess and timing APIs directly.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Host-side simulator and emulator automation uses Node subprocess and timing APIs directly.
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeNet from 'node:net'

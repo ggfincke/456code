@@ -1,6 +1,8 @@
 // scripts/lib/showcase-plan.ts
 // parses mobile showcase CLI args and plans capture sets
 
+// @effect-diagnostics nodeBuiltinImport:off - Host-side showcase planning uses Node path and process APIs directly.
+
 import type {
   ShowcaseAppearance,
   ShowcaseConfig,
