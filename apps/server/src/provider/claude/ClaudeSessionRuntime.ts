@@ -5,7 +5,6 @@ import {
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   query,
-  type SDKControlGetContextUsageResponse,
   type SDKControlInterruptResponse,
   type SDKMessage,
   type SDKUserMessage,
@@ -37,7 +36,6 @@ export interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage>
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>
   readonly initializationResult: () => Promise<unknown>
-  readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>
   readonly close: () => void
 }
 
