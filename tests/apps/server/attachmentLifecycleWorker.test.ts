@@ -484,6 +484,82 @@ it.layer(TestLayer)('AttachmentCleanupReactor', (it) =>
     }),
   )
 
+  it.effect('keeps a retried attachment owned by the re-created thread generation', () =>
+    Effect.gen(function* ()
+    {
+      const reactor = yield* AttachmentCleanupReactor
+      const repository = yield* AttachmentLifecycleRepository
+      const fileSystem = yield* FileSystem.FileSystem
+      const key = stagingKey('8')
+      const threadId = ThreadId.make('thread-recreated')
+      const commandId = CommandId.make('command-recreated')
+      const attachmentId = 'thread-recreated-00000000-0000-4000-8000-000000000010'
+      const relativePath = `${attachmentId}.png`
+      const stagingRelativePath = `.staging/${key}/${relativePath}`
+      const input = {
+        stagingKey: key,
+        commandId,
+        threadId,
+        messageId: MessageId.make('message-recreated'),
+        attachmentIndex: 0,
+        attachmentId,
+        stagingRelativePath,
+        relativePath,
+        mimeType: 'image/png',
+        byteCount: 8,
+        contentDigest: key,
+        now: EPOCH,
+      }
+
+      yield* repository.stage(input)
+      yield* repository.markDispatchFailure({
+        commandId,
+        reason: 'failed bootstrap',
+        now: EPOCH,
+      })
+      yield* repository.enqueueThreadCleanup({
+        cleanupKey: 'cleanup-recreated-thread',
+        threadId,
+        threadSegment: 'thread-recreated',
+        reason: 'deleted first incarnation',
+        sourceSequence: 2,
+        now: EPOCH,
+      })
+
+      const retriedAt = '1970-01-01T00:01:00.000Z'
+      const restaged = yield* repository.stage({ ...input, now: retriedAt })
+      assert.equal(restaged.generation, 1)
+      const stagingAbsolutePath = yield* writeAttachment(stagingRelativePath, 'new-data')
+      const absolutePath = yield* writeAttachment(relativePath, 'new-data')
+      yield* repository.associateAccepted({
+        commandId,
+        ownerSequence: 4,
+        ownerEventType: 'thread.message-sent',
+        now: retriedAt,
+      })
+
+      yield* TestClock.setTime(AFTER_GRACE_MS)
+      yield* reactor.drain
+
+      assert.isTrue(yield* pathExists(absolutePath))
+      assert.isTrue(yield* pathExists(stagingAbsolutePath))
+      assert.equal(yield* fileSystem.readFileString(absolutePath), 'new-data')
+      const diagnostics = yield* repository.listDiagnostics()
+      const staged = diagnostics.staging.find((row) => row.stagingKey === key)
+      assert.equal(staged?.state, 'owned')
+      assert.equal(staged?.generation, 1)
+      assert.equal(staged?.ownerSequence, 4)
+      assert.equal(
+        diagnostics.cleanup.find((row) => row.cleanupKey === `attachment:${key}`)?.state,
+        'complete',
+      )
+      assert.equal(
+        diagnostics.cleanup.find((row) => row.cleanupKey === 'cleanup-recreated-thread')?.state,
+        'complete',
+      )
+    }),
+  )
+
   it.effect('reports legacy managed-looking files for manual review without deleting them', () =>
     Effect.gen(function* ()
     {

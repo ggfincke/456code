@@ -176,23 +176,6 @@ export function normalizeClaudeActiveTokenUsage(
   })
 }
 
-export function normalizeClaudeContextUsageApiSnapshot(
-  value: {
-    readonly totalTokens: number
-    readonly maxTokens: number
-    readonly isAutoCompactEnabled: boolean
-  },
-  totalProcessedTokens?: number,
-): ThreadTokenUsageSnapshot | undefined
-{
-  return makeClaudeTokenUsageSnapshot({
-    activeTokens: value.totalTokens,
-    contextWindow: value.maxTokens,
-    ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
-    compactsAutomatically: value.isAutoCompactEnabled,
-  })
-}
-
 export function compactBoundaryTokenUsageSnapshot(
   message: Readonly<Record<string, unknown>>,
   contextWindow?: number,

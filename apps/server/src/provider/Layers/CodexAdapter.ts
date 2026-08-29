@@ -149,6 +149,10 @@ type CodexToolUserInputQuestion =
 const ApprovalDecisionPayload = Schema.Struct({
   decision: ProviderApprovalDecision,
 })
+const CodexCollabAgentMetadataUpdatedPayload = Schema.Struct({
+  model: Schema.optionalKey(Schema.String),
+  effort: Schema.optionalKey(Schema.NullOr(Schema.String)),
+})
 
 function readPayload<A>(
   schema: Schema.Schema<A>,
@@ -296,6 +300,7 @@ function toCanonicalItemType(raw: string | undefined | null): CanonicalItemType
   if (type.includes('mcp')) return 'mcp_tool_call'
   if (type.includes('dynamic tool')) return 'dynamic_tool_call'
   if (type.includes('collab')) return 'collab_agent_tool_call'
+  if (type.includes('sub agent activity')) return 'collab_agent_tool_call'
   if (type.includes('web search')) return 'web_search'
   if (type.includes('image')) return 'image_view'
   if (type.includes('review entered')) return 'review_entered'
@@ -310,6 +315,10 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
   if (itemType === 'mcp_tool_call' && item?.type === 'mcpToolCall')
   {
     return `${item.server} · ${item.tool}`
+  }
+  if (itemType === 'collab_agent_tool_call' && item?.type === 'subAgentActivity')
+  {
+    return item.agentPath.split('/').findLast((segment) => segment.length > 0)
   }
   switch (itemType)
   {
@@ -364,6 +373,23 @@ function itemDetail(itemType: CanonicalItemType, item: CodexLifecycleItem): stri
     return trimmed
   }
   return undefined
+}
+
+function collabItemMetadata(item: CodexLifecycleItem): {
+  readonly model?: string
+  readonly effort?: string
+}
+{
+  if (item.type !== 'collabAgentToolCall')
+  {
+    return {}
+  }
+  const model = trimText(item.model)
+  const effort = trimText(item.reasoningEffort)
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+  }
 }
 
 function toRequestTypeFromMethod(method: string): CanonicalRequestType
@@ -568,30 +594,49 @@ function mapItemLifecycle(
   {
     return undefined
   }
+  if (item.type === 'subAgentActivity' && event.method === 'item/started')
+  {
+    return undefined
+  }
+  if (item.type === 'collabAgentToolCall' && item.receiverThreadIds.length === 0)
+  {
+    return undefined
+  }
+  const mappedLifecycle =
+    item.type === 'subAgentActivity'
+      ? item.kind === 'started'
+        ? 'item.started'
+        : item.kind === 'interacted'
+          ? 'item.updated'
+          : 'item.completed'
+      : lifecycle
   const itemType = toCanonicalItemType(item.type)
-  if (itemType === 'unknown' && lifecycle !== 'item.updated')
+  if (itemType === 'unknown' && mappedLifecycle !== 'item.updated')
   {
     return undefined
   }
 
   const detail = itemDetail(itemType, item)
   const status =
-    lifecycle === 'item.started'
-      ? 'inProgress'
-      : lifecycle === 'item.completed'
-        ? 'status' in item && (item.status === 'failed' || item.status === 'declined')
-          ? item.status
-          : 'completed'
-        : undefined
+    item.type === 'subAgentActivity' && item.kind === 'interrupted'
+      ? 'failed'
+      : mappedLifecycle === 'item.started'
+        ? 'inProgress'
+        : mappedLifecycle === 'item.completed'
+          ? 'status' in item && (item.status === 'failed' || item.status === 'declined')
+            ? item.status
+            : 'completed'
+          : undefined
 
   return {
     ...runtimeEventBase(event, canonicalThreadId),
-    type: lifecycle,
+    type: mappedLifecycle,
     payload: {
       itemType,
       ...(status ? { status } : {}),
       ...(itemTitle(itemType, item) ? { title: itemTitle(itemType, item) } : {}),
       ...(detail ? { detail } : {}),
+      ...collabItemMetadata(item),
       ...(event.payload !== undefined ? { data: event.payload } : {}),
     },
   }
@@ -990,6 +1035,28 @@ function mapToRuntimeEvents(
   {
     const started = mapItemLifecycle(event, canonicalThreadId, 'item.started')
     return started ? [started] : []
+  }
+
+  if (event.method === 'collabAgent/metadataUpdated')
+  {
+    const payload = readPayload(CodexCollabAgentMetadataUpdatedPayload, event.payload)
+    const model = trimText(payload?.model)
+    const effort = trimText(payload?.effort)
+    if (!event.itemId || (!model && effort === undefined && payload?.effort !== null))
+    {
+      return []
+    }
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: 'item.updated',
+        payload: {
+          itemType: 'collab_agent_tool_call',
+          ...(model ? { model } : {}),
+          ...(effort ? { effort } : payload?.effort === null ? { effort: null } : {}),
+        },
+      },
+    ]
   }
 
   if (event.method === 'item/completed')

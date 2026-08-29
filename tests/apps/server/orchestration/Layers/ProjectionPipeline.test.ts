@@ -20,6 +20,7 @@ import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
@@ -3902,6 +3903,246 @@ engineLayer('OrchestrationProjectionPipeline via engine dispatch', (it) =>
           defaultModelSelection: '{"instanceId":"codex","model":"gpt-5"}',
         },
       ])
+    }),
+  )
+
+  it.effect('re-creating a deleted thread starts from an empty projection', () =>
+    Effect.gen(function* ()
+    {
+      const engine = yield* OrchestrationEngineService
+      const snapshotQuery = yield* ProjectionSnapshotQuery
+      const sql = yield* SqlClient.SqlClient
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      const projectId = ProjectId.make('project-retry')
+      const threadId = ThreadId.make('thread-retry')
+      const modelSelection = {
+        instanceId: ProviderInstanceId.make('codex'),
+        model: 'gpt-5-codex',
+      }
+      const createThread = (commandId: string, title: string) =>
+        engine.dispatch({
+          type: 'thread.create',
+          commandId: CommandId.make(commandId),
+          threadId,
+          projectId,
+          title,
+          modelSelection,
+          runtimeMode: 'full-access',
+          interactionMode: 'default',
+          orchestrate: true,
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        })
+      const countRowsForThread = (table: string) =>
+        sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count FROM ${sql(table)} WHERE thread_id = ${threadId}
+        `.pipe(Effect.map((rows) => rows[0]?.count ?? 0))
+      const perThreadTables = [
+        'projection_thread_messages',
+        'projection_thread_activities',
+        'projection_thread_sessions',
+        'projection_turns',
+        'projection_thread_proposed_plans',
+        'projection_pending_approvals',
+        'projection_thread_orchestrate_plans',
+        'projection_orchestrate_runs',
+        'projection_orchestrate_run_executions',
+        'projection_orchestrate_execution_jobs',
+      ]
+
+      yield* engine.dispatch({
+        type: 'project.create',
+        commandId: CommandId.make('cmd-retry-project'),
+        projectId,
+        title: 'Retry Project',
+        workspaceRoot: '/tmp/project-retry',
+        defaultModelSelection: modelSelection,
+        createdAt,
+      })
+      yield* createThread('cmd-retry-create-1', 'First attempt')
+      yield* engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-retry-turn-1'),
+        threadId,
+        message: {
+          messageId: MessageId.make('message-retry-1'),
+          role: 'user',
+          text: 'first attempt',
+          attachments: [],
+        },
+        runtimeMode: 'full-access',
+        interactionMode: 'default',
+        createdAt,
+      })
+      yield* engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-retry-activity-1'),
+        threadId,
+        activity: {
+          id: EventId.make('activity-retry-1'),
+          tone: 'info',
+          kind: 'approval.requested',
+          summary: 'approval requested',
+          payload: { requestId: 'request-retry-1' },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      })
+      yield* engine.dispatch({
+        type: 'thread.proposed-plan.upsert',
+        commandId: CommandId.make('cmd-retry-plan-1'),
+        threadId,
+        proposedPlan: {
+          id: 'plan-retry-1',
+          turnId: null,
+          planMarkdown: '# Plan',
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      })
+      yield* engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-retry-session-1'),
+        threadId,
+        session: {
+          threadId,
+          status: 'running',
+          providerName: 'codex',
+          runtimeMode: 'full-access',
+          activeTurnId: TurnId.make('turn-retry-1'),
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      })
+
+      // fork-owned projections must not survive the new thread incarnation either
+      yield* sql`
+        INSERT INTO projection_thread_orchestrate_plans (
+          thread_id, run_id, revision, turn_id, workflow, task, stages_json,
+          total_workers, max_workers, source, status, source_sequence, created_at, updated_at
+        ) VALUES (
+          ${threadId}, 'run-retry', 1, 'turn-retry-1', 'implementation', 'retry', '[]',
+          0, 1, 'tool', 'approved', 1, ${createdAt}, ${createdAt}
+        )
+      `
+      yield* sql`
+        INSERT INTO proposals (
+          proposal_id, environment_id, project_id, source_thread_id,
+          producer_session_id, producer_instance_id, repository_identity_json,
+          worktree_root_path, worktree_git_dir, worktree_git_common_dir,
+          created_at, updated_at
+        ) VALUES (
+          'proposal-retry', 'environment-retry', ${projectId}, ${threadId},
+          'session-retry', 'codex', '{}',
+          '/repo', '/repo/.git', '/repo/.git', ${createdAt}, ${createdAt}
+        )
+      `
+      yield* sql`
+        INSERT INTO proposal_blobs (sha256, content, byte_length, created_at)
+        VALUES (
+          'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+          X'',
+          0,
+          ${createdAt}
+        )
+      `
+      yield* sql`
+        INSERT INTO proposal_revisions (
+          revision_id, proposal_id, revision, head_commit_oid, base_tree_oid,
+          base_retained_ref, base_file_count, base_byte_count, snapshot_policy_json,
+          proposed_tree_oid, proposed_retained_ref, manifest_json, manifest_sha256,
+          diff_sha256, diff_byte_length, created_at
+        ) VALUES (
+          'revision-retry', 'proposal-retry', 1, 'head', 'base',
+          'refs/base/retry', 0, 0, '{}',
+          'proposed', 'refs/proposed/retry', '{}',
+          'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+          'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+          0, ${createdAt}
+        )
+      `
+      yield* sql`
+        INSERT INTO proposal_orchestrate_plan_links (
+          proposal_id, proposal_revision, source_thread_id, run_id,
+          orchestrate_revision, created_at
+        ) VALUES (
+          'proposal-retry', 1, ${threadId}, 'run-retry', 1, ${createdAt}
+        )
+      `
+      yield* sql`
+        INSERT INTO projection_orchestrate_runs (
+          thread_id, run_id, current_plan_revision, created_at, updated_at
+        ) VALUES (${threadId}, 'run-retry', 1, ${createdAt}, ${createdAt})
+      `
+      yield* sql`
+        INSERT INTO projection_orchestrate_run_executions (
+          thread_id, run_id, plan_revision, source_turn_id, source_sequence,
+          repository_root, repository_common_dir, base_oid, lifecycle, availability,
+          integration_root, integration_common_dir, integration_branch, integration_oid,
+          observed_head_oid, final_head_oid, close_reason, is_current, admitted_at,
+          updated_at, terminal_at
+        ) VALUES (
+          ${threadId}, 'run-retry', 1, 'turn-retry-1', 1,
+          '/repo', '/repo/.git', 'base', 'active', 'available',
+          '/repo/worktree', '/repo/.git', 'run/retry', 'head',
+          'head', NULL, NULL, 1, ${createdAt}, ${createdAt}, NULL
+        )
+      `
+      yield* sql`
+        INSERT INTO projection_orchestrate_execution_jobs (
+          job_id, thread_id, run_id, plan_revision, status, request_run_id,
+          request_repository_root, result_repository_root, repository_common_dir,
+          base_oid, head_oid, worktree_root, branch, bound_at
+        ) VALUES (
+          'job-retry', ${threadId}, 'run-retry', 1, 'completed', 'request-retry',
+          '/repo', '/repo/worktree', '/repo/.git',
+          'base', 'head', '/repo/worktree', 'run/retry', ${createdAt}
+        )
+      `
+
+      for (const table of perThreadTables)
+      {
+        assert.isAbove(yield* countRowsForThread(table), 0, `${table} should be populated`)
+      }
+      const countOrchestrateLinks = sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count
+        FROM proposal_orchestrate_plan_links
+        WHERE source_thread_id = ${threadId}
+      `.pipe(Effect.map((rows) => rows[0]?.count ?? 0))
+      assert.strictEqual(yield* countOrchestrateLinks, 1)
+      const populatedShell = Option.getOrThrow(yield* snapshotQuery.getThreadShellById(threadId))
+      assert.isTrue(populatedShell.hasPendingApprovals)
+      assert.isTrue(populatedShell.hasActionableProposedPlan)
+
+      yield* engine.dispatch({
+        type: 'thread.delete',
+        commandId: CommandId.make('cmd-retry-delete'),
+        threadId,
+      })
+      assert.isTrue(Option.isNone(yield* snapshotQuery.getThreadShellById(threadId)))
+
+      yield* createThread('cmd-retry-create-2', 'Second attempt')
+
+      const shell = Option.getOrThrow(yield* snapshotQuery.getThreadShellById(threadId))
+      assert.strictEqual(shell.title, 'Second attempt')
+      assert.isFalse(shell.hasPendingApprovals)
+      assert.isFalse(shell.hasActionableProposedPlan)
+      for (const table of perThreadTables)
+      {
+        assert.strictEqual(yield* countRowsForThread(table), 0, `${table} should be empty`)
+      }
+      assert.strictEqual(yield* countOrchestrateLinks, 0)
+      const detail = Option.getOrThrow(yield* snapshotQuery.getThreadDetailById(threadId))
+      assert.deepEqual(detail.messages, [])
+      assert.deepEqual(detail.activities, [])
+      assert.isNull(detail.latestTurn)
+      assert.isNull(detail.session)
     }),
   )
 })

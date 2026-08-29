@@ -318,11 +318,32 @@ const make = Effect.gen(function* ()
   const drainLane = (lane: ReactorLane, throughSequence?: number) =>
     lane.lock.withPermits(1)(drainLaneUnlocked(lane, throughSequence))
 
+  const drainLaneThrough = (lane: ReactorLane, sourceSequence: number) =>
+    lane.lock.withPermits(1)(
+      Effect.gen(function* ()
+      {
+        yield* drainLaneUnlocked(lane, sourceSequence)
+        const completedProgress = yield* delivery.getProgress(lane.definition.reactorId)
+        const completedSequence = Option.match(completedProgress, {
+          onNone: () => null,
+          onSome: (progress) =>
+            progress.mode === 'shadow' ? progress.shadowCursorSequence : progress.cursorSequence,
+        })
+        // a fence is successful only when durable progress reached its target
+        if (completedSequence === null || completedSequence < sourceSequence)
+        {
+          return yield* new ReactorDeliveryError({
+            operation: `DurableReactorRunner.drainThrough:blockedBeforeSequence:${lane.definition.reactorId}:${completedSequence ?? 'missing'}:${sourceSequence}`,
+          })
+        }
+      }),
+    )
+
   const drain: DurableReactorRunnerShape['drain'] = (reactorId) =>
     requireLane(reactorId).pipe(Effect.flatMap((lane) => drainLane(lane)))
 
   const drainThrough: DurableReactorRunnerShape['drainThrough'] = (reactorId, sourceSequence) =>
-    requireLane(reactorId).pipe(Effect.flatMap((lane) => drainLane(lane, sourceSequence)))
+    requireLane(reactorId).pipe(Effect.flatMap((lane) => drainLaneThrough(lane, sourceSequence)))
 
   const start: DurableReactorRunnerShape['start'] = Effect.fn('DurableReactorRunner.start')(
     function* (definition)

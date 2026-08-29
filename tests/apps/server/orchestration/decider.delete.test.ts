@@ -231,4 +231,47 @@ it.layer(NodeServices.layer)('decider deletion flows', (it) =>
       expect(normalizeDeleteEvent(forcedResult)).toEqual(normalizeDeleteEvent(sequentialEvents))
     }),
   )
+
+  it.effect('allows a deleted draft to re-create its client-minted thread id', () =>
+    Effect.gen(function* ()
+    {
+      const readModel = yield* seedReadModel
+      const deleted = yield* decideOrchestrationCommand({
+        command: {
+          type: 'thread.delete',
+          commandId: asCommandId('cmd-thread-delete-for-retry'),
+          threadId: asThreadId('thread-delete-1'),
+        },
+        readModel,
+      })
+      const deletedEvent = Array.isArray(deleted) ? deleted[0]! : deleted
+      const afterDelete = yield* projectEvent(readModel, {
+        ...deletedEvent,
+        sequence: readModel.snapshotSequence + 1,
+      })
+
+      const recreated = yield* decideOrchestrationCommand({
+        command: {
+          type: 'thread.create',
+          commandId: asCommandId('cmd-thread-recreate'),
+          threadId: asThreadId('thread-delete-1'),
+          projectId: asProjectId('project-delete'),
+          title: 'Retried draft',
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          branch: null,
+          worktreePath: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        readModel: afterDelete,
+      })
+
+      const recreatedEvents = Array.isArray(recreated) ? recreated : [recreated]
+      expect(recreatedEvents[0]?.type).toBe('thread.created')
+    }),
+  )
 })

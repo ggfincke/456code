@@ -124,4 +124,45 @@ describe('runtimeEventToActivities tool streaming persistence', () =>
       data: { toolCallId: 'item-streaming-tool' },
     })
   })
+
+  it('projects child metadata as a status-free update on the collab tool identity', () =>
+  {
+    const metadata = {
+      ...base,
+      type: 'item.updated',
+      eventId: EventId.make('event-collab-metadata-updated'),
+      payload: {
+        itemType: 'collab_agent_tool_call',
+        model: 'gpt-5.6-sol',
+        effort: 'high',
+      },
+    } satisfies ProviderRuntimeEvent
+
+    const [activity] = runtimeEventToActivities(metadata)
+    expect(activity?.kind).toBe('tool.updated')
+    expect(activity?.payload).toEqual({
+      itemType: 'collab_agent_tool_call',
+      toolCallId: 'item-streaming-tool',
+      model: 'gpt-5.6-sol',
+      effort: 'high',
+      data: { toolCallId: 'item-streaming-tool' },
+    })
+
+    const [clearedActivity] = runtimeEventToActivities({
+      ...metadata,
+      eventId: EventId.make('event-collab-metadata-cleared'),
+      payload: {
+        itemType: 'collab_agent_tool_call',
+        model: 'gpt-5.6-sol',
+        effort: null,
+      },
+    })
+    expect(clearedActivity?.payload).toEqual({
+      itemType: 'collab_agent_tool_call',
+      toolCallId: 'item-streaming-tool',
+      model: 'gpt-5.6-sol',
+      effort: null,
+      data: { toolCallId: 'item-streaming-tool' },
+    })
+  })
 })

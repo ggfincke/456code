@@ -75,7 +75,10 @@ function makeTestLayer(input: {
     ),
     Layer.provideMerge(Layer.succeed(ThreadArchiveReactor, owner('thread-archive-durable-owner'))),
     Layer.provideMerge(
-      Layer.succeed(ThreadDeletionReactor, owner('thread-deletion-durable-owner')),
+      Layer.succeed(ThreadDeletionReactor, {
+        ...owner('thread-deletion-durable-owner'),
+        drainThrough: () => Effect.void,
+      }),
     ),
     Layer.provideMerge(Layer.succeed(AttachmentCleanupReactor, owner('attachment-cleanup'))),
     Layer.provideMerge(

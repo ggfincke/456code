@@ -52,6 +52,7 @@ import * as ExternalLauncher from './process/externalLauncher.ts'
 import * as RemoteOpenTargets from './environment/RemoteOpenTargets.ts'
 import * as OrchestrationEngine from './orchestration/Services/OrchestrationEngine.ts'
 import * as ProjectionSnapshotQuery from './orchestration/Services/ProjectionSnapshotQuery.ts'
+import { ThreadDeletionReactor } from './orchestration/Services/ThreadDeletionReactor.ts'
 import {
   restoreOrchestrateRunWorktreeAvailability,
   retireOrchestrateRunWorktreeAvailability,
@@ -213,6 +214,7 @@ const makeWsRpcLayer = (
       const importService = yield* ImportService.ImportService
       const attachmentLifecycle = yield* AttachmentLifecycleRepository
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService
+      const threadDeletionReactor = yield* ThreadDeletionReactor
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery
       const keybindings = yield* Keybindings.Keybindings
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher
@@ -561,7 +563,7 @@ const makeWsRpcLayer = (
           {
             if (bootstrap?.createThread)
             {
-              yield* orchestrationEngine.dispatch({
+              const created = yield* orchestrationEngine.dispatch({
                 type: 'thread.create',
                 commandId: yield* serverCommandId('bootstrap-thread-create'),
                 threadId: command.threadId,
@@ -578,6 +580,8 @@ const makeWsRpcLayer = (
                 createdAt: bootstrap.createThread.createdAt,
               })
               createdThread = true
+              // the create sequence fences every deletion from the prior incarnation
+              yield* threadDeletionReactor.drainThrough(created.sequence)
             }
 
             if (bootstrap?.prepareWorktree)
@@ -635,7 +639,7 @@ const makeWsRpcLayer = (
                 return Effect.fail(dispatchError)
               }
               // cleanup must not be interrupted mid-delete; report whether the
-              // rollback landed so clients can retry under a fresh thread id
+              // rollback landed so clients can retry the same client-minted thread id
               return Effect.uninterruptible(cleanupCreatedThread()).pipe(
                 Effect.matchCauseEffect({
                   onFailure: (cleanupCause) =>
@@ -671,13 +675,16 @@ const makeWsRpcLayer = (
         const dispatchEffect =
           normalizedCommand.type === 'thread.turn.start' && normalizedCommand.bootstrap
             ? dispatchBootstrapTurnStart(normalizedCommand)
-            : orchestrationEngine
-                .dispatch(normalizedCommand)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toDispatchCommandError(cause, 'Failed to dispatch orchestration command'),
-                  ),
-                )
+            : orchestrationEngine.dispatch(normalizedCommand).pipe(
+                Effect.tap(({ sequence }) =>
+                  normalizedCommand.type === 'thread.create'
+                    ? threadDeletionReactor.drainThrough(sequence)
+                    : Effect.void,
+                ),
+                Effect.mapError((cause) =>
+                  toDispatchCommandError(cause, 'Failed to dispatch orchestration command'),
+                ),
+              )
 
         return dispatchWithAttachmentLifecycle(
           normalizedCommand,

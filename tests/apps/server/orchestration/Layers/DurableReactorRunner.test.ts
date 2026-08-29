@@ -398,13 +398,14 @@ describe('DurableReactorRunner', () =>
           SET attempt_count = 7
           WHERE reactor_id = 'thread-deletion' AND source_sequence = 2
         `
-        yield* runner.drainThrough('thread-deletion', 2)
+        const fenceFailure = yield* Effect.flip(runner.drainThrough('thread-deletion', 2))
         const manualRows = yield* sql<{ readonly actionId: string; readonly status: string }>`
           SELECT action_id AS "actionId", status
           FROM orchestration_reactor_actions
           WHERE reactor_id = 'thread-deletion' AND source_sequence = 2
         `
         assert.equal(manualRows[0]?.status, 'manual')
+        assert.match(fenceFailure.operation, /blockedBeforeSequence:thread-deletion:1:2/)
         assert.deepStrictEqual(yield* Ref.get(blockedHooks), ['1:poison', '2:manual'])
         assert.equal(
           Option.getOrThrow(yield* delivery.getProgress('thread-deletion')).blockedSequence,

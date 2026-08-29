@@ -214,7 +214,9 @@ export function requireThreadAbsent(input: {
   readonly threadId: ThreadId
 }): Effect.Effect<void, OrchestrationCommandInvariantError>
 {
-  if (!findThreadById(input.readModel, input.threadId))
+  const existing = findThreadById(input.readModel, input.threadId)
+  // draft retries reuse a client-minted id after bootstrap rollback soft-deletes it
+  if (existing === undefined || existing.deletedAt !== null)
   {
     return Effect.void
   }

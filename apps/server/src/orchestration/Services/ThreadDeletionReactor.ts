@@ -24,6 +24,9 @@ export interface ThreadDeletionReactorShape
   // resolves when the durable reactor lane is empty and idle.
   // intended for test use to replace timing-sensitive sleeps.
   readonly drain: Effect.Effect<void, ReactorDeliveryError>
+
+  // resolves once deletion cleanup has reached the supplied event sequence.
+  readonly drainThrough: (sequence: number) => Effect.Effect<void, ReactorDeliveryError>
 }
 
 /**

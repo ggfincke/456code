@@ -35,6 +35,8 @@ export interface NormalizedWorkLogEntry
   readonly toolLifecycleStatus?: WorkLogToolLifecycleStatus
   readonly collapseKey?: string
   readonly toolCallId?: string
+  readonly model?: string
+  readonly effort?: string | null
 }
 
 export interface NormalizeWorkLogOptions<T extends NormalizedWorkLogEntry>
@@ -505,6 +507,8 @@ function toNormalizedWorkLogEntry(
   const itemType = extractWorkLogItemType(payload)
   const requestKind = extractWorkLogRequestKind(payload, requestKindFromRequestType)
   const toolCallId = isTaskActivity ? null : extractToolCallId(activity, payload)
+  const model = asTrimmedString(payload?.model)
+  const effort = payload?.effort === null ? null : (asTrimmedString(payload?.effort) ?? undefined)
   const detail = !taskDetailAsLabel
     ? stripTrailingExitCode(asTrimmedString(payload?.detail) ?? '').output
     : null
@@ -540,6 +544,8 @@ function toNormalizedWorkLogEntry(
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
     ...(toolCallId ? { toolCallId } : {}),
+    ...(model ? { model } : {}),
+    ...(effort !== undefined ? { effort } : {}),
     ...(toolLifecycleStatus ? { toolLifecycleStatus } : {}),
   }
   return base
@@ -577,6 +583,10 @@ export function mergeNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
       : {}),
     ...((next.toolCallId ?? previous.toolCallId)
       ? { toolCallId: next.toolCallId ?? previous.toolCallId }
+      : {}),
+    ...((next.model ?? previous.model) ? { model: next.model ?? previous.model } : {}),
+    ...(next.effort !== undefined || previous.effort !== undefined
+      ? { effort: next.effort !== undefined ? next.effort : previous.effort }
       : {}),
     ...((next.toolLifecycleStatus ?? previous.toolLifecycleStatus)
       ? { toolLifecycleStatus: next.toolLifecycleStatus ?? previous.toolLifecycleStatus }
@@ -623,6 +633,16 @@ function shouldCollapseToolLifecycleEntries(
     previous.itemType === next.itemType &&
     normalizeCompactToolLabel(previous.toolTitle ?? previous.label) ===
       normalizeCompactToolLabel(next.toolTitle ?? next.label)
+  )
+}
+
+function isCollabMetadataOnlyUpdate(entry: NormalizedWorkLogEntry): boolean
+{
+  return (
+    entry.activityKind === 'tool.updated' &&
+    entry.itemType === 'collab_agent_tool_call' &&
+    entry.toolLifecycleStatus === undefined &&
+    (entry.model !== undefined || entry.effort !== undefined)
   )
 }
 
@@ -678,6 +698,11 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
   const retiredIndexes = new Set<number>()
   const openHeartbeats: OpenHeartbeatRow[] = []
   const openRowIndexByToolCallId = new Map<string, number>()
+  const terminalRowIndexByToolCallId = new Map<string, number>()
+  const pendingCollabMetadataByToolCallId = new Map<
+    string,
+    Pick<NormalizedWorkLogEntry, 'model' | 'effort'>
+  >()
 
   const lastLiveIndex = (): number =>
   {
@@ -706,6 +731,11 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
         openRowIndexByToolCallId.delete(toolCallId)
       }
     }
+    const closed = collapsed[index]
+    if (closed?.toolCallId)
+    {
+      terminalRowIndexByToolCallId.set(toolCallIdentityKey(closed.turnId, closed.toolCallId), index)
+    }
   }
 
   const mergeIntoRow = (index: number, entry: T): void =>
@@ -733,8 +763,9 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
     return true
   }
 
-  for (const entry of entries)
+  for (const sourceEntry of entries)
   {
+    let entry = sourceEntry
     if (entry.activityKind === 'tool.progress')
     {
       // an id-less heartbeat updates the newest open id-less row, because
@@ -766,6 +797,41 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
     if (isToolLifecycleFrameKind(entry.activityKind) && entry.toolCallId !== undefined)
     {
       const identityKey = toolCallIdentityKey(entry.turnId, entry.toolCallId)
+      if (isCollabMetadataOnlyUpdate(entry))
+      {
+        const rowIndex =
+          openRowIndexByToolCallId.get(identityKey) ?? terminalRowIndexByToolCallId.get(identityKey)
+        const previous = rowIndex === undefined ? undefined : collapsed[rowIndex]
+        if (rowIndex !== undefined && previous)
+        {
+          collapsed[rowIndex] = {
+            ...previous,
+            ...(entry.model ? { model: entry.model } : {}),
+            ...(entry.effort !== undefined ? { effort: entry.effort } : {}),
+          }
+        }
+        else
+        {
+          const pending = pendingCollabMetadataByToolCallId.get(identityKey)
+          pendingCollabMetadataByToolCallId.set(identityKey, {
+            ...(pending?.model ? { model: pending.model } : {}),
+            ...(pending?.effort !== undefined ? { effort: pending.effort } : {}),
+            ...(entry.model ? { model: entry.model } : {}),
+            ...(entry.effort !== undefined ? { effort: entry.effort } : {}),
+          })
+        }
+        continue
+      }
+      const pendingMetadata = pendingCollabMetadataByToolCallId.get(identityKey)
+      if (pendingMetadata)
+      {
+        entry = {
+          ...entry,
+          ...(pendingMetadata.model ? { model: pendingMetadata.model } : {}),
+          ...(pendingMetadata.effort !== undefined ? { effort: pendingMetadata.effort } : {}),
+        }
+        pendingCollabMetadataByToolCallId.delete(identityKey)
+      }
       // * the id-less fallback inside findOpenHeartbeatToRetire is load-bearing:
       // codex heartbeats carry no id, so retiring only on an exact match would
       // strand their row at "in progress" forever
@@ -800,6 +866,10 @@ function collapseNormalizedWorkLogEntries<T extends NormalizedWorkLogEntry>(
       if (entry.activityKind !== 'tool.completed')
       {
         openRowIndexByToolCallId.set(identityKey, pushedIndex)
+      }
+      else
+      {
+        terminalRowIndexByToolCallId.set(identityKey, pushedIndex)
       }
       continue
     }

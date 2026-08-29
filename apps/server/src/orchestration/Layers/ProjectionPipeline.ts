@@ -1640,6 +1640,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.created':
+          yield* projectionThreadMessageRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          })
+          return
+
         case 'thread.message-sent':
         {
           const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
@@ -1756,6 +1762,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.created':
+          yield* projectionThreadProposedPlanRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          })
+          return
+
         case 'thread.proposed-plan-upserted':
           yield* projectionThreadProposedPlanRepository.upsert({
             planId: event.payload.proposedPlan.id,
@@ -1812,6 +1824,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.created':
+        {
+          const existingRows = yield* listThreadOrchestratePlanRows({
+            threadId: event.payload.threadId,
+          }).pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.list:query'),
+            ),
+          )
+          // exact old plan identities avoid timestamp ambiguity on client-minted retries
+          yield* Effect.forEach(existingRows, deleteThreadOrchestratePlanRow, {
+            concurrency: 1,
+          }).pipe(Effect.asVoid)
+          return
+        }
+
         case 'thread.orchestrate-plan-upserted':
           // a new revision supersedes older pending revisions of the same run
           yield* sql`
@@ -1977,6 +2005,39 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.created':
+          yield* sql`
+            DELETE FROM projection_orchestrate_execution_jobs
+            WHERE thread_id = ${event.payload.threadId}
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                'ProjectionOrchestrateRunExecutions.deleteJobsByThreadId:query',
+              ),
+            ),
+          )
+          yield* sql`
+            DELETE FROM projection_orchestrate_run_executions
+            WHERE thread_id = ${event.payload.threadId}
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                'ProjectionOrchestrateRunExecutions.deleteExecutionsByThreadId:query',
+              ),
+            ),
+          )
+          yield* sql`
+            DELETE FROM projection_orchestrate_runs
+            WHERE thread_id = ${event.payload.threadId}
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                'ProjectionOrchestrateRunExecutions.deleteRunsByThreadId:query',
+              ),
+            ),
+          )
+          return
+
         case 'thread.orchestrate-run-execution-admitted':
           yield* insertOrchestrateRunExecution(event.payload.execution).pipe(
             Effect.mapError(
@@ -2004,6 +2065,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.created':
+          yield* projectionThreadActivityRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          })
+          return
+
         case 'thread.provider-switch-failed':
         {
           const sourceModelSelection = event.payload.sourceModelSelection
@@ -2198,6 +2265,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       'applyThreadSessionsProjection',
     )(function* (event, _attachmentSideEffects)
     {
+      if (event.type === 'thread.created')
+      {
+        yield* projectionThreadSessionRepository.deleteByThreadId({
+          threadId: event.payload.threadId,
+        })
+        return
+      }
       if (event.type !== 'thread.session-set')
       {
         return
@@ -2220,6 +2294,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.created':
+          yield* projectionTurnRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          })
+          return
+
         case 'thread.turn-start-requested':
         {
           yield* projectionTurnRepository.replacePendingTurnStart({
@@ -2689,6 +2769,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.created':
+          yield* projectionPendingApprovalRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          })
+          return
+
         case 'thread.activity-appended':
         {
           const requestId =
@@ -2892,17 +2978,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
-        eventTypes: new Set(['thread.message-sent', 'thread.reverted']),
+        eventTypes: new Set(['thread.created', 'thread.message-sent', 'thread.reverted']),
         apply: applyThreadMessagesProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
-        eventTypes: new Set(['thread.proposed-plan-upserted', 'thread.reverted']),
+        eventTypes: new Set(['thread.created', 'thread.proposed-plan-upserted', 'thread.reverted']),
         apply: applyThreadProposedPlansProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
         eventTypes: new Set([
+          'thread.created',
           'thread.provider-switch-failed',
           'thread.provider-switched',
           'thread.activity-appended',
@@ -2912,12 +2999,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
-        eventTypes: new Set(['thread.session-set']),
+        eventTypes: new Set(['thread.created', 'thread.session-set']),
         apply: applyThreadSessionsProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
         eventTypes: new Set([
+          'thread.created',
           'thread.turn-start-requested',
           'thread.session-set',
           'thread.message-sent',
@@ -2930,6 +3018,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadOrchestratePlans,
         eventTypes: new Set([
+          'thread.created',
           'thread.orchestrate-plan-upserted',
           'thread.orchestrate-plan-response-requested',
           'thread.activity-appended',
@@ -2940,6 +3029,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.orchestrateRunExecutions,
         eventTypes: new Set([
+          'thread.created',
           'thread.orchestrate-run-execution-admitted',
           'thread.orchestrate-run-execution-updated',
         ]),
@@ -2957,7 +3047,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
-        eventTypes: new Set(['thread.activity-appended', 'thread.approval-response-requested']),
+        eventTypes: new Set([
+          'thread.created',
+          'thread.activity-appended',
+          'thread.approval-response-requested',
+        ]),
         apply: applyPendingApprovalsProjection,
       },
       {

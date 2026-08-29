@@ -59,6 +59,7 @@ export interface WorkLogEntry
   elapsedSeconds?: number
   taskId?: string
   model?: string
+  effort?: string | null
   subagentType?: string
   totalTokens?: number
   toolUses?: number

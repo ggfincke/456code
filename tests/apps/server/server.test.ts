@@ -1,10 +1,12 @@
 // tests/apps/server/server.test.ts
 // verifies server routes and websocket assembly
 
-import * as NodeHttpServer from '@effect/platform-node/NodeHttpServer'
+// @effect-diagnostics nodeBuiltinImport:off - the router seam binds a concrete loopback listener.
+import * as NodeHttpServerPlatform from '@effect/platform-node/NodeHttpServer'
 import * as NodeSocket from '@effect/platform-node/NodeSocket'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as NodeCrypto from 'node:crypto'
+import * as NodeHttp from 'node:http'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 
 import {
@@ -83,6 +85,25 @@ import { vi } from 'vite-plus/test'
 
 const TEST_EPOCH = DateTime.makeUnsafe('1970-01-01T00:00:00.000Z')
 
+// bind loopback explicitly so unrelated host listeners cannot intercept test traffic
+const loopbackHttpServerTestLayer = HttpServer.layerTestClient.pipe(
+  Layer.provide(
+    Layer.fresh(FetchHttpClient.layer).pipe(
+      Layer.provide(
+        Layer.succeed(FetchHttpClient.RequestInit)({
+          keepalive: false,
+        }),
+      ),
+    ),
+  ),
+  Layer.provideMerge(
+    NodeHttpServerPlatform.layer(NodeHttp.createServer, {
+      host: '127.0.0.1',
+      port: 0,
+    }),
+  ),
+)
+
 import * as ServerConfig from '../../../apps/server/src/config.ts'
 import * as ArchitectureQueryService from '../../../apps/server/src/cartographer/ArchitectureQueryService.ts'
 import * as ArchitectureProjectionService from '../../../apps/server/src/cartographer/ArchitectureProjectionService.ts'
@@ -104,6 +125,7 @@ import * as Keybindings from '../../../apps/server/src/keybindings.ts'
 import * as ExternalLauncher from '../../../apps/server/src/process/externalLauncher.ts'
 import * as RemoteOpenTargets from '../../../apps/server/src/environment/RemoteOpenTargets.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
+import { ThreadDeletionReactor } from '../../../apps/server/src/orchestration/Services/ThreadDeletionReactor.ts'
 import { OrchestrationListenerCallbackError } from '../../../apps/server/src/orchestration/Errors.ts'
 import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { SqlitePersistenceMemory } from '../../../apps/server/src/persistence/Layers/Sqlite.ts'
@@ -400,6 +422,7 @@ const buildAppUnderTest = (options?: {
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunner.ProjectSetupScriptRunner['Service']>
     terminalManager?: Partial<TerminalManager.TerminalManager['Service']>
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService['Service']>
+    threadDeletionReactor?: Partial<ThreadDeletionReactor['Service']>
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery['Service']>
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery['Service']>
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector['Service']>
@@ -931,6 +954,12 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(AttachmentLifecycleRepository)({
             markDispatchFailure: () => Effect.void,
+          }),
+          Layer.mock(ThreadDeletionReactor)({
+            start: () => Effect.void,
+            drain: Effect.void,
+            drainThrough: () => Effect.void,
+            ...options?.layers?.threadDeletionReactor,
           }),
         ),
       ),
@@ -1544,7 +1573,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       const response = yield* HttpClient.get('/')
       assert.equal(response.status, 200)
       assert.include(yield* response.text, 'router-static-ok')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('redirects to dev URL when configured', () =>
@@ -1559,7 +1588,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(response.status, 302)
       assert.equal(response.headers.location, 'http://127.0.0.1:5173/foo/bar?token=test-token')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('serves the public environment descriptor without requiring auth', () =>
@@ -1578,7 +1607,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(response.status, 200)
       assertBrowserApiCorsResponseHeaders(response.headers)
       assert.deepEqual(body, testEnvironmentDescriptor)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('reports unauthenticated session state without requiring auth', () =>
@@ -1608,7 +1637,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         'dpop-access-token',
       ])
       assert.isTrue(body.auth.sessionCookieName.startsWith('t3_session_'))
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('bootstraps a browser session and authenticates the session endpoint via cookie', () =>
@@ -1642,7 +1671,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(sessionResponse.status, 200)
       assert.equal(sessionBody.authenticated, true)
       assert.equal(sessionBody.sessionMethod, 'browser-session-cookie')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('exchanges a bootstrap grant for a scoped bearer access token', () =>
@@ -1686,7 +1715,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         'access:write',
         'relay:write',
       ])
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('persists token exchange client display metadata for authorized-client listings', () =>
@@ -1748,7 +1777,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ipAddress: '127.0.0.1',
         userAgent: 'undici',
       })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('streams pairing consumption changes in their causal revision order', () =>
@@ -1822,7 +1851,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       {
         assert.equal(events[2].payload.current, false)
       }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect(
@@ -1899,7 +1928,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         }>(dpopResponse)
         assert.equal(dpopState.authenticated, true)
         assert.equal(dpopState.sessionMethod, 'dpop-access-token')
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects replayed DPoP proofs across token exchanges', () =>
@@ -1953,7 +1982,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(replayBootstrap.body.code, 'auth_invalid')
       assert.equal(replayBootstrap.body.reason, 'invalid_credential')
       assert.equal(typeof replayBootstrap.body.traceId, 'string')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('ignores forwarded host headers when validating token exchange DPoP URLs', () =>
@@ -1989,7 +2018,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(bootstrap.response.status, 200)
       assert.equal(bootstrap.body.token_type, 'DPoP')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects token exchange DPoP proofs bound to spoofed forwarded hosts', () =>
@@ -2030,7 +2059,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(bootstrap.body.code, 'auth_invalid')
       assert.equal(bootstrap.body.reason, 'invalid_credential')
       assert.equal(typeof bootstrap.body.traceId, 'string')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('does not allow management-only access tokens to operate the environment', () =>
@@ -2094,7 +2123,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           assert.equal(rpcError.requiredScope, 'orchestration:read')
         }
       }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('includes CORS headers on remote auth success responses', () =>
@@ -2147,7 +2176,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(wsTicketResponse.status, 200)
       assertBrowserApiCorsResponseHeaders(wsTicketResponse.headers)
       assert.equal(typeof wsTicketBody.ticket, 'string')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -2169,7 +2198,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
         assert.equal(response.status, 204)
         assertBrowserApiCorsPreflightHeaders(response.headers)
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   for (const desktopOrigin of ['code456://app', 'code456-dev://app'])
@@ -2196,7 +2225,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           origin: desktopOrigin,
           credentials: true,
         })
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
     )
   }
 
@@ -2225,7 +2254,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(body.code, 'auth_invalid')
       assert.equal(body.reason, 'missing_credential')
       assert.equal(typeof body.traceId, 'string')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('issues authenticated one-time pairing credentials for additional clients', () =>
@@ -2254,7 +2283,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       const reusedResult = yield* bootstrapBrowserSession(body.credential)
       assert.equal(reusedResult.response.status, 401)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('issues pairing credentials for bearer sessions with access management scope', () =>
@@ -2277,7 +2306,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(response.status, 200)
       assert.isTrue(body.credential.length > 0)
       assert.equal(body.label, 'Hosted web')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects pairing credentials with an empty scope grant', () =>
@@ -2299,7 +2328,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(response.status, 400)
       assert.equal(body.code, 'invalid_request')
       assert.equal(body.reason, 'invalid_scope')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects recovery scope grants through the pairing route', () =>
@@ -2321,7 +2350,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(response.status, 400)
       assert.equal(body.code, 'invalid_request')
       assert.equal(body.reason, 'invalid_scope')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('mounts recovery diagnostics behind orchestration read authority', () =>
@@ -2346,7 +2375,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(response.status, 200)
       assert.deepEqual(body, { items: [], truncated: false, nextCursor: null })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects unauthenticated pairing credential requests', () =>
@@ -2358,7 +2387,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         body: yield* HttpBody.json({}),
       })
       assert.equal(response.status, 401)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('lists and revokes pairing links for access management sessions', () =>
@@ -2406,7 +2435,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.isTrue(listedLinks.some((entry) => entry.id === createdBody.id))
       assert.equal(revokeResponse.status, 200)
       assert.equal(revokedBootstrap.response.status, 401)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects pairing credential requests without access management scope', () =>
@@ -2448,7 +2477,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(pairedBody.code, 'insufficient_scope')
       assert.equal(pairedBody.requiredScope, 'access:write')
       assert.equal(typeof pairedBody.traceId, 'string')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('lists paired clients and revokes other sessions while keeping the administrator', () =>
@@ -2560,7 +2589,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(pairedClientPairingBody.code, 'auth_invalid')
       assert.equal(pairedClientPairingBody.reason, 'invalid_credential')
       assert.equal(typeof pairedClientPairingBody.traceId, 'string')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('separates access inventory reads from credential management writes', () =>
@@ -2621,7 +2650,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(readWriteBody.requiredScope, 'access:write')
       assert.equal(writeListResponse.status, 403)
       assert.equal(writeListBody.requiredScope, 'access:read')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('revokes an individual paired client session', () =>
@@ -2673,7 +2702,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(revokeResponse.status, 200)
       assert.equal(pairedClientPairingResponse.status, 401)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('allows reusing the desktop bootstrap credential', () =>
@@ -2690,7 +2719,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(first.response.status, 200)
       assert.equal(second.response.status, 200)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('accepts websocket rpc handshake with a bootstrapped browser session cookie', () =>
@@ -2716,7 +2745,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.deepEqual(response.remoteOpenTargets, [])
       assert.equal(response.shellResumeCompletionMarker, true)
       assert.equal(response.threadResumeCompletionMarker, true)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('does not block server config when editor discovery never resolves', () =>
@@ -2755,7 +2784,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
         assert.equal(error._tag, 'RpcClientError')
         assertInclude(String(error), 'SocketOpenError')
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -2791,7 +2820,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
         assert.equal(response.environment.environmentId, testEnvironmentDescriptor.environmentId)
         assert.equal(response.auth.policy, 'desktop-managed-local')
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('proxies browser OTLP trace exports through the server', () =>
@@ -2990,7 +3019,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           contentType: 'application/json',
         },
       ])
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('responds to browser OTLP trace preflight requests with CORS headers', () =>
@@ -3020,7 +3049,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         'dpop',
         'traceparent',
       ])
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -3096,7 +3125,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         assert.deepEqual(record.scope.attributes, {})
         assert.equal(record.resourceAttributes['service.name'], 't3-web')
         assert.equal(record.status?.code, String(span.status.code))
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc server.upsertKeybinding', () =>
@@ -3133,7 +3162,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.deepEqual(response.issues, [])
       assert.deepEqual(response.keybindings, [resolved])
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('shares one preview automation broker across websocket sessions', () =>
@@ -3174,7 +3203,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         assert.notEqual(replacementEvent.connectionId, firstConnectionId)
         assert.isTrue(Option.isSome(firstStreamClosed))
       }),
-    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    ).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects websocket rpc handshake when session authentication is missing', () =>
@@ -3210,7 +3239,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         failureMessage.includes('Unauthorized') ||
           failureMessage.includes('An error occurred during Open'),
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc subscribeServerConfig streams snapshot then update', () =>
@@ -3283,7 +3312,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         type: 'keybindingsUpdated',
         payload: { keybindings: [], issues: [] },
       })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc subscribeServerConfig emits provider status updates', () =>
@@ -3339,7 +3368,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         type: 'providerStatuses',
         payload: { providers: nextProviders },
       })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -3390,7 +3419,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         assert.equal(first?.sequence, 1)
         assert.equal(second?.type, 'ready')
         assert.equal(second?.sequence, 2)
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc projects.searchEntries', () =>
@@ -3420,7 +3449,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.isAtLeast(response.entries.length, 1)
       assert.isTrue(response.entries.some((entry) => entry.path === 'needle-file.ts'))
       assert.equal(response.truncated, false)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('routes websocket rpc projects.listEntries and projects.readFile', () =>
@@ -3457,7 +3486,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         byteLength: 26,
         truncated: false,
       })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('reads MDX only from the authenticated thread workspace context', () =>
@@ -3540,7 +3569,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         assert.fail('Expected a ProjectReadMdxDocumentError')
       }
       assert.equal(response.missing.failure.failure, 'workspace_context_not_found')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('dispatches explicit architecture preparation only for live authorized owners', () =>
@@ -3689,7 +3718,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       {
         assert.equal(denied.requiredScope, 'orchestration:operate')
       }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes native architecture projections through read-scoped authority', () =>
@@ -3839,7 +3868,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ),
         true,
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes diff-analysis RPCs with target reads, owner masking, and scoped access', () =>
@@ -4049,7 +4078,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       {
         assert.equal(scoped.requestDenied.requiredScope, 'orchestration:operate')
       }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('serves scoped proposal state and exact orchestrate links', () =>
@@ -4310,7 +4339,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       ])
       assert.equal(response.attempt?.outcome, 'matched')
       Reflect.deleteProperty(globalThis, '__proposalNarrativeExecuted')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('routes websocket rpc projects.searchEntries excludes gitignored files', () =>
@@ -4368,7 +4397,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(response.entries.length, 0)
       assert.equal(response.truncated, false)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('preserves structured workspace rpc failures', () =>
@@ -4484,7 +4513,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(browseError.failure, 'read_directory_failed')
       assert.equal(browseError.parentPath, missingBrowseParent)
       assert.isDefined(browseError.cause)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('reports workspace root stat failures without relabeling them as missing', () =>
@@ -4520,7 +4549,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(error.failure, 'workspace_root_stat_failed')
       assert.equal(error.normalizedCwd, workspaceRoot)
       assert.equal(error.detail, 'validate-existing')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc projects.writeFile', () =>
@@ -4546,7 +4575,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(response.relativePath, 'nested/created.txt')
       const persisted = yield* fs.readFileString(path.join(workspaceDir, 'nested', 'created.txt'))
       assert.equal(persisted, 'written-by-rpc')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('creates a missing workspace root during websocket project.create dispatch', () =>
@@ -4581,7 +4610,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.isAtLeast(response.sequence, 0)
       assert.equal(stat.type, 'Directory')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('rejects imported continuation consent when the target source identity changed', () =>
@@ -4663,7 +4692,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         'no longer resolves to the accepted continuation source',
       )
       assert.equal(dispatch.mock.calls.length, 0)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc projects.writeFile errors', () =>
@@ -4699,7 +4728,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(writeError.failure, 'workspace_path_outside_root')
       assert.isDefined(writeError.cause)
       assert.notProperty(writeError, 'contents')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc shell.openInEditor errors', () =>
@@ -4734,7 +4763,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.deepEqual(openedInput, { cwd: '/tmp/project', editor: 'cursor' })
       assertFailure(result, externalLauncherError)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc git methods', () =>
@@ -5009,7 +5038,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ),
       )
       assert.equal(diffPreview.sources[0]?.diff, 'dirty-diff')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc git.pull errors', () =>
@@ -5095,7 +5124,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assertFailure(result, gitError)
       assert.equal(invalidationCalls, 0)
       assert.equal(statusCalls, 0)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc git.runStackedAction errors after refreshing git status', () =>
@@ -5183,7 +5212,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assertFailure(result, gitError)
       assert.equal(invalidationCalls, 0)
       assert.equal(statusCalls, 0)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('completes websocket rpc git.pull before background git status refresh finishes', () =>
@@ -5234,7 +5263,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(result.status, 'pulled')
       assertTrue(elapsedMs < 1_000)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -5310,7 +5339,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt
 
         assertTrue(elapsedMs < 1_000)
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -5391,7 +5420,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         )
 
         yield* Deferred.await(localRefreshStarted)
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc orchestration methods', () =>
@@ -5503,7 +5532,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ),
       )
       assert.equal(fullDiffResult.diff, 'full-diff')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc orchestration shell snapshot errors', () =>
@@ -5532,7 +5561,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assertTrue(result.failure._tag === 'OrchestrationGetSnapshotError')
       assertTrue(result.failure.cause instanceof Error)
       assert.include(result.failure.cause.message, projectionError.message)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -5916,7 +5945,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         )
         assert.equal(importedCandidate?.alreadyImportedThreadId, threads[0]?.id)
         assert.equal(importedCandidate?.alreadyImportedProviderInstanceId, providerInstanceId)
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('marks an empty shell catch-up replay as synchronized when requested', () =>
@@ -5941,7 +5970,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
 
       assert.deepEqual(Option.getOrThrow(firstItem), { kind: 'synchronized' })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('marks a socket thread snapshot as synchronized when requested', () =>
@@ -5969,7 +5998,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(items[0]?.kind, 'snapshot')
       assert.deepEqual(items[1], { kind: 'synchronized' })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('buffers shell events published while the fallback snapshot loads', () =>
@@ -6026,7 +6055,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(items[0]?.kind, 'snapshot')
       assert.equal(items[1]?.kind, 'thread-removed')
       assert.deepEqual(items[2], { kind: 'synchronized' })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('buffers orchestrate plan upserts published while the initial snapshot loads', () =>
@@ -6106,7 +6135,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         items[1]?.kind === 'event' ? items[1].event.type : null,
         'thread.orchestrate-plan-upserted',
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('replays an orchestrate plan response before the synchronization marker', () =>
@@ -6171,7 +6200,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
       assert.equal(items[0]?.kind === 'event' ? items[0].event.type : null, responseEvent.type)
       assert.isFalse(Array.from(items).some((item) => item.kind === 'snapshot'))
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('subscribeShell sends a fresh snapshot instead of replaying a large gap', () =>
@@ -6236,7 +6265,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       }
       assert.equal(second?.kind, 'synchronized')
       assert.equal(readEventsCalls, 0)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('subscribeShell replaces a cursor ahead of the authoritative head', () =>
@@ -6278,7 +6307,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(Option.getOrThrow(first).kind, 'snapshot')
       assert.equal(readEventsCalls, 0)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('subscribeThread sends a fresh snapshot instead of replaying a large gap', () =>
@@ -6319,7 +6348,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(items[0]?.kind, 'snapshot')
       assert.deepEqual(items[1], { kind: 'synchronized' })
       assert.equal(readEventsCalls, 0)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('subscribeShell coalesces a per-thread burst without stalling other threads', () =>
@@ -6407,7 +6436,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(collected[2]?.kind, 'synchronized')
       assert.equal(shellFetches.filter((id) => id === busyThreadId).length, 1)
       assert.equal(replayLimit, 50)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('subscribeShell coalesces live bursts after the synchronization marker', () =>
@@ -6514,7 +6543,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.include(liveUpsertedIds, busyThreadId)
       assert.include(liveUpsertedIds, newThreadId)
       assert.isBelow(shellFetches.filter((id) => id === busyThreadId).length, 20)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('subscribeShell coalescing still emits a removal for a deleted thread', () =>
@@ -6574,7 +6603,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       const [first] = Array.from(items)
       assert.equal(first?.kind, 'thread-removed')
       assert.equal(first?.kind === 'thread-removed' ? first.threadId : null, goneThreadId)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('subscribeShell retries a transient shell projection refetch failure', () =>
@@ -6638,7 +6667,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(first?.kind, 'thread-upserted')
       assert.equal(first?.kind === 'thread-upserted' ? first.thread.id : null, threadId)
       assert.equal(attempts, 2)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('subscribeShell coalescing still removes a project after a trailing update', () =>
@@ -6697,7 +6726,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       const [first] = Array.from(items)
       assert.equal(first?.kind, 'project-removed')
       assert.equal(first?.kind === 'project-removed' ? first.projectId : null, projectId)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('dispatches archive without transport-local provider or terminal cleanup', () =>
@@ -6766,7 +6795,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         dispatchedCommands.map((command) => command.type),
         ['thread.archive'],
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('archives without consulting transport-local thread session state', () =>
@@ -6844,7 +6873,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         dispatchedCommands.map((command) => command.type),
         ['thread.archive'],
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect.each([
@@ -6925,7 +6954,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         dispatchedCommands.map((command) => command.type),
         ['thread.archive'],
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('does not invoke the obsolete session-stop path during archive', () =>
@@ -6997,7 +7026,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         dispatchedCommands.map((command) => command.type),
         ['thread.archive'],
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect(
@@ -7202,7 +7231,105 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         {
           assert.equal(finalCommand.bootstrap, undefined)
         }
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('drains deletion cleanup through the re-created thread event', () =>
+    Effect.gen(function* ()
+    {
+      const trace: Array<string> = []
+      const drainRequested = yield* Deferred.make<void>()
+      const cleanupDone = yield* Deferred.make<void>()
+      yield* buildAppUnderTest({
+        layers: {
+          threadDeletionReactor: {
+            drainThrough: (sequence) =>
+              Effect.gen(function* ()
+              {
+                trace.push(`drain:${sequence}`)
+                yield* Deferred.succeed(drainRequested, undefined)
+                yield* Deferred.await(cleanupDone)
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() =>
+              {
+                trace.push(command.type)
+                return { sequence: trace.length }
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      })
+
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      const threadId = ThreadId.make('thread-retry-after-delete')
+      const wsUrl = yield* getWsServerUrl('/ws')
+
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* ()
+          {
+            const directCreate = yield* Effect.forkChild(
+              client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+                type: 'thread.create',
+                commandId: CommandId.make('cmd-retry-create'),
+                threadId,
+                projectId: defaultProjectId,
+                title: 'Retry',
+                modelSelection: defaultModelSelection,
+                runtimeMode: 'full-access',
+                interactionMode: 'default',
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              }),
+            )
+            yield* Deferred.await(drainRequested)
+            assert.deepEqual(trace, ['thread.create', 'drain:1'])
+            yield* Deferred.succeed(cleanupDone, undefined)
+            yield* Fiber.join(directCreate)
+          }),
+        ),
+      )
+      assert.deepEqual(trace, ['thread.create', 'drain:1'])
+
+      trace.length = 0
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: 'thread.turn.start',
+            commandId: CommandId.make('cmd-retry-bootstrap'),
+            threadId,
+            message: {
+              messageId: MessageId.make('msg-retry-bootstrap'),
+              role: 'user',
+              text: 'hello',
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: 'Retry',
+                modelSelection: defaultModelSelection,
+                runtimeMode: 'full-access',
+                interactionMode: 'default',
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+              runSetupScript: false,
+            },
+            createdAt,
+          }),
+        ),
+      )
+      assert.deepEqual(trace, ['thread.create', 'drain:1', 'thread.turn.start'])
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('falls back to the local base branch when startFromOrigin is set without origin', () =>
@@ -7306,7 +7433,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         baseRefName: 'main',
         path: null,
       })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('records setup-script failures without aborting bootstrap turn start', () =>
@@ -7413,7 +7540,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         worktreePath: '/tmp/bootstrap-worktree',
       })
       assertTrue(dispatchedCommands.every((command) => command.type !== 'thread.delete'))
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('does not misattribute setup activity dispatch failures as setup launch failures', () =>
@@ -7541,7 +7668,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         setupActivities.every((command) => command.activity.kind !== 'setup-script.failed'),
       )
       assertTrue(dispatchedCommands.every((command) => command.type !== 'thread.delete'))
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('cleans up created bootstrap threads when worktree creation defects', () =>
@@ -7618,7 +7745,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         dispatchedCommands.map((command) => command.type),
         ['thread.create', 'thread.delete'],
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('does not report a deleted bootstrap thread when cleanup fails', () =>
@@ -7714,7 +7841,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         dispatchedCommands.map((command) => command.type),
         ['thread.create', 'thread.delete'],
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc terminal methods', () =>
@@ -7811,7 +7938,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           }),
         ),
       )
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
   it.effect('routes websocket rpc terminal.write errors', () =>
@@ -7841,6 +7968,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
 
       assertFailure(result, terminalError)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 })

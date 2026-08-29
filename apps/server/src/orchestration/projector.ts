@@ -609,6 +609,12 @@ export function projectEvent(
           threads: existing
             ? nextBase.threads.map((entry) => (entry.id === thread.id ? thread : entry))
             : [...nextBase.threads, thread],
+          orchestrateRuns: (nextBase.orchestrateRuns ?? []).filter(
+            (run) => run.threadId !== thread.id,
+          ),
+          orchestrateRunExecutions: (nextBase.orchestrateRunExecutions ?? []).filter(
+            (execution) => execution.threadId !== thread.id,
+          ),
         }
       })
 
