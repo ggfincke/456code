@@ -37,6 +37,8 @@ import {
 } from '../logicalProject'
 import { useUiStateStore } from '../uiStateStore'
 import { syncBrowserChromeTheme } from '../hooks/useTheme'
+import { useEnvironmentThemeSync } from '../hooks/useEnvironmentTheme'
+import { useDefaultThemeAdoption } from '../hooks/useDefaultTheme'
 import { configureClientTracing } from '../observability/clientTracing'
 import { resolveInitialServerAuthGateState } from '../environments/primary'
 import { hasHostedPairingRequest, isHostedStaticApp } from '../hostedPairing'
@@ -139,6 +141,7 @@ function RootRouteView()
       <AnchoredToastProvider>
         <DocumentTitleSync />
         <GlassAppearanceSync />
+        <EnvironmentThemeSync />
         {/* mounted here rather than inside a thread view so a turn that ends
             while the user is somewhere else still notifies. */}
         {primaryEnvironmentAuthenticated ? <ThreadAttentionNotifier /> : null}
@@ -152,6 +155,13 @@ function RootRouteView()
       </AnchoredToastProvider>
     </ToastProvider>
   )
+}
+
+function EnvironmentThemeSync()
+{
+  useEnvironmentThemeSync()
+  useDefaultThemeAdoption()
+  return null
 }
 
 function GlassAppearanceSync()

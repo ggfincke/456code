@@ -16,6 +16,7 @@ import { projectCommand } from './cli/project.ts'
 import { pairCommand } from './cli/pair.ts'
 import { runServerCommand, serveCommand, startCommand } from './cli/server.ts'
 import { serviceCommand } from './cli/service.ts'
+import { themeCommand } from './cli/theme.ts'
 
 export { createCartographerAnalyzerIdentifier } from './cartographer/CartographerAnalyzer.ts'
 
@@ -32,6 +33,7 @@ export const makeCli = () =>
       pairCommand,
       projectCommand,
       serviceCommand,
+      themeCommand,
     ]),
   )
 

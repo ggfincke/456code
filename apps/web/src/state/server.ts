@@ -4,6 +4,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
+  type EnvironmentTheme,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
@@ -23,6 +24,8 @@ import { environmentSession } from './session'
 
 export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRuntime, {
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
+  // primary environments can change without reconnecting their subscriptions
+  environmentThemes: true,
 })
 export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
@@ -34,6 +37,7 @@ interface PrimaryServerState
   readonly config: ServerConfig | null
   readonly latestEvent: ServerConfigStreamEvent | null
   readonly welcome: ServerLifecycleWelcomePayload | null
+  readonly source: 'live' | 'cache' | null
 }
 
 const EMPTY_AVAILABLE_EDITORS: ReadonlyArray<EditorId> = []
@@ -42,6 +46,7 @@ const EMPTY_PRIMARY_SERVER_STATE: PrimaryServerState = {
   config: null,
   latestEvent: null,
   welcome: null,
+  source: null,
 }
 
 export const primaryServerStateAtom = Atom.make((get): PrimaryServerState =>
@@ -62,6 +67,7 @@ export const primaryServerStateAtom = Atom.make((get): PrimaryServerState =>
     config: get(serverEnvironment.configValueAtom(environmentId)),
     latestEvent: configProjection?.latestEvent ?? null,
     welcome,
+    source: configProjection?.source ?? null,
   }
 }).pipe(Atom.withLabel('web-primary-server-state'))
 
@@ -69,6 +75,16 @@ export const primaryServerConfigAtom = Atom.make(
   (get): ServerConfig | null => get(primaryServerStateAtom).config,
 ).pipe(Atom.withLabel('web-primary-server-config'))
 
+export const primaryServerConfigSourceAtom = Atom.make(
+  (get) => get(primaryServerStateAtom).source,
+).pipe(Atom.withLabel('web-primary-server-config-source'))
+
+const EMPTY_ENVIRONMENT_THEMES: ReadonlyArray<EnvironmentTheme> = []
+
+export const primaryServerEnvironmentThemesAtom = Atom.make(
+  (get): ReadonlyArray<EnvironmentTheme> =>
+    get(primaryServerConfigAtom)?.environmentThemes ?? EMPTY_ENVIRONMENT_THEMES,
+).pipe(Atom.withLabel('web-primary-server-environment-themes'))
 export const primaryServerConfigEventAtom = Atom.make(
   (get): ServerConfigStreamEvent | null => get(primaryServerStateAtom).latestEvent,
 ).pipe(Atom.withLabel('web-primary-server-config-event'))

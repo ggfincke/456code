@@ -1,24 +1,37 @@
 // apps/web/src/hooks/useTheme.ts
 // owns stored theme preference and browser/desktop synchronization
-import type { DesktopBridge } from '@t3tools/contracts'
+import { EnvironmentThemeId, type DesktopBridge, type DesktopTheme } from '@t3tools/contracts'
 import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
+import type { ThemeDefinition } from '@t3tools/shared/themePalettes'
+import * as Equal from 'effect/Equal'
 import * as Schema from 'effect/Schema'
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 
-const ThemePreference = Schema.Literals(['light', 'dark', 'ocean', 'system'])
+import { applyThemeColors } from '../themePalette'
+
+const ThemePreference = Schema.Union([
+  Schema.Literals(['light', 'dark', 'ocean', 'system']),
+  EnvironmentThemeId,
+])
+const isThemePreference = Schema.is(ThemePreference)
 type Theme = typeof ThemePreference.Type
 type ThemeSnapshot = {
   theme: Theme
   systemDark: boolean
+  environmentThemes: ReadonlyArray<ThemeDefinition>
+  userSelectionRevision: number
 }
 
 type DesktopThemeBridge = Pick<DesktopBridge, 'setTheme'>
 
 const STORAGE_KEY = '456code:theme'
 const MEDIA_QUERY = '(prefers-color-scheme: dark)'
+const EMPTY_ENVIRONMENT_THEMES: ReadonlyArray<ThemeDefinition> = []
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
   theme: 'system',
   systemDark: false,
+  environmentThemes: EMPTY_ENVIRONMENT_THEMES,
+  userSelectionRevision: 0,
 }
 const THEME_COLOR_META_NAME = 'theme-color'
 const DYNAMIC_THEME_COLOR_SELECTOR = `meta[name="${THEME_COLOR_META_NAME}"][data-dynamic-theme-color="true"]`
@@ -59,9 +72,47 @@ export const isDesktopThemeSyncError = Schema.is(DesktopThemeSyncError)
 
 let listeners: Array<() => void> = []
 let lastSnapshot: ThemeSnapshot | null = null
-let lastDesktopTheme: Theme | null = null
+let lastDesktopTheme: DesktopTheme | null = null
 let lastAppliedTheme: ThemeSnapshot | null = null
 let themeStorageReadFailure: ThemeStorageError | null = null
+let environmentThemes = EMPTY_ENVIRONMENT_THEMES
+let userSelectionRevision = 0
+
+export function isThemeAvailable(theme: string): boolean
+{
+  return (
+    theme === 'system' ||
+    theme === 'light' ||
+    theme === 'dark' ||
+    theme === 'ocean' ||
+    environmentThemes.some((definition) => definition.id === theme)
+  )
+}
+
+export function setEnvironmentThemes(themes: ReadonlyArray<ThemeDefinition>): void
+{
+  if (Equal.equals(environmentThemes, themes)) return
+  environmentThemes = themes
+  applyTheme(getStored(), true)
+  emitChange()
+}
+
+function resolvedAppearance(theme: Theme, systemDark = getSystemDark()): 'light' | 'dark'
+{
+  if (theme === 'light') return 'light'
+  if (theme === 'dark' || theme === 'ocean') return 'dark'
+  return (
+    environmentThemes.find((definition) => definition.id === theme)?.appearance ??
+    (systemDark ? 'dark' : 'light')
+  )
+}
+
+function desktopThemePreference(theme: Theme): DesktopTheme
+{
+  if (theme === 'light' || theme === 'dark' || theme === 'system') return theme
+  if (theme === 'ocean') return 'dark'
+  return environmentThemes.find((definition) => definition.id === theme)?.appearance ?? 'system'
+}
 
 function emitChange()
 {
@@ -93,7 +144,7 @@ export function readThemePreference(): Theme
       cause,
     })
   }
-  if (raw === 'light' || raw === 'dark' || raw === 'ocean' || raw === 'system') return raw
+  if (raw !== null && isThemePreference(raw)) return raw
   return DEFAULT_THEME_SNAPSHOT.theme
 }
 
@@ -203,8 +254,12 @@ export function syncBrowserChromeTheme()
 function applyTheme(theme: Theme, suppressTransitions = false)
 {
   if (typeof document === 'undefined' || typeof window === 'undefined') return
-  const systemDark = theme === 'system' ? getSystemDark() : false
-  if (lastAppliedTheme?.theme === theme && lastAppliedTheme.systemDark === systemDark)
+  const systemDark = getSystemDark()
+  if (
+    lastAppliedTheme?.theme === theme &&
+    lastAppliedTheme.systemDark === systemDark &&
+    lastAppliedTheme.environmentThemes === environmentThemes
+  )
   {
     syncDesktopTheme(theme)
     return
@@ -215,10 +270,11 @@ function applyTheme(theme: Theme, suppressTransitions = false)
     document.documentElement.classList.add('no-transitions')
   }
   const isOcean = theme === 'ocean'
-  const isDark = isOcean || theme === 'dark' || (theme === 'system' && systemDark)
+  const isDark = resolvedAppearance(theme, systemDark) === 'dark'
   document.documentElement.classList.toggle('ocean', isOcean)
   document.documentElement.classList.toggle('dark', isDark)
-  lastAppliedTheme = { theme, systemDark }
+  applyThemeColors(environmentThemes.find((definition) => definition.id === theme)?.colors ?? null)
+  lastAppliedTheme = { theme, systemDark, environmentThemes, userSelectionRevision }
   syncBrowserChromeTheme()
   syncDesktopTheme(theme)
   if (suppressTransitions)
@@ -240,7 +296,7 @@ export async function syncDesktopThemePreference(
 {
   try
   {
-    await bridge.setTheme(theme === 'ocean' ? 'dark' : theme)
+    await bridge.setTheme(desktopThemePreference(theme))
   }
   catch (cause)
   {
@@ -252,12 +308,13 @@ export function syncDesktopTheme(theme: Theme)
 {
   if (typeof window === 'undefined') return
   const bridge = window.desktopBridge
-  if (!bridge || typeof bridge.setTheme !== 'function' || lastDesktopTheme === theme)
+  const desktopTheme = desktopThemePreference(theme)
+  if (!bridge || typeof bridge.setTheme !== 'function' || lastDesktopTheme === desktopTheme)
   {
     return
   }
 
-  lastDesktopTheme = theme
+  lastDesktopTheme = desktopTheme
   void syncDesktopThemePreference(bridge, theme).catch((cause: unknown) =>
   {
     const error = isDesktopThemeSyncError(cause)
@@ -267,7 +324,7 @@ export function syncDesktopTheme(theme: Theme)
       theme: error.theme,
       ...safeErrorLogAttributes(error),
     })
-    if (lastDesktopTheme === theme)
+    if (lastDesktopTheme === desktopTheme)
     {
       lastDesktopTheme = null
     }
@@ -284,14 +341,20 @@ function getSnapshot(): ThemeSnapshot
 {
   if (typeof window === 'undefined') return DEFAULT_THEME_SNAPSHOT
   const theme = getStored()
-  const systemDark = theme === 'system' ? getSystemDark() : false
+  const systemDark = getSystemDark()
 
-  if (lastSnapshot && lastSnapshot.theme === theme && lastSnapshot.systemDark === systemDark)
+  if (
+    lastSnapshot &&
+    lastSnapshot.theme === theme &&
+    lastSnapshot.systemDark === systemDark &&
+    lastSnapshot.environmentThemes === environmentThemes &&
+    lastSnapshot.userSelectionRevision === userSelectionRevision
+  )
   {
     return lastSnapshot
   }
 
-  lastSnapshot = { theme, systemDark }
+  lastSnapshot = { theme, systemDark, environmentThemes, userSelectionRevision }
   return lastSnapshot
 }
 
@@ -310,7 +373,7 @@ function subscribe(listener: () => void): () => void
   const mq = typeof window.matchMedia === 'function' ? window.matchMedia(MEDIA_QUERY) : null
   const handleChange = () =>
   {
-    if (getStored() === 'system') applyTheme('system', true)
+    applyTheme(getStored(), true)
     emitChange()
   }
   mq?.addEventListener('change', handleChange)
@@ -321,6 +384,7 @@ function subscribe(listener: () => void): () => void
     if (e.key === STORAGE_KEY)
     {
       themeStorageReadFailure = null
+      userSelectionRevision += 1
       applyTheme(getStored(), true)
       emitChange()
     }
@@ -335,54 +399,60 @@ function subscribe(listener: () => void): () => void
   }
 }
 
+function commitThemePreference(next: Theme, human: boolean): boolean
+{
+  if (
+    typeof window === 'undefined' ||
+    !isThemePreference(next) ||
+    (!isThemeAvailable(next) && (!human || next !== getStored()))
+  )
+    return false
+  try
+  {
+    writeThemePreference(next)
+  }
+  catch (cause)
+  {
+    const error = isThemeStorageError(cause)
+      ? cause
+      : new ThemeStorageError({ operation: 'write', storageKey: STORAGE_KEY, theme: next, cause })
+    console.error(error.message, {
+      operation: error.operation,
+      storageKey: error.storageKey,
+      theme: next,
+      ...safeErrorLogAttributes(error),
+    })
+    return false
+  }
+  if (human) userSelectionRevision += 1
+  applyTheme(next, true)
+  emitChange()
+  return true
+}
+
+export function adoptEnvironmentTheme(next: string): boolean
+{
+  return isThemePreference(next) && commitThemePreference(next, false)
+}
+
 export function useTheme()
 {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
   const theme = snapshot.theme
-
-  const resolvedTheme: 'light' | 'dark' =
-    theme === 'system'
-      ? snapshot.systemDark
-        ? 'dark'
-        : 'light'
-      : theme === 'ocean'
-        ? 'dark'
-        : theme
-
-  const setTheme = useCallback((next: Theme) =>
-  {
-    if (typeof window === 'undefined') return
-    try
-    {
-      writeThemePreference(next)
-    }
-    catch (cause)
-    {
-      const error = isThemeStorageError(cause)
-        ? cause
-        : new ThemeStorageError({
-            operation: 'write',
-            storageKey: STORAGE_KEY,
-            theme: next,
-            cause,
-          })
-      console.error(error.message, {
-        operation: error.operation,
-        storageKey: error.storageKey,
-        theme: next,
-        ...safeErrorLogAttributes(error),
-      })
-      return
-    }
-    applyTheme(next, true)
-    emitChange()
-  }, [])
+  const resolvedTheme = resolvedAppearance(theme, snapshot.systemDark)
+  const setTheme = useCallback((next: Theme) => commitThemePreference(next, true), [])
 
   // keep DOM in sync on mount/change
   useEffect(() =>
   {
     applyTheme(theme)
-  }, [theme])
+  }, [theme, snapshot.environmentThemes])
 
-  return { theme, setTheme, resolvedTheme } as const
+  return {
+    theme,
+    setTheme,
+    resolvedTheme,
+    environmentThemes: snapshot.environmentThemes,
+    userSelectionRevision: snapshot.userSelectionRevision,
+  } as const
 }

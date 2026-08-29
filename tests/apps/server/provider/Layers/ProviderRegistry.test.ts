@@ -318,6 +318,7 @@ function makeMutableServerSettingsService(
       start: Effect.void,
       ready: Effect.void,
       getSettings: Ref.get(settingsRef),
+      streamCurrentAndChanges: Stream.fromEffect(Ref.get(settingsRef)),
       updateSettings: (patch) =>
         Effect.gen(function* ()
         {

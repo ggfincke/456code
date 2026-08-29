@@ -44,6 +44,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
   attachmentUploads: Schema.optionalKey(Schema.Boolean),
+  environmentThemes: Schema.optionalKey(Schema.Boolean),
   fileAttachments: Schema.optionalKey(
     Schema.Struct({
       maxUploadBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),

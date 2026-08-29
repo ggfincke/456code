@@ -13,6 +13,7 @@ import { createModelSelection } from '@t3tools/shared/model'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Duration from 'effect/Duration'
+import * as Deferred from 'effect/Deferred'
 import * as FileSystem from 'effect/FileSystem'
 import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
@@ -103,6 +104,39 @@ const recordRuntimeProviderUsage = (provider: string, instanceId: string | null 
 
 it.layer(NodeServices.layer)('server settings', (it) =>
 {
+  it.effect('reads current settings before changes and does not replay queued stale values', () =>
+    Effect.gen(function* ()
+    {
+      const settings = yield* ServerSettingsModule.ServerSettingsService
+      yield* settings.updateSettings({ enableAgentBrowserAccess: false })
+      const initialSeen = yield* Deferred.make<void>()
+      const releaseInitial = yield* Deferred.make<void>()
+      let first = true
+      const reader = yield* settings.streamCurrentAndChanges.pipe(
+        Stream.tap(() =>
+          Effect.gen(function* ()
+          {
+            if (!first) return
+            first = false
+            yield* Deferred.succeed(initialSeen, undefined)
+            yield* Deferred.await(releaseInitial)
+          }),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      )
+      yield* Deferred.await(initialSeen)
+      yield* settings.updateSettings({ enableProviderUpdateChecks: false })
+      yield* settings.updateSettings({ enableAgentBrowserAccess: true })
+      yield* Deferred.succeed(releaseInitial, undefined)
+      const values = yield* Fiber.join(reader)
+      assert.isFalse(values[0]?.enableAgentBrowserAccess)
+      assert.isTrue(values[1]?.enableAgentBrowserAccess)
+      assert.isFalse(values[1]?.enableProviderUpdateChecks)
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
   it.effect('preserves context when reading a provider environment secret fails', () =>
   {
     const platformCause = PlatformError.systemError({
