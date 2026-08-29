@@ -75,6 +75,8 @@ import {
   markPromotedDraftThreads,
   markPromotedDraftThreadsByRef,
   type ComposerImageAttachment,
+  type ComposerFileAttachment,
+  composerFileNeedsReattach,
   useComposerDraftStore,
   DraftId,
 } from '../../../apps/web/src/composerDraftStore'
@@ -190,6 +192,88 @@ function draftByKey(key: string)
 {
   return useComposerDraftStore.getState().draftsByThreadKey[key] ?? undefined
 }
+
+describe('composerDraftStore files', () =>
+{
+  beforeEach(() => resetComposerDraftStore())
+
+  it('round-trips uploaded IDs and unfinished markers without persisting local bytes or losing explicit intent', () =>
+  {
+    const target = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make('file-roundtrip'))
+    const bytes = new File(['pdf'], 'notes.pdf', { type: 'application/pdf' })
+    const file: ComposerFileAttachment = {
+      type: 'file',
+      id: 'uploaded',
+      name: bytes.name,
+      mimeType: bytes.type,
+      sizeBytes: bytes.size,
+      file: bytes,
+    }
+    const store = useComposerDraftStore.getState()
+    store.addFiles(target, [file, { ...file, id: 'unfinished', name: 'other.pdf' }])
+    store.setFileUpload(target, file.id, TEST_ENVIRONMENT_ID, 'server-copy')
+    store.setModelSelection(
+      target,
+      { instanceId: CODEX_INSTANCE, model: 'custom/model' },
+      { explicit: true },
+    )
+    const { partialize, merge } = useComposerDraftStore.persist.getOptions()
+    const persisted = partialize!(useComposerDraftStore.getState())
+    expect(JSON.stringify(persisted)).not.toContain('"file":')
+    const restored = merge!(persisted, useComposerDraftStore.getInitialState())
+    const draft = restored.draftsByThreadKey[scopedThreadKey(target)]!
+    expect(draft.modelSelectionExplicit).toBe(true)
+    expect(draft.files[0]).toMatchObject({
+      file: null,
+      uploadedAttachmentId: 'server-copy',
+      uploadEnvironmentId: TEST_ENVIRONMENT_ID,
+    })
+    expect(composerFileNeedsReattach(draft.files[1]!)).toBe(true)
+    useComposerDraftStore.setState(restored)
+    store.addFiles(target, [{ ...file, id: 'reattached', name: 'other.pdf' }])
+    expect(useComposerDraftStore.getState().getComposerDraft(target)?.files).toHaveLength(2)
+    expect(useComposerDraftStore.getState().getComposerDraft(target)?.files[1]?.file).toBe(bytes)
+  })
+
+  it('keeps file-only server copies in their environment while moving byte-backed files and enforcing the combined cap', () =>
+  {
+    const source = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make('file-source'))
+    const destination = scopeThreadRef(
+      EnvironmentId.make('other-file-environment'),
+      ThreadId.make('file-target'),
+    )
+    const bytes = new File(['pdf'], 'move.pdf', { type: 'application/pdf' })
+    const file: ComposerFileAttachment = {
+      type: 'file',
+      id: 'local',
+      name: bytes.name,
+      mimeType: bytes.type,
+      sizeBytes: bytes.size,
+      file: bytes,
+      uploadedAttachmentId: 'old-copy',
+      uploadEnvironmentId: TEST_ENVIRONMENT_ID,
+    }
+    const store = useComposerDraftStore.getState()
+    store.addFiles(source, [file, { ...file, id: 'server-only', name: 'keep.pdf', file: null }])
+    store.moveComposerPromptAndImages(source, destination)
+    expect(store.getComposerDraft(source)?.files.map((entry) => entry.id)).toEqual(['server-only'])
+    expect(store.getComposerDraft(destination)?.files[0]).toMatchObject({
+      id: 'local',
+      file: bytes,
+    })
+    expect(store.getComposerDraft(destination)?.files[0]?.uploadedAttachmentId).toBeUndefined()
+    store.addImages(
+      destination,
+      Array.from({ length: 8 }, (_, index) =>
+        makeImage({ id: `limit-${index}`, name: `image-${index}.png`, previewUrl: '' }),
+      ),
+    )
+    expect(
+      store.getComposerDraft(destination)!.images.length +
+        store.getComposerDraft(destination)!.files.length,
+    ).toBe(8)
+  })
+})
 
 describe('composerDraftStore addImages', () =>
 {

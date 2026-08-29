@@ -4,7 +4,10 @@ import { ModelSelection, ProviderInstanceId } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 import { create } from 'zustand'
 
-import { PersistedComposerImageAttachment } from '../composerDraftStore'
+import {
+  PersistedComposerFileAttachment,
+  PersistedComposerImageAttachment,
+} from '../composerDraftStore'
 import { createMemoryStorage, type StateStorage } from '../lib/storage'
 
 export const PROMPT_STASH_STORAGE_KEY = '456code:prompt-stash:v1'
@@ -24,6 +27,7 @@ const StashEntrySchema = Schema.Struct({
   createdAt: Schema.String,
   prompt: Schema.String,
   attachments: Schema.Array(PersistedComposerImageAttachment),
+  files: Schema.optionalKey(Schema.Array(PersistedComposerFileAttachment)),
   providerInstanceId: Schema.NullOr(ProviderInstanceId),
   modelSelection: Schema.NullOr(ModelSelection),
   // images that exceeded the attachment budget

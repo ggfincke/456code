@@ -119,6 +119,7 @@ import { isModelPickerOpen } from '../modelPickerVisibility'
 import { useShortcutModifierState } from '../lib/shortcutModifierState'
 import { readLocalApi } from '../localApi'
 import { useComposerDraftStore } from '../composerDraftStore'
+import { releaseProjectDraftUploads } from '../lib/composerDraftUploads'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
 import { useTerminalFocus } from '../hooks/useTerminalFocus'
 import { useNowMinute } from '../hooks/useNowMinute'
@@ -1695,6 +1696,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return result
       }
       const draftStore = useComposerDraftStore.getState()
+      releaseProjectDraftUploads(
+        memberProjectRef,
+        projectThreads
+          .filter(
+            (thread) =>
+              thread.environmentId === member.environmentId && thread.projectId === member.id,
+          )
+          .map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+      )
       const projectDraftThread = draftStore.getDraftThreadByProjectRef(memberProjectRef)
       if (projectDraftThread)
       {
@@ -1703,7 +1713,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       draftStore.clearProjectDraftThreadId(memberProjectRef)
       return result
     },
-    [deleteProject],
+    [deleteProject, projectThreads],
   )
 
   const handleRemoveProject = useCallback(

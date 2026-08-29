@@ -355,10 +355,16 @@ export async function executeAtomCommand<A, E>(
   return result
 }
 
+export interface AtomQueryOptions extends AtomCommandOptions
+{
+  // retry verification against the server rather than accepting an SWR-cached result
+  readonly refresh?: boolean
+}
+
 export async function executeAtomQuery<A, E>(
   registry: AtomRegistry.AtomRegistry,
   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
-  options: AtomCommandOptions = {},
+  options: AtomQueryOptions = {},
   reporter: AtomCommandReporter = console,
 ): Promise<AtomCommandResult<A, E>>
 {
@@ -366,6 +372,14 @@ export async function executeAtomQuery<A, E>(
     Effect.gen(function* ()
     {
       yield* AtomRegistry.mount(registry, atom)
+      if (options.refresh)
+      {
+        const current = registry.get(atom)
+        if (current._tag !== 'Initial' && !current.waiting)
+        {
+          registry.refresh(atom)
+        }
+      }
       return yield* AtomRegistry.getResult(registry, atom, {
         suspendOnWaiting: true,
       })

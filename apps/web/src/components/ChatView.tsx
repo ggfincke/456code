@@ -202,6 +202,7 @@ import {
   createArchitectureConcernContext,
   type ArchitectureConcernGraphSelection,
   type ComposerImageAttachment,
+  type ComposerFileAttachment,
   type DraftThreadEnvMode,
   useComposerDraftStore,
   type DraftId,
@@ -779,6 +780,7 @@ function ChatViewContent(props: ChatViewProps)
   })
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt)
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages)
+  const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles)
   const setComposerDraftTerminalContexts = useComposerDraftStore(
     (store) => store.setTerminalContexts,
   )
@@ -808,6 +810,7 @@ function ChatViewContent(props: ChatViewProps)
   )
   const promptRef = useRef('')
   const composerImagesRef = useRef<ComposerImageAttachment[]>([])
+  const composerFilesRef = useRef<ComposerFileAttachment[]>([])
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([])
   const composerElementContextsRef = useRef<ElementContextDraft[]>([])
   const localComposerRef = useRef<ChatComposerHandle | null>(null)
@@ -4088,6 +4091,7 @@ function ChatViewContent(props: ChatViewProps)
       draft &&
       (draft.prompt.trim().length > 0 ||
         draft.images.length > 0 ||
+        draft.files.length > 0 ||
         draft.terminalContexts.length > 0 ||
         draft.elementContexts.length > 0 ||
         draft.previewAnnotations.length > 0 ||
@@ -5571,6 +5575,7 @@ function ChatViewContent(props: ChatViewProps)
       activeThreadKey,
       activeTimelineAnchorIndexRef,
       addComposerDraftImages,
+      addComposerDraftFiles,
       anchorUserScrollGenerationRef,
       beginLocalDispatch,
       captureDraftHeroComposerRect,
@@ -5580,6 +5585,7 @@ function ChatViewContent(props: ChatViewProps)
       composerDraftTarget,
       composerElementContextsRef,
       composerImagesRef,
+      composerFilesRef,
       composerRef,
       composerTerminalContextsRef,
       focusImportContinuationBanner,
@@ -6339,6 +6345,19 @@ function ChatViewContent(props: ChatViewProps)
                             gitCwd={gitCwd}
                             promptRef={promptRef}
                             composerImagesRef={composerImagesRef}
+                            composerFilesRef={composerFilesRef}
+                            attachmentUploadsCapabilityKnown={serverConfig !== null}
+                            attachmentUploadsReady={
+                              activeEnvironmentConnectionPhase === 'connected' &&
+                              activeEnvironmentBootstrapComplete
+                            }
+                            supportsAttachmentUploads={
+                              serverConfig?.environment.capabilities.attachmentUploads === true
+                            }
+                            maxFileAttachmentBytes={
+                              serverConfig?.environment.capabilities.fileAttachments
+                                ?.maxUploadBytes ?? null
+                            }
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}

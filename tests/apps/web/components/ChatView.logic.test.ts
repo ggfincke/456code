@@ -1655,6 +1655,21 @@ describe('shouldReleaseTimelineAnchorForToolActivity', () =>
 
 describe('shouldRestoreComposerDraftAfterSendFailure', () =>
 {
+  it('does not overwrite a newly attached file after an earlier send fails', () =>
+  {
+    expect(
+      shouldRestoreComposerDraftAfterSendFailure({
+        retryDraftIsEmpty: true,
+        composerOwnerIsCurrent: true,
+        promptEmpty: true,
+        imagesEmpty: true,
+        filesEmpty: false,
+        terminalContextsEmpty: true,
+        elementContextsEmpty: true,
+      }),
+    ).toBe(false)
+  })
+
   it('restores when the retry draft is empty and the owner key still matches live refs', () =>
   {
     expect(

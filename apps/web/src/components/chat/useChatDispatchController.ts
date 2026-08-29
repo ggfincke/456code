@@ -15,6 +15,7 @@ import {
 import { wasBootstrapThreadDeleted } from '@t3tools/client-runtime/errors'
 import {
   DEFAULT_MODEL,
+  type ClientOrchestrationCommand,
   type CollaborationMode,
   type EnvironmentId,
   type MessageId,
@@ -60,6 +61,7 @@ import {
   getStartedThreadProviderSwitchBlockReason,
   handleImportContinuationSendBlock,
   IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   isComposerProviderInstanceChange,
   readFileAsDataUrl,
   revokeUserMessagePreviewUrls,
@@ -79,10 +81,12 @@ import {
 import type {
   ArchitectureConcernContext,
   ComposerImageAttachment,
+  ComposerFileAttachment,
   DraftId,
   DraftThreadEnvMode,
 } from '~/composerDraftStore'
 import { useComposerDraftStore } from '~/composerDraftStore'
+import { acceptAttachmentUploads, getUploadedAttachments } from '~/lib/attachmentUploadQueue'
 
 type ComposerThreadTarget = ScopedThreadRef | DraftId
 import {
@@ -143,13 +147,10 @@ type StartThreadTurnMutation = (input: {
       readonly messageId: MessageId
       readonly role: 'user'
       readonly text: string
-      readonly attachments: ReadonlyArray<{
-        readonly type: 'image'
-        readonly name: string
-        readonly mimeType: string
-        readonly sizeBytes: number
-        readonly dataUrl: string
-      }>
+      readonly attachments: Extract<
+        ClientOrchestrationCommand,
+        { type: 'thread.turn.start' }
+      >['message']['attachments']
     }
     readonly modelSelection: ModelSelection
     readonly titleSeed: string
@@ -197,6 +198,10 @@ export interface ChatSendPorts
     target: ComposerThreadTarget,
     images: ComposerImageAttachment[],
   ) => void
+  readonly addComposerDraftFiles: (
+    target: ComposerThreadTarget,
+    files: ComposerFileAttachment[],
+  ) => void
   readonly anchorUserScrollGenerationRef: MutableRefObject<number>
   readonly beginLocalDispatch: (options?: { preparingWorktree?: boolean }) => void
   readonly captureDraftHeroComposerRect: () => void
@@ -206,6 +211,7 @@ export interface ChatSendPorts
   readonly composerDraftTarget: ComposerThreadTarget
   readonly composerElementContextsRef: MutableRefObject<ElementContextDraft[]>
   readonly composerImagesRef: MutableRefObject<ComposerImageAttachment[]>
+  readonly composerFilesRef: MutableRefObject<ComposerFileAttachment[]>
   readonly composerRef: RefObject<ChatComposerHandle | null>
   readonly composerTerminalContextsRef: MutableRefObject<TerminalContextDraft[]>
   readonly focusImportContinuationBanner: () => void
@@ -1049,6 +1055,13 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       return false
     }
     const composerImages = directProviderSlashCommand === null ? sendContextComposerImages : []
+    const composerFiles = directProviderSlashCommand === null ? sendCtx.files : []
+    if (directProviderSlashCommand === null && sendCtx.attachmentBlockReason) return false
+    const uploadedAttachments = sendCtx.supportsAttachmentUploads
+      ? getUploadedAttachments({ environmentId, images: [...composerImages, ...composerFiles] })
+      : null
+    if (sendCtx.supportsAttachmentUploads && uploadedAttachments === null) return false
+    if (!sendCtx.supportsAttachmentUploads && composerFiles.length > 0) return false
     const composerTerminalContexts =
       directProviderSlashCommand === null ? sendContextComposerTerminalContexts : []
     const composerElementContexts =
@@ -1079,6 +1092,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     } = deriveComposerSendState({
       prompt: promptForSend,
       imageCount: composerImages.length,
+      fileCount: composerFiles.length,
       terminalContexts: composerTerminalContexts,
       elementContextCount:
         composerElementContexts.length +
@@ -1095,6 +1109,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     }
     const standaloneSlashCommand =
       composerImages.length === 0 &&
+      composerFiles.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
@@ -1117,6 +1132,8 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       !options.bypassPlanFollowUp &&
       send.showPlanFollowUpPrompt &&
       send.activeProposedPlan &&
+      composerImages.length === 0 &&
+      composerFiles.length === 0 &&
       composerArchitectureContexts.length === 0
     )
     {
@@ -1219,6 +1236,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     }
 
     const composerImagesSnapshot = [...composerImages]
+    const composerFilesSnapshot = [...composerFiles]
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts]
     const composerElementContextsSnapshot = [...composerElementContexts]
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations]
@@ -1226,6 +1244,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments]
     const hasAttachmentsOrContext =
       composerImagesSnapshot.length > 0 ||
+      composerFilesSnapshot.length > 0 ||
       composerTerminalContextsSnapshot.length > 0 ||
       composerElementContextsSnapshot.length > 0 ||
       composerPreviewAnnotationsSnapshot.length > 0 ||
@@ -1261,7 +1280,11 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      text:
+        messageTextForSend ||
+        (composerFilesSnapshot.length > 0
+          ? ATTACHMENT_ONLY_BOOTSTRAP_PROMPT
+          : IMAGE_ONLY_BOOTSTRAP_PROMPT),
       providerSlashCommands: ctxSelectedProviderSlashCommands,
       hasAttachmentsOrContext,
     })
@@ -1294,23 +1317,37 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
 
     const messageIdForSend = newMessageId()
     const messageCreatedAt = new Date().toISOString()
-    const turnAttachmentsPromise = Promise.all(
-      composerImagesSnapshot.map(async (image) => ({
+    const turnAttachmentsPromise: Promise<
+      Extract<ClientOrchestrationCommand, { type: 'thread.turn.start' }>['message']['attachments']
+    > =
+      uploadedAttachments !== null
+        ? Promise.resolve(uploadedAttachments)
+        : Promise.all(
+            composerImagesSnapshot.map(async (image) => ({
+              type: 'image' as const,
+              name: image.name,
+              mimeType: image.mimeType,
+              sizeBytes: image.sizeBytes,
+              dataUrl: await readFileAsDataUrl(image.file),
+            })),
+          )
+    const optimisticAttachments = [
+      ...composerImagesSnapshot.map((image) => ({
         type: 'image' as const,
+        id: image.id,
         name: image.name,
         mimeType: image.mimeType,
         sizeBytes: image.sizeBytes,
-        dataUrl: await readFileAsDataUrl(image.file),
+        previewUrl: image.previewUrl,
       })),
-    )
-    const optimisticAttachments = composerImagesSnapshot.map((image) => ({
-      type: 'image' as const,
-      id: image.id,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      previewUrl: image.previewUrl,
-    }))
+      ...composerFilesSnapshot.map((file) => ({
+        type: 'file' as const,
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+      })),
+    ]
     // sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
@@ -1372,6 +1409,10 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       if (firstComposerImageName)
       {
         titleSeed = `Image: ${firstComposerImageName}`
+      }
+      else if (composerFilesSnapshot[0])
+      {
+        titleSeed = `File: ${composerFilesSnapshot[0].name}`
       }
       else if (composerTerminalContextsSnapshot.length > 0)
       {
@@ -1507,6 +1548,9 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
       else
       {
         turnStartSucceeded = true
+        acceptAttachmentUploads(
+          [...composerImagesSnapshot, ...composerFilesSnapshot].map((attachment) => attachment.id),
+        )
       }
     }
 
@@ -1523,6 +1567,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         retryDraft === null ||
         (retryDraft.prompt.length === 0 &&
           retryDraft.images.length === 0 &&
+          retryDraft.files.length === 0 &&
           retryDraft.terminalContexts.length === 0 &&
           retryDraft.elementContexts.length === 0 &&
           retryDraft.previewAnnotations.length === 0 &&
@@ -1537,6 +1582,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           composerOwnerIsCurrent,
           promptEmpty: send.promptRef.current.length === 0,
           imagesEmpty: send.composerImagesRef.current.length === 0,
+          filesEmpty: send.composerFilesRef.current.length === 0,
           terminalContextsEmpty: send.composerTerminalContextsRef.current.length === 0,
           elementContextsEmpty: send.composerElementContextsRef.current.length === 0,
         })
@@ -1555,6 +1601,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry)
         send.setComposerDraftPrompt(send.composerDraftTarget, promptForSend)
         send.addComposerDraftImages(send.composerDraftTarget, retryComposerImages)
+        send.addComposerDraftFiles(send.composerDraftTarget, composerFilesSnapshot)
         send.setComposerDraftTerminalContexts(
           send.composerDraftTarget,
           composerTerminalContextsSnapshot,
@@ -1579,6 +1626,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         {
           send.promptRef.current = promptForSend
           send.composerImagesRef.current = retryComposerImages
+          send.composerFilesRef.current = composerFilesSnapshot
           send.composerTerminalContextsRef.current = composerTerminalContextsSnapshot
           send.composerElementContextsRef.current = composerElementContextsSnapshot
           send.composerRef.current?.resetCursorState({
