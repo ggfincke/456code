@@ -1,28 +1,22 @@
 // apps/mobile/src/features/threads/sidebar/ThreadNavigationSidebar.tsx
 // render thread navigation sidebar
 
-import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from '@t3tools/client-runtime/state/shell'
 import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
 import { LegendList } from '@legendapp/list/react-native'
-import type { MenuAction } from '@react-native-menu/menu'
 import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/unstable/reactivity'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
-import { Platform, Pressable, StyleSheet, TextInput, View, useColorScheme } from 'react-native'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Pressable, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { SearchBarCommands } from 'react-native-screens'
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 
 import { AppText as Text } from '../../../components/AppText'
-import { ControlPillMenu } from '../../../components/ControlPill'
-import { SymbolView } from '../../../components/AppSymbol'
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../../native/native-glass'
 import { NativeStackScreenOptions } from '../../../native/StackHeader'
 import { scopedProjectKey, scopedThreadKey } from '../../../lib/scopedEntities'
@@ -34,12 +28,7 @@ import { useThreadSearch } from '../../../state/use-thread-search'
 import { useWorkspaceState } from '../../../state/workspace'
 import { useSavedRemoteConnections } from '../../../state/use-remote-environment-registry'
 import { useHardwareKeyboardCommand } from '../../keyboard/hardwareKeyboardCommands'
-import {
-  hasCustomHomeListOptions,
-  PROJECT_SORT_OPTIONS,
-  THREAD_SORT_OPTIONS,
-  useHomeListOptions,
-} from '../../home/home-list-options'
+import { hasCustomHomeListOptions, useHomeListOptions } from '../../home/home-list-options'
 import { buildHomeListFilterMenu } from '../../home/home-list-filter-menu'
 import {
   buildHomeListLayout,
@@ -59,8 +48,6 @@ import { usePendingTaskListActions } from '../../home/usePendingTaskListActions'
 import { useThreadListActions } from '../../home/useThreadListActions'
 import { WorkspaceConnectionStatus } from '../../home/WorkspaceConnectionStatus'
 import { shouldShowWorkspaceConnectionStatus } from '../../home/workspace-connection-status'
-import { SidebarHeaderActions } from './sidebar-header-actions'
-import { SidebarFilterButton } from './sidebar-filter-button'
 import { createSidebarHeaderItems } from './sidebar-native-header-items'
 import { SidebarNavigationShell } from './sidebar-navigation-shell'
 import {
@@ -87,49 +74,6 @@ type SidebarListItem =
   | { readonly type: 'v2-thread'; readonly key: string; readonly item: ThreadListV2Item }
   | { readonly type: 'v2-show-more'; readonly key: string; readonly hiddenCount: number }
 
-// shared capsule behind the sidebar header buttons — a native liquid-glass
-// surface on iOS 26+, a tinted pill everywhere else.
-function SidebarHeaderButtonGroup(props: {
-  readonly children: ReactNode
-  readonly colorScheme: 'light' | 'dark'
-})
-{
-  if (isLiquidGlassSupported)
-  {
-    return (
-      <LiquidGlassView
-        colorScheme={props.colorScheme}
-        effect="regular"
-        interactive
-        style={styles.headerButtonGroup}
-      >
-        {props.children}
-      </LiquidGlassView>
-    )
-  }
-
-  return (
-    <View
-      style={[
-        styles.headerButtonGroup,
-        props.colorScheme === 'dark'
-          ? { backgroundColor: 'rgba(118,118,128,0.24)', borderColor: 'rgba(255,255,255,0.08)' }
-          : { backgroundColor: 'rgba(255,255,255,0.72)', borderColor: 'rgba(0,0,0,0.08)' },
-        { borderWidth: StyleSheet.hairlineWidth },
-      ]}
-    >
-      {props.children}
-    </View>
-  )
-}
-
-const SIDEBAR_STICKY_HEADER_HEIGHT = 106
-const SIDEBAR_STICKY_HEADER_FADE_HEIGHT = 44
-const SIDEBAR_HEADER_WASH_OPACITY = {
-  dark: [0.22, 0.14, 0.04],
-  light: [0.46, 0.3, 0.08],
-} as const
-
 interface ThreadNavigationSidebarProps
 {
   readonly width: number
@@ -146,17 +90,10 @@ interface ThreadNavigationSidebarProps
 
 // iPad/large-width sidebar column.
 //
-// on iOS the pane is hosted inside its own navigation-inert single-screen
-// native stack (SidebarNavigationShell) so the header is a real
-// UINavigationBar: large title, native bar-button items, and a
-// UISearchController search field — the same chrome a UISplitViewController
-// column gets. Other platforms keep the custom header chrome.
+// the pane is hosted inside its own navigation-inert single-screen native
+// stack so the header is a real UINavigationBar with native controls
 export function ThreadNavigationSidebar(props: ThreadNavigationSidebarProps)
 {
-  if (Platform.OS !== 'ios')
-  {
-    return <ThreadNavigationSidebarPane {...props} nativeChrome={false} />
-  }
   return <NativeSidebarContainer {...props} />
 }
 
@@ -177,27 +114,21 @@ function NativeSidebarContainer(props: ThreadNavigationSidebarProps)
       }}
     >
       <SidebarNavigationShell>
-        <ThreadNavigationSidebarPane {...props} nativeChrome />
+        <ThreadNavigationSidebarPane {...props} />
       </SidebarNavigationShell>
     </View>
   )
 }
 
-function ThreadNavigationSidebarPane(
-  props: ThreadNavigationSidebarProps & { readonly nativeChrome: boolean },
-)
+function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
 {
   const insets = useSafeAreaInsets()
-  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light'
   const projects = useProjects()
   const threads = useThreadShells()
   const { state: catalogState } = useWorkspaceState()
   const { savedConnectionsById } = useSavedRemoteConnections()
-  const [headerIsOverContent, setHeaderIsOverContent] = useState(false)
-  const searchInputRef = useRef<TextInput>(null)
   const searchBarRef = useRef<SearchBarCommands>(null)
   const openSwipeableRef = useRef<SwipeableMethods | null>(null)
-  const headerIsOverContentRef = useRef(false)
   const sidebarScrollGesture = useMemo(() => Gesture.Native(), [])
   const { archiveThread, confirmDeleteThread, settleThread, unsettleThread } =
     useThreadListActions()
@@ -452,151 +383,7 @@ function ThreadNavigationSidebarPane(
     threadListV2Layout,
   ])
   const showsConnectionStatus = shouldShowWorkspaceConnectionStatus(catalogState)
-  const listMenuActions = useMemo<MenuAction[]>(
-    () => [
-      {
-        id: 'environment',
-        title: 'Environment',
-        subactions: [
-          {
-            id: 'environment:all',
-            title: 'All environments',
-            subtitle: 'Show threads from every environment',
-            state: options.selectedEnvironmentId === null ? 'on' : 'off',
-          },
-          ...environments.map((environment) => ({
-            id: `environment:${environment.environmentId}`,
-            title: environment.label,
-            state:
-              options.selectedEnvironmentId === environment.environmentId
-                ? ('on' as const)
-                : ('off' as const),
-          })),
-        ],
-      },
-      ...(projectFilterOptions.length === 0
-        ? []
-        : ([
-            {
-              id: 'project',
-              title: 'Project',
-              subactions: [
-                {
-                  id: 'project:all',
-                  title: 'All projects',
-                  subtitle: 'Show threads from every project',
-                  state: selectedProjectKey === null ? 'on' : 'off',
-                },
-                ...projectFilterOptions.map((project) => ({
-                  id: `project:${project.key}`,
-                  title: project.label,
-                  state: selectedProjectKey === project.key ? ('on' as const) : ('off' as const),
-                })),
-              ],
-            },
-          ] satisfies MenuAction[])),
-      // v2 lays the list out in fixed creation order — offering sort/group
-      // controls it silently ignores would be a lie. Environment still
-      // scopes the v2 partition, so it stays.
-      ...(threadListV2Enabled
-        ? []
-        : ([
-            {
-              id: 'project-sort',
-              title: 'Sort projects',
-              subactions: PROJECT_SORT_OPTIONS.map((option) => ({
-                id: `project-sort:${option.value}`,
-                title: option.label,
-                state: options.projectSortOrder === option.value ? 'on' : 'off',
-              })),
-            },
-            {
-              id: 'thread-sort',
-              title: 'Sort threads',
-              subactions: THREAD_SORT_OPTIONS.map((option) => ({
-                id: `thread-sort:${option.value}`,
-                title: option.label,
-                state: options.threadSortOrder === option.value ? 'on' : 'off',
-              })),
-            },
-          ] satisfies MenuAction[])),
-    ],
-    [environments, options, projectFilterOptions, selectedProjectKey, threadListV2Enabled],
-  )
-  const handleListMenuAction = useCallback(
-    ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) =>
-    {
-      const event = nativeEvent.event
-      if (event === 'environment:all')
-      {
-        setSelectedEnvironmentId(null)
-        return
-      }
-      if (event.startsWith('environment:'))
-      {
-        const environment = environments.find(
-          (candidate) => String(candidate.environmentId) === event.slice('environment:'.length),
-        )
-        if (environment) setSelectedEnvironmentId(environment.environmentId)
-        return
-      }
-      if (event === 'project:all')
-      {
-        setSelectedProjectKey(null)
-        return
-      }
-      if (event.startsWith('project:'))
-      {
-        const projectKey = event.slice('project:'.length)
-        if (projectFilterOptions.some((project) => project.key === projectKey))
-        {
-          setSelectedProjectKey(projectKey)
-        }
-        return
-      }
-      const projectSort = PROJECT_SORT_OPTIONS.find(
-        (option) => `project-sort:${option.value}` === event,
-      )
-      if (projectSort)
-      {
-        setProjectSortOrder(projectSort.value)
-        return
-      }
-      const threadSort = THREAD_SORT_OPTIONS.find(
-        (option) => `thread-sort:${option.value}` === event,
-      )
-      if (threadSort)
-      {
-        setThreadSortOrder(threadSort.value)
-        return
-      }
-    },
-    [
-      environments,
-      projectFilterOptions,
-      setProjectSortOrder,
-      setSelectedEnvironmentId,
-      setThreadSortOrder,
-    ],
-  )
 
-  const backgroundColor = useThemeColor('--color-drawer')
-  const borderColor = useThemeColor('--color-border')
-  const mutedColor = useThemeColor('--color-foreground-muted')
-  const placeholderColor = useThemeColor('--color-placeholder')
-  const headerFadeColor = String(backgroundColor)
-  const headerWashOpacity = SIDEBAR_HEADER_WASH_OPACITY[colorScheme]
-  const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState<number | null>(null)
-  // the sticky header (title row, search field, optional connection status)
-  // is measured so the list inset always matches its real height — no
-  // hardcoded per-variant constants.
-  const stickyHeaderHeight = measuredHeaderHeight ?? insets.top + SIDEBAR_STICKY_HEADER_HEIGHT
-  const topListInset = stickyHeaderHeight + 6
-  const handleStickyHeaderLayout = useCallback((event: LayoutChangeEvent) =>
-  {
-    const nextHeight = Math.round(event.nativeEvent.layout.height)
-    setMeasuredHeaderHeight((current) => (current === nextHeight ? current : nextHeight))
-  }, [])
   const handleSwipeableWillOpen = useCallback((methods: SwipeableMethods) =>
   {
     if (openSwipeableRef.current !== methods)
@@ -620,22 +407,11 @@ function ThreadNavigationSidebarPane(
     },
     [props.onSelectThread],
   )
-  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) =>
-  {
-    const next = event.nativeEvent.contentOffset.y > 6
-    if (headerIsOverContentRef.current === next)
-    {
-      return
-    }
-    headerIsOverContentRef.current = next
-    setHeaderIsOverContent(next)
-  }, [])
   const handleScrollBeginDrag = useCallback(() =>
   {
     openSwipeableRef.current?.close()
   }, [])
   const { swipeEnabled, scrollGateHandlers } = useSwipeableScrollGate({
-    onScroll: handleScroll,
     onScrollBeginDrag: handleScrollBeginDrag,
   })
   const listExtraData = useMemo(
@@ -687,12 +463,7 @@ function ThreadNavigationSidebarPane(
   {
     const focus = () =>
     {
-      if (props.nativeChrome)
-      {
-        searchBarRef.current?.focus()
-        return
-      }
-      searchInputRef.current?.focus()
+      searchBarRef.current?.focus()
     }
     if (!props.visible)
     {
@@ -704,7 +475,7 @@ function ThreadNavigationSidebarPane(
       focus()
     }
     return true
-  }, [props.nativeChrome, props.onRequestVisibility, props.visible])
+  }, [props.onRequestVisibility, props.visible])
   useHardwareKeyboardCommand('focusSearch', focusSearch)
   const renderListItem = useCallback(
     ({ item }: { readonly item: SidebarListItem }) =>
@@ -959,97 +730,34 @@ function ThreadNavigationSidebarPane(
     </Text>
   )
 
-  if (props.nativeChrome)
-  {
-    return (
-      <>
-        <NativeStackScreenOptions
-          optionsVersion={nativeHeaderItems}
-          options={{
-            headerSearchBarOptions: {
-              ref: searchBarRef,
-              autoCapitalize: 'none',
-              hideNavigationBar: false,
-              // keep the search bar pinned under the title — UIKit's default
-              // hidesSearchBarWhenScrolling collapses it on scroll.
-              hideWhenScrolling: false,
-              obscureBackground: false,
-              placeholder: 'Search',
-              placement: 'stacked',
-              onCancelButtonPress: () =>
-              {
-                props.onSearchQueryChange('')
-              },
-              onChangeText: (event) =>
-              {
-                props.onSearchQueryChange(event.nativeEvent.text)
-              },
-            },
-            unstable_headerRightItems: () => nativeHeaderItems,
-          }}
-        />
-        <View className="flex-1">
-          <SwipeableScrollGateProvider enabled={swipeEnabled}>
-            <GestureDetector gesture={sidebarScrollGesture}>
-              <LegendList
-                data={listItems}
-                drawDistance={500}
-                estimatedItemSize={64}
-                extraData={listExtraData}
-                getItemType={(item) => item.type}
-                itemsAreEqual={sidebarItemsAreEqual}
-                keyExtractor={(item) => item.key}
-                renderItem={renderListItem}
-                automaticallyAdjustsScrollIndicatorInsets={NATIVE_LIQUID_GLASS_SUPPORTED}
-                contentInsetAdjustmentBehavior={
-                  NATIVE_LIQUID_GLASS_SUPPORTED ? 'automatic' : 'never'
-                }
-                contentContainerStyle={[
-                  styles.threadListContent,
-                  {
-                    paddingBottom: Math.max(insets.bottom, 16) + 16,
-                    paddingTop: 6,
-                  },
-                ]}
-                keyboardDismissMode="on-drag"
-                keyboardShouldPersistTaps="handled"
-                {...scrollGateHandlers}
-                recycleItems
-                scrollEventThrottle={16}
-                showsVerticalScrollIndicator={false}
-                style={styles.threadList}
-                ListHeaderComponent={
-                  showsConnectionStatus ? (
-                    <View className="px-1.5 pt-0.5 pb-2">
-                      <WorkspaceConnectionStatus
-                        onPress={props.onOpenEnvironmentSettings}
-                        state={catalogState}
-                        variant="sidebar"
-                      />
-                    </View>
-                  ) : null
-                }
-                ListEmptyComponent={listEmpty}
-              />
-            </GestureDetector>
-          </SwipeableScrollGateProvider>
-        </View>
-      </>
-    )
-  }
-
   return (
-    <View
-      testID="thread-navigation-sidebar"
-      className="flex-1"
-      style={{
-        width: props.width,
-        backgroundColor,
-        borderRightColor: borderColor,
-        borderRightWidth: StyleSheet.hairlineWidth,
-      }}
-    >
-      <View className="flex-1" style={{ paddingBottom: insets.bottom }}>
+    <>
+      <NativeStackScreenOptions
+        optionsVersion={nativeHeaderItems}
+        options={{
+          headerSearchBarOptions: {
+            ref: searchBarRef,
+            autoCapitalize: 'none',
+            hideNavigationBar: false,
+            // keep the search bar pinned under the title — UIKit's default
+            // hidesSearchBarWhenScrolling collapses it on scroll.
+            hideWhenScrolling: false,
+            obscureBackground: false,
+            placeholder: 'Search',
+            placement: 'stacked',
+            onCancelButtonPress: () =>
+            {
+              props.onSearchQueryChange('')
+            },
+            onChangeText: (event) =>
+            {
+              props.onSearchQueryChange(event.nativeEvent.text)
+            },
+          },
+          unstable_headerRightItems: () => nativeHeaderItems,
+        }}
+      />
+      <View className="flex-1">
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
@@ -1061,11 +769,13 @@ function ThreadNavigationSidebarPane(
               itemsAreEqual={sidebarItemsAreEqual}
               keyExtractor={(item) => item.key}
               renderItem={renderListItem}
+              automaticallyAdjustsScrollIndicatorInsets={NATIVE_LIQUID_GLASS_SUPPORTED}
+              contentInsetAdjustmentBehavior={NATIVE_LIQUID_GLASS_SUPPORTED ? 'automatic' : 'never'}
               contentContainerStyle={[
                 styles.threadListContent,
                 {
-                  paddingBottom: 16 + insets.bottom,
-                  paddingTop: topListInset,
+                  paddingBottom: Math.max(insets.bottom, 16) + 16,
+                  paddingTop: 6,
                 },
               ]}
               keyboardDismissMode="on-drag"
@@ -1075,103 +785,27 @@ function ThreadNavigationSidebarPane(
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}
               style={styles.threadList}
+              ListHeaderComponent={
+                showsConnectionStatus ? (
+                  <View className="px-1.5 pt-0.5 pb-2">
+                    <WorkspaceConnectionStatus
+                      onPress={props.onOpenEnvironmentSettings}
+                      state={catalogState}
+                      variant="sidebar"
+                    />
+                  </View>
+                ) : null
+              }
               ListEmptyComponent={listEmpty}
             />
           </GestureDetector>
         </SwipeableScrollGateProvider>
       </View>
-
-      <View
-        className="absolute inset-x-0 top-0 z-[4]"
-        onLayout={handleStickyHeaderLayout}
-        pointerEvents="box-none"
-        style={{ paddingTop: insets.top }}
-      >
-        <View
-          className="absolute inset-x-0 top-0"
-          pointerEvents="none"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          style={{ height: stickyHeaderHeight + SIDEBAR_STICKY_HEADER_FADE_HEIGHT }}
-        >
-          <Svg width="100%" height="100%">
-            <Defs>
-              <LinearGradient id="sidebar-header-wash" x1="0%" x2="0%" y1="0%" y2="100%">
-                <Stop
-                  offset="0%"
-                  stopColor={headerFadeColor}
-                  stopOpacity={headerIsOverContent ? headerWashOpacity[0] : 0}
-                />
-                <Stop
-                  offset="58%"
-                  stopColor={headerFadeColor}
-                  stopOpacity={headerIsOverContent ? headerWashOpacity[1] : 0}
-                />
-                <Stop
-                  offset="88%"
-                  stopColor={headerFadeColor}
-                  stopOpacity={headerIsOverContent ? headerWashOpacity[2] : 0}
-                />
-                <Stop offset="100%" stopColor={headerFadeColor} stopOpacity={0} />
-              </LinearGradient>
-            </Defs>
-            <Rect width="100%" height="100%" fill="url(#sidebar-header-wash)" />
-          </Svg>
-        </View>
-        <View className="h-[50px] flex-row items-end gap-0.5 pr-2 pl-5">
-          <Text className="flex-1 text-[34px] font-sans-bold text-foreground" numberOfLines={1}>
-            Threads
-          </Text>
-          <SidebarHeaderButtonGroup colorScheme={colorScheme}>
-            <ControlPillMenu actions={listMenuActions} onPressAction={handleListMenuAction}>
-              <SidebarFilterButton
-                grouped
-                accessibilityLabel="Filter and sort threads"
-                icon={filterIcon}
-              />
-            </ControlPillMenu>
-            <SidebarHeaderActions grouped onOpenSettings={props.onOpenSettings} />
-          </SidebarHeaderButtonGroup>
-        </View>
-
-        <View className="mx-4 mt-[9px] h-[38px] flex-row items-center gap-1.5 rounded-xl bg-sidebar-search pr-2.5 pl-[11px]">
-          <SymbolView name="magnifyingglass" size={15} tintColor={mutedColor} type="monochrome" />
-          <TextInput
-            ref={searchInputRef}
-            accessibilityLabel="Search threads"
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-            onChangeText={props.onSearchQueryChange}
-            placeholder="Search"
-            placeholderTextColor={placeholderColor}
-            returnKeyType="search"
-            className="h-[34px] flex-1 px-0 py-0 font-sans text-base text-foreground"
-            value={props.searchQuery}
-          />
-        </View>
-
-        {showsConnectionStatus ? (
-          <View className="px-3.5 pt-2.5">
-            <WorkspaceConnectionStatus
-              onPress={props.onOpenEnvironmentSettings}
-              state={catalogState}
-              variant="sidebar"
-            />
-          </View>
-        ) : null}
-      </View>
-    </View>
+    </>
   )
 }
 
 const styles = StyleSheet.create({
-  headerButtonGroup: {
-    alignItems: 'center',
-    borderRadius: 22,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
   threadList: {
     flex: 1,
   },

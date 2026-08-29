@@ -38,8 +38,6 @@ export interface ComposerEditorProps
   readonly spellCheck?: boolean
   readonly multiline?: boolean
   readonly contentInsetVertical?: number
-  // android: center a single line vertically (collapsed pill); no-op on iOS.
-  readonly singleLineCentered?: boolean
   readonly style?: StyleProp<ViewStyle>
   readonly textStyle?: StyleProp<TextStyle>
   readonly onChangeText: (value: string) => void

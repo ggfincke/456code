@@ -7,11 +7,6 @@
       "modules": [
         "Code456ReviewDiffModule"
       ]
-    },
-    "android": {
-      "modules": [
-        "expo.modules.code456reviewdiff.Code456ReviewDiffModule"
-      ]
     }
   }
 }

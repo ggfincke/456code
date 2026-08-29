@@ -34,34 +34,18 @@ const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.developmentUniversalIconPng),
-  // ocean base fill from assets/dev/app-icon.icon/icon.json
-  androidAdaptiveBackgroundColor: '#0F111A',
-  androidMonochromeIcon: './assets/android-icon-mark.png',
-  androidNotificationIcon: './assets/android-notification-icon.png',
-  androidNotificationColor: '#00639B',
 } as const
 
 const PREVIEW_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
-  androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.nightlyLinuxIconPng),
-  androidAdaptiveBackgroundColor: '#111533',
-  androidMonochromeIcon: './assets/android-icon-mark.png',
-  androidNotificationIcon: './assets/android-notification-icon.png',
-  androidNotificationColor: '#7565C7',
 } as const
 
 const RELEASE_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
-  androidAdaptiveForeground: './assets/android-icon-mark.png',
-  androidAdaptiveBackgroundColor: '#000000',
-  androidMonochromeIcon: './assets/android-icon-mark.png',
-  androidNotificationIcon: './assets/android-notification-icon.png',
-  androidNotificationColor: '#FFFFFF',
 } as const
 
 const VARIANT_CONFIG = {
@@ -70,7 +54,6 @@ const VARIANT_CONFIG = {
     iosModuleName: '_56codeDev',
     scheme: 'code456-dev',
     iosBundleIdentifier: 'com.ggfincke.code456.dev',
-    androidPackage: 'com.ggfincke.code456.dev',
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
@@ -78,7 +61,6 @@ const VARIANT_CONFIG = {
     iosModuleName: '_56codePreview',
     scheme: 'code456-preview',
     iosBundleIdentifier: 'com.ggfincke.code456.preview',
-    androidPackage: 'com.ggfincke.code456.preview',
     assets: PREVIEW_ASSETS,
   },
   production: {
@@ -86,7 +68,6 @@ const VARIANT_CONFIG = {
     iosModuleName: '_56code',
     scheme: 'code456',
     iosBundleIdentifier: 'com.ggfincke.code456',
-    androidPackage: 'com.ggfincke.code456',
     assets: RELEASE_ASSETS,
   },
 } as const
@@ -151,22 +132,13 @@ const sharingPlugin: NonNullable<ExpoConfig['plugins']>[number] = [
         supportsImageWithMaxCount: 8,
       },
     },
-    android: {
-      enabled: true,
-      singleShareMimeTypes: ['text/plain', 'image/*'],
-      multipleShareMimeTypes: ['image/*'],
-    },
   },
 ]
-
-// these aliases match the fonts' PostScript names on iOS. Register the same
-// names on Android so React Native and the native composer use one set of
-// family names without waiting for runtime font loading.
 
 const config: ExpoConfig = {
   name: variant.appName,
   slug: '456code',
-  platforms: ['ios', 'android'],
+  platforms: ['ios'],
   scheme: variant.scheme,
   version: '0.1.0',
   runtimeVersion: {
@@ -205,19 +177,6 @@ const config: ExpoConfig = {
       ITSAppUsesNonExemptEncryption: false,
     },
   },
-  android: {
-    icon: variant.assets.appIcon,
-    package: variant.androidPackage,
-    adaptiveIcon: {
-      backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
-      foregroundImage: variant.assets.androidAdaptiveForeground,
-      monochromeImage: variant.assets.androidMonochromeIcon,
-    },
-    // opts into OnBackInvokedCallback-based back dispatch (Android 13+).
-    // JS back handling survives it via react-native's Android 16 shim plus
-    // withAndroidPredictiveBackCompat on Android 13-15.
-    predictiveBackGestureEnabled: true,
-  },
   web: {
     favicon: variant.assets.appIcon,
   },
@@ -229,22 +188,6 @@ const config: ExpoConfig = {
         ios: {
           fonts: [dmSansFonts.regular, dmSansFonts.medium, dmSansFonts.bold],
         },
-        android: {
-          fonts: [
-            {
-              fontFamily: 'DMSans-Regular',
-              fontDefinitions: [{ path: dmSansFonts.regular, weight: 400 }],
-            },
-            {
-              fontFamily: 'DMSans-Medium',
-              fontDefinitions: [{ path: dmSansFonts.medium, weight: 500 }],
-            },
-            {
-              fontFamily: 'DMSans-Bold',
-              fontDefinitions: [{ path: dmSansFonts.bold, weight: 700 }],
-            },
-          ],
-        },
       },
     ],
     'expo-secure-store',
@@ -255,8 +198,6 @@ const config: ExpoConfig = {
     [
       'expo-notifications',
       {
-        icon: variant.assets.androidNotificationIcon,
-        color: variant.assets.androidNotificationColor,
         mode: APP_VARIANT === 'development' ? 'development' : 'production',
       },
     ],
@@ -265,24 +206,10 @@ const config: ExpoConfig = {
     ['@clerk/expo', { theme: './clerk-theme.json', appleSignIn: !isIosPersonalTeamBuild }],
     'expo-web-browser',
     [
-      'expo-quick-actions',
-      {
-        // adaptive launcher-shortcut icon; referenced by resource name from
-        // the shortcut items set in src/features/shortcuts.
-        androidIcons: {
-          shortcut_icon: {
-            foregroundImage: variant.assets.androidAdaptiveForeground,
-            backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
-          },
-        },
-      },
-    ],
-    [
       'expo-camera',
       {
         cameraPermission: 'Allow 456code to access your camera so you can scan pairing QR codes.',
         barcodeScannerEnabled: true,
-        recordAudioAndroid: false,
       },
     ],
     [
@@ -311,6 +238,7 @@ const config: ExpoConfig = {
         },
       },
     ],
+    './plugins/withIosPodsDeploymentTargetFloor.cjs',
     './plugins/withIosCocoaPodsUuidCache.cjs',
     // must be listed BEFORE expo-widgets: same-type mods run last-registered-
     // first, so registering earlier makes this plugin's mods run AFTER
@@ -319,11 +247,6 @@ const config: ExpoConfig = {
     // target (which must exist before the compile phase can be attached).
     ...(!isIosPersonalTeamBuild ? ['./plugins/withWidgetLogoAsset.cjs', widgetsPlugin] : []),
     './plugins/withIosSceneLifecycle.cjs',
-    './plugins/withAndroidCleartextTraffic.cjs',
-    './plugins/withAndroidGradleHeap.cjs',
-    './plugins/withAndroidModernPopupMenu.cjs',
-    './plugins/withAndroidModernAlertDialog.cjs',
-    './plugins/withAndroidPredictiveBackCompat.cjs',
     ...(isIosPersonalTeamBuild ? ['./plugins/withoutIosPersonalTeamCapabilities.cjs'] : []),
   ],
   extra: {
@@ -343,7 +266,6 @@ const config: ExpoConfig = {
     // null to {}, which is truthy and would defeat Clerk's fallback checks.
     EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
     EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID,
     EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
     observability: {
       tracesUrl: repoEnv.EXPO_PUBLIC_OTLP_TRACES_URL ?? 'https://api.axiom.co/v1/traces',

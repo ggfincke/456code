@@ -21,7 +21,6 @@ import {
 } from 'react'
 import {
   Linking,
-  Platform,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -43,11 +42,7 @@ import { type SelectableMarkdownSkill } from '../../native/SelectableMarkdownTex
 
 import { resolveMarkdownLinkPresentation } from '@t3tools/mobile-markdown-text/links'
 import { scaledTypographyLineHeight } from '../../lib/appearancePreferences'
-import {
-  deriveCenteredContentHorizontalPadding,
-  deriveThreadFeedInitialContentInset,
-  type LayoutVariant,
-} from '../../lib/layout'
+import { deriveCenteredContentHorizontalPadding, type LayoutVariant } from '../../lib/layout'
 import { scopedThreadKey } from '../../lib/scopedEntities'
 import {
   deriveThreadFeedPresentation,
@@ -141,13 +136,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
   const insets = useSafeAreaInsets()
   const topContentInset = props.contentTopInset ?? insets.top + 44
   const bottomContentInset = props.contentBottomInset ?? 18
-  const usesNativeAutomaticInsets =
-    props.usesAutomaticContentInsets === true && Platform.OS === 'ios'
-  const initialContentInset = deriveThreadFeedInitialContentInset({
-    platform: Platform.OS,
-    usesNativeAutomaticInsets,
-    bottomContentInset,
-  })
+  const usesNativeAutomaticInsets = props.usesAutomaticContentInsets === true
   // with automatic insets the header inset lives in UIKit's adjustedContentInset,
   // which LegendList's JS anchoring math cannot see — it measures the anchored
   // end space from the scroll view's frame top. Fold the header height back into
@@ -655,9 +644,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
             // ThreadDetailScreen); this tells LegendList's scroll math about the
             // extra so programmatic end scrolls land at the true resting offset.
             contentInsetEndStaticAdjustment={usesNativeAutomaticInsets ? insets.bottom : 0}
-            // seed android scroll math before the asynchronous composer report;
-            // ios owns its native automatic inset and must not receive this floor
-            {...(initialContentInset ? { contentInset: initialContentInset } : {})}
             // the keyboard integration's offset math (end pinning, max scroll)
             // must add the same UIKit-added extra, or its keyboard-open end
             // targets land one safe-area short of the true resting offset.

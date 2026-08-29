@@ -52,7 +52,6 @@ import { SettingsEnvironmentsRouteScreen } from './features/settings/SettingsEnv
 import { SettingsRouteScreen } from './features/settings/SettingsRouteScreen'
 import { SettingsWaitlistRouteScreen } from './features/settings/SettingsWaitlistRouteScreen'
 import { ShowcaseCaptureCoordinator } from './features/showcase/ShowcaseCaptureCoordinator'
-import { useAppShortcuts } from './features/shortcuts/useAppShortcuts'
 import { useIncomingShare } from './features/sharing/IncomingShareProvider'
 import {
   EMPTY_INCOMING_SHARE_PRESENTATION_STATE,
@@ -298,8 +297,6 @@ function RootStackLayout(props: {
   useAgentNotificationNavigation()
   // present cloud-relay onboarding after an in-session sign-in
   useConnectOnboardingNavigation()
-  // launcher app shortcuts: routes shortcut taps and tracks opened threads.
-  useAppShortcuts(props.state)
   useEffect(() =>
   {
     const topRouteName = props.state.routes[props.state.index]?.name
@@ -413,11 +410,9 @@ export const RootStack = createNativeStackNavigator({
       screen: ReviewCommentComposerSheet,
       linking: `${THREAD_LINKING_PREFIX}/review-comment`,
       options: {
-        // android cannot host the keyboard-driven comment composer inside a
-        // formSheet; use a full-screen modal there instead.
-        presentation: Platform.OS === 'android' ? 'fullScreenModal' : 'formSheet',
-        sheetAllowedDetents: Platform.OS === 'android' ? undefined : [0.55, 0.92],
-        sheetGrabberVisible: Platform.OS !== 'android',
+        presentation: 'formSheet',
+        sheetAllowedDetents: [0.55, 0.92],
+        sheetGrabberVisible: true,
       },
     }),
     ThreadFiles: createNativeStackScreen({
@@ -479,24 +474,16 @@ export const RootStack = createNativeStackNavigator({
       options: {
         gestureEnabled: true,
         headerShown: false,
-        // android pushes settings as a regular full page with an in-screen
-        // back header; iOS keeps the detented form sheet.
-        ...(Platform.OS === 'android'
-          ? { presentation: 'card' as const }
-          : {
-              presentation: 'formSheet' as const,
-              sheetAllowedDetents: [0.7, 0.92],
-              sheetGrabberVisible: true,
-            }),
+        presentation: 'formSheet',
+        sheetAllowedDetents: [0.7, 0.92],
+        sheetGrabberVisible: true,
       },
     }),
     ConnectOnboarding: createNativeStackScreen({
       screen: ConnectOnboardingRouteScreen,
       linking: 'connect-onboarding',
       options: {
-        // a root-level Android formSheet does not host the native stack bar;
-        // the route renders an embedded AndroidSheetHeader instead.
-        ...(Platform.OS === 'android' ? { headerShown: false } : SHEET_SOLID_HEADER_OPTIONS),
+        ...SHEET_SOLID_HEADER_OPTIONS,
         title: 'Set up cloud access',
         gestureEnabled: true,
         presentation: 'formSheet',
@@ -509,15 +496,9 @@ export const RootStack = createNativeStackNavigator({
       linking: 'connections',
       options: {
         title: 'Environments',
-        // android: full page; the screen renders its own AndroidScreenHeader,
-        // so the native bar stays hidden. iOS keeps the sheet.
-        ...(Platform.OS === 'android'
-          ? { presentation: 'card' as const, headerShown: false }
-          : {
-              presentation: 'formSheet' as const,
-              sheetAllowedDetents: [0.55, 0.7],
-              sheetGrabberVisible: true,
-            }),
+        presentation: 'formSheet',
+        sheetAllowedDetents: [0.55, 0.7],
+        sheetGrabberVisible: true,
       },
     }),
     ConnectionsNew: createNativeStackScreen({
@@ -539,15 +520,9 @@ export const RootStack = createNativeStackNavigator({
       options: {
         gestureEnabled: true,
         headerShown: false,
-        // android pushes the flow as a regular full page — the draft should
-        // read like a thread that just doesn't exist yet; iOS keeps the sheet.
-        ...(Platform.OS === 'android'
-          ? { presentation: 'card' as const }
-          : {
-              presentation: 'formSheet' as const,
-              sheetAllowedDetents: [0.92],
-              sheetGrabberVisible: true,
-            }),
+        presentation: 'formSheet',
+        sheetAllowedDetents: [0.92],
+        sheetGrabberVisible: true,
       },
     }),
     NotFound: createNativeStackScreen({

@@ -31,7 +31,7 @@ SKIP_PARTS = {
     "node_modules",
     "vendor",
 }
-NATIVE_PROJECT_PREFIXES = ("apps/mobile/android/", "apps/mobile/ios/")
+NATIVE_PROJECT_PREFIXES = ("apps/mobile/ios/",)
 TEST_PARTS = {"e2e", "test", "tests"}
 TODO_PREFIX_RE = re.compile(r"^(?:#|//)\s*todo\b", re.IGNORECASE)
 VALID_TODO_RE = re.compile(r"^(?:#|//) TODO(?:\([a-z][a-z0-9._/-]*\):)?\s+\S")

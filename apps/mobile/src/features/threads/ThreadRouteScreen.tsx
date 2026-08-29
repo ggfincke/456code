@@ -11,15 +11,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as Option from 'effect/Option'
 import { EnvironmentId, ThreadId, type ProjectScript } from '@t3tools/contracts'
 import { projectScriptCwd, projectScriptRuntimeEnv } from '@t3tools/shared/projectScripts'
-import { Platform, ScrollView, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { ScrollView, View } from 'react-native'
 import { useWorkspaceState } from '../../state/workspace'
 import { useEnvironmentQuery } from '../../state/query'
 import { dismissGitActionResult, useGitActionProgress } from '../../state/use-vcs-action-state'
 import { vcsEnvironment } from '../../state/vcs'
 
 import { EmptyState } from '../../components/EmptyState'
-import { AndroidScreenHeader, type AndroidHeaderAction } from '../../components/AndroidScreenHeader'
 import { LoadingScreen } from '../../components/LoadingScreen'
 import { scopedThreadKey } from '../../lib/scopedEntities'
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../native/native-glass'
@@ -108,7 +106,7 @@ type ThreadRouteScreenRouteProps = StaticScreenProps<{
 interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps
 {
   readonly onReturnToThread?: () => void
-  readonly renderInspector?: (headerInset: number) => ReactNode
+  readonly renderInspector?: () => ReactNode
 }
 
 function ThreadUnavailableScreen()
@@ -438,20 +436,9 @@ function ThreadRouteContent(
     },
     [fileInspector.supported, navigation, selectedThread],
   )
-  // the workspace inspector column spans the full window height. On iOS the
-  // panes bring their own nested native headers (which underlap the status
-  // bar); elsewhere the pane content pads itself below the top inset.
-  const safeAreaInsets = useSafeAreaInsets()
-  const inspectorHeaderInset = Platform.OS === 'ios' ? 0 : safeAreaInsets.top
   const GitInspector = useCallback(
-    () => (
-      <GitOverviewSheet
-        headerInset={inspectorHeaderInset}
-        presentation="inspector"
-        route={{ params: props.route.params }}
-      />
-    ),
-    [inspectorHeaderInset, props.route.params],
+    () => <GitOverviewSheet presentation="inspector" route={{ params: props.route.params }} />,
+    [props.route.params],
   )
   const FilesInspector = useCallback(
     () =>
@@ -459,24 +446,14 @@ function ThreadRouteContent(
         <ThreadFileNavigatorPane
           cwd={selectedThreadCwd}
           environmentId={selectedThread.environmentId}
-          headerInset={inspectorHeaderInset}
           projectName={selectedThreadProject?.title ?? 'Files'}
           selectedPath={null}
           onSelectFile={handleSelectInspectorFile}
         />
       ) : null,
-    [
-      handleSelectInspectorFile,
-      inspectorHeaderInset,
-      selectedThread,
-      selectedThreadCwd,
-      selectedThreadProject?.title,
-    ],
+    [handleSelectInspectorFile, selectedThread, selectedThreadCwd, selectedThreadProject?.title],
   )
-  const RouteInspector = useCallback(
-    () => props.renderInspector?.(inspectorHeaderInset),
-    [inspectorHeaderInset, props.renderInspector],
-  )
+  const RouteInspector = useCallback(() => props.renderInspector?.(), [props.renderInspector])
   const renderInspectorStack = useCallback(
     () =>
       inspectorMode === null ? null : (
@@ -711,60 +688,6 @@ function ThreadRouteContent(
     ],
     [panes.primarySidebarVisible, props.onReturnToThread, navigation, togglePrimarySidebar],
   )
-  const androidHeaderActions = useMemo<ReadonlyArray<AndroidHeaderAction>>(() =>
-  {
-    if (Platform.OS !== 'android') return []
-
-    const actions: AndroidHeaderAction[] = []
-    if (props.onReturnToThread)
-    {
-      actions.push({
-        accessibilityLabel: 'Return to chat',
-        icon: 'chevron.left',
-        onPress: props.onReturnToThread,
-      })
-    }
-    if (selectedThreadCwd !== null)
-    {
-      actions.push({
-        accessibilityLabel: 'Open files',
-        icon: 'folder',
-        onPress: handleOpenFilesInspector,
-      })
-    }
-    if (selectedThreadProject?.workspaceRoot)
-    {
-      actions.push({
-        accessibilityLabel: 'Open terminal',
-        icon: 'terminal',
-        onPress: () => handleOpenTerminal(null),
-      })
-    }
-    actions.push({
-      accessibilityLabel: 'Open git controls',
-      icon: 'point.topleft.down.curvedto.point.bottomright.up',
-      onPress: handleOpenGitInspector,
-    })
-    if (fileInspector.supported && selectedThreadCwd !== null)
-    {
-      actions.push({
-        accessibilityLabel: 'Toggle inspector',
-        icon: 'sidebar.right',
-        onPress: handleToggleInspector,
-      })
-    }
-    return actions
-  }, [
-    fileInspector.supported,
-    handleOpenFilesInspector,
-    handleOpenTerminal,
-    handleOpenGitInspector,
-    handleToggleInspector,
-    props.onReturnToThread,
-    selectedThreadCwd,
-    selectedThreadProject?.workspaceRoot,
-  ])
-
   // deep links / cold starts land with Thread as the ONLY route, where the
   // native back button does not render. Provide an explicit Home escape for
   // that case; when history exists the native back button is used instead.
@@ -865,9 +788,7 @@ function ThreadRouteContent(
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
       <NativeStackScreenOptions
         options={{
-          // android draws its own in-flow header (AndroidScreenHeader below);
-          // the native stack header stays iOS-only.
-          headerShown: Platform.OS !== 'android',
+          headerShown: true,
           headerTitle: selectedThread.title,
           headerTitleStyle: usesNativeHeaderGlass
             ? {
@@ -880,39 +801,21 @@ function ThreadRouteContent(
           // compact uses the NATIVE back button when a previous route exists;
           // deep links / cold starts get an explicit Home button instead.
           // split view always uses its custom left items.
-          unstable_headerLeftItems:
-            Platform.OS === 'ios'
-              ? layout.usesSplitView
-                ? () => splitLeftHeaderItems
-                : canGoBack
-                  ? undefined
-                  : () => compactHomeHeaderItems
-              : undefined,
+          unstable_headerLeftItems: layout.usesSplitView
+            ? () => splitLeftHeaderItems
+            : canGoBack
+              ? undefined
+              : () => compactHomeHeaderItems,
           // search lives in the persistent sidebar, so the split header keeps
           // the git controls on the RIGHT (no center items — center space is
           // reserved for future breadcrumbs/status).
-          unstable_headerRightItems:
-            Platform.OS === 'ios'
-              ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
-              : undefined,
+          unstable_headerRightItems: () =>
+            layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems,
           unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
         }}
       />
 
-      {Platform.OS === 'android' ? (
-        <AndroidScreenHeader
-          title={selectedThread.title}
-          subtitle={headerSubtitle}
-          onBack={layout.usesSplitView ? undefined : () => navigation.goBack()}
-          actions={androidHeaderActions}
-        />
-      ) : null}
-
-      {/* Android surfaces the git/files/inspector actions in its in-flow
-          header above, so the fallback action toolbar stays iOS-only. */}
-      {renderThreadRouteBody(
-        Platform.OS !== 'android' && !layout.usesSplitView && !usesNativeHeaderGlass,
-      )}
+      {renderThreadRouteBody(!layout.usesSplitView && !usesNativeHeaderGlass)}
     </>
   )
 }

@@ -45,7 +45,6 @@ import {
   useHardwareKeyboardCommand,
 } from '../keyboard/hardwareKeyboardCommands'
 import { HomeListOptionsProvider, resolveProjectGroupingMode } from '../home/home-list-options'
-import { AndroidHomeFabLayout } from '../home/AndroidHomeFab'
 import { ThreadNavigationSidebar } from '../threads/ThreadNavigationSidebar'
 import { WORKSPACE_PANE_TIMING } from './workspace-pane-animation'
 import { WorkspaceInspectorPane } from './workspace-inspector-pane'
@@ -566,22 +565,18 @@ function AdaptiveWorkspaceLayoutContent(
               pointerEvents={panes.primarySidebarVisible ? 'auto' : 'none'}
               style={sidebarAnimatedStyle}
             >
-              <AndroidHomeFabLayout
-                onStartNewTask={() => navigation.navigate('NewTaskSheet', { screen: 'NewTask' })}
-              >
-                <ThreadNavigationSidebar
-                  width={layout.listPaneWidth}
-                  visible={panes.primarySidebarVisible}
-                  onRequestVisibility={revealPrimarySidebar}
-                  selectedThreadKey={selectedThreadKey}
-                  onOpenSettings={handleOpenSettings}
-                  onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
-                  onNewThreadInProject={handleNewThreadInProject}
-                  onSelectThread={handleSelectThread}
-                  onSearchQueryChange={setPrimarySidebarSearchQuery}
-                  searchQuery={primarySidebarSearchQuery}
-                />
-              </AndroidHomeFabLayout>
+              <ThreadNavigationSidebar
+                width={layout.listPaneWidth}
+                visible={panes.primarySidebarVisible}
+                onRequestVisibility={revealPrimarySidebar}
+                selectedThreadKey={selectedThreadKey}
+                onOpenSettings={handleOpenSettings}
+                onOpenEnvironmentSettings={handleOpenEnvironmentSettings}
+                onNewThreadInProject={handleNewThreadInProject}
+                onSelectThread={handleSelectThread}
+                onSearchQueryChange={setPrimarySidebarSearchQuery}
+                searchQuery={primarySidebarSearchQuery}
+              />
             </Animated.View>
           ) : null}
           <View className="flex-1 overflow-hidden bg-screen" collapsable={false}>

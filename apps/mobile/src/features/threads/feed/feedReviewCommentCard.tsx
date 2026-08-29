@@ -119,7 +119,6 @@ export const ReviewCommentCard = memo(function ReviewCommentCard(props: {
       ) : props.comment.diff.trim().length > 0 ? (
         <ScrollView
           horizontal
-          nestedScrollEnabled
           directionalLockEnabled
           showsHorizontalScrollIndicator={false}
           bounces={false}

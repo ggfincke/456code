@@ -1,7 +1,6 @@
 // apps/mobile/src/App.tsx
 // compose mobile application providers and navigation
 
-import { BlurTargetView } from 'expo-blur'
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
 import { useEffect } from 'react'
@@ -12,7 +11,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { createStaticNavigation, DarkTheme, DefaultTheme } from '@react-navigation/native'
 
 import { RegistryContext } from '@effect/atom-react'
-import { ConfirmDialogHost } from './components/ConfirmDialogHost'
 import { CloudAuthProvider } from './features/cloud/CloudAuthProvider'
 import { prepareNativeShowcaseCapture } from './features/showcase/nativeShowcaseScene'
 import { IncomingShareProvider } from './features/sharing/IncomingShareProvider'
@@ -22,9 +20,6 @@ import {
 } from './features/settings/appearance/AppearancePreferencesProvider'
 import { RootStack } from './Stack'
 import { appAtomRegistry } from './state/atom-registry'
-import { OverlayPortalHost } from './components/OverlayPortal'
-import { appBlurTargetRef } from './lib/appBlurTarget'
-import { useThemeColor } from './lib/useThemeColor'
 
 import '../global.css'
 
@@ -67,7 +62,6 @@ function SplashScreenCoordinator()
 export default function App()
 {
   const colorScheme = useColorScheme()
-  const statusBarBg = useThemeColor('--color-status-bar')
 
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
@@ -75,31 +69,20 @@ export default function App()
         <AppearancePreferencesProvider>
           <SplashScreenCoordinator />
           <GestureHandlerRootView className="flex-1">
-            <KeyboardProvider statusBarTranslucent>
+            <KeyboardProvider>
               <SafeAreaProvider>
-                <StatusBar
-                  barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
-                  backgroundColor={statusBarBg}
-                  translucent
-                />
+                <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
                 {/* The navigation theme drives the NATIVE header appearance: native-stack
                     forwards `dark` as the nav bar's overrideUserInterfaceStyle. Without
                     this, React Navigation defaults to its light theme and every native
                     header (glass buttons, title, materials) is forced light even when
                     the system is in dark mode. */}
-                {/* Blur target for Android dropdown backdrops — see appBlurTarget.ts. */}
-                <BlurTargetView ref={appBlurTargetRef} style={{ flex: 1 }}>
-                  <IncomingShareProvider>
-                    <Navigation
-                      linking={appLinking}
-                      theme={colorScheme === 'dark' ? DarkTheme : DefaultTheme}
-                    />
-                  </IncomingShareProvider>
-                  <ConfirmDialogHost />
-                </BlurTargetView>
-                {/* Anchored-menu overlays render here — in-window, so the
-                    keyboard stays up while a dropdown is open. */}
-                <OverlayPortalHost />
+                <IncomingShareProvider>
+                  <Navigation
+                    linking={appLinking}
+                    theme={colorScheme === 'dark' ? DarkTheme : DefaultTheme}
+                  />
+                </IncomingShareProvider>
               </SafeAreaProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>

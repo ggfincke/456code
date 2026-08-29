@@ -53,29 +53,29 @@ function workRowSymbolName(icon: ThreadFeedActivity['icon']): AppSymbolName
   switch (icon)
   {
     case 'agent':
-      return { ios: 'sparkles', android: 'auto_awesome' }
+      return 'sparkles'
     case 'alert':
-      return { ios: 'exclamationmark.triangle', android: 'error' }
+      return 'exclamationmark.triangle'
     case 'check':
-      return { ios: 'checkmark', android: 'check' }
+      return 'checkmark'
     case 'command':
-      return { ios: 'terminal', android: 'terminal' }
+      return 'terminal'
     case 'edit':
-      return { ios: 'square.and.pencil', android: 'edit' }
+      return 'square.and.pencil'
     case 'eye':
-      return { ios: 'eye', android: 'visibility' }
+      return 'eye'
     case 'globe':
-      return { ios: 'globe', android: 'public' }
+      return 'globe'
     case 'hammer':
-      return { ios: 'hammer', android: 'construction' }
+      return 'hammer'
     case 'message':
-      return { ios: 'bubble.left', android: 'chat_bubble' }
+      return 'bubble.left'
     case 'warning':
-      return { ios: 'xmark', android: 'close' }
+      return 'xmark'
     case 'wrench':
-      return { ios: 'wrench', android: 'build' }
+      return 'wrench'
     case 'zap':
-      return { ios: 'bolt', android: 'bolt' }
+      return 'bolt'
   }
 }
 
@@ -86,13 +86,13 @@ function workRowStatusSymbolName(status: NonNullable<ThreadFeedActivity['status'
   switch (status)
   {
     case 'failure':
-      return { ios: 'xmark', android: 'close' }
+      return 'xmark'
     case 'success':
-      return { ios: 'checkmark', android: 'check' }
+      return 'checkmark'
     case 'running':
-      return { ios: 'ellipsis', android: 'more_horiz' }
+      return 'ellipsis'
     case 'neutral':
-      return { ios: 'minus', android: 'remove' }
+      return 'minus'
   }
 }
 
@@ -247,11 +247,7 @@ export function ThreadWorkLog(props: {
                     <View className="h-4 w-4 items-center justify-center">
                       {canExpand ? (
                         <SymbolView
-                          name={
-                            expanded
-                              ? { ios: 'chevron.up', android: 'keyboard_arrow_up' }
-                              : { ios: 'chevron.down', android: 'keyboard_arrow_down' }
-                          }
+                          name={expanded ? 'chevron.up' : 'chevron.down'}
                           size={11}
                           tintColor={props.iconSubtleColor}
                           type="monochrome"
@@ -275,7 +271,6 @@ export function ThreadWorkLog(props: {
               {fullDetail ? (
                 <View className="ml-7 border-l border-neutral-300/60 pb-1 pl-3 pt-0.5 dark:border-white/[0.12]">
                   <ScrollView
-                    nestedScrollEnabled
                     directionalLockEnabled
                     showsVerticalScrollIndicator
                     className="max-h-60"
@@ -339,11 +334,7 @@ export function ThreadWorkGroupToggle(props: {
       >
         <View className="h-[18px] w-5 items-center justify-center">
           <SymbolView
-            name={
-              props.expanded
-                ? { ios: 'chevron.up', android: 'keyboard_arrow_up' }
-                : { ios: 'chevron.down', android: 'keyboard_arrow_down' }
-            }
+            name={props.expanded ? 'chevron.up' : 'chevron.down'}
             size={12}
             tintColor={props.iconSubtleColor}
             type="monochrome"

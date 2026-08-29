@@ -9,7 +9,7 @@
 - `/apps/web`: React + Vite UI. Owns session control, conversation and provider event rendering,
   plus native Impact Diff and the Architecture/Structure Repository Map lenses. Connects to the
   server via WebSocket.
-- `/apps/mobile`: Expo client for iOS and Android. Connects to registered environments through the
+- `/apps/mobile`: Expo client for iPhone and iPad. Connects to registered environments through the
   shared client runtime.
 - `/apps/desktop`: Electron host. Supervises a primary 456code server backend and optional WSL
   backends, then loads the shared web client through the desktop protocol.

@@ -1,9 +1,6 @@
 {
-  "platforms": ["apple", "android"],
+  "platforms": ["apple"],
   "apple": {
     "modules": ["Code456ComposerEditorModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.code456composereditor.Code456ComposerEditorModule"]
   }
 }

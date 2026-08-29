@@ -179,7 +179,7 @@ export function buildModelMenuActions(
     state: isSelected(option) ? 'on' : undefined,
   })
 
-  // android menus support only one submenu level, so legacy groups are siblings
+  // keep legacy groups beside current models so both remain directly discoverable
   return groups.flatMap((group) =>
   {
     const currentModels = group.models.filter((model) => model.isLegacy !== true)

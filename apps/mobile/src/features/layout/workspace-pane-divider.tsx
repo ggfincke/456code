@@ -3,7 +3,6 @@
 
 import { useState } from 'react'
 import {
-  Platform,
   PlatformColor,
   Pressable,
   StyleSheet,
@@ -67,14 +66,13 @@ export function WorkspacePaneDivider(props: WorkspacePaneDividerProps)
 const styles = StyleSheet.create({
   line: {
     alignSelf: 'center',
-    backgroundColor:
-      Platform.OS === 'ios' ? PlatformColor('separator') : 'rgba(120, 120, 128, 0.28)',
+    backgroundColor: PlatformColor('separator'),
     height: '100%',
     opacity: 0.7,
     width: StyleSheet.hairlineWidth,
   },
   activeLine: {
-    backgroundColor: Platform.OS === 'ios' ? PlatformColor('systemBlueColor') : '#0a84ff',
+    backgroundColor: PlatformColor('systemBlueColor'),
     opacity: 1,
     width: 2,
   },

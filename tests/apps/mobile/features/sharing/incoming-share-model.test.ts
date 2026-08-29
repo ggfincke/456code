@@ -135,7 +135,7 @@ describe('incoming native shares', () =>
   {
     const duplicate: SharePayload = {
       shareType: 'image',
-      value: 'content://shared/screenshot',
+      value: 'shared-image://screenshot',
       mimeType: 'image/png',
     }
     const resolvedPayloads: ResolvedSharePayload[] = [

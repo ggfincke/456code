@@ -5,7 +5,6 @@ import { memo, useMemo, useState, type ReactNode } from 'react'
 import {
   Image,
   Linking,
-  Platform,
   ScrollView,
   StyleSheet,
   Text as NativeText,
@@ -69,11 +68,7 @@ const MARKDOWN_COLORS = {
   },
 } as const
 
-const MARKDOWN_MONO_FONT = Platform.select({
-  ios: 'ui-monospace',
-  android: 'monospace',
-  default: 'monospace',
-})
+const MARKDOWN_MONO_FONT = 'ui-monospace'
 
 export interface MarkdownStyleSets
 {
@@ -192,7 +187,6 @@ function MarkdownCodeBlock(props: {
           style={{
             color: props.headerTextColor,
             fontSize: props.fontSize,
-            ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
           }}
         >
           {languageLabel}
@@ -208,7 +202,6 @@ function MarkdownCodeBlock(props: {
       <ScrollView
         horizontal
         bounces={false}
-        nestedScrollEnabled={Platform.OS === 'android'}
         showsHorizontalScrollIndicator={false}
         contentContainerClassName="px-3.5 py-3"
       >
@@ -219,7 +212,6 @@ function MarkdownCodeBlock(props: {
             color: props.textColor,
             fontSize: props.fontSize,
             lineHeight: props.lineHeight,
-            ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
           }}
         >
           {highlighted

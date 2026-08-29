@@ -11,7 +11,7 @@ import {
   type SharePayload,
 } from 'expo-sharing'
 import React, { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
-import { Alert, AppState, Platform } from 'react-native'
+import { Alert, AppState } from 'react-native'
 
 import {
   buildIncomingShareDraft,
@@ -43,14 +43,6 @@ const IncomingShareContext = React.createContext<IncomingShareContextValue | nul
 
 function receiveSharingEnabled(): boolean
 {
-  if (Platform.OS === 'android')
-  {
-    return true
-  }
-  if (Platform.OS !== 'ios')
-  {
-    return false
-  }
   return Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true
 }
 
@@ -62,10 +54,8 @@ async function resolvedPayloadsForImages(): Promise<ReadonlyArray<ResolvedShareP
   }
   catch (error)
   {
-    // iOS already gives the containing app a copied file:// URL, so raw
-    // payloads remain usable. Android normally resolves content:// into a
-    // private cache file; its modern File API can still read the raw URI when
-    // resolution fails.
+    // the containing app already receives a copied file URL, so raw payloads
+    // remain usable when metadata resolution fails
     console.warn('[incoming-share] could not resolve shared file metadata', error)
     return []
   }

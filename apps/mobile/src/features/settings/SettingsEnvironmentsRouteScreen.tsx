@@ -1,16 +1,15 @@
 // apps/mobile/src/features/settings/SettingsEnvironmentsRouteScreen.tsx
 // render the settings environments route screen route
 
-import { NativeHeaderToolbar, NativeStackScreenOptions } from '../../native/StackHeader'
+import { NativeHeaderToolbar } from '../../native/StackHeader'
 import { useNavigation } from '@react-navigation/native'
 import { SymbolView } from '../../components/AppSymbol'
 import type { EnvironmentId } from '@t3tools/contracts'
 import { useCallback, useEffect, useState } from 'react'
-import { Platform, ScrollView, View } from 'react-native'
+import { ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AppText as Text } from '../../components/AppText'
-import { AndroidScreenHeader } from '../../components/AndroidScreenHeader'
 import { hasCloudPublicConfig } from '../cloud/publicConfig'
 import { CloudEnvironmentRows } from '../connection/CloudEnvironmentRows'
 import { ConnectionEnvironmentRow } from '../connection/ConnectionEnvironmentRow'
@@ -94,35 +93,14 @@ export function SettingsEnvironmentsRouteScreen()
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === 'android' ? (
-        <>
-          {/* Android renders its own in-screen header instead of the native bar. */}
-          <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader
-            title="Environments"
-            onBack={() => navigation.goBack()}
-            actions={[
-              {
-                accessibilityLabel: 'Add environment',
-                icon: 'plus',
-                onPress: () =>
-                  navigation.navigate('SettingsSheet', { screen: 'SettingsEnvironmentNew' }),
-              },
-            ]}
-          />
-        </>
-      ) : (
-        <NativeHeaderToolbar placement="right">
-          <NativeHeaderToolbar.Button
-            icon="plus"
-            onPress={() =>
-              navigation.navigate('SettingsSheet', { screen: 'SettingsEnvironmentNew' })
-            }
-            separateBackground
-            tintColor={headerIconColor}
-          />
-        </NativeHeaderToolbar>
-      )}
+      <NativeHeaderToolbar placement="right">
+        <NativeHeaderToolbar.Button
+          icon="plus"
+          onPress={() => navigation.navigate('SettingsSheet', { screen: 'SettingsEnvironmentNew' })}
+          separateBackground
+          tintColor={headerIconColor}
+        />
+      </NativeHeaderToolbar>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}

@@ -1,7 +1,8 @@
 # 456code Mobile
 
 > [!WARNING]
-> 456code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
+> 456code Mobile is an iPhone and iPad app currently in development and is not distributed yet. If
+> you want to try it out, you can build it from source.
 
 ## Quickstart
 
@@ -85,11 +86,10 @@ Run static checks for mobile native code:
 node ../../scripts/mobile-native-static-check.ts
 ```
 
-The native composer supports hardware submit with Command-Return on iOS. Android hardware submit
-is not supported, so JavaScript does not expect or register an Android native submit event. Touch
-Send remains supported on every platform.
+The native composer supports hardware submit with Command-Return. Touch Send remains available.
 
-The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin. Missing native tools are reported as warnings and skipped locally. CI installs the default toolset from `apps/mobile/Brewfile` before running the native checks.
+The native lint task runs SwiftLint. A missing local installation is reported as a warning and
+skipped. CI installs the tool from `apps/mobile/Brewfile` before running the native checks.
 
 ## EAS Builds
 
@@ -115,12 +115,4 @@ Create a persistent preview build:
 
 ```bash
 vp run eas:ios:preview
-```
-
-Android equivalents:
-
-```bash
-vp run eas:android:dev
-vp run eas:android:preview:dev
-vp run eas:android:preview
 ```

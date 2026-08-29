@@ -15,7 +15,6 @@ pnpm-lock.yaml
 **/*.generated.ts
 **/*.generated.tsx
 **/_generated/
-apps/mobile/android/
 apps/mobile/ios/
 apps/web/public/mockServiceWorker.js
 packages/shared/src/qrCode.ts

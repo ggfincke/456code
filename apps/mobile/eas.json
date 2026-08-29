@@ -35,10 +35,7 @@
       "channel": "preview",
       "environment": "preview",
       "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      }
+      "distribution": "internal"
     },
     "production": {
       "corepack": true,
@@ -55,9 +52,6 @@
     "production": {
       "ios": {
         "ascAppId": "6787819824"
-      },
-      "android": {
-        "track": "internal"
       }
     }
   }

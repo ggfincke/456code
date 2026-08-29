@@ -2,13 +2,11 @@
 // attaches and drives a thread-scoped mobile terminal session
 
 import { DEFAULT_TERMINAL_ID, EnvironmentId, ThreadId } from '@t3tools/contracts'
-import { type KnownTerminalSession } from '@t3tools/client-runtime/state/terminal'
-import type { MenuAction } from '@react-native-menu/menu'
 import { SymbolView } from '../../components/AppSymbol'
 import { NativeHeaderToolbar, NativeStackScreenOptions } from '../../native/StackHeader'
 import { StackActions, useNavigation, type StaticScreenProps } from '@react-navigation/native'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Platform, Pressable, View, useColorScheme } from 'react-native'
+import { Pressable, View, useColorScheme } from 'react-native'
 import {
   KeyboardController,
   KeyboardEvents,
@@ -24,18 +22,15 @@ import {
   firstRouteParam,
   inferHostPlatform,
   pickRunningTerminalSessionForBootstrap,
-  type HostPlatform,
   type PendingModifier,
   type TerminalToolbarAction,
 } from './terminalRouteHelpers'
 
-import { AndroidHeaderIconButton, AndroidScreenHeader } from '../../components/AndroidScreenHeader'
 import {
   ComposerToolbarButton,
   ComposerToolbarRow,
   ComposerToolbarScroller,
 } from '../../components/ComposerToolbarTrigger'
-import { ControlPillMenu } from '../../components/ControlPill'
 import { EmptyState } from '../../components/EmptyState'
 import { GlassSurface } from '../../components/GlassSurface'
 import { LoadingScreen } from '../../components/LoadingScreen'
@@ -427,7 +422,6 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   )
 
   const terminalTheme = getPierreTerminalTheme(appearanceScheme)
-  const usesNativeHeaderGlass = Platform.OS === 'ios'
   const pendingModifier =
     pendingModifierState.terminalId === terminalId ? pendingModifierState.value : null
   const headerSubtitle = selectedThreadProject?.title ?? ''
@@ -943,72 +937,6 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     setTerminalFontSize(stepTerminalFontSize(fontSize, 1))
   }, [fontSize, setTerminalFontSize])
 
-  // android mirror of the iOS NativeHeaderToolbar terminal menu below: text
-  // size, session switching, and "Open new terminal", rendered through the
-  // token-styled anchored menu (the native header items are iOS-only).
-  const androidTerminalMenuActions = useMemo<MenuAction[]>(
-    () => [
-      {
-        id: 'text-size',
-        title: 'Text size',
-        subactions: [
-          {
-            id: 'font-decrease',
-            title: `A- ${Math.max(MIN_TERMINAL_FONT_SIZE, fontSize - TERMINAL_FONT_SIZE_STEP).toFixed(1)} pt`,
-            attributes: fontSize <= MIN_TERMINAL_FONT_SIZE ? { disabled: true } : undefined,
-          },
-          {
-            id: 'font-increase',
-            title: `A+ ${Math.min(MAX_TERMINAL_FONT_SIZE, fontSize + TERMINAL_FONT_SIZE_STEP).toFixed(1)} pt`,
-            attributes: fontSize >= MAX_TERMINAL_FONT_SIZE ? { disabled: true } : undefined,
-          },
-        ],
-      },
-      ...terminalMenuSessions.map((session): MenuAction => ({
-        id: `terminal-session:${session.terminalId}`,
-        title: session.displayLabel,
-        subtitle: [getTerminalStatusLabel({ status: session.status }), basename(session.cwd)]
-          .filter(Boolean)
-          .join(' · '),
-        state: session.terminalId === terminalId ? ('on' as const) : undefined,
-      })),
-      {
-        id: 'terminal-new',
-        title: 'Open new terminal',
-        image: 'plus',
-        subtitle: `Start another shell in ${basename(selectedThreadProject?.workspaceRoot ?? null) ?? 'this workspace'}`,
-      },
-    ],
-    [fontSize, selectedThreadProject?.workspaceRoot, terminalId, terminalMenuSessions],
-  )
-
-  const handleAndroidTerminalMenuAction = useCallback(
-    (event: { nativeEvent: { event: string } }) =>
-    {
-      const id = event.nativeEvent.event
-      if (id === 'font-decrease')
-      {
-        handleDecreaseFontSize()
-        return
-      }
-      if (id === 'font-increase')
-      {
-        handleIncreaseFontSize()
-        return
-      }
-      if (id === 'terminal-new')
-      {
-        handleOpenNewTerminal()
-        return
-      }
-      if (id.startsWith('terminal-session:'))
-      {
-        handleSelectTerminal(id.slice('terminal-session:'.length))
-      }
-    },
-    [handleDecreaseFontSize, handleIncreaseFontSize, handleOpenNewTerminal, handleSelectTerminal],
-  )
-
   const handleClearTerminal = useCallback(() =>
   {
     if (!selectedThread)
@@ -1142,52 +1070,11 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
           // static header config lives in Stack.tsx (SOLID_HEADER_OPTIONS — the pty
           // scrolls internally, nothing for glass to sample). Default title/subtitle
           // styling, like every other page.
-          // android draws its own in-flow header (AndroidScreenHeader below);
-          // the native stack header stays iOS-only.
-          headerShown: Platform.OS !== 'android',
+          headerShown: true,
           title: 'Terminal',
-          unstable_headerSubtitle:
-            usesNativeHeaderGlass && headerSubtitle.length > 0 ? headerSubtitle : undefined,
+          unstable_headerSubtitle: headerSubtitle.length > 0 ? headerSubtitle : undefined,
         }}
       />
-
-      {Platform.OS === 'android' ? (
-        <AndroidScreenHeader
-          title="Terminal"
-          subtitle={headerSubtitle}
-          onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
-          trailing={
-            <>
-              {layout.usesSplitView ? (
-                <AndroidHeaderIconButton
-                  accessibilityLabel={
-                    panes.primarySidebarVisible ? 'Maximize terminal' : 'Show threads'
-                  }
-                  icon={
-                    panes.primarySidebarVisible
-                      ? 'arrow.up.left.and.arrow.down.right'
-                      : 'sidebar.left'
-                  }
-                  onPress={togglePrimarySidebar}
-                />
-              ) : null}
-              {isEnvironmentReady ? (
-                <ControlPillMenu
-                  actions={androidTerminalMenuActions}
-                  isAnchoredToRight
-                  title={getTerminalStatusLabel({
-                    status: terminal.status,
-                    hasRunningSubprocess: terminal.hasRunningSubprocess,
-                  })}
-                  onPressAction={handleAndroidTerminalMenuAction}
-                >
-                  <AndroidHeaderIconButton accessibilityLabel="Terminal options" icon="terminal" />
-                </ControlPillMenu>
-              ) : null}
-            </>
-          }
-        />
-      ) : null}
 
       {layout.usesSplitView ? (
         <NativeHeaderToolbar placement="left">
@@ -1332,7 +1219,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
                     </ComposerToolbarScroller>
                     <ComposerToolbarButton
                       accessibilityLabel="Dismiss keyboard"
-                      icon={{ ios: 'keyboard.chevron.compact.down', android: 'keyboard_hide' }}
+                      icon="keyboard.chevron.compact.down"
                       onPress={handleDismissKeyboard}
                       showChevron={false}
                     />
@@ -1366,7 +1253,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
                   pointerEvents="none"
                 >
                   <SymbolView
-                    name={{ ios: 'keyboard', android: 'keyboard' }}
+                    name="keyboard"
                     size={20}
                     tintColor={terminalTheme.foreground}
                     type="monochrome"

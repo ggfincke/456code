@@ -77,7 +77,7 @@ jobs:
         with:
           profile: preview:dev
           branch: pr-${{ github.event.pull_request.number }}
-          platform: all
+          platform: ios
           environment: preview
           working-directory: apps/mobile
           github-token: ${{ secrets.GITHUB_TOKEN }}

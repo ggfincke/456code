@@ -3,10 +3,9 @@
 
 import { useNavigation, type StaticScreenProps } from '@react-navigation/native'
 import { useCallback, useState } from 'react'
-import { Platform, Pressable, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { AndroidSheetHeader } from '../../../components/AndroidScreenHeader'
 import { AppText as Text, AppTextInput as TextInput } from '../../../components/AppText'
 import { cn } from '../../../lib/cn'
 import { useEnvironmentQuery } from '../../../state/query'
@@ -72,9 +71,6 @@ export function GitCommitSheet(_props: GitCommitSheetProps)
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === 'android' ? (
-        <AndroidSheetHeader title="Commit changes" onBack={() => navigation.goBack()} />
-      ) : null}
       <ScrollView
         className="flex-1"
         keyboardShouldPersistTaps="handled"

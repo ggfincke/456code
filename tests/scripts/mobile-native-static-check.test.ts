@@ -41,6 +41,29 @@ const runSwiftLint = runCommand('swiftlint', ['lint', '--strict'], '/repo/apps/m
 
 it.layer(NodeServices.layer)('mobile native source discovery', (it) =>
 {
+  it.effect('collects owned Swift while skipping the generated iOS project', () =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: 'mobile-native-static-check-' })
+      const moduleDirectory = path.join(root, 'modules', 'code456-example')
+      const generatedDirectory = path.join(root, 'ios', 'Generated')
+      const ownedSwift = path.join(moduleDirectory, 'ExampleModule.swift')
+
+      yield* fs.makeDirectory(moduleDirectory, { recursive: true })
+      yield* fs.makeDirectory(generatedDirectory, { recursive: true })
+      yield* fs.writeFileString(ownedSwift, 'struct ExampleModule {}\n')
+      yield* fs.writeFileString(path.join(moduleDirectory, 'index.ts'), 'export {}\n')
+      yield* fs.writeFileString(
+        path.join(generatedDirectory, 'Generated.swift'),
+        'struct Generated {}\n',
+      )
+
+      assert.deepStrictEqual(yield* collectSources(root, root), [ownedSwift])
+    }),
+  )
+
   it.effect('preserves the failed discovery operation, path, and exact cause', () =>
     Effect.gen(function* ()
     {

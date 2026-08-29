@@ -1,7 +1,7 @@
 // apps/mobile/src/features/settings/appearance/components/AppearancePreviews.tsx
 // render appearance previews
 
-import { Platform, ScrollView, View, useColorScheme } from 'react-native'
+import { ScrollView, View, useColorScheme } from 'react-native'
 
 import { AppText as Text } from '../../../../components/AppText'
 import {
@@ -11,11 +11,7 @@ import {
 import { useThemeColor } from '../../../../lib/useThemeColor'
 import { getPierreTerminalTheme } from '../../../terminal/terminalTheme'
 
-const CODE_FONT_FAMILY = Platform.select({
-  ios: 'ui-monospace',
-  android: 'monospace',
-  default: 'monospace',
-})
+const CODE_FONT_FAMILY = 'ui-monospace'
 
 // hairline between a section's preview surface and its control rows.
 export function AppearancePreviewSeparator()

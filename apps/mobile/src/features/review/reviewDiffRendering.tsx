@@ -1,7 +1,7 @@
 // apps/mobile/src/features/review/reviewDiffRendering.tsx
 // render review diff rendering
 
-import { Platform, Text as NativeText, View } from 'react-native'
+import { Text as NativeText, View } from 'react-native'
 
 import { cn } from '../../lib/cn'
 import { MOBILE_CODE_SURFACE } from '../../lib/typography'
@@ -9,11 +9,7 @@ import { MOBILE_CODE_SURFACE } from '../../lib/typography'
 import type { ReviewRenderableLineRow } from './reviewModel'
 import type { ReviewHighlightedToken } from './shikiReviewHighlighter'
 
-export const REVIEW_MONO_FONT_FAMILY = Platform.select({
-  ios: 'ui-monospace',
-  android: 'monospace',
-  default: 'monospace',
-})
+export const REVIEW_MONO_FONT_FAMILY = 'ui-monospace'
 
 export const REVIEW_DIFF_LINE_HEIGHT = MOBILE_CODE_SURFACE.rowHeight
 

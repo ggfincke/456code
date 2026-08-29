@@ -142,7 +142,6 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
       >
         <ProjectFavicon
           environmentId={props.project.environmentId}
-          open={!props.collapsed}
           size={compact ? 22 : 18}
           projectTitle={props.project.title}
           workspaceRoot={props.project.workspaceRoot}
@@ -771,14 +770,12 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       threadTitle={thread.title}
     >
       {(close) => (
-        // messages-style row actions on long-press. iOS: a real
+        // messages-style row actions on long-press using a real
         // UIContextMenuInteraction with the row as the zoom preview (needs the
         // patched @react-native-menu, see
         // patches/@react-native-menu__menu@2.0.0.patch — in long-press mode the
         // interaction is hosted by the component view and the underlying
-        // UIButton passes touches through, so row taps keep working). Android:
-        // ControlPillMenu injects onLongPress into the row and anchors the
-        // token-styled dropdown to it; taps and swipes are untouched.
+        // UIButton passes touches through, so row taps and swipes keep working).
         <ControlPillMenu
           actions={THREAD_ROW_MENU_ACTIONS}
           onPressAction={handleMenuAction}
