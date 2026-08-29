@@ -101,11 +101,31 @@ index 919b984edc9f91ee9ac26faf257d8a721e26457c..5bb0cd6736ed6bc51db57e2a9326f758
  
  NS_ASSUME_NONNULL_END
 diff --git a/ios/RNSScreenStackHeaderConfig.mm b/ios/RNSScreenStackHeaderConfig.mm
-index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147bcead0e9d 100644
+index 5970e3e3a624b9498b8dedfc16831df03a274d0c..9503b85abbabafb6b684d8b6c4cf985715073979 100644
 --- a/ios/RNSScreenStackHeaderConfig.mm
 +++ b/ios/RNSScreenStackHeaderConfig.mm
-@@ -30,6 +30,20 @@ namespace react = facebook::react;
+@@ -28,8 +28,40 @@
+ namespace react = facebook::react;
+ 
  static const NSNumber *const DEFAULT_TITLE_FONT_SIZE = @17;
++
++#if !TARGET_OS_TV
++// Each placement keeps its own cache so changes to one side do not move live
++// items on the other side into new groups during a navigation transition.
++static char RNSAppliedLeadingHeaderItemsKey;
++static char RNSAppliedTrailingHeaderItemsKey;
++static char RNSAppliedCenterHeaderItemsKey;
++
++// Records a placement's owner and contents, returning whether they changed.
++static BOOL RNSUpdateHeaderItemsCache(UINavigationItem *navitem, const void *key, NSArray *itemsKey)
++{
++  if ([objc_getAssociatedObject(navitem, key) isEqual:itemsKey]) {
++    return NO;
++  }
++  objc_setAssociatedObject(navitem, key, itemsKey, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
++  return YES;
++}
++#endif
  static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
  
 +static NSInteger navigationItemStyleFromCppEquivalent(
@@ -125,7 +145,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  @interface RCTImageLoader (Private)
  - (id<RCTImageCache>)imageCache;
  @end
-@@ -47,6 +61,9 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
+@@ -47,6 +79,9 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
  @end
  
  @interface RNSScreenStackHeaderConfig () <RCTMountingTransactionObserving>
@@ -135,7 +155,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  @end
  
  @implementation RNSScreenStackHeaderConfig {
-@@ -81,6 +98,7 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
+@@ -81,6 +116,7 @@ static const NSNumber *const DEFAULT_TITLE_LARGE_FONT_SIZE = @34;
    self.hidden = YES;
    _reactSubviews = [NSMutableArray new];
    _backTitleVisible = YES;
@@ -143,7 +163,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
    _blurEffect = RNSBlurEffectStyleNone;
  }
  
-@@ -496,6 +514,10 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -496,6 +532,10 @@ RNS_IGNORE_SUPER_CALL_END
  
    if (shouldHide) {
      navitem.title = config.title;
@@ -154,7 +174,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  
      // Setting navigation bar visibility is split to mitigate iOS 26 bug with bar button items.
      [navctr setNavigationBarHidden:YES animated:animated];
-@@ -512,11 +534,19 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -512,11 +552,19 @@ RNS_IGNORE_SUPER_CALL_END
    }
    navitem.largeTitleDisplayMode =
        config.largeTitle ? UINavigationItemLargeTitleDisplayModeAlways : UINavigationItemLargeTitleDisplayModeNever;
@@ -174,7 +194,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  
  // appearance does not apply to the tvOS so we need to use lagacy customization
  #if TARGET_OS_TV
-@@ -548,8 +578,6 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -548,8 +596,6 @@ RNS_IGNORE_SUPER_CALL_END
    navitem.leftItemsSupplementBackButton = config.backButtonInCustomView;
  #endif
    navitem.titleView = nil;
@@ -183,7 +203,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  
  #if !TARGET_OS_TV
    // We want to set navitem.searchController to nil only if we are sure
-@@ -557,22 +585,18 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -557,22 +603,18 @@ RNS_IGNORE_SUPER_CALL_END
    bool searchBarPresent = false;
  #endif /* !TARGET_OS_TV */
  
@@ -210,7 +230,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
          break;
        }
        case RNSScreenStackHeaderSubviewTypeCenter:
-@@ -637,10 +661,325 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -637,10 +679,311 @@ RNS_IGNORE_SUPER_CALL_END
    // This assignment should be done after `navitem.titleView = ...` assignment (iOS 16.0 bug).
    // See: https://github.com/software-mansion/react-native-screens/issues/1570 (comments)
    navitem.title = config.title;
@@ -218,9 +238,6 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
 -                                                withCurrentItems:navitem.leftBarButtonItems];
 -  navitem.rightBarButtonItems = [config barButtonItemsFromConfigs:config.headerRightBarButtonItems
 -                                                 withCurrentItems:navitem.rightBarButtonItems];
-+  NSArray *headerLeftConfigs = config.headerLeftBarButtonItems ?: @[];
-+  NSArray *headerRightConfigs = config.headerRightBarButtonItems ?: @[];
-+  NSArray *headerCenterConfigs = config.headerCenterBarButtonItems ?: @[];
 +  // Retain the config in the key so its address cannot be reused while cached.
 +  // Items capture this config's event emitter in their press handlers, so a
 +  // remounted header-config view with value-equal configs must still rebuild
@@ -229,59 +246,48 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
 +  // subview. Include those native identities in the key so React-backed
 +  // items can use the same cache without reusing a group after its view was
 +  // replaced.
-+  NSArray *headerItemsKey = @[
-+    config,
-+    headerLeftConfigs,
-+    headerRightConfigs,
-+    headerCenterConfigs,
-+    subviewLeftItems,
-+    subviewRightItems,
-+  ];
-+  // Rebuilding bar button items creates brand-new native buttons (glass
-+  // UIButton custom views on iOS 26). Replacing them while UIKit animates an
-+  // existing one (menu capsule morph, push/pop glass transitions) strands the
-+  // animation overlay — a stuck expanded capsule or an unmasked square back
-+  // button. When both the JS configs and React-backed item identities are
-+  // unchanged, keep the already-applied item groups. Item groups are only
-+  // available from iOS 16, so older platforms keep the legacy rebuild path.
-+  BOOL canReuseHeaderBarButtonItems = NO;
++  // A bar button item can belong to only one group. Even if the item itself
++  // is reused, constructing a new group removes it from the old group that
++  // UIKit may still be animating. Preserve each unchanged placement's group,
++  // including the empty leading group beside the system back button.
 +#if !TARGET_OS_TV
 +  if (@available(iOS 16.0, *)) {
-+    canReuseHeaderBarButtonItems = YES;
-+  }
++    NSArray *headerLeftConfigs = config.headerLeftBarButtonItems ?: @[];
++    NSArray *headerRightConfigs = config.headerRightBarButtonItems ?: @[];
++    NSArray *headerCenterConfigs = config.headerCenterBarButtonItems ?: @[];
++    if (RNSUpdateHeaderItemsCache(
++            navitem, &RNSAppliedLeadingHeaderItemsKey, @[ config, headerLeftConfigs, subviewLeftItems ])) {
++      NSArray *items = [config barButtonItemsFromConfigs:config.headerLeftBarButtonItems
++                                      withCurrentItems:subviewLeftItems
++                                        navigationItem:navitem];
++      navitem.leadingItemGroups = [config barButtonItemGroupsFromItems:items];
++    }
++    if (RNSUpdateHeaderItemsCache(
++            navitem, &RNSAppliedTrailingHeaderItemsKey, @[ config, headerRightConfigs, subviewRightItems ])) {
++      NSArray *items = [config barButtonItemsFromConfigs:config.headerRightBarButtonItems
++                                      withCurrentItems:subviewRightItems
++                                        navigationItem:navitem];
++      navitem.trailingItemGroups = [config barButtonItemGroupsFromItems:items];
++    }
++    if (@available(iOS 26.0, *)) {
++      if (RNSUpdateHeaderItemsCache(navitem, &RNSAppliedCenterHeaderItemsKey, @[ config, headerCenterConfigs ])) {
++        NSArray *items = [config barButtonItemsFromConfigs:config.headerCenterBarButtonItems
++                                        withCurrentItems:@[]
++                                          navigationItem:navitem];
++        navitem.centerItemGroups = [config barButtonItemGroupsFromItems:items];
++      }
++    }
++  } else
 +#endif
-+  BOOL reuseHeaderBarButtonItems = canReuseHeaderBarButtonItems &&
-+      [objc_getAssociatedObject(navitem, &RNSAppliedHeaderBarButtonConfigsKey) isEqual:headerItemsKey];
-+  if (!reuseHeaderBarButtonItems) {
++  {
 +    NSArray<UIBarButtonItem *> *leftBarButtonItems = [config barButtonItemsFromConfigs:config.headerLeftBarButtonItems
 +                                                                      withCurrentItems:subviewLeftItems
 +                                                                        navigationItem:navitem];
 +    NSArray<UIBarButtonItem *> *rightBarButtonItems = [config barButtonItemsFromConfigs:config.headerRightBarButtonItems
 +                                                                       withCurrentItems:subviewRightItems
 +                                                                         navigationItem:navitem];
-+    NSArray<UIBarButtonItem *> *centerBarButtonItems = [config barButtonItemsFromConfigs:config.headerCenterBarButtonItems
-+                                                                        withCurrentItems:@[]
-+                                                                          navigationItem:navitem];
-+#if !TARGET_OS_TV
-+    if (@available(iOS 16.0, *)) {
-+      navitem.leadingItemGroups = [config barButtonItemGroupsFromItems:leftBarButtonItems];
-+      navitem.trailingItemGroups = [config barButtonItemGroupsFromItems:rightBarButtonItems];
-+      if (@available(iOS 26.0, *)) {
-+        navitem.centerItemGroups = [config barButtonItemGroupsFromItems:centerBarButtonItems];
-+      }
-+    } else {
-+      navitem.leftBarButtonItems = leftBarButtonItems;
-+      navitem.rightBarButtonItems = rightBarButtonItems;
-+    }
-+#else
 +    navitem.leftBarButtonItems = leftBarButtonItems;
 +    navitem.rightBarButtonItems = rightBarButtonItems;
-+#endif
-+    objc_setAssociatedObject(
-+        navitem,
-+        &RNSAppliedHeaderBarButtonConfigsKey,
-+        headerItemsKey,
-+        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 +  }
 +  NSDictionary<NSString *, id> *mailSearchToolbarConfig = nil;
 +  for (NSDictionary<NSString *, id> *toolbarConfig in config.headerToolbarItems) {
@@ -540,7 +546,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  
    // Setting navigation bar visibility is split to mitigate iOS 26 bug with bar button items
    // (setting nav bar visibility should be done after `navitem.*BarButtonItems`).
-@@ -773,6 +1112,7 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -773,6 +1116,7 @@ RNS_IGNORE_SUPER_CALL_END
  
  - (NSArray<UIBarButtonItem *> *)barButtonItemsFromConfigs:(NSArray<NSDictionary<NSString *, id> *> *)dicts
                                           withCurrentItems:(NSArray<UIBarButtonItem *> *)currentItems
@@ -548,7 +554,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  {
    if (dicts.count == 0) {
      return currentItems;
-@@ -781,7 +1121,197 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -781,7 +1125,197 @@ RNS_IGNORE_SUPER_CALL_END
    [items addObjectsFromArray:currentItems];
    for (NSUInteger i = 0; i < dicts.count; i++) {
      NSDictionary *dict = dicts[i];
@@ -747,7 +753,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
        RNSBarButtonItem *item = [[RNSBarButtonItem alloc] initWithConfig:dict
            action:^(NSString *buttonId) {
              auto eventEmitter = std::static_pointer_cast<const facebook::react::RNSScreenStackHeaderConfigEventEmitter>(
-@@ -809,11 +1339,15 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -809,11 +1343,15 @@ RNS_IGNORE_SUPER_CALL_END
          [items addObject:item];
        }
      } else if (dict[@"spacing"]) {
@@ -767,7 +773,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
        NSNumber *index = dict[@"index"];
        if (index.integerValue < items.count) {
          [items insertObject:item atIndex:index.integerValue];
-@@ -825,6 +1359,47 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -825,6 +1363,47 @@ RNS_IGNORE_SUPER_CALL_END
    return items;
  }
  
@@ -815,7 +821,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  RNS_IGNORE_SUPER_CALL_BEGIN
  - (void)insertReactSubview:(RNSScreenStackHeaderSubview *)subview atIndex:(NSInteger)atIndex
  {
-@@ -1013,6 +1588,8 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
+@@ -1013,6 +1592,8 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
    }
  
    _title = RCTNSStringFromStringNilIfEmpty(newScreenProps.title);
@@ -824,7 +830,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
    if (newScreenProps.titleFontFamily != oldScreenProps.titleFontFamily) {
      _titleFontFamily = RCTNSStringFromStringNilIfEmpty(newScreenProps.titleFontFamily);
    }
-@@ -1038,6 +1615,7 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
+@@ -1038,6 +1619,7 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
    _disableBackButtonMenu = newScreenProps.disableBackButtonMenu;
    _backButtonDisplayMode =
        [RNSConvert UINavigationItemBackButtonDisplayModeFromCppEquivalent:newScreenProps.backButtonDisplayMode];
@@ -832,7 +838,7 @@ index 5970e3e3a624b9498b8dedfc16831df03a274d0c..94989a9655902da4ab265af95ee5147b
  
    if (newScreenProps.userInterfaceStyle != oldScreenProps.userInterfaceStyle) {
      _userInterfaceStyle = [RNSConvert UIUserInterfaceStyleFromCppEquivalent:newScreenProps.userInterfaceStyle];
-@@ -1084,6 +1662,30 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
+@@ -1084,6 +1666,30 @@ static RCTResizeMode resizeModeFromCppEquiv(react::ImageResizeMode resizeMode)
      _headerRightBarButtonItems = array;
    }
  
