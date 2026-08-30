@@ -105,6 +105,8 @@ describe('theme failure handling', () =>
     vi.stubGlobal('document', {
       documentElement: {
         classList: { toggle: vi.fn() },
+        style: { removeProperty: vi.fn() },
+        dataset: {},
       },
     })
 
