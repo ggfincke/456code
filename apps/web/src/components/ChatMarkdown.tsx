@@ -5,7 +5,16 @@ import { useAtomValue } from '@effect/atom-react'
 import { type DiffsThemeNames } from '@pierre/diffs'
 import {
   CircleAlertIcon,
+  FileSpreadsheetIcon,
+  FileTextIcon,
+  GlobeIcon,
+  ImageIcon,
+  MailIcon,
+  MessageSquareIcon,
+  PresentationIcon,
+  SparklesIcon,
   TriangleAlertIcon,
+  type LucideIcon,
 } from 'lucide-react'
 import type {
   OrchestratePlanRevision,
@@ -17,6 +26,17 @@ import {
   classifyMarkdownImageSource,
   markdownImageSourceFragment,
 } from '@t3tools/client-runtime/markdown-images'
+import {
+  codexArtifactTemplatePresentationLabel,
+  type CodexArtifactTemplate,
+  type CodexArtifactTemplateKind,
+} from '@t3tools/client-runtime/codex-artifact-templates'
+import {
+  artifactTemplateFromHastProperties,
+  CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES,
+  remarkCodexDirectives,
+  renderCodexFileCitationsAsMarkdown,
+} from '@t3tools/client-runtime/codex-markdown-directives'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import React, {
@@ -54,6 +74,7 @@ import {
   showExternalLinkContextMenu,
 } from './chat/externalLinkContextMenu'
 import { Tooltip, TooltipPopup, TooltipTrigger } from './ui/tooltip'
+import { Button } from './ui/button'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { useOpenInPreferredEditor } from '../lib/editorPreferences'
 import { useTheme } from '../hooks/useTheme'
@@ -156,12 +177,70 @@ interface ChatMarkdownProps
   lineBreaks?: boolean
   // parse sanitized raw HTML; user-authored messages disable this.
   parseRawHtml?: boolean
+  onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined
   imageBaseDir?: string | undefined
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined
   orchestratePlanActions?: OrchestratePlanActions | undefined
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, 'name' | 'displayName'>> = []
+
+const ARTIFACT_TEMPLATE_ICON_BY_KIND = {
+  document: FileTextIcon,
+  presentation: PresentationIcon,
+  spreadsheet: FileSpreadsheetIcon,
+  site: GlobeIcon,
+  'google-docs': FileTextIcon,
+  'google-slides': PresentationIcon,
+  'google-sheets': FileSpreadsheetIcon,
+  image: ImageIcon,
+  email: MailIcon,
+  slack: MessageSquareIcon,
+} satisfies Record<CodexArtifactTemplateKind, LucideIcon>
+
+function CodexArtifactTemplateCard(props: {
+  readonly template: CodexArtifactTemplate
+  readonly onUse?: ((template: CodexArtifactTemplate) => void) | undefined
+})
+{
+  const Icon = ARTIFACT_TEMPLATE_ICON_BY_KIND[props.template.artifactKind]
+  const presentationLabel = codexArtifactTemplatePresentationLabel(props.template.artifactKind)
+  return (
+    <div
+      role="group"
+      aria-label={`${props.template.displayName} template`}
+      className="chat-markdown-artifact-template my-[0.65rem] flex w-full min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card/60 px-3 py-2.5 text-foreground shadow-xs"
+      data-artifact-kind={props.template.artifactKind}
+      data-markdown-copy={`${props.template.displayName} (${presentationLabel})\n\n`}
+      data-skill-name={props.template.skillName}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background text-muted-foreground shadow-xs">
+          <Icon aria-hidden className="size-5" />
+          <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full border border-background bg-fuchsia-500 text-white shadow-xs">
+            <SparklesIcon aria-hidden className="size-2.5" />
+          </span>
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium text-foreground">
+            {props.template.displayName}
+          </span>
+          <span className="block text-xs text-muted-foreground">{presentationLabel}</span>
+        </span>
+      </div>
+      {props.onUse ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => props.onUse?.(props.template)}
+        >
+          Use template
+        </Button>
+      ) : null}
+    </div>
+  )
+}
 
 function findTaskListMarkerOffset(markdown: string, listItemStart: number): number | null
 {
@@ -271,6 +350,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     '*': (defaultSchema.attributes?.['*'] ?? []).filter((attribute) => attribute !== 'title'),
     code: [...(defaultSchema.attributes?.code ?? []), 'dataCodeMeta'],
     a: [...(defaultSchema.attributes?.a ?? []), 'dataFilePathChip'],
+    div: [...(defaultSchema.attributes?.div ?? []), ...CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES],
     img: [
       ...(defaultSchema.attributes?.img ?? []),
       'dataLocalSrc',
@@ -286,6 +366,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkNormalizeListItemIndentation,
+  remarkCodexDirectives,
   remarkPreserveCodeMeta,
   remarkLinkInlineCodePaths,
 ] satisfies NonNullable<ReactMarkdownOptions['remarkPlugins']>
@@ -293,6 +374,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
   remarkNormalizeListItemIndentation,
+  remarkCodexDirectives,
   remarkBreaks,
   remarkPreserveCodeMeta,
   remarkLinkInlineCodePaths,
@@ -518,6 +600,7 @@ function useChatMarkdownState({
   className,
   lineBreaks = false,
   parseRawHtml = true,
+  onUseArtifactTemplate,
   imageBaseDir,
   onImageExpand,
   orchestratePlanActions,
@@ -552,7 +635,7 @@ function useChatMarkdownState({
   const markdownLinkHrefKey = useMemo(
     () =>
       JSON.stringify([
-        ...extractMarkdownLinkHrefs(renderedText),
+        ...extractMarkdownLinkHrefs(renderCodexFileCitationsAsMarkdown(renderedText)),
         ...extractInlineCodeFilePaths(renderedText),
       ]),
     [renderedText],
@@ -689,6 +772,7 @@ function useChatMarkdownState({
     markdownFileLinkMetaByHref,
     onImageExpand,
     onTaskListChange,
+    onUseArtifactTemplate,
     orchestratePlanActions,
     openFileInPanel,
     openInPreferredEditor,
@@ -714,6 +798,16 @@ function useMarkdownRendererState()
 
 // component identities stay fixed while current source and actions flow through context.
 const CHAT_MARKDOWN_COMPONENTS: Components = {
+  div({ node, children, ...props })
+  {
+    const { onUseArtifactTemplate } = useMarkdownRendererState()
+    const artifactTemplate = artifactTemplateFromHastProperties(node?.properties)
+    return artifactTemplate ? (
+      <CodexArtifactTemplateCard template={artifactTemplate} onUse={onUseArtifactTemplate} />
+    ) : (
+      <div {...props}>{children}</div>
+    )
+  },
   p({ node: _node, children, ...props })
   {
     const { skills } = useMarkdownRendererState()

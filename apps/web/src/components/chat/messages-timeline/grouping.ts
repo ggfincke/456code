@@ -11,6 +11,7 @@ import {
   normalizeCompactToolLabel,
   toolCallIdentityKey,
 } from '@t3tools/client-runtime/thread-activity'
+import { renderCodexDirectivesForCopy } from '@t3tools/client-runtime/codex-markdown-directives'
 import * as Equal from 'effect/Equal'
 import { type ProviderSwitchTimelineEvent } from '../../../providerSwitchPresentation'
 import {
@@ -368,9 +369,10 @@ export function resolveAssistantMessageCopyState({
 })
 {
   const hasText = text !== null && text.trim().length > 0
+  const visible = showCopyButton && hasText && !streaming
   return {
-    text: hasText ? text : null,
-    visible: showCopyButton && hasText && !streaming,
+    text: hasText ? (visible ? renderCodexDirectivesForCopy(text) : text) : null,
+    visible,
   }
 }
 

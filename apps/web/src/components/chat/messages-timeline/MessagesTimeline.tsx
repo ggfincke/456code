@@ -2,6 +2,7 @@
 // renders virtualized thread timeline rows and shared row interactions
 import { LegendList, type LegendListRef } from '@legendapp/list/react'
 import { parseScopedThreadKey } from '@t3tools/client-runtime/environment'
+import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 import {
   type EnvironmentId,
   type MessageId,
@@ -45,6 +46,8 @@ const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />
 const TIMELINE_LIST_FADE_HEADER = <div className="h-10 sm:h-12" />
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, 'name' | 'displayName'>> = []
+const NOOP_USE_ARTIFACT_TEMPLATE = () =>
+{}
 
 // props (public API)
 
@@ -63,6 +66,7 @@ interface MessagesTimelineProps
   revertTurnCountByUserMessageId: Map<MessageId, number>
   canRevertConversation: boolean
   onRevertUserMessage: (messageId: MessageId) => void
+  onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void
   isRevertingCheckpoint: boolean
   onImageExpand: (preview: ExpandedImagePreview) => void
   activeThreadEnvironmentId: EnvironmentId
@@ -99,6 +103,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   revertTurnCountByUserMessageId,
   canRevertConversation,
   onRevertUserMessage,
+  onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -377,6 +382,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       canRevertConversation,
       onRevertUserMessage,
+      onUseArtifactTemplate,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -394,6 +400,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       canRevertConversation,
       onRevertUserMessage,
+      onUseArtifactTemplate,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,

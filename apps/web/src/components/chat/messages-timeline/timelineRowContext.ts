@@ -10,6 +10,7 @@ import {
 } from '@t3tools/contracts'
 import { type TimestampFormat } from '@t3tools/contracts/settings'
 import { createContext } from 'react'
+import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 
 import { deriveTimelineEntries } from '../../../session-logic'
 import { type MessagesTimelineRow } from './MessagesTimeline.logic'
@@ -28,6 +29,7 @@ export interface TimelineRowSharedState
   activeThreadEnvironmentId: EnvironmentId
   canRevertConversation: boolean
   onRevertUserMessage: (messageId: MessageId) => void
+  onUseArtifactTemplate: (template: CodexArtifactTemplate) => void
   onImageExpand: (preview: ExpandedImagePreview) => void
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void
   onToggleTurnFold: (turnId: TurnId) => void

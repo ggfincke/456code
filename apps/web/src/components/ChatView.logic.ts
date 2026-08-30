@@ -21,6 +21,11 @@ import {
   toWireInteractionMode,
 } from '@t3tools/contracts'
 import { isBareKnownProviderSlashCommand } from '@t3tools/shared/composerTrigger'
+import {
+  appendCodexArtifactTemplateUsePrompt,
+  codexArtifactTemplateUsePrompt,
+  type CodexArtifactTemplate,
+} from '@t3tools/client-runtime/codex-artifact-templates'
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from '@t3tools/shared/model'
 import {
   isImageAttachment,
@@ -50,6 +55,16 @@ export const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000
+
+export function codexArtifactTemplatePromptToAppend(
+  currentDraft: string,
+  template: CodexArtifactTemplate,
+): string | null
+{
+  return appendCodexArtifactTemplateUsePrompt(currentDraft, template) === currentDraft
+    ? null
+    : codexArtifactTemplateUsePrompt(template)
+}
 
 export function shouldReleaseTimelineAnchorForToolActivity(input: {
   readonly anchorMessageId: MessageId | null

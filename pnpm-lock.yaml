@@ -813,10 +813,28 @@ importers:
       effect:
         specifier: 4.0.0-beta.107
         version: 4.0.0-beta.107(patch_hash=f7c5e4403a91d40abc955ae76847c96f27a8480483ad9e004756895e7c9790ea)
+      mdast-util-directive:
+        specifier: ^3.1.0
+        version: 3.1.0(supports-color@8.1.1)
+      micromark-extension-directive:
+        specifier: ^4.0.0
+        version: 4.0.0
+      micromark-util-character:
+        specifier: ^2.1.1
+        version: 2.1.1
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0(supports-color@8.1.1)
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.0-beta.107
         version: 4.0.0-beta.107(patch_hash=8e1a54f88d985a4f7d124a3d8f1f9bb30bddb66c840244a5d24cfef79d25f6e8)(effect@4.0.0-beta.107(patch_hash=f7c5e4403a91d40abc955ae76847c96f27a8480483ad9e004756895e7c9790ea))
+      micromark-util-types:
+        specifier: ^2.0.2
+        version: 2.0.2
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.0(@types/node@24.13.3)(@typescript/typescript6@6.0.2)(bufferutil@4.1.0)(esbuild@0.28.1)(happy-dom@20.11.2(bufferutil@4.1.0)(utf-8-validate@6.0.6))(jiti@2.7.0)(msw@2.12.11(@types/node@24.13.3)(@typescript/typescript6@6.0.2))(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)

@@ -31,6 +31,7 @@ import {
   connectionStatusTitle,
   type EnvironmentConnectionPresentation,
 } from '@t3tools/client-runtime/connection'
+import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 import {
   type RespondToThreadOrchestratePlanInput,
   respondToThreadOrchestratePlan,
@@ -323,6 +324,7 @@ import {
   shouldWriteThreadErrorToCurrentServerThread,
   shouldSuppressTransientEnvironmentReconnectWarning,
   startNewThreadForProject,
+  codexArtifactTemplatePromptToAppend,
   threadHasStarted,
   waitForStartedServerThread,
 } from './ChatView.logic'
@@ -2519,6 +2521,26 @@ function ChatViewContent(props: ChatViewProps)
       focusComposer()
     })
   }, [focusComposer])
+  const useArtifactTemplate = useCallback(
+    (template: CodexArtifactTemplate) =>
+    {
+      const composer = composerRef.current
+      if (!composer) return
+      const currentDraft = composer.getSendContext().prompt
+      const prompt = codexArtifactTemplatePromptToAppend(currentDraft, template)
+      if (prompt !== null && !composer.insertTextAtEnd(prompt, { ensureLeadingBoundary: true }))
+      {
+        toastManager.add({
+          type: 'error',
+          title: 'Unable to add to chat',
+          description: 'The composer is busy; try again once it is ready.',
+        })
+        return
+      }
+      scheduleComposerFocus()
+    },
+    [composerRef, scheduleComposerFocus],
+  )
   const addTerminalContextToDraft = useCallback(
     (selection: TerminalContextSelection) =>
     {
@@ -6217,6 +6239,7 @@ function ChatViewContent(props: ChatViewProps)
                   activeProviderStatus?.capabilities?.conversationRollback !== 'unsupported'
                 }
                 onRevertUserMessage={onRevertUserMessage}
+                onUseArtifactTemplate={useArtifactTemplate}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
