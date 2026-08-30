@@ -4,12 +4,20 @@
 import { ChatImageAttachment, type EnvironmentId, type TurnId } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 import { formatElapsed } from '@t3tools/shared/orchestrationTiming'
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, View } from 'react-native'
 import { TouchableOpacity } from 'react-native-gesture-handler'
 import { Markdown } from 'react-native-nitro-markdown'
 import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated'
-import { SymbolView } from '../../../components/AppSymbol'
+import { SymbolView, type AppSymbolName } from '../../../components/AppSymbol'
+import {
+  codexArtifactTemplatePresentationLabel,
+  type CodexArtifactTemplate,
+} from '@t3tools/client-runtime/codex-artifact-templates'
+import {
+  renderCodexFileCitationsAsMarkdown,
+  splitCodexArtifactTemplateMarkdown,
+} from '@t3tools/client-runtime/codex-markdown-directives'
 import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
@@ -98,9 +106,111 @@ function MessageAttachmentImage(props: {
   )
 }
 
+const ARTIFACT_TEMPLATE_SYMBOL_BY_KIND: Record<
+  CodexArtifactTemplate['artifactKind'],
+  AppSymbolName
+> = {
+  document: 'doc.text',
+  presentation: 'chart.bar.xaxis',
+  spreadsheet: 'chart.bar.xaxis',
+  site: 'safari',
+  'google-docs': 'doc.text',
+  'google-slides': 'chart.bar.xaxis',
+  'google-sheets': 'chart.bar.xaxis',
+  image: 'camera',
+  email: 'text.bubble',
+  slack: 'text.bubble',
+}
+
+function ArtifactTemplateCard(props: {
+  readonly template: CodexArtifactTemplate
+  readonly onUse?: ((template: CodexArtifactTemplate) => void) | undefined
+})
+{
+  return (
+    <View className="my-2 min-w-0 flex-row items-center gap-3 rounded-2xl border border-border bg-card px-3 py-3">
+      <View className="relative h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-subtle">
+        <SymbolView
+          name={ARTIFACT_TEMPLATE_SYMBOL_BY_KIND[props.template.artifactKind]}
+          size={20}
+          tintColorClassName="accent-foreground-muted"
+          type="monochrome"
+        />
+      </View>
+      <View className="min-w-0 flex-1">
+        <Text className="font-t3-bold text-sm text-foreground" numberOfLines={1}>
+          {props.template.displayName}
+        </Text>
+        <Text className="text-xs text-foreground-muted">
+          {codexArtifactTemplatePresentationLabel(props.template.artifactKind)}
+        </Text>
+      </View>
+      {props.onUse ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Use ${props.template.displayName} template`}
+          className="min-h-9 justify-center rounded-lg border border-border bg-subtle px-3 active:opacity-65"
+          onPress={() => props.onUse?.(props.template)}
+        >
+          <Text className="font-t3-bold text-xs text-foreground">Use template</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  )
+}
+
+const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
+  readonly markdown: string
+  readonly markdownStyles: MarkdownStyleSets['assistant']
+  readonly onLinkPress: (href: string) => void
+  readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined
+})
+{
+  const segments = useMemo(
+    () => splitCodexArtifactTemplateMarkdown(props.markdown),
+    [props.markdown],
+  )
+  return segments.map((segment) =>
+  {
+    if (segment.kind === 'artifact-template')
+    {
+      return (
+        <ArtifactTemplateCard
+          key={`artifact-template:${segment.sourceOffset}`}
+          template={segment.template}
+          onUse={props.onUseArtifactTemplate}
+        />
+      )
+    }
+    if (segment.markdown.trim().length === 0) return null
+    const markdown = renderCodexFileCitationsAsMarkdown(segment.markdown)
+    return hasNativeSelectableMarkdownText() ? (
+      <SelectableMarkdownText
+        key={`markdown:${segment.sourceOffset}`}
+        markdown={markdown}
+        skills={props.skills}
+        textStyle={props.markdownStyles.nativeTextStyle}
+        onLinkPress={props.onLinkPress}
+      />
+    ) : (
+      <Markdown
+        key={`markdown:${segment.sourceOffset}`}
+        options={{ gfm: true }}
+        renderers={props.markdownStyles.renderers}
+
+        styles={props.markdownStyles.styles}
+        theme={props.markdownStyles.theme}
+      >
+        {markdown}
+      </Markdown>
+    )
+  })
+})
+
 export function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
-  props: Pick<ThreadFeedProps, 'environmentId' | 'skills'> & {
+  props: Pick<ThreadFeedProps, 'environmentId' | 'onUseArtifactTemplate' | 'skills'> & {
     readonly copiedRowId: string | null
     readonly expandedWorkRows: Record<string, boolean>
     readonly terminalAssistantMessageIds: ReadonlySet<string>
@@ -252,23 +362,13 @@ export function renderFeedEntry(
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
         {message.text.trim().length > 0 ? (
-          hasNativeSelectableMarkdownText() ? (
-            <SelectableMarkdownText
-              markdown={message.text}
-              skills={props.skills}
-              textStyle={styles.nativeTextStyle}
-              onLinkPress={props.onMarkdownLinkPress}
-            />
-          ) : (
-            <Markdown
-              options={{ gfm: true }}
-              renderers={styles.renderers}
-              styles={styles.styles}
-              theme={styles.theme}
-            >
-              {message.text}
-            </Markdown>
-          )
+          <AssistantMarkdownContent
+            markdown={message.text}
+            markdownStyles={styles}
+            onLinkPress={props.onMarkdownLinkPress}
+            onUseArtifactTemplate={props.onUseArtifactTemplate}
+            skills={props.skills}
+          />
         ) : null}
         {attachments.map((attachment) =>
         {

@@ -6,6 +6,7 @@ import { type LegendListRef } from '@legendapp/list/react-native'
 import { HeaderHeightContext } from '@react-navigation/elements'
 import { useNavigation } from '@react-navigation/native'
 import type { EnvironmentId, MessageId, ThreadId, TurnId } from '@t3tools/contracts'
+import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from '@t3tools/shared/chatList'
 import * as Haptics from 'expo-haptics'
 import {
@@ -84,6 +85,7 @@ export interface ThreadFeedProps
   readonly usesAutomaticContentInsets?: boolean
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>
+  readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void
 }
 
 import {
@@ -562,6 +564,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
         reviewCommentBubbleWidth,
         userBubbleMaxWidth,
         skills: props.skills,
+        onUseArtifactTemplate: props.onUseArtifactTemplate,
       }),
     [
       copiedRowId,
@@ -582,6 +585,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
       onToggleWorkRow,
       props.environmentId,
       props.skills,
+      props.onUseArtifactTemplate,
     ],
   )
 
