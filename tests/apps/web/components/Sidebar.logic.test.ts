@@ -2,10 +2,13 @@
 // verifies sidebar thread grouping and presentation
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { effectiveSettled, effectiveSnoozed } from '@t3tools/client-runtime/state/thread-settled'
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
+  estimateSidebarV2HeaderSize,
+  filterSidebarProjectScopeItems,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -15,7 +18,10 @@ import {
   isContextMenuPointerDown,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  partitionLegacySidebarProjectThreads,
+  reduceSidebarProjectScopeMenuState,
   resolveProjectStatusIndicator,
+  resolveSidebarV2LifecycleSection,
   resolveSidebarV2Status,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
@@ -45,6 +51,58 @@ import {
 
 const localEnvironmentId = EnvironmentId.make('environment-local')
 
+describe('sidebar project scope combobox', () =>
+{
+  it('filters project labels in source order and only offers an unqueried scope reset', () =>
+  {
+    const items = [
+      { value: 'all', label: 'All projects' },
+      { value: 'alpha', label: 'Alpha workspace' },
+      { value: 'beta', label: 'Beta tools' },
+      { value: 'gamma', label: 'Gamma tools' },
+    ] as const
+    const filter = (activeScopeKey: string | null, query: string) =>
+      filterSidebarProjectScopeItems({
+        items,
+        activeScopeKey,
+        query,
+        matches: (item, candidate) =>
+          item.label.toLocaleLowerCase().includes(candidate.toLocaleLowerCase()),
+      })
+
+    expect(filter(null, '')).toEqual(items.slice(1))
+    expect(filter('alpha', ' ')).toEqual(items)
+    expect(filter(null, ' TOOL ')).toEqual([items[2], items[3]])
+    expect(filter('alpha', 'all')).toEqual([])
+  })
+
+  it('keeps typing open and clears stale queries on close, reopen, and project actions', () =>
+  {
+    const queriedOpenState = reduceSidebarProjectScopeMenuState(
+      { open: true, query: '' },
+      { type: 'query-changed', query: 'alpha' },
+    )
+    expect(queriedOpenState).toEqual({ open: true, query: 'alpha' })
+    expect(
+      reduceSidebarProjectScopeMenuState(queriedOpenState, {
+        type: 'open-changed',
+        open: false,
+      }),
+    ).toEqual({ open: false, query: '' })
+    expect(
+      reduceSidebarProjectScopeMenuState(queriedOpenState, {
+        type: 'project-settings-opened',
+      }),
+    ).toEqual({ open: false, query: '' })
+    expect(
+      reduceSidebarProjectScopeMenuState(
+        { open: false, query: 'stale' },
+        { type: 'open-changed', open: true },
+      ),
+    ).toEqual({ open: true, query: '' })
+  })
+})
+
 describe('sortThreadsForSidebarV2', () =>
 {
   it('surfaces a reactivated thread without using malformed timestamps', () =>
@@ -70,6 +128,77 @@ describe('sortThreadsForSidebarV2', () =>
     ])
 
     expect(sorted.map((thread) => thread.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('estimateSidebarV2HeaderSize', () =>
+{
+  it('includes pinned cards and their divider in the virtual list header estimate', () =>
+  {
+    expect(
+      estimateSidebarV2HeaderSize({
+        activeThreadCount: 2,
+        pinnedThreadCount: 0,
+        hasImportedShelf: true,
+      }),
+    ).toBe(226)
+    expect(
+      estimateSidebarV2HeaderSize({
+        activeThreadCount: 2,
+        pinnedThreadCount: 3,
+        hasImportedShelf: true,
+      }),
+    ).toBe(488)
+  })
+})
+
+describe('resolveSidebarV2LifecycleSection', () =>
+{
+  it('temporarily shelves a snoozed pinned thread', () =>
+  {
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: true,
+        pinned: true,
+        settled: true,
+      }),
+    ).toBe('snoozed')
+  })
+
+  it('keeps a settled pinned thread in the settled shelf', () =>
+  {
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: true,
+        settled: true,
+      }),
+    ).toBe('settled')
+  })
+
+  it('falls through to settled and active sections', () =>
+  {
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: true,
+        settled: false,
+      }),
+    ).toBe('pinned')
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: false,
+        settled: true,
+      }),
+    ).toBe('settled')
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: false,
+        settled: false,
+      }),
+    ).toBe('active')
   })
 })
 
@@ -154,6 +283,100 @@ describe('isImportedShelfThread', () =>
   ])('%s', (_label, input, expected) =>
   {
     expect(isImportedShelfThread(input)).toBe(expected)
+  })
+})
+
+describe('partitionLegacySidebarProjectThreads', () =>
+{
+  it('places native pins first without pulling imported shelf threads into the pinned section', () =>
+  {
+    const importedOrigin = {
+      kind: 'imported',
+      source: 'codex-cli',
+      sourcePath: '/tmp/session.jsonl',
+      contentHash: 'hash',
+      nativeSessionId: null,
+      importedAt: '2026-07-25T12:00:00.000Z',
+    } as NonNullable<Thread['origin']>
+    const nativePinned = { id: 'native-pinned', latestTurn: null, origin: null, pinnedAt: 'now' }
+    const regular = { id: 'regular', latestTurn: null, origin: null, pinnedAt: null }
+    const legacyWithoutPinField = { id: 'legacy-without-pin-field', latestTurn: null, origin: null }
+    const importedPinned = {
+      id: 'imported-pinned',
+      latestTurn: null,
+      origin: importedOrigin,
+      pinnedAt: 'stale-pin',
+    }
+
+    const partition = partitionLegacySidebarProjectThreads(
+      [regular, legacyWithoutPinField, importedPinned, nativePinned],
+      () => false,
+    )
+
+    expect(partition.pinnedThreads.map((thread) => thread.id)).toEqual(['native-pinned'])
+    expect(partition.regularThreads.map((thread) => thread.id)).toEqual([
+      'regular',
+      'legacy-without-pin-field',
+      'imported-pinned',
+    ])
+  })
+
+  it('does not promote settled or snoozed pins, including derived settlement', () =>
+  {
+    const now = '2026-06-02T00:00:00.000Z'
+    const pinnedAt = '2026-05-21T00:00:00.000Z'
+    const active = {
+      ...makeThread({ id: ThreadId.make('active-pinned'), pinnedAt }),
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    }
+    const settled = {
+      ...active,
+      id: ThreadId.make('settled-pinned'),
+      settledOverride: 'settled' as const,
+      settledAt: now,
+    }
+    const inactive = {
+      ...active,
+      id: ThreadId.make('inactive-pinned'),
+      latestUserMessageAt: '2026-05-21T00:00:00.000Z',
+    }
+    const merged = { ...active, id: ThreadId.make('merged-pinned') }
+    const snoozed = {
+      ...settled,
+      id: ThreadId.make('snoozed-pinned'),
+      snoozedAt: '2026-06-01T12:00:00.000Z',
+      snoozedUntil: '2026-06-03T12:00:00.000Z',
+    }
+    const threads = [settled, inactive, merged, snoozed, active]
+    const sectionForThread = (thread: (typeof threads)[number]) =>
+      resolveSidebarV2LifecycleSection({
+        snoozed: effectiveSnoozed(thread, { now }),
+        pinned: thread.pinnedAt != null,
+        settled: effectiveSettled(thread, {
+          now,
+          autoSettleAfterDays: 3,
+          changeRequest: thread.id === merged.id ? { state: 'merged' } : null,
+        }),
+      })
+
+    expect(threads.map(sectionForThread)).toEqual([
+      'settled',
+      'settled',
+      'settled',
+      'snoozed',
+      'pinned',
+    ])
+    const partition = partitionLegacySidebarProjectThreads(threads, (thread) =>
+    {
+      const section = sectionForThread(thread)
+      return section === 'settled' || section === 'snoozed'
+    })
+    expect(partition.pinnedThreads).toEqual([active])
+    expect(partition.regularThreads).toEqual([settled, inactive, merged, snoozed])
+    expect(threads.every((thread) => thread.pinnedAt === pinnedAt)).toBe(true)
   })
 })
 

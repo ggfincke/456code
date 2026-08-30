@@ -51,11 +51,113 @@ type LogicalSidebarProject = SidebarProject & {
 
 export type ThreadTraversalDirection = 'previous' | 'next'
 
+export function filterSidebarProjectScopeItems<TItem extends { readonly value: string }>(input: {
+  items: readonly TItem[]
+  activeScopeKey: string | null
+  query: string
+  matches: (item: TItem, query: string) => boolean
+}): readonly TItem[]
+{
+  const projectItems = input.items.filter((item) => item.value !== 'all')
+  const query = input.query.trim()
+  if (query.length > 0)
+  {
+    return projectItems.filter((item) => input.matches(item, query))
+  }
+  return input.activeScopeKey === null ? projectItems : input.items
+}
+
+export interface SidebarProjectScopeMenuState
+{
+  readonly open: boolean
+  readonly query: string
+}
+
+export type SidebarProjectScopeMenuAction =
+  | { readonly type: 'query-changed'; readonly query: string }
+  | { readonly type: 'open-changed'; readonly open: boolean }
+  | { readonly type: 'project-settings-opened' }
+
+export function reduceSidebarProjectScopeMenuState(
+  state: SidebarProjectScopeMenuState,
+  action: SidebarProjectScopeMenuAction,
+): SidebarProjectScopeMenuState
+{
+  switch (action.type)
+  {
+    case 'query-changed':
+      return { ...state, query: action.query }
+    case 'open-changed':
+      return { open: action.open, query: '' }
+    case 'project-settings-opened':
+      return { open: false, query: '' }
+  }
+}
+
 export function isImportedShelfThread(
   thread: Pick<SidebarThreadSummary, 'latestTurn' | 'origin'>,
 ): boolean
 {
   return thread.origin !== null && thread.latestTurn === null
+}
+
+export function partitionLegacySidebarProjectThreads<
+  TThread extends Pick<SidebarThreadSummary, 'latestTurn' | 'origin'> & {
+    readonly pinnedAt?: SidebarThreadSummary['pinnedAt']
+  },
+>(
+  threads: readonly TThread[],
+  isLifecycleShelfThread: (thread: TThread) => boolean,
+): {
+  readonly pinnedThreads: readonly TThread[]
+  readonly regularThreads: readonly TThread[]
+}
+{
+  const pinnedThreads: TThread[] = []
+  const regularThreads: TThread[] = []
+  for (const thread of threads)
+  {
+    if (
+      thread.pinnedAt != null &&
+      !isImportedShelfThread(thread) &&
+      !isLifecycleShelfThread(thread)
+    )
+      pinnedThreads.push(thread)
+    else regularThreads.push(thread)
+  }
+  return { pinnedThreads, regularThreads }
+}
+
+const SIDEBAR_V2_CARD_ESTIMATED_SIZE = 83
+const SIDEBAR_V2_PINNED_DIVIDER_ESTIMATED_SIZE = 13
+const SIDEBAR_V2_SHELF_HEADER_ESTIMATED_SIZE = 60
+
+export function estimateSidebarV2HeaderSize(input: {
+  readonly activeThreadCount: number
+  readonly pinnedThreadCount: number
+  readonly hasImportedShelf: boolean
+}): number
+{
+  return (
+    (input.activeThreadCount + input.pinnedThreadCount) * SIDEBAR_V2_CARD_ESTIMATED_SIZE +
+    (input.pinnedThreadCount > 0 ? SIDEBAR_V2_PINNED_DIVIDER_ESTIMATED_SIZE : 0) +
+    (input.hasImportedShelf ? SIDEBAR_V2_SHELF_HEADER_ESTIMATED_SIZE : 0)
+  )
+}
+
+export type SidebarV2LifecycleSection = 'active' | 'pinned' | 'settled' | 'snoozed'
+
+// snooze and settlement keep their shelves even while the underlying pin remains.
+export function resolveSidebarV2LifecycleSection(input: {
+  readonly snoozed: boolean
+  readonly pinned: boolean
+  readonly settled: boolean
+}): SidebarV2LifecycleSection
+{
+  if (input.snoozed) return 'snoozed'
+  if (input.settled) return 'settled'
+  if (input.pinned) return 'pinned'
+  return 'active'
 }
 
 export async function archiveSelectedThreadEntries<

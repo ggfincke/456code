@@ -181,6 +181,7 @@ export const make = Effect.gen(function* ()
       connectionProbe: true,
       threadSettlement: true,
       threadSnooze: true,
+      threadPinning: true,
       safeMdxDocument: true,
       proposalPreview: true,
       orchestrateRunExecutionV1: true,

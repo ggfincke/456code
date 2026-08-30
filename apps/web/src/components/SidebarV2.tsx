@@ -32,6 +32,7 @@ import {
   GitBranchIcon,
   EllipsisIcon,
   MessageSquareIcon,
+  PinIcon,
   PlusIcon,
   SearchIcon,
   ServerIcon,
@@ -44,6 +45,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -106,14 +108,18 @@ import type { SidebarThreadSummary } from '../types'
 import { importSourceDisplayName, importSourceDriverKind } from '../lib/importSourcePresentation'
 import { cn } from '~/lib/utils'
 import {
+  estimateSidebarV2HeaderSize,
+  filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
   isImportedShelfThread,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
+  resolveSidebarV2LifecycleSection,
   resolveSidebarV2Status,
   resolveWorkingStartedAt,
   shouldNavigateAfterProjectRemoval,
@@ -164,7 +170,16 @@ import {
 } from './ui/dialog'
 import { Input } from './ui/input'
 import { Kbd } from './ui/kbd'
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from './ui/menu'
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxTrigger,
+  useComboboxFilter,
+} from './ui/combobox'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from './ui/select'
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from './ui/sidebar'
 import { SidebarChromeFooter, SidebarChromeHeader } from './sidebar/SidebarChrome'
@@ -183,9 +198,9 @@ const SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION = { data: true, size: false }
 // stable fallback for threads whose environment has no resolved server config,
 // so row props never churn a fresh Map per render.
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map()
-type SidebarV2ThreadSection = 'active' | 'imported' | 'snoozed' | 'settled'
+type SidebarV2ThreadSection = 'pinned' | 'active' | 'imported' | 'snoozed' | 'settled'
 
-type SidebarV2Shelf = Exclude<SidebarV2ThreadSection, 'active'>
+type SidebarV2Shelf = Exclude<SidebarV2ThreadSection, 'pinned' | 'active'>
 
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: 'Group by repository',
@@ -549,6 +564,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   settlementSupported: boolean
   // same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean
+  // the pin marker survives lifecycle shelves; pin/unpin stays in the menu.
+  isPinned: boolean
   // compact wake countdown ("2h") for rows in the snoozed shelf.
   snoozeWakeLabelText: string | null
   // when a snooze ended (timer or early wake); drives the Woke pill until
@@ -1070,6 +1087,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         #{pr.number}
       </button>
     ) : null
+  const pinIndicator = props.isPinned ? (
+    <PinIcon aria-label="Pinned" role="img" className="size-3 shrink-0 text-muted-foreground/65" />
+  ) : null
 
   if (variant === 'slim')
   {
@@ -1121,6 +1141,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             ) : (
               title
             )}
+            {pinIndicator}
             {/* The PR badge stays outside the hover-fading slot: it must
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
@@ -1230,6 +1251,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              {pinIndicator}
               <span className="group/v2-actions relative ml-auto flex h-5 min-w-8 shrink-0 items-center justify-end pl-1 text-xs">
                 {/* hidden status text must not intercept hover actions */}
                 <span
@@ -1383,6 +1405,8 @@ export default function SidebarV2()
     unsettleThread,
     snoozeThread,
     unsnoozeThread,
+    pinThread,
+    confirmAndUnpinThread,
     deleteThread,
   } = useThreadActions()
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -1441,7 +1465,6 @@ export default function SidebarV2()
   const [projectActionsTarget, setProjectActionsTarget] = useState<SidebarProjectSnapshot | null>(
     null,
   )
-  const [projectScopeMenuOpen, setProjectScopeMenuOpen] = useState(false)
   const newThreadContext = useHandleNewThread()
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: 'add-project' }),
@@ -1579,6 +1602,43 @@ export default function SidebarV2()
   // project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
   const [projectScopeKey, setProjectScopeKey] = useState<string | null>(null)
+  const projectScopeItems = useMemo(
+    () => [
+      { value: 'all', label: 'All projects' },
+      ...projectGroups.map((project) => ({
+        value: project.projectKey,
+        label: project.displayName,
+      })),
+    ],
+    [projectGroups],
+  )
+  const projectGroupByScopeKey = useMemo(
+    () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
+    [projectGroups],
+  )
+  const selectedProjectScopeItem = useMemo(
+    () =>
+      projectScopeItems.find((item) => item.value === (projectScopeKey ?? 'all')) ??
+      projectScopeItems[0]!,
+    [projectScopeItems, projectScopeKey],
+  )
+  const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
+    reduceSidebarProjectScopeMenuState,
+    { open: false, query: '' },
+  )
+  const projectScopeFilter = useComboboxFilter()
+  // the input and list share one query; the reset row never outranks a project match.
+  const filteredProjectScopeItems = useMemo(
+    () =>
+      filterSidebarProjectScopeItems({
+        items: projectScopeItems,
+        activeScopeKey: projectScopeKey,
+        query: projectScopeMenuState.query,
+        matches: (item, query) =>
+          projectScopeFilter.contains(item, query, (candidate) => candidate.label),
+      }),
+    [projectScopeFilter, projectScopeItems, projectScopeKey, projectScopeMenuState.query],
+  )
   const scopedProjectGroup = useMemo(
     () =>
       projectScopeKey === null
@@ -1772,7 +1832,7 @@ export default function SidebarV2()
     {
       event.preventDefault()
       event.stopPropagation()
-      setProjectScopeMenuOpen(false)
+      dispatchProjectScopeMenu({ type: 'project-settings-opened' })
       window.requestAnimationFrame(() => setProjectActionsTarget(projectGroup))
     },
     [],
@@ -1822,8 +1882,8 @@ export default function SidebarV2()
       serverConfigs,
     ],
   )
-  const { activeThreads, importedThreads, snoozedThreads, settledThreads, snoozeNow } =
-    useMemo(() =>
+  const threadSections = useMemo(
+    function partitionThreads()
     {
       const now = `${nowMinute}:00.000Z`
       // snooze classification uses a REAL clock, not the quantized minute:
@@ -1838,6 +1898,7 @@ export default function SidebarV2()
           (scopedProjectKeys === null ||
             scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
       )
+      const pinned: EnvironmentThreadShell[] = []
       const active: EnvironmentThreadShell[] = []
       const imported: EnvironmentThreadShell[] = []
       const snoozed: EnvironmentThreadShell[] = []
@@ -1877,22 +1938,27 @@ export default function SidebarV2()
             ? { state: snapshot.pr.state, updatedAt: snapshot.pr.updatedAt }
             : null
         const changeRequest = observedTerminalChangeRequest ?? cachedTerminalChangeRequest
-        // snooze outranks settled classification: an explicitly snoozed thread
-        // belongs to the shelf even if it would also auto-settle (the shelf's
-        // wake time is a stronger statement about when it matters again).
-        if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }))
+        const lifecycleSection = resolveSidebarV2LifecycleSection({
+          snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
+          pinned: thread.pinnedAt != null,
+          settled:
+            supportsSettlement &&
+            effectiveSettled(thread, {
+              now,
+              autoSettleAfterDays,
+              autoSettleOnMerge,
+              changeRequest,
+            }),
+        })
+        if (lifecycleSection === 'snoozed')
         {
           snoozed.push(thread)
         }
-        else if (
-          supportsSettlement &&
-          effectiveSettled(thread, {
-            now,
-            autoSettleAfterDays,
-            autoSettleOnMerge,
-            changeRequest,
-          })
-        )
+        else if (lifecycleSection === 'pinned')
+        {
+          pinned.push(thread)
+        }
+        else if (lifecycleSection === 'settled')
         {
           settled.push(thread)
         }
@@ -1902,6 +1968,7 @@ export default function SidebarV2()
         }
       }
       return {
+        pinnedThreads: sortThreadsForSidebarV2(pinned),
         activeThreads: sortThreadsForSidebarV2(active),
         importedThreads: imported.toSorted(
           (left, right) =>
@@ -1916,7 +1983,8 @@ export default function SidebarV2()
         settledThreads: sortSettledThreadsForSidebarV2(settled),
         snoozeNow: preciseNow,
       }
-    }, [
+    },
+    [
       autoSettleAfterDays,
       autoSettleOnMerge,
       changeRequestSnapshotByKey,
@@ -1926,7 +1994,16 @@ export default function SidebarV2()
       serverConfigs,
       snoozeWakeTick,
       threads,
-    ])
+    ],
+  )
+  const {
+    pinnedThreads,
+    activeThreads,
+    importedThreads,
+    snoozedThreads,
+    settledThreads,
+    snoozeNow,
+  } = threadSections
 
   // arm a timeout for the earliest upcoming wake so the shelf empties the
   // moment a snooze expires instead of on the next minute tick. Sorted
@@ -2031,12 +2108,19 @@ export default function SidebarV2()
 
   const orderedThreads = useMemo(
     () => [
+      ...pinnedThreads,
       ...activeThreads,
       ...visibleImportedThreads,
       ...visibleSnoozedThreads,
       ...renderedSettledThreads,
     ],
-    [activeThreads, visibleImportedThreads, visibleSnoozedThreads, renderedSettledThreads],
+    [
+      activeThreads,
+      pinnedThreads,
+      renderedSettledThreads,
+      visibleImportedThreads,
+      visibleSnoozedThreads,
+    ],
   )
   const orderedThreadKeys = useMemo(
     () =>
@@ -2295,6 +2379,48 @@ export default function SidebarV2()
       })()
     },
     [unsettleThread],
+  )
+  const attemptPin = useCallback(
+    (threadRef: ScopedThreadRef) =>
+    {
+      void (async () =>
+      {
+        const result = await pinThread(threadRef)
+        if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+        {
+          const error = squashAtomCommandFailure(result)
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title: 'Failed to pin thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+            }),
+          )
+        }
+      })()
+    },
+    [pinThread],
+  )
+  const attemptUnpin = useCallback(
+    (threadRef: ScopedThreadRef) =>
+    {
+      void (async () =>
+      {
+        const result = await confirmAndUnpinThread(threadRef)
+        if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+        {
+          const error = squashAtomCommandFailure(result)
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title: 'Failed to unpin thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+            }),
+          )
+        }
+      })()
+    },
+    [confirmAndUnpinThread],
   )
   const attemptUnsnooze = useCallback(
     (threadRef: ScopedThreadRef) =>
@@ -2564,8 +2690,12 @@ export default function SidebarV2()
         const supportsSnooze =
           !isImportedShelf &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
+        const supportsPinning =
+          !isImportedShelf &&
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinning === true
         const isSettled = settledThreadKeysRef.current.has(threadKey)
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey)
+        const isPinned = thread.pinnedAt != null
         // presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date())
         const threadWorkspacePath =
@@ -2576,7 +2706,7 @@ export default function SidebarV2()
           api.contextMenu.show(
             buildThreadActionMenuItems({
               branch: thread.branch,
-              isPinned: false,
+              isPinned,
               isSettled,
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
@@ -2586,7 +2716,7 @@ export default function SidebarV2()
               supports: {
                 settlement: supportsSettlement,
                 snooze: supportsSnooze,
-                pinning: false,
+                pinning: supportsPinning,
                 titleRegeneration: false,
               },
               snoozePresets,
@@ -2638,6 +2768,12 @@ export default function SidebarV2()
             return
           case 'unsnooze':
             attemptUnsnooze(threadRef)
+            return
+          case 'pin':
+            attemptPin(threadRef)
+            return
+          case 'unpin':
+            attemptUnpin(threadRef)
             return
           case 'rename':
             startThreadRename(threadRef, thread.title)
@@ -2718,8 +2854,10 @@ export default function SidebarV2()
       })()
     },
     [
+      attemptPin,
       attemptSettle,
       attemptSnooze,
+      attemptUnpin,
       attemptUnsettle,
       attemptUnsnooze,
       archiveThread,
@@ -2817,7 +2955,7 @@ export default function SidebarV2()
     (thread: EnvironmentThreadShell, section: SidebarV2ThreadSection) =>
     {
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
-      const isCard = section === 'active'
+      const isCard = section === 'active' || section === 'pinned'
       const rowVariant = isCard ? 'card' : 'slim'
       return (
         <SidebarV2Row
@@ -2840,6 +2978,7 @@ export default function SidebarV2()
           snoozeSupported={
             serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
           }
+          isPinned={section !== 'imported' && thread.pinnedAt != null}
           snoozeWakeLabelText={
             section === 'snoozed' && thread.snoozedUntil != null
               ? snoozeWakeLabel(thread.snoozedUntil, new Date())
@@ -2912,6 +3051,14 @@ export default function SidebarV2()
   const sidebarListHeader = useMemo(
     () => (
       <div role="presentation" className="flex flex-col gap-px">
+        {pinnedThreads.map((thread) => renderThreadRow(thread, 'pinned'))}
+        {pinnedThreads.length > 0 ? (
+          <div
+            aria-hidden
+            data-testid="sidebar-v2-pinned-divider"
+            className="mx-2.5 my-1.5 h-px bg-sidebar-border/60"
+          />
+        ) : null}
         {activeThreads.map((thread) => renderThreadRow(thread, 'active'))}
         {importedThreads.length > 0 ? (
           <SidebarV2ShelfHeader
@@ -2927,6 +3074,7 @@ export default function SidebarV2()
       activeThreads,
       importedShelfExpanded,
       importedThreads.length,
+      pinnedThreads,
       renderThreadRow,
       toggleImportedShelf,
     ],
@@ -2970,7 +3118,8 @@ export default function SidebarV2()
             </button>
           </div>
         ) : null}
-        {activeThreads.length +
+        {pinnedThreads.length +
+          activeThreads.length +
           importedThreads.length +
           snoozedThreads.length +
           settledThreads.length ===
@@ -3002,6 +3151,7 @@ export default function SidebarV2()
       hiddenSettledCount,
       importedThreads.length,
       openAddProjectCommandPalette,
+      pinnedThreads.length,
       projects.length,
       renderedSettledThreads,
       renderThreadRow,
@@ -3136,8 +3286,25 @@ export default function SidebarV2()
         {projectGroups.length > 0 ? (
           <SidebarGroup className="px-2 pb-2 pt-0">
             <div className="flex items-center gap-1">
-              <Menu open={projectScopeMenuOpen} onOpenChange={setProjectScopeMenuOpen}>
-                <MenuTrigger
+              <Combobox
+                items={projectScopeItems}
+                filteredItems={filteredProjectScopeItems}
+                autoHighlight
+                itemToStringLabel={(item) => item.label}
+                isItemEqualToValue={(a, b) => a.value === b.value}
+                open={projectScopeMenuState.open}
+                onOpenChange={(open) =>
+                  {
+                  dispatchProjectScopeMenu({ type: 'open-changed', open })
+                }}
+                value={selectedProjectScopeItem}
+                onValueChange={(item) =>
+                  {
+                  if (!item) return
+                  setProjectScopeKey(item.value === 'all' ? null : item.value)
+                }}
+              >
+                <ComboboxTrigger
                   aria-label="Filter threads by project"
                   className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                 >
@@ -3154,57 +3321,76 @@ export default function SidebarV2()
                     {scopedProjectGroup?.displayName ?? 'All projects'}
                   </span>
                   <ChevronDownIcon className="size-4 shrink-0 text-sidebar-muted-foreground/70" />
-                </MenuTrigger>
-                <MenuPopup align="start" className="w-(--anchor-width)">
-                  <MenuRadioGroup
-                    value={projectScopeKey ?? 'all'}
-                    onValueChange={(value) =>
-                      setProjectScopeKey(value === 'all' ? null : (value as string))
-                    }
-                  >
-                    <MenuRadioItem
-                      value="all"
-                      closeOnClick
-                      className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-                    >
-                      <FolderIcon className="size-4 shrink-0" />
-                      <span className="min-w-0 truncate text-sm">All projects</span>
-                    </MenuRadioItem>
-                    {projectGroups.map((project) =>
+                </ComboboxTrigger>
+                <ComboboxPopup align="start" className="w-(--anchor-width) min-w-0 overflow-hidden">
+                  <div className="shrink-0 px-3 pt-2.5">
+                    <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
+                      <SearchIcon
+                        aria-hidden="true"
+                        className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
+                      />
+                      <ComboboxInput
+                        aria-label="Search projects"
+                        className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
+                        inputClassName="rounded-none bg-transparent text-sm"
+                        placeholder="Search projects..."
+                        showTrigger={false}
+                        size="sm"
+                        unstyled
+                        value={projectScopeMenuState.query}
+                        onChange={(event) =>
+                          dispatchProjectScopeMenu({
+                            type: 'query-changed',
+                            query: event.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <ComboboxEmpty>No matching projects.</ComboboxEmpty>
+                  <ComboboxList>
+                    {(item: (typeof projectScopeItems)[number]) =>
                       {
-                      const scopeKey = project.projectKey
+                      const project = projectGroupByScopeKey.get(item.value) ?? null
                       return (
-                        <MenuRadioItem
-                          key={scopeKey}
-                          value={scopeKey}
-                          closeOnClick
-                          className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
+                        <ComboboxItem
+                          key={item.value}
+                          hideIndicator
+                          value={item}
+                          className="h-8 min-h-8 px-1 py-0 font-medium"
+                          contentClassName="flex min-w-0 items-center gap-2"
                         >
-                          <ProjectFavicon
-                            environmentId={project.environmentId}
-                            cwd={project.workspaceRoot}
-                            className="size-4 shrink-0"
-                          />
-                          <span className="min-w-0 truncate text-sm">{project.displayName}</span>
-                          <button
-                            type="button"
-                            aria-label={`Project actions for ${project.displayName}`}
-                            title={`Project actions for ${project.displayName}`}
-                            className="ml-auto inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/55 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) =>
-                              {
-                              void handleProjectActions(event, project)
-                            }}
-                          >
-                            <EllipsisIcon className="size-3.5" />
-                          </button>
-                        </MenuRadioItem>
+                          {project ? (
+                            <ProjectFavicon
+                              environmentId={project.environmentId}
+                              cwd={project.workspaceRoot}
+                              className="size-4 shrink-0"
+                            />
+                          ) : (
+                            <FolderIcon className="size-4 shrink-0" />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                          {project ? (
+                            <button
+                              type="button"
+                              aria-label={`Project actions for ${project.displayName}`}
+                              title={`Project actions for ${project.displayName}`}
+                              className="ml-auto inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/55 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) =>
+                                {
+                                void handleProjectActions(event, project)
+                              }}
+                            >
+                              <EllipsisIcon className="size-3.5" />
+                            </button>
+                          ) : null}
+                        </ComboboxItem>
                       )
-                    })}
-                  </MenuRadioGroup>
-                </MenuPopup>
-              </Menu>
+                    }}
+                  </ComboboxList>
+                </ComboboxPopup>
+              </Combobox>
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -3242,9 +3428,11 @@ export default function SidebarV2()
               renderItem={renderImportedThread}
               extraData={renderThreadRow}
               estimatedItemSize={48}
-              estimatedHeaderSize={
-                activeThreads.length * 83 + (importedThreads.length > 0 ? 60 : 0)
-              }
+              estimatedHeaderSize={estimateSidebarV2HeaderSize({
+                activeThreadCount: activeThreads.length,
+                pinnedThreadCount: pinnedThreads.length,
+                hasImportedShelf: importedThreads.length > 0,
+              })}
               drawDistance={480}
               recycleItems={false}
               maintainVisibleContentPosition={SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION}

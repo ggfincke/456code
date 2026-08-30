@@ -1610,9 +1610,10 @@ describe('thread outbox', () =>
     expect(persisted.failure?.reason).toBe('settings rejected')
   })
 
-  it('preserves re-entry and provider-switch state in the detail-to-shell fallback', () =>
+  it('preserves re-entry, pinning, and provider-switch state in the detail-to-shell fallback', () =>
   {
     const unsettledAt = '2026-08-02T11:30:00.000Z'
+    const pinnedAt = '2026-08-02T11:45:00.000Z'
     const switchState = {
       phase: 'finalizing' as const,
       targetInstanceId: ProviderInstanceId.make('provider-next'),
@@ -1623,6 +1624,7 @@ describe('thread outbox', () =>
     const detail = {
       ...shell,
       unsettledAt,
+      pinnedAt,
       deletedAt: null,
       messages: [],
       proposedPlans: [],
@@ -1634,5 +1636,6 @@ describe('thread outbox', () =>
     const fallback = threadDetailToShell(EnvironmentId.make('environment-1'), detail)
     expect(fallback.providerSwitch).toEqual(switchState)
     expect(fallback.unsettledAt).toBe(unsettledAt)
+    expect(fallback.pinnedAt).toBe(pinnedAt)
   })
 })

@@ -1021,6 +1021,184 @@ it.layer(
   )
 })
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-pinning-')))(
+  'OrchestrationProjectionPipeline pinning',
+  (it) =>
+  {
+    it.effect('persists pin transitions and resets the pin on same-id recreation', () =>
+      Effect.gen(function* ()
+      {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline
+        const eventStore = yield* OrchestrationEventStore
+        const sql = yield* SqlClient.SqlClient
+        const projectId = ProjectId.make('project-projection-pinning')
+        const threadId = ThreadId.make('thread-projection-pinning')
+        const createdAt = '2026-08-29T12:00:00.000Z'
+        const firstPinnedAt = '2026-08-29T12:01:00.000Z'
+        const unpinnedAt = '2026-08-29T12:02:00.000Z'
+        const secondPinnedAt = '2026-08-29T12:03:00.000Z'
+        const deletedAt = '2026-08-29T12:04:00.000Z'
+        const recreatedAt = '2026-08-29T12:05:00.000Z'
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
+        const readThreadRow = () =>
+          sql<{
+            readonly pinnedAt: string | null
+            readonly deletedAt: string | null
+          }>`
+            SELECT
+              pinned_at AS "pinnedAt",
+              deleted_at AS "deletedAt"
+            FROM projection_threads
+            WHERE thread_id = ${threadId}
+          `
+
+        yield* appendAndProject({
+          type: 'project.created',
+          eventId: EventId.make('evt-projection-pinning-project'),
+          aggregateKind: 'project',
+          aggregateId: projectId,
+          occurredAt: createdAt,
+          commandId: CommandId.make('cmd-projection-pinning-project'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-projection-pinning-project'),
+          metadata: {},
+          payload: {
+            projectId,
+            title: 'Projection pinning',
+            workspaceRoot: '/tmp/project-projection-pinning',
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt,
+            updatedAt: createdAt,
+          },
+        })
+        yield* appendAndProject({
+          type: 'thread.created',
+          eventId: EventId.make('evt-projection-pinning-created'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          commandId: CommandId.make('cmd-projection-pinning-created'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-projection-pinning-created'),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: 'Pinned projection thread',
+            modelSelection: {
+              instanceId: ProviderInstanceId.make('codex'),
+              model: 'gpt-5.4',
+            },
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            orchestrate: false,
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        })
+        yield* appendAndProject({
+          type: 'thread.pinned',
+          eventId: EventId.make('evt-projection-pinning-pinned'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: firstPinnedAt,
+          commandId: CommandId.make('cmd-projection-pinning-pinned'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-projection-pinning-pinned'),
+          metadata: {},
+          payload: {
+            threadId,
+            pinnedAt: firstPinnedAt,
+            updatedAt: firstPinnedAt,
+          },
+        })
+        assert.deepEqual(yield* readThreadRow(), [{ pinnedAt: firstPinnedAt, deletedAt: null }])
+
+        yield* appendAndProject({
+          type: 'thread.unpinned',
+          eventId: EventId.make('evt-projection-pinning-unpinned'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: unpinnedAt,
+          commandId: CommandId.make('cmd-projection-pinning-unpinned'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-projection-pinning-unpinned'),
+          metadata: {},
+          payload: { threadId, updatedAt: unpinnedAt },
+        })
+        assert.deepEqual(yield* readThreadRow(), [{ pinnedAt: null, deletedAt: null }])
+
+        yield* appendAndProject({
+          type: 'thread.pinned',
+          eventId: EventId.make('evt-projection-pinning-repinned'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: secondPinnedAt,
+          commandId: CommandId.make('cmd-projection-pinning-repinned'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-projection-pinning-repinned'),
+          metadata: {},
+          payload: {
+            threadId,
+            pinnedAt: secondPinnedAt,
+            updatedAt: secondPinnedAt,
+          },
+        })
+        yield* appendAndProject({
+          type: 'thread.deleted',
+          eventId: EventId.make('evt-projection-pinning-deleted'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: deletedAt,
+          commandId: CommandId.make('cmd-projection-pinning-deleted'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-projection-pinning-deleted'),
+          metadata: {},
+          payload: { threadId, deletedAt },
+        })
+        assert.deepEqual(yield* readThreadRow(), [{ pinnedAt: secondPinnedAt, deletedAt }])
+
+        yield* appendAndProject({
+          type: 'thread.created',
+          eventId: EventId.make('evt-projection-pinning-recreated'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: recreatedAt,
+          commandId: CommandId.make('cmd-projection-pinning-recreated'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-projection-pinning-recreated'),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: 'Recreated projection thread',
+            modelSelection: {
+              instanceId: ProviderInstanceId.make('codex'),
+              model: 'gpt-5.4',
+            },
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            orchestrate: false,
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt: recreatedAt,
+            updatedAt: recreatedAt,
+          },
+        })
+        assert.deepEqual(yield* readThreadRow(), [{ pinnedAt: null, deletedAt: null }])
+      }),
+    )
+  },
+)
+
 it.layer(
   Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-attachments-rollback-')),
 )('OrchestrationProjectionPipeline', (it) =>

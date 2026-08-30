@@ -1,5 +1,5 @@
 // tests/packages/client-runtime/thread-activity/worklogNormalization.test.ts
-// verifies caller-owned work log normalization caching
+// verifies work log filtering, caller-owned caches, and child metadata
 
 import { EventId, TurnId, type OrchestrationThreadActivity } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
@@ -30,6 +30,41 @@ function makeCompletedActivity(id: string, sequence: number): OrchestrationThrea
 
 describe('deriveNormalizedWorkLogEntries caching', () =>
 {
+  it('filters wire-only warnings without dropping actionable warnings or errors', () =>
+  {
+    const base = makeCompletedActivity('warning-noise', 1)
+    const activities: OrchestrationThreadActivity[] = [
+      {
+        ...base,
+        kind: 'runtime.warning',
+        tone: 'info',
+        summary: "Claude system message 'background_tasks_changed' (no displayable text content)",
+      },
+      {
+        ...base,
+        id: EventId.make('warning-signal'),
+        kind: 'runtime.warning',
+        tone: 'info',
+        summary: 'Reconnecting... 2/5',
+        sequence: 2,
+      },
+      {
+        ...base,
+        id: EventId.make('runtime-error'),
+        kind: 'runtime.error',
+        tone: 'error',
+        summary: 'Provider failed (no displayable text content)',
+        sequence: 3,
+      },
+    ]
+
+    const entries = deriveNormalizedWorkLogEntries(activities, {
+      requestKindFromRequestType: () => null,
+    })
+
+    expect(entries.map((entry) => entry.id)).toEqual(['warning-signal', 'runtime-error'])
+  })
+
   it('reuses entries only through the caller-owned cache after attaching collapse keys', () =>
   {
     const firstActivity = makeCompletedActivity('tool-first', 1)

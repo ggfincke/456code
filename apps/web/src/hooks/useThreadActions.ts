@@ -24,6 +24,7 @@ import { useNewThreadHandler } from './useHandleNewThread'
 import { refreshArchivedThreadsForEnvironment } from '../lib/archivedThreadsState'
 import { readLocalApi } from '../localApi'
 import {
+  readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
   readEnvironmentThreadRefs,
@@ -107,6 +108,42 @@ export class ThreadSnoozeBlockedError extends Schema.TaggedErrorClass<ThreadSnoo
   }
 }
 
+export class ThreadPinningUnsupportedError extends Schema.TaggedErrorClass<ThreadPinningUnsupportedError>()(
+  'ThreadPinningUnsupportedError',
+  {
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+  },
+)
+{
+  override get message(): string
+  {
+    return "This environment's server does not support pinning yet. Update the server to use Pin."
+  }
+}
+
+export async function requestThreadUnpinConfirmation(input: {
+  enabled: boolean
+  title: string
+  confirm: ((message: string) => Promise<boolean>) | null
+})
+{
+  const { confirm } = input
+  if (!input.enabled || confirm === null)
+  {
+    return AsyncResult.success(true)
+  }
+
+  return settlePromise(() =>
+    confirm(
+      [
+        `Unpin thread "${input.title}"?`,
+        'This will move the thread out of your pinned section.',
+      ].join('\n'),
+    ),
+  )
+}
+
 export function useThreadActions()
 {
   const closeTerminal = useAtomCommand(terminalEnvironment.close)
@@ -125,6 +162,12 @@ export function useThreadActions()
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   })
+  const pinThreadMutation = useAtomCommand(threadEnvironment.pin, {
+    reportFailure: false,
+  })
+  const unpinThreadMutation = useAtomCommand(threadEnvironment.unpin, {
+    reportFailure: false,
+  })
   const snoozeThreadMutation = useAtomCommand(threadEnvironment.snooze, {
     reportFailure: false,
   })
@@ -140,6 +183,7 @@ export function useThreadActions()
   })
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder)
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete)
+  const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin)
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread)
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
@@ -522,6 +566,68 @@ export function useThreadActions()
     [unsettleThreadMutation],
   )
 
+  const pinThread = useCallback(
+    async (target: ScopedThreadRef) =>
+    {
+      // version skew: never send the command to a server that predates it.
+      if (!readEnvironmentSupportsPinning(target.environmentId))
+      {
+        return AsyncResult.failure(
+          Cause.fail(
+            new ThreadPinningUnsupportedError({
+              environmentId: target.environmentId,
+              threadId: target.threadId,
+            }),
+          ),
+        )
+      }
+      return pinThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId },
+      })
+    },
+    [pinThreadMutation],
+  )
+
+  const unpinThread = useCallback(
+    async (target: ScopedThreadRef) =>
+    {
+      if (!readEnvironmentSupportsPinning(target.environmentId))
+      {
+        return AsyncResult.failure(
+          Cause.fail(
+            new ThreadPinningUnsupportedError({
+              environmentId: target.environmentId,
+              threadId: target.threadId,
+            }),
+          ),
+        )
+      }
+      return unpinThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId },
+      })
+    },
+    [unpinThreadMutation],
+  )
+
+  const confirmAndUnpinThread = useCallback(
+    async (target: ScopedThreadRef) =>
+    {
+      const localApi = readLocalApi()
+      const resolved = resolveThreadTarget(target)
+      const confirmationResult = await requestThreadUnpinConfirmation({
+        enabled: confirmThreadUnpin,
+        title: resolved?.thread.title ?? 'this thread',
+        confirm: localApi ? (message) => localApi.dialogs.confirm(message) : null,
+      })
+      if (confirmationResult._tag === 'Failure') return confirmationResult
+      if (!confirmationResult.value) return AsyncResult.success(undefined)
+      return unpinThread(target)
+    },
+    [confirmThreadUnpin, resolveThreadTarget, unpinThread],
+  )
+
   const snoozeThread = useCallback(
     async (target: ScopedThreadRef, snoozedUntil: string) =>
     {
@@ -624,14 +730,20 @@ export function useThreadActions()
       unsettleThread,
       snoozeThread,
       unsnoozeThread,
+      pinThread,
+      unpinThread,
+      confirmAndUnpinThread,
     }),
     [
       archiveThread,
       confirmAndDeleteThread,
+      confirmAndUnpinThread,
       deleteThread,
+      pinThread,
       settleThread,
       snoozeThread,
       unarchiveThread,
+      unpinThread,
       unsettleThread,
       unsnoozeThread,
     ],

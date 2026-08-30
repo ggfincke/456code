@@ -111,6 +111,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly searchMatch?: EnvironmentThreadSearchMatch | null
   readonly searchQuery?: string
   readonly variant: 'card' | 'slim'
+  readonly pinned: boolean
   readonly showSettledDivider: boolean
   readonly project: EnvironmentProject | null
   readonly projectTitle?: string
@@ -136,9 +137,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onSettleThread: (thread: EnvironmentThreadShell) => void
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void
+  readonly onPinThread: (thread: EnvironmentThreadShell) => void
+  readonly onUnpinThread: (thread: EnvironmentThreadShell) => void
   // false on environments whose server predates thread.settle/unsettle:
   // swipe + menu fall back to Archive instead of failing on use.
   readonly settlementSupported: boolean
+  // false on environments whose server predates thread.pin/thread.unpin.
+  readonly pinningSupported: boolean
   readonly onSwipeableWillOpen: (methods: SwipeableMethods) => void
   readonly onSwipeableClose: (methods: SwipeableMethods) => void
   // reports this row's live PR state up so the partition can auto-settle
@@ -162,8 +167,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onSettleThread,
     onUnsettleThread,
     onArchiveThread,
+    onPinThread,
+    onUnpinThread,
     onChangeRequestState,
   } = props
+  const pinnedRow = props.pinned
 
   const pr = useThreadPr(thread, props.projectCwd ?? props.project?.workspaceRoot ?? null)
   const queuedFailureReason = useThreadOutboxFailureReason(thread.environmentId, thread.id)
@@ -178,6 +186,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const drawerColor = useThemeColor('--color-drawer')
   const pressedBackgroundColor = useThemeColor('--color-subtle')
   const selectedBackgroundColor = useThemeColor('--color-user-bubble')
+  const pinTintColor = useThemeColor('--color-foreground-muted')
   const sidebarPane = props.pane === 'sidebar'
   const selected = props.selected === true
 
@@ -206,20 +215,47 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleSettle = useCallback(() => onSettleThread(thread), [onSettleThread, thread])
   const handleUnsettle = useCallback(() => onUnsettleThread(thread), [onUnsettleThread, thread])
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread])
+  const handlePin = useCallback(() => onPinThread(thread), [onPinThread, thread])
+  const handleUnpin = useCallback(() => onUnpinThread(thread), [onUnpinThread, thread])
+  const pinMenuItem = useMemo<MenuAction[]>(
+    () =>
+      props.pinningSupported
+        ? [
+            thread.pinnedAt != null
+              ? { id: 'unpin', title: 'Unpin', image: 'pin.slash' }
+              : { id: 'pin', title: 'Pin', image: 'pin' },
+          ]
+        : [],
+    [props.pinningSupported, thread.pinnedAt],
+  )
+  const cardMenuActions = useMemo<MenuAction[]>(
+    () => [CARD_MENU_ACTIONS[0]!, ...pinMenuItem, ...CARD_MENU_ACTIONS.slice(1)],
+    [pinMenuItem],
+  )
+  const slimMenuActions = useMemo<MenuAction[]>(
+    () => [
+      SLIM_MENU_ACTIONS[0]!,
+      ...(thread.pinnedAt != null ? pinMenuItem : []),
+      SLIM_MENU_ACTIONS[1]!,
+    ],
+    [pinMenuItem, thread.pinnedAt],
+  )
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) =>
     {
       if (nativeEvent.event === 'settle') handleSettle()
       if (nativeEvent.event === 'unsettle') handleUnsettle()
+      if (nativeEvent.event === 'pin') handlePin()
+      if (nativeEvent.event === 'unpin') handleUnpin()
       if (nativeEvent.event === 'archive') handleArchive()
       if (nativeEvent.event === 'delete') handleDelete()
     },
-    [handleArchive, handleDelete, handleSettle, handleUnsettle],
+    [handleArchive, handleDelete, handlePin, handleSettle, handleUnpin, handleUnsettle],
   )
 
   // swipe: the v2 primary action is the lifecycle transition. Every settled
-  // row can un-settle — explicit settles clear the override, auto-settled
-  // rows get pinned active until real activity clears the pin.
+  // row can un-settle; auto-settled rows become explicitly active until
+  // real activity clears that override.
   const canUnsettle = variant === 'slim'
   const primaryAction = useMemo(() =>
   {
@@ -279,6 +315,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         >
           {props.projectTitle ?? props.project?.title ?? ''}
         </Text>
+        {pinnedRow ? (
+          <SymbolView name="pin" size={11} tintColor={pinTintColor} type="monochrome" />
+        ) : null}
         <Text
           className={cn(
             'text-xs tabular-nums',
@@ -512,8 +551,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               !props.settlementSupported
                 ? LEGACY_MENU_ACTIONS
                 : canUnsettle
-                  ? SLIM_MENU_ACTIONS
-                  : CARD_MENU_ACTIONS
+                  ? slimMenuActions
+                  : cardMenuActions
             }
             onPressAction={handleMenuAction}
             shouldOpenOnLongPress

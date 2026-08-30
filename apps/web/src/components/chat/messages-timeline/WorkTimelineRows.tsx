@@ -24,6 +24,7 @@ import {
   formatDuration,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
+  workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from '../../../session-logic'
 import {
@@ -216,7 +217,7 @@ function LiveActivityContent({
         <span
           className={cn(
             'flex size-6 shrink-0 items-center justify-center',
-            failed ? 'text-destructive' : highlighted ? 'text-foreground' : 'text-muted-foreground',
+            highlighted ? 'text-foreground' : 'text-muted-foreground',
           )}
           role={announceFailure ? 'img' : undefined}
           aria-label={announceFailure ? 'Tool call failed' : undefined}
@@ -313,16 +314,9 @@ export function WorkGroupToggleTimelineRow({
           ctx.onToggleWorkGroup(row.groupId, anchorElement)
         }}
       >
-        <span
-          className={cn(
-            'flex size-6 shrink-0 items-center justify-center',
-            row.hasFailure ? 'text-destructive' : 'text-muted-foreground',
-          )}
-          role={row.hasFailure ? 'img' : undefined}
-          aria-label={row.hasFailure ? 'Tool call failed' : undefined}
-        >
+        <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
           <WorkEntryIconSvg
-            name={row.hasFailure ? 'x' : toolGroupSummaryIconName(row.summaryKind)}
+            name={toolGroupSummaryIconName(row.summaryKind)}
             className="size-4 shrink-0 stroke-[1.8] opacity-70"
           />
         </span>
@@ -337,12 +331,15 @@ export function WorkGroupToggleTimelineRow({
     : row.hiddenCount === 1
       ? 'log entry'
       : 'log entries'
-  const showHiddenFailure = row.hasFailure && !row.expanded
-
   return (
     <button
       type="button"
       className="flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      aria-label={
+        row.hasFailure && !row.expanded
+          ? `+${row.hiddenCount} previous ${labelNoun}, includes a failure`
+          : undefined
+      }
       aria-expanded={row.expanded}
       onClick={(event) =>
       {
@@ -351,24 +348,13 @@ export function WorkGroupToggleTimelineRow({
         ctx.onToggleWorkGroup(row.groupId, anchorElement)
       }}
     >
-      <span
-        className={cn(
-          'flex size-5 shrink-0 items-center justify-center text-muted-foreground/65',
-          showHiddenFailure && 'text-destructive',
-        )}
-        role={showHiddenFailure ? 'img' : undefined}
-        aria-label={showHiddenFailure ? 'Hidden work includes a failure' : undefined}
-      >
-        {showHiddenFailure ? (
-          <WorkEntryIconSvg name="x" className="size-3.5 shrink-0 stroke-[1.8] opacity-70" />
-        ) : (
-          <ChevronDownIcon
-            className={cn(
-              'size-3.5 shrink-0 opacity-70 transition-transform duration-200',
-              row.expanded && 'rotate-180',
-            )}
-          />
-        )}
+      <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
+        <ChevronDownIcon
+          className={cn(
+            'size-3.5 shrink-0 opacity-70 transition-transform duration-200',
+            row.expanded && 'rotate-180',
+          )}
+        />
       </span>
       {row.expanded ? (
         <span className="font-medium text-foreground/82">
@@ -793,8 +779,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const activity = use(TimelineRowActivityCtx)
   const [expanded, setExpanded] = useState(false)
   const iconConfig = workToneIcon(workEntry.tone)
-  // an approaching plan limit is the one warning that has to survive being skimmed, so it gets
-  // the same destructive treatment runtime.warning already has instead of blending into info rows
+  // actionable runtime and plan-limit warnings stay distinct from ordinary tool failures
   const showWarningIndicator =
     workEntry.sourceActivityKind === 'runtime.warning' ||
     workEntry.sourceActivityKind === 'account.rate-limit.warning'
@@ -814,11 +799,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry)
   const showDestructiveRowStyle =
     showFailedIndicator &&
-    (workEntry.sourceActivityKind === 'runtime.error' || !workLogEntryIsToolLike(workEntry))
+    (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry))
   const iconWrapperClass = cn(
     'flex size-5 shrink-0 items-center justify-center',
     showWarningIndicator
-      ? 'text-destructive'
+      ? 'text-warning'
       : showDestructiveRowStyle
         ? 'text-destructive'
         : workEntry.tone === 'tool' || showFailedIndicator
@@ -919,7 +904,13 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                       />
                     }
                   >
-                    <XIcon className="block size-3 shrink-0 text-destructive" aria-hidden />
+                    <XIcon
+                      className={cn(
+                        'block size-3 shrink-0',
+                        showDestructiveRowStyle && 'text-destructive',
+                      )}
+                      aria-hidden
+                    />
                   </TooltipTrigger>
                   <TooltipPopup>Failed</TooltipPopup>
                 </Tooltip>

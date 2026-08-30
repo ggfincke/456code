@@ -64,6 +64,33 @@ function makeThread(
 
 describe('buildThreadFeed', () =>
 {
+  it('drops wire-only runtime warnings while keeping actionable warnings', () =>
+  {
+    const thread = makeThread({
+      id: ThreadId.make('thread-warning-noise'),
+      projectId: ProjectId.make('project-1'),
+      title: 'Warning noise',
+      activities: [
+        makeActivity({
+          id: EventId.make('warning-noise'),
+          kind: 'runtime.warning',
+          summary: "Claude system message 'background_tasks_changed' (no displayable text content)",
+          createdAt: '2026-04-01T00:00:02.000Z',
+        }),
+        makeActivity({
+          id: EventId.make('warning-signal'),
+          kind: 'runtime.warning',
+          summary: 'Reconnecting... 2/5',
+          createdAt: '2026-04-01T00:00:03.000Z',
+        }),
+      ],
+    })
+
+    expect(buildThreadFeed(thread)).toMatchObject([
+      { type: 'activity-group', activities: [{ id: 'warning-signal', icon: 'warning' }] },
+    ])
+  })
+
   it('keeps historic work entries attributed to their turns', () =>
   {
     const thread = makeThread({

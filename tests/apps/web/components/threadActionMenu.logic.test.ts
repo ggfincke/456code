@@ -47,4 +47,48 @@ describe('buildThreadActionMenuItems', () =>
       separatorBefore: true,
     })
   })
+
+  it('offers pin when supported and the thread is not pinned', () =>
+  {
+    const items = buildThreadActionMenuItems({
+      branch: null,
+      isPinned: false,
+      isSettled: false,
+      isSnoozed: false,
+      canSnoozeNow: false,
+      isRegeneratingTitle: false,
+      isRunning: false,
+      supports: {
+        settlement: false,
+        snooze: false,
+        pinning: true,
+        titleRegeneration: false,
+      },
+      snoozePresets: [],
+    })
+
+    expect(items[0]).toMatchObject({ id: 'pin', label: 'Pin thread', icon: 'pin' })
+  })
+
+  it('offers unpin for a pinned thread', () =>
+  {
+    const items = buildThreadActionMenuItems({
+      branch: null,
+      isPinned: true,
+      isSettled: false,
+      isSnoozed: false,
+      canSnoozeNow: false,
+      isRegeneratingTitle: false,
+      isRunning: false,
+      supports: {
+        settlement: false,
+        snooze: false,
+        pinning: true,
+        titleRegeneration: false,
+      },
+      snoozePresets: [],
+    })
+
+    expect(items[0]).toMatchObject({ id: 'unpin', label: 'Unpin thread', icon: 'pin-off' })
+  })
 })

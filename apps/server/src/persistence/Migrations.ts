@@ -84,6 +84,7 @@ import Migration0068 from './Migrations/068_ProjectionThreadOrchestratePlanArchi
 import Migration0069 from './Migrations/069_HealOrchestratePlanRespondFailure.ts'
 import Migration0070 from './Migrations/070_NativeArchitectureViews.ts'
 import Migration0071 from './Migrations/071_ProjectionThreadsUnsettledAt.ts'
+import Migration0072 from './Migrations/072_ProjectionThreadsPinnedAt.ts'
 
 // migration loader with all migrations defined inline.
 //
@@ -162,6 +163,7 @@ export const migrationEntries = [
   [69, 'HealOrchestratePlanRespondFailure', Migration0069],
   [70, 'NativeArchitectureViews', Migration0070],
   [71, 'ProjectionThreadsUnsettledAt', Migration0071],
+  [72, 'ProjectionThreadsPinnedAt', Migration0072],
 ] as const
 
 export interface MigrationIdentity

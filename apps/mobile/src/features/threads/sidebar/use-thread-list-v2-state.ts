@@ -92,6 +92,18 @@ export function useThreadListV2State(input: {
     }
     return supported
   }, [serverConfigs])
+  const pinningEnvironmentIds = useMemo(() =>
+  {
+    const supported = new Set<EnvironmentId>()
+    for (const [environmentId, config] of serverConfigs)
+    {
+      if (config.environment.capabilities.threadPinning === true)
+      {
+        supported.add(environmentId)
+      }
+    }
+    return supported
+  }, [serverConfigs])
   const layout = useMemo(() =>
   {
     if (!input.enabled)
@@ -141,6 +153,7 @@ export function useThreadListV2State(input: {
   return {
     handleChangeRequestState,
     layout,
+    pinningEnvironmentIds,
     serverConfigs,
     settlementEnvironmentIds,
     showMoreSettled,

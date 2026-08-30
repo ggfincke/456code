@@ -9,6 +9,7 @@ import {
   FolderPlusIcon,
   Globe2Icon,
   LoaderIcon,
+  PinIcon,
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -65,6 +66,7 @@ import {
   scopeThreadRef,
 } from '@t3tools/client-runtime/environment'
 import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
+import { effectiveSettled, effectiveSnoozed } from '@t3tools/client-runtime/state/thread-settled'
 import { resolveThreadChangeRoot } from '@t3tools/shared/threadChangeRoot'
 import {
   isAtomCommandInterrupted,
@@ -86,9 +88,11 @@ import { useOpenPrLink } from '../lib/openPullRequestLink'
 import { isTerminalFocused } from '../lib/terminalFocus'
 import { isMacPlatform } from '../lib/utils'
 import {
+  readEnvironmentSupportsPinning,
   readThreadShell,
   useProject,
   useProjects,
+  useServerConfigs,
   useThreadShells,
   useThreadShellsForProjectRefs,
 } from '../state/entities'
@@ -117,6 +121,7 @@ import { readLocalApi } from '../localApi'
 import { useComposerDraftStore } from '../composerDraftStore'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
 import { useTerminalFocus } from '../hooks/useTerminalFocus'
+import { useNowMinute } from '../hooks/useNowMinute'
 import { useDesktopUpdateState } from '../state/desktopUpdate'
 
 import { useThreadActions } from '../hooks/useThreadActions'
@@ -183,6 +188,8 @@ import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
   getSidebarThreadIdsToPrewarm,
+  isImportedShelfThread,
+  partitionLegacySidebarProjectThreads,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   isTrailingDoubleClick,
@@ -330,6 +337,7 @@ interface SidebarThreadRowProps
   projectCwd: string | null
   orderedProjectThreadKeys: readonly string[]
   isActive: boolean
+  isPinned: boolean
   jumpLabel: string | null
   appSettingsConfirmThreadArchive: boolean
   renamingThreadKey: string | null
@@ -368,6 +376,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const {
     orderedProjectThreadKeys,
     isActive,
+    isPinned,
     jumpLabel,
     appSettingsConfirmThreadArchive,
     renamingThreadKey,
@@ -840,6 +849,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               </TooltipPopup>
             </Tooltip>
           )}
+          {isPinned ? (
+            <PinIcon
+              aria-label="Pinned"
+              role="img"
+              className="size-3 shrink-0 text-muted-foreground/65"
+            />
+          ) : null}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {discoveredPorts.length > 0 && (
@@ -997,6 +1013,7 @@ interface SidebarProjectThreadListProps
   hasOverflowingThreads: boolean
   hiddenThreadStatus: ThreadStatusPill | null
   orderedProjectThreadKeys: readonly string[]
+  pinnedThreadCount: number
   renderedThreads: readonly SidebarThreadSummary[]
   changeRequestSnapshotByKey: ReadonlyMap<string, ThreadChangeRequestSnapshot>
   showEmptyThreadState: boolean
@@ -1050,6 +1067,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hasOverflowingThreads,
     hiddenThreadStatus,
     orderedProjectThreadKeys,
+    pinnedThreadCount,
     renderedThreads,
     changeRequestSnapshotByKey,
     showEmptyThreadState,
@@ -1100,38 +1118,47 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         </SidebarMenuSubItem>
       ) : null}
       {shouldShowThreadPanel &&
-        renderedThreads.map((thread) =>
+        renderedThreads.map((thread, index) =>
         {
           const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
           return (
-            <SidebarThreadRow
-              key={threadKey}
-              thread={thread}
-              changeRequestSnapshot={changeRequestSnapshotByKey.get(threadKey) ?? null}
-              projectCwd={projectCwd}
-              orderedProjectThreadKeys={orderedProjectThreadKeys}
-              isActive={activeRouteThreadKey === threadKey}
-              jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
-              appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
-              renamingThreadKey={renamingThreadKey}
-              renamingTitle={renamingTitle}
-              setRenamingTitle={setRenamingTitle}
-              startThreadRename={startThreadRename}
-              renamingInputRef={renamingInputRef}
-              renamingCommittedRef={renamingCommittedRef}
-              confirmingArchiveThreadKey={confirmingArchiveThreadKey}
-              setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
-              confirmArchiveButtonRefs={confirmArchiveButtonRefs}
-              handleThreadClick={handleThreadClick}
-              navigateToThread={navigateToThread}
-              handleMultiSelectContextMenu={handleMultiSelectContextMenu}
-              handleThreadContextMenu={handleThreadContextMenu}
-              clearSelection={clearSelection}
-              commitRename={commitRename}
-              cancelRename={cancelRename}
-              attemptArchiveThread={attemptArchiveThread}
-              openPrLink={openPrLink}
-            />
+            <React.Fragment key={threadKey}>
+              {index === pinnedThreadCount && pinnedThreadCount > 0 ? (
+                <SidebarMenuSubItem
+                  aria-hidden
+                  data-testid="legacy-sidebar-pinned-divider"
+                  className="my-1 h-px w-full bg-sidebar-border/60"
+                />
+              ) : null}
+              <SidebarThreadRow
+                thread={thread}
+                changeRequestSnapshot={changeRequestSnapshotByKey.get(threadKey) ?? null}
+                projectCwd={projectCwd}
+                orderedProjectThreadKeys={orderedProjectThreadKeys}
+                isActive={activeRouteThreadKey === threadKey}
+                isPinned={thread.pinnedAt != null && !isImportedShelfThread(thread)}
+                jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
+                appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
+                renamingThreadKey={renamingThreadKey}
+                renamingTitle={renamingTitle}
+                setRenamingTitle={setRenamingTitle}
+                startThreadRename={startThreadRename}
+                renamingInputRef={renamingInputRef}
+                renamingCommittedRef={renamingCommittedRef}
+                confirmingArchiveThreadKey={confirmingArchiveThreadKey}
+                setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
+                confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+                handleThreadClick={handleThreadClick}
+                navigateToThread={navigateToThread}
+                handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+                handleThreadContextMenu={handleThreadContextMenu}
+                clearSelection={clearSelection}
+                commitRename={commitRename}
+                cancelRename={cancelRename}
+                attemptArchiveThread={attemptArchiveThread}
+                openPrLink={openPrLink}
+              />
+            </React.Fragment>
           )
         })}
 
@@ -1183,6 +1210,8 @@ interface SidebarProjectItemProps
   handleNewThread: ReturnType<typeof useNewThreadHandler>
   archiveThread: ReturnType<typeof useThreadActions>['archiveThread']
   deleteThread: ReturnType<typeof useThreadActions>['deleteThread']
+  pinThread: ReturnType<typeof useThreadActions>['pinThread']
+  unpinThread: ReturnType<typeof useThreadActions>['confirmAndUnpinThread']
   threadJumpLabelByKey: ReadonlyMap<string, string>
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void
   expandThreadListForProject: (projectKey: string) => void
@@ -1204,6 +1233,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     handleNewThread,
     archiveThread,
     deleteThread,
+    pinThread,
+    unpinThread,
     threadJumpLabelByKey,
     attachThreadListAutoAnimateRef,
     expandThreadListForProject,
@@ -1217,6 +1248,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   )
+  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays)
+  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const serverConfigs = useServerConfigs()
+  const nowMinute = useNowMinute()
   const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   )
@@ -1389,8 +1424,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     return counts
   }, [memberProjectByScopedKey, project.memberProjects, projectThreads])
 
-  const { projectStatus, visibleProjectThreads, orderedProjectThreadKeys } = useMemo(() =>
+  const {
+    projectStatus,
+    pinnedProjectThreads,
+    regularProjectThreads,
+    visibleProjectThreads,
+    orderedProjectThreadKeys,
+  } = useMemo(() =>
   {
+    const now = `${nowMinute}:00.000Z`
     const lastVisitedAtByThreadKey = new Map(
       projectThreads.map((thread, index) => [
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
@@ -1409,10 +1451,37 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       })
     }
-    const visibleProjectThreads = sortThreads(
+    const sortedProjectThreads = sortThreads(
       projectThreads.filter((thread) => thread.archivedAt === null),
       threadSortOrder,
     )
+    const { pinnedThreads, regularThreads } = partitionLegacySidebarProjectThreads(
+      sortedProjectThreads,
+      (thread) =>
+      {
+        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities
+        const snapshot = changeRequestSnapshotByKey.get(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        )
+        const changeRequest =
+          thread.branch !== null &&
+          snapshot !== undefined &&
+          (thread.worktreePath === null || snapshot.branch === thread.branch)
+            ? snapshot.pr
+            : null
+        return (
+          (capabilities?.threadSnooze === true && effectiveSnoozed(thread, { now })) ||
+          (capabilities?.threadSettlement === true &&
+            effectiveSettled(thread, {
+              now,
+              autoSettleAfterDays,
+              autoSettleOnMerge,
+              changeRequest,
+            }))
+        )
+      },
+    )
+    const visibleProjectThreads = [...pinnedThreads, ...regularThreads]
     const projectStatus = resolveProjectStatusIndicator(
       visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
     )
@@ -1421,9 +1490,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
       projectStatus,
+      pinnedProjectThreads: pinnedThreads,
+      regularProjectThreads: regularThreads,
       visibleProjectThreads,
     }
-  }, [projectThreads, threadLastVisitedAts, threadSortOrder])
+  }, [
+    autoSettleAfterDays,
+    autoSettleOnMerge,
+    changeRequestSnapshotByKey,
+    nowMinute,
+    projectThreads,
+    serverConfigs,
+    threadLastVisitedAts,
+    threadSortOrder,
+  ])
   const pinnedCollapsedThread = useMemo(() =>
   {
     const activeThreadKey = activeRouteThreadKey ?? undefined
@@ -1442,6 +1522,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const {
     hasOverflowingThreads,
     hiddenThreadStatus,
+    pinnedThreadCount,
     renderedThreads,
     showEmptyThreadState,
     shouldShowThreadPanel,
@@ -1465,11 +1546,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       })
     }
-    const hasOverflowingThreads = visibleProjectThreads.length > sidebarThreadPreviewCount
-    const previewThreads =
-      isThreadListExpanded || !hasOverflowingThreads
-        ? visibleProjectThreads
-        : visibleProjectThreads.slice(0, sidebarThreadPreviewCount)
+    const regularPreviewCount = Math.max(0, sidebarThreadPreviewCount - pinnedProjectThreads.length)
+    const previewThreads = isThreadListExpanded
+      ? visibleProjectThreads
+      : [...pinnedProjectThreads, ...regularProjectThreads.slice(0, regularPreviewCount)]
+    const hasOverflowingThreads = previewThreads.length < visibleProjectThreads.length
     const visibleThreadKeys = new Set(
       [...previewThreads, ...(pinnedCollapsedThread ? [pinnedCollapsedThread] : [])].map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
@@ -1489,6 +1570,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       hiddenThreadStatus: resolveProjectStatusIndicator(
         hiddenThreads.map((thread) => resolveProjectThreadStatus(thread)),
       ),
+      pinnedThreadCount: pinnedProjectThreads.length,
       renderedThreads,
       showEmptyThreadState: projectExpanded && visibleProjectThreads.length === 0,
       shouldShowThreadPanel: projectExpanded || pinnedCollapsedThread !== null,
@@ -1496,8 +1578,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }, [
     isThreadListExpanded,
     pinnedCollapsedThread,
+    pinnedProjectThreads,
     projectExpanded,
     projectThreads,
+    regularProjectThreads,
     sidebarThreadPreviewCount,
     threadLastVisitedAts,
     visibleProjectThreads,
@@ -2362,10 +2446,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       )
       const threadWorkspacePath =
         thread.worktreePath ?? threadProject?.workspaceRoot ?? project.workspaceRoot ?? null
+      const supportsPinning =
+        !isImportedShelfThread(thread) && readEnvironmentSupportsPinning(thread.environmentId)
       const clicked = await api.contextMenu.show(
         buildThreadActionMenuItems({
           branch: thread.branch,
-          isPinned: false,
+          isPinned: thread.pinnedAt != null,
           isSettled: false,
           isSnoozed: false,
           canSnoozeNow: false,
@@ -2374,7 +2460,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           supports: {
             settlement: false,
             snooze: false,
-            pinning: false,
+            pinning: supportsPinning,
             titleRegeneration: false,
           },
           snoozePresets: [],
@@ -2417,6 +2503,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (clicked === 'mark-unread')
       {
         markThreadUnread(threadKey, thread.latestTurn?.completedAt)
+        return
+      }
+      if (clicked === 'pin' || clicked === 'unpin')
+      {
+        const result = await (clicked === 'pin' ? pinThread : unpinThread)(threadRef)
+        if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+        {
+          const error = squashAtomCommandFailure(result)
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title: clicked === 'pin' ? 'Failed to pin thread' : 'Failed to unpin thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+            }),
+          )
+        }
         return
       }
       if (clicked === 'copy-path')
@@ -2493,8 +2595,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       handleNewThread,
       markThreadUnread,
       memberProjectByScopedKey,
+      pinThread,
       project.workspaceRoot,
       startThreadRename,
+      unpinThread,
     ],
   )
 
@@ -2612,6 +2716,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hasOverflowingThreads={hasOverflowingThreads}
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
+        pinnedThreadCount={pinnedThreadCount}
         renderedThreads={renderedThreads}
         changeRequestSnapshotByKey={changeRequestSnapshotByKey}
         showEmptyThreadState={showEmptyThreadState}
@@ -3057,6 +3162,8 @@ interface SidebarProjectsContentProps
   handleNewThread: ReturnType<typeof useNewThreadHandler>
   archiveThread: ReturnType<typeof useThreadActions>['archiveThread']
   deleteThread: ReturnType<typeof useThreadActions>['deleteThread']
+  pinThread: ReturnType<typeof useThreadActions>['pinThread']
+  unpinThread: ReturnType<typeof useThreadActions>['confirmAndUnpinThread']
   sortedProjects: readonly SidebarProjectSnapshot[]
   expandedThreadListsByProject: ReadonlySet<string>
   activeRouteProjectKey: string | null
@@ -3098,6 +3205,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     handleNewThread,
     archiveThread,
     deleteThread,
+    pinThread,
+    unpinThread,
     sortedProjects,
     expandedThreadListsByProject,
     activeRouteProjectKey,
@@ -3244,6 +3353,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         handleNewThread={handleNewThread}
                         archiveThread={archiveThread}
                         deleteThread={deleteThread}
+                        pinThread={pinThread}
+                        unpinThread={unpinThread}
                         threadJumpLabelByKey={threadJumpLabelByKey}
                         attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
                         expandThreadListForProject={expandThreadListForProject}
@@ -3276,6 +3387,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 handleNewThread={handleNewThread}
                 archiveThread={archiveThread}
                 deleteThread={deleteThread}
+                pinThread={pinThread}
+                unpinThread={unpinThread}
                 threadJumpLabelByKey={threadJumpLabelByKey}
                 attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
                 expandThreadListForProject={expandThreadListForProject}
@@ -3314,7 +3427,7 @@ function ProjectSidebar()
   const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount)
   const updateSettings = useUpdateClientSettings()
   const handleNewThread = useNewThreadHandler()
-  const { archiveThread, deleteThread } = useThreadActions()
+  const { archiveThread, deleteThread, pinThread, confirmAndUnpinThread } = useThreadActions()
   const { isMobile, setOpenMobile } = useSidebar()
   const routeTarget = useParams({
     strict: false,
@@ -3986,6 +4099,8 @@ function ProjectSidebar()
         handleNewThread={handleNewThread}
         archiveThread={archiveThread}
         deleteThread={deleteThread}
+        pinThread={pinThread}
+        unpinThread={confirmAndUnpinThread}
         sortedProjects={sortedProjects}
         expandedThreadListsByProject={expandedThreadListsByProject}
         activeRouteProjectKey={activeRouteProjectKey}

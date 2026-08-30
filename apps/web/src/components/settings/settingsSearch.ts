@@ -134,6 +134,12 @@ export const SETTINGS_SEARCH_ITEMS: ReadonlyArray<SettingsSearchItem> = [
     anchorId: 'settings-add-project-starts-in',
   },
   {
+    id: 'unpin-confirmation',
+    title: 'Unpin confirmation',
+    to: '/settings/general',
+    anchorId: 'settings-unpin-confirmation',
+  },
+  {
     id: 'archive-confirmation',
     title: 'Archive confirmation',
     to: '/settings/general',
