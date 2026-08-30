@@ -8,11 +8,135 @@ import { ProviderInstanceId, type ServerConfig } from '@t3tools/contracts'
 import {
   buildModelMenuActions,
   buildModelOptions,
+  filterModelOptions,
   groupByProvider,
+  resolveNewTaskModelSelection,
 } from '../../../../apps/mobile/src/lib/modelOptions'
 
 describe('mobile model options', () =>
 {
+  it('resolves draft then project then sticky defaults without changing explicit routing or options', () =>
+  {
+    const selection = {
+      instanceId: ProviderInstanceId.make('custom-instance'),
+      model: 'unavailable-model',
+      options: [{ id: 'reasoningEffort', value: 'xhigh' }],
+    }
+    const draftSelection = { ...selection, model: 'draft-model' }
+    const projectDefaultSelection = { ...selection, model: 'project-model' }
+    const stickySelection = { ...selection, model: 'sticky-model' }
+    const config = {
+      providers: [
+        {
+          instanceId: 'codex',
+          driver: 'codex',
+          enabled: true,
+          installed: true,
+          auth: { status: 'authenticated' },
+          models: [
+            { slug: 'first-model', name: 'First' },
+            { slug: 'provider-default', name: 'Default', isDefault: true },
+          ].map((model) => ({ isCustom: false, capabilities: null, ...model })),
+        },
+      ],
+    } as unknown as ServerConfig
+    const modelOptions = buildModelOptions(config, draftSelection)
+    const input = { draftSelection, projectDefaultSelection, stickySelection, modelOptions }
+
+    expect(resolveNewTaskModelSelection(input)).toBe(draftSelection)
+    expect(resolveNewTaskModelSelection({ ...input, draftSelection: null })).toBe(
+      projectDefaultSelection,
+    )
+    expect(
+      resolveNewTaskModelSelection({
+        ...input,
+        draftSelection: null,
+        projectDefaultSelection: null,
+      }),
+    ).toBe(stickySelection)
+    const providerInput = {
+      draftSelection: null,
+      projectDefaultSelection: null,
+      stickySelection: null,
+      modelOptions,
+    }
+    expect(resolveNewTaskModelSelection(providerInput)?.model).toBe('provider-default')
+    expect(
+      resolveNewTaskModelSelection({ ...providerInput, modelOptions: modelOptions.slice(0, 1) })
+        ?.model,
+    ).toBe('first-model')
+    expect(resolveNewTaskModelSelection({ ...providerInput, modelOptions: [] })).toBeNull()
+    expect(modelOptions.at(-1)?.selection).toBe(draftSelection)
+  })
+
+  it('distinguishes and searches same-name OpenCode sources without changing their routing', () =>
+  {
+    const sources = [
+      { id: 'anthropic', label: 'Anthropic' },
+      { id: 'github-copilot', label: 'GitHub Copilot' },
+      { id: 'opencode', label: 'OpenCode Zen' },
+    ]
+    const config = {
+      providers: [
+        {
+          instanceId: 'opencode_work',
+          driver: 'opencode',
+          displayName: 'OpenCode Work',
+          enabled: true,
+          installed: true,
+          auth: { status: 'authenticated' },
+          models: [
+            ...sources.map((source) => ({
+              slug: `${source.id}/claude-fable-5`,
+              name: 'Claude Fable 5',
+              subProvider: source.label,
+              isCustom: false,
+              capabilities: null,
+            })),
+            { slug: 'custom', name: 'Custom', isCustom: true, capabilities: null },
+          ],
+        },
+      ],
+    } as unknown as ServerConfig
+    const selection = {
+      instanceId: ProviderInstanceId.make('opencode_work'),
+      model: 'github-copilot/claude-fable-5',
+    }
+    const options = buildModelOptions(config, selection)
+
+    expect(options.slice(0, sources.length)).toMatchObject(
+      sources.map((source) => ({
+        key: `opencode_work:${source.id}/claude-fable-5`,
+        label: 'Claude Fable 5',
+        subtitle: source.label,
+        providerLabel: 'OpenCode Work',
+        selection: {
+          instanceId: 'opencode_work',
+          model: `${source.id}/claude-fable-5`,
+        },
+      })),
+    )
+    expect(groupByProvider(options)).toEqual([
+      { providerKey: 'opencode_work', providerLabel: 'OpenCode Work', models: options },
+    ])
+    expect(filterModelOptions(options, 'GITHUB COPILOT').map((option) => option.selection)).toEqual(
+      [selection],
+    )
+    expect(filterModelOptions(options, 'OpenCode Work')).toEqual(options)
+    const [menu] = buildModelMenuActions(groupByProvider(options), selection)
+    expect(menu?.subactions?.slice(0, sources.length)).toEqual(
+      sources.map((source) => ({
+        id: `model:opencode_work:${source.id}/claude-fable-5`,
+        title: 'Claude Fable 5',
+        subtitle: source.label,
+        state: source.id === 'github-copilot' ? 'on' : undefined,
+      })),
+    )
+    expect(options.at(-1)?.subtitle).toBe('')
+    expect(menu?.subactions?.at(-1)?.subtitle).toBeUndefined()
+    expect(buildModelOptions(config, { ...selection, model: 'missing' }).at(-1)?.subtitle).toBe('')
+  })
+
   it('groups only explicit legacy models and retains selected legacy and missing fallback choices', () =>
   {
     const selected = { instanceId: ProviderInstanceId.make('codex'), model: 'superseded' }

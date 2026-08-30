@@ -69,6 +69,23 @@ function normalizeSelectionOptions(
       }
 }
 
+export function resolveNewTaskModelSelection(input: {
+  readonly draftSelection: ModelSelection | null
+  readonly projectDefaultSelection: ModelSelection | null
+  readonly stickySelection: ModelSelection | null
+  readonly modelOptions: ReadonlyArray<ModelOption>
+}): ModelSelection | null
+{
+  return (
+    input.draftSelection ??
+    input.projectDefaultSelection ??
+    input.stickySelection ??
+    input.modelOptions.find((option) => option.isDefault)?.selection ??
+    input.modelOptions[0]?.selection ??
+    null
+  )
+}
+
 export function buildModelOptions(
   config: ServerConfig | null | undefined,
   fallbackModelSelection: ModelSelection | null,
@@ -90,7 +107,7 @@ export function buildModelOptions(
       options.set(key, {
         key,
         label: model.name,
-        subtitle: providerLabel,
+        subtitle: provider.driver === 'opencode' ? (model.subProvider ?? '') : providerLabel,
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
@@ -122,10 +139,13 @@ export function buildModelOptions(
     else
     {
       const providerLabel = fallbackModelSelection.instanceId
+      const provider = config?.providers.find(
+        (entry) => entry.instanceId === fallbackModelSelection.instanceId,
+      )
       options.set(key, {
         key,
         label: fallbackModelSelection.model,
-        subtitle: providerLabel,
+        subtitle: (provider?.driver ?? providerLabel) === 'opencode' ? '' : providerLabel,
         providerKey: fallbackModelSelection.instanceId,
         providerLabel,
         providerDriver: fallbackModelSelection.instanceId,
@@ -137,6 +157,19 @@ export function buildModelOptions(
   }
 
   return [...options.values()]
+}
+
+export function filterModelOptions(
+  options: ReadonlyArray<ModelOption>,
+  query: string,
+): ReadonlyArray<ModelOption>
+{
+  const normalizedQuery = query.toLowerCase()
+  return options.filter((option) =>
+    `${option.label} ${option.providerLabel} ${option.subtitle}`
+      .toLowerCase()
+      .includes(normalizedQuery),
+  )
 }
 
 export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyArray<ProviderGroup>
@@ -176,6 +209,9 @@ export function buildModelMenuActions(
   const modelAction = (option: ModelOption): MenuAction => ({
     id: `model:${option.key}`,
     title: option.label,
+    ...(option.providerDriver === 'opencode' && option.subtitle
+      ? { subtitle: option.subtitle }
+      : {}),
     state: isSelected(option) ? 'on' : undefined,
   })
 

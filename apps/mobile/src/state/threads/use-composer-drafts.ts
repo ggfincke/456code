@@ -97,6 +97,7 @@ const ComposerDraftSchema = Schema.Struct({
 const PersistedComposerDraftsSchema = Schema.Struct({
   schemaVersion: Schema.Literal(COMPOSER_DRAFTS_SCHEMA_VERSION),
   drafts: Schema.Record(Schema.String, ComposerDraftSchema),
+  stickyModelSelection: Schema.optional(ModelSelectionSchema),
 })
 
 const decodePersistedComposerDraftsDocument = Schema.decodeUnknownSync(
@@ -113,8 +114,19 @@ export const composerDraftsAtom = Atom.make<Record<string, ComposerDraft>>({}).p
   Atom.withLabel('mobile:composer-drafts'),
 )
 
+export const stickyComposerModelSelectionAtom = Atom.make<ModelSelection | null>(null).pipe(
+  Atom.keepAlive,
+  Atom.withLabel('mobile:sticky-composer-model-selection'),
+)
+
+type PersistedComposerState = {
+  readonly drafts: Record<string, ComposerDraft>
+  readonly stickyModelSelection: ModelSelection | null
+}
+
 let loadPromise: Promise<void> | null = null
 let hydrated = false
+let stickySelectionChangedBeforeHydration = false
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let persistRequestedBeforeHydration = false
 const persistenceQueue = new SerializedAsyncQueue()
@@ -183,6 +195,7 @@ function isEmptyDraft(draft: ComposerDraft): boolean
   return (
     draft.text.length === 0 &&
     draft.attachments.length === 0 &&
+    (draft.importedShareIds?.length ?? 0) === 0 &&
     draft.modelSelection === undefined &&
     draft.runtimeMode === undefined &&
     draft.interactionMode === undefined &&
@@ -191,14 +204,22 @@ function isEmptyDraft(draft: ComposerDraft): boolean
   )
 }
 
-export function decodePersistedComposerDrafts(value: unknown): Record<string, ComposerDraft>
+export function decodePersistedComposerState(value: unknown): PersistedComposerState
 {
   const parsed = decodePersistedComposerDraftsDocument(value)
-  return Object.fromEntries(
-    Object.entries(parsed.drafts)
-      .map(([draftKey, draft]) => [draftKey, normalizeStoredDraft(draft)] as const)
-      .filter(([, draft]) => !isEmptyDraft(draft)),
-  )
+  return {
+    drafts: Object.fromEntries(
+      Object.entries(parsed.drafts)
+        .map(([draftKey, draft]) => [draftKey, normalizeStoredDraft(draft)] as const)
+        .filter(([, draft]) => !isEmptyDraft(draft)),
+    ),
+    stickyModelSelection: parsed.stickyModelSelection ?? null,
+  }
+}
+
+export function decodePersistedComposerDrafts(value: unknown): Record<string, ComposerDraft>
+{
+  return decodePersistedComposerState(value).drafts
 }
 
 async function getComposerDraftsFile()
@@ -209,7 +230,7 @@ async function getComposerDraftsFile()
   return new File(directory, COMPOSER_DRAFTS_FILE)
 }
 
-async function loadPersistedComposerDrafts(): Promise<Record<string, ComposerDraft>>
+async function loadPersistedComposerState(): Promise<PersistedComposerState>
 {
   let operation: ComposerDraftPersistenceError['operation'] = 'open'
   try
@@ -217,12 +238,12 @@ async function loadPersistedComposerDrafts(): Promise<Record<string, ComposerDra
     const file = await getComposerDraftsFile()
     if (!file.exists)
     {
-      return {}
+      return { drafts: {}, stickyModelSelection: null }
     }
     operation = 'read'
     const raw = await file.text()
     operation = 'decode'
-    return decodePersistedComposerDrafts(JSON.parse(raw) as unknown)
+    return decodePersistedComposerState(JSON.parse(raw) as unknown)
   }
   catch (cause)
   {
@@ -235,11 +256,11 @@ async function loadPersistedComposerDrafts(): Promise<Record<string, ComposerDra
         cause,
       }),
     )
-    return {}
+    return { drafts: {}, stickyModelSelection: null }
   }
 }
 
-async function writePersistedComposerDrafts(drafts: Record<string, ComposerDraft>): Promise<void>
+async function writePersistedComposerState(state: PersistedComposerState): Promise<void>
 {
   let operation: ComposerDraftPersistenceError['operation'] = 'open'
   try
@@ -247,13 +268,14 @@ async function writePersistedComposerDrafts(drafts: Record<string, ComposerDraft
     const file = await getComposerDraftsFile()
     operation = 'encode'
     const nonEmptyDrafts = Object.fromEntries(
-      Object.entries(drafts)
+      Object.entries(state.drafts)
         .map(([draftKey, draft]) => [draftKey, normalizeDraftForWrite(draft)] as const)
         .filter(([, draft]) => !isEmptyDraft(draft)),
     )
     const document = {
       schemaVersion: COMPOSER_DRAFTS_SCHEMA_VERSION,
       drafts: nonEmptyDrafts,
+      ...(state.stickyModelSelection ? { stickyModelSelection: state.stickyModelSelection } : {}),
     } as const
     const encoded = JSON.stringify(document)
     operation = 'write'
@@ -274,11 +296,20 @@ async function writePersistedComposerDrafts(drafts: Record<string, ComposerDraft
   }
 }
 
+function persistComposerDraftsSnapshot(drafts: Record<string, ComposerDraft>): Promise<void>
+{
+  const state = {
+    drafts,
+    stickyModelSelection: appAtomRegistry.get(stickyComposerModelSelectionAtom),
+  }
+  return persistenceQueue.run(() => writePersistedComposerState(state))
+}
+
 async function savePersistedComposerDrafts(drafts: Record<string, ComposerDraft>): Promise<void>
 {
   try
   {
-    await persistenceQueue.run(() => writePersistedComposerDrafts(drafts))
+    await persistComposerDraftsSnapshot(drafts)
   }
   catch (error)
   {
@@ -307,20 +338,28 @@ function schedulePersistComposerDrafts(drafts: Record<string, ComposerDraft>): v
   }, PERSIST_DEBOUNCE_MS)
 }
 
-function completeComposerDraftsHydration(persistedDrafts: Record<string, ComposerDraft>): void
+function completeComposerDraftsHydration(persisted: PersistedComposerState): void
 {
+  if (!stickySelectionChangedBeforeHydration)
+  {
+    appAtomRegistry.set(stickyComposerModelSelectionAtom, persisted.stickyModelSelection)
+  }
+  stickySelectionChangedBeforeHydration = false
+  const persistedDrafts = persisted.drafts
   if (pendingMutations.length === 0)
   {
     hydrated = true
-    if (Object.keys(persistedDrafts).length === 0)
-    {
-      return
-    }
     const current = appAtomRegistry.get(composerDraftsAtom)
-    appAtomRegistry.set(composerDraftsAtom, {
-      ...persistedDrafts,
-      ...current,
-    })
+    const next = { ...persistedDrafts, ...current }
+    if (Object.keys(persistedDrafts).length > 0)
+    {
+      appAtomRegistry.set(composerDraftsAtom, next)
+    }
+    if (persistRequestedBeforeHydration)
+    {
+      persistRequestedBeforeHydration = false
+      schedulePersistComposerDrafts(next)
+    }
     return
   }
 
@@ -353,10 +392,10 @@ export function ensureComposerDraftsLoaded(): void
   {
     return
   }
-  loadPromise = loadPersistedComposerDrafts()
-    .then((persistedDrafts) =>
+  loadPromise = loadPersistedComposerState()
+    .then((persisted) =>
     {
-      completeComposerDraftsHydration(persistedDrafts)
+      completeComposerDraftsHydration(persisted)
     })
     .catch((cause) =>
     {
@@ -370,7 +409,7 @@ export function ensureComposerDraftsLoaded(): void
         }),
       )
       // draft loading is best-effort; in-memory drafts still keep working.
-      completeComposerDraftsHydration({})
+      completeComposerDraftsHydration({ drafts: {}, stickyModelSelection: null })
     })
 }
 
@@ -390,6 +429,17 @@ function updateComposerDrafts(
   const next = update(appAtomRegistry.get(composerDraftsAtom))
   appAtomRegistry.set(composerDraftsAtom, next)
   schedulePersistComposerDrafts(next)
+}
+
+export function setStickyComposerModelSelection(modelSelection: ModelSelection): void
+{
+  ensureComposerDraftsLoaded()
+  if (!hydrated)
+  {
+    stickySelectionChangedBeforeHydration = true
+  }
+  appAtomRegistry.set(stickyComposerModelSelectionAtom, modelSelection)
+  schedulePersistComposerDrafts(appAtomRegistry.get(composerDraftsAtom))
 }
 
 export function setComposerDraftText(draftKey: string, value: string): void
@@ -523,6 +573,10 @@ export function updateComposerDraftSettings(
 export function clearComposerDraftContentState(
   current: Record<string, ComposerDraft>,
   draftKey: string,
+  options?: {
+    readonly clearModelSelection?: boolean
+    readonly clearWorkspaceSelection?: boolean
+  },
 ): Record<string, ComposerDraft>
 {
   const existing = current[draftKey]
@@ -530,9 +584,18 @@ export function clearComposerDraftContentState(
   {
     return current
   }
-  const { importedShareIds: _importedShareIds, ...retained } = existing
+  const {
+    importedShareIds: _importedShareIds,
+    modelSelection,
+    workspaceSelection,
+    ...retained
+  } = existing
   const draft = {
     ...retained,
+    ...(options?.clearModelSelection || modelSelection === undefined ? {} : { modelSelection }),
+    ...(options?.clearWorkspaceSelection || workspaceSelection === undefined
+      ? {}
+      : { workspaceSelection }),
     text: '',
     attachments: [],
   }
@@ -669,7 +732,7 @@ export async function mergeComposerDraftContent(
   {
     appAtomRegistry.set(composerDraftsAtom, next)
   }
-  await persistenceQueue.run(() => writePersistedComposerDrafts(next))
+  await persistComposerDraftsSnapshot(next)
   return { skippedAttachmentCount }
 }
 
@@ -695,12 +758,20 @@ export async function restoreComposerDraftSnapshot(
     snapshot,
   )
   appAtomRegistry.set(composerDraftsAtom, next)
-  await persistenceQueue.run(() => writePersistedComposerDrafts(next))
+  await persistComposerDraftsSnapshot(next)
 }
 
-export function clearComposerDraftContent(draftKey: string): void
+export function clearComposerDraftContent(
+  draftKey: string,
+  options?: {
+    readonly clearModelSelection?: boolean
+    readonly clearWorkspaceSelection?: boolean
+  },
+): void
 {
-  updateComposerDrafts(draftKey, (current) => clearComposerDraftContentState(current, draftKey))
+  updateComposerDrafts(draftKey, (current) =>
+    clearComposerDraftContentState(current, draftKey, options),
+  )
 }
 
 export function clearComposerDraft(draftKey: string): void
@@ -751,7 +822,7 @@ export async function clearComposerDraftsEnvironment(environmentId: EnvironmentI
     persistTimer = null
   }
   appAtomRegistry.set(composerDraftsAtom, next)
-  await persistenceQueue.run(() => writePersistedComposerDrafts(next))
+  await persistComposerDraftsSnapshot(next)
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft
@@ -762,4 +833,14 @@ export function useComposerDraft(draftKey: string | null): ComposerDraft
     ensureComposerDraftsLoaded()
   }, [])
   return draftKey ? normalizeDraft(drafts[draftKey]) : EMPTY_DRAFT
+}
+
+export function useStickyComposerModelSelection(): ModelSelection | null
+{
+  const selection = useAtomValue(stickyComposerModelSelectionAtom)
+  useEffect(() =>
+  {
+    ensureComposerDraftsLoaded()
+  }, [])
+  return selection
 }

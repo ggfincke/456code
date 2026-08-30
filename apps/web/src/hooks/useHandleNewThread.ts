@@ -49,6 +49,7 @@ function composerDraftHasUserContent(draft: ComposerThreadDraftState | null | un
     draft.terminalContexts.length > 0 ||
     draft.elementContexts.length > 0 ||
     draft.previewAnnotations.length > 0 ||
+    draft.architectureContexts.length > 0 ||
     draft.reviewComments.length > 0
   )
 }
@@ -93,14 +94,10 @@ export function useNewThreadHandler()
         moveComposerPromptAndImages,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
-        setModelSelection,
       } = useComposerDraftStore.getState()
       const currentRouteTarget = getCurrentRouteTarget()
-      // a new thread carries the user's *working mode* from the thread being
-      // viewed: model (including options like reasoning effort and context
-      // window), permission mode, and collaboration mode. Branch, worktree, and
-      // env mode never carry implicitly — those come from the configured
-      // defaults unless the caller passes them explicitly.
+      // runtime and collaboration modes carry from the viewed thread independently
+      // of the target project's model and configured workspace defaults
       const carrySourceShell =
         currentRouteTarget?.kind === 'server' ? readThreadShell(currentRouteTarget.threadRef) : null
       const carrySourceDraft =
@@ -114,11 +111,6 @@ export function useNewThreadHandler()
               : currentRouteTarget.draftId,
           )
         : null
-      const composerActiveProvider = carrySourceComposer?.activeProvider ?? null
-      const composerModelSelection = composerActiveProvider
-        ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
-        : null
-      const carryModelSelection = composerModelSelection ?? carrySourceShell?.modelSelection ?? null
       const carryRuntimeMode =
         carrySourceComposer?.runtimeMode ??
         carrySourceShell?.runtimeMode ??
@@ -194,8 +186,8 @@ export function useNewThreadHandler()
           // defaults change (or by the old carry-over behavior) stop landing
           // on "current checkout" branches forever. Composer text is
           // preserved. When the draft is already open and no options were
-          // passed, leave it alone entirely — the user may have just picked a
-          // branch in the composer.
+          // passed, leave its workspace context alone — the user may have just
+          // picked a branch. Model seeds refresh independently of this guard.
           const defaultEnvMode = primaryServerSettings.defaultThreadEnvMode
           const workspaceContext = hasExplicitWorkspaceOption
             ? {
@@ -222,16 +214,8 @@ export function useNewThreadHandler()
               ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
               ...(carryCollaborationMode ? { collaborationMode: carryCollaborationMode } : {}),
             })
-            if (carryModelSelection)
-            {
-              // the carried selection is a complete snapshot of the viewed
-              // thread's model state: absent options mean "no options", not
-              // "keep the stale draft's options".
-              setModelSelection(reusableStoredDraftThread.draftId, carryModelSelection, {
-                replaceOptions: true,
-              })
-            }
           }
+          applyStickyState(reusableStoredDraftThread.draftId, project?.defaultModelSelection)
           // carry workspace context across physical members of a logical project
           setLogicalProjectDraftThreadId(
             logicalProjectKey,
@@ -291,6 +275,7 @@ export function useNewThreadHandler()
           ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
           ...(hasStartFromOriginOption ? { startFromOrigin: options?.startFromOrigin } : {}),
         })
+        applyStickyState(currentRouteTarget.draftId, project?.defaultModelSelection)
         return Promise.resolve()
       }
 
@@ -315,16 +300,7 @@ export function useNewThreadHandler()
           runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
           ...(carryCollaborationMode ? { collaborationMode: carryCollaborationMode } : {}),
         })
-        applyStickyState(draftId)
-        if (carryModelSelection)
-        {
-          // after sticky state so the viewed thread's exact selection
-          // (model + options like effort and context window) wins over the
-          // globally sticky one. replaceOptions: the carried selection is a
-          // complete snapshot — absent options mean "no options", not "keep
-          // whatever sticky state just wrote".
-          setModelSelection(draftId, carryModelSelection, { replaceOptions: true })
-        }
+        applyStickyState(draftId, project?.defaultModelSelection)
         carryComposerContentTo(draftId)
 
         await router.navigate({

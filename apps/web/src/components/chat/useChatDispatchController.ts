@@ -413,7 +413,7 @@ interface UseChatDispatchControllerInput
   readonly setComposerDraftModelSelection: (
     threadRef: ScopedThreadRef,
     modelSelection: ModelSelection,
-    opts?: { readonly replaceOptions?: boolean },
+    opts?: { readonly replaceOptions?: boolean; readonly explicit?: boolean },
   ) => void
   readonly setStickyComposerModelSelection: (modelSelection: ModelSelection) => void
   readonly setThreadError: (threadId: ThreadId | null, error: string | null) => void
@@ -553,7 +553,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
     (
       threadRef: ScopedThreadRef,
       nextModelSelection: ModelSelection,
-      opts?: { readonly replaceOptions?: boolean },
+      opts?: { readonly replaceOptions?: boolean; readonly explicit?: boolean },
     ) =>
     {
       setComposerDraftModelSelection(threadRef, nextModelSelection, opts)
@@ -691,7 +691,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
           .getState()
           .setRuntimeMode(targetThreadRef, entry.capabilities.defaultRuntimeMode)
       }
-      applyComposerModelSelection(targetThreadRef, nextModelSelection)
+      applyComposerModelSelection(targetThreadRef, nextModelSelection, { explicit: true })
       scheduleComposerFocus()
     },
     [

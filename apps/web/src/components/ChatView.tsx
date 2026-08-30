@@ -791,6 +791,7 @@ function ChatViewContent(props: ChatViewProps)
   )
   const setComposerDraftReviewComments = useComposerDraftStore((store) => store.setReviewComments)
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection)
+  const seedComposerDraftModelSelection = useComposerDraftStore((store) => store.applyStickyState)
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode)
   const setComposerDraftInteractionMode = useComposerDraftStore((store) => store.setInteractionMode)
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent)
@@ -1160,6 +1161,30 @@ function ChatViewContent(props: ChatViewProps)
     [activeThread?.environmentId, activeThread?.projectId],
   )
   const activeProject = useProject(activeProjectRef)
+  useEffect(() =>
+  {
+    if (
+      !draftId ||
+      !isLocalDraftThread ||
+      !activeProject ||
+      isConnecting ||
+      sendInFlightRef.current ||
+      localDraftError
+    )
+    {
+      return
+    }
+    // project snapshots can arrive or change after a draft opens; seed both
+    // instance and model together without replacing a human choice
+    seedComposerDraftModelSelection(draftId, activeProject.defaultModelSelection)
+  }, [
+    activeProject,
+    draftId,
+    isConnecting,
+    isLocalDraftThread,
+    localDraftError,
+    seedComposerDraftModelSelection,
+  ])
   useEffect(() =>
   {
     if (!activeThreadRef || !activeProjectRef) return

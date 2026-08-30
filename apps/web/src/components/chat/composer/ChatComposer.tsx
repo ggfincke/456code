@@ -2031,6 +2031,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       {
         setComposerDraftModelSelection(composerDraftTarget, restorableSelection, {
           replaceOptions: true,
+          explicit: true,
         })
       }
 
