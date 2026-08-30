@@ -15,6 +15,7 @@ import { toastManager } from '~/components/ui/toast'
 import { useComposerHandleContext } from '~/composerHandleContext'
 import { writeTextToClipboard } from '~/hooks/useCopyToClipboard'
 import { useTheme } from '~/hooks/useTheme'
+import { useWorkspaceMutationRefresh } from '~/hooks/useWorkspaceMutationRefresh'
 import { cn } from '~/lib/utils'
 import { readLocalApi } from '~/localApi'
 import { PIERRE_ICONS } from '~/pierre-icons'
@@ -29,6 +30,7 @@ interface FileBrowserPanelProps
   projectName: string
   onOpenFile: (relativePath: string) => void
   onRefreshSelectedFile?: () => void
+  workspaceMutationId: string | null
 }
 
 const TREE_UNSAFE_CSS = `
@@ -54,6 +56,7 @@ export default function FileBrowserPanel({
   projectName,
   onOpenFile,
   onRefreshSelectedFile,
+  workspaceMutationId,
 }: FileBrowserPanelProps)
 {
   const { resolvedTheme } = useTheme()
@@ -72,6 +75,11 @@ export default function FileBrowserPanel({
     entriesQuery.refresh()
     onRefreshSelectedFile?.()
   }
+  useWorkspaceMutationRefresh({
+    mutationId: workspaceMutationId,
+    refresh: entriesQuery.refresh,
+    resourceKey: JSON.stringify(['files', environmentId, cwd]),
+  })
 
   // the tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed

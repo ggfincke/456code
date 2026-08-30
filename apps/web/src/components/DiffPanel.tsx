@@ -35,6 +35,7 @@ import {
 } from '../diffPanelStore'
 import { useTheme } from '../hooks/useTheme'
 import { useTurnDiffSummaries } from '../hooks/useTurnDiffSummaries'
+import { useWorkspaceMutationRefresh } from '../hooks/useWorkspaceMutationRefresh'
 import { useProject, useThread, useThreadActivities } from '../state/entities'
 import { resolveThreadRouteRef } from '../threadRoutes'
 import { useClientSettings } from '../hooks/useSettings'
@@ -127,6 +128,7 @@ interface DiffPanelProps
   mode?: DiffPanelMode
   composerDraftTarget: ScopedThreadRef | DraftId
   initialGitScope: 'branch' | 'unstaged'
+  workspaceMutationId: string | null
   onViewInRepositoryMap: (anchor: ArchitectureStandingAnchor) => void
   onAddArchitectureConcern: (
     projection: ArchitectureGraphProjection,
@@ -140,6 +142,7 @@ export default function DiffPanel({
   mode = 'inline',
   composerDraftTarget,
   initialGitScope: initialGitScopeProp,
+  workspaceMutationId,
   onViewInRepositoryMap,
   onAddArchitectureConcern,
 }: DiffPanelProps)
@@ -425,6 +428,19 @@ export default function DiffPanel({
   const branchDiffPreview = shouldRetryBranchDiffAtEnvironmentCwd
     ? fallbackBranchDiffPreview
     : primaryBranchDiffPreview
+  useWorkspaceMutationRefresh({
+    enabled: selectedTurnId === null && !isRunScope && activeCwd !== null,
+    mutationId: workspaceMutationId,
+    refresh: branchDiffPreview.refresh,
+    resourceKey: JSON.stringify([
+      'diff',
+      routeThreadRef,
+      activeCwd,
+      selectedBaseRef,
+      diffIgnoreWhitespace,
+      shouldRetryBranchDiffAtEnvironmentCwd,
+    ]),
+  })
   // the review preview only knows the working tree and the branch range, so the
   // run scope deliberately has no source here and reads runDiff instead
   const selectedGitSource = isRunScope

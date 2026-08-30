@@ -25,6 +25,7 @@ import { OpenInPicker } from '~/components/chat/OpenInPicker'
 import { useClientSettings } from '~/hooks/useSettings'
 import { getLocalStorageItem, setLocalStorageItem } from '~/hooks/useLocalStorage'
 import { useTheme } from '~/hooks/useTheme'
+import { useWorkspaceMutationRefresh } from '~/hooks/useWorkspaceMutationRefresh'
 import { useSyntaxThemeName } from '~/hooks/useSyntaxThemeName'
 import { useRemoteOpenState } from '~/lib/remoteOpen'
 import { cn } from '~/lib/utils'
@@ -75,6 +76,7 @@ interface FilePreviewPanelProps
   revealRequestId: number
   onOpenFile: (relativePath: string, line?: number) => void
   onPendingChange: (relativePath: string, pending: boolean) => void
+  workspaceMutationId: string | null
 }
 
 const FILE_EXPLORER_STORAGE_KEY = '456code.fileExplorerOpen'
@@ -83,6 +85,7 @@ function WorkspaceImagePreview(props: {
   readonly threadRef: ScopedThreadRef
   readonly absolutePath: string
   readonly alt: string
+  readonly workspaceMutationId: string | null
 })
 {
   const assetUrl = useAssetUrlState(props.environmentId, {
@@ -91,8 +94,14 @@ function WorkspaceImagePreview(props: {
     path: props.absolutePath,
   })
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  const imageUrl =
+    assetUrl._tag === 'Success'
+      ? props.workspaceMutationId === null
+        ? assetUrl.url
+        : `${assetUrl.url}${assetUrl.url.includes('?') ? '&' : '?'}workspace-revision=${encodeURIComponent(props.workspaceMutationId)}`
+      : null
 
-  if (assetUrl._tag === 'Failure' || (assetUrl._tag === 'Success' && failedUrl === assetUrl.url))
+  if (assetUrl._tag === 'Failure' || (imageUrl !== null && failedUrl === imageUrl))
   {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
@@ -101,13 +110,13 @@ function WorkspaceImagePreview(props: {
     )
   }
 
-  return assetUrl._tag === 'Success' ? (
+  return imageUrl !== null ? (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
       <img
         className="max-h-full max-w-full object-contain"
-        src={assetUrl.url}
+        src={imageUrl}
         alt={props.alt}
-        onError={() => setFailedUrl(assetUrl.url)}
+        onError={() => setFailedUrl(imageUrl)}
       />
     </div>
   ) : (
@@ -143,6 +152,7 @@ export default function FilePreviewPanel({
   revealRequestId,
   onOpenFile,
   onPendingChange,
+  workspaceMutationId,
 }: FilePreviewPanelProps)
 {
   const { resolvedTheme } = useTheme()
@@ -180,6 +190,12 @@ export default function FilePreviewPanel({
   const renderMarkdown = isMarkdown && renderRequested
   const renderMdx = isMdx && renderRequested
   const currentFilePending = relativePath !== null && pendingOwnersByPath.has(relativePath)
+  useWorkspaceMutationRefresh({
+    enabled: relativePath !== null && !isImage && !currentFilePending,
+    mutationId: workspaceMutationId,
+    refresh: file.refresh,
+    resourceKey: JSON.stringify(['file', environmentId, cwd, relativePath]),
+  })
   const supportsSafeMdx =
     serverConfigs.get(environmentId)?.environment.capabilities.safeMdxDocument === true
   const mdxQueryEnabled =
@@ -190,6 +206,12 @@ export default function FilePreviewPanel({
     relativePath ?? '',
     mdxQueryEnabled,
   )
+  useWorkspaceMutationRefresh({
+    enabled: mdxQueryEnabled,
+    mutationId: workspaceMutationId,
+    refresh: mdxDocument.refresh,
+    resourceKey: JSON.stringify(['mdx', environmentId, threadRef.threadId, cwd, relativePath]),
+  })
   const mdxDocumentMatchesSource =
     relativePath !== null &&
     file.data !== null &&
@@ -492,6 +514,7 @@ export default function FilePreviewPanel({
               threadRef={threadRef}
               absolutePath={absolutePath}
               alt={relativePath}
+              workspaceMutationId={workspaceMutationId}
             />
           ) : relativePath && file.error && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
@@ -610,6 +633,7 @@ export default function FilePreviewPanel({
               cwd={cwd}
               projectName={projectName}
               onOpenFile={onOpenFile}
+              workspaceMutationId={workspaceMutationId}
               {...(relativePath && !isImage ? { onRefreshSelectedFile: file.refresh } : {})}
             />
           </aside>

@@ -106,6 +106,10 @@ import {
 } from '../pendingUserInput'
 import { useUiStateStore } from '../uiStateStore'
 import {
+  latestWorkspaceMutationId,
+  useWorkspaceMutationRefresh,
+} from '../hooks/useWorkspaceMutationRefresh'
+import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
   ORCHESTRATE_PLAN_IMPLEMENTATION_PROMPT,
@@ -1757,6 +1761,14 @@ function ChatViewContent(props: ChatViewProps)
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider
   const phase = derivePhase(activeThread?.session ?? null)
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES
+  const latestCheckpointCompletedAt = activeThread?.checkpoints.at(-1)?.completedAt ?? null
+  const workspaceMutationId = useMemo(() =>
+  {
+    const activityId = latestWorkspaceMutationId(threadActivities)
+    return activityId === null && latestCheckpointCompletedAt === null
+      ? null
+      : JSON.stringify([activityId, latestCheckpointCompletedAt])
+  }, [latestCheckpointCompletedAt, threadActivities])
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities])
   const workerVerdicts = useMemo(() => deriveWorkerVerdictMap(threadActivities), [threadActivities])
   const providerSwitchTimelineEvents = useMemo(
@@ -2319,6 +2331,12 @@ function ChatViewContent(props: ChatViewProps)
         }),
   )
   const keybindings = useAtomValue(primaryServerKeybindingsAtom)
+  useWorkspaceMutationRefresh({
+    enabled: gitStatusCwd !== null,
+    mutationId: workspaceMutationId,
+    refresh: gitStatusQuery.refresh,
+    resourceKey: JSON.stringify(['git-status', activeThreadKey, gitStatusCwd]),
+  })
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom)
   // prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
@@ -5923,6 +5941,7 @@ function ChatViewContent(props: ChatViewProps)
           mode="embedded"
           composerDraftTarget={composerDraftTarget}
           initialGitScope={initialDiffPanelGitScope}
+          workspaceMutationId={workspaceMutationId}
           onAddArchitectureConcern={addArchitectureConcernToComposer}
           onViewInRepositoryMap={viewArchitectureStandingAnchor}
         />
@@ -6067,6 +6086,7 @@ function ChatViewContent(props: ChatViewProps)
           revealRequestId={activeFileSurface?.revealRequestId ?? 0}
           onOpenFile={openFileSurface}
           onPendingChange={handleFilePendingChange}
+          workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
     ) : null
