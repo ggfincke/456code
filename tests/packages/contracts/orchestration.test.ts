@@ -8,6 +8,9 @@ import * as Schema from 'effect/Schema'
 import { EventId } from '../../../packages/contracts/src/baseSchemas.ts'
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  ChatAttachment,
+  ChatFileAttachment,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   DEFAULT_RUNTIME_MODE,
   ClientOrchestrationCommand,
   coerceRuntimeMode,
@@ -52,6 +55,52 @@ import {
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput)
 const decodeThreadSearchInput = Schema.decodeUnknownSync(OrchestrationSearchThreadsInput)
+const isFileAttachment = Schema.is(ChatFileAttachment)
+const isPersistedAttachment = Schema.is(ChatAttachment)
+const isClientCommand = Schema.is(ClientOrchestrationCommand)
+it('decodes future persisted kinds without weakening known inputs or mixed attachment bounds', () =>
+{
+  const file = {
+    type: 'file',
+    id: 'pending-id',
+    name: 'archive.zip',
+    mimeType: 'application/zip',
+    sizeBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  }
+  assert.isTrue(isFileAttachment(file))
+  assert.isFalse(
+    isPersistedAttachment({ ...file, sizeBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1 }),
+  )
+  assert.isTrue(isPersistedAttachment({ ...file, type: 'future-kind' }))
+  assert.isFalse(isPersistedAttachment({ ...file, type: 'image', mimeType: 'application/zip' }))
+  const command = {
+    type: 'thread.turn.start',
+    commandId: 'c',
+    threadId: 't',
+    message: {
+      messageId: 'm',
+      role: 'user',
+      text: '',
+      attachments: Array.from({ length: 8 }, () => file),
+    },
+    runtimeMode: 'full-access',
+    interactionMode: 'default',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  }
+  assert.isTrue(isClientCommand(command))
+  assert.isFalse(
+    isClientCommand({
+      ...command,
+      message: { ...command.message, attachments: [...command.message.attachments, file] },
+    }),
+  )
+  assert.isFalse(
+    isClientCommand({
+      ...command,
+      message: { ...command.message, attachments: [{ ...file, type: 'future-kind' }] },
+    }),
+  )
+})
 it('bounds and trims conversation search requests', () =>
 {
   assert.deepEqual(decodeThreadSearchInput({ query: '  needle  ', limit: 50 }), {

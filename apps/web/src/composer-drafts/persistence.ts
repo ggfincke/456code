@@ -10,7 +10,7 @@ import {
 } from '@t3tools/client-runtime/environment'
 import {
   type CollaborationMode,
-  type EnvironmentId,
+  EnvironmentId,
   ModelSelection,
   type PreviewAnnotationPayload,
   PreviewAnnotationPayloadSchema,
@@ -37,6 +37,7 @@ import {
 } from '../lib/terminalContext'
 import { type ReviewCommentContext, ReviewCommentContextSchema } from '../reviewCommentContext'
 import {
+  type ChatFileAttachment,
   type ChatImageAttachment,
   DEFAULT_COLLABORATION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -100,6 +101,40 @@ export interface ComposerImageAttachment extends Omit<ChatImageAttachment, 'prev
   file: File
 }
 
+export interface ComposerFileAttachment extends Omit<ChatFileAttachment, 'previewUrl'>
+{
+  file: File | null
+  uploadedAttachmentId?: string
+  uploadEnvironmentId?: EnvironmentId
+}
+
+// bytes never persist; unfinished uploads remain visible as reattach markers after reload
+export function composerFileNeedsReattach(file: ComposerFileAttachment): boolean
+{
+  return file.file === null && file.uploadedAttachmentId === undefined
+}
+
+export const PersistedComposerFileAttachment = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Number,
+  attachmentId: Schema.String,
+  environmentId: EnvironmentId,
+})
+export type PersistedComposerFileAttachment = typeof PersistedComposerFileAttachment.Type
+
+export const PersistedComposerDraftFileAttachment = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Number,
+  attachmentId: Schema.optionalKey(Schema.String),
+  environmentId: Schema.optionalKey(EnvironmentId),
+})
+export type PersistedComposerDraftFileAttachment = typeof PersistedComposerDraftFileAttachment.Type
+const isPersistedComposerDraftFileAttachment = Schema.is(PersistedComposerDraftFileAttachment)
+
 const PersistedTerminalContextDraft = Schema.Struct({
   id: Schema.String,
   threadId: ThreadId,
@@ -138,6 +173,7 @@ type PersistedElementContextDraft = typeof PersistedElementContextDraft.Type
 const PersistedComposerThreadDraftState = Schema.Struct({
   prompt: Schema.String,
   attachments: Schema.Array(PersistedComposerImageAttachment),
+  files: Schema.optionalKey(Schema.Array(PersistedComposerDraftFileAttachment)),
   terminalContexts: Schema.optionalKey(Schema.Array(PersistedTerminalContextDraft)),
   elementContexts: Schema.optionalKey(Schema.Array(PersistedElementContextDraft)),
   previewAnnotations: Schema.optionalKey(Schema.Array(PreviewAnnotationPayloadSchema)),
@@ -269,6 +305,7 @@ export interface ComposerThreadDraftState
 {
   prompt: string
   images: ComposerImageAttachment[]
+  files: ComposerFileAttachment[]
   nonPersistedImageIds: string[]
   persistedAttachments: PersistedComposerImageAttachment[]
   terminalContexts: TerminalContextDraft[]
@@ -344,6 +381,7 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
 })
 
 const EMPTY_IMAGES: ComposerImageAttachment[] = []
+const EMPTY_FILES: ComposerFileAttachment[] = []
 
 const EMPTY_IDS: string[] = []
 
@@ -362,6 +400,7 @@ const EMPTY_REVIEW_COMMENTS: ReviewCommentContext[] = []
 export const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   prompt: '',
   images: EMPTY_IMAGES,
+  files: EMPTY_FILES,
   nonPersistedImageIds: EMPTY_IDS,
   persistedAttachments: EMPTY_PERSISTED_ATTACHMENTS,
   terminalContexts: EMPTY_TERMINAL_CONTEXTS,
@@ -384,6 +423,7 @@ export function createEmptyThreadDraft(): ComposerThreadDraftState
   return {
     prompt: '',
     images: [],
+    files: [],
     nonPersistedImageIds: [],
     persistedAttachments: [],
     terminalContexts: [],
@@ -468,6 +508,7 @@ export function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean
   return (
     draft.prompt.length === 0 &&
     draft.images.length === 0 &&
+    draft.files.length === 0 &&
     draft.persistedAttachments.length === 0 &&
     draft.terminalContexts.length === 0 &&
     draft.elementContexts.length === 0 &&
@@ -1191,6 +1232,9 @@ function normalizePersistedDraftsByThreadId(
           return normalized ? [normalized] : []
         })
       : []
+    const files = Array.isArray(draftCandidate.files)
+      ? draftCandidate.files.filter(isPersistedComposerDraftFileAttachment)
+      : []
     const terminalContexts = Array.isArray(draftCandidate.terminalContexts)
       ? draftCandidate.terminalContexts.flatMap((entry) =>
         {
@@ -1293,6 +1337,7 @@ function normalizePersistedDraftsByThreadId(
     if (
       promptCandidate.length === 0 &&
       attachments.length === 0 &&
+      files.length === 0 &&
       terminalContexts.length === 0 &&
       elementContexts.length === 0 &&
       previewAnnotations.length === 0 &&
@@ -1322,6 +1367,7 @@ function normalizePersistedDraftsByThreadId(
     nextDraftsByThreadKey[normalizedThreadKey] = {
       prompt,
       attachments,
+      ...(files.length > 0 ? { files } : {}),
       ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
       ...(elementContexts.length > 0 ? { elementContexts } : {}),
       ...(previewAnnotations.length > 0 ? { previewAnnotations } : {}),
@@ -1422,6 +1468,7 @@ export function partializeComposerDraftStoreState(
     if (
       draft.prompt.length === 0 &&
       draft.persistedAttachments.length === 0 &&
+      draft.files.length === 0 &&
       draft.terminalContexts.length === 0 &&
       draft.elementContexts.length === 0 &&
       draft.previewAnnotations.length === 0 &&
@@ -1438,6 +1485,22 @@ export function partializeComposerDraftStoreState(
     const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
       prompt: draft.prompt,
       attachments: draft.persistedAttachments,
+      ...(draft.files.length > 0
+        ? {
+            files: draft.files.map((file) => ({
+              id: file.id,
+              name: file.name,
+              mimeType: file.mimeType,
+              sizeBytes: file.sizeBytes,
+              ...(file.uploadedAttachmentId && file.uploadEnvironmentId
+                ? {
+                    attachmentId: file.uploadedAttachmentId,
+                    environmentId: file.uploadEnvironmentId,
+                  }
+                : {}),
+            })),
+          }
+        : {}),
       ...(draft.terminalContexts.length > 0
         ? {
             terminalContexts: draft.terminalContexts.map((context) => ({
@@ -1769,6 +1832,21 @@ export function toHydratedThreadDraft(
   return {
     prompt: persistedDraft.prompt,
     images: hydrateImagesFromPersisted(persistedDraft.attachments),
+    files:
+      persistedDraft.files?.map((file) => ({
+        type: 'file' as const,
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        file: null,
+        ...(file.attachmentId !== undefined && file.environmentId !== undefined
+          ? {
+              uploadedAttachmentId: file.attachmentId,
+              uploadEnvironmentId: file.environmentId,
+            }
+          : {}),
+      })) ?? [],
     nonPersistedImageIds: [],
     persistedAttachments: [...persistedDraft.attachments],
     terminalContexts:

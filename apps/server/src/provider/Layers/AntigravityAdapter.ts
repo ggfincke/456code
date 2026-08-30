@@ -927,7 +927,7 @@ export const makeAntigravityAdapter = Effect.fn('makeAntigravityAdapter')(functi
         {
           return yield* fail('sendTurn', 'Antigravity session is recovering or exited.')
         }
-        if ((input.attachments?.length ?? 0) > 0)
+        if (input.attachments?.some((attachment) => attachment.type !== 'file'))
         {
           return yield* fail('sendTurn', 'Antigravity supports text input only.')
         }

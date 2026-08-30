@@ -23,6 +23,7 @@ import {
   ProviderEventLoggers,
 } from '../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts'
 import { makeProviderServiceLive } from '../../../../apps/server/src/provider/Layers/ProviderService.ts'
+import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import { ProviderRuntimeInboxLive } from '../../../../apps/server/src/persistence/Layers/ProviderRuntimeInbox.ts'
 import {
   ProviderService,
@@ -100,6 +101,7 @@ const makeIntegrationFixture = Effect.gen(function* ()
     Layer.provide(McpSessionRegistry.disabledLayer),
     Layer.provide(ProviderBackgroundTaskRegistryLive),
     Layer.provide(shared),
+    Layer.provide(ServerConfig.layerTest(cwd, { prefix: 'provider-integration-attachments-' })),
     Layer.provide(NodeServices.layer),
   )
 

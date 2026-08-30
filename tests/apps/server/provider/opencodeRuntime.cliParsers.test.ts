@@ -9,7 +9,64 @@ import {
   parseModelsCliOutput,
   parseAgentListCliOutput,
   parseSkillsCliOutput,
+  toOpenCodeFileParts,
+  OPENCODE_NATIVE_FILE_PART_MAX_BYTES,
 } from '../../../../apps/server/src/provider/opencodeRuntime.ts'
+import type { ChatAttachment } from '@t3tools/contracts'
+
+describe('toOpenCodeFileParts', () =>
+{
+  it('sends eligible native files while leaving unsupported and unknown attachments path-only', () =>
+  {
+    const attachments: ReadonlyArray<ChatAttachment> = [
+      { type: 'image', id: 'image', name: 'image.png', mimeType: 'image/png', sizeBytes: 4 },
+      { type: 'file', id: 'text', name: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4 },
+      {
+        type: 'file',
+        id: 'pdf',
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: OPENCODE_NATIVE_FILE_PART_MAX_BYTES,
+      },
+      { type: 'file', id: 'zip', name: 'archive.zip', mimeType: 'application/zip', sizeBytes: 4 },
+      {
+        type: 'file',
+        id: 'large',
+        name: 'large.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: OPENCODE_NATIVE_FILE_PART_MAX_BYTES + 1,
+      },
+      { type: 'file', id: 'svg', name: 'vector.svg', mimeType: 'image/svg+xml', sizeBytes: 4 },
+      {
+        type: 'future-attachment',
+        id: 'unknown',
+        name: 'unknown.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 4,
+      },
+    ]
+    const resolved: string[] = []
+    const parts = toOpenCodeFileParts({
+      attachments,
+      resolveAttachmentPath: (attachment) =>
+      {
+        resolved.push(attachment.id)
+        return `/managed/${attachment.name}`
+      },
+    })
+    NodeAssert.deepEqual(resolved, ['image', 'text', 'pdf'])
+    NodeAssert.deepEqual(parts, [
+      { type: 'file', mime: 'image/png', filename: 'image.png', url: 'file:///managed/image.png' },
+      { type: 'file', mime: 'text/plain', filename: 'notes.txt', url: 'file:///managed/notes.txt' },
+      {
+        type: 'file',
+        mime: 'application/pdf',
+        filename: 'report.pdf',
+        url: 'file:///managed/report.pdf',
+      },
+    ])
+  })
+})
 
 describe('parseModelsCliOutput', () =>
 {

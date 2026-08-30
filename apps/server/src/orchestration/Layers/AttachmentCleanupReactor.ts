@@ -1,6 +1,9 @@
 // apps/server/src/orchestration/Layers/AttachmentCleanupReactor.ts
 // reconciles and removes durably unowned attachment files
 
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from 'node:fs'
+import * as NodePath from 'node:path'
 import * as Clock from 'effect/Clock'
 import * as DateTime from 'effect/DateTime'
 import * as Duration from 'effect/Duration'
@@ -16,10 +19,15 @@ import {
   resolveAttachmentRelativePath,
 } from '../../attachments/attachmentPaths.ts'
 import {
+  PARTIAL_UPLOAD_MAX_AGE_MS,
+  PENDING_ATTACHMENT_MAX_AGE_MS,
   parseAttachmentIdFromRelativePath,
+  parsePendingAttachmentRelativePath,
   parseThreadSegmentFromAttachmentId,
+  pendingSourceRelativePath,
   toSafeThreadAttachmentSegment,
 } from '../../attachments/attachmentStore.ts'
+import { inspectManagedFile, isSafeManagedPath } from '../../attachments/attachmentFiles.ts'
 import { ServerConfig } from '../../config.ts'
 import { toPersistenceSqlError } from '../../persistence/Errors.ts'
 import { AttachmentLifecycleRepositoryLive } from '../../persistence/Layers/AttachmentLifecycle.ts'
@@ -88,6 +96,48 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
   const fileSystem = yield* FileSystem.FileSystem
   const sql = yield* SqlClient.SqlClient
   const serverConfig = yield* ServerConfig
+  const pinsPendingSource = (row: AttachmentStaging, relativePath: string): boolean =>
+    pendingSourceRelativePath(row.stagingKey, row.stagingRelativePath) === relativePath &&
+    (row.state === 'staged' ||
+      (row.state === 'cleanup_pending' &&
+        [row.stagingRelativePath, row.relativePath].some(
+          (candidate) =>
+            inspectManagedFile({
+              attachmentsDir: serverConfig.attachmentsDir,
+              relativePath: candidate,
+            }) !== null,
+        )))
+  const removeUnchangedPendingFile = (
+    cleanupKey: string,
+    relativePath: string,
+    expected: { sizeBytes: number; mtimeMs: number },
+  ) =>
+    Effect.try({
+      try: () =>
+      {
+        const current = inspectManagedFile({
+          attachmentsDir: serverConfig.attachmentsDir,
+          relativePath,
+        })
+        if (
+          !current ||
+          current.sizeBytes !== expected.sizeBytes ||
+          current.mtimeMs !== expected.mtimeMs
+        )
+          return
+        try
+        {
+          NodeFS.unlinkSync(current.path)
+        }
+        catch (cause)
+        {
+          if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause
+        }
+      },
+      catch: (cause) => deliveryError(cleanupKey, String(cause)),
+    })
+  let rootScanOffset = 0
+  let stagingScanOffset = 0
 
   const statRegularFile = Effect.fn('AttachmentCleanupReactor.statRegularFile')(function* (
     cleanupKey: string,
@@ -101,6 +151,13 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
     {
       return false
     }
+    if (
+      !inspectManagedFile({
+        attachmentsDir: serverConfig.attachmentsDir,
+        relativePath: NodePath.relative(serverConfig.attachmentsDir, absolutePath),
+      })
+    )
+      return yield* deliveryError(cleanupKey, 'Cleanup target is not a safe regular file.')
     const fileInfo = yield* fileSystem
       .stat(absolutePath)
       .pipe(Effect.mapError((cause) => deliveryError(cleanupKey, String(cause))))
@@ -195,6 +252,22 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
         rows,
         (row) =>
         {
+          if (
+            row.state === 'owned' &&
+            row.ownerSequence !== null &&
+            pendingSourceRelativePath(row.stagingKey, row.stagingRelativePath)
+          )
+          {
+            return repository.enqueuePathCleanup({
+              cleanupKey: `pending-source:${row.stagingKey}`,
+              stagingKey: row.stagingKey,
+              relativePath: null,
+              stagingRelativePath: row.stagingRelativePath,
+              reason: 'accepted pending upload source recovery',
+              sourceSequence: row.ownerSequence,
+              now: row.updatedAt,
+            })
+          }
           if (row.state === 'owned' || Date.parse(row.createdAt) > graceThresholdMs)
           {
             return Effect.void
@@ -215,16 +288,17 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
   )
 
   const reconcileLegacyFiles = Effect.fn('AttachmentCleanupReactor.reconcileLegacyFiles')(
-    function* (rows: ReadonlyArray<AttachmentStaging>, now: string)
+    function* (
+      rows: ReadonlyArray<AttachmentStaging>,
+      now: string,
+      entries: ReadonlyArray<string>,
+    )
     {
       if (!(yield* fileSystem.exists(serverConfig.attachmentsDir)))
       {
         return
       }
       const trackedPaths = new Set(rows.map((row) => row.relativePath))
-      const entries = yield* fileSystem.readDirectory(serverConfig.attachmentsDir, {
-        recursive: false,
-      })
       yield* Effect.forEach(
         entries,
         (entry) =>
@@ -285,8 +359,116 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
     const nowMs = yield* Clock.currentTimeMillis
     const now = formatIsoMillis(nowMs)
     const stagingRows = yield* repository.listStaging()
-    yield* reconcileStagingRows(stagingRows, nowMs - Duration.toMillis(ATTACHMENT_CLEANUP_GRACE))
-    yield* reconcileLegacyFiles(stagingRows, now)
+    const scanRows = stagingRows.slice(
+      stagingScanOffset,
+      stagingScanOffset + ATTACHMENT_CLEANUP_BATCH_SIZE,
+    )
+    stagingScanOffset =
+      stagingScanOffset + ATTACHMENT_CLEANUP_BATCH_SIZE >= stagingRows.length
+        ? 0
+        : stagingScanOffset + ATTACHMENT_CLEANUP_BATCH_SIZE
+    yield* reconcileStagingRows(scanRows, nowMs - Duration.toMillis(ATTACHMENT_CLEANUP_GRACE))
+    if (!(yield* fileSystem.exists(serverConfig.attachmentsDir))) return
+    const rootEntries = yield* fileSystem.readDirectory(serverConfig.attachmentsDir, {
+      recursive: false,
+    })
+    const entries = rootEntries.slice(
+      rootScanOffset,
+      rootScanOffset + ATTACHMENT_CLEANUP_BATCH_SIZE,
+    )
+    rootScanOffset =
+      rootScanOffset + ATTACHMENT_CLEANUP_BATCH_SIZE >= rootEntries.length
+        ? 0
+        : rootScanOffset + ATTACHMENT_CLEANUP_BATCH_SIZE
+    yield* reconcileLegacyFiles(stagingRows, now, entries)
+    for (const row of scanRows)
+    {
+      const sourcePath = pendingSourceRelativePath(row.stagingKey, row.stagingRelativePath)
+      if (!sourcePath) continue
+      const parent = `.staging/${row.stagingKey}/pending-upload`
+      if (!isSafeManagedPath({ attachmentsDir: serverConfig.attachmentsDir, relativePath: parent }))
+        continue
+      const entries = yield* Effect.try({
+        try: () =>
+        {
+          const names: string[] = []
+          let directory: NodeFS.Dir
+          try
+          {
+            directory = NodeFS.opendirSync(NodePath.join(serverConfig.attachmentsDir, parent))
+          }
+          catch (cause)
+          {
+            if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return names
+            throw cause
+          }
+          try
+          {
+            for (let index = 0; index < ATTACHMENT_CLEANUP_BATCH_SIZE; index++)
+            {
+              const entry = directory.readSync()
+              if (!entry) break
+              names.push(entry.name)
+            }
+          }
+          finally
+          {
+            directory.closeSync()
+          }
+          return names
+        },
+        catch: (cause) => deliveryError(row.stagingKey, String(cause)),
+      })
+      for (const name of entries)
+      {
+        const parsed = parsePendingAttachmentRelativePath(name)
+        if (!parsed?.partial || !name.startsWith(`${sourcePath}.`)) continue
+        const relativePath = `${parent}/${name}`
+        const file = inspectManagedFile({
+          attachmentsDir: serverConfig.attachmentsDir,
+          relativePath,
+        })
+        if (!file || nowMs - file.mtimeMs < PARTIAL_UPLOAD_MAX_AGE_MS) continue
+        yield* repository.enqueuePathCleanup({
+          cleanupKey: `staging-part:${row.stagingKey}:${name}:${file.sizeBytes}:${Math.trunc(file.mtimeMs)}`,
+          stagingKey: row.stagingKey,
+          relativePath: null,
+          stagingRelativePath: relativePath,
+          reason: 'expired attachment working copy',
+          sourceSequence: null,
+          now,
+        })
+      }
+    }
+    if (!(yield* fileSystem.exists(serverConfig.attachmentsDir))) return
+    yield* Effect.forEach(
+      entries,
+      (relativePath) =>
+      {
+        const pending = parsePendingAttachmentRelativePath(relativePath)
+        if (!pending) return Effect.void
+        const file = inspectManagedFile({
+          attachmentsDir: serverConfig.attachmentsDir,
+          relativePath,
+        })
+        const maxAge = pending.partial ? PARTIAL_UPLOAD_MAX_AGE_MS : PENDING_ATTACHMENT_MAX_AGE_MS
+        if (!file || nowMs - file.mtimeMs < maxAge) return Effect.void
+        const liveClaim = stagingRows.some((row) => pinsPendingSource(row, relativePath))
+        if (liveClaim) return Effect.void
+        return repository.enqueuePathCleanup({
+          cleanupKey: `pending-expiry:${relativePath}:${file.sizeBytes}:${Math.trunc(file.mtimeMs)}`,
+          stagingKey: null,
+          relativePath,
+          stagingRelativePath: null,
+          reason: pending.partial
+            ? 'expired partial attachment upload'
+            : 'expired pending attachment upload',
+          sourceSequence: null,
+          now,
+        })
+      },
+      { concurrency: 1 },
+    )
   })
 
   const fenceClaim = Effect.fn('AttachmentCleanupReactor.fenceClaim')(function* (
@@ -342,8 +524,110 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
   const processPathClaim = Effect.fn('AttachmentCleanupReactor.processPathClaim')(function* (
     claim: AttachmentCleanup,
     stagingRows: ReadonlyArray<AttachmentStaging>,
-  ): Effect.fn.Return<'complete' | 'manual', AttachmentCleanupDeliveryError>
+  ): Effect.fn.Return<'complete' | 'defer' | 'manual', AttachmentCleanupDeliveryError>
   {
+    if (claim.cleanupKey.startsWith('staging-part:'))
+    {
+      const row = stagingRows.find((candidate) => candidate.stagingKey === claim.stagingKey)
+      const relativePath = claim.stagingRelativePath
+      const sourcePath = row
+        ? pendingSourceRelativePath(row.stagingKey, row.stagingRelativePath)
+        : null
+      const name = relativePath?.slice(relativePath.lastIndexOf('/') + 1)
+      if (
+        !row ||
+        !relativePath ||
+        !sourcePath ||
+        !name ||
+        !parsePendingAttachmentRelativePath(name)?.partial ||
+        !relativePath.startsWith(`${row.stagingRelativePath}.`) ||
+        relativePath !== `.staging/${row.stagingKey}/pending-upload/${name}` ||
+        row.generation !== claim.stagingGeneration
+      )
+        return yield* deliveryError(claim.cleanupKey, 'Working copy cleanup identity is invalid.')
+      const file = inspectManagedFile({ attachmentsDir: serverConfig.attachmentsDir, relativePath })
+      if (
+        file &&
+        claim.cleanupKey !==
+          `staging-part:${row.stagingKey}:${name}:${file.sizeBytes}:${Math.trunc(file.mtimeMs)}`
+      )
+        return 'complete' as const
+      if (file && (yield* Clock.currentTimeMillis) - file.mtimeMs >= PARTIAL_UPLOAD_MAX_AGE_MS)
+        yield* removeUnchangedPendingFile(claim.cleanupKey, relativePath, file)
+      return 'complete' as const
+    }
+    if (claim.cleanupKey.startsWith('pending-source:'))
+    {
+      const row =
+        claim.stagingKey === null
+          ? undefined
+          : stagingRows.find((candidate) => candidate.stagingKey === claim.stagingKey)
+      const pendingPath = row
+        ? pendingSourceRelativePath(row.stagingKey, row.stagingRelativePath)
+        : null
+      if (
+        !row ||
+        !pendingPath ||
+        row.state !== 'owned' ||
+        row.ownerEventType !== 'thread.message-sent' ||
+        row.ownerSequence === null ||
+        row.generation !== claim.stagingGeneration ||
+        row.ownerSequence !== claim.sourceSequence ||
+        claim.stagingRelativePath !== row.stagingRelativePath
+      )
+        return yield* deliveryError(
+          claim.cleanupKey,
+          'Pending source cleanup authority is invalid.',
+        )
+      const stagedPath = resolveAttachmentRelativePath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        relativePath: row.stagingRelativePath,
+      })
+      if (stagedPath) yield* removeRegularFile(claim.cleanupKey, stagedPath)
+      const allRows = yield* repository
+        .listStaging()
+        .pipe(Effect.mapError((cause) => deliveryError(claim.cleanupKey, String(cause))))
+      if (
+        allRows.some(
+          (candidate) =>
+            candidate.stagingKey !== row.stagingKey && pinsPendingSource(candidate, pendingPath),
+        )
+      )
+        return 'defer' as const
+      const absolutePath = resolveAttachmentRelativePath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        relativePath: pendingPath,
+      })
+      if (!absolutePath)
+        return yield* deliveryError(claim.cleanupKey, 'Pending source escaped its managed root.')
+      yield* removeRegularFile(claim.cleanupKey, absolutePath)
+      return 'complete' as const
+    }
+    if (claim.cleanupKey.startsWith('pending-expiry:'))
+    {
+      const relativePath = claim.relativePath
+      const pending = relativePath ? parsePendingAttachmentRelativePath(relativePath) : null
+      const file = relativePath
+        ? inspectManagedFile({ attachmentsDir: serverConfig.attachmentsDir, relativePath })
+        : null
+      if (!relativePath || !pending)
+        return yield* deliveryError(claim.cleanupKey, 'Expired pending cleanup path is invalid.')
+      if (!file) return 'complete' as const
+      if (
+        claim.cleanupKey !==
+        `pending-expiry:${relativePath}:${file.sizeBytes}:${Math.trunc(file.mtimeMs)}`
+      )
+        return 'complete' as const
+      const allRows = yield* repository
+        .listStaging()
+        .pipe(Effect.mapError((cause) => deliveryError(claim.cleanupKey, String(cause))))
+      if (allRows.some((row) => pinsPendingSource(row, relativePath))) return 'defer' as const
+      const nowMs = yield* Clock.currentTimeMillis
+      const maxAge = pending.partial ? PARTIAL_UPLOAD_MAX_AGE_MS : PENDING_ATTACHMENT_MAX_AGE_MS
+      if (nowMs - file.mtimeMs < maxAge) return 'complete' as const
+      yield* removeUnchangedPendingFile(claim.cleanupKey, relativePath, file)
+      return 'complete' as const
+    }
     const targets: Array<{ readonly relativePath: string; readonly row: AttachmentStaging }> = []
 
     if (claim.relativePath !== null)
@@ -395,7 +679,8 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
         normalized !== claim.stagingRelativePath ||
         normalized !== row.stagingRelativePath ||
         !normalized.startsWith(`.staging/${row.stagingKey}/`) ||
-        managedRootRelativePath(normalized.slice(normalized.lastIndexOf('/') + 1)) === null
+        (managedRootRelativePath(normalized.slice(normalized.lastIndexOf('/') + 1)) === null &&
+          pendingSourceRelativePath(row.stagingKey, normalized) === null)
       )
       {
         return yield* deliveryError(claim.cleanupKey, 'Unsafe or unowned staging attachment path.')
@@ -553,6 +838,16 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
             )
             return
           }
+          if (result.success === 'defer')
+          {
+            yield* deferUntilGraceExpires(
+              claim.cleanupKey,
+              claim.stagingGeneration,
+              formatIsoMillis(nowMs + Duration.toMillis(ATTACHMENT_CLEANUP_POLL_INTERVAL)),
+              now,
+            )
+            return
+          }
           yield* repository.complete({
             cleanupKey: claim.cleanupKey,
             stagingGeneration: claim.stagingGeneration,
@@ -593,7 +888,9 @@ export const makeAttachmentCleanupReactor = Effect.gen(function* ()
     {
       yield* runSafely(reconcile().pipe(Effect.andThen(drain)))
       yield* Effect.forkScoped(
-        runSafely(drain).pipe(Effect.repeat(Schedule.spaced(ATTACHMENT_CLEANUP_POLL_INTERVAL))),
+        runSafely(reconcile().pipe(Effect.andThen(drain))).pipe(
+          Effect.repeat(Schedule.spaced(ATTACHMENT_CLEANUP_POLL_INTERVAL)),
+        ),
       )
     },
   )

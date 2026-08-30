@@ -13,6 +13,31 @@ import * as Effect from 'effect/Effect'
 import { makeRpcAuthorization } from '../../../../apps/server/src/ws/rpcAuthorization.ts'
 import type { AuthenticatedSession } from '../../../../apps/server/src/auth/EnvironmentAuth.ts'
 
+it.effect('requires operate scope before minting uploads or deleting pending files', () =>
+  Effect.gen(function* ()
+  {
+    const session: AuthenticatedSession = {
+      sessionId: AuthSessionId.make('upload-session'),
+      subject: 'test',
+      method: 'browser-session-cookie',
+      scopes: [AuthOrchestrationReadScope],
+    }
+    let writes = 0
+    for (const method of [WS_METHODS.attachmentsCreateUploadUrl, WS_METHODS.attachmentsDelete])
+    {
+      expect(
+        yield* Effect.flip(
+          makeRpcAuthorization(session).observeRpcEffect(
+            method,
+            Effect.sync(() => ++writes),
+          ),
+        ),
+      ).toMatchObject({ requiredScope: AuthOrchestrationOperateScope })
+    }
+    expect(writes).toBe(0)
+  }),
+)
+
 it.effect('requires read scope for both content searches before invoking the query', () =>
   Effect.gen(function* ()
   {

@@ -14,6 +14,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
+import * as Stream from 'effect/Stream'
 import { cast } from 'effect/Function'
 import {
   HttpBody,
@@ -29,6 +30,11 @@ import { OtlpTracer } from 'effect/unstable/observability'
 
 import * as ServerConfig from './config.ts'
 import { ASSET_ROUTE_PREFIX, resolveAsset } from './assets/AssetAccess.ts'
+import {
+  ATTACHMENT_UPLOAD_ROUTE_PREFIX,
+  validateAttachmentUploadToken,
+  storeAttachmentUpload,
+} from './assets/AttachmentUpload.ts'
 import * as BrowserTraceCollector from './observability/BrowserTraceCollector.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import {
@@ -48,9 +54,42 @@ const OTLP_TRACES_PROXY_PATH = '/api/observability/v1/traces'
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '::1', 'localhost'])
 const SVG_CONTENT_SECURITY_POLICY = `default-src 'none'; style-src 'unsafe-inline'; sandbox`
 
-export function assetResponseHeaders(filePath: string): Record<string, string>
+export function downloadContentDisposition(fileName?: string): string
+{
+  if (fileName === undefined) return 'attachment'
+  // response headers cannot contain controls, separators, or quoted filename delimiters
+  // eslint-disable-next-line no-control-regex
+  const sanitized = fileName.toWellFormed().replace(/[\u0000-\u001f\u007f"\\/]/g, '_')
+  const ascii = sanitized.replace(/[^\u0020-\u007e]/g, '_')
+  const encoded = encodeURIComponent(sanitized).replace(
+    /['()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
+  return `attachment; filename="${ascii}"${ascii === sanitized ? '' : `; filename*=UTF-8''${encoded}`}`
+}
+
+export function assetResponseHeaders(
+  filePath: string,
+  options?: { download?: boolean; fileName?: string; mimeType?: string },
+): Record<string, string>
 {
   const lowerPath = filePath.toLowerCase()
+  if (options?.download)
+  {
+    const mime = options.mimeType
+    return {
+      'Cache-Control': 'private, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': downloadContentDisposition(options.fileName),
+      'Content-Security-Policy': `default-src 'none'; sandbox`,
+      'Content-Type':
+        mime &&
+        /^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/.test(mime) &&
+        !/(?:^text\/html$|\/xml(?:$|-)|\+xml$)/i.test(mime)
+          ? mime
+          : 'application/octet-stream',
+    }
+  }
   return {
     'Cache-Control': 'private, max-age=3600',
     'X-Content-Type-Options': 'nosniff',
@@ -236,10 +275,37 @@ export const assetRouteLayer = HttpRouter.add(
     }
     return yield* HttpServerResponse.file(asset.path, {
       status: 200,
-      headers: assetResponseHeaders(asset.path),
+      headers: assetResponseHeaders(asset.path, asset),
     }).pipe(
       Effect.orElseSucceed(() => HttpServerResponse.text('Internal Server Error', { status: 500 })),
     )
+  }),
+)
+
+export const attachmentUploadRouteLayer = HttpRouter.add(
+  'POST',
+  `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`,
+  Effect.gen(function* ()
+  {
+    const request = yield* HttpServerRequest.HttpServerRequest
+    const url = HttpServerRequest.toURL(request)
+    if (Option.isNone(url)) return HttpServerResponse.text('Bad Request', { status: 400 })
+    const token = url.value.pathname.slice(ATTACHMENT_UPLOAD_ROUTE_PREFIX.length + 1)
+    const claims = yield* validateAttachmentUploadToken(token)
+    if (!claims) return HttpServerResponse.text('Not Found', { status: 404 })
+    const length = request.headers['content-length']
+    if (
+      length !== undefined &&
+      (!/^\d+$/.test(length) ||
+        !Number.isSafeInteger(Number(length)) ||
+        Number(length) !== claims.sizeBytes)
+    )
+      return HttpServerResponse.text('Content-Length must match the upload size.', { status: 400 })
+    const pull = yield* Stream.toPull(request.stream)
+    const stored = yield* storeAttachmentUpload(claims, Stream.fromPull(Effect.succeed(pull)))
+    return stored.ok
+      ? HttpServerResponse.empty({ status: 204 })
+      : HttpServerResponse.text(stored.detail, { status: stored.status })
   }),
 )
 

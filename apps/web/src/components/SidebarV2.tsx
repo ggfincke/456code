@@ -186,6 +186,7 @@ import { SidebarChromeFooter, SidebarChromeHeader } from './sidebar/SidebarChrom
 import { Popover, PopoverPopup, PopoverTrigger } from './ui/popover'
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { useComposerDraftStore } from '../composerDraftStore'
+import { releaseProjectDraftUploads } from '../lib/composerDraftUploads'
 import { useRightPanelStore } from '../rightPanelStore'
 import { repositoryAtlasDisabledReason } from './architecture/architectureAvailability'
 
@@ -1765,6 +1766,10 @@ export default function SidebarV2()
         }
 
         shouldNavigate ||= memberRemovalNeedsNavigation
+        releaseProjectDraftUploads(
+          projectRef,
+          memberThreads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
+        )
         if (projectDraftThread)
         {
           draftStore.clearDraftThread(projectDraftThread.draftId)

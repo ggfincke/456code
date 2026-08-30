@@ -766,6 +766,7 @@ const buildUserMessageEffect = Effect.fn('buildUserMessageEffect')(function* (
 
   for (const attachment of input.attachments ?? [])
   {
+    // generic files use the verified path context supplied by ProviderService
     if (attachment.type !== 'image')
     {
       continue

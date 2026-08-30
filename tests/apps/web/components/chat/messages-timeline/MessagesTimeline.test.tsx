@@ -274,6 +274,55 @@ function buildAssistantTimelineEntry(text: string)
 
 describe('MessagesTimeline', () =>
 {
+  it('renders known files as downloads and never previews unknown attachment bytes', () =>
+  {
+    const entry = buildUserTimelineEntry('Mixed attachments')
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            ...entry,
+            message: {
+              ...entry.message,
+              attachments: [
+                {
+                  type: 'image',
+                  id: 'image',
+                  name: 'photo.png',
+                  mimeType: 'image/png',
+                  sizeBytes: 3,
+                  previewUrl: 'https://assets.test/photo.png',
+                },
+                {
+                  type: 'file',
+                  id: 'file',
+                  name: 'notes.pdf',
+                  mimeType: 'application/pdf',
+                  sizeBytes: 4,
+                  previewUrl: 'https://assets.test/notes.pdf',
+                  downloadable: true,
+                },
+                {
+                  type: 'future',
+                  id: 'unknown',
+                  name: 'opaque.bin',
+                  mimeType: 'application/octet-stream',
+                  sizeBytes: 5,
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    )
+    expect(markup).toContain('src="https://assets.test/photo.png"')
+    expect(markup).toContain('href="https://assets.test/notes.pdf"')
+    expect(markup).not.toContain('src="https://assets.test/notes.pdf"')
+    expect(markup).toContain('opaque.bin')
+    expect(markup).toContain('Unsupported attachment')
+  })
+
   it('keeps the composer inset on the list without shrinking the minimap', () =>
   {
     const timelineEntries = Array.from({ length: 5 }, (_, index) =>

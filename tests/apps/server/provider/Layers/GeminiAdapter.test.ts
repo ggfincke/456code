@@ -171,6 +171,62 @@ const waitForGeminiTurnIdle = (
 
 it.layer(NodeServices.layer)('GeminiAdapterLive', (it) =>
 {
+  it.effect('passes generic attachment path context without reading it as an image', () =>
+    Effect.gen(function* ()
+    {
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), 'gemini-file-context-')),
+      )
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => NodeFSP.rm(tempDir, { recursive: true, force: true })),
+      )
+      const requestLogPath = NodePath.join(tempDir, 'requests.ndjson')
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGeminiWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      )
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() =>
+          NodeFSP.rm(NodePath.dirname(wrapperPath), { recursive: true, force: true }),
+        ),
+      )
+      const adapter = yield* makeTestAdapter(wrapperPath)
+      const threadId = ThreadId.make('gemini-file-context')
+      const events: Array<ProviderRuntimeEvent> = []
+      const eventFiber = yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
+        Effect.sync(() => events.push(event)),
+      ).pipe(Effect.forkChild)
+      yield* startAcpTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('gemini'),
+        cwd: process.cwd(),
+        runtimeMode: 'approval-required',
+      })
+      const input = '[Attached file: "/managed/report.pdf"]'
+      const sent = yield* adapter.sendTurn({
+        threadId,
+        input,
+        attachments: [
+          {
+            type: 'file',
+            id: 'thread-file-12345678-1234-1234-1234-123456789abc-pdf',
+            name: 'report.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 4,
+          },
+        ],
+      })
+      yield* waitForGeminiTurnIdle(adapter, threadId, events, sent.turnId)
+      assert.deepEqual(adapter.capabilities.supportedAttachmentTypes, ['image'])
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath))
+      const prompt = requests.find((request) => request.method === 'session/prompt')?.params as {
+        prompt: Array<unknown>
+      }
+      assert.deepEqual(prompt.prompt, [{ type: 'text', text: input }])
+      yield* adapter.stopSession(threadId)
+      yield* Fiber.interrupt(eventFiber)
+    }).pipe(TestClock.withLive, Effect.timeout('10 seconds')),
+  )
+
   it.effect('runs multiple Gemini turns, projects ACP events, and closes the child on stop', () =>
     Effect.gen(function* ()
     {

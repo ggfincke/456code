@@ -31,7 +31,12 @@ function stashEntrySnippet(entry: PromptStashEntry): string
     return trimmed.length > SNIPPET_MAX_CHARS ? `${trimmed.slice(0, SNIPPET_MAX_CHARS)}…` : trimmed
   }
   const imageCount = entry.attachments.length + entry.droppedImageNames.length
-  return imageCount > 0 ? `(${imageCount} image${imageCount === 1 ? '' : 's'})` : '(empty)'
+  const fileCount = entry.files?.length ?? 0
+  const parts = [
+    imageCount > 0 ? `${imageCount} image${imageCount === 1 ? '' : 's'}` : '',
+    fileCount > 0 ? `${fileCount} file${fileCount === 1 ? '' : 's'}` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? `(${parts.join(', ')})` : '(empty)'
 }
 
 // lists the current provider's stash with capture-phase keyboard navigation

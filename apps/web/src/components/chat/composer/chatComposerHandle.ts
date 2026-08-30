@@ -11,7 +11,7 @@ import {
   type ServerProvider,
 } from '@t3tools/contracts'
 
-import type { ComposerImageAttachment } from '../../../composerDraftStore'
+import type { ComposerImageAttachment, ComposerFileAttachment } from '../../../composerDraftStore'
 import type { ArchitectureConcernContext } from '../../../composerDraftStore'
 import type { ElementContextDraft } from '../../../lib/elementContext'
 import type { TerminalContextDraft, TerminalContextSelection } from '../../../lib/terminalContext'
@@ -46,6 +46,9 @@ export interface ChatComposerHandle
   getSendContext: () => {
     prompt: string
     images: ComposerImageAttachment[]
+    files: ComposerFileAttachment[]
+    supportsAttachmentUploads: boolean
+    attachmentBlockReason: string | null
     terminalContexts: TerminalContextDraft[]
     elementContexts: ElementContextDraft[]
     previewAnnotations: PreviewAnnotationPayload[]

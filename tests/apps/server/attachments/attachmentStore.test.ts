@@ -57,7 +57,7 @@ describe('attachmentStore', () =>
         stagingKey,
         attachment,
       }),
-    ).toBe(NodePath.join('/tmp/attachments', relativePath))
+    ).toBe(NodePath.join('/tmp/attachments', relativePath!))
     expect(
       resolveAttachmentStagingPath({
         attachmentsDir: '/tmp/attachments',

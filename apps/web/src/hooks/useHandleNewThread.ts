@@ -45,6 +45,7 @@ function composerDraftHasUserContent(draft: ComposerThreadDraftState | null | un
   return (
     draft.prompt.trim().length > 0 ||
     draft.images.length > 0 ||
+    draft.files.length > 0 ||
     draft.persistedAttachments.length > 0 ||
     draft.terminalContexts.length > 0 ||
     draft.elementContexts.length > 0 ||

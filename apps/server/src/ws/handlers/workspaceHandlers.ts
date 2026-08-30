@@ -23,6 +23,7 @@ import * as Option from 'effect/Option'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
 import type * as AssetAccess from '../../assets/AssetAccess.ts'
+import { issueAttachmentUploadUrl, deletePendingAttachment } from '../../assets/AttachmentUpload.ts'
 import type * as WorkspaceMdxDocument from '../../mdx/WorkspaceMdxDocument.ts'
 import type * as ProjectionSnapshotQuery from '../../orchestration/Services/ProjectionSnapshotQuery.ts'
 import type * as ExternalLauncher from '../../process/externalLauncher.ts'
@@ -42,6 +43,8 @@ type WorkspaceRpcMethod =
   | typeof WS_METHODS.shellOpenInEditor
   | typeof WS_METHODS.filesystemBrowse
   | typeof WS_METHODS.assetsCreateUrl
+  | typeof WS_METHODS.attachmentsCreateUploadUrl
+  | typeof WS_METHODS.attachmentsDelete
 type WorkspaceRpcHandlers = Pick<WsRpcHandlers, WorkspaceRpcMethod>
 
 interface WorkspaceRpcHandlerDependencies
@@ -180,6 +183,14 @@ export function makeWorkspaceRpcHandlers({
 }: WorkspaceRpcHandlerDependencies)
 {
   return {
+    [WS_METHODS.attachmentsCreateUploadUrl]: (input) =>
+      observeRpcEffect(WS_METHODS.attachmentsCreateUploadUrl, issueAttachmentUploadUrl(input), {
+        'rpc.aggregate': 'workspace',
+      }),
+    [WS_METHODS.attachmentsDelete]: (input) =>
+      observeRpcEffect(WS_METHODS.attachmentsDelete, deletePendingAttachment(input.attachmentId), {
+        'rpc.aggregate': 'workspace',
+      }),
     [WS_METHODS.projectsSearchContents]: (input) =>
       observeRpcEffect(
         WS_METHODS.projectsSearchContents,

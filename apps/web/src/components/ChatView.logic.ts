@@ -22,7 +22,13 @@ import {
 } from '@t3tools/contracts'
 import { isBareKnownProviderSlashCommand } from '@t3tools/shared/composerTrigger'
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from '@t3tools/shared/model'
-import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from '../types'
+import {
+  isImageAttachment,
+  type ChatMessage,
+  type SessionPhase,
+  type Thread,
+  type ThreadShell,
+} from '../types'
 import { type ComposerImageAttachment, type DraftThreadState } from '../composerDraftStore'
 import * as Schema from 'effect/Schema'
 import { appAtomRegistry } from '../rpc/atomRegistry'
@@ -39,6 +45,8 @@ import type { TimelineEntry } from '../session-logic'
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = '456code:last-invoked-script-by-project'
 export const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   '[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]'
+export const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
+  '[User attached one or more files without additional text. Respond using the conversation context and attached files.]'
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000
@@ -566,7 +574,7 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void
   }
   for (const attachment of message.attachments)
   {
-    if (attachment.type !== 'image')
+    if (!isImageAttachment(attachment))
     {
       continue
     }
@@ -583,7 +591,7 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
   const previewUrls: string[] = []
   for (const attachment of message.attachments)
   {
-    if (attachment.type !== 'image') continue
+    if (!isImageAttachment(attachment)) continue
     if (!attachment.previewUrl || !attachment.previewUrl.startsWith('blob:')) continue
     previewUrls.push(attachment.previewUrl)
   }
@@ -651,6 +659,7 @@ export function shouldRestoreComposerDraftAfterSendFailure(input: {
   readonly composerOwnerIsCurrent: boolean
   readonly promptEmpty: boolean
   readonly imagesEmpty: boolean
+  readonly filesEmpty?: boolean
   readonly terminalContextsEmpty: boolean
   readonly elementContextsEmpty: boolean
 }): boolean
@@ -660,6 +669,7 @@ export function shouldRestoreComposerDraftAfterSendFailure(input: {
     (!input.composerOwnerIsCurrent ||
       (input.promptEmpty &&
         input.imagesEmpty &&
+        input.filesEmpty !== false &&
         input.terminalContextsEmpty &&
         input.elementContextsEmpty))
   )
@@ -697,6 +707,7 @@ export function cloneComposerImageForRetry(
 export function deriveComposerSendState(options: {
   prompt: string
   imageCount: number
+  fileCount?: number
   terminalContexts: ReadonlyArray<TerminalContextDraft>
   // optional element-pick attachment count. Element contexts contribute to
   // "sendable content" exactly like images and (text-bearing) terminal
@@ -721,6 +732,7 @@ export function deriveComposerSendState(options: {
     hasSendableContent:
       trimmedPrompt.length > 0 ||
       options.imageCount > 0 ||
+      (options.fileCount ?? 0) > 0 ||
       sendableTerminalContexts.length > 0 ||
       elementContextCount > 0,
   }

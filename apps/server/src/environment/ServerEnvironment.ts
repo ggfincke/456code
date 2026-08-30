@@ -1,7 +1,11 @@
 // apps/server/src/environment/ServerEnvironment.ts
 // derives and persists the server environment descriptor
 
-import { EnvironmentId, type ExecutionEnvironmentDescriptor } from '@t3tools/contracts'
+import {
+  EnvironmentId,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  type ExecutionEnvironmentDescriptor,
+} from '@t3tools/contracts'
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Context from 'effect/Context'
 import * as Crypto from 'effect/Crypto'
@@ -182,6 +186,8 @@ export const make = Effect.gen(function* ()
       threadSettlement: true,
       threadSnooze: true,
       threadPinning: true,
+      attachmentUploads: true,
+      fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },
       safeMdxDocument: true,
       proposalPreview: true,
       orchestrateRunExecutionV1: true,

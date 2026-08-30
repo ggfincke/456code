@@ -17,6 +17,7 @@ import { useCallback, useMemo, useRef } from 'react'
 
 import { getFallbackThreadIdAfterDelete } from '../components/Sidebar.logic'
 import { useComposerDraftStore } from '../composerDraftStore'
+import { releaseComposerDraftUploads } from '../lib/composerDraftUploads'
 import { terminalEnvironment } from '../state/terminal'
 import { threadEnvironment } from '../state/threads'
 import { vcsEnvironment } from '../state/vcs'
@@ -295,6 +296,8 @@ export function useThreadActions()
         })
         if (result._tag === 'Success')
         {
+          releaseComposerDraftUploads(target)
+          clearComposerDraftForThread(target)
           refreshArchivedThreadsForEnvironment(target.environmentId)
         }
         return result
@@ -381,6 +384,7 @@ export function useThreadActions()
         return deleteResult
       }
       refreshArchivedThreadsForEnvironment(threadRef.environmentId)
+      releaseComposerDraftUploads(threadRef)
       clearComposerDraftForThread(threadRef)
       clearProjectDraftThreadById(
         scopeProjectRef(threadRef.environmentId, thread.projectId),

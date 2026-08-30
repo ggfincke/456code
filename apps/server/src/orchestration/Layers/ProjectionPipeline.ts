@@ -220,7 +220,7 @@ function collectThreadAttachmentRelativePaths(
   {
     for (const attachment of message.attachments ?? [])
     {
-      if (attachment.type !== 'image')
+      if (attachment.type !== 'image' && attachment.type !== 'file')
       {
         continue
       }
@@ -229,7 +229,8 @@ function collectThreadAttachmentRelativePaths(
       {
         continue
       }
-      relativePaths.add(attachmentRelativePath(attachment))
+      const relativePath = attachmentRelativePath(attachment)
+      if (relativePath) relativePaths.add(relativePath)
     }
   }
   return relativePaths

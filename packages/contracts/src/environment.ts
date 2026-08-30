@@ -43,6 +43,12 @@ export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
+  attachmentUploads: Schema.optionalKey(Schema.Boolean),
+  fileAttachments: Schema.optionalKey(
+    Schema.Struct({
+      maxUploadBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    }),
+  ),
   // server understands thread.settle / thread.unsettle commands. Absent on
   // pre-settlement servers, so clients treat missing as unsupported and
   // never send the commands under version skew.

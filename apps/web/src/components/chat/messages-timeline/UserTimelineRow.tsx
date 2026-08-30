@@ -73,7 +73,13 @@ import {
   workLogEntryIsToolLike,
 } from '../../../session-logic'
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from '../../../timestampFormat'
-import { type TurnDiffSummary } from '../../../types'
+import {
+  isImageAttachment,
+  isFileAttachment,
+  type ChatImageAttachment,
+  type TurnDiffSummary,
+} from '../../../types'
+import { formatAttachmentSize } from '@t3tools/client-runtime/state/attachments'
 import ChatMarkdown from '../../ChatMarkdown'
 import { Button } from '../../ui/button'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
@@ -107,7 +113,6 @@ import {
 import {
   TimelineRowActivityCtx,
   TimelineRowCtx,
-  type TimelineMessage,
   type TimelineRow,
   type TimelineWorkEntry,
 } from './timelineRowContext'
@@ -146,7 +151,12 @@ function splitTrailingReviewComments(value: string): {
 export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'message' }> })
 {
   const ctx = use(TimelineRowCtx)
-  const userImages = row.message.attachments ?? []
+  const attachments = row.message.attachments ?? []
+  const userImages = attachments.filter(isImageAttachment)
+  const userFiles = attachments.filter(isFileAttachment)
+  const unknownAttachments = attachments.filter(
+    (attachment) => !isImageAttachment(attachment) && !isFileAttachment(attachment),
+  )
   const reviewCommentState = splitTrailingReviewComments(row.message.text)
   const architectureContexts: ArchitectureConcernContext[] = []
   let promptWithoutArchitectureContexts = reviewCommentState.promptText
@@ -187,7 +197,7 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
       <div className="relative max-w-[80%] rounded-2xl bg-accent p-3">
         {regularImages.length > 0 && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image: NonNullable<TimelineMessage['attachments']>[number]) => (
+            {regularImages.map((image) => (
               <div
                 key={image.id}
                 className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
@@ -215,6 +225,40 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
                     {image.name}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+        {(userFiles.length > 0 || unknownAttachments.length > 0) && (
+          <div className="mb-2 flex flex-col gap-1.5">
+            {userFiles.map((file) => (
+              <div key={file.id} className="rounded-lg border border-border/80 px-3 py-2 text-sm">
+                {file.downloadable && file.previewUrl ? (
+                  <a
+                    href={file.previewUrl}
+                    download={file.name}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2"
+                    aria-label={`Download ${file.name}`}
+                  >
+                    {file.name}
+                  </a>
+                ) : (
+                  <span>{file.name}</span>
+                )}
+                <div className="text-xs text-muted-foreground">
+                  {formatAttachmentSize(file.sizeBytes)}
+                </div>
+              </div>
+            ))}
+            {unknownAttachments.map((attachment) => (
+              <div
+                key={attachment.id}
+                className="rounded-lg border border-border/80 px-3 py-2 text-sm"
+              >
+                <span>{attachment.name}</span>
+                <div className="text-xs text-muted-foreground">Unsupported attachment type</div>
               </div>
             ))}
           </div>
@@ -358,7 +402,7 @@ const UserMessageArchitectureConcernChip = memo(function UserMessageArchitecture
 
 function UserMessagePreviewAnnotationCard(props: {
   annotation: ParsedPreviewAnnotation
-  image: NonNullable<TimelineMessage['attachments']>[number] | null
+  image: ChatImageAttachment | null
 })
 {
   const ctx = use(TimelineRowCtx)

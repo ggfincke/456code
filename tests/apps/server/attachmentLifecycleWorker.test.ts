@@ -1,6 +1,8 @@
 // tests/apps/server/attachmentLifecycleWorker.test.ts
 // verifies bounded durable attachment cleanup and path safety
 
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from 'node:fs'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { CommandId, MessageId, ThreadId } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'
@@ -13,6 +15,7 @@ import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as TestClock from 'effect/testing/TestClock'
+import { createPendingAttachmentId } from '../../../apps/server/src/attachments/attachmentStore.ts'
 
 import { ServerConfig } from '../../../apps/server/src/config.ts'
 import {
@@ -96,6 +99,150 @@ const pathExists = Effect.fn('pathExists')(function* (absolutePath: string)
 
 it.layer(TestLayer)('AttachmentCleanupReactor', (it) =>
 {
+  it.effect(
+    'reclaims expired uploads and working parts but revalidates refreshed files and ignores lookalikes',
+    () =>
+      Effect.gen(function* ()
+      {
+        const repository = yield* AttachmentLifecycleRepository
+        const reactor = yield* makeAttachmentCleanupReactor
+        const source = `${createPendingAttachmentId('file', '.txt')}.txt`
+        const expiredPath = yield* writeAttachment(source)
+        const partial = `${createPendingAttachmentId('file', '.txt')}.txt.00000000-0000-4000-8000-000000000001.part`
+        const refreshedPath = yield* writeAttachment(partial)
+        const sentinel = yield* writeAttachment('unowned.part')
+        const key = stagingKey('c')
+        const stagePath = `.staging/${key}/pending-upload/${source}`
+        const workingPath = yield* writeAttachment(
+          `${stagePath}.00000000-0000-4000-8000-000000000002.part`,
+        )
+        const refreshedWorkingPath = yield* writeAttachment(
+          `${stagePath}.00000000-0000-4000-8000-000000000003.part`,
+        )
+        yield* repository.stage({
+          stagingKey: key,
+          commandId: CommandId.make('working-part'),
+          threadId: ThreadId.make('part-thread'),
+          messageId: MessageId.make('working-part'),
+          attachmentIndex: 0,
+          attachmentId: 'part-thread-00000000-0000-4000-8000-000000000001-txt',
+          relativePath: 'part-thread-00000000-0000-4000-8000-000000000001-txt.txt',
+          stagingRelativePath: stagePath,
+          mimeType: 'text/plain',
+          byteCount: 4,
+          contentDigest: key,
+          now: EPOCH,
+        })
+        yield* repository.markDispatchFailure({
+          commandId: CommandId.make('working-part'),
+          reason: 'abandoned working copy',
+          now: EPOCH,
+        })
+        yield* Effect.sync(() =>
+        {
+          for (const path of [
+            expiredPath,
+            refreshedPath,
+            workingPath,
+            refreshedWorkingPath,
+            sentinel,
+          ])
+            NodeFS.utimesSync(path, 0, 0)
+        })
+        yield* TestClock.setTime(25 * 60 * 60 * 1000)
+        yield* reactor.start()
+        const fs = yield* FileSystem.FileSystem
+        yield* fs.writeFileString(refreshedPath, 'fresh bytes')
+        yield* fs.writeFileString(refreshedWorkingPath, 'resumed working bytes')
+        yield* Effect.sync(() =>
+          NodeFS.utimesSync(refreshedWorkingPath, 25 * 60 * 60, 25 * 60 * 60),
+        )
+        yield* TestClock.adjust(ATTACHMENT_CLEANUP_GRACE)
+        yield* reactor.drain
+        assert.isFalse(yield* pathExists(expiredPath))
+        assert.isFalse(yield* pathExists(workingPath))
+        assert.isTrue(yield* pathExists(refreshedPath))
+        assert.isTrue(yield* pathExists(sentinel))
+        assert.isTrue(yield* pathExists(refreshedWorkingPath))
+        yield* TestClock.adjust(Duration.hours(2))
+        const restarted = yield* makeAttachmentCleanupReactor
+        yield* restarted.start()
+        yield* TestClock.adjust(ATTACHMENT_CLEANUP_GRACE)
+        yield* restarted.drain
+        assert.isFalse(yield* pathExists(refreshedWorkingPath))
+      }),
+  )
+  it.effect(
+    'recovers accepted-source cleanup after restart while another unaccepted claim pins the source',
+    () =>
+      Effect.gen(function* ()
+      {
+        const repository = yield* AttachmentLifecycleRepository
+        const sql = yield* SqlClient.SqlClient
+        const source = `${createPendingAttachmentId('file', '.pdf')}.pdf`
+        const sourcePath = yield* writeAttachment(source)
+        const firstKey = stagingKey('a')
+        const secondKey = stagingKey('b')
+        for (const [key, command, index] of [
+          [firstKey, 'pending-first', '1'],
+          [secondKey, 'pending-second', '2'],
+        ] as const)
+        {
+          const id = `pending-thread-00000000-0000-4000-8000-00000000000${index}-pdf`
+          yield* repository.stage({
+            stagingKey: key,
+            commandId: CommandId.make(command),
+            threadId: ThreadId.make('pending-thread'),
+            messageId: MessageId.make(command),
+            attachmentIndex: 0,
+            attachmentId: id,
+            relativePath: `${id}.pdf`,
+            stagingRelativePath: `.staging/${key}/pending-upload/${source}`,
+            mimeType: 'application/pdf',
+            byteCount: 4,
+            contentDigest: key,
+            now: EPOCH,
+          })
+          yield* writeAttachment(`${id}.pdf`)
+          yield* writeAttachment(`.staging/${key}/pending-upload/${source}`)
+        }
+        yield* repository.associateAccepted({
+          commandId: CommandId.make('pending-first'),
+          ownerSequence: 1,
+          ownerEventType: 'thread.message-sent',
+          now: EPOCH,
+        })
+        yield* sql`DELETE FROM attachment_cleanup WHERE cleanup_key = ${`pending-source:${firstKey}`}`
+        const restarted = yield* makeAttachmentCleanupReactor
+        yield* TestClock.setTime(AFTER_GRACE_MS)
+        yield* restarted.start()
+        assert.isTrue(yield* pathExists(sourcePath))
+        const before = yield* repository.listDiagnostics()
+        assert.equal(
+          before.cleanup.find((row) => row.cleanupKey === `pending-source:${firstKey}`)?.state,
+          'pending',
+        )
+        yield* repository.markDispatchFailure({
+          commandId: CommandId.make('pending-second'),
+          reason: 'rejected',
+          now: EPOCH,
+        })
+        yield* TestClock.adjust(Duration.minutes(1))
+        yield* restarted.drain
+        yield* TestClock.adjust(Duration.minutes(1))
+        yield* restarted.drain
+        assert.isFalse(yield* pathExists(sourcePath))
+        const { attachmentsDir } = yield* ServerConfig
+        assert.isTrue(
+          yield* pathExists(
+            `${attachmentsDir}/pending-thread-00000000-0000-4000-8000-000000000001-pdf.pdf`,
+          ),
+        )
+        assert.isFalse(
+          yield* pathExists(`${attachmentsDir}/.staging/${firstKey}/pending-upload/${source}`),
+        )
+      }),
+  )
   it.effect('claims, verifies, and deletes an exact tracked attachment path', () =>
     Effect.gen(function* ()
     {

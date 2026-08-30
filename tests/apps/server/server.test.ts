@@ -117,6 +117,7 @@ import * as ImportRuntime from '../../../apps/server/src/import/importRuntime.ts
 import { ImportReplacementIntentRepository } from '../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
 import { OrchestrationProjectionPipeline } from '../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts'
 import { AttachmentLifecycleRepository } from '../../../apps/server/src/persistence/Services/AttachmentLifecycle.ts'
+import { makeKeyedSemaphore } from '../../../apps/server/src/provider/Layers/KeyedSemaphore.ts'
 import * as CheckpointDiffQuery from '../../../apps/server/src/orchestration/Services/CheckpointDiffQuery.ts'
 import * as CheckpointIdentity from '../../../apps/server/src/checkpointing/CheckpointIdentity.ts'
 import * as GitManager from '../../../apps/server/src/git/GitManager.ts'
@@ -459,6 +460,7 @@ const buildAppUnderTest = (options?: {
   Effect.gen(function* ()
   {
     const fileSystem = yield* FileSystem.FileSystem
+    const attachmentCommandPermits = yield* makeKeyedSemaphore<string>()
     const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: 't3-router-test-' })
     const baseDir = options?.config?.baseDir ?? tempBaseDir
     const devUrl = options?.config?.devUrl
@@ -953,6 +955,7 @@ const buildAppUnderTest = (options?: {
               Effect.succeed({ complete: true, remainingRelativePaths: [] }),
           }),
           Layer.mock(AttachmentLifecycleRepository)({
+            withCommandPermit: attachmentCommandPermits.withPermit,
             markDispatchFailure: () => Effect.void,
           }),
           Layer.mock(ThreadDeletionReactor)({

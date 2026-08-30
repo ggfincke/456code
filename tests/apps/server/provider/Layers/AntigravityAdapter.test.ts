@@ -25,6 +25,7 @@ const runtimeHarness = vi.hoisted(() => ({
     }>
   }>,
   created: [] as Array<Record<string, unknown>>,
+  sentTexts: [] as string[],
 }))
 
 vi.mock(
@@ -52,6 +53,7 @@ vi.mock(
             sendTurn: (text: string) =>
               Effect.gen(function* ()
               {
+                runtimeHarness.sentTexts.push(text)
                 const turn = script.turns.shift()
                 if (!turn)
                 {
@@ -233,10 +235,48 @@ beforeEach(() =>
 {
   runtimeHarness.scripts.length = 0
   runtimeHarness.created.length = 0
+  runtimeHarness.sentTexts.length = 0
 })
 
 it.layer(NodeServices.layer)('AntigravityAdapter', (it) =>
 {
+  it.effect(
+    'passes generic attachment path context as text without enabling native attachments',
+    () =>
+      Effect.gen(function* ()
+      {
+        const adapter = yield* makeAdapter()
+        const threadId = ThreadId.make('antigravity-file-context')
+        const events: Array<ProviderRuntimeEvent> = []
+        const eventFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => events.push(event.event)),
+        ).pipe(Effect.forkChild)
+        yield* adapter.startSession(startInput(threadId))
+        const input = '[Attached file: "/managed/report.pdf"]'
+        const sent = yield* adapter.sendTurn({
+          threadId,
+          input,
+          attachments: [
+            {
+              type: 'file',
+              id: 'thread-file-12345678-1234-1234-1234-123456789abc-pdf',
+              name: 'report.pdf',
+              mimeType: 'application/pdf',
+              sizeBytes: 4,
+            },
+          ],
+        })
+        yield* waitForEvent(
+          events,
+          (event) => event.type === 'turn.completed' && event.turnId === sent.turnId,
+        )
+        expect(adapter.capabilities.supportedAttachmentTypes).toEqual([])
+        expect(runtimeHarness.sentTexts).toEqual([input])
+        yield* adapter.stopSession(threadId)
+        yield* Fiber.interrupt(eventFiber)
+      }).pipe(TestClock.withLive, Effect.timeout('10 seconds')),
+  )
+
   it.effect(
     'starts and resumes identity, normalizes events, and reports cumulative usage deltas',
     () =>

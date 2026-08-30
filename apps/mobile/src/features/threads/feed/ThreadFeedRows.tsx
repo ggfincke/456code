@@ -1,7 +1,8 @@
 // apps/mobile/src/features/threads/feed/ThreadFeedRows.tsx
 // renders mobile thread feed messages and activity rows
 
-import type { EnvironmentId, TurnId } from '@t3tools/contracts'
+import { ChatImageAttachment, type EnvironmentId, type TurnId } from '@t3tools/contracts'
+import * as Schema from 'effect/Schema'
 import { formatElapsed } from '@t3tools/shared/orchestrationTiming'
 import { memo, useEffect, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, View } from 'react-native'
@@ -34,6 +35,7 @@ const MESSAGE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
   minute: '2-digit',
 })
+const isImageAttachment = Schema.is(ChatImageAttachment)
 function formatMessageTime(input: string): string
 {
   const timestamp = Date.parse(input)
@@ -168,7 +170,7 @@ export function renderFeedEntry(
     const isUser = message.role === 'user'
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant
     const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt)
-    const attachments = message.attachments ?? []
+    const attachments = (message.attachments ?? []).filter(isImageAttachment)
     const hasReviewCommentContext = message.text.includes('<review_comment')
     const assistantTurnStillInProgress =
       message.role === 'assistant' &&

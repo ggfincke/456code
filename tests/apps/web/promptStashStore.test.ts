@@ -1,6 +1,6 @@
 // tests/apps/web/promptStashStore.test.ts
 // verifies provider-scoped prompt stash persistence
-import { ProviderInstanceId } from '@t3tools/contracts'
+import { EnvironmentId, ProviderInstanceId } from '@t3tools/contracts'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 
 import { removeLocalStorageItem } from '../../../apps/web/src/hooks/useLocalStorage'
@@ -116,6 +116,45 @@ describe('partitionStashAttachments', () =>
 
 describe('promptStashStore', () =>
 {
+  it('restores mixed persisted entries with exact environment upload ownership through image finalization', () =>
+  {
+    const scope = promptStashScopeKey(CODEX_INSTANCE)
+    const entry: PromptStashEntry = {
+      ...makeEntry({ id: 'mixed-upload', providerInstanceId: CODEX_INSTANCE }),
+      files: [
+        {
+          id: 'pdf',
+          name: 'notes.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 3,
+          attachmentId: 'pending-pdf',
+          environmentId: EnvironmentId.make('original-environment'),
+        },
+      ],
+      pendingImageCount: 1,
+    }
+    writePromptStashStorageForTest(
+      JSON.stringify({ version: 1, state: { queuesByScopeKey: { [scope]: [entry] } } }),
+    )
+    usePromptStashStore.getState().finalizeEntryImages(scope, entry.id, {
+      attachments: [
+        {
+          id: 'image',
+          name: 'photo.png',
+          mimeType: 'image/png',
+          sizeBytes: 3,
+          dataUrl: 'data:image/png;base64,AQID',
+        },
+      ],
+      droppedImageNames: [],
+      unreadableImageNames: [],
+    })
+    const taken = usePromptStashStore.getState().takeEntry(scope, entry.id).entry
+    expect(taken?.files).toEqual(entry.files)
+    expect(taken?.attachments).toHaveLength(1)
+    expect(usePromptStashStore.getState().takeEntry(scope, entry.id).entry).toBeNull()
+  })
+
   beforeEach(() =>
   {
     resetPromptStashStore()

@@ -70,6 +70,21 @@ after logout or plugin removal, are authoritative; disabled and missing-CLI snap
 the previous inventory. An inventory/plugin failure after a successful CLI version check does not
 classify the CLI as missing.
 
+## Attachment delivery
+
+Accepted uploads become thread-owned managed files before provider dispatch. `ProviderService`
+validates the routed instance and native image capability, verifies each managed regular file,
+and adds one JSON-quoted absolute path per unique file to the prompt. Original filenames do not
+enter this path context. Pending uploads, unknown persisted attachment kinds, and unsafe or missing
+files cannot become provider path context.
+
+Codex, Claude, Cursor, Grok, and Gemini inline images only; generic files reach their tools through
+the path context. Antigravity receives generic file paths as text and continues rejecting native
+image attachments. OpenCode additionally sends text and PDF files as native file parts, with a
+20 MiB per-file limit; ZIP files, other unsupported formats, and larger files remain path-only.
+This does not advertise generic files as a provider-native attachment capability. OpenCode title
+and branch-name generation continues using only image file parts.
+
 ## Google CLI capability boundary
 
 The two Google providers intentionally expose different runtime contracts:
