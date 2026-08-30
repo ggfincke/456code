@@ -1833,6 +1833,57 @@ describe('composerDraftStore sticky composer settings', () =>
     expect(draftByKey(draftId)?.modelSelectionExplicit).toBe(true)
   })
 
+  it.each([
+    { label: 'added', initialOptions: undefined, nextOptions: { reasoningEffort: 'high' } },
+    {
+      label: 'changed',
+      initialOptions: { reasoningEffort: 'low' },
+      nextOptions: { reasoningEffort: 'high' },
+    },
+    { label: 'cleared', initialOptions: { reasoningEffort: 'low' }, nextOptions: undefined },
+  ])('persists the project model when its traits are $label', ({ initialOptions, nextOptions }) =>
+  {
+    const store = useComposerDraftStore.getState()
+    const draftId = DraftId.make('project-traits-draft')
+    const nextDraftId = DraftId.make('next-no-default-draft')
+    const projectDefault = createModelSelection(
+      CODEX_SECONDARY_INSTANCE,
+      'project-model',
+      toSelections(initialOptions),
+    )
+    store.setStickyModelSelection(
+      createModelSelection(
+        CODEX_SECONDARY_INSTANCE,
+        'sticky-model',
+        toSelections({ fastMode: true }),
+      ),
+    )
+    store.applyStickyState(draftId, projectDefault)
+
+    store.setProviderModelOptions(draftId, CODEX_DRIVER, toSelections(nextOptions), {
+      instanceId: CODEX_SECONDARY_INSTANCE,
+      model: projectDefault.model,
+      persistSticky: true,
+    })
+
+    const expectedSelection = createModelSelection(
+      CODEX_SECONDARY_INSTANCE,
+      projectDefault.model,
+      toSelections(nextOptions),
+    )
+    expect(draftByKey(draftId)?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE]).toEqual(
+      expectedSelection,
+    )
+    expect(
+      useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_SECONDARY_INSTANCE],
+    ).toEqual(expectedSelection)
+    store.applyStickyState(nextDraftId)
+    expect(draftByKey(nextDraftId)?.activeProvider).toBe(CODEX_SECONDARY_INSTANCE)
+    expect(draftByKey(nextDraftId)?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE]).toEqual(
+      expectedSelection,
+    )
+  })
+
   it('pins identical human trait choices, including the default options of a fresh draft', () =>
   {
     const store = useComposerDraftStore.getState()

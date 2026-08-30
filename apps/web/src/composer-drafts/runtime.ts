@@ -967,21 +967,15 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (options?.persistSticky === true)
             {
               nextStickyMap = { ...state.stickyModelSelectionByProvider }
-              const stickyBase =
-                nextStickyMap[instanceKey] ??
-                base.modelSelectionByProvider[instanceKey] ??
-                createModelSelection(instanceKey, fallbackModel)
-              if (providerOpts)
+              const updatedSelection = nextMap[instanceKey]
+              const stickySelection = nextStickyMap[instanceKey]
+              if (updatedSelection)
               {
-                nextStickyMap[instanceKey] = createModelSelection(
-                  instanceKey,
-                  stickyBase.model,
-                  providerOpts,
-                )
+                nextStickyMap[instanceKey] = updatedSelection
               }
-              else if ((stickyBase.options?.length ?? 0) > 0)
+              else if (stickySelection && (stickySelection.options?.length ?? 0) > 0)
               {
-                const { options: _, ...rest } = stickyBase
+                const { options: _, ...rest } = stickySelection
                 nextStickyMap[instanceKey] = rest as ModelSelection
               }
               nextStickyActiveProvider = options.instanceId
