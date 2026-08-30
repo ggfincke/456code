@@ -1,16 +1,18 @@
 // tests/apps/web/browser/HostedBrowserWebview.test.tsx
-// verify hosted browser teardown behavior
+// verify hosted browser rendering and teardown behavior
 
 // @vitest-environment happy-dom
 
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { describe, expect, it, vi } from 'vite-plus/test'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const mocks = vi.hoisted(() => ({
   release: vi.fn(),
   stopBrowserRecording: vi.fn(async () => null),
+  config: undefined as { partition: string; webPreferences: string } | undefined,
 }))
 
 vi.mock('../../../../apps/web/src/browser/browserRecording', () => ({
@@ -20,7 +22,7 @@ vi.mock('../../../../apps/web/src/browser/browserRecording', () => ({
 vi.mock('../../../../apps/web/src/browser/browserSurfaceStore', () => ({
   resolveBrowserSurfacePanelRect: () => null,
   useBrowserSurfaceStore: (select: (state: unknown) => unknown) =>
-    select({ byTabId: { 'runtime-tab-1': { visible: true } } }),
+    select({ byTabId: { 'runtime-tab-1': { visible: true } }, activityByTabId: {} }),
 }))
 vi.mock('../../../../apps/web/src/browser/BrowserDeviceToolbar', () => ({
   BrowserDeviceToolbar: () => null,
@@ -33,7 +35,7 @@ vi.mock('../../../../apps/web/src/browser/desktopTabLifetime', () => ({
 }))
 vi.mock('../../../../apps/web/src/browser/previewBridge', () => ({ previewBridge: undefined }))
 vi.mock('../../../../apps/web/src/browser/previewWebviewConfigState', () => ({
-  usePreviewWebviewConfig: () => undefined,
+  usePreviewWebviewConfig: () => mocks.config,
 }))
 vi.mock('../../../../apps/web/src/browser/usePreviewBridge', () => ({
   usePreviewBridge: () => undefined,
@@ -65,6 +67,33 @@ import { HostedBrowserWebview } from '../../../../apps/web/src/browser/HostedBro
 
 describe('HostedBrowserWebview', () =>
 {
+  beforeEach(() =>
+  {
+    vi.clearAllMocks()
+    mocks.config = undefined
+  })
+
+  it('includes the literal popup attribute in initial markup before any ref runs', () =>
+  {
+    mocks.config = { partition: 'persist:preview-test', webPreferences: 'sandbox=true' }
+    const markup = renderToStaticMarkup(
+      <HostedBrowserWebview
+        threadRef={{
+          environmentId: EnvironmentId.make('environment-1'),
+          threadId: ThreadId.make('thread-1'),
+        }}
+        tabId="server-tab-1"
+        runtimeTabId="runtime-tab-1"
+        initialUrl={null}
+        viewport={{ _tag: 'fill' }}
+        zoomFactor={1}
+      />,
+    )
+
+    expect(markup).toContain('allowpopups="true"')
+    expect(markup).toContain('data-preview-rendering="active"')
+  })
+
   it('stops an active recording before releasing a removed runtime tab', async () =>
   {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })

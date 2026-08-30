@@ -23,7 +23,7 @@ import {
   type ScopedThreadRef,
 } from '@t3tools/contracts'
 import { resolvePreviewViewport } from '@t3tools/shared/previewViewport'
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Atom } from 'effect/unstable/reactivity'
 
 import {
@@ -42,7 +42,10 @@ import {
   stopBrowserRecording,
 } from '~/browser/browserRecording'
 import { resolveBrowserRecordingStopTarget } from '~/browser/browserRecordingScope'
-import { useBrowserSurfaceStore } from '~/browser/browserSurfaceStore'
+import {
+  acquireBrowserSurfaceActivity,
+  useBrowserSurfaceStore,
+} from '~/browser/browserSurfaceStore'
 import { previewRuntimeTabId } from '~/browser/previewRuntimeTabId'
 import { isElectron } from '~/env'
 import { useEnvironments } from '~/state/environments'
@@ -78,15 +81,18 @@ const waitForDesktopOverlay = async (
   tabId: string,
   runtimeTabId: string,
   timeoutMs: number,
+  assertActive: () => void,
 ): Promise<void> =>
 {
   const deadline = Date.now() + timeoutMs
   while (Date.now() <= deadline)
   {
+    assertActive()
     const state = readThreadPreviewState(threadRef)
-    if (state.desktopByTabId[tabId] && previewBridge)
+    if (state.desktopByTabId[tabId] && previewBridge && isPreviewRenderingActive(runtimeTabId))
     {
       const status = await previewBridge.automation.status(runtimeTabId)
+      assertActive()
       if (status.available) return
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50))
@@ -106,6 +112,7 @@ const waitForNavigationReadiness = async (
   runtimeTabId: string,
   readiness: PreviewAutomationNavigateInput['readiness'],
   timeoutMs: number,
+  assertActive: () => void,
 ): Promise<void> =>
 {
   const targetReadiness = readiness ?? 'load'
@@ -113,16 +120,19 @@ const waitForNavigationReadiness = async (
   const deadline = Date.now() + timeoutMs
   while (Date.now() <= deadline)
   {
+    assertActive()
     if (targetReadiness === 'domContentLoaded')
     {
       const readyState = await previewBridge.automation.evaluate(runtimeTabId, {
         expression: 'document.readyState',
       })
+      assertActive()
       if (readyState === 'interactive' || readyState === 'complete') return
     }
     else
     {
       const status = await previewBridge.automation.status(runtimeTabId)
+      assertActive()
       if (!status.loading) return
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50))
@@ -175,6 +185,11 @@ const readRenderedViewport = async (
   return await readWebviewViewport(webview)
 }
 
+const isPreviewRenderingActive = (runtimeTabId: string): boolean =>
+  findPreviewWebview(runtimeTabId)
+    ?.closest('[data-preview-rendering]')
+    ?.getAttribute('data-preview-rendering') === 'active'
+
 const readDeclaredViewport = (
   webview: ExecutablePreviewWebview | null,
 ): PreviewRenderedViewportSize | null =>
@@ -196,17 +211,20 @@ const waitForRenderedViewport = async (
     readonly environmentId: EnvironmentId
     readonly threadId: PreviewAutomationRequest['threadId']
   },
+  assertActive: () => void,
 ): Promise<PreviewRenderedViewportSize> =>
 {
   const deadline = Date.now() + timeoutMs
   while (Date.now() <= deadline)
   {
+    assertActive()
     try
     {
       const webview = findPreviewWebview(runtimeTabId)
       const appliedSettingKey = webview?.getAttribute('data-preview-viewport-key') ?? null
       const declaredViewport = readDeclaredViewport(webview)
       const renderedViewport = webview ? await readWebviewViewport(webview) : null
+      assertActive()
       if (
         renderedViewport &&
         isPreviewViewportReady({
@@ -225,6 +243,7 @@ const waitForRenderedViewport = async (
       // registration and navigation can transiently replace the guest while
       // react applies the server snapshot. Retry until the operation deadline.
     }
+    assertActive()
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50))
   }
   throw new PreviewAutomationViewportTimeoutError({
@@ -247,7 +266,10 @@ const currentStatus = async (
     ? (useBrowserSurfaceStore.getState().byTabId[runtimeTabId]?.visible ?? false)
     : false
   const viewportSetting = snapshot ? (snapshot.viewport ?? FILL_PREVIEW_VIEWPORT) : undefined
-  const viewport = runtimeTabId ? await readRenderedViewport(runtimeTabId).catch(() => null) : null
+  const viewport =
+    runtimeTabId && isPreviewRenderingActive(runtimeTabId)
+      ? await readRenderedViewport(runtimeTabId).catch(() => null)
+      : null
   const viewportStatus = {
     ...(viewportSetting === undefined ? {} : { viewportSetting }),
     ...(viewport === null ? {} : { viewport }),
@@ -338,6 +360,25 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   )
   const [automationConnectionAtom] = useState(() => Atom.make<string | null>(null))
   const automationConnectionId = useAtomValue(automationConnectionAtom)
+  const [activeRequests] = useState(() => new Map<AbortController, string | null>())
+  const hostActive = useRef(true)
+  useEffect(() =>
+  {
+    hostActive.current = true
+    const unsubscribe = registry.subscribe(automationConnectionAtom, (connectionId) =>
+    {
+      for (const [controller, ownerConnectionId] of activeRequests)
+      {
+        if (ownerConnectionId !== connectionId) controller.abort()
+      }
+    })
+    return () =>
+    {
+      hostActive.current = false
+      unsubscribe()
+      for (const controller of activeRequests.keys()) controller.abort()
+    }
+  }, [activeRequests, automationConnectionAtom, registry])
 
   const handleRequest = useCallback(
     async (request: PreviewAutomationRequest): Promise<unknown> =>
@@ -347,8 +388,35 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         threadId: request.threadId,
       }
       let tabId = request.tabId ?? null
+      let releaseActivity: (() => void) | undefined
+      const controller = new AbortController()
+      const connectionId = registry.get(automationConnectionAtom)
+      const deadline = Date.now() + request.timeoutMs
+      const timeout = window.setTimeout(() => controller.abort(), request.timeoutMs)
+      const releaseRequest = () =>
+      {
+        window.clearTimeout(timeout)
+        releaseActivity?.()
+        activeRequests.delete(controller)
+      }
+      // native IPC may never settle; rendering ownership still ends with the request
+      controller.signal.addEventListener('abort', releaseRequest, { once: true })
+      activeRequests.set(controller, connectionId)
+      const assertActive = () =>
+      {
+        if (
+          Date.now() >= deadline ||
+          !hostActive.current ||
+          registry.get(automationConnectionAtom) !== connectionId
+        )
+        {
+          controller.abort()
+        }
+        controller.signal.throwIfAborted()
+      }
       try
       {
+        assertActive()
         let state = readThreadPreviewState(threadRef)
         const needsSessionSync = needsPreviewAutomationSessionSync(state, request.tabId)
         if (needsSessionSync)
@@ -366,6 +434,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           reconcilePreviewServerSessions(threadRef, result.value)
           state = readThreadPreviewState(threadRef)
         }
+        assertActive()
         const target = resolvePreviewAutomationTarget(state, request.tabId ?? null)
         tabId = target.tabId
         const unavailableTarget = {
@@ -382,6 +451,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         }
         const requireReadyTab = async () =>
         {
+          assertActive()
           const bridge = previewBridge
           const readyTabId = tabId
           if (!bridge || !readyTabId)
@@ -390,12 +460,14 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           const readyState = readThreadPreviewState(threadRef)
           const runtimeTabId = previewRuntimeTabId(threadRef, readyState.serverEpoch, readyTabId)
+          releaseActivity ??= acquireBrowserSurfaceActivity(runtimeTabId)
           await waitForDesktopOverlay(
             threadRef,
             request.requestId,
             readyTabId,
             runtimeTabId,
             request.timeoutMs,
+            assertActive,
           )
           return { bridge, tabId: readyTabId, runtimeTabId }
         }
@@ -490,13 +562,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             )
             if (activeSnapshot && previewAutomationOpenNeedsOverlay(input, activeSnapshot))
             {
-              await waitForDesktopOverlay(
-                threadRef,
-                request.requestId,
-                activeTabId,
-                activeRuntimeTabId,
-                request.timeoutMs,
-              )
+              await requireReadyTab()
             }
             if (reusedExistingTab && resolvedInputUrl && previewBridge)
             {
@@ -508,6 +574,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 activeRuntimeTabId,
                 'load',
                 request.timeoutMs,
+                assertActive,
               )
             }
             return await currentStatus(threadRef, activeTabId)
@@ -531,6 +598,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               ready.runtimeTabId,
               input.readiness ?? 'load',
               input.timeoutMs ?? request.timeoutMs,
+              assertActive,
             )
             return await currentStatus(threadRef, ready.tabId)
           }
@@ -562,6 +630,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 environmentId,
                 threadId: request.threadId,
               },
+              assertActive,
             )
             return {
               tabId: ready.tabId,
@@ -683,8 +752,13 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           cause,
         })
       }
+      finally
+      {
+        releaseRequest()
+        controller.signal.removeEventListener('abort', releaseRequest)
+      }
     },
-    [environmentId, listPreviews, open, registry, resize],
+    [activeRequests, automationConnectionAtom, environmentId, listPreviews, open, registry, resize],
   )
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }))
   const setRequestHandler = useAtomSet(requestHandlerAtom)

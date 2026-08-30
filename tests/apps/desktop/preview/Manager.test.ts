@@ -152,6 +152,10 @@ const makeFaviconWebContents = (options?: {
   {
     currentUrl = url
   })
+  const setWindowOpenHandler = vi.fn(
+    (_handler: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse) =>
+      undefined,
+  )
   const off = vi.fn((event: string, listener: Listener) =>
   {
     const registered = listeners.get(event)
@@ -184,7 +188,7 @@ const makeFaviconWebContents = (options?: {
     send: webviewSend,
     session: { fetch },
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-    setWindowOpenHandler: vi.fn(),
+    setWindowOpenHandler,
     executeJavaScriptInIsolatedWorld,
     debugger: {
       isAttached: () => false,
@@ -202,8 +206,10 @@ const makeFaviconWebContents = (options?: {
     fetch,
     listenerCount: (event: string) => listeners.get(event)?.size ?? 0,
     listeners,
+    loadURL,
     off,
     reload,
+    setWindowOpenHandler,
     setDestroyed: (value: boolean) =>
     {
       destroyed = value
@@ -246,6 +252,139 @@ describe('PreviewManager', () =>
     createFromPath.mockClear()
     webviewSend.mockClear()
   })
+
+  effectIt.effect(
+    'opens only HTTP(S) scripted popups and keeps ordinary links in the preview',
+    () =>
+      withManager((manager) =>
+        Effect.gen(function* ()
+        {
+          const preview = makeFaviconWebContents()
+          fromId.mockReturnValue(preview.webContents)
+          yield* manager.createTab('tab_popup_policy')
+          yield* manager.registerWebview('tab_popup_policy', 42)
+          const openWindow = preview.setWindowOpenHandler.mock.calls[0]![0]
+          const details = (url: string, disposition: Electron.HandlerDetails['disposition']) => ({
+            url,
+            disposition,
+            frameName: '',
+            features: '',
+            referrer: { url: '', policy: 'default' as const },
+          })
+
+          for (const url of ['http://localhost:3200/auth', 'https://accounts.example/auth'])
+          {
+            expect(openWindow(details(url, 'new-window'))).toEqual({
+              action: 'allow',
+              overrideBrowserWindowOptions: {
+                webPreferences: {
+                  contextIsolation: true,
+                  nodeIntegration: false,
+                  sandbox: true,
+                },
+              },
+            })
+          }
+          expect(preview.loadURL).not.toHaveBeenCalled()
+
+          for (const disposition of ['foreground-tab', 'background-tab'] as const)
+          {
+            const url = `https://example.com/${disposition}`
+            expect(openWindow(details(url, disposition))).toEqual({ action: 'deny' })
+            yield* settle(() => preview.loadURL.mock.calls.some(([loaded]) => loaded === url))
+            expect(preview.loadURL).toHaveBeenCalledWith(url)
+          }
+          preview.loadURL.mockClear()
+
+          for (const url of [
+            'about:blank',
+            'javascript:alert(1)',
+            'data:text/html,popup',
+            'file:///tmp/popup.html',
+            'vscode://vscode-remote/ssh-remote+example/project',
+            'https://[invalid',
+          ])
+          {
+            for (const disposition of ['new-window', 'foreground-tab'] as const)
+            {
+              expect(openWindow(details(url, disposition))).toEqual({ action: 'deny' })
+            }
+          }
+          yield* settle(() => false)
+          expect(preview.loadURL).not.toHaveBeenCalled()
+        }),
+      ),
+  )
+
+  effectIt.effect(
+    'denies child popup chains and retires handlers with their exact attachment',
+    () =>
+      Effect.gen(function* ()
+      {
+        const initial = makeFaviconWebContents()
+        const replacement = makeFaviconWebContents({ id: 42 })
+        let active = initial.webContents
+        fromId.mockImplementation(() => active)
+        const popup = () => ({ webContents: { setWindowOpenHandler: vi.fn() } })
+        const request: Electron.HandlerDetails = {
+          url: 'https://accounts.example/auth',
+          disposition: 'new-window',
+          frameName: '',
+          features: '',
+          referrer: { url: '', policy: 'default' },
+        }
+
+        yield* withManager((manager) =>
+          Effect.gen(function* ()
+          {
+            yield* manager.createTab('tab_popup_lifecycle')
+            yield* manager.registerWebview('tab_popup_lifecycle', 42)
+            const initialOpen = initial.setWindowOpenHandler.mock.calls[0]![0]
+            const initialCreated = [...(initial.listeners.get('did-create-window') ?? [])][0]!
+            expect(initial.listenerCount('did-create-window')).toBe(1)
+            const child = popup()
+            initial.emit('did-create-window', child)
+            expect(child.webContents.setWindowOpenHandler).toHaveBeenCalledOnce()
+            expect(child.webContents.setWindowOpenHandler.mock.calls[0]![0](request)).toEqual({
+              action: 'deny',
+            })
+
+            active = replacement.webContents
+            yield* manager.registerWebview('tab_popup_lifecycle', 42)
+            expect(initial.listenerCount('did-create-window')).toBe(0)
+            expect(replacement.listenerCount('did-create-window')).toBe(1)
+            expect(initialOpen(request)).toEqual({ action: 'deny' })
+            const replacementChild = popup()
+            initialCreated(replacementChild)
+            expect(replacementChild.webContents.setWindowOpenHandler).not.toHaveBeenCalled()
+            replacement.emit('did-create-window', replacementChild)
+            expect(replacementChild.webContents.setWindowOpenHandler).toHaveBeenCalledOnce()
+            const replacementOpen = replacement.setWindowOpenHandler.mock.calls[0]![0]
+            expect(replacementOpen(request).action).toBe('allow')
+
+            yield* manager.closeTab('tab_popup_lifecycle')
+            expect(replacement.listenerCount('did-create-window')).toBe(0)
+            expect(replacementOpen(request)).toEqual({ action: 'deny' })
+            expect(replacementOpen({ ...request, disposition: 'foreground-tab' })).toEqual({
+              action: 'deny',
+            })
+            yield* settle(() => false)
+            expect(replacement.loadURL).not.toHaveBeenCalled()
+
+            yield* manager.createTab('tab_popup_lifecycle')
+            yield* manager.registerWebview('tab_popup_lifecycle', 42)
+            expect(replacement.listenerCount('did-create-window')).toBe(1)
+            expect(replacement.setWindowOpenHandler.mock.calls.at(-1)![0](request).action).toBe(
+              'allow',
+            )
+          }),
+        )
+        expect(replacement.listenerCount('did-create-window')).toBe(0)
+        expect(replacement.setWindowOpenHandler.mock.calls.at(-1)![0](request)).toEqual({
+          action: 'deny',
+        })
+      }),
+  )
 
   effectIt.effect('publishes one canonical favicon while the document is loading', () =>
     withManager((manager) =>

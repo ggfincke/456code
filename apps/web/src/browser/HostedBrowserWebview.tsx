@@ -63,6 +63,7 @@ export function HostedBrowserWebview(props: {
       return {
         rect: resolveBrowserSurfacePanelRect(state.byTabId, runtimeTabId),
         visible: current?.visible ?? false,
+        backgroundActivity: (state.activityByTabId[runtimeTabId] ?? 0) > 0,
       }
     }),
   )
@@ -96,7 +97,6 @@ export function HostedBrowserWebview(props: {
   const setWebviewRef = useCallback((node: HTMLElement | null) =>
   {
     webviewRef.current = node as ElectronWebview | null
-    if (node && !node.hasAttribute('allowpopups')) node.setAttribute('allowpopups', 'true')
   }, [])
 
   useEffect(() =>
@@ -142,6 +142,8 @@ export function HostedBrowserWebview(props: {
   }, [config, runtimeTabId])
 
   const active = presentation.visible && presentation.rect !== null
+  const renderingActive =
+    active || presentation.backgroundActivity || activeRecordingTabId === runtimeTabId
   const lastRect = presentation.rect
   const normalizedZoomFactor = Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1
   const viewportWidth = viewport._tag === 'fill' ? null : viewport.width
@@ -211,6 +213,7 @@ export function HostedBrowserWebview(props: {
 
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
     active,
+    renderingActive,
     rect: lastRect,
     hiddenSize,
   })
@@ -222,6 +225,7 @@ export function HostedBrowserWebview(props: {
       style={{ ...wrapperStyle, overscrollBehavior: 'contain' }}
       onScroll={syncContentPresentation}
       data-preview-viewport={runtimeTabId}
+      data-preview-rendering={renderingActive ? 'active' : 'suspended'}
     >
       <div className="relative" style={{ width: layout.canvasWidth, height: layout.canvasHeight }}>
         {deviceToolbarVisible && effectiveViewport._tag !== 'fill' ? (
@@ -238,6 +242,8 @@ export function HostedBrowserWebview(props: {
           src={initialSrc}
           partition={config.partition}
           webpreferences={config.webPreferences}
+          // a string reaches Electron before refs; React drops an unknown boolean attribute
+          {...({ allowpopups: 'true' } as unknown as { readonly allowpopups?: boolean })}
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
           data-preview-tab={runtimeTabId}
           data-preview-server-tab={tabId}
