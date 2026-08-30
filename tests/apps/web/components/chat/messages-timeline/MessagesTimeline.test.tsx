@@ -184,6 +184,13 @@ beforeAll(async () =>
     documentElement: {
       classList,
       offsetHeight: 0,
+      style: {
+        setProperty: () =>
+        {},
+        removeProperty: () =>
+        {},
+      },
+      dataset: {},
     },
   })
 
