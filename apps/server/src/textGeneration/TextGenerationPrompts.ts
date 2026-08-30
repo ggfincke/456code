@@ -6,10 +6,14 @@ import type { ChatAttachment } from '@t3tools/contracts'
 import { limitSection } from './TextGenerationUtils.ts'
 import type { TextGenerationPolicy } from './TextGenerationPolicy.ts'
 
+const POLICY_INSTRUCTION_MAX_CHARS = 44_000
+
 function policyInstruction(instruction: string | undefined): ReadonlyArray<string>
 {
   const trimmed = instruction?.trim()
-  return trimmed ? ['', 'Additional instructions:', limitSection(trimmed, 4_000)] : []
+  return trimmed
+    ? ['', 'Additional instructions:', limitSection(trimmed, POLICY_INSTRUCTION_MAX_CHARS)]
+    : []
 }
 
 // commit message

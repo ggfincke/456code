@@ -76,6 +76,27 @@ describe('buildCommitMessagePrompt', () =>
     expect(result.prompt).toContain('Additional instructions:')
     expect(result.prompt).toContain('Use a terse repository-specific subject.')
   })
+
+  it('caps final policy instructions at 44,000 characters', () =>
+  {
+    const instructions = 'x'.repeat(44_001)
+    const result = buildCommitMessagePrompt({
+      branch: 'main',
+      stagedSummary: 'M a.ts',
+      stagedPatch: 'diff',
+      includeBranch: false,
+      policy: {
+        kind: 'repo_conventions',
+        commitInstructions: instructions,
+        inferRepositoryConventions: true,
+      },
+    })
+
+    const policySection = result.prompt
+      .split('Additional instructions:\n')[1]
+      ?.split('\n\nBranch:')[0]
+    expect(policySection).toBe(`${'x'.repeat(44_000)}\n\n[truncated]`)
+  })
 })
 
 describe('buildPrContentPrompt', () =>
