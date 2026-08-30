@@ -131,9 +131,9 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
       >
         <View
           accessibilityLiveRegion="polite"
-          className="max-w-full flex-row items-center gap-2 rounded-2xl bg-white/95 px-3 py-2 shadow-sm dark:bg-neutral-900/95"
+          className="max-w-full flex-row items-center gap-2 rounded-2xl bg-adaptive-white-a95-neutral-900-a95 px-3 py-2 shadow-sm"
         >
-          <View className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+          <View className="h-2 w-2 shrink-0 rounded-full bg-amber-500/40" />
           <Text className="max-w-[300px] text-sm font-sans-bold leading-snug text-foreground">
             {props.status.label}
           </Text>
@@ -154,7 +154,7 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
       <Pressable
         accessibilityRole="button"
         onPress={props.onPress}
-        className="max-w-full flex-row items-center gap-2 rounded-full bg-white/90 px-3 py-2 shadow-sm active:opacity-70 dark:bg-neutral-900/90"
+        className="max-w-full flex-row items-center gap-2 rounded-full bg-adaptive-white-a90-neutral-900-a90 px-3 py-2 shadow-sm active:opacity-70"
       >
         {isReconnecting ? (
           <ActivityIndicator size="small" color="#8e8e93" />

@@ -139,6 +139,7 @@ export default defineConfig({
       '456code/no-global-process-runtime': 'error',
       '456code/no-inline-schema-compile': 'warn',
       '456code/no-manual-effect-runtime-in-tests': 'error',
+      '456code/no-mobile-uniwind-theme-escape-hatches': 'error',
       '456code/namespace-node-imports': 'error',
       '456code/block-doc-comments': 'error',
       '456code/comment-tags': 'error',

@@ -11,6 +11,7 @@ import noGlobalProcessRuntime from './rules/no-global-process-runtime.ts'
 import noInlineProse from './rules/no-inline-prose.ts'
 import noInlineSchemaCompile from './rules/no-inline-schema-compile.ts'
 import noManualEffectRuntimeInTests from './rules/no-manual-effect-runtime-in-tests.ts'
+import noMobileUniwindThemeEscapeHatches from './rules/no-mobile-uniwind-theme-escape-hatches.ts'
 import noUnicodeArrow from './rules/no-unicode-arrow.ts'
 import plainCommentCase from './rules/plain-comment-case.ts'
 
@@ -27,6 +28,7 @@ export default definePlugin({
     'no-inline-prose': noInlineProse,
     'no-inline-schema-compile': noInlineSchemaCompile,
     'no-manual-effect-runtime-in-tests': noManualEffectRuntimeInTests,
+    'no-mobile-uniwind-theme-escape-hatches': noMobileUniwindThemeEscapeHatches,
     'no-unicode-arrow': noUnicodeArrow,
     'plain-comment-case': plainCommentCase,
   },

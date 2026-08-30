@@ -2,11 +2,12 @@
 // provide appearance preferences context
 
 import { createContext, use, useCallback, useEffect, useMemo, type ReactNode } from 'react'
+import { useColorScheme } from 'react-native'
 
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/unstable/reactivity'
 
-import { Uniwind } from 'uniwind'
+import { ScopedTheme, Uniwind } from 'uniwind'
 
 import {
   resolveAppearance,
@@ -17,11 +18,13 @@ import {
 } from '../../../lib/appearancePreferences'
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from '../../../state/preferences'
 import { cacheTerminalFontSize } from '../../terminal/terminalUiState'
+import type { MobileThemeAppearance } from '../../../lib/mobileThemeVariables'
 
 interface AppearancePreferencesContextValue
 {
   // effective values with base-size derivation applied. Use this for rendering.
   readonly appearance: ResolvedAppearance
+  readonly themeAppearance: MobileThemeAppearance
   readonly isReady: boolean
   readonly setBaseFontSize: (value: number) => void
   // pass null to clear the override and follow the base font size.
@@ -53,6 +56,7 @@ function applyTextScaleVariables(baseFontSize: number)
 
 export function AppearancePreferencesProvider(props: { readonly children: ReactNode })
 {
+  const themeAppearance = useColorScheme() === 'dark' ? 'dark' : 'light'
   const preferencesResult = useAtomValue(mobilePreferencesAtom)
   const savePreferences = useAtomSet(updateMobilePreferencesAtom)
   const preferences = useMemo(
@@ -113,18 +117,27 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   const value = useMemo(
     (): AppearancePreferencesContextValue => ({
       appearance: resolveAppearance(preferences),
+      themeAppearance,
       isReady,
       setBaseFontSize,
       setTerminalFontSize,
       setCodeFontSize,
       setCodeWordBreak,
     }),
-    [preferences, isReady, setBaseFontSize, setTerminalFontSize, setCodeFontSize, setCodeWordBreak],
+    [
+      preferences,
+      themeAppearance,
+      isReady,
+      setBaseFontSize,
+      setTerminalFontSize,
+      setCodeFontSize,
+      setCodeWordBreak,
+    ],
   )
 
   return (
     <AppearancePreferencesContext.Provider value={value}>
-      {props.children}
+      <ScopedTheme theme={themeAppearance}>{props.children}</ScopedTheme>
     </AppearancePreferencesContext.Provider>
   )
 }

@@ -14,6 +14,7 @@ import {
 import type { ReviewInlineComment } from '../../review/reviewCommentSelection'
 import { buildReviewParsedDiff } from '../../review/reviewModel'
 import { useAppearanceCodeSurface } from '../../settings/appearance/useAppearanceCodeSurface'
+import { useMobileThemeVariables } from '../../../lib/useMobileThemeVariables'
 import type { ReviewCommentColors } from './feedMarkdown'
 
 export const ReviewCommentCard = memo(function ReviewCommentCard(props: {
@@ -22,6 +23,7 @@ export const ReviewCommentCard = memo(function ReviewCommentCard(props: {
 })
 {
   const { codeSurface, nativeReviewDiffStyle } = useAppearanceCodeSurface()
+  const appTheme = useMobileThemeVariables()
   const colorScheme = useColorScheme()
   const appearanceScheme = colorScheme === 'light' ? 'light' : 'dark'
   const NativeReviewDiffView = resolveNativeReviewDiffView()
@@ -36,8 +38,8 @@ export const ReviewCommentCard = memo(function ReviewCommentCard(props: {
     [nativeReviewDiffData.rows],
   )
   const nativeReviewDiffTheme = useMemo(
-    () => createNativeReviewDiffTheme(appearanceScheme),
-    [appearanceScheme],
+    () => createNativeReviewDiffTheme(appearanceScheme, appTheme),
+    [appTheme, appearanceScheme],
   )
   const nativeRowsJson = useMemo(() => JSON.stringify(compactNativeRows), [compactNativeRows])
   const nativeThemeJson = useMemo(

@@ -80,13 +80,11 @@ const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === '1'
 const ReviewNotice = memo(function ReviewNotice(props: { readonly notice: string })
 {
   return (
-    <View className="border-b border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/40">
-      <Text className="text-xs font-sans-bold uppercase text-amber-700 dark:text-amber-300">
+    <View className="border-b border-adaptive-amber-200-900-a60 bg-adaptive-amber-50-950-a40 px-4 py-3">
+      <Text className="text-xs font-sans-bold uppercase text-adaptive-amber-700-300">
         Partial diff
       </Text>
-      <Text className="text-xs leading-normal text-amber-800 dark:text-amber-200">
-        {props.notice}
-      </Text>
+      <Text className="text-xs leading-normal text-adaptive-amber-800-200">{props.notice}</Text>
     </View>
   )
 })

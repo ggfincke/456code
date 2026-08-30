@@ -4,7 +4,6 @@
 import { SymbolView } from '../../../components/AppSymbol'
 import type { ComponentProps } from 'react'
 import { Pressable, View } from 'react-native'
-import { useThemeColor } from '../../../lib/useThemeColor'
 import { AppText as Text } from '../../../components/AppText'
 import { cn } from '../../../lib/cn'
 
@@ -18,12 +17,13 @@ export function SheetActionButton(props: {
   readonly onPress: () => void
 })
 {
-  const primaryFg = useThemeColor('--color-primary-foreground')
-  const dangerFg = useThemeColor('--color-danger-foreground')
-  const secondaryFg = useThemeColor('--color-secondary-foreground')
-
   const tone = props.tone ?? 'secondary'
-  const textColor = tone === 'primary' ? primaryFg : tone === 'danger' ? dangerFg : secondaryFg
+  const tintColorClassName =
+    tone === 'primary'
+      ? 'accent-primary-foreground'
+      : tone === 'danger'
+        ? 'accent-danger-foreground'
+        : 'accent-secondary-foreground'
 
   return (
     <Pressable
@@ -38,7 +38,12 @@ export function SheetActionButton(props: {
       disabled={props.disabled}
       onPress={props.onPress}
     >
-      <SymbolView name={props.icon} size={16} tintColor={textColor} type="monochrome" />
+      <SymbolView
+        name={props.icon}
+        size={16}
+        tintColorClassName={tintColorClassName}
+        type="monochrome"
+      />
       <Text
         className={cn(
           'text-xs font-sans-bold tracking-[0.9px] uppercase',
@@ -77,9 +82,6 @@ export function SheetListRow(props: {
   readonly onPress: () => void
 })
 {
-  const iconColor = useThemeColor('--color-icon')
-  const iconSubtleColor = useThemeColor('--color-icon-subtle')
-
   return (
     <Pressable
       className="flex-row items-center gap-3 px-1 py-3 disabled:opacity-[0.45]"
@@ -87,7 +89,12 @@ export function SheetListRow(props: {
       onPress={props.onPress}
     >
       <View className="bg-subtle h-9 w-9 items-center justify-center rounded-full">
-        <SymbolView name={props.icon} size={16} tintColor={iconColor} type="monochrome" />
+        <SymbolView
+          name={props.icon}
+          size={16}
+          tintColorClassName="accent-icon"
+          type="monochrome"
+        />
       </View>
       <View className="flex-1 gap-0.5">
         <Text className="text-foreground text-base font-sans-bold">{props.title}</Text>
@@ -95,7 +102,12 @@ export function SheetListRow(props: {
           <Text className="text-foreground-muted text-xs leading-snug">{props.subtitle}</Text>
         ) : null}
       </View>
-      <SymbolView name="chevron.right" size={13} tintColor={iconSubtleColor} type="monochrome" />
+      <SymbolView
+        name="chevron.right"
+        size={13}
+        tintColorClassName="accent-icon-subtle"
+        type="monochrome"
+      />
     </Pressable>
   )
 }

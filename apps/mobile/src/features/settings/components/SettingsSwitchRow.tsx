@@ -6,7 +6,6 @@ import { Switch, View } from 'react-native'
 
 import { SymbolView } from '../../../components/AppSymbol'
 import { AppText as Text } from '../../../components/AppText'
-import { useThemeColor } from '../../../lib/useThemeColor'
 
 type SymbolName = ComponentProps<typeof SymbolView>['name']
 
@@ -18,10 +17,6 @@ export function SettingsSwitchRow(props: {
   readonly onValueChange: (value: boolean) => void
 })
 {
-  const icon = useThemeColor('--color-icon')
-  const activeTrack = String(useThemeColor('--color-switch-active'))
-  const track = String(useThemeColor('--color-secondary-border'))
-
   return (
     <View
       className={
@@ -30,13 +25,20 @@ export function SettingsSwitchRow(props: {
           : 'flex-row items-center gap-4 p-4'
       }
     >
-      <SymbolView name={props.icon} size={22} tintColor={icon} type="monochrome" weight="regular" />
+      <SymbolView
+        name={props.icon}
+        size={22}
+        tintColorClassName="accent-icon"
+        type="monochrome"
+        weight="regular"
+      />
       <Text className="flex-1 text-lg text-foreground">{props.label}</Text>
       <Switch
         disabled={props.disabled}
-        ios_backgroundColor={track}
+        ios_backgroundColorClassName="accent-secondary-border"
         onValueChange={props.onValueChange}
-        trackColor={{ false: track, true: activeTrack }}
+        trackColorOffClassName="accent-secondary-border"
+        trackColorOnClassName="accent-switch-active"
         value={props.value}
       />
     </View>

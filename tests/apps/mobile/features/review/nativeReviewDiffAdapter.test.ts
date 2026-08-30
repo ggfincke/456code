@@ -4,11 +4,13 @@
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
+  createNativeReviewDiffTheme,
   getCachedNativeReviewDiffData,
   type BuildNativeReviewDiffDataInput,
 } from '../../../../../apps/mobile/src/features/review/nativeReviewDiffAdapter'
 import type { ReviewInlineComment } from '../../../../../apps/mobile/src/features/review/reviewCommentSelection'
 import { buildReviewParsedDiff } from '../../../../../apps/mobile/src/features/review/reviewModel'
+import { getDefaultMobileThemeVariables } from '../../../../../apps/mobile/src/lib/mobileThemeVariables'
 
 const parsedDiff = buildReviewParsedDiff(
   [
@@ -60,5 +62,23 @@ describe('getCachedNativeReviewDiffData', () =>
 
     expect(equivalent).toBe(first)
     expect(changed).not.toBe(first)
+  })
+})
+
+describe('createNativeReviewDiffTheme', () =>
+{
+  it('uses the compiled default semantic palette for native code surfaces', () =>
+  {
+    for (const appearance of ['light', 'dark'] as const)
+    {
+      const variables = getDefaultMobileThemeVariables(appearance)
+      const theme = createNativeReviewDiffTheme(appearance, variables)
+
+      expect(theme.background).toMatch(/^#[\da-f]{6}$/iu)
+      expect(theme.text).toBe(variables['--color-md-code-text'])
+      expect(theme.mutedText).toMatch(/^#[\da-f]{6}$/iu)
+      expect(theme.border).toMatch(/^#[\da-f]{6}$/iu)
+      expect(theme.headerBackground).toBe(theme.background)
+    }
   })
 })

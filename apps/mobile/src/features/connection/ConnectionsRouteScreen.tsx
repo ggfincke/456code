@@ -8,7 +8,6 @@ import type { EnvironmentId } from '@t3tools/contracts'
 import { useCallback, useState } from 'react'
 import { ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useThemeColor } from '../../lib/useThemeColor'
 
 import { AppText as Text } from '../../components/AppText'
 import { cn } from '../../lib/cn'
@@ -27,8 +26,6 @@ export function ConnectionsRouteScreen()
   const insets = useSafeAreaInsets()
   const hasEnvironments = connectedEnvironments.length > 0
   const [expandedId, setExpandedId] = useState<EnvironmentId | null>(null)
-
-  const accentColor = useThemeColor('--color-icon-muted')
 
   const handleToggle = useCallback((environmentId: EnvironmentId) =>
   {
@@ -79,7 +76,7 @@ export function ConnectionsRouteScreen()
               <SymbolView
                 name="point.3.connected.trianglepath.dotted"
                 size={20}
-                tintColor={accentColor}
+                tintColorClassName="accent-icon-muted"
                 type="monochrome"
               />
             </View>

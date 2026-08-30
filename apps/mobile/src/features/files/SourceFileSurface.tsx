@@ -21,6 +21,7 @@ import {
   resolveNativeReviewDiffView,
 } from '../diffs/nativeReviewDiffSurface'
 import { createNativeReviewDiffTheme } from '../review/nativeReviewDiffAdapter'
+import { useMobileThemeVariables } from '../../lib/useMobileThemeVariables'
 import { REVIEW_MONO_FONT_FAMILY, renderVisibleWhitespace } from '../review/reviewDiffRendering'
 import type { ReviewHighlightedToken } from '../review/shikiReviewHighlighter'
 import { cn } from '../../lib/cn'
@@ -197,7 +198,11 @@ function NativeSourceFileSurface(
     () => JSON.stringify(targetIndex === null ? [] : [nativeSourceRowId(targetIndex)]),
     [targetIndex],
   )
-  const themeJson = useMemo(() => JSON.stringify(createNativeReviewDiffTheme(theme)), [theme])
+  const appTheme = useMobileThemeVariables()
+  const themeJson = useMemo(
+    () => JSON.stringify(createNativeReviewDiffTheme(theme, appTheme)),
+    [appTheme, theme],
+  )
   const styleJson = useMemo(() => JSON.stringify(nativeSourceStyle), [nativeSourceStyle])
   const contentWidth = codeWordBreak
     ? Math.max(240, viewportWidth - codeSurface.gutterWidth - 24)

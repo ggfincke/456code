@@ -269,8 +269,8 @@ export const ThreadListShowMoreRow = memo(function ThreadListShowMoreRow(props: 
 function QueuedFailurePill()
 {
   return (
-    <View className="rounded-full bg-rose-500/12 px-1.5 py-0.5 dark:bg-rose-500/16">
-      <Text className="text-3xs font-sans-bold text-rose-700 dark:text-rose-300">Failed</Text>
+    <View className="rounded-full bg-adaptive-rose-500-a12-a16 px-1.5 py-0.5">
+      <Text className="text-3xs font-sans-bold text-adaptive-rose-700-300">Failed</Text>
     </View>
   )
 }
@@ -374,10 +374,8 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
   const statusPill = status.failed ? (
     <QueuedFailurePill />
   ) : (
-    <View className="rounded-full bg-zinc-500/12 px-1.5 py-0.5 dark:bg-zinc-500/16">
-      <Text className="text-3xs font-sans-bold text-zinc-600 dark:text-zinc-300">
-        {status.badge}
-      </Text>
+    <View className="rounded-full bg-adaptive-zinc-500-a12-a16 px-1.5 py-0.5">
+      <Text className="text-3xs font-sans-bold text-adaptive-zinc-600-300">{status.badge}</Text>
     </View>
   )
 

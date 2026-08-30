@@ -22,7 +22,6 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, View } from 'react-native'
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useThemeColor } from '../../lib/useThemeColor'
 
 import { AppText as Text } from '../../components/AppText'
 import { EmptyState } from '../../components/EmptyState'
@@ -188,7 +187,6 @@ export function HomeScreen(props: HomeScreenProps)
   const openSwipeableRef = useRef<SwipeableMethods | null>(null)
   const listRef = useRef<LegendListRef | null>(null)
   const insets = useSafeAreaInsets()
-  const accentColor = useThemeColor('--color-icon-muted')
   const effectiveGroupDisplayStates = useMemo(() =>
   {
     const next = new Map(groupDisplayStates)
@@ -710,7 +708,7 @@ export function HomeScreen(props: HomeScreenProps)
           />
           {emptyState.loading && !shouldShowConnectionStatus ? (
             <View className="mt-4 items-center">
-              <ActivityIndicator color={accentColor} />
+              <ActivityIndicator colorClassName="accent-icon-muted" />
             </View>
           ) : null}
           {shouldShowConnectionStatus ? (

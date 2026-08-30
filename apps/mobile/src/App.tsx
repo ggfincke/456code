@@ -4,11 +4,11 @@
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
 import { useEffect } from 'react'
-import { StatusBar, useColorScheme } from 'react-native'
+import { StatusBar } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { createStaticNavigation, DarkTheme, DefaultTheme } from '@react-navigation/native'
+import { createStaticNavigation } from '@react-navigation/native'
 
 import { RegistryContext } from '@effect/atom-react'
 import { CloudAuthProvider } from './features/cloud/CloudAuthProvider'
@@ -20,6 +20,7 @@ import {
 } from './features/settings/appearance/AppearancePreferencesProvider'
 import { RootStack } from './Stack'
 import { appAtomRegistry } from './state/atom-registry'
+import { useMobileNavigationTheme } from './lib/useMobileNavigationTheme'
 
 import '../global.css'
 
@@ -61,33 +62,37 @@ function SplashScreenCoordinator()
 
 export default function App()
 {
-  const colorScheme = useColorScheme()
-
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
       <CloudAuthProvider>
         <AppearancePreferencesProvider>
-          <SplashScreenCoordinator />
-          <GestureHandlerRootView className="flex-1">
-            <KeyboardProvider>
-              <SafeAreaProvider>
-                <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
-                {/* The navigation theme drives the NATIVE header appearance: native-stack
-                    forwards `dark` as the nav bar's overrideUserInterfaceStyle. Without
-                    this, React Navigation defaults to its light theme and every native
-                    header (glass buttons, title, materials) is forced light even when
-                    the system is in dark mode. */}
-                <IncomingShareProvider>
-                  <Navigation
-                    linking={appLinking}
-                    theme={colorScheme === 'dark' ? DarkTheme : DefaultTheme}
-                  />
-                </IncomingShareProvider>
-              </SafeAreaProvider>
-            </KeyboardProvider>
-          </GestureHandlerRootView>
+          <AppContent />
         </AppearancePreferencesProvider>
       </CloudAuthProvider>
     </RegistryContext.Provider>
+  )
+}
+
+function AppContent()
+{
+  const { themeAppearance } = useAppearancePreferences()
+  const navigationTheme = useMobileNavigationTheme()
+
+  return (
+    <>
+      <SplashScreenCoordinator />
+      <GestureHandlerRootView className="flex-1">
+        <KeyboardProvider>
+          <SafeAreaProvider>
+            <StatusBar barStyle={themeAppearance === 'dark' ? 'light-content' : 'dark-content'} />
+            {/* The navigation theme drives the native header appearance: native-stack
+                forwards `dark` as the nav bar's overrideUserInterfaceStyle. */}
+            <IncomingShareProvider>
+              <Navigation linking={appLinking} theme={navigationTheme} />
+            </IncomingShareProvider>
+          </SafeAreaProvider>
+        </KeyboardProvider>
+      </GestureHandlerRootView>
+    </>
   )
 }
