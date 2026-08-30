@@ -16,6 +16,7 @@ import {
 } from '../providerIconUtils'
 import { ComboboxItem } from '../../ui/combobox'
 import { Button } from '../../ui/button'
+import { Badge } from '../../ui/badge'
 import { Kbd } from '../../ui/kbd'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { cn } from '~/lib/utils'
@@ -87,6 +88,11 @@ export const ModelListRow = memo(function ModelListRow(props: {
           ) : null}
           {props.model.isLegacy === true ? (
             <span className="shrink-0 text-[10px] font-normal text-muted-foreground">Legacy</span>
+          ) : null}
+          {props.model.isUnavailable === true ? (
+            <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+              Unavailable
+            </Badge>
           ) : null}
         </div>
         {props.showProvider && (

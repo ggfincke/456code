@@ -9,6 +9,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import type { VariantProps } from 'class-variance-authority'
 import { ChevronDownIcon } from 'lucide-react'
 import { Button, buttonVariants } from '../../ui/button'
+import { Badge } from '../../ui/badge'
 import { Popover, PopoverPopup, PopoverTrigger } from '../../ui/popover'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { cn } from '~/lib/utils'
@@ -67,15 +68,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? []
-  // if the current slug belongs to a different instance (for example after
-  // a provider switch or disable), prefer the active instance's first
-  // option so the trigger icon and label stay in sync instead of showing
-  // a stale foreign slug.
+  // OpenCode catalog gaps keep the exact selected slug visible
   const selectedModel =
     selectedInstanceOptions.find((option) => option.slug === props.model) ??
-    selectedInstanceOptions[0]
+    (activeEntry?.driverKind === 'opencode' ? undefined : selectedInstanceOptions[0])
   const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model
-  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model
+  const triggerLabel = `${selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model}${selectedModel?.isUnavailable ? ' (Unavailable)' : ''}`
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries)
   // the trigger shows the instance as an icon and the model as text, so without
@@ -83,8 +81,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const triggerAriaLabel =
     props.triggerAriaLabel ??
     (activeEntry
-      ? `Change provider and model — currently ${providerInstancePickerLabel(activeEntry)}, ${triggerTitle}`
-      : `Change provider and model — currently ${triggerTitle}`)
+      ? `Change provider and model — currently ${providerInstancePickerLabel(activeEntry)}, ${triggerLabel}`
+      : `Change provider and model — currently ${triggerLabel}`)
 
   const setIsMenuOpen = (open: boolean) =>
   {
@@ -155,6 +153,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) =>
   {
     if (props.disabled) return
+    // reselecting the saved unavailable row must not invoke normal fallback resolution
+    if (instanceId === activeInstanceId && model === props.model && selectedModel?.isUnavailable)
+    {
+      setIsMenuOpen(false)
+      return
+    }
     props.onInstanceModelChange(instanceId, model)
     setIsMenuOpen(false)
   }
@@ -210,6 +214,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
           </Tooltip>
+          {selectedModel?.isUnavailable ? (
+            <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
+              Unavailable
+            </Badge>
+          ) : null}
         </span>
         <span aria-hidden="true" className="flex items-center">
           <ChevronDownIcon aria-hidden="true" className="!ms-0 !-me-1 size-3 shrink-0 opacity-60" />

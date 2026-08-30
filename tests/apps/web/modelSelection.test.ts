@@ -7,9 +7,11 @@ import { describe, expect, it } from 'vite-plus/test'
 import { deriveProviderInstanceEntries } from '../../../apps/web/src/providerInstances'
 import {
   getAppModelOptionsForInstance,
+  getCustomModelOptionsByInstance,
   resolveAppModelSelectionForInstance,
   resolveAppModelSelectionState,
 } from '../../../apps/web/src/modelSelection'
+import { deriveEffectiveComposerModelState } from '../../../apps/web/src/composer-drafts/model-selection'
 
 function provider(input: {
   provider?: ProviderDriverKind
@@ -61,6 +63,97 @@ function settingsWithProviderInstances(): UnifiedSettings
 
 describe('instance-scoped model selection', () =>
 {
+  it('keeps an exact OpenCode draft or thread selection through catalog loss and recovery', () =>
+  {
+    const instanceId = ProviderInstanceId.make('opencode-work')
+    const driver = ProviderDriverKind.make('opencode')
+    const selection = {
+      instanceId,
+      model: 'vendor/saved',
+      options: [{ id: 'variant', value: 'high' }],
+    }
+    const missing = provider({ provider: driver, instanceId, models: ['vendor/fallback'] })
+    const other = provider({
+      provider: driver,
+      instanceId: 'opencode-other',
+      models: ['vendor/other'],
+    })
+    const settings = DEFAULT_UNIFIED_SETTINGS
+    for (const draft of [
+      null,
+      { activeProvider: instanceId, modelSelectionByProvider: { [instanceId]: selection } },
+    ])
+    {
+      const input = {
+        draft,
+        providers: [missing, other],
+        selectedProvider: driver,
+        selectedInstanceId: instanceId,
+        threadModelSelection: selection,
+        projectModelSelection: null,
+        settings,
+      }
+      const effective = deriveEffectiveComposerModelState(input)
+      expect(effective.selectedModel).toBe(selection.model)
+      expect(effective.modelOptions?.[instanceId]).toEqual(selection.options)
+      const restored = provider({
+        provider: driver,
+        instanceId,
+        models: ['vendor/fallback', selection.model],
+      })
+      expect(deriveEffectiveComposerModelState({ ...input, providers: [restored, other] })).toEqual(
+        effective,
+      )
+      expect(
+        getCustomModelOptionsByInstance(settings, [restored, other], instanceId, selection.model)
+          .get(instanceId)
+          ?.some((option) => option.isUnavailable),
+      ).toBe(false)
+    }
+    const options = getCustomModelOptionsByInstance(
+      settings,
+      [missing, other],
+      instanceId,
+      selection.model,
+    )
+    expect(options.get(instanceId)?.filter((option) => option.isUnavailable)).toEqual([
+      { slug: selection.model, name: selection.model, isCustom: false, isUnavailable: true },
+    ])
+    expect(options.get(other.instanceId)?.some((option) => option.slug === selection.model)).toBe(
+      false,
+    )
+    expect(
+      resolveAppModelSelectionForInstance(instanceId, settings, [missing], selection.model),
+    ).toBe('vendor/fallback')
+  })
+
+  it.each([true, false])(
+    'does not resurrect hidden OpenCode models when present in raw catalog: %s',
+    (inCatalog) =>
+    {
+      const snapshot = provider({
+        provider: ProviderDriverKind.make('opencode'),
+        instanceId: 'opencode',
+        models: inCatalog ? ['visible', 'hidden'] : ['visible'],
+      })
+      const settings = {
+        ...DEFAULT_UNIFIED_SETTINGS,
+        providerModelPreferences: {
+          [snapshot.instanceId]: { hiddenModels: ['hidden'], modelOrder: [] },
+        },
+      }
+      const [entry] = deriveProviderInstanceEntries([snapshot])
+      expect(
+        getAppModelOptionsForInstance(settings, entry!, 'hidden').map((option) => option.slug),
+      ).toEqual(['visible'])
+      expect(
+        resolveAppModelSelectionForInstance(snapshot.instanceId, settings, [snapshot], 'hidden', {
+          preserveUnavailableSelection: true,
+        }),
+      ).toBe('visible')
+    },
+  )
+
   it('preserves explicit legacy selection while unknown and custom models remain normal', () =>
   {
     const snapshot = {

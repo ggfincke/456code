@@ -16,6 +16,7 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
+  normalizeModelSlug,
 } from '@t3tools/shared/model'
 import { memo, useCallback, useState } from 'react'
 import type { VariantProps } from 'class-variance-authority'
@@ -36,6 +37,43 @@ import { cn } from '~/lib/utils'
 import { Badge } from '../../ui/badge'
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>
+
+const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
+  agent: 'Agent',
+  effort: 'Effort',
+  reasoningEffort: 'Reasoning effort',
+  variant: 'Variant',
+}
+
+function savedOptionLabel(id: string): string
+{
+  return (
+    SAVED_OPTION_LABELS[id] ??
+    id.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (character) => character.toUpperCase())
+  )
+}
+
+export function buildUnavailableModelOptionDescriptors(
+  selections: ProviderOptions | null | undefined,
+): ReadonlyArray<ProviderOptionDescriptor>
+{
+  return (selections ?? []).map((selection) =>
+    typeof selection.value === 'boolean'
+      ? {
+          id: selection.id,
+          label: savedOptionLabel(selection.id),
+          type: 'boolean' as const,
+          currentValue: selection.value,
+        }
+      : {
+          id: selection.id,
+          label: savedOptionLabel(selection.id),
+          type: 'select' as const,
+          options: [{ id: selection.value, label: selection.value }],
+          currentValue: selection.value,
+        },
+  )
+}
 
 type TraitsPersistence =
   | {
@@ -105,10 +143,15 @@ function getSelectedTraits(
 )
 {
   const caps = getProviderModelCapabilities(models, model, provider)
-  const descriptors = getProviderOptionDescriptors({
-    caps,
-    selections: modelOptions,
-  })
+  const modelIsUnavailable =
+    provider === 'opencode' &&
+    !models.some((candidate) => candidate.slug === normalizeModelSlug(model, provider))
+  const descriptors = modelIsUnavailable
+    ? buildUnavailableModelOptionDescriptors(modelOptions)
+    : getProviderOptionDescriptors({
+        caps,
+        selections: modelOptions,
+      })
   const selectDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: 'select' }> =>
       descriptor.type === 'select',
@@ -165,6 +208,7 @@ function getSelectedTraits(
     ultrathinkInBodyText,
     selectedAgent,
     selectedAgentLabel,
+    modelIsUnavailable,
   }
 }
 
@@ -199,7 +243,13 @@ function getTraitsSectionVisibility(input: {
     showFastMode,
     showContextWindow,
     showAgent,
-    hasAnyControls: showEffort || showThinking || showFastMode || showContextWindow || showAgent,
+    hasAnyControls:
+      showEffort ||
+      showThinking ||
+      showFastMode ||
+      showContextWindow ||
+      showAgent ||
+      (selected.modelIsUnavailable && selected.descriptors.length > 0),
   }
 }
 
@@ -271,6 +321,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ultrathinkPromptControlled,
     ultrathinkInBodyText,
     hasAnyControls,
+    modelIsUnavailable,
   } = getTraitsSectionVisibility({
     provider,
     models,
@@ -311,6 +362,30 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   if (!hasAnyControls)
   {
     return null
+  }
+
+  if (modelIsUnavailable)
+  {
+    return (
+      <>
+        {descriptors.map((descriptor, index) =>
+        {
+          const value = getProviderOptionCurrentLabel(descriptor)
+          if (!value) return null
+          return (
+            <div key={descriptor.id}>
+              {index > 0 ? <MenuDivider /> : null}
+              <MenuGroup>
+                <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
+                  {descriptor.label}
+                </div>
+                <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">{value}</div>
+              </MenuGroup>
+            </div>
+          )
+        })}
+      </>
+    )
   }
 
   return (

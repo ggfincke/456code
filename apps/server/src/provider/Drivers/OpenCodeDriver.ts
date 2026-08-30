@@ -1,20 +1,7 @@
 // apps/server/src/provider/Drivers/OpenCodeDriver.ts
 // creates isolated OpenCode instances bound to local storage or external servers
 
-// OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
-//
-// mirrors the Codex / Claude drivers: a plain value whose `create()`
-// bundles `snapshot` / `adapter` / `textGeneration` closures over the
-// per-instance `OpenCodeSettings`.
-//
-// two instances with different `serverUrl`s therefore talk to independent
-// OpenCode servers; when no `serverUrl` is set, the adapter + text-generation
-// shares spin up their own scoped child processes, and those child
-// processes are released when the registry scope closes.
-//
-// @module provider/Drivers/OpenCodeDriver
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
-import * as Duration from 'effect/Duration'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -39,6 +26,7 @@ import {
 import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
 import { OpenCodeRuntime } from '../opencodeRuntime.ts'
+import * as OpenCodeServerOwner from '../OpenCodeServerOwner.ts'
 import { type ProviderDriver, type ProviderInstance } from '../catalog/ProviderDriver.ts'
 import type { ServerProviderDraft } from '../providerSnapshot.ts'
 import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
@@ -56,7 +44,6 @@ import {
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings)
 
 const DRIVER_KIND = ProviderDriverKind.make('opencode')
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
 
 function isOpenCodeNativeCommandPath(commandPath: string): boolean
 {
@@ -156,13 +143,28 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         environment: runtimeEnvironment,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       })
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, runtimeEnvironment)
+      // inventory and generated text share one instance owner; chat servers remain isolated
+      const serverOwner = yield* OpenCodeServerOwner.make({
+        binaryPath: effectiveConfig.binaryPath,
+        directory: serverConfig.cwd,
+        ...(effectiveConfig.serverPassword
+          ? { serverPassword: effectiveConfig.serverPassword }
+          : {}),
+        environment: runtimeEnvironment,
+      })
+      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
+        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+      )
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,
         serverConfig.cwd,
         runtimeEnvironment,
-      ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime))
+      ).pipe(
+        Effect.map(stampIdentity),
+        Effect.provideService(OpenCodeRuntime, openCodeRuntime),
+        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+      )
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>(
@@ -181,7 +183,8 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
               Effect.provideService(HttpClient.HttpClient, httpClient),
               Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
             ),
-          refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
+          checkProviderOnSettingsChange: () => false,
+          refreshOnInterval: false,
         },
       ).pipe(
         Effect.mapError(

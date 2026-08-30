@@ -840,8 +840,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               capabilities: null,
             },
           ],
-          slashCommands: [],
-          skills: [],
+          slashCommands: [{ name: 'review', description: 'Review changes' }],
+          skills: [{ name: 'review', path: '/tmp/review/SKILL.md', enabled: true }],
         } as const satisfies ServerProvider
         const pendingProvider = {
           ...previousProvider,
@@ -851,6 +851,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           checkedAt: '2026-07-17T00:01:00.000Z',
           version: null,
           models: [],
+          slashCommands: [],
+          skills: [],
           message: 'OpenCode provider status has not been checked in this session yet.',
         } satisfies ServerProvider
         const loggedOutProvider = {
@@ -859,6 +861,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           auth: { status: 'unknown' },
           checkedAt: '2026-07-17T00:02:00.000Z',
           models: [],
+          slashCommands: [],
+          skills: [],
           message: 'OpenCode is available, but it did not report any connected upstream providers.',
         } satisfies ServerProvider
         const missingProvider = {
@@ -869,12 +873,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           checkedAt: '2026-07-17T00:03:00.000Z',
           version: null,
           models: [],
+          slashCommands: [],
+          skills: [],
           message: 'OpenCode CLI (`opencode`) is not installed or not on PATH.',
         } satisfies ServerProvider
         const authoritativeProvider = {
           ...previousProvider,
           checkedAt: '2026-07-17T00:04:00.000Z',
           models: [previousProvider.models[0]!],
+          slashCommands: [],
+          skills: [],
         } satisfies ServerProvider
         const failedProvider = {
           ...authoritativeProvider,
@@ -882,6 +890,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           auth: { status: 'unknown' },
           checkedAt: '2026-07-17T00:05:00.000Z',
           models: [],
+          slashCommands: [],
+          skills: [],
           message: 'Failed to refresh OpenCode models.',
         } satisfies ServerProvider
 
@@ -894,10 +904,35 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         )
         assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, missingProvider).models, [])
 
+        const disabledProvider = {
+          ...missingProvider,
+          enabled: false,
+          status: 'warning',
+        } satisfies ServerProvider
+        for (const partial of [pendingProvider, failedProvider])
+        {
+          const merged = mergeProviderSnapshot(previousProvider, partial)
+          assert.deepStrictEqual(merged.slashCommands, previousProvider.slashCommands)
+          assert.deepStrictEqual(merged.skills, previousProvider.skills)
+        }
+        for (const authoritative of [
+          loggedOutProvider,
+          missingProvider,
+          disabledProvider,
+          authoritativeProvider,
+        ])
+        {
+          const merged = mergeProviderSnapshot(previousProvider, authoritative)
+          assert.deepStrictEqual(merged.slashCommands, [])
+          assert.deepStrictEqual(merged.skills, [])
+        }
+
         const afterRemoval = mergeProviderSnapshot(previousProvider, authoritativeProvider)
         const afterFailure = mergeProviderSnapshot(afterRemoval, failedProvider)
 
         assert.deepStrictEqual(afterFailure.models, [authoritativeProvider.models[0]!])
+        assert.deepStrictEqual(afterFailure.slashCommands, [])
+        assert.deepStrictEqual(afterFailure.skills, [])
       })
 
       it('fills missing capabilities from the previous provider snapshot', () =>

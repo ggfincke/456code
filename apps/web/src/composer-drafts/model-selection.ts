@@ -429,6 +429,7 @@ export function deriveEffectiveComposerModelState(input: {
 {
   const baseModelCandidate =
     input.threadModelSelection?.model ?? input.projectModelSelection?.model ?? null
+  const preserveThreadModel = input.threadModelSelection?.instanceId === input.selectedInstanceId
   const baseModel =
     (input.selectedInstanceId
       ? resolveAppModelSelectionForInstance(
@@ -436,6 +437,7 @@ export function deriveEffectiveComposerModelState(input: {
           input.settings,
           input.providers,
           baseModelCandidate,
+          { preserveUnavailableSelection: preserveThreadModel },
         )
       : null) ??
     resolveAppModelSelection(
@@ -465,6 +467,7 @@ export function deriveEffectiveComposerModelState(input: {
         input.settings,
         input.providers,
         activeSelection.model,
+        { preserveUnavailableSelection: true },
       ) ??
       resolveAppModelSelection(
         input.selectedProvider,

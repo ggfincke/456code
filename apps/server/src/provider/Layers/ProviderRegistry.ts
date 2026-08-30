@@ -145,6 +145,17 @@ export const mergeProviderSnapshot = (
     : {
         ...nextProvider,
         models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
+        ...(nextProvider.driver === ProviderDriverKind.make('opencode') &&
+        shouldRetainMissingProviderModels(nextProvider)
+          ? {
+              slashCommands:
+                nextProvider.slashCommands.length === 0
+                  ? previousProvider.slashCommands
+                  : nextProvider.slashCommands,
+              skills:
+                nextProvider.skills.length === 0 ? previousProvider.skills : nextProvider.skills,
+            }
+          : {}),
       }
 
 export const mergeProviderSnapshots = (

@@ -701,7 +701,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // instance-keyed option list so the picker can show each configured
   // instance (built-in + custom) as a first-class sidebar entry. The
   // options are server-reported models plus that exact instance's
-  // configured custom models; selected slugs are not injected into lists.
+  // configured custom models, plus the active unavailable OpenCode selection.
   const modelOptionsByInstance = useMemo<
     ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>
   >(() =>
@@ -709,10 +709,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const out = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>()
     for (const entry of providerInstanceEntries)
     {
-      out.set(entry.instanceId, getAppModelOptionsForInstance(settings, entry))
+      out.set(
+        entry.instanceId,
+        getAppModelOptionsForInstance(
+          settings,
+          entry,
+          entry.instanceId === selectedInstanceId ? selectedModelForPicker : null,
+        ),
+      )
     }
     return out
-  }, [providerInstanceEntries, settings])
+  }, [providerInstanceEntries, selectedInstanceId, selectedModelForPicker, settings])
   const selectedModelForPickerWithCustomFallback = useMemo(() =>
   {
     const currentOptions = modelOptionsByInstance.get(selectedInstanceId) ?? []
