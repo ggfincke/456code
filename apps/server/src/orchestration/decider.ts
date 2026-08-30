@@ -992,12 +992,13 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           updatedAt: existingPinnedAt !== null ? thread.updatedAt : occurredAt,
         },
       } satisfies PlannedOrchestrationEvent
-      // pinning promotes the thread immediately, spending settled and snooze
-      // states instead of merely hiding them beneath the pin.
-      const promotionEvents: Array<PlannedOrchestrationEvent> = []
-      if (thread.settledOverride === 'settled')
-      {
-        promotionEvents.push({
+      // duplicate pins must not wake a thread parked after its original pin.
+      if (existingPinnedAt !== null) return pinnedEvent
+
+      // fresh pins explicitly wake client-derived settlement too; real
+      // activity later clears the active override through the existing path.
+      const promotionEvents: Array<PlannedOrchestrationEvent> = [
+        {
           ...(yield* withEventBase({
             aggregateKind: 'thread',
             aggregateId: command.threadId,
@@ -1010,8 +1011,8 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
             reason: 'user',
             updatedAt: occurredAt,
           },
-        } satisfies PlannedOrchestrationEvent)
-      }
+        } satisfies PlannedOrchestrationEvent,
+      ]
       if (thread.snoozedUntil != null)
       {
         promotionEvents.push({
@@ -1029,7 +1030,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           },
         } satisfies PlannedOrchestrationEvent)
       }
-      return promotionEvents.length === 0 ? pinnedEvent : [pinnedEvent, ...promotionEvents]
+      return [pinnedEvent, ...promotionEvents]
     }
 
     case 'thread.unpin':
