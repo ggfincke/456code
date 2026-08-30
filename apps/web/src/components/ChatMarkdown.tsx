@@ -24,6 +24,9 @@ import React, {
   type CSSProperties,
   type ClipboardEvent as ReactClipboardEvent,
   type ComponentPropsWithoutRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  use,
   useCallback,
   memo,
   useMemo,
@@ -38,6 +41,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import { renderSkillInlineMarkdownChildren } from './chat/SkillInlineText'
+import { type ExpandedImagePreview } from './chat/ExpandedImagePreview'
 import {
   OrchestratePlanCard,
   type OrchestratePlan,
@@ -153,6 +157,7 @@ interface ChatMarkdownProps
   // parse sanitized raw HTML; user-authored messages disable this.
   parseRawHtml?: boolean
   imageBaseDir?: string | undefined
+  onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined
   orchestratePlanActions?: OrchestratePlanActions | undefined
 }
 
@@ -361,6 +366,8 @@ const CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME = cn(
   'rounded-lg border border-border/40',
 )
 
+const MarkdownLinkContext = React.createContext(false)
+
 function markdownImageCopy(alt: string, src: string, title: string | undefined): string
 {
   const escapedAlt = alt.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')
@@ -392,6 +399,33 @@ function authoredImageSizeStyle(
   return undefined
 }
 
+function expandableMarkdownImageProps(
+  onImageExpand: ((preview: ExpandedImagePreview) => void) | undefined,
+  src: string,
+  alt: string,
+)
+{
+  if (!onImageExpand) return {}
+  const previewName = alt.trim() || 'image'
+  const expand = (event: ReactMouseEvent | ReactKeyboardEvent) =>
+  {
+    if (event.currentTarget.closest('a')) return
+    event.preventDefault()
+    event.stopPropagation()
+    onImageExpand({ images: [{ src, name: previewName }], index: 0 })
+  }
+  return {
+    role: 'button' as const,
+    tabIndex: 0,
+    'aria-label': `Preview ${previewName}`,
+    onClick: expand,
+    onKeyDown: (event: ReactKeyboardEvent) =>
+    {
+      if (event.key === 'Enter' || event.key === ' ') expand(event)
+    },
+  }
+}
+
 function ChatMarkdownImageFallback(props: {
   readonly alt: string
   readonly copyMarkdown?: string | undefined
@@ -420,6 +454,7 @@ function ChatMarkdownImage(props: {
   readonly copyMarkdown: string
   readonly style?: CSSProperties | undefined
   readonly imageProps?: ComponentPropsWithoutRef<'img'> | undefined
+  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined
 })
 {
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
@@ -437,8 +472,10 @@ function ChatMarkdownImage(props: {
       className={cn(
         CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME,
         props.imageProps?.className,
+        props.onImageExpand && 'cursor-zoom-in',
       )}
       style={props.style}
+      {...expandableMarkdownImageProps(props.onImageExpand, props.src, props.alt)}
       onError={() => setFailedSrc(props.src)}
     />
   )
@@ -451,6 +488,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
   readonly copyMarkdown: string
   readonly srcFragment: string
   readonly style?: CSSProperties | undefined
+  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined
 })
 {
   const assetUrl = useAssetUrlState(props.threadRef.environmentId, {
@@ -465,6 +503,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
       alt={props.alt}
       copyMarkdown={props.copyMarkdown}
       style={props.style}
+      onImageExpand={props.onImageExpand}
     />
   )
 })
@@ -480,6 +519,7 @@ function useChatMarkdownState({
   lineBreaks = false,
   parseRawHtml = true,
   imageBaseDir,
+  onImageExpand,
   orchestratePlanActions,
 }: ChatMarkdownProps)
 {
@@ -647,6 +687,7 @@ function useChatMarkdownState({
     fileLinkParentSuffixByPath,
     imageBaseDir,
     markdownFileLinkMetaByHref,
+    onImageExpand,
     onTaskListChange,
     orchestratePlanActions,
     openFileInPanel,
@@ -666,7 +707,7 @@ const ChatMarkdownRendererContext = React.createContext<ReturnType<
 
 function useMarkdownRendererState()
 {
-  const state = React.use(ChatMarkdownRendererContext)
+  const state = use(ChatMarkdownRendererContext)
   if (state === null) throw new Error('Markdown renderer state is unavailable')
   return state
 }
@@ -750,6 +791,7 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
       const isSameDocumentLink = href?.startsWith('#') ?? false
       const onClick = props.onClick
       const canOpenInPreview = Boolean(threadRef) && isPreviewSupportedInRuntime()
+      const linkChildren = <MarkdownLinkContext value>{children}</MarkdownLinkContext>
       const link = (
         <a
           {...props}
@@ -797,10 +839,10 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
         >
           {faviconHost ? (
             <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
-              {children}
+              {linkChildren}
             </MarkdownExternalLinkContent>
           ) : (
-            children
+            linkChildren
           )}
         </a>
       )
@@ -865,7 +907,8 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
   },
   img: function MarkdownImage({ node, title, src, alt, ...props })
   {
-    const { imageBaseDir, cwd, threadRef } = useMarkdownRendererState()
+    const { onImageExpand, imageBaseDir, cwd, threadRef } = useMarkdownRendererState()
+    const imageExpand = use(MarkdownLinkContext) ? undefined : onImageExpand
     const localSrc = node?.properties?.dataLocalSrc
     const markdownTitle = node?.properties?.dataMarkdownTitle
     const authoredSrc = typeof localSrc === 'string' ? localSrc : src
@@ -887,6 +930,7 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
           alt={altText}
           copyMarkdown={copyMarkdown}
           style={authoredSizeStyle}
+          onImageExpand={imageExpand}
         />
       )
     }
@@ -901,6 +945,7 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
           copyMarkdown={copyMarkdown}
           srcFragment={markdownImageSourceFragment(classifiedSrc)}
           style={authoredSizeStyle}
+          onImageExpand={imageExpand}
         />
       )
     }

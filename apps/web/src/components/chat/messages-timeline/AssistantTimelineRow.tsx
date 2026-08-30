@@ -119,6 +119,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
           isStreaming={Boolean(row.message.streaming)}
           lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
           skills={ctx.skills}
+          onImageExpand={ctx.onImageExpand}
           orchestratePlanActions={ctx.orchestratePlanActions}
         />
         <AssistantChangedFilesSection
