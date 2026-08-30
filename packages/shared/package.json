@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./themePalettes": {
+      "types": "./src/themePalettes.ts",
+      "import": "./src/themePalettes.ts"
+    },
     "./pierreFileIcons": {
       "types": "./src/pierreFileIcons.ts",
       "import": "./src/pierreFileIcons.ts"

@@ -1,0 +1,591 @@
+// apps/server/src/cli/theme.ts
+// publish guarded theme files and edit sparse environment defaults
+
+// @effect-diagnostics nodeBuiltinImport:off - publication needs exact entry moves and file ownership
+import * as NodeFS from 'node:fs'
+import * as NodeCrypto from 'node:crypto'
+
+import { EnvironmentThemeFile, EnvironmentThemeId } from '@t3tools/contracts'
+import { fromJsonStringPretty, fromLenientJson } from '@t3tools/shared/schemaJson'
+import {
+  BUILT_IN_THEME_IDS,
+  RESERVED_THEME_IDS,
+  environmentThemeFileHasColors,
+} from '@t3tools/shared/themePalettes'
+import * as Config from 'effect/Config'
+import * as Console from 'effect/Console'
+import * as DateTime from 'effect/DateTime'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Exit from 'effect/Exit'
+import * as Option from 'effect/Option'
+import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
+import { Argument, Command, Flag } from 'effect/unstable/cli'
+
+import { writeFileStringAtomically } from '../atomicWrite.ts'
+import * as ServerConfig from '../config.ts'
+import {
+  MAX_THEME_FILE_BYTES,
+  readPublishedThemes,
+  readThemeFileGuarded,
+} from '../environmentTheme.ts'
+import { expandHomePath, resolveBaseDir } from '../os-jank.ts'
+import { baseDirFlag } from './config.ts'
+
+const SparseSettings = Schema.Record(Schema.String, Schema.Unknown)
+const decodeSettingsJson = Schema.decodeUnknownEffect(fromLenientJson(SparseSettings))
+const encodeSettingsJson = Schema.encodeEffect(fromJsonStringPretty(SparseSettings))
+const decodeThemeFileJsonExit = Schema.decodeUnknownExit(
+  Schema.fromJsonString(EnvironmentThemeFile),
+)
+const isEnvironmentThemeId = Schema.is(EnvironmentThemeId)
+
+export class ThemeSettingsUnreadableError extends Schema.TaggedErrorClass<ThemeSettingsUnreadableError>()(
+  'ThemeSettingsUnreadableError',
+  { settingsPath: Schema.String, cause: Schema.Defect() },
+)
+{
+  override get message(): string
+  {
+    return `Could not read ${this.settingsPath}. Fix its permissions, then run this again.`
+  }
+}
+
+export class ThemeSettingsMalformedError extends Schema.TaggedErrorClass<ThemeSettingsMalformedError>()(
+  'ThemeSettingsMalformedError',
+  { settingsPath: Schema.String, cause: Schema.Defect() },
+)
+{
+  override get message(): string
+  {
+    return `${this.settingsPath} is not a JSON object. Fix or remove it, then run this again.`
+  }
+}
+
+export class ThemeSettingsBusyError extends Schema.TaggedErrorClass<ThemeSettingsBusyError>()(
+  'ThemeSettingsBusyError',
+  { settingsPath: Schema.String, attempts: Schema.Number },
+)
+{
+  override get message(): string
+  {
+    return `${this.settingsPath} kept changing while writing (gave up after ${this.attempts} attempts). Try again.`
+  }
+}
+
+export class ThemeSettingsWriteError extends Schema.TaggedErrorClass<ThemeSettingsWriteError>()(
+  'ThemeSettingsWriteError',
+  { settingsPath: Schema.String, cause: Schema.Defect() },
+)
+{
+  override get message(): string
+  {
+    return `Could not write ${this.settingsPath}.`
+  }
+}
+
+export class ThemeFileUnreadableError extends Schema.TaggedErrorClass<ThemeFileUnreadableError>()(
+  'ThemeFileUnreadableError',
+  { filePath: Schema.String, cause: Schema.optional(Schema.Defect()) },
+)
+{
+  override get message(): string
+  {
+    return `Could not read ${this.filePath}.`
+  }
+}
+
+export class ThemeFileInvalidError extends Schema.TaggedErrorClass<ThemeFileInvalidError>()(
+  'ThemeFileInvalidError',
+  { filePath: Schema.String, cause: Schema.Defect() },
+)
+{
+  override get message(): string
+  {
+    return `${this.filePath} is not a valid theme file. Use a JSON palette with name, appearance, and colors, or both canvas and accent seeds.`
+  }
+}
+
+export class ThemeFileTooLargeError extends Schema.TaggedErrorClass<ThemeFileTooLargeError>()(
+  'ThemeFileTooLargeError',
+  { filePath: Schema.String, limit: Schema.Number },
+)
+{
+  override get message(): string
+  {
+    return `${this.filePath} is larger than ${this.limit} bytes, which is more than a theme can publish.`
+  }
+}
+
+export class ThemeFileColorlessError extends Schema.TaggedErrorClass<ThemeFileColorlessError>()(
+  'ThemeFileColorlessError',
+  { filePath: Schema.String },
+)
+{
+  override get message(): string
+  {
+    return `${this.filePath} has no colors to publish.`
+  }
+}
+
+export class ThemePublishError extends Schema.TaggedErrorClass<ThemePublishError>()(
+  'ThemePublishError',
+  { themesDir: Schema.String, cause: Schema.Defect() },
+)
+{
+  override get message(): string
+  {
+    return `Could not publish the theme into ${this.themesDir}.`
+  }
+}
+
+const INVALID_THEME_ID_REASON =
+  'is not a valid theme id (lowercase letters, digits, and hyphens; not an appearance keyword)'
+
+export class ThemeIdUnknownError extends Schema.TaggedErrorClass<ThemeIdUnknownError>()(
+  'ThemeIdUnknownError',
+  { themeId: Schema.String, known: Schema.Array(Schema.String) },
+)
+{
+  override get message(): string
+  {
+    return `No theme named "${this.themeId}". Available: ${this.known.join(', ')}. Publish one by passing a theme file instead of an id.`
+  }
+}
+
+export class ThemeIdInvalidError extends Schema.TaggedErrorClass<ThemeIdInvalidError>()(
+  'ThemeIdInvalidError',
+  { themeId: Schema.String },
+)
+{
+  override get message(): string
+  {
+    return `"${this.themeId}" ${INVALID_THEME_ID_REASON}.`
+  }
+}
+
+export class ThemeFileIdInvalidError extends Schema.TaggedErrorClass<ThemeFileIdInvalidError>()(
+  'ThemeFileIdInvalidError',
+  { themeId: Schema.String, filePath: Schema.String },
+)
+{
+  override get message(): string
+  {
+    return `"${this.themeId}" ${INVALID_THEME_ID_REASON}. Pass one with --id.`
+  }
+}
+
+export class ThemeTargetMissingError extends Schema.TaggedErrorClass<ThemeTargetMissingError>()(
+  'ThemeTargetMissingError',
+  {},
+)
+{
+  override get message(): string
+  {
+    return 'Provide a theme id or file, or run `456code theme clear` to remove the theme.'
+  }
+}
+
+const envT3Home = Config.string('T3CODE_HOME').pipe(Config.option)
+
+const resolveThemePaths = Effect.fn(function* (explicitBaseDir: Option.Option<string>)
+{
+  const envHome = Option.filter(yield* envT3Home, (value) => value.trim().length > 0)
+  const configuredBaseDir = Option.orElse(explicitBaseDir, () => envHome)
+  const baseDir = yield* resolveBaseDir(Option.getOrUndefined(configuredBaseDir))
+  const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined, {
+    baseDirIsExplicit: Option.isSome(configuredBaseDir),
+  })
+  return {
+    settingsPath: derivedPaths.settingsPath,
+    themesDir: derivedPaths.environmentThemesDir,
+  }
+})
+
+const readSettingsObject = Effect.fn(function* (settingsPath: string)
+{
+  const fs = yield* FileSystem.FileSystem
+  const raw = yield* fs
+    .readFileString(settingsPath)
+    .pipe(
+      Effect.catch((cause) =>
+        cause.reason._tag === 'NotFound'
+          ? Effect.succeed('')
+          : Effect.fail(new ThemeSettingsUnreadableError({ settingsPath, cause })),
+      ),
+    )
+  if (raw.trim().length === 0) return { raw, settings: {} }
+
+  const settings = yield* decodeSettingsJson(raw).pipe(
+    Effect.mapError((cause) => new ThemeSettingsMalformedError({ settingsPath, cause })),
+  )
+  return { raw, settings }
+})
+
+const CONCURRENT_WRITE_ATTEMPTS = 5
+
+const writeDefaultTheme = Effect.fn(function* (input: {
+  readonly settingsPath: string
+  readonly themeId: string
+})
+{
+  for (let attempt = 1; ; attempt++)
+  {
+    const { raw, settings } = yield* readSettingsObject(input.settingsPath)
+    const now = DateTime.toEpochMillis(yield* DateTime.now)
+    const previous =
+      typeof settings.defaultThemeSetAt === 'string'
+        ? Date.parse(settings.defaultThemeSetAt)
+        : Number.NaN
+    const nextMillis = Math.max(
+      now,
+      Number.isFinite(previous) && previous < 8.64e15 ? previous + 1 : now,
+    )
+    const setAt = DateTime.formatIso(DateTime.makeUnsafe(nextMillis))
+    const next =
+      input.themeId.length > 0
+        ? { ...settings, defaultTheme: input.themeId, defaultThemeSetAt: setAt }
+        : Object.fromEntries(
+            Object.entries(settings).filter(
+              ([key]) => key !== 'defaultTheme' && key !== 'defaultThemeSetAt',
+            ),
+          )
+
+    const contents = yield* encodeSettingsJson(next)
+    const current = yield* readSettingsObject(input.settingsPath)
+    if (current.raw !== raw)
+    {
+      if (attempt >= CONCURRENT_WRITE_ATTEMPTS)
+      {
+        return yield* Effect.fail(
+          new ThemeSettingsBusyError({
+            settingsPath: input.settingsPath,
+            attempts: CONCURRENT_WRITE_ATTEMPTS,
+          }),
+        )
+      }
+      continue
+    }
+
+    yield* writeFileStringAtomically({
+      filePath: input.settingsPath,
+      contents: `${contents}\n`,
+    }).pipe(
+      Effect.mapError(
+        (cause) => new ThemeSettingsWriteError({ settingsPath: input.settingsPath, cause }),
+      ),
+    )
+    return
+  }
+})
+
+const publishThemeFile = Effect.fn(function* (input: {
+  readonly themesDir: string
+  readonly filePath: string
+  readonly explicitId: Option.Option<string>
+})
+{
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const info = yield* fs
+    .stat(input.filePath)
+    .pipe(
+      Effect.mapError((cause) => new ThemeFileUnreadableError({ filePath: input.filePath, cause })),
+    )
+  if (info.type !== 'File')
+  {
+    return yield* Effect.fail(new ThemeFileUnreadableError({ filePath: input.filePath }))
+  }
+  if (Number(info.size) > MAX_THEME_FILE_BYTES)
+  {
+    return yield* Effect.fail(
+      new ThemeFileTooLargeError({ filePath: input.filePath, limit: MAX_THEME_FILE_BYTES }),
+    )
+  }
+  const resolvedSource = yield* fs
+    .realPath(input.filePath)
+    .pipe(
+      Effect.mapError((cause) => new ThemeFileUnreadableError({ filePath: input.filePath, cause })),
+    )
+  const raw = readThemeFileGuarded(resolvedSource, MAX_THEME_FILE_BYTES)
+  if (raw === null)
+  {
+    return yield* Effect.fail(new ThemeFileUnreadableError({ filePath: input.filePath }))
+  }
+
+  const decoded = decodeThemeFileJsonExit(raw)
+  if (decoded._tag === 'Failure')
+  {
+    return yield* Effect.fail(
+      new ThemeFileInvalidError({ filePath: input.filePath, cause: decoded.cause }),
+    )
+  }
+  if (!environmentThemeFileHasColors(decoded.value))
+  {
+    return yield* Effect.fail(new ThemeFileColorlessError({ filePath: input.filePath }))
+  }
+
+  const fileBasename = path.basename(input.filePath, '.json')
+  const themeId = Option.getOrElse(input.explicitId, () => fileBasename)
+  if (!isEnvironmentThemeId(themeId) || RESERVED_THEME_IDS.has(themeId))
+  {
+    return yield* Effect.fail(new ThemeFileIdInvalidError({ themeId, filePath: input.filePath }))
+  }
+
+  const destinationPath = path.join(input.themesDir, `${themeId}.json`)
+  const nonce = `${process.pid}-${NodeCrypto.randomUUID()}`
+  const backupPath = `${destinationPath}.rollback-${nonce}`
+  const stagingPath = `${destinationPath}.staging-${nonce}`
+  yield* fs
+    .makeDirectory(input.themesDir, { recursive: true })
+    .pipe(Effect.mapError((cause) => new ThemePublishError({ themesDir: input.themesDir, cause })))
+
+  const publishFailure = (cause: unknown) =>
+    new ThemePublishError({ themesDir: input.themesDir, cause })
+  return yield* Effect.try({
+    try: () =>
+    {
+      let staged: NodeFS.Stats | undefined
+      let hadPrevious = false
+      const isOwned = (info: NodeFS.Stats) =>
+        staged !== undefined && info.dev === staged.dev && info.ino === staged.ino
+      const revert = () =>
+      {
+        try
+        {
+          if (isOwned(NodeFS.lstatSync(stagingPath))) NodeFS.unlinkSync(stagingPath)
+        }
+        catch
+        {}
+        try
+        {
+          let current: NodeFS.Stats | undefined
+          try
+          {
+            current = NodeFS.lstatSync(destinationPath)
+          }
+          catch (error)
+          {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          }
+          if (hadPrevious)
+          {
+            if (current === undefined || isOwned(current))
+              NodeFS.renameSync(backupPath, destinationPath)
+            else NodeFS.unlinkSync(backupPath)
+          }
+          else if (current !== undefined && isOwned(current)) NodeFS.unlinkSync(destinationPath)
+        }
+        catch
+        {}
+      }
+      try
+      {
+        const fd = NodeFS.openSync(
+          stagingPath,
+          NodeFS.constants.O_WRONLY | NodeFS.constants.O_CREAT | NodeFS.constants.O_EXCL,
+          0o644,
+        )
+        let failed = false
+        let writeFailure: unknown
+        try
+        {
+          staged = NodeFS.fstatSync(fd)
+          NodeFS.writeFileSync(fd, raw)
+        }
+        catch (error)
+        {
+          failed = true
+          writeFailure = error
+        }
+        try
+        {
+          NodeFS.closeSync(fd)
+        }
+        catch (error)
+        {
+          if (!failed) throw error
+        }
+        if (failed) throw writeFailure
+        try
+        {
+          const previous = NodeFS.lstatSync(destinationPath)
+          if (!previous.isFile() && !previous.isSymbolicLink())
+            throw new Error('The theme destination is not a regular file or symlink.')
+          if (previous.isSymbolicLink())
+            NodeFS.symlinkSync(NodeFS.readlinkSync(destinationPath), backupPath)
+          else NodeFS.linkSync(destinationPath, backupPath)
+          hadPrevious = true
+          const current = NodeFS.lstatSync(destinationPath)
+          if (current.dev !== previous.dev || current.ino !== previous.ino)
+            throw new Error('The theme destination changed while preparing publication.')
+        }
+        catch (error)
+        {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        NodeFS.renameSync(stagingPath, destinationPath)
+      }
+      catch (error)
+      {
+        revert()
+        throw error
+      }
+      return {
+        themeId,
+        revert: Effect.sync(revert),
+        cleanup: Effect.sync(() =>
+        {
+          try
+          {
+            if (hadPrevious) NodeFS.unlinkSync(backupPath)
+          }
+          catch
+          {}
+        }),
+      }
+    },
+    catch: publishFailure,
+  })
+})
+
+const resolvableThemeIds = Effect.fn(function* (themesDir: string)
+{
+  const published = yield* readPublishedThemes(themesDir)
+  return [...BUILT_IN_THEME_IDS, ...published.map((theme) => theme.id)].toSorted()
+})
+
+const themeSetCommand = Command.make('set', {
+  baseDir: baseDirFlag,
+  id: Flag.string('id').pipe(
+    Flag.withDescription('Theme id to publish a file under, instead of its filename.'),
+    Flag.optional,
+  ),
+  theme: Argument.string('theme').pipe(
+    Argument.withDescription(
+      'A theme id (a built-in, or one this machine publishes — themes/nightfall.json is "nightfall"), or a path to a theme JSON file to publish and set in one step.',
+    ),
+  ),
+}).pipe(
+  Command.withDescription("Set the environment's theme; connected clients switch to it."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const target = yield* expandHomePath(flags.theme.trim())
+      if (target.length === 0)
+      {
+        return yield* Effect.fail(new ThemeTargetMissingError())
+      }
+      const paths = yield* resolveThemePaths(flags.baseDir)
+      const looksLikePath =
+        target.endsWith('.json') ||
+        target.includes('/') ||
+        target.includes('\\') ||
+        target.startsWith('~')
+      const targetIsFile =
+        looksLikePath && (yield* fs.exists(target).pipe(Effect.orElseSucceed(() => false)))
+      let themeId: string
+      if (targetIsFile)
+      {
+        yield* readSettingsObject(paths.settingsPath)
+        themeId = yield* Effect.acquireUseRelease(
+          publishThemeFile({ themesDir: paths.themesDir, filePath: target, explicitId: flags.id }),
+          (published) =>
+            Effect.gen(function* ()
+            {
+              const served = yield* readPublishedThemes(paths.themesDir)
+              if (!served.some((theme) => theme.id === published.themeId))
+              {
+                return yield* new ThemePublishError({
+                  themesDir: paths.themesDir,
+                  cause: new Error('The published theme exceeds the served directory limits.'),
+                })
+              }
+              yield* writeDefaultTheme({
+                settingsPath: paths.settingsPath,
+                themeId: published.themeId,
+              })
+              return published.themeId
+            }),
+          (published, exit) => (Exit.isSuccess(exit) ? published.cleanup : published.revert),
+        )
+      }
+      else if (looksLikePath)
+      {
+        return yield* Effect.fail(new ThemeFileUnreadableError({ filePath: target }))
+      }
+      else if (BUILT_IN_THEME_IDS.some((id) => id === target))
+      {
+        themeId = target
+      }
+      else if (isEnvironmentThemeId(target))
+      {
+        const known = yield* resolvableThemeIds(paths.themesDir)
+        if (!known.includes(target))
+        {
+          return yield* Effect.fail(new ThemeIdUnknownError({ themeId: target, known }))
+        }
+        themeId = target
+      }
+      else
+      {
+        return yield* Effect.fail(new ThemeIdInvalidError({ themeId: target }))
+      }
+      if (!targetIsFile) yield* writeDefaultTheme({ settingsPath: paths.settingsPath, themeId })
+      yield* Console.log(
+        targetIsFile
+          ? `Published ${target} as "${themeId}" and set it as the environment theme.\n`
+          : `Environment theme set to "${themeId}" in ${paths.settingsPath}.\n`,
+      )
+    }),
+  ),
+)
+
+const themeClearCommand = Command.make('clear', { baseDir: baseDirFlag }).pipe(
+  Command.withDescription("Remove the environment's theme; clients keep what they have."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* ()
+    {
+      const paths = yield* resolveThemePaths(flags.baseDir)
+      yield* writeDefaultTheme({ settingsPath: paths.settingsPath, themeId: '' })
+      yield* Console.log(`Environment theme cleared in ${paths.settingsPath}.\n`)
+    }),
+  ),
+)
+
+const themeShowCommand = Command.make('show', { baseDir: baseDirFlag }).pipe(
+  Command.withDescription("Show the environment's theme and its published themes."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* ()
+    {
+      const paths = yield* resolveThemePaths(flags.baseDir)
+      const { settings } = yield* readSettingsObject(paths.settingsPath)
+      const defaultTheme =
+        typeof settings.defaultTheme === 'string' && settings.defaultTheme.length > 0
+          ? settings.defaultTheme
+          : null
+
+      const published = (yield* readPublishedThemes(paths.themesDir))
+        .map((theme) => theme.id)
+        .toSorted()
+
+      yield* Console.log(
+        defaultTheme === null
+          ? 'Environment theme: not set.\n'
+          : `Environment theme: "${defaultTheme}".\n`,
+      )
+      yield* Console.log(
+        published.length === 0
+          ? `Published themes: none (publish into ${paths.themesDir}).\n`
+          : `Published themes: ${published.join(', ')}.\n`,
+      )
+    }),
+  ),
+)
+
+export const themeCommand = Command.make('theme').pipe(
+  Command.withDescription('Inspect and set environment-wide theme defaults.'),
+  Command.withSubcommands([themeSetCommand, themeClearCommand, themeShowCommand]),
+)

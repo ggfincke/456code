@@ -47,6 +47,7 @@ import { RpcSerialization, RpcServer } from 'effect/unstable/rpc'
 import * as CheckpointIdentity from './checkpointing/CheckpointIdentity.ts'
 import * as CheckpointDiffQuery from './orchestration/Services/CheckpointDiffQuery.ts'
 import * as ServerConfig from './config.ts'
+import * as EnvironmentTheme from './environmentTheme.ts'
 import * as Keybindings from './keybindings.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import * as RemoteOpenTargets from './environment/RemoteOpenTargets.ts'
@@ -217,6 +218,7 @@ const makeWsRpcLayer = (
       const threadDeletionReactor = yield* ThreadDeletionReactor
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery
       const keybindings = yield* Keybindings.Keybindings
+      const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService
@@ -1305,7 +1307,7 @@ const makeWsRpcLayer = (
             { 'rpc.aggregate': 'terminal' },
           ),
         ...previewRpcHandlers,
-        [WS_METHODS.subscribeServerConfig]: (_input) =>
+        [WS_METHODS.subscribeServerConfig]: (input) =>
           observeRpcStreamEffect(
             WS_METHODS.subscribeServerConfig,
             Effect.gen(function* ()
@@ -1328,8 +1330,30 @@ const makeWsRpcLayer = (
                 })),
                 Stream.debounce(Duration.millis(PROVIDER_STATUS_DEBOUNCE_MS)),
               )
-              const settingsUpdates = serverSettings.streamChanges.pipe(
-                Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
+              const environmentThemeUpdates =
+                input.environmentThemes === true
+                  ? environmentTheme.streamChanges.pipe(
+                      Stream.map((themes) => ({
+                        version: 1 as const,
+                        type: 'environmentThemesUpdated' as const,
+                        payload: { themes },
+                      })),
+                    )
+                  : Stream.empty
+
+              yield* providerRegistry
+                .refresh()
+                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped)
+
+              const initialConfig = yield* loadServerConfig
+              const settingsUpdates = Stream.concat(
+                Stream.succeed(initialConfig.settings),
+                serverSettings.streamCurrentAndChanges.pipe(
+                  Stream.map(ServerSettings.redactServerSettingsForClient),
+                ),
+              ).pipe(
+                Stream.changes,
+                Stream.drop(1),
                 Stream.map((settings) => ({
                   version: 1 as const,
                   type: 'settingsUpdated' as const,
@@ -1337,20 +1361,19 @@ const makeWsRpcLayer = (
                 })),
               )
 
-              yield* providerRegistry
-                .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped)
-
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
-                Stream.merge(providerStatuses, settingsUpdates),
+                Stream.merge(
+                  providerStatuses,
+                  Stream.merge(settingsUpdates, environmentThemeUpdates),
+                ),
               )
 
               return Stream.concat(
                 Stream.make({
                   version: 1 as const,
                   type: 'snapshot' as const,
-                  config: yield* loadServerConfig,
+                  config: initialConfig,
                 }),
                 liveUpdates,
               )

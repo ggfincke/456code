@@ -575,7 +575,15 @@ export const ArchitectureAutoAnalysis = Schema.Literals(['off', 'on-demand', 'au
 export type ArchitectureAutoAnalysis = typeof ArchitectureAutoAnalysis.Type
 export const DEFAULT_ARCHITECTURE_AUTO_ANALYSIS: ArchitectureAutoAnalysis = 'on-demand'
 
+// CLI validation owns this setting; it is intentionally absent from ServerSettingsPatch.
+export const DefaultThemePreference = Schema.String.check(Schema.isMaxLength(64))
+export type DefaultThemePreference = typeof DefaultThemePreference.Type
+
 export const ServerSettings = Schema.Struct({
+  defaultTheme: DefaultThemePreference.pipe(Schema.withDecodingDefault(Effect.succeed(''))),
+  defaultThemeSetAt: Schema.String.check(Schema.isMaxLength(64)).pipe(
+    Schema.withDecodingDefault(Effect.succeed('')),
+  ),
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),

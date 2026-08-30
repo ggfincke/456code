@@ -499,7 +499,15 @@ export function useSettingsRestore(onRestored?: () => void)
 
 export function GeneralSettingsPanel()
 {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, environmentThemes } = useTheme()
+  const themeOptions = [
+    ...THEME_OPTIONS,
+    ...environmentThemes.map((definition) => ({ value: definition.id, label: definition.label })),
+  ]
+  if (!themeOptions.some((option) => option.value === theme))
+  {
+    themeOptions.push({ value: theme, label: `${theme} (unavailable)` })
+  }
   const settings = usePrimarySettings()
   const updateSettings = useUpdatePrimarySettings()
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
@@ -561,24 +569,16 @@ export function GeneralSettingsPanel()
               value={theme}
               onValueChange={(value) =>
               {
-                if (
-                  value === 'system' ||
-                  value === 'light' ||
-                  value === 'dark' ||
-                  value === 'ocean'
-                )
-                {
-                  setTheme(value)
-                }
+                if (typeof value === 'string') setTheme(value)
               }}
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Theme preference">
                 <SelectValue>
-                  {THEME_OPTIONS.find((option) => option.value === theme)?.label ?? 'System'}
+                  {themeOptions.find((option) => option.value === theme)?.label ?? 'System'}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                {THEME_OPTIONS.map((option) => (
+                {themeOptions.map((option) => (
                   <SelectItem hideIndicator key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>

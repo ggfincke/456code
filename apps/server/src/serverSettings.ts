@@ -160,6 +160,9 @@ export class ServerSettingsService extends Context.Service<
 
     // stream of settings change events.
     readonly streamChanges: Stream.Stream<ServerSettings>
+
+    // subscribe before reading current settings; queued notifications never replay stale values.
+    readonly streamCurrentAndChanges: Stream.Stream<ServerSettings, ServerSettingsError>
   }
 >()('456code/serverSettings/ServerSettingsService')
 {
@@ -192,6 +195,9 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
           Effect.map(resolveTextGenerationProvider),
         ),
       streamChanges: Stream.empty,
+      streamCurrentAndChanges: Stream.fromEffect(
+        Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider)),
+      ),
     } satisfies ServerSettingsService['Service']
   })
 
@@ -869,12 +875,24 @@ const make = Effect.gen(function* ()
     yield* Deferred.succeed(startedDeferred, undefined).pipe(Effect.orDie)
   })
 
+  const getSettings = getSettingsFromCache.pipe(
+    Effect.flatMap(materializeProviderEnvironmentSecrets),
+    Effect.map(resolveTextGenerationProvider),
+  )
+
   return {
     start,
     ready: Deferred.await(startedDeferred),
-    getSettings: getSettingsFromCache.pipe(
-      Effect.flatMap(materializeProviderEnvironmentSecrets),
-      Effect.map(resolveTextGenerationProvider),
+    getSettings,
+    streamCurrentAndChanges: Stream.unwrap(
+      Effect.gen(function* ()
+      {
+        const subscription = yield* PubSub.subscribe(changesPubSub)
+        return Stream.concat(
+          Stream.fromEffect(getSettings),
+          Stream.fromSubscription(subscription).pipe(Stream.mapEffect(() => getSettings)),
+        ).pipe(Stream.changes)
+      }),
     ),
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(

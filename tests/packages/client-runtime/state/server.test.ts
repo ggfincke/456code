@@ -3,6 +3,7 @@
 
 import {
   EnvironmentId,
+  type EnvironmentTheme,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
@@ -29,9 +30,11 @@ import {
   makeEnvironmentServerConfigState,
   projectServerWelcome,
   resolveServerConfigValue,
+  type ServerConfigProjection,
 } from '../../../../packages/client-runtime/src/state/server.ts'
 
 const CONFIG = {
+  environment: { environmentId: EnvironmentId.make('environment-1'), capabilities: {} },
   availableEditors: [],
   issues: [],
   keybindings: {},
@@ -142,8 +145,13 @@ describe('server state projection', () =>
     Effect.gen(function* ()
     {
       const events = yield* Queue.unbounded<ServerConfigStreamEvent>()
+      const subscriptionInputs: unknown[] = []
       const client = {
-        [WS_METHODS.subscribeServerConfig]: () => Stream.fromQueue(events),
+        [WS_METHODS.subscribeServerConfig]: (input: unknown) =>
+        {
+          subscriptionInputs.push(input)
+          return Stream.fromQueue(events)
+        },
       } as unknown as WsRpcProtocolClient
       const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
         target: TARGET,
@@ -199,6 +207,7 @@ describe('server state projection', () =>
       )
 
       expect((yield* Queue.take(savedConfigs)).providers).toEqual([])
+      expect(subscriptionInputs).toEqual([{}])
     }),
   )
 
@@ -243,4 +252,163 @@ describe('server state projection', () =>
       expect(yield* Queue.poll(savedConfigs)).toEqual(Option.none())
     }),
   )
+
+  it.effect('retains live themes across session replacement without persisting them', () =>
+    Effect.gen(function* ()
+    {
+      const theme: EnvironmentTheme = {
+        id: 'published',
+        name: 'Published',
+        appearance: 'dark',
+        canvas: '#111',
+        accent: '#abcdef',
+      }
+      const config: ServerConfig = {
+        ...CONFIG,
+        environment: {
+          ...CONFIG.environment,
+          capabilities: { ...CONFIG.environment.capabilities, environmentThemes: true },
+        },
+      }
+      const firstEvents = yield* Queue.unbounded<ServerConfigStreamEvent>()
+      const secondEvents = yield* Queue.unbounded<ServerConfigStreamEvent>()
+      const inputs: unknown[] = []
+      const makeClient = (events: Queue.Queue<ServerConfigStreamEvent>) =>
+        ({
+          [WS_METHODS.subscribeServerConfig]: (input: unknown) =>
+          {
+            inputs.push(input)
+            return Stream.fromQueue(events)
+          },
+        }) as unknown as WsRpcProtocolClient
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(Option.some(session(makeClient(firstEvents)))),
+        prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      })
+      let cacheLoads = 0
+      const saved: ServerConfig[] = []
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.none()),
+        saveShell: () => Effect.void,
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () =>
+          Effect.sync(() =>
+          {
+            cacheLoads += 1
+            return Option.some({ ...config, environmentThemes: [theme] })
+          }),
+        saveServerConfig: (_id, value) =>
+          Effect.sync(() =>
+          {
+            saved.push(value)
+          }),
+        loadVcsRefs: () => Effect.succeed(Option.none()),
+        saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      })
+      yield* Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const state = yield* makeEnvironmentServerConfigState(true).pipe(
+            Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+            Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+          )
+          expect(
+            Option.getOrThrow(yield* SubscriptionRef.get(state)).config.environmentThemes,
+          ).toBeUndefined()
+          const waitForEvent = (event: ServerConfigStreamEvent) =>
+            SubscriptionRef.changes(state).pipe(
+              Stream.filter((value) => Option.isSome(value) && value.value.latestEvent === event),
+              Stream.runHead,
+            )
+          yield* Queue.offer(firstEvents, snapshotEvent(config))
+          const published: ServerConfigStreamEvent = {
+            version: 1,
+            type: 'environmentThemesUpdated',
+            payload: { themes: [theme] },
+          }
+          yield* Queue.offer(firstEvents, published)
+          yield* waitForEvent(published)
+          yield* SubscriptionRef.set(supervisor.session, Option.none())
+          expect(
+            Option.getOrThrow(yield* SubscriptionRef.get(state)).config.environmentThemes,
+          ).toEqual([theme])
+          yield* SubscriptionRef.set(
+            supervisor.session,
+            Option.some(session(makeClient(secondEvents))),
+          )
+          const reconnect = snapshotEvent(config)
+          yield* Queue.offer(secondEvents, reconnect)
+          yield* waitForEvent(reconnect)
+          expect(
+            Option.getOrThrow(yield* SubscriptionRef.get(state)).config.environmentThemes,
+          ).toEqual([theme])
+          const cleared: ServerConfigStreamEvent = {
+            version: 1,
+            type: 'environmentThemesUpdated',
+            payload: { themes: [] },
+          }
+          yield* Queue.offer(secondEvents, cleared)
+          yield* waitForEvent(cleared)
+          expect(
+            Option.getOrThrow(yield* SubscriptionRef.get(state)).config.environmentThemes,
+          ).toBeUndefined()
+          yield* Queue.offer(secondEvents, published)
+          yield* waitForEvent(published)
+        }),
+      )
+      expect(cacheLoads).toBe(1)
+      expect(inputs).toEqual([{ environmentThemes: true }, { environmentThemes: true }])
+      expect(saved.length).toBeGreaterThan(0)
+      expect(saved.every((value) => value.environmentThemes === undefined)).toBe(true)
+      expect(saved.at(-1)?.providers).toEqual(config.providers)
+    }),
+  )
+
+  it('does not carry themes from cache, another environment, or a server that lost support', () =>
+  {
+    const theme: EnvironmentTheme = {
+      id: 'published',
+      name: 'Published',
+      appearance: 'dark',
+      canvas: '#111',
+      accent: '#abc',
+    }
+    const config: ServerConfig = {
+      ...CONFIG,
+      environment: {
+        ...CONFIG.environment,
+        capabilities: { ...CONFIG.environment.capabilities, environmentThemes: true },
+      },
+      environmentThemes: [theme],
+    }
+    const current = { config, source: 'live' as const, latestEvent: snapshotEvent(config) }
+    const themesAfter = (previous: ServerConfigProjection, next: ServerConfig) =>
+      Option.getOrThrow(applyServerConfigProjection(Option.some(previous), snapshotEvent(next)))
+        .config.environmentThemes
+    expect(themesAfter(current, CONFIG)).toBeUndefined()
+    expect(
+      themesAfter(current, {
+        ...config,
+        environment: { ...config.environment, environmentId: EnvironmentId.make('other') },
+      }),
+    ).toBeUndefined()
+    expect(
+      Option.getOrThrow(
+        applyServerConfigProjection(
+          Option.some({ ...current, source: 'cache' }),
+          snapshotEvent(config),
+        ),
+      ).config.environmentThemes,
+    ).toBeUndefined()
+  })
 })

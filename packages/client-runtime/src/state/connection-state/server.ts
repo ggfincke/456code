@@ -45,11 +45,21 @@ export function applyServerConfigProjection(
   switch (event.type)
   {
     case 'snapshot':
+    {
+      const config = withoutEnvironmentThemes(event.config)
+      const themes =
+        config.environment.capabilities.environmentThemes === true &&
+        Option.isSome(current) &&
+        current.value.source === 'live' &&
+        current.value.config.environment.environmentId === config.environment.environmentId
+          ? current.value.config.environmentThemes
+          : undefined
       return Option.some({
-        config: event.config,
+        config: themes === undefined ? config : { ...config, environmentThemes: themes },
         latestEvent: event,
         source: 'live',
       })
+    }
     case 'keybindingsUpdated':
       return Option.map(current, (projection) => ({
         config: {
@@ -78,6 +88,20 @@ export function applyServerConfigProjection(
         latestEvent: event,
         source: 'live',
       }))
+    case 'environmentThemesUpdated':
+      return Option.map(current, (projection) =>
+        projection.source !== 'live' ||
+        projection.config.environment.capabilities.environmentThemes !== true
+          ? projection
+          : {
+              ...projection,
+              config:
+                event.payload.themes.length > 0
+                  ? { ...projection.config, environmentThemes: event.payload.themes }
+                  : withoutEnvironmentThemes(projection.config),
+              latestEvent: event,
+            },
+      )
   }
 }
 
@@ -96,11 +120,19 @@ const cachedConfigSnapshotEvent = (config: ServerConfig): ServerConfigStreamEven
   config,
 })
 
+// published palettes belong to the live environment, never its persisted cache
+function withoutEnvironmentThemes(config: ServerConfig): ServerConfig
+{
+  if (config.environmentThemes === undefined) return config
+  const { environmentThemes: _themes, ...rest } = config
+  return rest
+}
+
 // keeps a complete server configuration available during reconnects. Server
 // config carries the provider/model catalogue used by task creation, so it is
 // useful—and safe—to retain after a transport session ends.
 export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConfigState.make')(
-  function* ()
+  function* (environmentThemes?: boolean)
   {
     const supervisor = yield* EnvironmentSupervisor
     const cache = yield* EnvironmentCacheStore
@@ -117,11 +149,11 @@ export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConf
       ),
     )
     const state = yield* SubscriptionRef.make<Option.Option<ServerConfigProjection>>(
-      Option.map(cachedConfig, (config) => ({
-        config,
-        latestEvent: cachedConfigSnapshotEvent(config),
-        source: 'cache' as const,
-      })),
+      Option.map(cachedConfig, (cached) =>
+      {
+        const config = withoutEnvironmentThemes(cached)
+        return { config, latestEvent: cachedConfigSnapshotEvent(config), source: 'cache' as const }
+      }),
     )
     const persistence = yield* Queue.sliding<ServerConfig>(1)
     const pendingPersistence = yield* Ref.make<Option.Option<ServerConfig>>(Option.none())
@@ -130,7 +162,7 @@ export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConf
       config: ServerConfig,
     )
     {
-      return yield* cache.saveServerConfig(environmentId, config).pipe(
+      return yield* cache.saveServerConfig(environmentId, withoutEnvironmentThemes(config)).pipe(
         Effect.as(true),
         Effect.catch((error) =>
           Effect.logWarning('Could not persist cached server configuration.').pipe(
@@ -163,7 +195,10 @@ export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConf
       Effect.forkScoped,
     )
 
-    yield* subscribe(WS_METHODS.subscribeServerConfig, {}).pipe(
+    yield* subscribe(
+      WS_METHODS.subscribeServerConfig,
+      environmentThemes === true ? { environmentThemes: true } : {},
+    ).pipe(
       Stream.runForEach((event) =>
         Effect.gen(function* ()
         {
@@ -195,12 +230,15 @@ export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConf
   },
 )
 
-export function serverConfigStateChanges(environmentId: EnvironmentId)
+export function serverConfigStateChanges(
+  environmentId: EnvironmentId,
+  environmentThemes?: boolean,
+)
 {
   return followStreamInEnvironment(
     environmentId,
     Stream.unwrap(
-      makeEnvironmentServerConfigState().pipe(
+      makeEnvironmentServerConfigState(environmentThemes).pipe(
         Effect.map((state) =>
           SubscriptionRef.changes(state).pipe(
             Stream.filterMap((projection) =>
@@ -250,6 +288,7 @@ export function createServerEnvironmentAtoms<R, E>(
     readonly initialConfigValueAtom: (
       environmentId: EnvironmentId,
     ) => Atom.Atom<ServerConfig | null>
+    readonly environmentThemes?: boolean
   },
 )
 {
@@ -260,7 +299,7 @@ export function createServerEnvironmentAtoms<R, E>(
   }
   const configProjectionFamily = Atom.family((environmentId: EnvironmentId) =>
     runtime
-      .atom(serverConfigStateChanges(environmentId))
+      .atom(serverConfigStateChanges(environmentId, options.environmentThemes))
       .pipe(
         Atom.setIdleTTL(5 * 60_000),
         Atom.withLabel(`environment-data:server:config-projection:${environmentId}`),

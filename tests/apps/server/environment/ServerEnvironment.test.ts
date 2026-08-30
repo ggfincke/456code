@@ -79,6 +79,7 @@ it.layer(NodeServices.layer)('ServerEnvironmentLive', (it) =>
       expect(second.capabilities.safeMdxDocument).toBe(true)
       expect(second.capabilities.orchestrateRunExecutionV1).toBe(true)
       expect(second.capabilities.attachmentUploads).toBe(true)
+      expect(second.capabilities.environmentThemes).toBe(true)
       expect(second.capabilities.fileAttachments).toEqual({ maxUploadBytes: 50 * 1024 * 1024 })
       expect(typeof second.capabilities.architectureImpact).toBe('boolean')
     }),

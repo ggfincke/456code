@@ -446,6 +446,44 @@ export const ServerSignalProcessResult = Schema.Struct({
 })
 export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type
 
+export const EnvironmentThemeColor = Schema.String.check(
+  Schema.isPattern(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/),
+)
+export type EnvironmentThemeColor = typeof EnvironmentThemeColor.Type
+
+// published filenames cannot shadow a stock client selection.
+export const EnvironmentThemeId = Schema.String.check(
+  Schema.isPattern(/^(?!(?:system|light|dark|ocean)$)[a-z0-9][a-z0-9-]{0,47}$/),
+)
+export type EnvironmentThemeId = typeof EnvironmentThemeId.Type
+
+const EnvironmentThemeColors = Schema.Record(
+  Schema.String.check(Schema.isPattern(/^[a-zA-Z][a-zA-Z0-9]{0,63}$/)),
+  TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+)
+
+const environmentThemeFields = {
+  version: Schema.optionalKey(Schema.Literal(1)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(48)),
+  appearance: Schema.Literals(['light', 'dark']),
+  canvas: Schema.optionalKey(EnvironmentThemeColor),
+  accent: Schema.optionalKey(EnvironmentThemeColor),
+  colors: Schema.optionalKey(EnvironmentThemeColors),
+  variants: Schema.optionalKey(
+    Schema.Struct({
+      light: Schema.optionalKey(EnvironmentThemeColors),
+      dark: Schema.optionalKey(EnvironmentThemeColors),
+    }),
+  ),
+}
+
+// the filename owns identity; an embedded id never overrides it.
+export const EnvironmentThemeFile = Schema.Struct(environmentThemeFields)
+export type EnvironmentThemeFile = typeof EnvironmentThemeFile.Type
+
+export const EnvironmentTheme = Schema.Struct({ id: EnvironmentThemeId, ...environmentThemeFields })
+export type EnvironmentTheme = typeof EnvironmentTheme.Type
+
 export const ServerConfig = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,
@@ -463,6 +501,8 @@ export const ServerConfig = Schema.Struct({
   shellResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
   // whether thread subscriptions can emit an opt-in catch-up completion marker.
   threadResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  // populated by client projection; the initial theme set arrives only through the opt-in stream.
+  environmentThemes: Schema.optionalKey(Schema.Array(EnvironmentTheme)),
 })
 export type ServerConfig = typeof ServerConfig.Type
 
@@ -547,11 +587,26 @@ export const ServerConfigStreamSettingsUpdatedEvent = Schema.Struct({
 export type ServerConfigStreamSettingsUpdatedEvent =
   typeof ServerConfigStreamSettingsUpdatedEvent.Type
 
+export const ServerConfigEnvironmentThemesUpdatedPayload = Schema.Struct({
+  themes: Schema.Array(EnvironmentTheme),
+})
+export type ServerConfigEnvironmentThemesUpdatedPayload =
+  typeof ServerConfigEnvironmentThemesUpdatedPayload.Type
+
+export const ServerConfigStreamEnvironmentThemesUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal('environmentThemesUpdated'),
+  payload: ServerConfigEnvironmentThemesUpdatedPayload,
+})
+export type ServerConfigStreamEnvironmentThemesUpdatedEvent =
+  typeof ServerConfigStreamEnvironmentThemesUpdatedEvent.Type
+
 export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
   ServerConfigStreamProviderStatusesEvent,
   ServerConfigStreamSettingsUpdatedEvent,
+  ServerConfigStreamEnvironmentThemesUpdatedEvent,
 ])
 export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type
 

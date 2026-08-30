@@ -123,6 +123,7 @@ import * as CheckpointIdentity from '../../../apps/server/src/checkpointing/Chec
 import * as GitManager from '../../../apps/server/src/git/GitManager.ts'
 import * as GitStatusReaderLive from '../../../apps/server/src/git/GitStatusReaderLive.ts'
 import * as Keybindings from '../../../apps/server/src/keybindings.ts'
+import * as EnvironmentTheme from '../../../apps/server/src/environmentTheme.ts'
 import * as ExternalLauncher from '../../../apps/server/src/process/externalLauncher.ts'
 import * as RemoteOpenTargets from '../../../apps/server/src/environment/RemoteOpenTargets.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
@@ -407,6 +408,7 @@ const buildAppUnderTest = (options?: {
   config?: Partial<ServerConfig.ServerConfig['Service']>
   layers?: {
     keybindings?: Partial<Keybindings.Keybindings['Service']>
+    environmentTheme?: Partial<EnvironmentTheme.EnvironmentThemeService['Service']>
     providerRegistry?: Partial<ProviderRegistry.ProviderRegistry['Service']>
     serverSettings?: Partial<ServerSettings.ServerSettingsService['Service']>
     externalLauncher?: Partial<ExternalLauncher.ExternalLauncher['Service']>
@@ -656,6 +658,11 @@ const buildAppUnderTest = (options?: {
             streamChanges: Stream.empty,
             ...options?.layers?.keybindings,
           }),
+          Layer.mock(EnvironmentTheme.EnvironmentThemeService)({
+            current: Effect.succeed([]),
+            streamChanges: Stream.succeed([]),
+            ...options?.layers?.environmentTheme,
+          }),
         ),
       ),
       Layer.provide(
@@ -679,6 +686,7 @@ const buildAppUnderTest = (options?: {
           getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
           updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
           streamChanges: Stream.empty,
+          streamCurrentAndChanges: Stream.succeed(DEFAULT_SERVER_SETTINGS),
           ...options?.layers?.serverSettings,
         }),
       ),
@@ -3314,6 +3322,94 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         version: 1,
         type: 'keybindingsUpdated',
         payload: { keybindings: [], issues: [] },
+      })
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('streams published themes only to opted-in config subscribers', () =>
+    Effect.gen(function* ()
+    {
+      const themes = [
+        {
+          id: 'nightfall',
+          name: 'Nightfall',
+          appearance: 'dark' as const,
+          canvas: '#123',
+          accent: '#456',
+        },
+      ]
+      yield* buildAppUnderTest({
+        layers: {
+          environmentTheme: { streamChanges: Stream.make(themes, []) },
+        },
+      })
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const legacy = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.runCollect),
+        ),
+      )
+      assert.deepEqual(
+        Array.from(legacy).map((event) => event.type),
+        ['snapshot'],
+      )
+      const modern = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({ environmentThemes: true }).pipe(
+            Stream.runCollect,
+          ),
+        ),
+      )
+      assert.equal(modern[0]?.type, 'snapshot')
+      if (modern[0]?.type === 'snapshot') assert.notProperty(modern[0].config, 'environmentThemes')
+      assert.deepEqual(Array.from(modern).slice(1), [
+        { version: 1, type: 'environmentThemesUpdated', payload: { themes } },
+        { version: 1, type: 'environmentThemesUpdated', payload: { themes: [] } },
+      ])
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('catches a theme default changed after the config snapshot read', () =>
+    Effect.gen(function* ()
+    {
+      const changed = {
+        ...DEFAULT_SERVER_SETTINGS,
+        defaultTheme: 'ocean',
+        defaultThemeSetAt: '2026-08-30T00:00:00.001Z',
+      }
+      let snapshotRead = false
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.sync(() =>
+            {
+              snapshotRead = true
+              return DEFAULT_SERVER_SETTINGS
+            }),
+            streamCurrentAndChanges: Stream.unwrap(
+              Effect.sync(() =>
+              {
+                assert.isTrue(snapshotRead)
+                return Stream.succeed(changed)
+              }),
+            ),
+          },
+        },
+      })
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.runCollect),
+        ),
+      )
+      assert.deepEqual(
+        Array.from(events).map((event) => event.type),
+        ['snapshot', 'settingsUpdated'],
+      )
+      assert.deepEqual(events[1], {
+        version: 1,
+        type: 'settingsUpdated',
+        payload: { settings: changed },
       })
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
