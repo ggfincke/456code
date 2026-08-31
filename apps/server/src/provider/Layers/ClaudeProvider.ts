@@ -659,6 +659,10 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
       // connected claude.ai MCP servers are discovered outside filesystem
       // config; disable them independently for this health check.
       ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+      // skip IDE discovery because the probe never opens an interactive terminal.
+      FORCE_CODE_TERMINAL: undefined,
+      CLAUDE_CODE_AUTO_CONNECT_IDE: '0',
+      CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1',
     },
     ...(input.cwd ? { cwd: input.cwd } : {}),
     stderr: () =>
