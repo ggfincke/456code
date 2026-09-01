@@ -18,7 +18,22 @@ import {
   XIcon,
   ZapIcon,
 } from 'lucide-react'
-import { memo, use, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  memo,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react'
+import {
+  resolveViewedImageAsset,
+  workEntryViewedImagePath,
+  type ViewedImageAsset,
+} from '@t3tools/client-runtime/thread-activity'
+import type { EnvironmentId } from '@t3tools/contracts'
 import { cn } from '~/lib/utils'
 import {
   formatDuration,
@@ -36,6 +51,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { normalizeCompactToolLabel, type MessagesTimelineRow } from './MessagesTimeline.logic'
 import { toolGroupAction, workEntryIsVisibleInGroup } from './grouping'
 import { formatWorkspaceRelativePath } from '../../../lib/filePathDisplay'
+import { useAssetUrlState } from '../../../assets/assetUrls'
 import {
   TimelineRowActivityCtx,
   TimelineRowCtx,
@@ -769,6 +785,51 @@ export function subagentMetadataLabel(workEntry: TimelineWorkEntry): string | nu
 }
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation()
+
+const ViewedWorkImage = memo(function ViewedWorkImage(props: {
+  readonly environmentId: EnvironmentId
+  readonly image: ViewedImageAsset
+  readonly onExpand: (src: string, name: string) => void
+})
+{
+  const assetUrl = useAssetUrlState(props.environmentId, props.image.resource)
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
+
+  if (assetUrl._tag === 'Failure' || (assetUrl._tag === 'Success' && failedUrl === assetUrl.url))
+  {
+    return <p className="text-[11px] text-muted-foreground">Image unavailable</p>
+  }
+  if (assetUrl._tag !== 'Success')
+  {
+    return <div className="aspect-video w-64 max-w-full rounded-md bg-muted/60" role="status" />
+  }
+
+  const src = assetUrl.url + props.image.srcFragment
+  const open = (event: MouseEvent<HTMLImageElement> | KeyboardEvent<HTMLImageElement>) =>
+  {
+    event.preventDefault()
+    event.stopPropagation()
+    props.onExpand(src, props.image.alt)
+  }
+  return (
+    <img
+      src={src}
+      alt={props.image.alt}
+      loading="lazy"
+      draggable={false}
+      role="button"
+      tabIndex={0}
+      aria-label={`Preview ${props.image.alt}`}
+      className="max-h-72 max-w-full cursor-zoom-in rounded-md border border-border/45 object-contain"
+      onClick={open}
+      onKeyDown={(event) =>
+      {
+        if (event.key === 'Enter' || event.key === ' ') open(event)
+      }}
+      onError={() => setFailedUrl(assetUrl.url)}
+    />
+  )
+})
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry
