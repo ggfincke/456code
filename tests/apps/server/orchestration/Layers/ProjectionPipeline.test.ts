@@ -2880,6 +2880,32 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
         '2026-02-26T12:35:00.000Z',
       )
 
+      // invalid tool payloads prove shell refresh filters lifecycle rows before decoding
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES (
+          'activity-stale-user-input-malformed-tool',
+          ${threadId},
+          NULL,
+          'tool',
+          'tool.completed',
+          'Malformed tool output',
+          'not-json',
+          NULL,
+          '2026-02-26T12:35:01.500Z'
+        )
+      `
+
       yield* appendAndProject({
         type: 'thread.activity-appended',
         eventId: EventId.make('evt-stale-user-input-3'),

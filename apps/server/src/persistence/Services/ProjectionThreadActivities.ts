@@ -61,6 +61,11 @@ export interface ProjectionThreadActivityRepositoryShape
     input: ListProjectionThreadActivitiesInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>
 
+  // list only the lifecycle rows used to derive pending user-input state.
+  readonly listUserInputLifecycleByThreadId: (
+    input: ListProjectionThreadActivitiesInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>
+
   // delete projected thread activity rows by thread.
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadActivitiesInput,

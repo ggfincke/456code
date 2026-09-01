@@ -641,6 +641,80 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
     }),
   )
 
+  it.effect('filters targeted activities before payload decoding', () =>
+    Effect.gen(function* ()
+    {
+      const snapshotQuery = yield* ProjectionSnapshotQuery
+      const sql = yield* SqlClient.SqlClient
+      yield* clearProjectionTables(sql)
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json, scripts_json,
+          created_at, updated_at, deleted_at
+        ) VALUES (
+          'project-filtered-detail', 'Filtered detail', '/tmp/filtered-detail',
+          '{"provider":"codex","model":"gpt-5"}', '[]',
+          '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL
+        )
+      `
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, created_at, updated_at
+        ) VALUES (
+          'thread-filtered-detail', 'project-filtered-detail', 'Filtered detail',
+          '{"provider":"codex","model":"gpt-5"}',
+          '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z'
+        )
+      `
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, sequence, created_at
+        ) VALUES
+          (
+            'activity-task-started', 'thread-filtered-detail', NULL, 'info', 'task.started',
+            'Ship the query filter', '{"taskId":"task-1"}', 1,
+            '2026-03-01T00:00:01.000Z'
+          ),
+          (
+            'activity-malformed-tool', 'thread-filtered-detail', NULL, 'tool', 'tool.completed',
+            'Malformed tool output', 'not-json', 2, '2026-03-01T00:00:02.000Z'
+          )
+      `
+
+      const withoutActivities = yield* snapshotQuery.getThreadDetailById(
+        ThreadId.make('thread-filtered-detail'),
+        { activityKinds: [] },
+      )
+      assert.equal(withoutActivities._tag, 'Some')
+      if (withoutActivities._tag === 'Some')
+      {
+        assert.deepEqual(withoutActivities.value.activities, [])
+      }
+
+      const withTaskActivities = yield* snapshotQuery.getThreadDetailById(
+        ThreadId.make('thread-filtered-detail'),
+        { activityKinds: ['task.started', 'task.progress'] },
+      )
+      assert.equal(withTaskActivities._tag, 'Some')
+      if (withTaskActivities._tag === 'Some')
+      {
+        assert.deepEqual(withTaskActivities.value.activities, [
+          {
+            id: EventId.make('activity-task-started'),
+            tone: 'info',
+            kind: 'task.started',
+            summary: 'Ship the query filter',
+            payload: { taskId: 'task-1' },
+            turnId: null,
+            sequence: 1,
+            createdAt: '2026-03-01T00:00:01.000Z',
+          },
+        ])
+      }
+    }),
+  )
+
   it.effect('keeps archived threads out of the main shell snapshot', () =>
     Effect.gen(function* ()
     {

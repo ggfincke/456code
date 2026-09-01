@@ -97,6 +97,7 @@ import {
   type ProjectionImportReconciliationContext,
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
+  type ProjectionThreadDetailQuery,
   type ProjectionSnapshotQueryShape,
 } from '../Services/ProjectionSnapshotQuery.ts'
 
@@ -132,6 +133,10 @@ const EventReplayStatsInput = Schema.Struct({
 const EventReplayStatsRowSchema = Schema.Struct({
   eventCount: NonNegativeInt,
   payloadBytes: NonNegativeInt,
+})
+const ThreadActivityKindsLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  activityKinds: Schema.Array(Schema.String),
 })
 const ThreadActivityIdsLookupInput = Schema.Struct({
   activityIds: Schema.Array(EventId),
@@ -1468,6 +1473,63 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           created_at AS "createdAt"
         FROM projection_thread_activities
         WHERE ${sql.in('activity_id', activityIds)}
+      `,
+  })
+  const listThreadActivityRowsByThreadAndKinds = SqlSchema.findAll({
+    Request: ThreadActivityKindsLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, activityKinds }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM (
+          SELECT
+            activity_id,
+            thread_id,
+            turn_id,
+            tone,
+            kind,
+            summary,
+            payload_json,
+            sequence,
+            created_at
+          FROM projection_thread_activities
+          WHERE thread_id = ${threadId}
+            AND ${sql.in('kind', activityKinds)}
+          ORDER BY
+            CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END DESC,
+            CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END DESC,
+            created_at DESC,
+            CASE WHEN sequence IS NULL THEN 1 ELSE 0 END DESC,
+            sequence DESC,
+            CASE
+              WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
+              WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
+              ELSE 1
+            END DESC,
+            activity_id DESC
+          LIMIT ${THREAD_DETAIL_ACTIVITY_LIMIT}
+        ) AS recent_activities
+        ORDER BY
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END ASC,
+          created_at ASC,
+          CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
+          sequence ASC,
+          CASE
+            WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
+            WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
+            ELSE 1
+          END ASC,
+          activity_id ASC
       `,
   })
   const getThreadSessionRowByThread = SqlSchema.findOneOption({
@@ -3286,7 +3348,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
     return activities
   })
 
-  type ThreadDetailActivityRead = { readonly mode: 'raw' } | { readonly mode: 'client' }
+  type ThreadDetailActivityRead =
+    | { readonly mode: 'raw'; readonly query?: ProjectionThreadDetailQuery }
+    | { readonly mode: 'client' }
 
   const getThreadDetailByIdWithActivityRead = (
     threadId: ThreadId,
@@ -3297,7 +3361,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
       const activitiesEffect =
         activityRead.mode === 'client'
           ? listProjectedThreadActivities(threadId)
-          : listThreadActivityRowsByThread({ threadId }).pipe(
+          : (activityRead.query?.activityKinds === undefined
+              ? listThreadActivityRowsByThread({ threadId })
+              : activityRead.query.activityKinds.length === 0
+                ? Effect.succeed([])
+                : listThreadActivityRowsByThreadAndKinds({
+                    threadId,
+                    activityKinds: activityRead.query.activityKinds,
+                  })
+            ).pipe(
               Effect.mapError(
                 toPersistenceSqlOrDecodeError(
                   'ProjectionSnapshotQuery.getThreadDetailById:listActivities:query',
@@ -3474,8 +3546,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
       )
     })
 
-  const getThreadDetailById: ProjectionSnapshotQueryShape['getThreadDetailById'] = (threadId) =>
-    getThreadDetailByIdWithActivityRead(threadId, { mode: 'raw' })
+  const getThreadDetailById: ProjectionSnapshotQueryShape['getThreadDetailById'] = (
+    threadId,
+    query,
+  ) =>
+    getThreadDetailByIdWithActivityRead(
+      threadId,
+      query === undefined ? { mode: 'raw' } : { mode: 'raw', query },
+    )
 
   const getThreadDetailSnapshot: ProjectionSnapshotQueryShape['getThreadDetailSnapshot'] = (
     threadId,

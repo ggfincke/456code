@@ -47,6 +47,12 @@ export interface ProjectionEventReplayStats
   readonly payloadBytes: number
 }
 
+export interface ProjectionThreadDetailQuery
+{
+  // any explicit filter omits pinned reads; an empty list skips activity SQL.
+  readonly activityKinds?: ReadonlyArray<string>
+}
+
 export interface ProjectionThreadCheckpointContext
 {
   readonly threadId: ThreadId
@@ -214,6 +220,7 @@ export interface ProjectionSnapshotQueryShape
   // read a single active thread detail snapshot by id.
   readonly getThreadDetailById: (
     threadId: ThreadId,
+    query?: ProjectionThreadDetailQuery,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>
 
   // read a single active thread detail together with the projection snapshot

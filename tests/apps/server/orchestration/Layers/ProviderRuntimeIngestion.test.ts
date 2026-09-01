@@ -3634,6 +3634,83 @@ describe('ProviderRuntimeIngestion', () =>
     expect(completedPayload?.title).toBe('Watch round-3 CI and bots')
   })
 
+  it('nests tool progress from a persisted completed task after the task cache is swept', async () =>
+  {
+    const harness = await createHarness()
+    await bindSessionFence(harness, {
+      providerName: 'claudeAgent',
+      providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+      commandSuffix: 'claude-completed-task-parent',
+    })
+    const now = '2026-01-01T00:00:00.000Z'
+
+    harness.emit({
+      type: 'task.completed',
+      eventId: asEventId('evt-completed-task-parent'),
+      provider: ProviderDriverKind.make('claudeAgent'),
+      createdAt: now,
+      threadId: asThreadId('thread-1'),
+      turnId: asTurnId('turn-completed-task-parent'),
+      payload: {
+        taskId: 'completed-task-parent',
+        status: 'completed',
+        toolUseId: 'tool-use-completed-task-parent',
+      },
+    })
+
+    await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-completed-task-parent',
+      ),
+    )
+
+    harness.emit({
+      type: 'session.exited',
+      eventId: asEventId('evt-completed-task-parent-session-exited'),
+      provider: ProviderDriverKind.make('claudeAgent'),
+      createdAt: now,
+      threadId: asThreadId('thread-1'),
+      payload: {},
+    })
+
+    harness.emit({
+      type: 'session.started',
+      eventId: asEventId('evt-completed-task-parent-session-restarted'),
+      provider: ProviderDriverKind.make('claudeAgent'),
+      createdAt: '2026-01-01T00:00:01.000Z',
+      threadId: asThreadId('thread-1'),
+      payload: {},
+    })
+
+    harness.emit({
+      type: 'tool.progress',
+      eventId: asEventId('evt-completed-task-child-tool'),
+      provider: ProviderDriverKind.make('claudeAgent'),
+      createdAt: '2026-01-01T00:00:02.000Z',
+      threadId: asThreadId('thread-1'),
+      turnId: asTurnId('turn-completed-task-parent'),
+      payload: {
+        toolUseId: 'tool-use-completed-task-child',
+        toolName: 'Read',
+        summary: 'task:completed-task-parent',
+      },
+    })
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-completed-task-child-tool',
+      ),
+    )
+    const childTool = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-completed-task-child-tool',
+    )
+
+    expect(childTool?.payload).toMatchObject({
+      parentToolUseId: 'tool-use-completed-task-parent',
+      toolUseId: 'tool-use-completed-task-child',
+    })
+  })
+
   it('projects structured user input request and resolution as thread activities', async () =>
   {
     const harness = await createHarness()

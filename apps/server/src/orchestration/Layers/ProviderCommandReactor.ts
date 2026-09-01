@@ -889,7 +889,9 @@ const make = Effect.gen(function* ()
 
   const resolveLatestThread = Effect.fnUntraced(function* (threadId: ThreadId)
   {
-    return Option.getOrUndefined(yield* projectionSnapshotQuery.getThreadDetailById(threadId))
+    return Option.getOrUndefined(
+      yield* projectionSnapshotQuery.getThreadDetailById(threadId, { activityKinds: [] }),
+    )
   })
 
   const ensureThreadWorktree = Effect.fnUntraced(function* (thread: OrchestrationThread)
@@ -2564,7 +2566,9 @@ const make = Effect.gen(function* ()
   )
   {
     const thread = Option.getOrNull(
-      yield* projectionSnapshotQuery.getThreadDetailById(event.payload.threadId),
+      yield* projectionSnapshotQuery.getThreadDetailById(event.payload.threadId, {
+        activityKinds: [PROVIDER_HANDOFF_DELIVERED_ACTIVITY_KIND],
+      }),
     )
     // persisted approve resumes via sendTurn, which needs instance routing like turn start
     const requiresRuntimeSnapshot =
