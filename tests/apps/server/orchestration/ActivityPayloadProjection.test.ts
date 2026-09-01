@@ -188,6 +188,25 @@ describe('projectActivityPayload', () =>
     ).toMatchObject({ data: { rawOutput: { content: 'ACP output' } } })
   })
 
+  it('normalizes CRLF previews and keeps fence-only fallback bounded', () =>
+  {
+    const preview = projectActivityPayload(
+      makeActivity('crlf-preview', 'command_execution', {
+        rawOutput: `\r\n\`\`\`\r\n  actual\tresult  \r\n${'x'.repeat(1_000_000)}`,
+      }),
+    )
+    const fences = projectActivityPayload(
+      makeActivity('fence-preview', 'command_execution', {
+        rawOutput: '```\r\n \t \r\n```\r\n',
+      }),
+    )
+
+    expect(preview.payload).toMatchObject({
+      data: { rawOutput: { content: 'actual result' } },
+    })
+    expect(fences.payload).toMatchObject({ data: { rawOutput: { content: '2 lines' } } })
+  })
+
   it('retains rendered MCP fields while bounding its result payload', () =>
   {
     expect(projectActivityPayload(fixtures[2]!).payload).toEqual({

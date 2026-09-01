@@ -15,13 +15,16 @@ import { assert, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as Tracer from 'effect/Tracer'
 
 import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import ProjectionThreadCommandActivityIndexesMigration from '../../../../../apps/server/src/persistence/Migrations/036_ProjectionThreadCommandActivityIndexes.ts'
 import HealOrchestratePlanRespondFailureMigration from '../../../../../apps/server/src/persistence/Migrations/069_HealOrchestratePlanRespondFailure.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { decideOrchestrationCommand } from '../../../../../apps/server/src/orchestration/decider.ts'
+import { projectThreadDetailSnapshot } from '../../../../../apps/server/src/orchestration/ActivityPayloadProjection.ts'
 import { ORCHESTRATION_PROJECTOR_NAMES } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import {
   COMMAND_THREAD_ACTIVITY_QUERY_SQL,
@@ -35,6 +38,7 @@ const asTurnId = (value: string): TurnId => TurnId.make(value)
 const asMessageId = (value: string): MessageId => MessageId.make(value)
 const asEventId = (value: string): EventId => EventId.make(value)
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 
 const clearProjectionTables = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* ()
@@ -1973,9 +1977,43 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           'thread-bounded-detail',
           NULL,
           'info',
-          'runtime.note',
+          CASE
+            WHEN value = 2 THEN 'tool.updated'
+            WHEN value = 80 THEN 'tool.completed'
+            WHEN value IN (3, 70) THEN 'context-window.updated'
+            ELSE 'runtime.note'
+          END,
           'Later activity',
-          '{}',
+          CASE
+            WHEN value IN (2, 80) THEN json_object(
+              'itemType', 'command_execution',
+              'toolCallId', 'cross-batch-call',
+              'title', CASE WHEN value = 80 THEN 'Build completed' ELSE 'Build' END,
+              'status', 'completed',
+              'data', json_object(
+                'toolCallId', 'cross-batch-call',
+                'item', json_object(
+                  'command', 'vp test run',
+                  'aggregatedOutput', printf(
+                    'command output%s%s',
+                    char(13) || char(10),
+                    replace(hex(zeroblob(8192)), '00', 'x')
+                  )
+                ),
+                'rawOutput', printf(
+                  'raw output%s%s',
+                  char(13) || char(10),
+                  replace(hex(zeroblob(8192)), '00', 'y')
+                ),
+                'files', json_array(json_object('path', 'apps/server/src/snapshot.ts'))
+              )
+            )
+            WHEN value IN (3, 70) THEN json_object(
+              'usedTokens', value * 100,
+              'modelContextWindow', 100000
+            )
+            ELSE json_object('value', value)
+          END,
           value + 2,
           printf('2026-08-16T01:%02d:%02d.000Z', value / 60, value % 60)
         FROM activity_numbers
@@ -2050,6 +2088,77 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           assert.isFalse(activityIds.includes(asEventId('activity-bounded-note-001')))
           assert.isTrue(activityIds.includes(asEventId('activity-bounded-note-002')))
           assert.isTrue(activityIds.includes(asEventId('activity-bounded-note-501')))
+        }
+
+        const payloadQuerySpans: Array<{
+          readonly startTime: bigint
+          readonly endTime: bigint
+          readonly query: string
+        }> = []
+        const queryTracer = Tracer.make({
+          span: (options) =>
+          {
+            const span = new Tracer.NativeSpan(options)
+            const end = span.end.bind(span)
+            span.end = (endTime, exit) =>
+            {
+              end(endTime, exit)
+              const query = span.attributes.get('db.query.text')
+              if (
+                typeof query === 'string' &&
+                query.includes('payload_json AS "payload"') &&
+                query.includes('"activity_id" IN (')
+              )
+              {
+                payloadQuerySpans.push({ startTime: span.startTime, endTime, query })
+              }
+            }
+            return span
+          },
+        })
+        const clientSnapshot = yield* snapshotQuery
+          .getThreadDetailSnapshot(ThreadId.make('thread-bounded-detail'))
+          .pipe(Effect.withTracer(queryTracer))
+        assert.equal(clientSnapshot._tag, 'Some')
+        assert.equal(payloadQuerySpans.length, Math.ceil(503 / 25))
+        for (let index = 0; index < payloadQuerySpans.length; index += 1)
+        {
+          const current = payloadQuerySpans[index]!
+          assert.isAtMost(current.query.match(/\?/gu)?.length ?? 0, 25)
+          if (index > 0)
+          {
+            assert.isTrue(payloadQuerySpans[index - 1]!.endTime <= current.startTime)
+          }
+        }
+        if (detail._tag === 'Some' && clientSnapshot._tag === 'Some')
+        {
+          const projectedClientSnapshot = projectThreadDetailSnapshot(clientSnapshot.value)
+          const projectedRawBaseline = projectThreadDetailSnapshot({
+            snapshotSequence: clientSnapshot.value.snapshotSequence,
+            thread: detail.value,
+          })
+          assert.deepStrictEqual(projectedClientSnapshot, projectedRawBaseline)
+
+          const projectedActivities = projectedClientSnapshot.thread.activities
+          const latestContextWindow = projectedActivities.find(
+            (activity) => activity.id === asEventId('activity-bounded-note-070'),
+          )
+          assert.deepEqual(latestContextWindow?.payload, {
+            usedTokens: 7000,
+            modelContextWindow: 100000,
+          })
+
+          const completedCommand = projectedActivities.find(
+            (activity) => activity.id === asEventId('activity-bounded-note-080'),
+          )
+          assert.isDefined(completedCommand)
+          if (completedCommand)
+          {
+            const completedPayloadJson = encodeUnknownJsonString(completedCommand.payload)
+            assert.isBelow(completedPayloadJson.length, 1_000)
+            assert.notInclude(completedPayloadJson, 'xxxxxxxxxx')
+            assert.notInclude(completedPayloadJson, 'yyyyyyyyyy')
+          }
         }
       }),
   )

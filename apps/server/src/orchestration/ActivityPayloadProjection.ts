@@ -202,26 +202,32 @@ function projectImageViewData(data: Record<string, unknown>): Record<string, unk
 
 function summarizeToolTextOutput(value: string): string | null
 {
-  const lines: string[] = []
-  for (const rawLine of value.split(/\r?\n/u))
+  let meaningfulLineCount = 0
+  let offset = 0
+
+  while (offset <= value.length)
   {
-    const line = rawLine.replace(/\s+/g, ' ').trim()
+    const newlineIndex = value.indexOf('\n', offset)
+    const lineEnd = newlineIndex === -1 ? value.length : newlineIndex
+    const line = value.slice(offset, lineEnd).replace(/\s+/g, ' ').trim()
     if (line.length > 0)
     {
-      lines.push(line)
+      meaningfulLineCount += 1
+      if (line !== '```')
+      {
+        const summary = line.length <= 84 ? line : `${line.slice(0, 83).trimEnd()}…`
+        // detach the preview so V8 cannot retain the full tool output through a short slice
+        return Array.from(summary).join('')
+      }
     }
+    if (newlineIndex === -1)
+    {
+      break
+    }
+    offset = newlineIndex + 1
   }
 
-  const firstLine = lines.find((line) => line !== '```')
-  if (firstLine)
-  {
-    return firstLine.length <= 84 ? firstLine : `${firstLine.slice(0, 83).trimEnd()}…`
-  }
-  if (lines.length > 1)
-  {
-    return `${lines.length.toLocaleString()} lines`
-  }
-  return null
+  return meaningfulLineCount > 1 ? `${meaningfulLineCount.toLocaleString()} lines` : null
 }
 
 const MCP_ITEM_KEPT_FIELDS = [
