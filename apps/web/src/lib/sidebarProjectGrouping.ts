@@ -263,7 +263,7 @@ export function buildSidebarProjectPickerEntries(input: {
             projectRef.projectId === input.preferredProjectRef.projectId,
         )
       : false
-    const preferredProject = isPreferred
+    const preferredProject = input.preferredProjectRef
       ? (group.memberProjects.find(
           (project) =>
             project.environmentId === input.preferredProjectRef?.environmentId &&
