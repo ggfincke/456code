@@ -80,6 +80,21 @@ export function useThreadListV2State(input: {
     }
     return supported
   }, [serverConfigs])
+  const clientAutoSettlementEnvironmentIds = useMemo(() =>
+  {
+    const legacy = new Set<EnvironmentId>()
+    for (const [environmentId, config] of serverConfigs)
+    {
+      if (
+        config.environment.capabilities.threadSettlement === true &&
+        config.environment.capabilities.threadAutoSettlement !== true
+      )
+      {
+        legacy.add(environmentId)
+      }
+    }
+    return legacy
+  }, [serverConfigs])
   const snoozeEnvironmentIds = useMemo(() =>
   {
     const supported = new Set<EnvironmentId>()
@@ -119,6 +134,7 @@ export function useThreadListV2State(input: {
       changeRequestStateByKey,
       autoSettleOnMerge: input.autoSettleOnMerge,
       settlementEnvironmentIds,
+      clientAutoSettlementEnvironmentIds,
       snoozeEnvironmentIds,
       settledLimit: settledVisibleCount,
       now: `${nowMinute}:00.000Z`,
@@ -135,6 +151,7 @@ export function useThreadListV2State(input: {
     input.threads,
     nowMinute,
     settledVisibleCount,
+    clientAutoSettlementEnvironmentIds,
     settlementEnvironmentIds,
     snoozeEnvironmentIds,
     snoozeWakeTick,

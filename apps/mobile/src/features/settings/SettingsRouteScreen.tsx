@@ -41,6 +41,9 @@ import { withNativeGlassHeaderItem } from '../layout/native-glass-header-items'
 import { WorkspaceSidebarToolbar } from '../layout/workspace-sidebar-toolbar'
 import { runtime } from '../../lib/runtime'
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from '../../state/preferences'
+import { useServerConfigs } from '../../state/entities'
+import { serverEnvironment } from '../../state/server'
+import { useAtomCommand } from '../../state/use-atom-command'
 import { useSavedRemoteConnections } from '../../state/use-remote-environment-registry'
 import { SettingsRow } from './components/SettingsRow'
 import { SettingsSection } from './components/SettingsSection'
@@ -625,12 +628,45 @@ function BetaSettingsSection()
 {
   const preferencesResult = useAtomValue(mobilePreferencesAtom)
   const savePreferences = useAtomSet(updateMobilePreferencesAtom)
+  const serverConfigs = useServerConfigs()
+  const updateServerSettings = useAtomCommand(
+    serverEnvironment.updateSettings,
+    'automatic settlement settings update',
+  )
   const threadListV2Enabled = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.threadListV2Enabled === true
     : false
-  const autoSettleOnMerge = AsyncResult.isSuccess(preferencesResult)
+  const legacyAutoSettleOnMerge = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.sidebarAutoSettleOnMerge !== false
     : true
+  const serverManagedConfigs = [...serverConfigs.entries()].filter(
+    ([, config]) => config.environment.capabilities.threadAutoSettlement === true,
+  )
+  const hasLegacyEnvironment =
+    serverConfigs.size === 0 ||
+    [...serverConfigs.values()].some(
+      (config) => config.environment.capabilities.threadAutoSettlement !== true,
+    )
+  const autoSettleOnMerge =
+    (!hasLegacyEnvironment || legacyAutoSettleOnMerge) &&
+    serverManagedConfigs.every(([, config]) => config.settings.sidebarAutoSettleOnMerge)
+  const updateAutoSettleOnMerge = useCallback(
+    (value: boolean) =>
+    {
+      if (hasLegacyEnvironment)
+      {
+        savePreferences({ sidebarAutoSettleOnMerge: value })
+      }
+      for (const [environmentId] of serverManagedConfigs)
+      {
+        void updateServerSettings({
+          environmentId,
+          input: { patch: { sidebarAutoSettleOnMerge: value } },
+        })
+      }
+    },
+    [hasLegacyEnvironment, savePreferences, serverManagedConfigs, updateServerSettings],
+  )
 
   return (
     <View className="gap-3">
@@ -646,7 +682,7 @@ function BetaSettingsSection()
             icon="checkmark.circle"
             label="Auto-settle merged threads"
             value={autoSettleOnMerge}
-            onValueChange={(value) => savePreferences({ sidebarAutoSettleOnMerge: value })}
+            onValueChange={updateAutoSettleOnMerge}
           />
         ) : null}
       </SettingsSection>

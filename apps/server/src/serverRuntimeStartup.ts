@@ -44,6 +44,7 @@ import * as ProviderSessionDirectory from './provider/Services/ProviderSessionDi
 import * as ProviderSessionReaper from './provider/Services/ProviderSessionReaper.ts'
 import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefReconciler.ts'
 import * as ArchitectureAdmissionService from './architecture/ArchitectureAdmissionService.ts'
+import { makeThreadSettlementReactor } from './orchestration/ThreadSettlementReactor.ts'
 import { formatHeadlessServeOutput, issueHeadlessServeAccessInfo } from './startupAccess.ts'
 
 export class ServerRuntimeStartupError extends Schema.TaggedError<ServerRuntimeStartupError>()(
@@ -579,6 +580,9 @@ export const make = Effect.gen(function* ()
     yield* runStartupPhase('provider-sessions.reconcile', reconcileProviderSessions)
 
     yield* runImportReplacementStartupRecovery
+
+    const settlement = yield* makeThreadSettlementReactor
+    yield* settlement.start().pipe(Scope.provide(reactorScope))
 
     yield* Effect.logDebug('startup phase: reconciling proposal retained refs')
     yield* runStartupPhase('proposal-retained-refs.reconcile', runProposalRetainedRefReconciliation)

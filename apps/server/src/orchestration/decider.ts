@@ -761,6 +761,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
     }
 
+    case 'thread.auto-settle':
     case 'thread.settle':
     {
       const thread = yield* requireThreadNotArchived({
@@ -768,10 +769,22 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
+      const automatic = command.type === 'thread.auto-settle'
+      if (automatic && (thread.settledOverride !== null || thread.providerSwitch !== null))
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} is no longer eligible for automatic settlement`,
+        })
+      }
       // server-side twin of the client's canSettle session check: a stale
       // or raced client must not settle a thread whose session is coming
       // alive or working.
-      if (thread.session?.status === 'starting' || thread.session?.status === 'running')
+      if (
+        thread.session?.status === 'starting' ||
+        thread.session?.status === 'running' ||
+        thread.session?.activeTurnId != null
+      )
       {
         return yield* Effect.fail(
           new OrchestrationCommandInvariantError({
@@ -825,7 +838,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         },
       } satisfies PlannedOrchestrationEvent
       const lifecycleEvents: Array<PlannedOrchestrationEvent> = [settledEvent]
-      if (thread.snoozedUntil != null)
+      if (!automatic && thread.snoozedUntil != null)
       {
         // settling is an immediate "done" action, so stale snooze state must
         // not keep the row parked until its former wake time
@@ -846,7 +859,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
       // settling is "I'm done with this": it clears a pin the same way it
       // parks the thread, while retaining the fork's snooze reset above.
-      if (thread.pinnedAt != null)
+      if (!automatic && thread.pinnedAt != null)
       {
         lifecycleEvents.push({
           ...(yield* withEventBase({

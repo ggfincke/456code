@@ -59,6 +59,7 @@ export interface BranchHeadContext
   preferredHeadSelector: string
   remoteName: string | null
   headRemoteUrlKey: string | null
+  targetRemoteUrlKey: string | null
   headRepositoryNameWithOwner: string | null
   headRepositoryOwnerLogin: string | null
   isCrossRepository: boolean

@@ -125,6 +125,14 @@ export class GitManager extends Context.Service<
       input: VcsStatusInput,
       options?: GitVcsDriver.GitRemoteStatusOptions,
     ) => Effect.Effect<VcsStatusRemoteResult | null, GitManagerServiceError>
+    // resolve the pr for a saved branch without changing the current checkout
+    readonly branchPullRequest: (input: {
+      readonly cwd: string
+      readonly branch: string
+    }) => Effect.Effect<
+      { readonly state: 'open' | 'closed' | 'merged'; readonly terminalAt: string | null } | null,
+      GitManagerServiceError
+    >
     readonly invalidateLocalStatus: (cwd: string) => Effect.Effect<void, never>
     readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>
     readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>
@@ -627,6 +635,8 @@ export const make = Effect.gen(function* ()
       branch: string
       upstreamRef: string | null
       defaultBranch: string | null
+      localBranchExists?: boolean
+      remoteName?: string | null
     },
   ) =>
     [
@@ -634,6 +644,8 @@ export const make = Effect.gen(function* ()
       details.branch,
       details.upstreamRef ?? '',
       details.defaultBranch ?? '',
+      details.localBranchExists === false ? '0' : '1',
+      details.remoteName ?? '',
       String(prLookupEpoch(cwd)),
     ].join('\u0000')
   // track failures per branch cache key so a throttled provider is retried progressively slower
@@ -658,11 +670,20 @@ export const make = Effect.gen(function* ()
   const prLookupCache = yield* Cache.makeWith(
     (key: string) =>
     {
-      const [cwd = '', branch = '', upstreamRef = '', defaultBranch = ''] = key.split('\u0000')
+      const [
+        cwd = '',
+        branch = '',
+        upstreamRef = '',
+        defaultBranch = '',
+        branchExists = '1',
+        remoteName = '',
+      ] = key.split('\u0000')
       const details = {
         branch,
         upstreamRef: upstreamRef.length > 0 ? upstreamRef : null,
         defaultBranch: defaultBranch.length > 0 ? defaultBranch : null,
+        localBranchExists: branchExists !== '0',
+        ...(remoteName.length > 0 ? { remoteName } : {}),
       }
       return Effect.gen(function* ()
       {
@@ -905,12 +926,34 @@ export const make = Effect.gen(function* ()
     }
   })
 
+  const resolvePrLookupRepositoryIdentity = Effect.fn('resolvePrLookupRepositoryIdentity')(
+    function* (cwd: string, branch: string, remoteNameOverride?: string)
+    {
+      const remoteName =
+        remoteNameOverride ?? (yield* readConfigValueNullable(cwd, `branch.${branch}.remote`))
+      const [headRemote, targetRemote] = yield* Effect.all(
+        [
+          resolveRemoteRepositoryContext(cwd, remoteName),
+          resolveRemoteRepositoryContext(cwd, 'origin'),
+        ],
+        { concurrency: 'unbounded' },
+      )
+      return {
+        remoteName,
+        headRemoteUrlKey:
+          headRemote.remoteUrlKey ?? (remoteName === null ? targetRemote.remoteUrlKey : null),
+        targetRemoteUrlKey: targetRemote.remoteUrlKey,
+      }
+    },
+  )
+
   const resolveBranchHeadContext = Effect.fn('resolveBranchHeadContext')(function* (
     cwd: string,
-    details: { branch: string; upstreamRef: string | null },
+    details: { branch: string; upstreamRef: string | null; remoteName?: string },
   )
   {
-    const remoteName = yield* readConfigValueNullable(cwd, `branch.${details.branch}.remote`)
+    const remoteName =
+      details.remoteName ?? (yield* readConfigValueNullable(cwd, `branch.${details.branch}.remote`))
     const headBranchFromUpstream = details.upstreamRef
       ? extractBranchNameFromRemoteRef(details.upstreamRef, { remoteName })
       : ''
@@ -977,6 +1020,7 @@ export const make = Effect.gen(function* ()
       headRemoteUrlKey:
         remoteRepository.remoteUrlKey ??
         (remoteName === null ? originRepository.remoteUrlKey : null),
+      targetRemoteUrlKey: originRepository.remoteUrlKey,
       headRepositoryNameWithOwner: remoteRepository.repositoryNameWithOwner,
       headRepositoryOwnerLogin: remoteRepository.ownerLogin,
       isCrossRepository,
@@ -1547,6 +1591,150 @@ export const make = Effect.gen(function* ()
       concurrency: 'unbounded',
     })
     return mergeGitStatusParts(local, remote)
+  })
+  const branchPullRequest: GitManager['Service']['branchPullRequest'] = Effect.fn(
+    'branchPullRequest',
+  )(function* ({ cwd, branch })
+  {
+    const cacheCwd = yield* normalizeStatusCacheKey(cwd)
+    const remotes = yield* gitCore.execute({
+      operation: 'GitManager.branchPullRequest.remotes',
+      cwd: cacheCwd,
+      args: ['remote'],
+    })
+    const remoteNames = remotes.stdout
+      .split('\n')
+      .map((remoteName) => remoteName.trim())
+      .filter((remoteName) => remoteName.length > 0)
+    const [firstRemoteName] = remoteNames
+    if (firstRemoteName === undefined) return null
+
+    const branchRef = yield* gitCore.execute({
+      operation: 'GitManager.branchPullRequest.branchRef',
+      cwd: cacheCwd,
+      args: [
+        'for-each-ref',
+        '--format=%(refname)%00%(upstream:short)%00%(upstream:remotename)%00%(upstream:remoteref)',
+        `refs/heads/${branch}`,
+      ],
+    })
+    const expectedRefName = `refs/heads/${branch}`
+    const exactBranch = branchRef.stdout
+      .split('\n')
+      .find((line) => line.split('\u0000', 1)[0] === expectedRefName)
+    const [refName = '', savedUpstream = '', savedRemoteName = '', savedRemoteRef = ''] =
+      exactBranch?.split('\u0000') ?? []
+    const localBranchExists = refName.length > 0
+    let upstreamRef: string | null = null
+    let remoteName: string | null = null
+    if (savedUpstream.length > 0)
+    {
+      if (savedRemoteName.length === 0 || savedRemoteRef.length === 0)
+      {
+        return yield* new GitManagerError({
+          operation: 'branchPullRequest',
+          cwd: cacheCwd,
+          detail: `Saved upstream for ${branch} is incomplete.`,
+        })
+      }
+      remoteName = savedRemoteName
+      upstreamRef = `${remoteName}/${savedRemoteRef.replace(/^refs\/heads\//, '')}`
+    }
+    else if (!localBranchExists)
+    {
+      const trackingRefs = yield* gitCore.execute({
+        operation: 'GitManager.branchPullRequest.remoteTrackingRefs',
+        cwd: cacheCwd,
+        args: ['for-each-ref', '--format=%(refname)', 'refs/remotes'],
+      })
+      const refNames = new Set(
+        trackingRefs.stdout
+          .split('\n')
+          .map((remoteRef) => remoteRef.trim())
+          .filter((remoteRef) => remoteRef.length > 0),
+      )
+      const matchingRemoteNames = remoteNames.filter((candidate) =>
+        refNames.has(`refs/remotes/${candidate}/${branch}`),
+      )
+      if (matchingRemoteNames.length > 1)
+      {
+        return yield* new GitManagerError({
+          operation: 'branchPullRequest',
+          cwd: cacheCwd,
+          detail: `Multiple remotes track ${branch}. Its pull request is ambiguous.`,
+        })
+      }
+      remoteName = matchingRemoteNames[0] ?? null
+      if (remoteName !== null) upstreamRef = `${remoteName}/${branch}`
+    }
+
+    const defaultRemoteName = remoteNames.includes('origin') ? 'origin' : firstRemoteName
+    const defaultBranch = yield* gitCore
+      .resolveDefaultBranchName(cacheCwd, defaultRemoteName)
+      .pipe(Effect.orElseSucceed(() => null))
+    const cacheKey = prLookupCacheKey(cacheCwd, {
+      branch,
+      upstreamRef,
+      defaultBranch,
+      localBranchExists,
+      ...(localBranchExists ? {} : { remoteName }),
+    })
+    let cached = yield* Cache.get(prLookupCache, cacheKey)
+
+    const currentIdentity = yield* resolvePrLookupRepositoryIdentity(
+      cacheCwd,
+      branch,
+      remoteName ?? undefined,
+    )
+    const canVerifyIdentity = (headContext: BranchHeadContext, identity: typeof currentIdentity) =>
+      !(
+        (headContext.headRemoteUrlKey !== null && identity.headRemoteUrlKey === null) ||
+        (headContext.targetRemoteUrlKey !== null && identity.targetRemoteUrlKey === null)
+      )
+    const hasSameIdentity = (headContext: BranchHeadContext, identity: typeof currentIdentity) =>
+      headContext.headRemoteUrlKey === identity.headRemoteUrlKey &&
+      headContext.targetRemoteUrlKey === identity.targetRemoteUrlKey
+    if (!canVerifyIdentity(cached.headContext, currentIdentity))
+    {
+      return yield* new GitManagerError({
+        operation: 'branchPullRequest',
+        cwd: cacheCwd,
+        detail: `Repository identity for ${branch} could not be verified.`,
+      })
+    }
+    if (!hasSameIdentity(cached.headContext, currentIdentity))
+    {
+      yield* Cache.invalidate(prLookupCache, cacheKey)
+      cached = yield* Cache.get(prLookupCache, cacheKey)
+      const refreshedIdentity = yield* resolvePrLookupRepositoryIdentity(
+        cacheCwd,
+        branch,
+        remoteName ?? undefined,
+      )
+      if (
+        !canVerifyIdentity(cached.headContext, refreshedIdentity) ||
+        !hasSameIdentity(cached.headContext, refreshedIdentity)
+      )
+      {
+        return yield* new GitManagerError({
+          operation: 'branchPullRequest',
+          cwd: cacheCwd,
+          detail: `Repository identity for ${branch} changed during pull request lookup.`,
+        })
+      }
+    }
+
+    if (cached.latest === null) return null
+    if (
+      (branch === defaultBranch ||
+        (defaultBranch === null && (branch === 'main' || branch === 'master'))) &&
+      cached.latest.state !== 'open'
+    )
+    {
+      return null
+    }
+    const statusPr = toStatusPr(cached.latest)
+    return { state: statusPr.state, terminalAt: null }
   })
   const invalidateLocalStatus: GitManager['Service']['invalidateLocalStatus'] = Effect.fn(
     'invalidateLocalStatus',
@@ -2149,6 +2337,7 @@ export const make = Effect.gen(function* ()
     localStatus,
     remoteStatus,
     status,
+    branchPullRequest,
     invalidateLocalStatus,
     invalidateRemoteStatus,
     invalidateStatus,

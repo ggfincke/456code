@@ -1,9 +1,16 @@
 // apps/web/src/components/settings/BetaSettingsPanel.tsx
 // render beta settings panel
 
+import { useAtomValue } from '@effect/atom-react'
 import { useEffect, useState } from 'react'
 
-import { useClientSettings, useUpdateClientSettings } from '../../hooks/useSettings'
+import {
+  useClientSettings,
+  useUpdateClientSettings,
+  useUpdatePrimarySettings,
+} from '../../hooks/useSettings'
+import { resolveAutoSettlementPreferences } from '../../lib/threadAutoSettlement'
+import { primaryServerConfigAtom } from '../../state/server'
 import { Input } from '../ui/input'
 import { Switch } from '../ui/switch'
 import { SettingsPageContainer, SettingsRow, SettingsSection } from './settingsLayout'
@@ -60,13 +67,22 @@ function AutoSettleDaysInput({
 export function BetaSettingsPanel()
 {
   const sidebarV2Enabled = useClientSettings((settings) => settings.sidebarV2Enabled)
-  const sidebarAutoSettleAfterDays = useClientSettings(
+  const legacyAutoSettleAfterDays = useClientSettings(
     (settings) => settings.sidebarAutoSettleAfterDays,
   )
-  const sidebarAutoSettleOnMerge = useClientSettings(
-    (settings) => settings.sidebarAutoSettleOnMerge,
-  )
-  const updateSettings = useUpdateClientSettings()
+  const legacyAutoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const serverConfig = useAtomValue(primaryServerConfigAtom)
+  const autoSettlement = resolveAutoSettlementPreferences(serverConfig, {
+    autoSettleAfterDays: legacyAutoSettleAfterDays,
+    autoSettleOnMerge: legacyAutoSettleOnMerge,
+  })
+  const updateClientSettings = useUpdateClientSettings()
+  const updateServerSettings = useUpdatePrimarySettings()
+  const updateAutoSettlementSettings = autoSettlement.serverManaged
+    ? updateServerSettings
+    : updateClientSettings
+  const sidebarAutoSettleAfterDays = autoSettlement.autoSettleAfterDays
+  const sidebarAutoSettleOnMerge = autoSettlement.autoSettleOnMerge
 
   return (
     <SettingsPageContainer>
@@ -78,7 +94,9 @@ export function BetaSettingsPanel()
           control={
             <Switch
               checked={sidebarV2Enabled}
-              onCheckedChange={(checked) => updateSettings({ sidebarV2Enabled: Boolean(checked) })}
+              onCheckedChange={(checked) =>
+                updateClientSettings({ sidebarV2Enabled: Boolean(checked) })
+              }
               aria-label="Enable the sidebar v2 beta"
             />
           }
@@ -92,7 +110,7 @@ export function BetaSettingsPanel()
                 <Switch
                   checked={sidebarAutoSettleOnMerge}
                   onCheckedChange={(checked) =>
-                    updateSettings({ sidebarAutoSettleOnMerge: Boolean(checked) })
+                    updateAutoSettlementSettings({ sidebarAutoSettleOnMerge: Boolean(checked) })
                   }
                   aria-label="Auto-settle merged threads"
                 />
@@ -105,7 +123,7 @@ export function BetaSettingsPanel()
                 <Switch
                   checked={sidebarAutoSettleAfterDays !== null}
                   onCheckedChange={(checked) =>
-                    updateSettings({
+                    updateAutoSettlementSettings({
                       sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
                     })
                   }
@@ -120,7 +138,9 @@ export function BetaSettingsPanel()
                 control={
                   <AutoSettleDaysInput
                     value={sidebarAutoSettleAfterDays}
-                    onCommit={(days) => updateSettings({ sidebarAutoSettleAfterDays: days })}
+                    onCommit={(days) =>
+                      updateAutoSettlementSettings({ sidebarAutoSettleAfterDays: days })
+                    }
                   />
                 }
               />

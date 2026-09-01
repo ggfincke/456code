@@ -40,6 +40,10 @@ import { OrchestrationEventStore } from '../../persistence/Services/Orchestratio
 import { OrchestrationCommandReceiptRepository } from '../../persistence/Services/OrchestrationCommandReceipts.ts'
 import { ProjectionTurnRepository } from '../../persistence/Services/ProjectionTurns.ts'
 import { ProviderRuntimeInbox } from '../../persistence/Services/ProviderRuntimeInbox.ts'
+import { ProviderBackgroundTaskRegistry } from '../../provider/Services/ProviderBackgroundTaskRegistry.ts'
+import { ProviderBackgroundTaskRegistryLive } from '../../provider/Layers/ProviderBackgroundTaskRegistry.ts'
+import { isAutoSettlementCandidate } from '../ThreadSettlementPolicy.ts'
+import { ServerSettingsService } from '../../serverSettings.ts'
 import { checkpointRefForThreadTurn } from '../../checkpointing/Utils.ts'
 import {
   OrchestrationCommandIdConflictError,
@@ -85,6 +89,7 @@ const checkpointRevertBlockedCommandTypes: ReadonlySet<OrchestrationCommand['typ
   'thread.approval.respond',
   'thread.user-input.respond',
   'thread.user-input.dismiss',
+  'thread.auto-settle',
   'thread.orchestrate-plan.respond',
   'thread.checkpoint.revert',
   'thread.session.stop',
@@ -162,6 +167,8 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const checkpointRevertOperations = yield* CheckpointRevertOperations
   const projectionTurns = yield* ProjectionTurnRepository
   const providerRuntimeInbox = yield* ProviderRuntimeInbox
+  const backgroundTasks = yield* ProviderBackgroundTaskRegistry
+  const settingsService = yield* ServerSettingsService
   const projectionPipeline = yield* OrchestrationProjectionPipeline
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
   const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
@@ -318,6 +325,78 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                         `for thread '${threadId}' (phase '${activeRevert.value.phase}').`,
                     })
                   }
+                }
+              }
+
+              if (envelope.command.type === 'thread.auto-settle')
+              {
+                const command = envelope.command
+                const settings = yield* settingsService.getSettings.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationCommandInvariantError({
+                        commandType: command.type,
+                        detail: 'Automatic settlement policy could not be read.',
+                        cause,
+                      }),
+                  ),
+                )
+                if (
+                  settings.sidebarAutoSettleAfterDays !== command.autoSettleAfterDays ||
+                  settings.sidebarAutoSettleOnMerge !== command.autoSettleOnMerge
+                )
+                {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: 'Automatic settlement policy changed after the sweep.',
+                  })
+                }
+                const changes = yield* eventStore.getAggregateReplayStats({
+                  aggregateKind: 'thread',
+                  aggregateId: command.threadId,
+                  fromSequenceExclusive: command.snapshotSequence,
+                  toSequenceInclusive: commandReadModel.snapshotSequence,
+                  maxEvents: 1,
+                })
+                const shell = yield* projectionSnapshotQuery.getThreadShellById(command.threadId)
+                const projectChanges = Option.isNone(shell)
+                  ? null
+                  : yield* eventStore.getAggregateReplayStats({
+                      aggregateKind: 'project',
+                      aggregateId: shell.value.projectId,
+                      fromSequenceExclusive: command.snapshotSequence,
+                      toSequenceInclusive: commandReadModel.snapshotSequence,
+                      maxEvents: 1,
+                    })
+                const queued = yield* projectionTurns.getPendingTurnStartByThreadId({
+                  threadId: command.threadId,
+                })
+                let liveBackground = false
+                for (const identity of yield* providerRuntimeInbox.listAllOpenSessions())
+                {
+                  if (
+                    identity.threadId === command.threadId &&
+                    (yield* backgroundTasks.hasLiveTasks(identity))
+                  )
+                  {
+                    liveBackground = true
+                    break
+                  }
+                }
+                if (
+                  command.snapshotSequence > commandReadModel.snapshotSequence ||
+                  changes.eventCount > 0 ||
+                  (projectChanges?.eventCount ?? 0) > 0 ||
+                  Option.isSome(queued) ||
+                  liveBackground ||
+                  Option.isNone(shell) ||
+                  !isAutoSettlementCandidate(shell.value, yield* nowIso)
+                )
+                {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: 'Automatic settlement snapshot is stale or the thread has live work.',
+                  })
                 }
               }
 
@@ -668,7 +747,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
 export const OrchestrationEngineWithArchivePermitLive = Layer.effect(
   OrchestrationEngineService,
   makeOrchestrationEngine,
-)
+).pipe(Layer.provide(ProviderBackgroundTaskRegistryLive))
 
 export const OrchestrationEngineLive = OrchestrationEngineWithArchivePermitLive.pipe(
   Layer.provide(ThreadArchiveLifecyclePermitLive),

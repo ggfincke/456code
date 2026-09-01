@@ -188,6 +188,7 @@ import {
 } from '../providerSwitchPresentation'
 import { useClientSettings, useEnvironmentSettings } from '../hooks/useSettings'
 import { useNowMinute } from '../hooks/useNowMinute'
+import { resolveClientAutoSettlementEvaluation } from '../lib/threadAutoSettlement'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
 import { useThreadActions } from '../hooks/useThreadActions'
 import { type AppModelOption, getAppModelOptionsForInstance } from '../modelSelection'
@@ -3930,8 +3931,17 @@ function ChatViewContent(props: ChatViewProps)
   // partition (same shell, same capability gate, same PR auto-settle input)
   // so the banner and the sidebar row never disagree.
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null)
-  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays)
-  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const legacyAutoSettleAfterDays = useClientSettings(
+    (settings) => settings.sidebarAutoSettleAfterDays,
+  )
+  const legacyAutoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const { autoSettleAfterDays, autoSettleOnMerge } = resolveClientAutoSettlementEvaluation(
+    serverConfig,
+    {
+      autoSettleAfterDays: legacyAutoSettleAfterDays,
+      autoSettleOnMerge: legacyAutoSettleOnMerge,
+    },
+  )
   const activeThreadChangeRequestSnapshot =
     activeThreadKey === null ? undefined : changeRequestSnapshotByKey.get(activeThreadKey)
   const retainActiveTerminalPr = canRetainTerminalThreadPr({
