@@ -15,6 +15,7 @@ import {
 } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 import * as Context from 'effect/Context'
+import * as Struct from 'effect/Struct'
 import type * as Option from 'effect/Option'
 import type * as Effect from 'effect/Effect'
 
@@ -32,6 +33,12 @@ export const ProjectionThreadMessage = Schema.Struct({
   updatedAt: IsoDateTime,
 })
 export type ProjectionThreadMessage = typeof ProjectionThreadMessage.Type
+
+export const AppendStreamingProjectionThreadMessage = Schema.Struct(
+  Struct.omit(ProjectionThreadMessage.fields, ['isStreaming']),
+)
+export type AppendStreamingProjectionThreadMessage =
+  typeof AppendStreamingProjectionThreadMessage.Type
 
 export const ListProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
@@ -58,6 +65,11 @@ export interface ProjectionThreadMessageRepositoryShape
   // upserts by `messageId`.
   readonly upsert: (
     message: ProjectionThreadMessage,
+  ) => Effect.Effect<void, ProjectionRepositoryError>
+
+  // insert a streaming message or atomically append text to its existing row.
+  readonly appendStreaming: (
+    message: AppendStreamingProjectionThreadMessage,
   ) => Effect.Effect<void, ProjectionRepositoryError>
 
   // read a projected thread message by id.

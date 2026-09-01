@@ -884,11 +884,30 @@ it.layer(
   it.effect('overwrites stored attachment references when a message updates attachments', () =>
     Effect.gen(function* ()
     {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
       const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const cleanupReactor = yield* AttachmentCleanupReactor
       const eventStore = yield* OrchestrationEventStore
       const sql = yield* SqlClient.SqlClient
+      const { attachmentsDir } = yield* ServerConfig
       const now = '2026-01-01T00:00:00.000Z'
       const later = '2026-01-01T00:00:01.000Z'
+      const firstAttachmentId = 'thread-overwrite-00000000-0000-4000-8000-000000000001'
+      const secondAttachmentId = 'thread-overwrite-00000000-0000-4000-8000-000000000002'
+
+      yield* stageOwnedAttachment({
+        stagingKey: 'overwrite-first-staging',
+        commandId: 'cmd-overwrite-3',
+        threadId: ThreadId.make('thread-overwrite'),
+        messageId: 'message-overwrite',
+        attachmentId: firstAttachmentId,
+        ownerSequence: 3,
+        now,
+      })
+      yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true })
+      const firstAttachmentPath = path.join(attachmentsDir, `${firstAttachmentId}.png`)
+      yield* fileSystem.writeFileString(firstAttachmentPath, 'first')
 
       yield* eventStore.append({
         type: 'project.created',
@@ -955,7 +974,7 @@ it.layer(
           attachments: [
             {
               type: 'image',
-              id: 'thread-overwrite-att-1',
+              id: firstAttachmentId,
               name: 'file.png',
               mimeType: 'image/png',
               sizeBytes: 5,
@@ -982,18 +1001,18 @@ it.layer(
           threadId: ThreadId.make('thread-overwrite'),
           messageId: MessageId.make('message-overwrite'),
           role: 'user',
-          text: '',
+          text: ' plus update',
           attachments: [
             {
               type: 'image',
-              id: 'thread-overwrite-att-2',
+              id: secondAttachmentId,
               name: 'file.png',
               mimeType: 'image/png',
               sizeBytes: 5,
             },
           ],
           turnId: null,
-          streaming: false,
+          streaming: true,
           createdAt: now,
           updatedAt: later,
         },
@@ -1003,21 +1022,33 @@ it.layer(
 
       const rows = yield* sql<{
         readonly attachmentsJson: string | null
+        readonly text: string
+        readonly isStreaming: number
       }>`
-              SELECT attachments_json AS "attachmentsJson"
+              SELECT
+                attachments_json AS "attachmentsJson",
+                text,
+                is_streaming AS "isStreaming"
               FROM projection_thread_messages
               WHERE message_id = 'message-overwrite'
             `
       assert.equal(rows.length, 1)
+      assert.equal(rows[0]?.text, 'first image plus update')
+      assert.equal(rows[0]?.isStreaming, 1)
       assert.deepEqual(decodeUnknownJsonString(rows[0]?.attachmentsJson ?? 'null'), [
         {
           type: 'image',
-          id: 'thread-overwrite-att-2',
+          id: secondAttachmentId,
           name: 'file.png',
           mimeType: 'image/png',
           sizeBytes: 5,
         },
       ])
+
+      assert.isTrue(yield* exists(firstAttachmentPath))
+      yield* TestClock.setTime(Date.parse(later) + Duration.toMillis(ATTACHMENT_CLEANUP_GRACE))
+      yield* cleanupReactor.drain
+      assert.isFalse(yield* exists(firstAttachmentPath))
     }),
   )
 })
@@ -1854,7 +1885,7 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
     }),
   )
 
-  it.effect('resumes from projector last_applied_sequence without replaying older events', () =>
+  it.effect('retains streamed text through empty completion and repeated bootstrap', () =>
     Effect.gen(function* ()
     {
       const projectionPipeline = yield* OrchestrationProjectionPipeline
@@ -1925,13 +1956,20 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
           role: 'assistant',
           text: 'hello',
           turnId: null,
-          streaming: false,
+          streaming: true,
           createdAt: now,
           updatedAt: now,
         },
       })
 
       yield* projectionPipeline.bootstrap
+
+      // malformed untouched metadata makes any full-row streaming read fail fast
+      yield* sql`
+        UPDATE projection_thread_messages
+        SET attachments_json = 'not-json'
+        WHERE message_id = 'message-a'
+      `
 
       yield* eventStore.append({
         type: 'thread.message-sent',
@@ -1950,18 +1988,67 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
           text: ' world',
           turnId: null,
           streaming: true,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: '2026-01-01T00:00:01.000Z',
+          updatedAt: '2026-01-01T00:00:01.000Z',
         },
       })
 
       yield* projectionPipeline.bootstrap
       yield* projectionPipeline.bootstrap
 
-      const messageRows = yield* sql<{ readonly text: string }>`
-        SELECT text FROM projection_thread_messages WHERE message_id = 'message-a'
+      yield* sql`
+        UPDATE projection_thread_messages
+        SET attachments_json = NULL
+        WHERE message_id = 'message-a'
       `
-      assert.deepEqual(messageRows, [{ text: 'hello world' }])
+
+      yield* eventStore.append({
+        type: 'thread.message-sent',
+        eventId: EventId.make('evt-a5'),
+        aggregateKind: 'thread',
+        aggregateId: ThreadId.make('thread-a'),
+        occurredAt: '2026-01-01T00:00:02.000Z',
+        commandId: CommandId.make('cmd-a5'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-a5'),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make('thread-a'),
+          messageId: MessageId.make('message-a'),
+          role: 'assistant',
+          text: '',
+          turnId: null,
+          streaming: false,
+          createdAt: '2026-01-01T00:00:02.000Z',
+          updatedAt: '2026-01-01T00:00:02.000Z',
+        },
+      })
+
+      yield* projectionPipeline.bootstrap
+      yield* projectionPipeline.bootstrap
+
+      const messageRows = yield* sql<{
+        readonly text: string
+        readonly isStreaming: number
+        readonly createdAt: string
+        readonly updatedAt: string
+      }>`
+        SELECT
+          text,
+          is_streaming AS "isStreaming",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_messages
+        WHERE message_id = 'message-a'
+      `
+      assert.deepEqual(messageRows, [
+        {
+          text: 'hello world',
+          isStreaming: 0,
+          createdAt: now,
+          updatedAt: '2026-01-01T00:00:02.000Z',
+        },
+      ])
 
       const stateRows = yield* sql<{
         readonly projector: string

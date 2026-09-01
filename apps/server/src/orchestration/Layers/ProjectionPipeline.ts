@@ -1684,6 +1684,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
         case 'thread.message-sent':
         {
+          if (event.payload.streaming && event.payload.attachments === undefined)
+          {
+            yield* projectionThreadMessageRepository.appendStreaming({
+              messageId: event.payload.messageId,
+              threadId: event.payload.threadId,
+              turnId: event.payload.turnId,
+              role: event.payload.role,
+              text: event.payload.text,
+              createdAt: event.payload.createdAt,
+              updatedAt: event.payload.updatedAt,
+            })
+            return
+          }
+
           const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
             messageId: event.payload.messageId,
           })
