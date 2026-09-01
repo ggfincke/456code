@@ -11,19 +11,49 @@ import * as NodeCrypto from 'node:crypto'
 import * as Encoding from 'effect/Encoding'
 import * as Result from 'effect/Result'
 
+import { isLoopbackHost, isWildcardHost } from '../environment/accessHost.ts'
+
 const SESSION_COOKIE_NAME = 't3_session'
 
 export function resolveSessionCookieName(input: {
   readonly mode: 'web' | 'desktop'
   readonly port: number
+  readonly host: string | undefined
+  readonly instanceKey: string
+  readonly environmentId: string
+  readonly development: boolean
 }): string
 {
-  if (input.mode !== 'desktop')
+  if (input.mode === 'desktop')
   {
-    return SESSION_COOKIE_NAME
+    return `${SESSION_COOKIE_NAME}_${input.port}`
   }
 
-  return `${SESSION_COOKIE_NAME}_${input.port}`
+  const remoteProduction = !input.development && isRemoteReachableHost(input.host)
+  const instanceHash = NodeCrypto.createHash('sha256')
+    .update(remoteProduction ? input.environmentId : input.instanceKey)
+    .digest('hex')
+    .slice(0, 12)
+
+  return remoteProduction
+    ? `${SESSION_COOKIE_NAME}_${instanceHash}`
+    : `${SESSION_COOKIE_NAME}_${input.port}_${instanceHash}`
+}
+
+export function resolveLegacySessionCookieName(input: {
+  readonly mode: 'web' | 'desktop'
+  readonly host: string | undefined
+  readonly development: boolean
+}): string | undefined
+{
+  return input.mode === 'web' && !input.development && isRemoteReachableHost(input.host)
+    ? SESSION_COOKIE_NAME
+    : undefined
+}
+
+export function isRemoteReachableHost(host: string | undefined): boolean
+{
+  return isWildcardHost(host) || !isLoopbackHost(host)
 }
 
 export function base64UrlEncode(input: string | Uint8Array): string

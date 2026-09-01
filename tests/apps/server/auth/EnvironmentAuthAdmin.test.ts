@@ -2,15 +2,22 @@
 // verify environment auth admin behavior
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
+import { EnvironmentId } from '@t3tools/contracts'
 import { expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
+import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as EnvironmentAuth from '../../../../apps/server/src/auth/EnvironmentAuth.ts'
 import * as ServerSecretStore from '../../../../apps/server/src/auth/ServerSecretStore.ts'
 import * as SessionStore from '../../../../apps/server/src/auth/SessionStore.ts'
+
+const serverEnvironmentLayer = Layer.succeed(ServerEnvironment.ServerEnvironment, {
+  getEnvironmentId: Effect.succeed(EnvironmentId.make('environment-auth-admin-test')),
+  getDescriptor: Effect.die(new Error('unused in environment auth admin tests')),
+})
 
 const makeServerConfigLayer = (
   overrides?: Partial<Pick<ServerConfig.ServerConfig['Service'], 'desktopBootstrapToken'>>,
@@ -39,6 +46,7 @@ const makeEnvironmentAuthLayer = (
   EnvironmentAuth.layer.pipe(
     Layer.provideMerge(ServerSecretStore.layer),
     Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provide(serverEnvironmentLayer),
     Layer.provide(makeServerConfigLayer(overrides)),
   )
 

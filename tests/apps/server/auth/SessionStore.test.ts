@@ -2,6 +2,7 @@
 // verify session store behavior
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
+import { EnvironmentId } from '@t3tools/contracts'
 import { expect, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -9,15 +10,14 @@ import * as Layer from 'effect/Layer'
 import * as TestClock from 'effect/testing/TestClock'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
+import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
 import { PersistenceSqlError } from '../../../../apps/server/src/persistence/Errors.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as AuthSessions from '../../../../apps/server/src/persistence/AuthSessions.ts'
 import * as SessionStore from '../../../../apps/server/src/auth/SessionStore.ts'
 import * as ServerSecretStore from '../../../../apps/server/src/auth/ServerSecretStore.ts'
 
-const makeServerConfigLayer = (
-  overrides?: Partial<Pick<ServerConfig.ServerConfig['Service'], 'desktopBootstrapToken'>>,
-) =>
+const makeServerConfigLayer = (overrides?: Partial<ServerConfig.ServerConfig['Service']>) =>
   Layer.effect(
     ServerConfig.ServerConfig,
     Effect.gen(function* ()
@@ -30,12 +30,20 @@ const makeServerConfigLayer = (
     }),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: 't3-auth-session-test-' })))
 
+const makeServerEnvironmentLayer = (environmentId: EnvironmentId) =>
+  Layer.succeed(ServerEnvironment.ServerEnvironment, {
+    getEnvironmentId: Effect.succeed(environmentId),
+    getDescriptor: Effect.die(new Error('unused in session store tests')),
+  })
+
 const makeSessionStoreLayer = (
-  overrides?: Partial<Pick<ServerConfig.ServerConfig['Service'], 'desktopBootstrapToken'>>,
+  overrides?: Partial<ServerConfig.ServerConfig['Service']>,
+  environmentId = EnvironmentId.make('session-store-environment'),
 ) =>
   SessionStore.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
     Layer.provide(ServerSecretStore.layer),
+    Layer.provide(makeServerEnvironmentLayer(environmentId)),
     Layer.provide(makeServerConfigLayer(overrides)),
   )
 
@@ -60,11 +68,35 @@ const failingSessionLookupCredentialLayer = Layer.effect(
   Layer.provide(failingSessionLookupRepositoryLayer),
   Layer.provide(ServerSecretStore.layer),
   Layer.provide(SqlitePersistenceMemory),
+  Layer.provide(makeServerEnvironmentLayer(EnvironmentId.make('session-store-environment'))),
   Layer.provide(makeServerConfigLayer()),
 )
 
 it.layer(NodeServices.layer)('SessionStore.layer', (it) =>
 {
+  it.effect('keys remote cookies by environment identity instead of state directory', () =>
+    Effect.gen(function* ()
+    {
+      const cookieName = (stateDir: string, environmentId: EnvironmentId) =>
+        Effect.gen(function* ()
+        {
+          const sessions = yield* SessionStore.SessionStore
+          return sessions.cookieName
+        }).pipe(
+          Effect.provide(
+            makeSessionStoreLayer({ mode: 'web', host: '192.168.1.50', stateDir }, environmentId),
+          ),
+        )
+
+      const original = yield* cookieName('/srv/t3-one', EnvironmentId.make('environment-one'))
+      const moved = yield* cookieName('/srv/t3-moved', EnvironmentId.make('environment-one'))
+      const other = yield* cookieName('/srv/t3-one', EnvironmentId.make('environment-two'))
+
+      expect(moved).toBe(original)
+      expect(other).not.toBe(original)
+    }),
+  )
+
   it.effect('issues and verifies signed browser session tokens', () =>
     Effect.gen(function* ()
     {
