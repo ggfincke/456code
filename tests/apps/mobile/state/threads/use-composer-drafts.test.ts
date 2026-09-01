@@ -16,6 +16,8 @@ const persistedDraftFile = vi.hoisted(() => ({
   readResult: null as Promise<string> | null,
 }))
 
+vi.mock('../../../../../apps/mobile/src/state/attachments', () => ({ attachmentEnvironment: {} }))
+
 vi.mock('expo-file-system', () => ({
   Paths: { document: '/documents' },
   Directory: class

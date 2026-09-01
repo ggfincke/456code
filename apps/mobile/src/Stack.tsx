@@ -60,6 +60,7 @@ import {
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from './native/native-glass'
 import { nativeHeaderScrollEdgeEffects } from './native/StackHeader'
 import { useThreadOutboxDrain } from './state/use-thread-outbox-drain'
+import { useComposerAttachmentUploadWorker } from './state/composer-attachment-uploads'
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version)
 
@@ -278,6 +279,12 @@ function ThreadOutboxDrainWorker()
   return null
 }
 
+function ComposerAttachmentUploadWorker()
+{
+  useComposerAttachmentUploadWorker()
+  return null
+}
+
 // isolate the lock-screen publisher the same way. It is a store subscription,
 // not a render memo, so exactly one runs for the whole app.
 function AgentAwarenessLiveActivityWorker()
@@ -323,6 +330,7 @@ function RootStackLayout(props: {
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
       <ThreadOutboxDrainWorker />
+      <ComposerAttachmentUploadWorker />
       <AgentAwarenessLiveActivityWorker />
       <ShowcaseCaptureCoordinator pathname={pathname} />
       <ClerkSettingsSheetDetentProvider initiallyExpanded={false}>

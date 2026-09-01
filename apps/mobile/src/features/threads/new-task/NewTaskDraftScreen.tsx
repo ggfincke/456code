@@ -2,6 +2,7 @@
 // renders and routes new mobile task drafts
 
 import { NativeStackScreenOptions } from '../../../native/StackHeader'
+import { useAtomValue } from '@effect/atom-react'
 import { StackActions, useNavigation, usePreventRemove } from '@react-navigation/native'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, InteractionManager, View, useColorScheme } from 'react-native'
@@ -43,6 +44,11 @@ import {
   type ComposerDraft,
 } from '../../../state/use-composer-drafts'
 import { useProjects } from '../../../state/entities'
+import { useServerConfigs } from '../../../state/entities'
+import {
+  composerAttachmentUploadBlockReason,
+  composerAttachmentUploadsAtom,
+} from '../../../state/composer-attachment-uploads'
 import { deriveThreadTitleFromPrompt } from '../../../lib/projectThreadStartTurn'
 import { confirmProviderRuntimeModeWarnings } from '../../../lib/providerRuntimeModeWarnings'
 import { armAgentAwarenessLiveActivityForLocalWork } from '../../agent-awareness/remoteRegistration'
@@ -85,6 +91,7 @@ export function NewTaskDraftScreen(props: {
 {
   const projects = useProjects()
   const createProjectThread = useCreateProjectThread()
+  const serverConfigs = useServerConfigs()
   const flow = useNewTaskFlow()
   const navigation = useNavigation()
   const {
@@ -105,6 +112,18 @@ export function NewTaskDraftScreen(props: {
     connectedEnvironments.find(
       (environment) => environment.environmentId === selectedProject.environmentId,
     )?.connectionState === 'connected'
+  const uploadStates = useAtomValue(composerAttachmentUploadsAtom)
+  const selectedServerConfig = selectedProject
+    ? serverConfigs.get(selectedProject.environmentId)
+    : null
+  const attachmentUploadBlockReason = selectedProject
+    ? composerAttachmentUploadBlockReason({
+        environmentId: selectedProject.environmentId,
+        attachments: flow.attachments,
+        serverConfig: selectedServerConfig,
+        states: uploadStates,
+      })
+    : null
   const promptInputRef = useRef<ComposerEditorHandle>(null)
   const [isComposerFocused, setIsComposerFocused] = useState(false)
   const loadedBranchesProjectKeyRef = useRef<string | null>(null)
@@ -1160,6 +1179,7 @@ export function NewTaskDraftScreen(props: {
     isIncomingShareReady &&
     !isImportingShare &&
     !flow.submitting &&
+    attachmentUploadBlockReason === null &&
     (supportsImageAttachments || flow.attachments.length === 0) &&
     !(flow.workspaceMode === 'worktree' && !flow.selectedBranchName)
   const promptEditor = (
@@ -1250,7 +1270,13 @@ export function NewTaskDraftScreen(props: {
   const startButton = (
     <ComposerToolbarButton
       accessibilityLabel={
-        flow.submitting ? 'Starting task' : environmentConnected ? 'Start task' : 'Queue task'
+        attachmentUploadBlockReason !== null
+          ? attachmentUploadBlockReason
+          : flow.submitting
+            ? 'Starting task'
+            : environmentConnected
+              ? 'Start task'
+              : 'Queue task'
       }
       icon={environmentConnected ? 'arrow.up' : 'tray.and.arrow.up'}
       onPress={() => void handleStart()}
@@ -1282,6 +1308,7 @@ export function NewTaskDraftScreen(props: {
             <View className="px-4 pt-3">
               <ComposerAttachmentStrip
                 attachments={flow.attachments}
+                environmentId={selectedProject.environmentId}
                 onRemove={isIncomingShareTransferPending ? () => undefined : flow.removeAttachment}
                 imageSize={88}
                 imageBorderRadius={20}

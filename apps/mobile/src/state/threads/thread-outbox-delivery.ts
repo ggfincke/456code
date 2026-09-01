@@ -490,7 +490,10 @@ async function sendQueuedMessage(input: {
         messageId: dispatchMessage.messageId,
         role: 'user',
         text: dispatchMessage.text,
-        attachments: toUploadChatImageAttachments(dispatchMessage.attachments),
+        attachments: toUploadChatImageAttachments(
+          dispatchMessage.attachments,
+          dispatchMessage.environmentId,
+        ),
       },
       ...(threadHasStarted(finalThread) ? {} : { modelSelection: finalSettings.modelSelection }),
       runtimeMode: finalSettings.runtimeMode,

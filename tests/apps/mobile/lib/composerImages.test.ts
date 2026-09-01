@@ -2,7 +2,7 @@
 // verifies composer image wire conversion and native paste cleanup
 
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from '@t3tools/contracts'
+import { EnvironmentId, PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from '@t3tools/contracts'
 
 const files = new Map<string, { base64: string; deleted: boolean }>()
 
@@ -77,6 +77,28 @@ describe('toUploadChatImageAttachments', () =>
         dataUrl: 'data:image/png;base64,AA==',
       },
     ])
+  })
+
+  it('reuses an uploaded attachment only in its owning environment', () =>
+  {
+    const attachment = {
+      id: 'client-draft-id',
+      type: 'image' as const,
+      name: 'pasted-image.png',
+      mimeType: 'image/png',
+      sizeBytes: 12,
+      dataUrl: 'data:image/png;base64,AA==',
+      previewUri: 'file:///tmp/preview.png',
+      uploadedAttachmentId: 'server-attachment-id',
+      uploadEnvironmentId: EnvironmentId.make('environment-a'),
+    }
+
+    expect(toUploadChatImageAttachments([attachment], EnvironmentId.make('environment-a'))).toEqual(
+      [expect.objectContaining({ id: 'server-attachment-id' })],
+    )
+    expect(toUploadChatImageAttachments([attachment], EnvironmentId.make('environment-b'))).toEqual(
+      [expect.objectContaining({ dataUrl: attachment.dataUrl })],
+    )
   })
 })
 

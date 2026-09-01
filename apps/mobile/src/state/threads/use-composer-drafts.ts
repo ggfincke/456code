@@ -17,11 +17,14 @@ import {
 import * as Schema from 'effect/Schema'
 import { useEffect } from 'react'
 import { Atom } from 'effect/unstable/reactivity'
+import { deletePendingAttachmentUpload } from '@t3tools/client-runtime/state/attachments'
 
 import { DraftComposerImageAttachmentSchema } from '../../lib/composer-image-schema'
 import type { DraftComposerImageAttachment } from '../../lib/composerImages'
 import { SerializedAsyncQueue } from '../../lib/serialized-async-queue'
 import { appAtomRegistry } from '../atom-registry'
+import { attachmentEnvironment } from '../attachments'
+import { threadOutboxManager } from './thread-outbox'
 
 const COMPOSER_DRAFTS_SCHEMA_VERSION = 1
 const COMPOSER_DRAFTS_DIRECTORY = 'composer-drafts'
@@ -465,6 +468,82 @@ async function flushComposerDrafts(): Promise<void>
   } while (persistTimer !== null || persistRetryNeeded)
 }
 
+function isComposerAttachmentUploadReferenced(
+  environmentId: EnvironmentId,
+  attachmentId: string,
+): boolean
+{
+  const owners = [
+    ...Object.values(appAtomRegistry.get(composerDraftsAtom)),
+    ...Object.values(appAtomRegistry.get(threadOutboxManager.queuedMessagesByThreadKeyAtom)).flat(),
+  ]
+  return owners.some((owner) =>
+    owner.attachments.some(
+      (attachment) =>
+        attachment.uploadEnvironmentId === environmentId &&
+        attachment.uploadedAttachmentId === attachmentId,
+    ),
+  )
+}
+
+async function releaseUnusedComposerAttachmentUploads(
+  attachments: ReadonlyArray<DraftComposerImageAttachment>,
+): Promise<void>
+{
+  const candidates = attachments.flatMap((attachment) =>
+    attachment.uploadEnvironmentId && attachment.uploadedAttachmentId
+      ? [
+          {
+            environmentId: attachment.uploadEnvironmentId,
+            attachmentId: attachment.uploadedAttachmentId,
+          },
+        ]
+      : [],
+  )
+  if (candidates.length === 0) return
+
+  try
+  {
+    await waitForComposerDraftsLoaded()
+    await persistenceQueue.run(() => Promise.resolve())
+    await threadOutboxManager.load()
+    await threadOutboxManager.serialize(() => Promise.resolve())
+  }
+  catch
+  {
+    // unreadable ownership stores are not evidence that an upload is unused
+    return
+  }
+
+  for (const candidate of candidates)
+  {
+    if (isComposerAttachmentUploadReferenced(candidate.environmentId, candidate.attachmentId))
+    {
+      continue
+    }
+    deletePendingAttachmentUpload({
+      registry: appAtomRegistry,
+      remove: attachmentEnvironment.remove,
+      environmentId: candidate.environmentId,
+      attachmentId: candidate.attachmentId,
+    })
+  }
+}
+
+function scheduleUnusedComposerAttachmentUploadCleanup(
+  attachments: ReadonlyArray<DraftComposerImageAttachment>,
+): void
+{
+  if (!attachments.some((attachment) => attachment.uploadedAttachmentId !== undefined)) return
+  void releaseUnusedComposerAttachmentUploads(attachments).catch((error) =>
+  {
+    console.warn(
+      '[composer-attachments] could not release unused uploads',
+      error instanceof Error ? error.message : 'Attachment cleanup failed.',
+    )
+  })
+}
+
 // the single funnel for synchronous draft mutations: it publishes immediately
 // and, while hydration is still in flight, records the mutation so hydration
 // can replay it in order.
@@ -557,6 +636,7 @@ export function replaceComposerDraftAttachments(
   attachments: ReadonlyArray<DraftComposerImageAttachment>,
 ): void
 {
+  const previousAttachments = getComposerDraftSnapshot(draftKey).attachments
   updateComposerDrafts(draftKey, (current) =>
   {
     const draft = {
@@ -574,10 +654,15 @@ export function replaceComposerDraftAttachments(
       [draftKey]: draft,
     }
   })
+  const retainedIds = new Set(attachments.map((attachment) => attachment.id))
+  scheduleUnusedComposerAttachmentUploadCleanup(
+    previousAttachments.filter((attachment) => !retainedIds.has(attachment.id)),
+  )
 }
 
 export function removeComposerDraftAttachment(draftKey: string, imageId: string): void
 {
+  const previousAttachments = getComposerDraftSnapshot(draftKey).attachments
   updateComposerDrafts(draftKey, (current) =>
   {
     const existing = normalizeDraft(current[draftKey])
@@ -596,6 +681,44 @@ export function removeComposerDraftAttachment(draftKey: string, imageId: string)
       [draftKey]: draft,
     }
   })
+  scheduleUnusedComposerAttachmentUploadCleanup(
+    previousAttachments.filter((attachment) => attachment.id === imageId),
+  )
+}
+
+export function setComposerDraftAttachmentUpload(
+  draftKey: string,
+  imageId: string,
+  environmentId: EnvironmentId,
+  attachmentId: string,
+): boolean
+{
+  let updated = false
+  let previous: DraftComposerImageAttachment | undefined
+  updateComposerDrafts(draftKey, (current) =>
+  {
+    const existing = normalizeDraft(current[draftKey])
+    previous = existing.attachments.find((image) => image.id === imageId)
+    if (!previous) return current
+    updated = true
+    return {
+      ...current,
+      [draftKey]: {
+        ...existing,
+        attachments: existing.attachments.map((image) =>
+          image.id === imageId
+            ? {
+                ...image,
+                uploadEnvironmentId: environmentId,
+                uploadedAttachmentId: attachmentId,
+              }
+            : image,
+        ),
+      },
+    }
+  })
+  if (previous) scheduleUnusedComposerAttachmentUploadCleanup([previous])
+  return updated
 }
 
 export function updateComposerDraftSettings(
@@ -797,13 +920,16 @@ export function clearComposerDraftContent(
   },
 ): void
 {
+  const previousAttachments = getComposerDraftSnapshot(draftKey).attachments
   updateComposerDrafts(draftKey, (current) =>
     clearComposerDraftContentState(current, draftKey, options),
   )
+  scheduleUnusedComposerAttachmentUploadCleanup(previousAttachments)
 }
 
 export function clearComposerDraft(draftKey: string): void
 {
+  const previousAttachments = getComposerDraftSnapshot(draftKey).attachments
   updateComposerDrafts(draftKey, (current) =>
   {
     if (!current[draftKey])
@@ -814,6 +940,7 @@ export function clearComposerDraft(draftKey: string): void
     delete next[draftKey]
     return next
   })
+  scheduleUnusedComposerAttachmentUploadCleanup(previousAttachments)
 }
 
 export function removeComposerDraftsForEnvironment(
@@ -835,9 +962,11 @@ export async function clearComposerDraftsEnvironment(environmentId: EnvironmentI
 {
   await waitForComposerDraftsLoaded()
 
-  const next = removeComposerDraftsForEnvironment(
-    appAtomRegistry.get(composerDraftsAtom),
-    environmentId,
+  const current = appAtomRegistry.get(composerDraftsAtom)
+  const next = removeComposerDraftsForEnvironment(current, environmentId)
+  const retainedKeys = new Set(Object.keys(next))
+  const removedAttachments = Object.entries(current).flatMap(([draftKey, draft]) =>
+    retainedKeys.has(draftKey) ? [] : draft.attachments,
   )
 
   appAtomRegistry.set(composerDraftsAtom, next)
@@ -848,6 +977,7 @@ export async function clearComposerDraftsEnvironment(environmentId: EnvironmentI
   }
   await persistComposerDraftsSnapshot(next)
   await flushComposerDrafts()
+  await releaseUnusedComposerAttachmentUploads(removedAttachments)
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft

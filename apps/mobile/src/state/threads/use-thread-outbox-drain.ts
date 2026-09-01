@@ -19,7 +19,12 @@ import { scopedThreadKey } from '../../lib/scopedEntities'
 import { buildProjectThreadStartTurnInput } from '../../lib/projectThreadStartTurn'
 import { randomHex } from '../../lib/uuid'
 import { appAtomRegistry } from '../atom-registry'
-import { useProjects, useThreadShells } from '../entities'
+import { useProjects, useServerConfigs, useThreadShells } from '../entities'
+import {
+  composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
+  composerAttachmentUploadsAtom,
+} from '../composer-attachment-uploads'
 import {
   claimThreadOutboxMessageDelivery,
   dispatchingThreadOutboxMessageIdAtom,
@@ -101,6 +106,8 @@ export function useThreadOutboxDrain(): void
   const shellStatuses = useThreadOutboxShellStatuses()
   const threads = useThreadShells()
   const projects = useProjects()
+  const serverConfigs = useServerConfigs()
+  const attachmentUploadStates = useAtomValue(composerAttachmentUploadsAtom)
   const { connectedEnvironments } = useRemoteConnectionStatus()
   const [retryTick, setRetryTick] = useState(0)
   const retryNotBeforeRef = useRef(new Map<MessageId, number>())
@@ -181,6 +188,19 @@ export function useThreadOutboxDrain(): void
         continue
       }
       if ((retryNotBeforeRef.current.get(nextQueuedMessage.messageId) ?? 0) > Date.now())
+      {
+        continue
+      }
+      const attachmentUploadInput = {
+        environmentId: nextQueuedMessage.environmentId,
+        attachments: nextQueuedMessage.attachments,
+        serverConfig: serverConfigs.get(nextQueuedMessage.environmentId),
+        states: attachmentUploadStates,
+      }
+      if (
+        composerAttachmentsStillUploading(attachmentUploadInput) ||
+        composerAttachmentUploadBlockReason(attachmentUploadInput) !== null
+      )
       {
         continue
       }
@@ -341,10 +361,12 @@ export function useThreadOutboxDrain(): void
       return
     }
   }, [
+    attachmentUploadStates,
     connectedEnvironments,
     dispatchingQueuedMessageId,
     editingQueuedMessageIds,
     projects,
+    serverConfigs,
     queuedMessagesByThreadKey,
     retryTick,
     startQueuedCreation,
