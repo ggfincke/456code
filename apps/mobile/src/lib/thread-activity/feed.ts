@@ -8,6 +8,7 @@ import type {
 } from '@t3tools/contracts'
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
 import { formatDuration } from '@t3tools/shared/orchestrationTiming'
+import { workEntryViewedImagePath } from '@t3tools/client-runtime/thread-activity'
 
 import * as Arr from 'effect/Array'
 import * as Order from 'effect/Order'
@@ -581,6 +582,7 @@ function toThreadFeedActivityEntry(entry: DerivedWorkLogEntry): RawThreadFeedAct
 {
   const summary = workEntryHeading(entry)
   const detail = workEntryPreview(entry)
+  const viewedImagePath = workEntryViewedImagePath(entry)
   const getFullDetail = memoizeValue(() => buildWorkEntryExpandedBody(entry))
   const getCopyText = memoizeValue(() =>
     [summary, detail, getFullDetail()]
@@ -602,7 +604,8 @@ function toThreadFeedActivityEntry(entry: DerivedWorkLogEntry): RawThreadFeedAct
       activityKind: entry.activityKind,
       summary,
       detail,
-      canExpand: workEntryHasExpandedBody(entry),
+      viewedImagePath,
+      canExpand: viewedImagePath !== null || workEntryHasExpandedBody(entry),
       getFullDetail,
       getCopyText,
       icon: workEntryIcon(entry),
