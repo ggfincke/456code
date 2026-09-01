@@ -19,6 +19,16 @@ function makeSkill(input: Partial<ServerProviderSkill> & Pick<ServerProviderSkil
 
 describe('searchProviderSkills', () =>
 {
+  it('uses the same first-definition precedence for dollar and slash skill menus', () =>
+  {
+    const projectSkill = makeSkill({ name: 'Review', path: '/project/skills/review/SKILL.md' })
+    const skills = [projectSkill, makeSkill({ name: 'review' }), makeSkill({ name: 'other' })]
+    expect(searchProviderSkills(skills, '$review')).toEqual([projectSkill])
+    expect(
+      searchProviderSkills(skills, '').filter((skill) => skill.name.toLowerCase() === 'review'),
+    ).toEqual([projectSkill])
+  })
+
   it('moves exact ui matches ahead of broader ui matches', () =>
   {
     const skills = [
