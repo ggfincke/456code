@@ -36,6 +36,8 @@ export const makeProjectionSnapshotQueryStub = (
     Effect.die('unexpected ProjectionSnapshotQuery.getThreadRuntimeContext'),
   isThreadImportFinalized: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.isThreadImportFinalized'),
+  getAssistantCitationSource: () =>
+    Effect.die('unexpected ProjectionSnapshotQuery.getAssistantCitationSource'),
   getThreadDetailById: () => Effect.die('unexpected ProjectionSnapshotQuery.getThreadDetailById'),
   getOrchestrateRunExecution: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.getOrchestrateRunExecution'),

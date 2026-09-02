@@ -2,12 +2,15 @@
 // verify composer parsing, cursor, trigger, and submit behavior
 
 import { describe, expect, it } from 'vite-plus/test'
+import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from '@t3tools/contracts'
+import { serializeAssistantCitation } from '@t3tools/shared/assistantCitations'
 
 import {
   clampCollapsedComposerCursor,
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
   findUnknownLeadingComposerSlashCommand,
   parseLeadingComposerSlashCommand,
@@ -18,6 +21,34 @@ import {
   shouldSubmitComposerOnEnter,
 } from '../../../apps/web/src/composer-logic'
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from '../../../apps/web/src/lib/terminalContext'
+
+const assistantCitation: AssistantCitation = {
+  version: 1,
+  environmentId: EnvironmentId.make('environment-1'),
+  threadId: ThreadId.make('thread-1'),
+  messageId: MessageId.make('message-1'),
+  text: 'Keep Unicode 👋 and punctuation.',
+  start: 3,
+  end: 34,
+  prefix: 'Before ',
+  suffix: ' after.',
+}
+
+describe('assistant citation composer behavior', () =>
+{
+  it('binds a trimmed comment to the citation and treats its wire encoding as one cursor unit', () =>
+  {
+    const source = formatAssistantCitationForComposer(assistantCitation, '  Why shared?\n')
+    const serialized = serializeAssistantCitation({ ...assistantCitation, comment: 'Why shared?' })
+    expect(source).toBe(`${serialized} `)
+
+    const prompt = `(${serialized}),${serialized}!`
+    const firstEnd = '('.length + serialized.length
+    expect(collapseExpandedComposerCursor(prompt, firstEnd)).toBe('(□'.length)
+    expect(expandCollapsedComposerCursor(prompt, '(□'.length)).toBe(firstEnd)
+    expect(isCollapsedCursorAdjacentToInlineToken(prompt, 1, 'right')).toBe(true)
+  })
+})
 
 describe('shouldSubmitComposerOnEnter', () =>
 {

@@ -1,7 +1,7 @@
 // apps/web/src/components/composerInlineTokenPaste.ts
 // register composer inline token paste
 
-import { collectComposerInlineTokens } from '@t3tools/shared/composerInlineTokens'
+import type { AssistantCitation } from '@t3tools/contracts'
 import {
   $createLineBreakNode,
   $createTextNode,
@@ -13,10 +13,12 @@ import {
   type LexicalEditor,
   type LexicalNode,
 } from 'lexical'
+import { collectComposerPromptInlineTokens } from '../composer-editor-mentions'
 
 interface ComposerInlineTokenPasteOptions
 {
   createMentionNode: (path: string) => LexicalNode
+  createCitationNode: (citation: AssistantCitation, source: string) => LexicalNode
   getExpandedAbsoluteOffsetForPoint: (node: LexicalNode, pointOffset: number) => number
 }
 
@@ -44,10 +46,11 @@ export function registerComposerInlineTokenPaste(
       }
       // token grammar requires trailing whitespace; a virtual newline lets a
       // mention at the very end of the pasted text still parse.
-      const mentions = collectComposerInlineTokens(`${text}\n`).filter(
-        (token) => token.type === 'mention' && token.end <= text.length,
+      const tokens = collectComposerPromptInlineTokens(`${text}\n`).filter(
+        (token) =>
+          (token.type === 'mention' || token.type === 'citation') && token.end <= text.length,
       )
-      if (mentions.length === 0)
+      if (tokens.length === 0)
       {
         return false
       }
@@ -77,8 +80,8 @@ export function registerComposerInlineTokenPaste(
           }
         }
       }
-      const firstMention = mentions[0]
-      if (firstMention && firstMention.start === 0)
+      const firstToken = tokens[0]
+      if (firstToken?.type === 'mention' && firstToken.start === 0)
       {
         const startPoint = selection.isBackward() ? selection.focus : selection.anchor
         const insertionOffset = options.getExpandedAbsoluteOffsetForPoint(
@@ -94,24 +97,28 @@ export function registerComposerInlineTokenPaste(
         }
       }
       let cursor = 0
-      for (const mention of mentions)
+      for (const token of tokens)
       {
-        if (mention.start < cursor)
+        if (token.start < cursor)
         {
           continue
         }
-        if (mention.start > cursor)
+        if (token.start > cursor)
         {
-          appendText(text.slice(cursor, mention.start))
+          appendText(text.slice(cursor, token.start))
         }
-        nodes.push(options.createMentionNode(mention.value))
-        cursor = mention.end
+        nodes.push(
+          token.type === 'citation'
+            ? options.createCitationNode(token.citation, token.source)
+            : options.createMentionNode(token.value),
+        )
+        cursor = token.end
       }
       if (cursor < text.length)
       {
         appendText(text.slice(cursor))
       }
-      else
+      else if (tokens.at(-1)?.type === 'mention')
       {
         // keep the serialized prompt valid: mention tokens need trailing
         // whitespace, so a paste ending in a mention gets the same

@@ -36,6 +36,7 @@ import type { UnifiedSettings } from '@t3tools/contracts/settings'
 import { isBareKnownProviderSlashCommand } from '@t3tools/shared/composerTrigger'
 import { createModelSelection } from '@t3tools/shared/model'
 import { truncate } from '@t3tools/shared/String'
+import { assistantCitationsToPlainText } from '@t3tools/shared/assistantCitations'
 import { buildTemporaryWorktreeBranchName } from '@t3tools/shared/git'
 import {
   type Dispatch,
@@ -1403,7 +1404,7 @@ export function useChatDispatchController(input: UseChatDispatchControllerInput)
         firstComposerImageName = firstComposerImage.name
       }
     }
-    let titleSeed = trimmed
+    let titleSeed = assistantCitationsToPlainText(trimmed)
     if (!titleSeed)
     {
       if (firstComposerImageName)

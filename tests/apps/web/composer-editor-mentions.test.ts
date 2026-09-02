@@ -2,6 +2,8 @@
 // verify split prompt into composer segments behavior
 
 import { describe, expect, it } from 'vite-plus/test'
+import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from '@t3tools/contracts'
+import { serializeAssistantCitation } from '@t3tools/shared/assistantCitations'
 
 import {
   selectionTouchesMentionBoundary,
@@ -9,8 +11,39 @@ import {
 } from '../../../apps/web/src/composer-editor-mentions'
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from '../../../apps/web/src/lib/terminalContext'
 
+const assistantCitation: AssistantCitation = {
+  version: 1,
+  environmentId: EnvironmentId.make('remote-environment'),
+  threadId: ThreadId.make('thread-1'),
+  messageId: MessageId.make('message-1'),
+  text: 'Use @AGENTS.md, $review, and Unicode 雪 carefully.',
+  start: 4,
+  end: 49,
+  prefix: 'Before: ',
+  suffix: ' After.',
+}
+
 describe('splitPromptIntoComposerSegments', () =>
 {
+  it('keeps citations atomic alongside mentions, skills, punctuation, and terminal context', () =>
+  {
+    const source = serializeAssistantCitation(assistantCitation)
+
+    expect(
+      splitPromptIntoComposerSegments(
+        `@AGENTS.md (${source}), $review ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}`,
+      ),
+    ).toEqual([
+      { type: 'mention', path: 'AGENTS.md', source: '@AGENTS.md' },
+      { type: 'text', text: ' (' },
+      { type: 'citation', citation: assistantCitation, source },
+      { type: 'text', text: '), ' },
+      { type: 'skill', name: 'review' },
+      { type: 'text', text: ' ' },
+      { type: 'terminal-context', context: null },
+    ])
+  })
+
   it('splits mention tokens followed by whitespace into mention segments', () =>
   {
     expect(splitPromptIntoComposerSegments('Inspect @AGENTS.md please')).toEqual([

@@ -9,6 +9,7 @@ import type {
   ApprovalRequestId,
   CheckpointRef,
   OrchestrationCheckpointSummary,
+  OrchestrationMessage,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
@@ -20,6 +21,7 @@ import type {
   OrchestrationThread,
   OrchestrationThreadActivity,
   OrchestrationThreadDetailSnapshot,
+  MessageId,
   OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
@@ -237,6 +239,12 @@ export interface ProjectionSnapshotQueryShape
   readonly isThreadImportFinalized: (
     threadId: ThreadId,
   ) => Effect.Effect<boolean, ProjectionRepositoryError>
+
+  // citation sources remain readable after archive, but deleted threads are unavailable.
+  readonly getAssistantCitationSource: (input: {
+    readonly threadId: ThreadId
+    readonly messageId: MessageId
+  }) => Effect.Effect<Option.Option<OrchestrationMessage>, ProjectionRepositoryError>
 
   // read a single active thread detail snapshot by id.
   readonly getThreadDetailById: (

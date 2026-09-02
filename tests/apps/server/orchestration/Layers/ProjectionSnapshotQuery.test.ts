@@ -142,6 +142,53 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
     }),
   )
 
+  it.effect('loads assistant citation sources from retained archived threads only', () =>
+    Effect.gen(function* ()
+    {
+      const sql = yield* SqlClient.SqlClient
+      const query = yield* ProjectionSnapshotQuery
+      yield* clearProjectionTables(sql)
+      const timestamp = '2026-09-01T12:00:00.000Z'
+      yield* sql`INSERT INTO projection_projects
+        (project_id, title, workspace_root, default_model_selection_json, scripts_json, created_at, updated_at, deleted_at)
+        VALUES ('citation-project', 'Citation project', '/tmp/citation-project', NULL, '[]',
+          ${timestamp}, ${timestamp}, NULL)`
+      for (const [threadId, deletedAt] of [
+        ['citation-archived', null],
+        ['citation-deleted', timestamp],
+      ] as const)
+      {
+        yield* sql`INSERT INTO projection_threads
+          (thread_id, project_id, title, model_selection_json, created_at, updated_at, archived_at, deleted_at)
+          VALUES (${threadId}, 'citation-project', ${threadId},
+            '{"provider":"codex","model":"gpt-5"}', ${timestamp}, ${timestamp},
+            ${timestamp}, ${deletedAt})`
+        yield* sql`INSERT INTO projection_thread_messages
+          (message_id, thread_id, role, text, is_streaming, created_at, updated_at)
+          VALUES (${`message-${threadId}`}, ${threadId}, 'assistant', 'retained response', 0,
+            ${timestamp}, ${timestamp})`
+      }
+
+      const retained = yield* query.getAssistantCitationSource({
+        threadId: ThreadId.make('citation-archived'),
+        messageId: MessageId.make('message-citation-archived'),
+      })
+      const deleted = yield* query.getAssistantCitationSource({
+        threadId: ThreadId.make('citation-deleted'),
+        messageId: MessageId.make('message-citation-deleted'),
+      })
+
+      assert.equal(
+        retained.pipe(
+          Option.map((message) => message.text),
+          Option.getOrNull,
+        ),
+        'retained response',
+      )
+      assert.equal(Option.isNone(deleted), true)
+    }),
+  )
+
   it.effect('hydrates read model from projection tables and computes snapshot sequence', () =>
     Effect.gen(function* ()
     {

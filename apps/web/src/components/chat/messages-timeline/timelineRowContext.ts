@@ -8,17 +8,21 @@ import {
   type ServerProviderSkill,
   type TurnId,
 } from '@t3tools/contracts'
+import type { LegendListRef } from '@legendapp/list/react'
 import { type TimestampFormat } from '@t3tools/contracts/settings'
-import { createContext } from 'react'
+import { createContext, type RefObject } from 'react'
 import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 
 import { deriveTimelineEntries } from '../../../session-logic'
 import { type MessagesTimelineRow } from './MessagesTimeline.logic'
 import type { OrchestratePlanActions } from '../OrchestratePlanCard'
 import { type ExpandedImagePreview } from '../ExpandedImagePreview'
+import type { AssistantCitationTarget } from '../AssistantCitationSource'
 
 export interface TimelineRowSharedState
 {
+  citationRequest: AssistantCitationTarget | null
+  listRef: RefObject<LegendListRef | null>
   timestampFormat: TimestampFormat
   routeThreadKey: string
   threadRef: ScopedThreadRef | null

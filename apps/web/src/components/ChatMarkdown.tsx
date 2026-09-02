@@ -60,6 +60,8 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
+import { parseAssistantCitationHref } from '@t3tools/shared/assistantCitations'
+import { AssistantCitationChip } from './chat/AssistantCitationChip'
 import { renderSkillInlineMarkdownChildren } from './chat/SkillInlineText'
 import { type ExpandedImagePreview } from './chat/ExpandedImagePreview'
 import {
@@ -359,7 +361,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), 'file'],
+    href: [...(defaultSchema.protocols?.href ?? []), 'file', 't3-citation'],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0]
 
@@ -666,6 +668,7 @@ function useChatMarkdownState({
   }, [markdownFileLinkMetaByHref])
   const markdownUrlTransform = useCallback((href: string) =>
   {
+    if (parseAssistantCitationHref(href)) return href
     if (isWindowsDrivePathHref(href)) return href
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href)
   }, [])
@@ -870,6 +873,8 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
       openFileInPanel,
       openMarkdownFileInPreview,
     } = useMarkdownRendererState()
+    const citation = href ? parseAssistantCitationHref(href) : null
+    if (citation) return <AssistantCitationChip citation={citation} />
     const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : ''
     const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null
     const isFilePathChip = isFilePathChipNode(node)

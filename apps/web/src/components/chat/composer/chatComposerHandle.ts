@@ -3,6 +3,7 @@
 
 import {
   coerceRuntimeMode,
+  type AssistantCitation,
   type ModelSelection,
   type PreviewAnnotationPayload,
   type ProviderDriverKind,
@@ -16,6 +17,7 @@ import type { ArchitectureConcernContext } from '../../../composerDraftStore'
 import type { ElementContextDraft } from '../../../lib/elementContext'
 import type { TerminalContextDraft, TerminalContextSelection } from '../../../lib/terminalContext'
 import type { ReviewCommentContext } from '../../../lib/reviewCommentContext'
+import type { AssistantCitationSourceAnchor } from '../../../lib/assistantTextSelection'
 
 export interface ChatComposerHandle
 {
@@ -23,6 +25,10 @@ export interface ChatComposerHandle
   focusAt: (cursor: number) => void
   addDroppedFiles: (files: File[]) => void
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean
+  citeAssistantText: (
+    citation: AssistantCitation,
+    sourceAnchor: AssistantCitationSourceAnchor,
+  ) => boolean
   openModelPicker: () => void
   toggleModelPicker: () => void
   isModelPickerOpen: () => boolean

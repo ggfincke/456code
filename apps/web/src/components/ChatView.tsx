@@ -3,6 +3,7 @@
 import {
   type ApprovalRequestId,
   type AssetResource,
+  type AssistantCitation,
   type ArchitectureGraphProjection,
   type ArchitectureStandingAnchor,
   type CollaborationMode,
@@ -65,7 +66,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import { useShallow } from 'zustand/react/shallow'
 import {
   isAtomCommandInterrupted,
@@ -244,6 +245,9 @@ import { DraftHeroHeadline } from './chat/DraftHeroHeadline'
 import { ExpandedImageDialog } from './chat/ExpandedImageDialog'
 import { PullRequestThreadDialog } from './PullRequestThreadDialog'
 import { MessagesTimeline } from './chat/messages-timeline/MessagesTimeline'
+import type { AssistantCitationRequest } from './chat/AssistantCitationSource'
+import { assistantCitationFromLocation } from '../lib/assistantCitationNavigation'
+import type { AssistantCitationSourceAnchor } from '../lib/assistantTextSelection'
 import type { OrchestratePlanResponse } from './chat/orchestrate-plan/OrchestratePlanCard'
 import { ChatHeader } from './chat/ChatHeader'
 import {
@@ -768,6 +772,19 @@ function ChatViewContent(props: ChatViewProps)
   const timestampFormat = settings.timestampFormat
   const autoOpenPlanSidebar = settings.autoOpenPlanSidebar
   const navigate = useNavigate()
+  const citationLocation = useLocation({
+    select: (location) => ({
+      href: location.href,
+      key: location.state.assistantCitationActivation ?? location.state.__TSR_key,
+    }),
+  })
+  const citationRequest = useMemo<AssistantCitationRequest | null>(() =>
+  {
+    const citation = assistantCitationFromLocation(citationLocation.href)
+    return citation && citation.environmentId === environmentId && citation.threadId === threadId
+      ? { citation, key: citationLocation.key ?? citationLocation.href }
+      : null
+  }, [citationLocation.href, citationLocation.key, environmentId, threadId])
   const { resolvedTheme } = useTheme()
   // granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -824,6 +841,23 @@ function ChatViewContent(props: ChatViewProps)
   const composerElementContextsRef = useRef<ElementContextDraft[]>([])
   const localComposerRef = useRef<ChatComposerHandle | null>(null)
   const composerRef = useComposerHandleContext() ?? localComposerRef
+  const citeAssistantText = useCallback(
+    (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) =>
+    {
+      const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false
+      if (!inserted)
+      {
+        toastManager.add({
+          type: 'warning',
+          title: 'The composer is not ready',
+          description:
+            'Try citing the selection after the connection or pending input is resolved.',
+        })
+      }
+      return inserted
+    },
+    [composerRef],
+  )
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null)
@@ -6222,6 +6256,9 @@ function ChatViewContent(props: ChatViewProps)
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                citationRequest={citationRequest}
+                citationHistoryLoading={threadDetailLoading}
+                onCiteAssistantText={citeAssistantText}
                 key={activeThread.id}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
