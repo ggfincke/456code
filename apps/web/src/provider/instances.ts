@@ -237,9 +237,10 @@ export function deriveProviderEntriesByEnvironment(
 // settings write, so picker visibility must follow settings rather than waiting
 // for probe reconciliation.
 //
-// non-default instances only exist through `providerInstances`; if one is
-// absent there, its streamed snapshot is stale (for example immediately after
-// deletion) and is treated as disabled.
+// only built-in default instances have a legacy `providers` entry. every
+// other instance exists through `providerInstances`; if it is absent there,
+// its streamed snapshot is stale (for example immediately after deletion)
+// and is treated as disabled.
 export function applyProviderInstanceSettings(
   entries: ReadonlyArray<ProviderInstanceEntry>,
   settings: Pick<ServerSettings, 'providerInstances' | 'providers'>,
@@ -251,11 +252,16 @@ export function applyProviderInstanceSettings(
 
   return entries.map((entry) =>
   {
-    const explicitInstance = settings.providerInstances?.[entry.instanceId]
+    const explicitInstance = Object.hasOwn(settings.providerInstances, entry.instanceId)
+      ? settings.providerInstances[entry.instanceId]
+      : undefined
+    const legacyProvider = Object.hasOwn(legacyProviders, entry.driverKind)
+      ? legacyProviders[entry.driverKind]
+      : undefined
     const enabled = explicitInstance
       ? resolveProviderInstanceEnabled(explicitInstance)
-      : entry.isDefault
-        ? (legacyProviders[entry.driverKind]?.enabled ?? entry.enabled)
+      : entry.isDefault && legacyProvider
+        ? (legacyProvider.enabled ?? entry.enabled)
         : false
     return enabled === entry.enabled ? entry : { ...entry, enabled }
   })
