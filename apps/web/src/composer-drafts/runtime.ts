@@ -649,11 +649,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           set((state) =>
           {
             const existing = state.draftThreadsByThreadKey[threadKey]
-            if (!isDraftThreadPromoting(existing))
+            if (!existing || !isDraftThreadPromoting(existing))
             {
               return state
             }
-            return removeDraftThreadReferences(state, threadKey)
+            return removeDraftThreadReferences(state, threadKey, existing.promotedTo ?? undefined)
           })
         },
         clearDraftThread: (threadRef) =>

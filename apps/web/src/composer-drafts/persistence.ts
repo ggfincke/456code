@@ -979,6 +979,7 @@ export function removeDraftThreadReferences(
     | 'logicalProjectDraftThreadKeyByLogicalProjectKey'
   >,
   threadKey: string,
+  composerDestination?: ScopedThreadRef,
 ): Pick<
   ComposerDraftStoreState,
   | 'draftThreadsByThreadKey'
@@ -986,6 +987,39 @@ export function removeDraftThreadReferences(
   | 'logicalProjectDraftThreadKeyByLogicalProjectKey'
 >
 {
+  const sourceDraft = state.draftsByThreadKey[threadKey]
+  const sourceThread = state.draftThreadsByThreadKey[threadKey]
+  const destinationKey = composerDestination ? composerTargetKey(composerDestination) : null
+  const destinationDraft = destinationKey ? state.draftsByThreadKey[destinationKey] : undefined
+  const hasDestinationContent =
+    destinationDraft &&
+    (destinationDraft.prompt.length > 0 ||
+      destinationDraft.images.length > 0 ||
+      destinationDraft.files.length > 0 ||
+      destinationDraft.persistedAttachments.length > 0 ||
+      destinationDraft.terminalContexts.length > 0 ||
+      destinationDraft.elementContexts.length > 0 ||
+      destinationDraft.previewAnnotations.length > 0 ||
+      destinationDraft.architectureContexts.length > 0 ||
+      destinationDraft.reviewComments.length > 0 ||
+      destinationDraft.modelSelectionExplicit === true)
+  if (
+    sourceDraft &&
+    sourceThread &&
+    composerDestination &&
+    (sourceThread.environmentId !== composerDestination.environmentId ||
+      (destinationKey !== threadKey && hasDestinationContent))
+  )
+  {
+    // keep a conflicting draft discoverable instead of overwriting user content or upload ownership.
+    return {
+      ...state,
+      draftThreadsByThreadKey: {
+        ...state.draftThreadsByThreadKey,
+        [threadKey]: { ...sourceThread, promotedTo: null },
+      },
+    }
+  }
   const nextLogicalMappings = Object.fromEntries(
     Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(
       ([, draftThreadKey]) => draftThreadKey !== threadKey,
@@ -994,7 +1028,14 @@ export function removeDraftThreadReferences(
   const { [threadKey]: _removedDraftThread, ...restDraftThreadsByThreadKey } =
     state.draftThreadsByThreadKey
   const { [threadKey]: removedComposerDraft, ...restDraftsByThreadKey } = state.draftsByThreadKey
-  revokeDraftThreadPreviewUrls(removedComposerDraft)
+  if (destinationKey && removedComposerDraft)
+  {
+    restDraftsByThreadKey[destinationKey] = removedComposerDraft
+  }
+  else
+  {
+    revokeDraftThreadPreviewUrls(removedComposerDraft)
+  }
   return {
     draftsByThreadKey: restDraftsByThreadKey,
     draftThreadsByThreadKey: restDraftThreadsByThreadKey,
