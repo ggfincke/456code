@@ -24,7 +24,8 @@ import {
 import { type DraftId } from '~/composerDraftStore'
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from '~/lib/diffCollapse'
 import {
-  buildFileDiffRenderKey,
+  buildFileDiffContentVersion,
+  buildFileDiffIdentityKey,
   getDiffCollapseIconClassName,
   getDiffLineStat,
   getRenderablePatch,
@@ -75,6 +76,7 @@ interface NativeDiffFile
   readonly fileDiff: FileDiffMetadata
   readonly filePath: string
   readonly fileKey: string
+  readonly fileVersion: number
   readonly collapsed: boolean
 }
 
@@ -247,11 +249,12 @@ export function useNativeDiffSurfaceController(input: {
     () =>
       renderableFiles.map((fileDiff) =>
       {
-        const fileKey = buildFileDiffRenderKey(fileDiff)
+        const fileKey = buildFileDiffIdentityKey(fileDiff)
         return {
           fileDiff,
           filePath: resolveFileDiffPath(fileDiff),
           fileKey,
+          fileVersion: buildFileDiffContentVersion(fileDiff),
           collapsed: collapsedFileKeys.has(fileKey),
         }
       }),

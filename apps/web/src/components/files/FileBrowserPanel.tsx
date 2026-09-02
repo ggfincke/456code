@@ -22,6 +22,7 @@ import { PIERRE_ICONS } from '~/pierre-icons'
 
 import { createFileTreeDragMentionController } from './fileTreeDragMention'
 import { useProjectEntriesQuery } from './projectFilesQueryState'
+import { buildFileTreePathUpdates } from './fileTreePathReconciliation'
 
 interface FileBrowserPanelProps
 {
@@ -69,7 +70,7 @@ export default function FileBrowserPanel({
   )
   const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry['kind']>>(entryKinds)
   const treePaths = useMemo(() => entries.map(treePath), [entries])
-  const previousTreePathsRef = useRef<readonly string[]>([])
+  const previousTreePathsRef = useRef<readonly string[] | null>(null)
   const handleRefresh = () =>
   {
     entriesQuery.refresh()
@@ -222,11 +223,19 @@ export default function FileBrowserPanel({
 
   useEffect(() =>
   {
+    if (entriesQuery.data === null) return
     if (previousTreePathsRef.current === treePaths) return
     entryKindsRef.current = entryKinds
+    const previousTreePaths = previousTreePathsRef.current
     previousTreePathsRef.current = treePaths
-    model.resetPaths(treePaths)
-  }, [entryKinds, model, treePaths])
+    if (previousTreePaths === null)
+    {
+      model.resetPaths(treePaths)
+      return
+    }
+    const updates = buildFileTreePathUpdates(previousTreePaths, treePaths)
+    if (updates.length > 0) model.batch(updates)
+  }, [entriesQuery.data, entryKinds, model, treePaths])
 
   const fileCount = useMemo(
     () => entries.reduce((count, entry) => count + (entry.kind === 'file' ? 1 : 0), 0),
