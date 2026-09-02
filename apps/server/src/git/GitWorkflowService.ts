@@ -53,15 +53,33 @@ export class GitWorkflowService extends Context.Service<
       readonly cwd: string
       readonly remoteName: string
     }) => Effect.Effect<void, GitCommandError>
+    readonly fetchRemoteTrackingBranch: (input: {
+      readonly cwd: string
+      readonly remoteName: string
+      readonly remoteBranch: string
+    }) => Effect.Effect<void, GitCommandError>
     readonly remoteExists: (input: {
       readonly cwd: string
       readonly remoteName: string
     }) => Effect.Effect<boolean, GitCommandError>
-    readonly resolveRemoteTrackingCommit: (input: {
+    readonly remoteBranchExists: (input: {
       readonly cwd: string
-      readonly refName: string
-      readonly fallbackRemoteName: string
-    }) => Effect.Effect<
+      readonly remoteName: string
+      readonly remoteBranch: string
+    }) => Effect.Effect<boolean, GitCommandError>
+    readonly resolveRemoteTrackingCommit: (
+      input:
+        | {
+            readonly cwd: string
+            readonly refName: string
+            readonly fallbackRemoteName: string
+          }
+        | {
+            readonly cwd: string
+            readonly remoteName: string
+            readonly remoteBranch: string
+          },
+    ) => Effect.Effect<
       { readonly commitSha: string; readonly remoteRefName: string },
       GitCommandError
     >
@@ -233,9 +251,17 @@ export const make = Effect.gen(function* ()
       ensureGitCommand('GitWorkflowService.fetchRemote', input.cwd).pipe(
         Effect.andThen(git.fetchRemote(input)),
       ),
+    fetchRemoteTrackingBranch: (input) =>
+      ensureGitCommand('GitWorkflowService.fetchRemoteTrackingBranch', input.cwd).pipe(
+        Effect.andThen(git.fetchRemoteTrackingBranch(input)),
+      ),
     remoteExists: (input) =>
       ensureGitCommand('GitWorkflowService.remoteExists', input.cwd).pipe(
         Effect.andThen(git.remoteExists(input)),
+      ),
+    remoteBranchExists: (input) =>
+      ensureGitCommand('GitWorkflowService.remoteBranchExists', input.cwd).pipe(
+        Effect.andThen(git.remoteBranchExists(input)),
       ),
     resolveRemoteTrackingCommit: (input) =>
       ensureGitCommand('GitWorkflowService.resolveRemoteTrackingCommit', input.cwd).pipe(

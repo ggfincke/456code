@@ -7211,11 +7211,19 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
               return true
             }),
         )
-        const fetchRemote = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['fetchRemote']>[0]) =>
+        const fetchRemoteTrackingBranch = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['fetchRemoteTrackingBranch']>[0]) =>
             Effect.sync(() =>
             {
-              bootstrapGitOperations.push('fetch')
+              bootstrapGitOperations.push('fetch-remote-tracking-branch')
+            }),
+        )
+        const remoteBranchExists = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['remoteBranchExists']>[0]) =>
+            Effect.sync(() =>
+            {
+              bootstrapGitOperations.push('remote-branch-exists')
+              return true
             }),
         )
         const fetchedOriginCommit = '0123456789abcdef0123456789abcdef01234567'
@@ -7262,7 +7270,8 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           layers: {
             gitVcsDriver: {
               remoteExists,
-              fetchRemote,
+              fetchRemoteTrackingBranch,
+              remoteBranchExists,
               resolveRemoteTrackingCommit,
               createWorktree,
             },
@@ -7343,18 +7352,25 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           baseRefName: 'main',
           path: null,
         })
-        assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
+        assert.deepEqual(fetchRemoteTrackingBranch.mock.calls[0]?.[0], {
           cwd: '/tmp/project',
           remoteName: 'origin',
+          remoteBranch: 'main',
+        })
+        assert.deepEqual(remoteBranchExists.mock.calls[0]?.[0], {
+          cwd: '/tmp/project',
+          remoteName: 'origin',
+          remoteBranch: 'main',
         })
         assert.deepEqual(resolveRemoteTrackingCommit.mock.calls[0]?.[0], {
           cwd: '/tmp/project',
-          refName: 'main',
-          fallbackRemoteName: 'origin',
+          remoteName: 'origin',
+          remoteBranch: 'main',
         })
         assert.deepEqual(bootstrapGitOperations, [
           'remote-exists',
-          'fetch',
+          'remote-branch-exists',
+          'fetch-remote-tracking-branch',
           'resolve-remote-commit',
           'create-worktree',
         ])
@@ -7481,16 +7497,26 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
-  it.effect('falls back to the local base branch when startFromOrigin is set without origin', () =>
+  it.effect.each([
+    {
+      caseName: 'the origin remote is missing',
+      hasOrigin: false,
+    },
+    {
+      caseName: 'the base branch exists only locally',
+      hasOrigin: true,
+    },
+  ])('falls back to the local base branch when $caseName', ({ hasOrigin }) =>
     Effect.gen(function* ()
     {
       const dispatchedCommands: Array<OrchestrationCommand> = []
       const remoteExists = vi.fn(
         (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['remoteExists']>[0]) =>
-          Effect.succeed(false),
+          Effect.succeed(hasOrigin),
       )
-      const fetchRemote = vi.fn(
-        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['fetchRemote']>[0]) => Effect.void,
+      const fetchRemoteTrackingBranch = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['fetchRemoteTrackingBranch']>[0]) =>
+          Effect.void,
       )
       const resolveRemoteTrackingCommit = vi.fn(
         (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['resolveRemoteTrackingCommit']>[0]) =>
@@ -7498,6 +7524,10 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
             commitSha: '0123456789abcdef0123456789abcdef01234567',
             remoteRefName: 'origin/main',
           }),
+      )
+      const remoteBranchExists = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['remoteBranchExists']>[0]) =>
+          Effect.succeed(false),
       )
       const createWorktree = vi.fn(
         (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['createWorktree']>[0]) =>
@@ -7513,7 +7543,8 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         layers: {
           gitVcsDriver: {
             remoteExists,
-            fetchRemote,
+            fetchRemoteTrackingBranch,
+            remoteBranchExists,
             resolveRemoteTrackingCommit,
             createWorktree,
           },
@@ -7573,7 +7604,16 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         cwd: '/tmp/project',
         remoteName: 'origin',
       })
-      assert.equal(fetchRemote.mock.calls.length, 0)
+      assert.equal(fetchRemoteTrackingBranch.mock.calls.length, 0)
+      assert.equal(remoteBranchExists.mock.calls.length, hasOrigin ? 1 : 0)
+      if (hasOrigin)
+      {
+        assert.deepEqual(remoteBranchExists.mock.calls[0]?.[0], {
+          cwd: '/tmp/project',
+          remoteName: 'origin',
+          remoteBranch: 'main',
+        })
+      }
       assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0)
       assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
         cwd: '/tmp/project',

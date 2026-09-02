@@ -589,7 +589,7 @@ const makeWsRpcLayer = (
             if (bootstrap?.prepareWorktree)
             {
               let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch
-              // startFromOrigin is a stored preference, so local-only repos fall back to the base branch
+              // startFromOrigin is a stored preference, so a missing remote branch falls back locally
               const startFromOrigin =
                 bootstrap.prepareWorktree.startFromOrigin === true &&
                 (yield* gitWorkflow.remoteExists({
@@ -598,16 +598,26 @@ const makeWsRpcLayer = (
                 }))
               if (startFromOrigin)
               {
-                yield* gitWorkflow.fetchRemote({
+                const remoteBranch = bootstrap.prepareWorktree.baseBranch
+                const remoteBaseExists = yield* gitWorkflow.remoteBranchExists({
                   cwd: bootstrap.prepareWorktree.projectCwd,
                   remoteName: 'origin',
+                  remoteBranch,
                 })
-                const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  refName: bootstrap.prepareWorktree.baseBranch,
-                  fallbackRemoteName: 'origin',
-                })
-                worktreeBaseRef = resolvedRemoteBase.commitSha
+                if (remoteBaseExists)
+                {
+                  yield* gitWorkflow.fetchRemoteTrackingBranch({
+                    cwd: bootstrap.prepareWorktree.projectCwd,
+                    remoteName: 'origin',
+                    remoteBranch,
+                  })
+                  const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
+                    cwd: bootstrap.prepareWorktree.projectCwd,
+                    remoteName: 'origin',
+                    remoteBranch,
+                  })
+                  worktreeBaseRef = resolvedRemoteBase.commitSha
+                }
               }
               const worktree = yield* gitWorkflow.createWorktree({
                 cwd: bootstrap.prepareWorktree.projectCwd,
