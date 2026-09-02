@@ -51,6 +51,8 @@ export class FileSaveCoordinator<A = unknown, E = unknown>
   private timer: ReturnType<typeof setTimeout> | null = null
   private latestContents = ''
   private latestRevision = 0
+  private confirmedRevision = 0
+  private disposedFlushRevision = 0
   private lastChangeAt = 0
   private saving = false
   private disposed = false
@@ -60,6 +62,7 @@ export class FileSaveCoordinator<A = unknown, E = unknown>
 
   change(contents: string): void
   {
+    if (this.disposed) return
     this.latestContents = contents
     this.latestRevision += 1
     this.lastChangeAt = Date.now()
@@ -69,9 +72,10 @@ export class FileSaveCoordinator<A = unknown, E = unknown>
 
   dispose(): void
   {
+    if (this.disposed) return
     this.disposed = true
     this.clearTimer()
-    if (this.latestRevision > 0) void this.persistLatest()
+    if (this.latestRevision > 0) void this.persistLatest(true)
   }
 
   private schedule(delay: number): void
@@ -91,17 +95,24 @@ export class FileSaveCoordinator<A = unknown, E = unknown>
     this.timer = null
   }
 
-  private async persistLatest(): Promise<void>
+  private async persistLatest(disposalFlush = false): Promise<void>
   {
-    if (this.saving || this.latestRevision === 0) return
+    if (this.saving || this.latestRevision === this.confirmedRevision) return
 
-    this.saving = true
     const contents = this.latestContents
     const revision = this.latestRevision
+    if (this.disposed)
+    {
+      if (!disposalFlush || this.disposedFlushRevision === revision) return
+      this.disposedFlushRevision = revision
+    }
+
+    this.saving = true
     const result = await this.options.persist(contents)
     const succeeded = result._tag === 'Success'
     if (succeeded)
     {
+      this.confirmedRevision = revision
       this.options.onConfirmed(contents)
     }
 
@@ -118,7 +129,7 @@ export class FileSaveCoordinator<A = unknown, E = unknown>
     )
     if (this.disposed)
     {
-      void this.persistLatest()
+      void this.persistLatest(true)
     }
     else
     {
