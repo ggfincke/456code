@@ -68,12 +68,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? []
-  // OpenCode catalog gaps keep the exact selected slug visible
-  const selectedModel =
-    selectedInstanceOptions.find((option) => option.slug === props.model) ??
-    (activeEntry?.driverKind === 'opencode' ? undefined : selectedInstanceOptions[0])
+  // catalog gaps retain the exact selection instead of displaying a different model
+  const selectedModel = selectedInstanceOptions.find((option) => option.slug === props.model)
+  const selectionUnavailable =
+    !activeEntry?.enabled ||
+    !activeEntry.isAvailable ||
+    !selectedModel ||
+    selectedModel.isUnavailable
   const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model
-  const triggerLabel = `${selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model}${selectedModel?.isUnavailable ? ' (Unavailable)' : ''}`
+  const triggerLabel = `${selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model}${selectionUnavailable ? ' (Unavailable)' : ''}`
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries)
   // the trigger shows the instance as an icon and the model as text, so without
@@ -214,7 +217,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
           </Tooltip>
-          {selectedModel?.isUnavailable ? (
+          {selectionUnavailable ? (
             <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
               Unavailable
             </Badge>

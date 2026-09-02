@@ -187,7 +187,9 @@ export function getAppModelOptions(
 ): AppModelOption[]
 {
   const rawModels = getProviderModels(providers, provider)
-  const options: AppModelOption[] = rawModels.map(toAppModelOption)
+  const options: AppModelOption[] = rawModels
+    .filter((model) => !model.isCustom)
+    .map(toAppModelOption)
   const seen = new Set(options.map((option) => option.slug))
   const builtInModelSlugs = new Set(
     Arr.filterMap(getProviderModels(providers, provider), (model) =>
@@ -241,7 +243,9 @@ export function getAppModelOptionsForInstance(
   selectedModel?: string | null,
 ): AppModelOption[]
 {
-  const options: AppModelOption[] = entry.models.map(toAppModelOption)
+  const options: AppModelOption[] = entry.models
+    .filter((model) => !model.isCustom)
+    .map(toAppModelOption)
   const seen = new Set(options.map((option) => option.slug))
   const builtInModelSlugs = new Set(
     Arr.filterMap(entry.models, (model) =>

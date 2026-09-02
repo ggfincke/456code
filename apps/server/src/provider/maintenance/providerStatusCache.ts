@@ -24,7 +24,10 @@ const mergeProviderModels = (
 ): ReadonlyArray<ServerProvider['models'][number]> =>
 {
   const fallbackSlugs = new Set(fallbackModels.map((model) => model.slug))
-  return [...fallbackModels, ...cachedModels.filter((model) => !fallbackSlugs.has(model.slug))]
+  return [
+    ...fallbackModels,
+    ...cachedModels.filter((model) => !model.isCustom && !fallbackSlugs.has(model.slug)),
+  ]
 }
 
 export const orderProviderSnapshots = (
