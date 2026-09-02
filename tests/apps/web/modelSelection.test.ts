@@ -63,6 +63,43 @@ function settingsWithProviderInstances(): UnifiedSettings
 
 describe('instance-scoped model selection', () =>
 {
+  it('uses current custom metadata while dropping stale removed custom snapshot rows', () =>
+  {
+    const instanceId = ProviderInstanceId.make('claude_openrouter')
+    const settings = settingsWithProviderInstances()
+    const configured = {
+      ...settings,
+      providerInstances: {
+        ...settings.providerInstances,
+        [instanceId]: {
+          driver: ProviderDriverKind.make('claudeAgent'),
+          config: {
+            customModels: ['openai/gpt-5.5'],
+            customModelMetadata: {
+              'openai/gpt-5.5': { name: 'My private model' },
+              orphan: { name: 'Do not resurrect' },
+            },
+          },
+        },
+      },
+    }
+    const snapshot = {
+      ...provider({ instanceId, models: ['builtin'] }),
+      models: [
+        { slug: 'builtin', name: 'Built in', isCustom: false, capabilities: {} },
+        { slug: 'removed', name: 'Stale removed', isCustom: true, capabilities: {} },
+        { slug: 'openai/gpt-5.5', name: 'Stale name', isCustom: true, capabilities: {} },
+      ],
+    }
+    const [entry] = deriveProviderInstanceEntries([snapshot])
+    expect(
+      getAppModelOptionsForInstance(configured, entry!).map(({ slug, name }) => ({ slug, name })),
+    ).toEqual([
+      { slug: 'builtin', name: 'Built in' },
+      { slug: 'openai/gpt-5.5', name: 'My private model' },
+    ])
+  })
+
   it('keeps an exact OpenCode draft or thread selection through catalog loss and recovery', () =>
   {
     const instanceId = ProviderInstanceId.make('opencode-work')
@@ -413,6 +450,31 @@ describe('instance-scoped model selection', () =>
         'openai/gpt-5.5',
       ),
     ).toBe('claude-sonnet-4-6')
+  })
+
+  it('keeps backend writer defaults and unavailable saved routing targets visible', () =>
+  {
+    const providers = [provider({ instanceId: 'other-instance', models: ['other-model'] })]
+    expect(resolveAppModelSelectionState(DEFAULT_UNIFIED_SETTINGS, providers)).toEqual(
+      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+    )
+    const selection = {
+      instanceId: ProviderInstanceId.make('missing-instance'),
+      model: 'saved-model',
+    }
+    expect(
+      resolveAppModelSelectionState(
+        { ...DEFAULT_UNIFIED_SETTINGS, textGenerationModelSelection: selection },
+        providers,
+      ),
+    ).toEqual(selection)
+    const selected = provider({ instanceId: 'missing-instance', models: ['other-model'] })
+    expect(
+      resolveAppModelSelectionState(
+        { ...DEFAULT_UNIFIED_SETTINGS, textGenerationModelSelection: selection },
+        [selected, ...providers],
+      ),
+    ).toEqual(selection)
   })
 
   it('preserves custom provider instances in settings model selection', () =>

@@ -148,6 +148,11 @@ export function useNewThreadHandler()
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       )
+      const projectDefaultModelSelection =
+        project?.defaultModelSelection ??
+        environments.find((environment) => environment.environmentId === projectRef.environmentId)
+          ?.serverConfig?.settings.defaultModelSelection ??
+        null
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef)
@@ -301,7 +306,7 @@ export function useNewThreadHandler()
           runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
           ...(carryCollaborationMode ? { collaborationMode: carryCollaborationMode } : {}),
         })
-        applyStickyState(draftId, project?.defaultModelSelection)
+        applyStickyState(draftId, projectDefaultModelSelection)
         carryComposerContentTo(draftId)
 
         await router.navigate({
