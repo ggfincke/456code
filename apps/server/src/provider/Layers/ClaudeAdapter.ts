@@ -1998,12 +1998,17 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
         const partialInputJson = tool.partialInputJson + event.delta.partial_json
         const parsedInput = tryParseJsonRecord(partialInputJson)
+        const itemType = parsedInput
+          ? classifyToolItemType(tool.toolName, parsedInput)
+          : tool.itemType
         const detail = parsedInput ? summarizeToolRequest(tool.toolName, parsedInput) : tool.detail
         const nativeTask = parsedInput
           ? makeClaudeNativeTaskTool(tool.toolName, tool.itemId, parsedInput, tool.nativeTask)
           : tool.nativeTask
         let nextTool: ToolInFlight = {
           ...tool,
+          itemType,
+          title: titleForTool(itemType, tool.toolName),
           partialInputJson,
           ...(parsedInput ? { input: parsedInput } : {}),
           ...(detail ? { detail } : {}),
@@ -2121,11 +2126,11 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       }
 
       const toolName = block.name
-      const itemType = classifyToolItemType(toolName)
       const toolInput =
         typeof block.input === 'object' && block.input !== null
           ? (block.input as Record<string, unknown>)
           : {}
+      const itemType = classifyToolItemType(toolName, toolInput)
       const itemId = block.id
       const detail = summarizeToolRequest(toolName, toolInput)
       const inputFingerprint =

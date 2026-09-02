@@ -24,6 +24,7 @@ export type WorkLogToolLifecycleStatus =
 
 export interface NormalizedWorkLogEntry
 {
+  readonly viewedImagePath?: string
   readonly id: string
   readonly createdAt: string
   readonly turnId: TurnId | null
@@ -74,10 +75,13 @@ export interface ViewedImageAsset
 export function workEntryViewedImagePath(
   entry: Pick<
     NormalizedWorkLogEntry,
-    'detail' | 'requestKind' | 'itemType' | 'toolTitle'
+    'detail' | 'requestKind' | 'itemType' | 'toolTitle' | 'viewedImagePath'
   >,
 ): string | null
 {
+  const imagePath = entry.viewedImagePath?.trim()
+  if (imagePath && !/[\r\n]/.test(imagePath) && isWorkspaceImagePreviewPath(imagePath))
+    return imagePath
   const detail = entry.detail?.trim()
   const isReadEntry =
     entry.requestKind === 'file-read' ||
@@ -571,6 +575,7 @@ function toNormalizedWorkLogEntry(
   const commandPreview = extractToolCommand(payload)
   const changedFiles = extractChangedFiles(payload)
   const toolTitle = asTrimmedString(payload?.title)
+  const viewedImagePath = asTrimmedString(asRecord(payload?.data)?.imagePath)
   const isTaskActivity = activity.kind === 'task.progress' || activity.kind === 'task.completed'
   const taskSummary = isTaskActivity ? asNonEmptyString(payload?.summary) : null
   const taskDetailAsLabel =
@@ -607,6 +612,7 @@ function toNormalizedWorkLogEntry(
           : activity.tone,
     activityKind: activity.kind,
     ...(detail ? { detail } : {}),
+    ...(viewedImagePath ? { viewedImagePath } : {}),
     ...(commandPreview.command ? { command: commandPreview.command } : {}),
     ...(commandPreview.rawCommand ? { rawCommand: commandPreview.rawCommand } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
