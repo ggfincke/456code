@@ -1345,6 +1345,142 @@ describe('applyThreadDetailEvent', () =>
       }
     })
 
+    it('appends ordered activities while replacing a duplicate id', () =>
+    {
+      const activityEvent = (id: string, sequence: number, summary: string) => ({
+        ...baseEventFields,
+        sequence,
+        occurredAt: `2026-04-01T11:00:0${sequence}.000Z`,
+        aggregateKind: 'thread' as const,
+        aggregateId: ThreadId.make('thread-1'),
+        type: 'thread.activity-appended' as const,
+        payload: {
+          threadId: ThreadId.make('thread-1'),
+          activity: {
+            id: EventId.make(id),
+            tone: 'tool' as const,
+            kind: 'command',
+            summary,
+            payload: {},
+            turnId: TurnId.make('turn-1'),
+            sequence,
+            createdAt: `2026-04-01T11:00:0${sequence}.000Z`,
+          },
+        },
+      })
+
+      let seededIdReads = 0
+      const seededEvent = activityEvent('activity-1', 1, 'First')
+      const seededActivity = new Proxy(seededEvent.payload.activity, {
+        get(target, property, receiver)
+        {
+          if (property === 'id')
+          {
+            seededIdReads += 1
+          }
+          return Reflect.get(target, property, receiver)
+        },
+      })
+      const first = applyThreadDetailEvent(baseThread, {
+        ...seededEvent,
+        payload: { ...seededEvent.payload, activity: seededActivity },
+      })
+      expect(first.kind).toBe('updated')
+      if (first.kind !== 'updated')
+      {
+        return
+      }
+      const idReadsAfterSeed = seededIdReads
+      const second = applyThreadDetailEvent(first.thread, activityEvent('activity-2', 2, 'Second'))
+      expect(second.kind).toBe('updated')
+      expect(seededIdReads).toBe(idReadsAfterSeed)
+      if (second.kind !== 'updated')
+      {
+        return
+      }
+      const replacement = applyThreadDetailEvent(
+        second.thread,
+        activityEvent('activity-2', 2, 'Second updated'),
+      )
+
+      expect(replacement.kind).toBe('updated')
+      if (replacement.kind === 'updated')
+      {
+        expect(replacement.thread.activities.map((activity) => activity.id)).toEqual([
+          'activity-1',
+          'activity-2',
+        ])
+        expect(replacement.thread.activities[1]?.summary).toBe('Second updated')
+      }
+    })
+
+    it('sorts snapshot and out-of-order activity fallbacks', () =>
+    {
+      const activity = (id: string, sequence: number) => ({
+        id: EventId.make(id),
+        tone: 'tool' as const,
+        kind: 'command',
+        summary: id,
+        payload: {},
+        turnId: TurnId.make('turn-1'),
+        sequence,
+        createdAt: `2026-04-01T11:00:0${sequence}.000Z`,
+      })
+      const append = (
+        thread: OrchestrationThread,
+        nextActivity: ReturnType<typeof activity>,
+        sequence: number,
+      ) =>
+        applyThreadDetailEvent(thread, {
+          ...baseEventFields,
+          sequence,
+          occurredAt: nextActivity.createdAt,
+          aggregateKind: 'thread',
+          aggregateId: thread.id,
+          type: 'thread.activity-appended',
+          payload: { threadId: thread.id, activity: nextActivity },
+        })
+
+      const snapshotAppend = append(
+        { ...baseThread, activities: [activity('activity-3', 3), activity('activity-1', 1)] },
+        activity('activity-2', 2),
+        2,
+      )
+      expect(snapshotAppend.kind).toBe('updated')
+      if (snapshotAppend.kind !== 'updated')
+      {
+        return
+      }
+      expect(snapshotAppend.thread.activities.map((entry) => entry.id)).toEqual([
+        'activity-1',
+        'activity-2',
+        'activity-3',
+      ])
+
+      const orderedAppend = append(baseThread, activity('activity-1', 1), 1)
+      expect(orderedAppend.kind).toBe('updated')
+      if (orderedAppend.kind !== 'updated')
+      {
+        return
+      }
+      const thirdAppend = append(orderedAppend.thread, activity('activity-3', 3), 3)
+      expect(thirdAppend.kind).toBe('updated')
+      if (thirdAppend.kind !== 'updated')
+      {
+        return
+      }
+      const middleAppend = append(thirdAppend.thread, activity('activity-2', 2), 2)
+      expect(middleAppend.kind).toBe('updated')
+      if (middleAppend.kind === 'updated')
+      {
+        expect(middleAppend.thread.activities.map((entry) => entry.id)).toEqual([
+          'activity-1',
+          'activity-2',
+          'activity-3',
+        ])
+      }
+    })
+
     it('replaces a worker verdict activity with the same deterministic id', () =>
     {
       const activityId = EventId.make('worker-verdict:run-1:job-1')

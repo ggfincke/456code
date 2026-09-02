@@ -33,17 +33,41 @@ const checkpointOrder = O.mapInput(
     cp.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER,
 )
 
+type ThreadActivity = OrchestrationThread['activities'][number]
+
+// reducer-produced arrays are sorted and indexed, so later appends can
+// check fast-path eligibility without rescanning the complete activity list
+const activityIdIndex = new WeakMap<ReadonlyArray<ThreadActivity>, Set<ThreadActivity['id']>>()
+
 function upsertThreadActivity(
   activities: OrchestrationThread['activities'],
-  activity: OrchestrationThread['activities'][number],
-): ReadonlyArray<OrchestrationThread['activities'][number]>
+  activity: ThreadActivity,
+): ReadonlyArray<ThreadActivity>
 {
-  return pipe(
+  const ids = activityIdIndex.get(activities)
+  const lastActivity = activities.at(-1)
+  if (
+    ids !== undefined &&
+    !ids.has(activity.id) &&
+    (lastActivity === undefined ||
+      compareOrchestrationThreadActivities(lastActivity, activity) <= 0)
+  )
+  {
+    const updated = Arr.append(activities, activity)
+    activityIdIndex.delete(activities)
+    ids.add(activity.id)
+    activityIdIndex.set(updated, ids)
+    return updated
+  }
+
+  const updated = pipe(
     activities,
     Arr.filter((entry) => entry.id !== activity.id),
     Arr.append(activity),
     Arr.sort(compareOrchestrationThreadActivities),
   )
+  activityIdIndex.set(updated, new Set(updated.map((entry) => entry.id)))
+  return updated
 }
 
 // apply a single orchestration event to an `OrchestrationThread`, returning
@@ -743,7 +767,9 @@ export function applyThreadDetailEvent(
           )?.id
         : undefined
       const activities = upsertThreadActivity(
-        thread.activities.filter((entry) => entry.id !== replacedActivityId),
+        replacedActivityId === undefined
+          ? thread.activities
+          : thread.activities.filter((entry) => entry.id !== replacedActivityId),
         activity,
       )
       const orchestratePlans =
