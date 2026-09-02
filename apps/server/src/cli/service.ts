@@ -3,9 +3,9 @@
 
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
-import * as Result from 'effect/Result'
-import { Command, GlobalFlag } from 'effect/unstable/cli'
+import { Command, Flag, GlobalFlag } from 'effect/unstable/cli'
 
 import packageJson from '../../package.json' with { type: 'json' }
 import * as BootService from '../service/bootService.ts'
@@ -40,8 +40,30 @@ interface ServiceLocationFlags
   readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]['baseDir']
 }
 
+interface ServiceReconcileFlags extends ServiceLocationFlags
+{
+  readonly allowDowngrade: boolean
+}
+
+const requireServiceDowngradeAllowed = (
+  status: BootService.BootServiceStatus,
+  options?: BootService.BootServiceInstallOptions,
+) =>
+  status.installedVersion !== undefined &&
+  options?.allowDowngrade !== true &&
+  (BootService.compareServiceVersions(status.installedVersion, packageJson.version) ?? 0) > 0
+    ? Effect.fail(
+        new BootService.BootServiceDowngradeRefusedError({
+          installedVersion: status.installedVersion,
+          targetVersion: packageJson.version,
+        }),
+      )
+    : Effect.void
+
 // install, update, or repair the service using the CLI version running this command.
-export const reconcileService = Effect.fn('cli.service.reconcile')(function* ()
+export const reconcileService = Effect.fn('cli.service.reconcile')(function* (
+  options?: BootService.BootServiceInstallOptions,
+)
 {
   const service = yield* BootService.BootService
   const status = yield* service.status
@@ -49,7 +71,8 @@ export const reconcileService = Effect.fn('cli.service.reconcile')(function* ()
   {
     return { changed: false, status } satisfies ServiceReconcileResult
   }
-  const plan = yield* service.install
+  yield* requireServiceDowngradeAllowed(status, options)
+  const plan = yield* service.install(options)
   return {
     changed: true,
     previouslyInstalled: status.installed,
@@ -70,9 +93,24 @@ export function formatServiceStatus(
   {
     return '456code service\n  Status: not installed\n  Next: Run `456code service install`.'
   }
+  const installedVersion = status.installedVersion ?? cliVersion
+  if (
+    !status.current &&
+    status.installedVersion !== undefined &&
+    (BootService.compareServiceVersions(status.installedVersion, cliVersion) ?? 0) > 0
+  )
+  {
+    return [
+      '456code service',
+      `  Status: installed · 456code@${installedVersion} (newer than this 456code@${cliVersion} CLI)`,
+      `  Unit: ${status.unitPath}`,
+      `  Logs: ${status.logPath}`,
+      `  Next: Use \`npx 456code@${installedVersion} service update\` to repair it, or pass \`--allow-downgrade\` explicitly.`,
+    ].join('\n')
+  }
   return [
     '456code service',
-    `  Status: ${status.current ? `installed · 456code@${cliVersion}` : 'needs an update or repair'}`,
+    `  Status: ${status.current ? `installed · 456code@${installedVersion}` : 'needs an update or repair'}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...(status.current ? [] : ['  Next: Run `npx 456code@latest service update`.']),
@@ -94,78 +132,129 @@ const runServiceCommand = <A, E>(
   run: Effect.Effect<A, E, BootService.BootService>,
 ) => Effect.scoped(runServiceCommandUnscoped(flags, run))
 
+export const withPreparedServiceInstall = <A, B, E, E2, R, R2>(
+  prepare: Effect.Effect<A, E, R>,
+  activate: (prepared: A) => Effect.Effect<B, E2, R2>,
+  release: (prepared: A) => Effect.Effect<void>,
+) =>
+  Effect.acquireUseRelease(prepare, activate, (prepared) =>
+    release(prepared).pipe(Effect.uninterruptible),
+  )
+
+const prepareServiceStorageHandoff = Effect.fn('cli.service.prepare_storage_handoff')(function* (
+  options?: BootService.BootServiceInstallOptions,
+  onRestartSnapshot?: (snapshot: BootService.BootServiceRestartSnapshot) => void,
+)
+{
+  const service = yield* BootService.BootService
+  const status = yield* service.status
+  yield* requireServiceDowngradeAllowed(status, options)
+  let restartSnapshot: BootService.BootServiceRestartSnapshot | null = null
+  if (status.installed && status.active && !status.current)
+  {
+    restartSnapshot = yield* service.restartSnapshot
+    if (restartSnapshot !== null) onRestartSnapshot?.(restartSnapshot)
+    yield* service.stop(options)
+  }
+  return { status, restartSnapshot }
+})
+
 export const prepareServiceStorageMutation = Effect.fn('cli.service.prepare_storage_mutation')(
-  function* ()
+  function* (options?: BootService.BootServiceInstallOptions)
   {
     const service = yield* BootService.BootService
-    const status = yield* service.status
-    if (status.installed && status.active && !status.current)
-    {
-      yield* service.stop
-    }
-    return status
+    return yield* service.withMutationLock(
+      prepareServiceStorageHandoff(options).pipe(Effect.map(({ status }) => status)),
+    )
   },
 )
 
 const reconcileServiceWithStorageOwnership = Effect.fn(
   'cli.service.reconcile_with_storage_ownership',
-)(function* (flags: ServiceLocationFlags)
+)(function* (flags: ServiceReconcileFlags)
 {
   const logLevel = yield* GlobalFlag.LogLevel
   const probeConfig = yield* resolveProjectCliProbeConfig(flags, logLevel)
-  const status = yield* prepareServiceStorageMutation().pipe(
-    Effect.provide(bootServiceLayer(probeConfig)),
-  )
-
-  if (status.installed && status.current)
-  {
-    return { changed: false, status } satisfies ServiceReconcileResult
-  }
-
-  // this nested scope releases the CLI storage lease before systemd starts
-  // the server process that must acquire the same lease.
-  const preparation = yield* Effect.scoped(
-    Effect.gen(function* ()
-    {
-      const { config } = yield* resolveCliAuthConfig(flags, logLevel)
-      const prepared = yield* Effect.gen(function* ()
-      {
-        const service = yield* BootService.BootService
-        return yield* service.prepareInstall
-      }).pipe(Effect.provide(bootServiceLayer(config)))
-      return { config, prepared }
-    }).pipe(Effect.result),
-  )
-
-  if (Result.isFailure(preparation))
-  {
-    if (status.active)
-    {
-      yield* Effect.gen(function* ()
-      {
-        const service = yield* BootService.BootService
-        yield* service.restart
-      }).pipe(Effect.provide(bootServiceLayer(probeConfig)), Effect.ignore)
-    }
-    return yield* Effect.fail(preparation.failure)
-  }
-
-  const plan = yield* Effect.gen(function* ()
+  const installOptions = { allowDowngrade: flags.allowDowngrade }
+  return yield* Effect.gen(function* ()
   {
     const service = yield* BootService.BootService
-    return yield* service.activatePrepared(preparation.success.prepared)
-  }).pipe(Effect.provide(bootServiceLayer(preparation.success.config)))
-  return {
-    changed: true,
-    previouslyInstalled: status.installed,
-    plan,
-  } satisfies ServiceReconcileResult
+    let restartSnapshot: BootService.BootServiceRestartSnapshot | null = null
+    let preparedAcquired = false
+    return yield* service.withMutationLock(
+      Effect.gen(function* ()
+      {
+        const storageMutation = yield* prepareServiceStorageHandoff(installOptions, (snapshot) =>
+        {
+          restartSnapshot = snapshot
+        })
+        const status = storageMutation.status
+
+        if (status.installed && status.current)
+        {
+          return { changed: false, status } satisfies ServiceReconcileResult
+        }
+
+        const plan = yield* withPreparedServiceInstall(
+          // this nested scope releases the CLI storage lease before systemd starts
+          // the server process that must acquire the same lease.
+          Effect.scoped(
+            Effect.gen(function* ()
+            {
+              const { config } = yield* resolveCliAuthConfig(flags, logLevel)
+              const handoff = yield* Effect.gen(function* ()
+              {
+                const service = yield* BootService.BootService
+                const prepared = yield* service.prepareInstall(installOptions)
+                return { prepared, release: service.releasePreparedInstall(prepared) }
+              }).pipe(Effect.provide(bootServiceLayer(config)))
+              return { config, ...handoff }
+            }),
+          ).pipe(
+            Effect.tap(() =>
+              Effect.sync(() =>
+              {
+                preparedAcquired = true
+              }),
+            ),
+          ),
+          (preparation) =>
+            Effect.gen(function* ()
+            {
+              const service = yield* BootService.BootService
+              return yield* service.activatePrepared(preparation.prepared)
+            }).pipe(Effect.provide(bootServiceLayer(preparation.config))),
+          (preparation) => preparation.release,
+        )
+
+        return {
+          changed: true,
+          previouslyInstalled: status.installed,
+          plan,
+        } satisfies ServiceReconcileResult
+      }).pipe(
+        Effect.onExit((exit) =>
+          Exit.isFailure(exit) && restartSnapshot !== null && !preparedAcquired
+            ? service.restartIfUnchanged(restartSnapshot).pipe(Effect.ignore)
+            : Effect.void,
+        ),
+      ),
+    )
+  }).pipe(Effect.provide(bootServiceLayer(probeConfig)))
 })
 
-const runServiceReconcile = (flags: ServiceLocationFlags) =>
+const runServiceReconcile = (flags: ServiceReconcileFlags) =>
   Effect.scoped(reconcileServiceWithStorageOwnership(flags))
 
-const serviceInstallCommand = Command.make('install', projectLocationFlags).pipe(
+const serviceReconcileFlags = {
+  ...projectLocationFlags,
+  allowDowngrade: Flag.boolean('allow-downgrade').pipe(
+    Flag.withDescription('Allow replacing a newer installed service with this older CLI version.'),
+    Flag.withDefault(false),
+  ),
+}
+
+const serviceInstallCommand = Command.make('install', serviceReconcileFlags).pipe(
   Command.withDescription('Install 456code as a background service for this user.'),
   Command.withHandler((flags) =>
     Effect.gen(function* ()
@@ -185,7 +274,7 @@ const serviceInstallCommand = Command.make('install', projectLocationFlags).pipe
   ),
 )
 
-const serviceUpdateCommand = Command.make('update', projectLocationFlags).pipe(
+const serviceUpdateCommand = Command.make('update', serviceReconcileFlags).pipe(
   Command.withDescription(
     'Update or repair the background service using this CLI version. Use `npx 456code@latest service update` for the latest release.',
   ),

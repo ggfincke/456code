@@ -7,11 +7,14 @@ import * as Config from 'effect/Config'
 import * as DateTime from 'effect/DateTime'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as FileSystem from 'effect/FileSystem'
+import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
+import * as Scope from 'effect/Scope'
 
 import {
   HostProcessArguments,
@@ -22,7 +25,7 @@ import {
 } from '@t3tools/shared/hostProcess'
 
 import * as ProcessRunner from '../process/processRunner.ts'
-import { SERVER_STORAGE_LEASE_FILE, ServerStorageLeaseOwner } from '../serverStorageLease.ts'
+import * as ServerStorageLease from '../serverStorageLease.ts'
 import { ensurePinnedRuntimeInstalled, pinnedRuntimePaths } from './pinnedRuntime.ts'
 
 // installs 456code as a per-user systemd unit or macOS launch agent. The
@@ -36,13 +39,44 @@ export const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`
 export const BOOT_SERVICE_LAUNCHD_LABEL = 'com.t3tools.456code.service'
 export const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`
 export const BOOT_SERVICE_UNIT_ENV = 'CODE456_BOOT_SERVICE_UNIT'
+export const BOOT_SERVICE_VERSION_ENV = 'CODE456_BOOT_SERVICE_VERSION'
+
+const SEMVER_NUMBER = '(?:0|[1-9]\\d*)'
+const SEMVER_PRERELEASE = `(?:${SEMVER_NUMBER}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)`
+const EXACT_SERVICE_VERSION = new RegExp(
+  `^${SEMVER_NUMBER}\\.${SEMVER_NUMBER}\\.${SEMVER_NUMBER}(?:-${SEMVER_PRERELEASE}(?:\\.${SEMVER_PRERELEASE})*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$`,
+)
+const LEGACY_PINNED_RUNTIME_VERSION =
+  /(?:^|[\s"<])[^\s"<]*\/runtime\/versions\/([^/\s"<>]+)\/node_modules\/456code\/dist\/bin\.mjs(?=$|[\s"<])/gu
 
 // launchd may wait for the plist's 90-second ExitTimeOut before bootout returns.
 const STOP_STEP_TIMEOUT = '120 seconds'
+// retry contested storage mutex acquisitions after 50ms.
+const INSTALL_LOCK_ATTEMPTS = 200
+const INSTALL_LOCK_DIRECTORY_SUFFIX = '.install-lock'
 
 const decodeStorageOwner = Schema.decodeUnknownOption(
-  Schema.fromJsonString(ServerStorageLeaseOwner),
+  Schema.fromJsonString(ServerStorageLease.ServerStorageLeaseOwner),
 )
+
+interface HeldInstallerLock
+{
+  readonly unitPath: string
+  readonly scope: Scope.Closeable
+  readonly prepared?: BootServicePreparedInstall
+  readonly rollback?: () => Effect.Effect<void>
+}
+
+// the CLI rebuilds BootService after releasing its storage lease, so the token
+// carries this child scope across service instances until activation.
+const heldInstallerLocks = new Map<string, HeldInstallerLock>()
+
+/** Tracks per-fiber reentrant installer leases by unit path. */
+class ActiveInstallerLocks extends Context.Reference<ReadonlyMap<string, string>>(
+  '456code/service/bootService/ActiveInstallerLocks',
+  { defaultValue: () => new Map() },
+)
+{}
 
 const EPHEMERAL_CACHE_SEGMENTS = [
   // npx
@@ -92,6 +126,7 @@ export interface BootServicePlan
   // absolute path of the pinned 456code entry point the unit will run.
   readonly t3EntryPath: string
   readonly environmentPath: string
+  readonly serviceVersion: string
   readonly baseDir: string
   readonly logPath: string
   readonly unitPath: string
@@ -100,9 +135,168 @@ export interface BootServicePlan
 export interface BootServicePreparedInstall
 {
   readonly plan: BootServicePlan
+  readonly preparedUnit: string
+  readonly installerLockToken: string
   readonly canonicalBaseDir: string
   readonly previousStorageOwnerToken: string | null
   readonly previousUnit: string | null
+  readonly allowDowngrade: boolean
+}
+
+export interface BootServiceRestartSnapshot
+{
+  readonly unit: string
+}
+
+export interface BootServiceInstallOptions
+{
+  readonly allowDowngrade?: boolean
+}
+
+interface ParsedServiceVersion
+{
+  readonly core: readonly [bigint, bigint, bigint]
+  readonly prerelease: ReadonlyArray<string>
+}
+
+function parseExactServiceVersion(value: string): ParsedServiceVersion | undefined
+{
+  if (!EXACT_SERVICE_VERSION.test(value))
+  {
+    return undefined
+  }
+  const withoutBuild = value.split('+', 1)[0] ?? value
+  const separator = withoutBuild.indexOf('-')
+  const core = separator === -1 ? withoutBuild : withoutBuild.slice(0, separator)
+  const prerelease = separator === -1 ? [] : withoutBuild.slice(separator + 1).split('.')
+  const [major, minor, patch] = core.split('.')
+  return {
+    core: [BigInt(major!), BigInt(minor!), BigInt(patch!)],
+    prerelease,
+  }
+}
+
+function exactServiceVersion(value: string): boolean
+{
+  return parseExactServiceVersion(value) !== undefined
+}
+
+// compares only validated exact versions; build metadata has no SemVer precedence.
+export function compareServiceVersions(left: string, right: string): number | undefined
+{
+  const leftVersion = parseExactServiceVersion(left)
+  const rightVersion = parseExactServiceVersion(right)
+  if (leftVersion === undefined || rightVersion === undefined)
+  {
+    return undefined
+  }
+
+  for (let index = 0; index < leftVersion.core.length; index += 1)
+  {
+    const leftIdentifier = leftVersion.core[index]!
+    const rightIdentifier = rightVersion.core[index]!
+    if (leftIdentifier !== rightIdentifier)
+    {
+      return leftIdentifier < rightIdentifier ? -1 : 1
+    }
+  }
+
+  if (leftVersion.prerelease.length === 0 || rightVersion.prerelease.length === 0)
+  {
+    return leftVersion.prerelease.length === rightVersion.prerelease.length
+      ? 0
+      : leftVersion.prerelease.length === 0
+        ? 1
+        : -1
+  }
+
+  const identifierCount = Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length)
+  for (let index = 0; index < identifierCount; index += 1)
+  {
+    const leftIdentifier = leftVersion.prerelease[index]
+    const rightIdentifier = rightVersion.prerelease[index]
+    if (leftIdentifier === undefined || rightIdentifier === undefined)
+    {
+      return leftIdentifier === undefined ? -1 : 1
+    }
+    if (leftIdentifier === rightIdentifier)
+    {
+      continue
+    }
+
+    const leftNumeric = /^\d+$/u.test(leftIdentifier)
+    const rightNumeric = /^\d+$/u.test(rightIdentifier)
+    if (leftNumeric && rightNumeric)
+    {
+      return BigInt(leftIdentifier) < BigInt(rightIdentifier) ? -1 : 1
+    }
+    if (leftNumeric !== rightNumeric)
+    {
+      return leftNumeric ? -1 : 1
+    }
+    return leftIdentifier < rightIdentifier ? -1 : 1
+  }
+  return 0
+}
+
+function bootServicePlansEqual(left: BootServicePlan, right: BootServicePlan): boolean
+{
+  return (
+    left.nodePath === right.nodePath &&
+    left.t3EntryPath === right.t3EntryPath &&
+    left.environmentPath === right.environmentPath &&
+    left.serviceVersion === right.serviceVersion &&
+    left.baseDir === right.baseDir &&
+    left.logPath === right.logPath &&
+    left.unitPath === right.unitPath
+  )
+}
+
+function preparedInstallsEqual(
+  left: BootServicePreparedInstall,
+  right: BootServicePreparedInstall,
+): boolean
+{
+  return (
+    bootServicePlansEqual(left.plan, right.plan) &&
+    left.preparedUnit === right.preparedUnit &&
+    left.installerLockToken === right.installerLockToken &&
+    left.canonicalBaseDir === right.canonicalBaseDir &&
+    left.previousStorageOwnerToken === right.previousStorageOwnerToken &&
+    left.previousUnit === right.previousUnit &&
+    left.allowDowngrade === right.allowDowngrade
+  )
+}
+
+// new definitions carry an explicit marker. The legacy fallback recognizes only
+// the exact pinned-runtime layout previously written by this service.
+export function extractInstalledServiceVersion(definition: string): string | undefined
+{
+  const markerOccurrences =
+    definition.match(new RegExp(BOOT_SERVICE_VERSION_ENV, 'gu'))?.length ?? 0
+  if (markerOccurrences > 0)
+  {
+    const systemdMatch = definition.match(
+      new RegExp(`^Environment=${BOOT_SERVICE_VERSION_ENV}=([^\\r\\n]+)$`, 'mu'),
+    )
+    const plistMatch = definition.match(
+      new RegExp(`<key>${BOOT_SERVICE_VERSION_ENV}<\\/key>\\s*<string>([^<]+)<\\/string>`, 'u'),
+    )
+    const candidates = [systemdMatch?.[1], plistMatch?.[1]].filter(
+      (candidate): candidate is string => candidate !== undefined,
+    )
+    return markerOccurrences === 1 && candidates.length === 1 && exactServiceVersion(candidates[0]!)
+      ? candidates[0]
+      : undefined
+  }
+
+  const legacyMatches = Array.from(definition.matchAll(LEGACY_PINNED_RUNTIME_VERSION))
+  if (legacyMatches.length !== 1)
+  {
+    return undefined
+  }
+  const candidate = legacyMatches[0]?.[1]
+  return candidate !== undefined && exactServiceVersion(candidate) ? candidate : undefined
 }
 
 // pure so it is testable byte-for-byte. systemd user units run with a
@@ -128,6 +322,7 @@ export function renderBootServiceUnit(plan: BootServicePlan): string
     'WorkingDirectory=%h',
     `Environment=T3CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
     `Environment=${BOOT_SERVICE_UNIT_ENV}=${BOOT_SERVICE_UNIT_FILE}`,
+    `Environment=${BOOT_SERVICE_VERSION_ENV}=${plan.serviceVersion}`,
     `Environment=${quoteSystemdValue(`PATH=${plan.environmentPath}`)}`,
     `ExecStart=${quoteSystemdValue(plan.nodePath)} ${quoteSystemdValue(plan.t3EntryPath)} serve`,
     'Restart=always',
@@ -170,6 +365,8 @@ export function renderBootServicePlist(
     `    <string>${escapeXmlText(plan.baseDir)}</string>`,
     `    <key>${BOOT_SERVICE_UNIT_ENV}</key>`,
     `    <string>${BOOT_SERVICE_PLIST_FILE}</string>`,
+    `    <key>${BOOT_SERVICE_VERSION_ENV}</key>`,
+    `    <string>${plan.serviceVersion}</string>`,
     '    <key>PATH</key>',
     `    <string>${escapeXmlText(plan.environmentPath)}</string>`,
     '  </dict>',
@@ -236,8 +433,25 @@ export class BootServiceInstallError extends Schema.TaggedErrorClass<BootService
   }
 }
 
+export class BootServiceDowngradeRefusedError extends Schema.TaggedErrorClass<BootServiceDowngradeRefusedError>()(
+  'BootServiceDowngradeRefusedError',
+  {
+    installedVersion: Schema.String,
+    targetVersion: Schema.String,
+  },
+)
+{
+  override get message(): string
+  {
+    return `Refusing to replace 456code@${this.installedVersion} with older 456code@${this.targetVersion}. Run the command again with --allow-downgrade to continue.`
+  }
+}
+
 export type BootServiceError =
-  BootServiceUnsupportedError | BootServiceCommandError | BootServiceInstallError
+  | BootServiceUnsupportedError
+  | BootServiceCommandError
+  | BootServiceInstallError
+  | BootServiceDowngradeRefusedError
 
 export interface BootServiceStatus
 {
@@ -246,6 +460,7 @@ export interface BootServiceStatus
   readonly active: boolean
   // false when the installed unit no longer matches what install would write.
   readonly current: boolean
+  readonly installedVersion?: string
   readonly unitPath: string
   readonly logPath: string
 }
@@ -253,19 +468,32 @@ export interface BootServiceStatus
 export class BootService extends Context.Service<
   BootService,
   {
+    // serializes a complete install, update, or uninstall mutation.
+    readonly withMutationLock: <A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | BootServiceError, R>
     // materializes baseDir-owned runtime state and the unit without starting it.
-    readonly prepareInstall: Effect.Effect<BootServicePreparedInstall, BootServiceError>
+    readonly prepareInstall: (
+      options?: BootServiceInstallOptions,
+    ) => Effect.Effect<BootServicePreparedInstall, BootServiceError>
     // activates a prepared unit after the caller releases storage ownership.
     readonly activatePrepared: (
       prepared: BootServicePreparedInstall,
     ) => Effect.Effect<BootServicePlan, BootServiceError>
+    // idempotently releases a prepared install that will not be activated.
+    readonly releasePreparedInstall: (prepared: BootServicePreparedInstall) => Effect.Effect<void>
     // installs the pinned runtime + unit, enables linger, starts the service.
-    readonly install: Effect.Effect<BootServicePlan, BootServiceError>
-    // restores a previously installed unit after lease-scoped preparation fails.
-    readonly restart: Effect.Effect<void, BootServiceError>
+    readonly install: (
+      options?: BootServiceInstallOptions,
+    ) => Effect.Effect<BootServicePlan, BootServiceError>
+    // snapshots and conditionally restarts the exact unit stopped before preparation.
+    readonly restartSnapshot: Effect.Effect<BootServiceRestartSnapshot | null, BootServiceError>
+    readonly restartIfUnchanged: (
+      snapshot: BootServiceRestartSnapshot,
+    ) => Effect.Effect<boolean, BootServiceError>
     // stops the installed unit without removing it so a storage-owning server
     // releases its lease before an update replaces the runtime or unit.
-    readonly stop: Effect.Effect<boolean, BootServiceError>
+    readonly stop: (options?: BootServiceInstallOptions) => Effect.Effect<boolean, BootServiceError>
     // stops and removes the unit; leaves the pinned runtime for reuse.
     // returns whether a unit was actually removed.
     readonly uninstall: Effect.Effect<boolean, BootServiceError>
@@ -313,6 +541,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     ? path.join(homeDir, 'Library', 'LaunchAgents')
     : path.join(homeDir, '.config', 'systemd', 'user')
   const unitPath = path.join(unitDir, isLaunchd ? BOOT_SERVICE_PLIST_FILE : BOOT_SERVICE_UNIT_FILE)
+  const installerLockDirectory = `${unitPath}${INSTALL_LOCK_DIRECTORY_SUFFIX}`
   const logPath = path.join(input.logsDir, 'boot-service.log')
   const runtimePaths = pinnedRuntimePaths(path, input.baseDir, input.cliVersion)
 
@@ -433,6 +662,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
       : hostEnvironment.PATH?.trim() === '' || hostEnvironment.PATH === undefined
         ? DEFAULT_BOOT_SERVICE_PATH
         : hostEnvironment.PATH,
+    serviceVersion: input.cliVersion,
     baseDir: input.baseDir,
     logPath,
     unitPath,
@@ -446,10 +676,12 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     canonicalBaseDir: string,
   )
   {
-    return yield* fs.readFileString(path.join(canonicalBaseDir, SERVER_STORAGE_LEASE_FILE)).pipe(
-      Effect.map(decodeStorageOwner),
-      Effect.orElseSucceed(() => Option.none()),
-    )
+    return yield* fs
+      .readFileString(path.join(canonicalBaseDir, ServerStorageLease.SERVER_STORAGE_LEASE_FILE))
+      .pipe(
+        Effect.map(decodeStorageOwner),
+        Effect.orElseSucceed(() => Option.none()),
+      )
   })
 
   const restoreUnitFile = Effect.fn('service.boot_service.restore_unit_file')(function* (
@@ -464,43 +696,235 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     yield* fs.writeFileString(unitPath, previousUnit).pipe(Effect.ignore)
   })
 
-  const prepareInstall: BootService['Service']['prepareInstall'] = Effect.gen(function* ()
+  const readInstalledDefinition = Effect.fn('service.boot_service.read_installed_definition')(
+    function* ()
+    {
+      const exists = yield* fs.exists(unitPath)
+      if (!exists)
+      {
+        return null
+      }
+      return yield* fs.readFileString(unitPath)
+    },
+    Effect.mapError((cause) => new BootServiceInstallError({ cause })),
+  )
+
+  const requireDowngradeAllowed = Effect.fn('service.boot_service.require_downgrade_allowed')(
+    function* (options?: BootServiceInstallOptions, definition?: string | null)
+    {
+      if (options?.allowDowngrade === true)
+      {
+        return
+      }
+      const installedDefinition =
+        definition === undefined ? yield* readInstalledDefinition() : definition
+      const installedVersion =
+        installedDefinition === null
+          ? undefined
+          : extractInstalledServiceVersion(installedDefinition)
+      if (
+        installedVersion !== undefined &&
+        (compareServiceVersions(installedVersion, input.cliVersion) ?? 0) > 0
+      )
+      {
+        return yield* new BootServiceDowngradeRefusedError({
+          installedVersion,
+          targetVersion: input.cliVersion,
+        })
+      }
+    },
+  )
+
+  // cleanup runs in a fresh uninterruptible fiber so a pending cancellation on
+  // the installer cannot abort its first asynchronous filesystem operation.
+  const runInstallerCleanup = Effect.fn('service.boot_service.run_installer_cleanup')(function* (
+    cleanup: Effect.Effect<void>,
+  )
+  {
+    const fiber = yield* cleanup.pipe(
+      Effect.forkChild({ startImmediately: true, uninterruptible: true }),
+    )
+    yield* Fiber.join(fiber)
+  })
+
+  const closeInstallerLock = Effect.fn('service.boot_service.close_installer_lock')(function* (
+    lock: HeldInstallerLock,
+  )
+  {
+    yield* Scope.close(lock.scope, Exit.void)
+  })
+
+  const releaseInstallerLock = Effect.fn('service.boot_service.release_installer_lock')(function* (
+    token: string,
+  )
+  {
+    return yield* Effect.uninterruptible(
+      Effect.gen(function* ()
+      {
+        const lock = heldInstallerLocks.get(token)
+        if (lock === undefined) return
+        heldInstallerLocks.delete(token)
+        yield* runInstallerCleanup(
+          (lock.rollback?.() ?? Effect.void).pipe(Effect.ensuring(closeInstallerLock(lock))),
+        )
+      }),
+    )
+  })
+
+  const acquireInstallerLock = Effect.fn('service.boot_service.acquire_installer_lock')(
+    function* ()
+    {
+      for (let attempt = 0; attempt < INSTALL_LOCK_ATTEMPTS; attempt += 1)
+      {
+        const acquisition = yield* Effect.uninterruptible(
+          Effect.gen(function* ()
+          {
+            const scope = yield* Scope.make('sequential')
+            const result = yield* ServerStorageLease.acquireServerStorageLease(
+              installerLockDirectory,
+            ).pipe(
+              Scope.provide(scope),
+              Effect.provideService(HostProcessPlatform, platform),
+              Effect.result,
+            )
+            if (result._tag === 'Failure')
+            {
+              yield* Scope.close(scope, Exit.void)
+              return result
+            }
+            heldInstallerLocks.set(result.success.owner.token, { unitPath, scope })
+            return result
+          }),
+        )
+        if (acquisition._tag === 'Success') return acquisition.success.owner.token
+        if (acquisition.failure._tag !== 'ServerStorageLeaseConflictError')
+        {
+          return yield* new BootServiceInstallError({ cause: acquisition.failure })
+        }
+        if (attempt + 1 === INSTALL_LOCK_ATTEMPTS)
+        {
+          return yield* new BootServiceInstallError({
+            cause: new Error('Timed out waiting for another 456code service installation.'),
+          })
+        }
+        yield* Effect.sleep('50 millis').pipe(Effect.interruptible)
+      }
+      return yield* new BootServiceInstallError({
+        cause: new Error('Could not acquire the 456code service installation lock.'),
+      })
+    },
+  )
+
+  const activeInstallerLockToken = Effect.fn('service.boot_service.active_installer_lock_token')(
+    function* ()
+    {
+      const token = (yield* ActiveInstallerLocks).get(unitPath)
+      if (token === undefined) return undefined
+      return heldInstallerLocks.get(token)?.unitPath === unitPath ? token : undefined
+    },
+  )
+
+  const withMutationLock: BootService['Service']['withMutationLock'] = Effect.fn(
+    'service.boot_service.with_mutation_lock',
+  )(function* <A, E, R>(effect: Effect.Effect<A, E, R>)
   {
     yield* requireSupportedPlatform
-    yield* fs
-      .makeDirectory(input.logsDir, { recursive: true })
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
-
-    yield* ensurePinnedRuntime
-
-    const canonicalBaseDir = yield* fs
-      .realPath(input.baseDir)
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
-    const previousStorageOwner = yield* readStorageOwner(canonicalBaseDir)
-    const previousUnit = yield* fs.exists(unitPath).pipe(
-      Effect.flatMap((exists) =>
-        exists
-          ? fs.readFileString(unitPath).pipe(Effect.map((unit) => unit as string | null))
-          : Effect.succeed(null),
-      ),
-      Effect.mapError((cause) => new BootServiceInstallError({ cause })),
-    )
-
-    yield* fs.makeDirectory(unitDir, { recursive: true }).pipe(
-      Effect.andThen(fs.writeFileString(unitPath, renderServiceDefinition())),
-      Effect.mapError((cause) => new BootServiceInstallError({ cause })),
-      Effect.tapError(() => restoreUnitFile(previousUnit)),
-    )
-
-    return {
-      plan,
-      canonicalBaseDir,
-      previousStorageOwnerToken: Option.isSome(previousStorageOwner)
-        ? previousStorageOwner.value.token
-        : null,
-      previousUnit,
+    const inheritedToken = yield* activeInstallerLockToken()
+    if (inheritedToken !== undefined)
+    {
+      return yield* effect
     }
-  }).pipe(Effect.withSpan('service.boot_service.prepare_install'))
+
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* ()
+      {
+        const token = yield* acquireInstallerLock()
+        const activeLocks = new Map(yield* ActiveInstallerLocks)
+        activeLocks.set(unitPath, token)
+        return yield* restore(
+          effect.pipe(Effect.provideService(ActiveInstallerLocks, activeLocks)),
+        ).pipe(Effect.ensuring(releaseInstallerLock(token)))
+      }),
+    )
+  })
+
+  const prepareInstall = Effect.fn('service.boot_service.prepare_install')(function* (
+    options?: BootServiceInstallOptions,
+  )
+  {
+    yield* requireSupportedPlatform
+    // fail before creating logs or materializing a pinned runtime.
+    yield* requireDowngradeAllowed(options)
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* ()
+      {
+        const inheritedToken = yield* activeInstallerLockToken()
+        const installerLockToken = inheritedToken ?? (yield* acquireInstallerLock())
+        return yield* restore(
+          Effect.gen(function* ()
+          {
+            // repeat policy checks after the serialized handoff.
+            yield* requireDowngradeAllowed(options)
+            yield* fs
+              .makeDirectory(input.logsDir, { recursive: true })
+              .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
+
+            yield* ensurePinnedRuntime
+
+            const canonicalBaseDir = yield* fs
+              .realPath(input.baseDir)
+              .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
+            const previousStorageOwner = yield* readStorageOwner(canonicalBaseDir)
+            const previousUnit = yield* readInstalledDefinition()
+            yield* requireDowngradeAllowed(options, previousUnit)
+            const preparedUnit = renderServiceDefinition()
+
+            return yield* Effect.uninterruptible(
+              Effect.gen(function* ()
+              {
+                yield* fs.writeFileString(unitPath, preparedUnit).pipe(
+                  Effect.mapError((cause) => new BootServiceInstallError({ cause })),
+                  Effect.tapError(() => restoreUnitFile(previousUnit)),
+                )
+
+                const prepared = {
+                  plan,
+                  preparedUnit,
+                  installerLockToken,
+                  canonicalBaseDir,
+                  previousStorageOwnerToken: Option.isSome(previousStorageOwner)
+                    ? previousStorageOwner.value.token
+                    : null,
+                  previousUnit,
+                  allowDowngrade: options?.allowDowngrade === true,
+                } satisfies BootServicePreparedInstall
+                const installerLock = heldInstallerLocks.get(installerLockToken)
+                if (installerLock === undefined)
+                {
+                  yield* restoreUnitFile(previousUnit)
+                  return yield* new BootServiceInstallError({
+                    cause: new Error('Prepared boot service lost its installation lock.'),
+                  })
+                }
+                heldInstallerLocks.set(installerLockToken, {
+                  ...installerLock,
+                  prepared,
+                  rollback: () => rollbackFailedInstall(prepared),
+                })
+                return prepared
+              }),
+            )
+          }),
+        ).pipe(
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) && inheritedToken === undefined
+              ? releaseInstallerLock(installerLockToken)
+              : Effect.void,
+          ),
+        )
+      }),
+    )
+  })
 
   const awaitStorageOwner = Effect.fn('service.boot_service.await_storage_owner')(function* (
     prepared: BootServicePreparedInstall,
@@ -540,14 +964,18 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
         ])
   })
 
-  // if activation fails partway (e.g. enable succeeds but restart/linger
-  // fails), leave nothing behind: disable removes the enable symlink, remove
-  // deletes the file, daemon-reload clears the stale definition — otherwise a
-  // dangling wants/ symlink logs "Failed to load unit" at every boot and the
-  // next lifecycle command misreports the state.
+  // if activation fails partway, roll back only while this attempt's exact
+  // definition remains installed so a concurrent replacement always wins.
   const rollbackFailedInstall = Effect.fn('service.boot_service.rollback_failed_install')(
-    function* (previousUnit: string | null)
+    function* (prepared: BootServicePreparedInstall)
     {
+      const installedUnit = yield* readInstalledDefinition().pipe(Effect.option)
+      if (Option.isNone(installedUnit) || installedUnit.value !== prepared.preparedUnit)
+      {
+        return
+      }
+
+      const previousUnit = prepared.previousUnit
       if (previousUnit !== null)
       {
         if (isLaunchd)
@@ -606,104 +1034,178 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     'service.boot_service.activate_prepared',
   )(function* (prepared)
   {
-    yield* requireSupportedPlatform
-    if (
-      prepared.plan.unitPath !== unitPath ||
-      prepared.plan.baseDir !== plan.baseDir ||
-      prepared.plan.t3EntryPath !== plan.t3EntryPath
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* ()
+      {
+        const installerLock = heldInstallerLocks.get(prepared.installerLockToken)
+        if (installerLock?.prepared === undefined || installerLock.rollback === undefined)
+        {
+          return yield* new BootServiceInstallError({
+            cause: new Error('Prepared boot service no longer owns its installation lock.'),
+          })
+        }
+        heldInstallerLocks.delete(prepared.installerLockToken)
+
+        const activation = Effect.gen(function* ()
+        {
+          yield* requireSupportedPlatform
+          if (
+            installerLock.unitPath !== unitPath ||
+            !preparedInstallsEqual(prepared, installerLock.prepared!) ||
+            !bootServicePlansEqual(prepared.plan, plan) ||
+            prepared.preparedUnit !== renderServiceDefinition()
+          )
+          {
+            return yield* new BootServiceInstallError({
+              cause: new Error(
+                'Prepared boot service belongs to a different service configuration.',
+              ),
+            })
+          }
+
+          // preparation and activation are separated by storage-lease release.
+          // refuse if a non-cooperating writer replaced the prepared definition.
+          const installedUnit = yield* readInstalledDefinition()
+          yield* requireDowngradeAllowed({ allowDowngrade: prepared.allowDowngrade }, installedUnit)
+          if (installedUnit !== prepared.preparedUnit)
+          {
+            return yield* new BootServiceInstallError({
+              cause: new Error('Prepared boot service definition was replaced before activation.'),
+            })
+          }
+
+          if (isLaunchd)
+          {
+            yield* runStep(
+              'stopping the installed launch agent',
+              'launchctl',
+              ['bootout', '--wait', launchdServiceTarget],
+              { timeout: STOP_STEP_TIMEOUT },
+            ).pipe(Effect.ignore)
+            yield* runStep('enabling the launch agent', 'launchctl', [
+              'enable',
+              launchdServiceTarget,
+            ]).pipe(Effect.ignore)
+            yield* runStep('starting the service', 'launchctl', [
+              'bootstrap',
+              launchdDomainTarget,
+              unitPath,
+            ])
+          }
+          else
+          {
+            yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
+            yield* runStep('enabling the service', 'systemctl', [
+              '--user',
+              'enable',
+              BOOT_SERVICE_UNIT_FILE,
+            ])
+            yield* runStep('starting the service', 'systemctl', [
+              '--user',
+              'restart',
+              BOOT_SERVICE_UNIT_FILE,
+            ])
+            yield* runStep('enabling lingering for this user', 'loginctl', ['enable-linger'])
+          }
+          yield* awaitStorageOwner(prepared)
+          return prepared.plan
+        })
+        return yield* restore(activation).pipe(
+          Effect.onExit((exit) =>
+            runInstallerCleanup(
+              (Exit.isFailure(exit) ? installerLock.rollback!() : Effect.void).pipe(
+                Effect.ensuring(closeInstallerLock(installerLock)),
+              ),
+            ),
+          ),
+        )
+      }),
     )
-    {
-      return yield* new BootServiceInstallError({
-        cause: new Error('Prepared boot service belongs to a different service configuration.'),
-      })
-    }
-
-    yield* Effect.gen(function* ()
-    {
-      if (isLaunchd)
-      {
-        yield* runStep(
-          'stopping the installed launch agent',
-          'launchctl',
-          ['bootout', '--wait', launchdServiceTarget],
-          { timeout: STOP_STEP_TIMEOUT },
-        ).pipe(Effect.ignore)
-        yield* runStep('enabling the launch agent', 'launchctl', [
-          'enable',
-          launchdServiceTarget,
-        ]).pipe(Effect.ignore)
-        yield* runStep('starting the service', 'launchctl', [
-          'bootstrap',
-          launchdDomainTarget,
-          unitPath,
-        ])
-      }
-      else
-      {
-        yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
-        yield* runStep('enabling the service', 'systemctl', [
-          '--user',
-          'enable',
-          BOOT_SERVICE_UNIT_FILE,
-        ])
-        yield* runStep('starting the service', 'systemctl', [
-          '--user',
-          'restart',
-          BOOT_SERVICE_UNIT_FILE,
-        ])
-        yield* runStep('enabling lingering for this user', 'loginctl', ['enable-linger'])
-      }
-      yield* awaitStorageOwner(prepared)
-    }).pipe(Effect.tapError(() => rollbackFailedInstall(prepared.previousUnit)))
-
-    return prepared.plan
   })
 
-  const install: BootService['Service']['install'] = prepareInstall.pipe(
-    Effect.flatMap(activatePrepared),
-    Effect.withSpan('service.boot_service.install'),
-  )
+  const releasePreparedInstall: BootService['Service']['releasePreparedInstall'] = Effect.fn(
+    'service.boot_service.release_prepared_install',
+  )(function* (prepared)
+  {
+    yield* releaseInstallerLock(prepared.installerLockToken)
+  })
 
-  const restart: BootService['Service']['restart'] = Effect.gen(function* ()
+  const install = Effect.fn('service.boot_service.install')(function* (
+    options?: BootServiceInstallOptions,
+  )
+  {
+    return yield* Effect.acquireUseRelease(prepareInstall(options), activatePrepared, (prepared) =>
+      releasePreparedInstall(prepared).pipe(Effect.uninterruptible),
+    )
+  })
+
+  const restartSnapshot: BootService['Service']['restartSnapshot'] = Effect.gen(function* ()
   {
     yield* requireSupportedPlatform
-    const canonicalBaseDir = yield* fs
-      .realPath(input.baseDir)
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
-    const previousStorageOwner = yield* readStorageOwner(canonicalBaseDir)
-    if (isLaunchd)
-    {
-      yield* runStep(
-        'stopping the installed launch agent',
-        'launchctl',
-        ['bootout', '--wait', launchdServiceTarget],
-        { timeout: STOP_STEP_TIMEOUT },
-      ).pipe(Effect.ignore)
-      yield* runStep('restoring the previous service', 'launchctl', [
-        'bootstrap',
-        launchdDomainTarget,
-        unitPath,
-      ])
-    }
-    else
-    {
-      yield* runStep('restoring the previous service', 'systemctl', [
-        '--user',
-        'restart',
-        BOOT_SERVICE_UNIT_FILE,
-      ])
-    }
-    yield* awaitStorageOwner({
-      plan,
-      canonicalBaseDir,
-      previousStorageOwnerToken: Option.isSome(previousStorageOwner)
-        ? previousStorageOwner.value.token
-        : null,
-      previousUnit: null,
-    })
-  }).pipe(Effect.withSpan('service.boot_service.restart'))
+    const unit = yield* readInstalledDefinition()
+    return unit === null ? null : { unit }
+  }).pipe(Effect.withSpan('service.boot_service.restart_snapshot'))
 
-  const uninstall: BootService['Service']['uninstall'] = Effect.gen(function* ()
+  const restartIfUnchanged: BootService['Service']['restartIfUnchanged'] = Effect.fn(
+    'service.boot_service.restart_if_unchanged',
+  )(function* (snapshot)
+  {
+    yield* requireSupportedPlatform
+    return yield* withMutationLock(
+      Effect.gen(function* ()
+      {
+        const installerLockToken = yield* activeInstallerLockToken()
+        if (installerLockToken === undefined)
+        {
+          return yield* new BootServiceInstallError({
+            cause: new Error('Restart recovery no longer owns its installation lock.'),
+          })
+        }
+        if ((yield* readInstalledDefinition()) !== snapshot.unit) return false
+
+        const canonicalBaseDir = yield* fs
+          .realPath(input.baseDir)
+          .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
+        const previousStorageOwner = yield* readStorageOwner(canonicalBaseDir)
+        if (isLaunchd)
+        {
+          yield* runStep(
+            'stopping the installed launch agent',
+            'launchctl',
+            ['bootout', '--wait', launchdServiceTarget],
+            { timeout: STOP_STEP_TIMEOUT },
+          ).pipe(Effect.ignore)
+          yield* runStep('restoring the previous service', 'launchctl', [
+            'bootstrap',
+            launchdDomainTarget,
+            unitPath,
+          ])
+        }
+        else
+        {
+          yield* runStep('restoring the previous service', 'systemctl', [
+            '--user',
+            'restart',
+            BOOT_SERVICE_UNIT_FILE,
+          ])
+        }
+        yield* awaitStorageOwner({
+          plan,
+          preparedUnit: renderServiceDefinition(),
+          installerLockToken,
+          canonicalBaseDir,
+          previousStorageOwnerToken: Option.isSome(previousStorageOwner)
+            ? previousStorageOwner.value.token
+            : null,
+          previousUnit: null,
+          allowDowngrade: false,
+        })
+        return true
+      }),
+    )
+  })
+
+  const uninstallUnlocked = Effect.gen(function* ()
   {
     yield* requireSupportedPlatform
     const exists = yield* fs
@@ -731,9 +1233,15 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
       yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
     }
     return true
-  }).pipe(Effect.withSpan('service.boot_service.uninstall'))
+  })
 
-  const stop: BootService['Service']['stop'] = Effect.gen(function* ()
+  const uninstall: BootService['Service']['uninstall'] = withMutationLock(uninstallUnlocked).pipe(
+    Effect.withSpan('service.boot_service.uninstall'),
+  )
+
+  const stopUnlocked = Effect.fn('service.boot_service.stop_unlocked')(function* (
+    options?: BootServiceInstallOptions,
+  )
   {
     yield* requireSupportedPlatform
     const exists = yield* fs
@@ -743,13 +1251,22 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     {
       return false
     }
+    // this read is adjacent to the manager stop, after any earlier status probe.
+    yield* requireDowngradeAllowed(options)
     yield* isLaunchd
       ? runStep('stopping the service', 'launchctl', ['bootout', '--wait', launchdServiceTarget], {
           timeout: STOP_STEP_TIMEOUT,
         }).pipe(Effect.ignore)
       : runStep('stopping the service', 'systemctl', ['--user', 'stop', BOOT_SERVICE_UNIT_FILE])
     return true
-  }).pipe(Effect.withSpan('service.boot_service.stop'))
+  })
+
+  const stop: BootService['Service']['stop'] = Effect.fn('service.boot_service.stop')(
+    function* (options)
+    {
+      return yield* withMutationLock(stopUnlocked(options))
+    },
+  )
 
   const status: BootService['Service']['status'] = Effect.gen(function* ()
   {
@@ -770,6 +1287,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
       return { supported: true, installed: false, active: false, current: false, unitPath, logPath }
     }
     const unit = yield* fs.readFileString(unitPath)
+    const installedVersion = extractInstalledServiceVersion(unit)
     // a unit is current only if it matches what install would write now (an
     // older CLI wrote a different runtime/node path) AND the entry point it
     // references still exists (a pinned runtime under ~/.456code can be deleted to
@@ -820,17 +1338,28 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
         : definitionCurrent && active
     // a materialized unit that never reached post-lease activation is repairable.
     const current = definitionCurrent && active && ownerReady
-    return { supported: true, installed: true, active, current, unitPath, logPath }
+    return {
+      supported: true,
+      installed: true,
+      active,
+      current,
+      ...(installedVersion === undefined ? {} : { installedVersion }),
+      unitPath,
+      logPath,
+    }
   }).pipe(
     Effect.mapError((cause) => new BootServiceInstallError({ cause })),
     Effect.withSpan('service.boot_service.status'),
   )
 
   return BootService.of({
+    withMutationLock,
     prepareInstall,
     activatePrepared,
+    releasePreparedInstall,
     install,
-    restart,
+    restartSnapshot,
+    restartIfUnchanged,
     stop,
     uninstall,
     status,

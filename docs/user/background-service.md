@@ -23,6 +23,21 @@ Update or repair it:
 npx 456code@latest service update
 ```
 
+The service uses the same 456code version as the CLI you run. To install a nightly or an exact
+version, use that version of the CLI:
+
+```sh
+npx 456code@nightly service update
+npx 456code@1.2.3 service update
+```
+
+The install and update commands refuse to replace a newer service with an older version. To
+downgrade, select the exact older version and pass `--allow-downgrade`:
+
+```sh
+npx 456code@1.2.3 service update --allow-downgrade
+```
+
 Stop it and remove it from startup:
 
 ```sh
