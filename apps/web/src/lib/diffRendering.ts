@@ -3,6 +3,9 @@
 import { parsePatchFiles } from '@pierre/diffs/utils/parsePatchFiles'
 import type { FileDiffMetadata } from '@pierre/diffs/types'
 
+// every creation path must choose wasm before pierre's shared singleton initializes.
+export const PREFERRED_HIGHLIGHTER = 'shiki-wasm' as const
+
 // shiki's bundled material-theme-ocean carries token colors byte-identical to
 // t3dotgg/vsc-material-but-i-wont-sue-you's Material Theme Ocean High Contrast;
 // the HC-only deltas are UI chrome keys the diff surface never reads, and the

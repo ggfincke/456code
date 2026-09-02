@@ -10,6 +10,7 @@ import type {
 import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
 import { File, Virtualizer } from '@pierre/diffs/react'
 import { DiffWorkerPoolProvider } from '../DiffWorkerPoolProvider'
+import { PREFERRED_HIGHLIGHTER } from '../../lib/diffRendering'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -536,6 +537,7 @@ export default function FilePreviewPanel({
                       cacheKey: projectFileCacheKey(cwd, relativePath, file.data.contents),
                     }}
                     options={{
+                      preferredHighlighter: PREFERRED_HIGHLIGHTER,
                       disableFileHeader: true,
                       overflow: wordWrap ? 'wrap' : 'scroll',
                       theme: syntaxThemeName,

@@ -63,7 +63,11 @@ import {
 import { cn } from '~/lib/utils'
 import { useUiStateStore } from '~/uiStateStore'
 import { useSyntaxThemeName } from '../../../hooks/useSyntaxThemeName'
-import { getRenderablePatch, resolveFileDiffPath } from '../../../lib/diffRendering'
+import {
+  getRenderablePatch,
+  PREFERRED_HIGHLIGHTER,
+  resolveFileDiffPath,
+} from '../../../lib/diffRendering'
 import { type ProviderSwitchTimelineParty } from '../../../providerSwitchPresentation'
 import {
   deriveTimelineEntries,
@@ -768,6 +772,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
             <FileDiff
               fileDiff={fileDiff}
               options={{
+                preferredHighlighter: PREFERRED_HIGHLIGHTER,
                 collapsed: false,
                 diffStyle: 'unified',
                 theme: syntaxThemeName,

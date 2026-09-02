@@ -1047,6 +1047,9 @@ importers:
       '@react-navigation/native':
         specifier: 7.3.18
         version: 7.3.18(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)
+      '@shikijs/core':
+        specifier: 4.4.3
+        version: 4.4.3
       '@t3tools/client-runtime':
         specifier: workspace:*
         version: link:../packages/client-runtime

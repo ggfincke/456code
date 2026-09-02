@@ -6,7 +6,7 @@ import DiffsWorker from '@pierre/diffs/worker/worker.js?worker'
 import * as Schema from 'effect/Schema'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSyntaxThemeName } from '../hooks/useSyntaxThemeName'
-import { DIFF_THEME_NAMES, type DiffThemeName } from '../lib/diffRendering'
+import { DIFF_THEME_NAMES, PREFERRED_HIGHLIGHTER, type DiffThemeName } from '../lib/diffRendering'
 
 export class DiffWorkerError extends Schema.TaggedError<DiffWorkerError>()('DiffWorkerError', {
   operation: Schema.Literals(['create-worker', 'get-render-options', 'set-render-options']),
@@ -125,6 +125,7 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode })
       }}
       highlighterOptions={{
         theme: diffThemeName,
+        preferredHighlighter: PREFERRED_HIGHLIGHTER,
         tokenizeMaxLineLength: 1_000,
         useTokenTransformer: true,
       }}

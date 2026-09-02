@@ -15,7 +15,7 @@ import type { ScopedThreadRef } from '@t3tools/contracts'
 import { useCallback, useMemo, useState, type ReactNode, type Ref } from 'react'
 
 import { type DraftId, useComposerDraftStore } from '~/composerDraftStore'
-import { fnv1a32 } from '~/lib/diffRendering'
+import { fnv1a32, PREFERRED_HIGHLIGHTER } from '~/lib/diffRendering'
 import {
   buildDiffReviewComment,
   restoreDiffReviewCommentRange,
@@ -254,6 +254,7 @@ export function AnnotatableCodeView({
         onSelectedLinesChange={setSelectedLines}
         options={{
           ...options,
+          preferredHighlighter: PREFERRED_HIGHLIGHTER,
           enableGutterUtility: !hasOpenComment,
           enableLineSelection: !hasOpenComment,
           onLineSelectionEnd: beginComment,

@@ -23,6 +23,7 @@ import { isBrowserPreviewFile, openFileInPreview } from '~/browser/openFileInPre
 import { useAssetUrlState } from '~/assets/assetUrls'
 import ChatMarkdown from '~/components/ChatMarkdown'
 import { DiffWorkerPoolProvider } from '../DiffWorkerPoolProvider'
+import { PREFERRED_HIGHLIGHTER } from '../../lib/diffRendering'
 import { OpenInPicker } from '~/components/chat/OpenInPicker'
 import { useClientSettings } from '~/hooks/useSettings'
 import { useTheme } from '~/hooks/useTheme'
@@ -416,6 +417,7 @@ export function EditableFileSurface({
                 cacheKey: projectFileCacheKey(cwd, relativePath, contents),
               }}
               options={{
+                preferredHighlighter: PREFERRED_HIGHLIGHTER,
                 disableFileHeader: true,
                 enableGutterUtility: !hasOpenCommentForm,
                 enableLineSelection: !hasOpenCommentForm,

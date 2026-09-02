@@ -12,9 +12,15 @@ const fixture = vi.hoisted(() => ({
   initialize: vi.fn<() => Promise<void>>(),
 }))
 vi.mock('@pierre/diffs/react', () => ({
-  WorkerPoolContextProvider: ({ children }: { children: ReactNode }) =>
+  WorkerPoolContextProvider: ({
+    children,
+    highlighterOptions,
+  }: {
+    children: ReactNode
+    highlighterOptions: unknown
+  }) =>
   {
-    fixture.mounted()
+    fixture.mounted(highlighterOptions)
     return children
   },
   useWorkerPool: () => ({
@@ -55,6 +61,9 @@ it('starts only at code demand and renders plain code after initialization failu
       ),
     )
     expect(fixture.initialize).toHaveBeenCalledTimes(1)
+    expect(fixture.mounted).toHaveBeenLastCalledWith(
+      expect.objectContaining({ preferredHighlighter: 'shiki-wasm' }),
+    )
     expect(container.textContent).toBe('Loading code...')
     await act(async () => rejectInitialization(new Error('worker unavailable')))
     expect(container.querySelector('pre')?.textContent).toBe('plain file')

@@ -20,6 +20,7 @@
     "@noble/hashes": "catalog:",
     "@pierre/diffs": "catalog:",
     "@react-navigation/native": "7.3.18",
+    "@shikijs/core": "4.4.3",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/mobile-markdown-text": "file:../apps/mobile/modules/code456-markdown-text",
