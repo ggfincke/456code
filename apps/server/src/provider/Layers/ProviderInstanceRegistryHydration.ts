@@ -30,14 +30,18 @@
 //   1. Read the current `ServerSettings` once and use it to seed the
 //      registry's initial state via `ProviderInstanceRegistryMutableLayer`.
 //   2. Fork a daemon fiber (lifetime tied to the layer's scope) that
-//      subscribes to `ServerSettingsService.streamChanges` and calls
-//      `ProviderInstanceRegistryMutator.reconcile` on every emission.
+//      consumes `ServerSettingsService.streamCurrentAndChanges` and calls
+//      `ProviderInstanceRegistryMutator.reconcile` on every emission. The
+//      stream acquires its subscription before reading current settings, so
+//      updates cannot fall between the initial seed and watcher startup.
 //
 // failures inside the watcher are logged and swallowed so a failed
 // lifecycle retirement cannot kill the watcher. The last live route stays
 // authoritative when ProviderService cannot durably close it. Unknown
 // drivers and invalid configs still round-trip through the registry's
 // "unavailable" shadow bucket.
+// settings-read failures resubscribe indefinitely with exponential backoff
+// capped at five seconds, so a transient read cannot disable hot reload.
 //
 // @module provider/Layers/ProviderInstanceRegistryHydration
 import {
@@ -46,8 +50,10 @@ import {
   type ProviderInstanceConfigMap,
   ServerSettings,
 } from '@t3tools/contracts'
+import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Schedule from 'effect/Schedule'
 import * as Stream from 'effect/Stream'
 
 import { ServerSettingsService } from '../../serverSettings.ts'
@@ -55,6 +61,10 @@ import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from '../catalog/builtInDriv
 import { ProviderInstanceRegistry } from '../Services/ProviderInstanceRegistry.ts'
 import { ProviderInstanceRegistryMutator } from '../Services/ProviderInstanceRegistryMutator.ts'
 import { ProviderInstanceRegistryMutableLayer } from './ProviderInstanceRegistryLive.ts'
+
+const SETTINGS_WATCHER_RETRY_SCHEDULE = Schedule.exponential('100 millis').pipe(
+  Schedule.modifyDelay((_, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+)
 
 // synthesize a `ProviderInstanceConfigMap` from a `ServerSettings` snapshot.
 //
@@ -117,7 +127,16 @@ const SettingsWatcherLive = Layer.effectDiscard(
   {
     const mutator = yield* ProviderInstanceRegistryMutator
     const serverSettings = yield* ServerSettingsService
-    yield* serverSettings.streamChanges.pipe(
+    yield* serverSettings.streamCurrentAndChanges.pipe(
+      Stream.tapError((error) =>
+        Effect.logWarning('Provider settings watcher read failed; retrying', {
+          operation: error.operation,
+          settingsPath: error.settingsPath,
+          providerInstanceId: error.providerInstanceId,
+          environmentVariable: error.environmentVariable,
+        }),
+      ),
+      Stream.retry(SETTINGS_WATCHER_RETRY_SCHEDULE),
       Stream.runForEach((next) =>
         mutator
           .reconcile(deriveProviderInstanceConfigMap(next))
@@ -133,14 +152,15 @@ const SettingsWatcherLive = Layer.effectDiscard(
 )
 
 // hydrate `ProviderInstanceRegistry` from `ServerSettings` and keep it in
-// sync with subsequent `streamChanges` emissions.
+// sync with current and subsequent settings emissions.
 //
 // the Layer's two halves:
 //   - `ProviderInstanceRegistryMutableLayer` produces the registry +
 //     mutator from the initial config map. Its scope owns every
 //     per-instance child scope created during reconcile.
 //   - `SettingsWatcherLive` consumes the mutator and runs a daemon fiber
-//     in the same scope.
+//     in the same scope. Its initial full snapshot is safe to reconcile
+//     again because unchanged instance entries are idempotent.
 //
 // composing via `Layer.provideMerge` makes the watcher's deps available
 // from the mutable layer while still surfacing the registry as an output.
