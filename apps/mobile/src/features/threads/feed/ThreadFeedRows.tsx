@@ -18,6 +18,7 @@ import {
   renderCodexFileCitationsAsMarkdown,
   splitCodexArtifactTemplateMarkdown,
 } from '@t3tools/client-runtime/codex-markdown-directives'
+import { renderAssistantCitationsAsText } from '@t3tools/shared/assistantCitations'
 import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
@@ -278,6 +279,7 @@ export function renderFeedEntry(
   {
     const { message } = entry
     const isUser = message.role === 'user'
+    const renderedText = renderAssistantCitationsAsText(message.text)
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant
     const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt)
     const attachments = (message.attachments ?? []).filter(isImageAttachment)
@@ -310,7 +312,7 @@ export function renderFeedEntry(
           >
             {message.text.trim().length > 0 ? (
               <UserMessageContent
-                text={message.text}
+                text={renderedText}
                 markdownStyles={styles}
                 reviewCommentColors={props.reviewCommentColors}
                 skills={props.skills}
@@ -350,7 +352,7 @@ export function renderFeedEntry(
 
     // skip empty assistant messages (no text, no attachments) — they would
     // render as an orphaned timestamp and break adjacent activity-group merging.
-    if (message.text.trim().length === 0 && attachments.length === 0)
+    if (renderedText.trim().length === 0 && attachments.length === 0)
     {
       return null
     }
@@ -361,9 +363,9 @@ export function renderFeedEntry(
         className={cn(showAssistantMeta ? 'mb-5 px-1' : 'mb-2 px-1')}
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
-        {message.text.trim().length > 0 ? (
+        {renderedText.trim().length > 0 ? (
           <AssistantMarkdownContent
-            markdown={message.text}
+            markdown={renderedText}
             markdownStyles={styles}
             onLinkPress={props.onMarkdownLinkPress}
             onUseArtifactTemplate={props.onUseArtifactTemplate}
@@ -386,7 +388,7 @@ export function renderFeedEntry(
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton
               accessibilityLabel="Copy message"
-              text={message.text}
+              text={renderedText}
               tintColor={iconSubtleColor}
               buttonSize={28}
               iconSize={13}
