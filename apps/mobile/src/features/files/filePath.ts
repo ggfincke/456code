@@ -18,7 +18,7 @@ function isWindowsAbsolutePath(value: string): boolean
   return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }
 
-function isAbsolutePath(value: string): boolean
+export function isAbsolutePath(value: string): boolean
 {
   return value.startsWith('/') || isWindowsAbsolutePath(value)
 }
@@ -106,7 +106,12 @@ export function resolveWorkspaceRelativeFilePath(
     return null
   }
 
-  return normalizeRelativePath(normalizedTarget.slice(normalizedRoot.length + 1))
+  const relativePath = normalizedTarget.slice(normalizedRoot.length + 1)
+  if (relativePath.split('/').includes('..'))
+  {
+    return null
+  }
+  return normalizeRelativePath(relativePath)
 }
 
 export function isBrowserPreviewFile(path: string): boolean

@@ -1,12 +1,21 @@
 // apps/mobile/modules/code456-markdown-text/src/NativeMarkdownSelectableText.ios.tsx
 // render native markdown selectable text ios
 
-import { Image, Linking, type TextStyle, useColorScheme } from 'react-native'
+import { ActionSheetIOS, Image, Linking, type TextStyle, useColorScheme } from 'react-native'
+import { createContext, useContext } from 'react'
 
 import { MarkdownTextPrimitive } from './MarkdownTextPrimitive'
 import { markdownFileIconSource } from './markdownFileIcons'
 import type { NativeMarkdownTextRun } from './nativeMarkdownText'
-import type { NativeMarkdownTextStyle } from './SelectableMarkdownText.types'
+import type {
+  MarkdownFileContextMenu,
+  NativeMarkdownTextStyle,
+  SelectableMarkdownTextProps,
+} from './SelectableMarkdownText.types'
+
+export const MarkdownFileActionsContext = createContext<
+  Pick<SelectableMarkdownTextProps, 'fileContextMenu' | 'onFileContextMenuAction'>
+>({})
 
 const EXTERNAL_LINK_PREFIX = '◉ '
 const INLINE_ATTACHMENT_PREFIX = '\uFFFC\u00A0'
@@ -144,9 +153,15 @@ export function NativeMarkdownSelectableText(props: {
   readonly runs: ReadonlyArray<NativeMarkdownTextRun>
   readonly textStyle: NativeMarkdownTextStyle
   readonly onLinkPress?: (href: string) => void
+  readonly fileContextMenu?: (href: string) => MarkdownFileContextMenu | undefined
+  readonly onFileContextMenuAction?: (href: string, actionId: string) => void
 })
 {
   const colorScheme = useColorScheme()
+  const inheritedFileActions = useContext(MarkdownFileActionsContext)
+  const fileContextMenu = props.fileContextMenu ?? inheritedFileActions.fileContextMenu
+  const onFileContextMenuAction =
+    props.onFileContextMenuAction ?? inheritedFileActions.onFileContextMenuAction
   const occurrences = new Map<string, number>()
   const prefixedExternalLinks = new Set<string>()
   const keyedRuns = props.runs.map((run) =>
@@ -233,6 +248,28 @@ export function NativeMarkdownSelectableText(props: {
                       {
                       void Linking.openURL(href)
                     }
+                  }
+                : undefined
+            }
+            onLongPress={
+              href && run.fileIcon && fileContextMenu && onFileContextMenuAction
+                ? () =>
+                  {
+                    const menu = fileContextMenu(href)
+                    if (!menu || menu.actions.length === 0) return
+                    const cancelButtonIndex = menu.actions.length
+                    ActionSheetIOS.showActionSheetWithOptions(
+                      {
+                        title: menu.title,
+                        options: [...menu.actions.map((action) => action.title), 'Cancel'],
+                        cancelButtonIndex,
+                      },
+                      (index) =>
+                        {
+                        const action = menu.actions[index]
+                        if (action) onFileContextMenuAction(href, action.id)
+                      },
+                    )
                   }
                 : undefined
             }

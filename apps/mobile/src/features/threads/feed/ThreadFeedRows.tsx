@@ -33,7 +33,7 @@ import { useAssetUrl } from '../../../state/assets'
 import { parseReviewCommentMessageSegments } from '../../review/reviewCommentSelection'
 import { ThreadWorkGroupToggle, ThreadWorkLog } from '../thread-work-log'
 
-import type { ThreadFeedProps } from '../ThreadFeed'
+import type { MarkdownLinkHandlers, ThreadFeedProps } from '../ThreadFeed'
 import { type MarkdownStyleSets, type ReviewCommentColors } from './feedMarkdown'
 import { ReviewCommentCard } from './feedReviewCommentCard'
 
@@ -163,7 +163,7 @@ function ArtifactTemplateCard(props: {
 const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
   readonly markdown: string
   readonly markdownStyles: MarkdownStyleSets['assistant']
-  readonly onLinkPress: (href: string) => void
+  readonly markdownLinkHandlers: MarkdownLinkHandlers
   readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined
 })
@@ -192,7 +192,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
         markdown={markdown}
         skills={props.skills}
         textStyle={props.markdownStyles.nativeTextStyle}
-        onLinkPress={props.onLinkPress}
+        {...props.markdownLinkHandlers}
       />
     ) : (
       <Markdown
@@ -221,7 +221,7 @@ export function renderFeedEntry(
     readonly onToggleWorkRow: (rowId: string) => void
     readonly onToggleTurnFold: (turnId: TurnId) => void
     readonly onPressImage: (uri: string, headers?: Record<string, string>) => void
-    readonly onMarkdownLinkPress: (href: string) => void
+    readonly markdownLinkHandlers: MarkdownLinkHandlers
     readonly iconSubtleColor: string | import('react-native').ColorValue
     readonly userBubbleColor: string | import('react-native').ColorValue
     readonly markdownStyles: MarkdownStyleSets
@@ -316,7 +316,7 @@ export function renderFeedEntry(
                 markdownStyles={styles}
                 reviewCommentColors={props.reviewCommentColors}
                 skills={props.skills}
-                onLinkPress={props.onMarkdownLinkPress}
+                markdownLinkHandlers={props.markdownLinkHandlers}
               />
             ) : null}
             {attachments.map((attachment) =>
@@ -367,7 +367,7 @@ export function renderFeedEntry(
           <AssistantMarkdownContent
             markdown={renderedText}
             markdownStyles={styles}
-            onLinkPress={props.onMarkdownLinkPress}
+            markdownLinkHandlers={props.markdownLinkHandlers}
             onUseArtifactTemplate={props.onUseArtifactTemplate}
             skills={props.skills}
           />
@@ -448,7 +448,7 @@ function UserMessageContent(props: {
   readonly markdownStyles: MarkdownStyleSets['user']
   readonly reviewCommentColors: ReviewCommentColors
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>
-  readonly onLinkPress: (href: string) => void
+  readonly markdownLinkHandlers: MarkdownLinkHandlers
 })
 {
   const segments = parseReviewCommentMessageSegments(props.text)
@@ -463,7 +463,7 @@ function UserMessageContent(props: {
           skills={props.skills}
           textStyle={props.markdownStyles.nativeTextStyle}
           preserveSoftBreaks
-          onLinkPress={props.onLinkPress}
+          {...props.markdownLinkHandlers}
         />
       )
     }
@@ -507,7 +507,7 @@ function UserMessageContent(props: {
             skills={props.skills}
             textStyle={props.markdownStyles.nativeTextStyle}
             preserveSoftBreaks
-            onLinkPress={props.onLinkPress}
+            {...props.markdownLinkHandlers}
           />
         ) : (
           <Markdown

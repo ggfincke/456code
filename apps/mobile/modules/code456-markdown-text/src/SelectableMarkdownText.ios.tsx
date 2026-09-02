@@ -12,7 +12,10 @@ import {
   nativeMarkdownWithPreservedSoftBreaks,
 } from './nativeMarkdownText'
 import { NativeMarkdownBlock } from './NativeMarkdownBlock.ios'
-import { NativeMarkdownSelectableText } from './NativeMarkdownSelectableText.ios'
+import {
+  MarkdownFileActionsContext,
+  NativeMarkdownSelectableText,
+} from './NativeMarkdownSelectableText.ios'
 import type {
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,
@@ -40,10 +43,17 @@ export function SelectableMarkdownText({
   highlightCode,
   preserveSoftBreaks = false,
   onLinkPress,
+  fileContextMenu,
+  onFileContextMenuAction,
+
   marginTop = 0,
   marginBottom = 0,
 }: SelectableMarkdownTextProps)
 {
+  const fileActions = useMemo(
+    () => ({ fileContextMenu, onFileContextMenuAction }),
+    [fileContextMenu, onFileContextMenuAction],
+  )
   const chunks = useMemo(() =>
   {
     let parsedDocument: MarkdownNode
@@ -73,46 +83,47 @@ export function SelectableMarkdownText({
   }, [markdown, preserveSoftBreaks, skills])
 
   return (
-    // a percentage width here creates a cyclic intrinsic measurement inside
-    // shrink-to-fit containers such as user-message bubbles. Yoga then gives
-    // the native text node an unbounded second pass and the parent only clips
-    // the resulting single-line width instead of reflowing it.
-    <View style={{ flexShrink: 1, minWidth: 0, marginTop, marginBottom }}>
-      {chunks === undefined ? (
-        <NativeMarkdownSelectableText
-          runs={[{ text: markdown }]}
-          textStyle={textStyle}
-          onLinkPress={onLinkPress}
-        />
-      ) : (
-        chunks.map((chunk, index) =>
-          {
-          const content =
-            chunk.kind === 'rich' ? (
-              <NativeMarkdownBlock
-                node={chunk.node}
-                textStyle={textStyle}
-                highlightCode={highlightCode}
-                onLinkPress={onLinkPress}
-              />
-            ) : (
-              <NativeMarkdownSelectableText
-                runs={chunk.runs}
-                textStyle={textStyle}
-                onLinkPress={onLinkPress}
-              />
-            )
+    <MarkdownFileActionsContext.Provider value={fileActions}>
+        {/* a percentage width creates cyclic measurement in shrink-to-fit message bubbles. */}
+        <View style={{ flexShrink: 1, minWidth: 0, marginTop, marginBottom }}>
+          {chunks === undefined ? (
+            <NativeMarkdownSelectableText
+              runs={[{ text: markdown }]}
+              textStyle={textStyle}
+              onLinkPress={onLinkPress}
+              fileContextMenu={fileContextMenu}
+              onFileContextMenuAction={onFileContextMenuAction}
+            />
+          ) : (
+            chunks.map((chunk, index) =>
+              {
+              const content =
+                chunk.kind === 'rich' ? (
+                  <NativeMarkdownBlock
+                    node={chunk.node}
+                    textStyle={textStyle}
+                    highlightCode={highlightCode}
+                    onLinkPress={onLinkPress}
+                  />
+                ) : (
+                  <NativeMarkdownSelectableText
+                    runs={chunk.runs}
+                    textStyle={textStyle}
+                    onLinkPress={onLinkPress}
+                  />
+                )
 
-          return (
-            <View
-              key={chunk.key}
-              style={{ paddingTop: nativeMarkdownChunkSpacing(chunks[index - 1], chunk) }}
-            >
-              {content}
-            </View>
-          )
-        })
-      )}
-    </View>
+              return (
+                <View
+                  key={chunk.key}
+                  style={{ paddingTop: nativeMarkdownChunkSpacing(chunks[index - 1], chunk) }}
+                >
+                  {content}
+                </View>
+              )
+            })
+          )}
+        </View>
+    </MarkdownFileActionsContext.Provider>
   )
 }

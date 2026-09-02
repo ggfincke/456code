@@ -39,7 +39,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { copyTextWithHaptic } from '../../lib/copyTextWithHaptic'
 import { useThemeColor } from '../../lib/useThemeColor'
-import { type SelectableMarkdownSkill } from '../../native/SelectableMarkdownText'
+import {
+  type MarkdownFileContextMenu,
+  type SelectableMarkdownSkill,
+} from '../../native/SelectableMarkdownText'
 
 import { resolveMarkdownLinkPresentation } from '@t3tools/mobile-markdown-text/links'
 import { scaledTypographyLineHeight } from '../../lib/appearancePreferences'
@@ -55,6 +58,7 @@ import { resolveWorkspaceRelativeFilePath } from '../files/filePath'
 import { useAppearancePreferences } from '../settings/appearance/AppearancePreferencesProvider'
 import { collapsedWorkLogHeight, WORK_GROUP_TOGGLE_HEIGHT } from './thread-work-log'
 import type { ThreadContentPresentation } from './threadContentPresentation'
+import { fileChipMenu, resolveFileChipTarget, type FileChipAction } from './fileChipMenu'
 
 // animate content shifts only near the live end of the feed
 const FEED_ITEM_LAYOUT_DURATION_MS = 180
@@ -86,6 +90,13 @@ export interface ThreadFeedProps
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void
+}
+
+export interface MarkdownLinkHandlers
+{
+  readonly onLinkPress: (href: string) => void
+  readonly fileContextMenu: (href: string) => MarkdownFileContextMenu | undefined
+  readonly onFileContextMenuAction: (href: string, actionId: string) => void
 }
 
 import {
@@ -182,6 +193,36 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
       }
     },
     [props.environmentId, props.threadId, props.workspaceRoot, navigation],
+  )
+  const markdownLinkHandlers = useMemo<MarkdownLinkHandlers>(
+    () => ({
+      onLinkPress: onMarkdownLinkPress,
+      fileContextMenu: (href) =>
+      {
+        const target = resolveFileChipTarget(href, props.workspaceRoot)
+        return target ? fileChipMenu(target) : undefined
+      },
+      onFileContextMenuAction: (href, actionId) =>
+      {
+        const target = resolveFileChipTarget(href, props.workspaceRoot)
+        if (!target) return
+        switch (actionId as FileChipAction)
+        {
+          case 'copy-full-path':
+            if (target.fullPath) copyTextWithHaptic(target.fullPath, { target: 'full file path' })
+            return
+          case 'copy-relative-path':
+            if (target.relativePath)
+            {
+              copyTextWithHaptic(target.relativePath, { target: 'relative file path' })
+            }
+            return
+          case 'open-file':
+            onMarkdownLinkPress(href)
+        }
+      },
+    }),
+    [onMarkdownLinkPress, props.workspaceRoot],
   )
   const markdownStyles = useMarkdownStyles(onMarkdownLinkPress)
   const reviewCommentColors = useReviewCommentColors()
@@ -556,7 +597,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
         onToggleWorkRow,
         onToggleTurnFold,
         onPressImage,
-        onMarkdownLinkPress,
+        markdownLinkHandlers,
         iconSubtleColor,
         userBubbleColor,
         markdownStyles,
@@ -578,7 +619,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
       reviewCommentBubbleWidth,
       userBubbleMaxWidth,
       onCopyWorkRow,
-      onMarkdownLinkPress,
+      markdownLinkHandlers,
       onPressImage,
       onToggleTurnFold,
       onToggleWorkGroup,

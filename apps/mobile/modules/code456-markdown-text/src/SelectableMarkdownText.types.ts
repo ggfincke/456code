@@ -42,6 +42,18 @@ export interface SelectableMarkdownSkill
   readonly displayName?: string | null
 }
 
+export interface MarkdownFileContextMenuAction
+{
+  readonly id: string
+  readonly title: string
+}
+
+export interface MarkdownFileContextMenu
+{
+  readonly title: string
+  readonly actions: ReadonlyArray<MarkdownFileContextMenuAction>
+}
+
 export interface SelectableMarkdownTextProps
 {
   readonly markdown: string
@@ -50,6 +62,8 @@ export interface SelectableMarkdownTextProps
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>
   readonly preserveSoftBreaks?: boolean
   readonly onLinkPress?: (href: string) => void
+  readonly fileContextMenu?: (href: string) => MarkdownFileContextMenu | undefined
+  readonly onFileContextMenuAction?: (href: string, actionId: string) => void
   readonly marginTop?: number
   readonly marginBottom?: number
 }

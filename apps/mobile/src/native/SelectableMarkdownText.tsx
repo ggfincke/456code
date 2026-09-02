@@ -6,6 +6,8 @@ import type { SelectableMarkdownTextProps } from '@t3tools/mobile-markdown-text/
 type MobileSelectableMarkdownTextProps = Omit<SelectableMarkdownTextProps, 'highlightCode'>
 
 export type {
+  MarkdownFileContextMenu,
+  MarkdownFileContextMenuAction,
   NativeMarkdownTextStyle,
   SelectableMarkdownSkill,
 } from '@t3tools/mobile-markdown-text/types'
