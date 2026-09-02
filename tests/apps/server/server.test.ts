@@ -1005,6 +1005,11 @@ const buildAppUnderTest = (options?: {
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
             getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+            getEventReplayStats: ({ fromSequenceExclusive, toSequenceInclusive }) =>
+              Effect.succeed({
+                eventCount: Math.max(0, toSequenceInclusive - fromSequenceExclusive),
+                payloadBytes: 0,
+              }),
             getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
             getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
             getThreadCheckpointContext: () => Effect.succeed(Option.none()),
@@ -6628,6 +6633,59 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(items[0]?.kind, 'snapshot')
       assert.deepEqual(items[1], { kind: 'synchronized' })
+      assert.equal(readEventsCalls, 0)
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('subscribeShell snapshots instead of decoding an oversized replay payload', () =>
+    Effect.gen(function* ()
+    {
+      let readEventsCalls = 0
+      let replayStatsCalls = 0
+      const shell = makeDefaultOrchestrationThreadShell()
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(5),
+            readEvents: () =>
+              Stream.sync(() =>
+              {
+                readEventsCalls += 1
+                return {} as OrchestrationEvent
+              }),
+          },
+          projectionSnapshotQuery: {
+            getEventReplayStats: () =>
+              Effect.sync(() =>
+              {
+                replayStatsCalls += 1
+                return { eventCount: 5, payloadBytes: 8 * 1024 * 1024 + 1 }
+              }),
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 5,
+                projects: [],
+                threads: [shell],
+                updatedAt: '2026-01-01T00:00:00.000Z',
+              }),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const shellItems = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+            afterSequence: 0,
+            requestCompletionMarker: true,
+          }).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      )
+
+      assert.equal(shellItems[0]?.kind, 'snapshot')
+      assert.equal(shellItems[1]?.kind, 'synchronized')
+      assert.equal(replayStatsCalls, 1)
       assert.equal(readEventsCalls, 0)
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )

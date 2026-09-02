@@ -2,6 +2,7 @@
 // loads orchestration projection snapshots
 
 import {
+  NonNegativeInt,
   OrchestratePlanRevision,
   OrchestrateRunExecutionIdentity,
   OrchestrationReadModel,
@@ -89,6 +90,7 @@ export { COMMAND_THREAD_ACTIVITY_QUERY_SQL }
 import {
   ProjectionSnapshotQuery,
   type ProjectionCheckpointIdentity,
+  type ProjectionEventReplayStats,
   type ProjectionFullThreadDiffContext,
   type ProjectionImportReconciliationContext,
   type ProjectionSnapshotCounts,
@@ -120,6 +122,14 @@ function searchSnippet(text: string, query: string): string
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot)
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread)
 const THREAD_DETAIL_ACTIVITY_LIMIT = 500
+const EventReplayStatsInput = Schema.Struct({
+  fromSequenceExclusive: NonNegativeInt,
+  toSequenceInclusive: NonNegativeInt,
+})
+const EventReplayStatsRowSchema = Schema.Struct({
+  eventCount: NonNegativeInt,
+  payloadBytes: NonNegativeInt,
+})
 const THREAD_DETAIL_COMMAND_ACTIVITY_SQL_LIST = COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS.map(
   (kind) => `'${kind}'`,
 ).join(',\n        ')
@@ -1160,6 +1170,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         SELECT
           (SELECT COUNT(*) FROM projection_projects) AS "projectCount",
           (SELECT COUNT(*) FROM projection_threads) AS "threadCount"
+      `,
+  })
+
+  const readEventReplayStats = SqlSchema.findOne({
+    Request: EventReplayStatsInput,
+    Result: EventReplayStatsRowSchema,
+    execute: ({ fromSequenceExclusive, toSequenceInclusive }) =>
+      sql`
+        SELECT
+          COUNT(*) AS "eventCount",
+          COALESCE(SUM(octet_length(payload_json)), 0) AS "payloadBytes"
+        FROM orchestration_events
+        WHERE sequence > ${fromSequenceExclusive}
+          AND sequence <= ${toSequenceInclusive}
       `,
   })
 
@@ -2753,6 +2777,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
       })),
     )
 
+  const getEventReplayStats: ProjectionSnapshotQueryShape['getEventReplayStats'] = (input) =>
+    readEventReplayStats(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          'ProjectionSnapshotQuery.getEventReplayStats:query',
+          'ProjectionSnapshotQuery.getEventReplayStats:decodeRow',
+        ),
+      ),
+      Effect.map((row): ProjectionEventReplayStats => ({
+        eventCount: row.eventCount,
+        payloadBytes: row.payloadBytes,
+      })),
+    )
+
   const getImportReconciliationContext: ProjectionSnapshotQueryShape['getImportReconciliationContext'] =
     () =>
       sql
@@ -3374,6 +3412,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
     getArchivedShellSnapshot,
     getSnapshotSequence,
     getCounts,
+    getEventReplayStats,
     getImportReconciliationContext,
     getActiveProjectByWorkspaceRoot,
     getProjectShellById,

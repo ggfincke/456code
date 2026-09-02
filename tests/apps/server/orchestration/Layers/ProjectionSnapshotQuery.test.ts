@@ -551,6 +551,92 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
     }),
   )
 
+  it.effect('measures serialized replay bytes without decoding event payloads', () =>
+    Effect.gen(function* ()
+    {
+      const snapshotQuery = yield* ProjectionSnapshotQuery
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql`DELETE FROM orchestration_events`
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        VALUES
+          (
+            'replay-event-before',
+            'thread',
+            'thread-replay',
+            0,
+            'thread.activity-appended',
+            '2026-03-01T00:00:00.000Z',
+            NULL,
+            NULL,
+            NULL,
+            'provider',
+            '{}',
+            '{}'
+          ),
+          (
+            'replay-event-invalid-json',
+            'thread',
+            'thread-replay',
+            1,
+            'thread.activity-appended',
+            '2026-03-01T00:00:01.000Z',
+            NULL,
+            NULL,
+            NULL,
+            'provider',
+            '{not-json',
+            '{}'
+          ),
+          (
+            'replay-event-emoji',
+            'thread',
+            'thread-replay',
+            2,
+            'thread.activity-appended',
+            '2026-03-01T00:00:02.000Z',
+            NULL,
+            NULL,
+            NULL,
+            'provider',
+            '{"output":"😀"}',
+            '{}'
+          )
+      `
+      const sequenceRows = yield* sql<{
+        readonly eventId: string
+        readonly sequence: number
+      }>`
+        SELECT event_id AS "eventId", sequence
+        FROM orchestration_events
+        ORDER BY sequence ASC
+      `
+
+      const stats = yield* snapshotQuery.getEventReplayStats({
+        fromSequenceExclusive: sequenceRows[0]!.sequence,
+        toSequenceInclusive: sequenceRows[2]!.sequence,
+      })
+      assert.deepStrictEqual(stats, {
+        eventCount: 2,
+        payloadBytes: 26,
+      })
+    }),
+  )
+
   it.effect('keeps archived threads out of the main shell snapshot', () =>
     Effect.gen(function* ()
     {
