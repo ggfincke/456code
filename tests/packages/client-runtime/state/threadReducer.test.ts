@@ -793,6 +793,81 @@ describe('applyThreadDetailEvent', () =>
 
   describe('thread.message-sent', () =>
   {
+    it('keeps turn and checkpoint references stable across deltas but rebinds a new message', () =>
+    {
+      const turnId = TurnId.make('turn-1')
+      const messageId = MessageId.make('streamed-message')
+      const timestamp = '2026-04-01T06:00:00.000Z'
+      const thread: OrchestrationThread = {
+        ...baseThread,
+        latestTurn: {
+          turnId,
+          state: 'running',
+          requestedAt: timestamp,
+          startedAt: timestamp,
+          completedAt: null,
+          assistantMessageId: messageId,
+        },
+        checkpoints: [
+          {
+            turnId,
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.make('ref-1'),
+            status: 'ready',
+            files: [],
+            assistantMessageId: messageId,
+            completedAt: timestamp,
+          },
+        ],
+      }
+      const delta = {
+        ...baseEventFields,
+        sequence: 1,
+        occurredAt: timestamp,
+        aggregateKind: 'thread',
+        aggregateId: thread.id,
+        type: 'thread.message-sent',
+        payload: {
+          threadId: thread.id,
+          messageId,
+          role: 'assistant',
+          text: 'Hello',
+          turnId,
+          streaming: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      } as const
+      const first = applyThreadDetailEvent(thread, delta)
+      expect(first.kind).toBe('updated')
+      if (first.kind !== 'updated') return
+      const second = applyThreadDetailEvent(first.thread, {
+        ...delta,
+        sequence: 2,
+        payload: { ...delta.payload, text: ', world!' },
+      })
+      expect(second.kind).toBe('updated')
+      if (second.kind !== 'updated') return
+      expect(first.thread.latestTurn).toBe(thread.latestTurn)
+      expect(second.thread.latestTurn).toBe(thread.latestTurn)
+      expect(second.thread.checkpoints).toBe(thread.checkpoints)
+      expect(second.thread.messages).not.toBe(first.thread.messages)
+      expect(second.thread.messages[0]?.text).toBe('Hello, world!')
+
+      const replacementId = MessageId.make('next-message')
+      const replaced = applyThreadDetailEvent(second.thread, {
+        ...delta,
+        sequence: 3,
+        payload: { ...delta.payload, messageId: replacementId, streaming: false },
+      })
+      expect(replaced.kind).toBe('updated')
+      if (replaced.kind !== 'updated') return
+      expect(replaced.thread.latestTurn).not.toBe(thread.latestTurn)
+      expect(replaced.thread.latestTurn?.state).toBe('completed')
+      expect(replaced.thread.checkpoints).not.toBe(thread.checkpoints)
+      expect(replaced.thread.checkpoints[0]?.assistantMessageId).toBe(replacementId)
+    })
+
     it('appends, streams, and updates latestTurn for message sends', () =>
     {
       const appended = applyThreadDetailEvent(baseThread, {
