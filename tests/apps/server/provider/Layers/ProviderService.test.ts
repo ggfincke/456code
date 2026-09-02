@@ -45,6 +45,7 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
+  ProviderSessionDirectoryPersistenceError,
   ProviderUnsupportedError,
   ProviderValidationError,
   type ProviderAdapterError,
@@ -468,6 +469,7 @@ function makeProviderServiceLayer(
   mcpSessionRegistry: McpSessionRegistry.McpSessionRegistryShape = McpSessionRegistry.__testing
     .disabled,
   serverSettingsLayer = defaultServerSettingsLayer,
+  directory?: ProviderSessionDirectory.ProviderSessionDirectory['Service'],
 )
 {
   const codex = makeFakeCodexAdapter()
@@ -486,7 +488,10 @@ function makeProviderServiceLayer(
   const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
   )
-  const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
+  const directoryLayer =
+    directory === undefined
+      ? ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
+      : Layer.succeed(ProviderSessionDirectory.ProviderSessionDirectory, directory)
 
   const layer = it.layer(
     Layer.mergeAll(
@@ -2087,6 +2092,82 @@ it.effect('ProviderServiceLive resets authority when switching same-driver insta
 )
 
 const routing = makeProviderServiceLayer()
+
+const boundedListingThreadId = asThreadId('thread-bounded-listing')
+const historicalListingThreadIds = Array.from({ length: 2_000 }, (_, index) =>
+  asThreadId(`thread-historical-listing-${index}`),
+)
+const boundedListThreadIds = vi.fn(() => Effect.succeed(historicalListingThreadIds))
+const boundedGetBinding = vi.fn((_threadId: ThreadId) =>
+  Effect.fail(
+    new ProviderSessionDirectoryPersistenceError({
+      operation: 'getBinding',
+      detail: 'simulated binding read failure',
+    }),
+  ),
+)
+const boundedListing = makeProviderServiceLayer(
+  McpSessionRegistry.__testing.disabled,
+  defaultServerSettingsLayer,
+  {
+    upsert: () => Effect.void,
+    getProvider: () => Effect.die('ProviderService.listSessions does not use getProvider'),
+    getBinding: boundedGetBinding,
+    listThreadIds: boundedListThreadIds,
+    listBindings: () => Effect.die('ProviderService.listSessions does not use listBindings'),
+  },
+)
+
+boundedListing.layer('ProviderServiceLive bounded session listing', (it) =>
+{
+  it.effect('looks up unique active bindings without scanning historical threads', () =>
+    Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+
+      boundedListThreadIds.mockClear()
+      boundedGetBinding.mockClear()
+      assert.deepEqual(yield* provider.listSessions(), [])
+      assert.equal(boundedListThreadIds.mock.calls.length, 0)
+      assert.equal(boundedGetBinding.mock.calls.length, 0)
+
+      yield* boundedListing.codex.startSession({
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId: boundedListingThreadId,
+        cwd: '/tmp/project-bounded-listing',
+        runtimeMode: 'full-access',
+        runtimeSessionBinding: {
+          providerInstanceId: codexInstanceId,
+          threadId: boundedListingThreadId,
+          sessionGeneration: 1,
+        },
+      })
+      yield* boundedListing.claude.startSession({
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId: boundedListingThreadId,
+        cwd: '/tmp/project-bounded-listing',
+        runtimeMode: 'full-access',
+        runtimeSessionBinding: {
+          providerInstanceId: claudeAgentInstanceId,
+          threadId: boundedListingThreadId,
+          sessionGeneration: 1,
+        },
+      })
+
+      const sessions = yield* provider.listSessions()
+
+      assert.deepEqual(
+        sessions.map((session) => session.provider).sort(),
+        [CLAUDE_AGENT_DRIVER, CODEX_DRIVER].sort(),
+      )
+      assert.equal(boundedListThreadIds.mock.calls.length, 0)
+      assert.deepEqual(boundedGetBinding.mock.calls, [[boundedListingThreadId]])
+    }),
+  )
+})
+
 const recordedMcp = makeRecordingMcpSessionRegistry()
 const mcpRouting = makeProviderServiceLayer(recordedMcp.service)
 
