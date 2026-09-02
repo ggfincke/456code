@@ -22,6 +22,7 @@ import { makeOpenCodeAdapter } from '../Layers/OpenCodeAdapter.ts'
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
+  openCodeSkillsToServerProviderSkills,
 } from '../Layers/OpenCodeProvider.ts'
 import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
@@ -161,6 +162,35 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
         Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
       )
+      const loadSkillsForCwd = (cwd: string) =>
+        effectiveConfig.serverUrl.trim().length > 0
+          ? Effect.scoped(
+              Effect.gen(function* ()
+                {
+                const server = yield* openCodeRuntime.connectToOpenCodeServer({
+                  binaryPath: effectiveConfig.binaryPath,
+                  directory: cwd,
+                  serverUrl: effectiveConfig.serverUrl,
+                  ...(effectiveConfig.serverPassword
+                    ? { serverPassword: effectiveConfig.serverPassword }
+                    : {}),
+                  environment: processEnv,
+                })
+                const client = openCodeRuntime.createOpenCodeSdkClient({
+                  baseUrl: server.url,
+                  directory: cwd,
+                  ...(effectiveConfig.serverPassword
+                    ? { serverPassword: effectiveConfig.serverPassword }
+                    : {}),
+                })
+                return yield* openCodeRuntime.loadOpenCodeSkills(client)
+              }),
+            )
+          : openCodeRuntime.loadSkillsFromCli({
+              binaryPath: effectiveConfig.binaryPath,
+              cwd,
+              environment: processEnv,
+            })
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,
@@ -216,6 +246,24 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         accentColor,
         enabled,
         snapshot,
+        snapshotForCwd: (cwd) =>
+          !effectiveConfig.enabled
+            ? snapshot.getSnapshot
+            : Effect.all([snapshot.getSnapshot, loadSkillsForCwd(cwd)]).pipe(
+                Effect.map(([machineSnapshot, skills]) => ({
+                  ...machineSnapshot,
+                  skills: openCodeSkillsToServerProviderSkills(skills),
+                })),
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderDriverError({
+                      driver: DRIVER_KIND,
+                      instanceId,
+                      detail: `Failed to probe OpenCode skills for '${cwd}'`,
+                      cause,
+                    }),
+                ),
+              ),
         adapter,
         textGeneration,
       } satisfies ProviderInstance

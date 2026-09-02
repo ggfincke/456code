@@ -42,6 +42,12 @@ export interface ProviderRegistryShape
     instanceId: ProviderInstanceId,
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>
 
+  // load and cache the catalog visible to one exact provider workspace.
+  readonly refreshWorkspaceSnapshot: (input: {
+    readonly instanceId: ProviderInstanceId
+    readonly cwd: string
+  }) => Effect.Effect<ReadonlyArray<ServerProvider>>
+
   // resolve the maintenance capabilities owned by one live provider instance.
   // falls back to manual-only capabilities when the instance is not live.
   readonly getProviderMaintenanceCapabilitiesForInstance: (

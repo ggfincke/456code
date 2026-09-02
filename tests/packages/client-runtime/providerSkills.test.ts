@@ -1,7 +1,12 @@
 // tests/packages/client-runtime/providerSkills.test.ts
 // verify shared provider skill selection rules
 
-import type { ServerProviderSkill } from '@t3tools/contracts'
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+  type ServerProviderSkill,
+} from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -9,6 +14,8 @@ import {
   getProviderSkillsForSlashMenu,
   getProviderSlashCommandsForSlashMenu,
   isProviderSkillUserInvocable,
+  resolveProviderSkillsForCwd,
+  resolveProviderSlashCommandsForCwd,
 } from '../../../packages/client-runtime/src/providerSkills.ts'
 
 const skill = (
@@ -20,6 +27,28 @@ const skill = (
   enabled: options?.enabled ?? true,
   ...(options?.userInvocable === undefined ? {} : { userInvocable: options.userInvocable }),
 })
+
+const provider = {
+  instanceId: ProviderInstanceId.make('codex'),
+  driver: ProviderDriverKind.make('codex'),
+  enabled: true,
+  installed: true,
+  version: '1.0.0',
+  status: 'ready',
+  auth: { status: 'authenticated' },
+  checkedAt: '2026-09-08T00:00:00.000Z',
+  models: [],
+  slashCommands: [{ name: 'global' }],
+  skills: [skill('global')],
+  workspaceSnapshots: [
+    {
+      cwd: '/workspace/project-a',
+      checkedAt: '2026-09-08T00:01:00.000Z',
+      slashCommands: [{ name: 'project' }],
+      skills: [{ ...skill('project'), path: '/workspace/project-a/SKILL.md' }],
+    },
+  ],
+} satisfies ServerProvider
 
 describe('provider skill selection', () =>
 {
@@ -63,5 +92,17 @@ describe('provider skill selection', () =>
         [skill('Review')],
       ),
     ).toEqual([{ name: 'model' }])
+  })
+
+  it('selects an exact cwd snapshot and otherwise retains machine metadata', () =>
+  {
+    expect(resolveProviderSkillsForCwd(provider, '/workspace/project-a')).toEqual([
+      { name: 'project', path: '/workspace/project-a/SKILL.md', enabled: true },
+    ])
+    expect(resolveProviderSlashCommandsForCwd(provider, '/workspace/project-a')).toEqual([
+      { name: 'project' },
+    ])
+    expect(resolveProviderSkillsForCwd(provider, '/workspace/project-b')).toEqual(provider.skills)
+    expect(resolveProviderSlashCommandsForCwd(provider, null)).toEqual(provider.slashCommands)
   })
 })

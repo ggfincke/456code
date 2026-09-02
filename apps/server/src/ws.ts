@@ -16,6 +16,7 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
+  AuthOrchestrationReadScope,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
   CommandId,
@@ -24,6 +25,7 @@ import {
   type DiffAnalysisSource,
   type ClientOrchestrationCommand,
   EventId,
+  EnvironmentAuthorizationError,
   GitCommandError,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
@@ -88,6 +90,7 @@ import {
 import { makeWorkspaceRpcHandlers } from './ws/handlers/workspaceHandlers.ts'
 import { makeRpcAuthorization, toAuthAccessStreamEvent } from './ws/rpcAuthorization.ts'
 import * as ProviderRegistry from './provider/Services/ProviderRegistry.ts'
+import { resolveAuthorizedProviderWorkspaceCwd } from './provider/workspaceAuthorization.ts'
 import * as ProviderMaintenanceRunner from './provider/maintenance/providerMaintenanceRunner.ts'
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
 import * as ServerRuntimeStartup from './serverRuntimeStartup.ts'
@@ -889,10 +892,51 @@ const makeWsRpcLayer = (
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
-            (input.instanceId !== undefined
-              ? providerRegistry.refreshInstance(input.instanceId)
-              : providerRegistry.refresh()
-            ).pipe(Effect.map((providers) => ({ providers }))),
+            Effect.gen(function* ()
+            {
+              if (input.cwd !== undefined)
+              {
+                if (input.instanceId === undefined)
+                {
+                  return yield* new EnvironmentAuthorizationError({
+                    message: 'A provider instance is required to refresh a workspace catalog.',
+                    requiredScope: AuthOrchestrationReadScope,
+                  })
+                }
+                const shell = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+                  Effect.mapError(
+                    () =>
+                      new EnvironmentAuthorizationError({
+                        message: 'The provider workspace could not be authorized.',
+                        requiredScope: AuthOrchestrationReadScope,
+                      }),
+                  ),
+                )
+                const cwd = resolveAuthorizedProviderWorkspaceCwd({
+                  cwd: input.cwd,
+                  scopes: currentSession.scopes,
+                  shell,
+                  normalizePath: (value) => path.normalize(path.resolve(value)),
+                })
+                if (cwd === null)
+                {
+                  return yield* new EnvironmentAuthorizationError({
+                    message: 'The provider workspace is outside the authenticated project scope.',
+                    requiredScope: AuthOrchestrationReadScope,
+                  })
+                }
+                const providers = yield* providerRegistry.refreshWorkspaceSnapshot({
+                  instanceId: input.instanceId,
+                  cwd,
+                })
+                return { providers }
+              }
+
+              const providers = yield* input.instanceId !== undefined
+                ? providerRegistry.refreshInstance(input.instanceId)
+                : providerRegistry.refresh()
+              return { providers }
+            }),
             { 'rpc.aggregate': 'server' },
           ),
         [WS_METHODS.serverUpdateProvider]: (input) =>

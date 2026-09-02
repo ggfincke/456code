@@ -295,10 +295,12 @@ function trimOptional(value: string | null | undefined): string | undefined
   return trimmed && trimmed.length > 0 ? trimmed : undefined
 }
 
-function flattenOpenCodeSkills(input: OpenCodeInventory): ReadonlyArray<ServerProviderSkill>
+export function openCodeSkillsToServerProviderSkills(
+  input: OpenCodeInventory['skills'],
+): ReadonlyArray<ServerProviderSkill>
 {
   const skills: ServerProviderSkill[] = []
-  for (const skill of input.skills)
+  for (const skill of input)
   {
     const name = trimOptional(skill.name)
     const path = trimOptional(skill.location)
@@ -515,7 +517,7 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   )
   const connectedCount = inventory.providerList.connected.length
-  const skills = flattenOpenCodeSkills(inventory)
+  const skills = openCodeSkillsToServerProviderSkills(inventory.skills)
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,

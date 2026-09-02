@@ -2,6 +2,7 @@
 // verifies provider snapshot aggregation, refresh, and instance routing
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { describe, it, assert } from '@effect/vitest'
+import * as DateTime from 'effect/DateTime'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -51,6 +52,7 @@ import {
   mergeProviderSnapshots,
   ProviderRegistryLive,
   selectProvidersByKind,
+  upsertProviderWorkspaceSnapshot,
 } from '../../../../../apps/server/src/provider/Layers/ProviderRegistry.ts'
 import * as ServerConfig from '../../../../../apps/server/src/config.ts'
 import * as ServerSettingsModule from '../../../../../apps/server/src/serverSettings.ts'
@@ -728,6 +730,276 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
 
         assert.strictEqual(haveProvidersChanged(providers, [...providers]), false)
       })
+
+      it('stores only the newest sixteen workspace snapshots and refreshes an existing cwd', () =>
+      {
+        const provider = {
+          instanceId: ProviderInstanceId.make('codex'),
+          driver: ProviderDriverKind.make('codex'),
+          status: 'ready',
+          enabled: true,
+          installed: true,
+          auth: { status: 'authenticated' },
+          checkedAt: '2026-09-08T00:00:00.000Z',
+          version: '1.0.0',
+          models: [],
+          slashCommands: [{ name: 'global' }],
+          skills: [{ name: 'global', path: '/global/SKILL.md', enabled: true }],
+        } satisfies ServerProvider
+        let result = provider as ServerProvider
+        for (let index = 0; index < 17; index += 1)
+        {
+          result = upsertProviderWorkspaceSnapshot(result, `/workspace/${index}`, {
+            ...provider,
+            checkedAt: `2026-09-08T00:${String(index).padStart(2, '0')}:00.000Z`,
+            skills: [
+              {
+                name: `project-${index}`,
+                path: `/workspace/${index}/SKILL.md`,
+                enabled: true,
+              },
+            ],
+          })
+        }
+
+        assert.strictEqual(result.workspaceSnapshots?.length, 16)
+        assert.strictEqual(result.workspaceSnapshots?.[0]?.cwd, '/workspace/1')
+        assert.strictEqual(result.workspaceSnapshots?.at(-1)?.cwd, '/workspace/16')
+        assert.deepStrictEqual(result.skills, provider.skills)
+
+        const refreshed = upsertProviderWorkspaceSnapshot(result, '/workspace/5', {
+          ...provider,
+          checkedAt: '2026-09-08T01:00:00.000Z',
+          skills: [{ name: 'refreshed', path: '/workspace/5/SKILL.md', enabled: true }],
+        })
+        assert.strictEqual(refreshed.workspaceSnapshots?.length, 16)
+        assert.strictEqual(refreshed.workspaceSnapshots?.at(-1)?.cwd, '/workspace/5')
+        assert.strictEqual(refreshed.workspaceSnapshots?.at(-1)?.skills[0]?.name, 'refreshed')
+      })
+
+      it.effect(
+        'deduplicates workspace probes, refreshes cached entries, retains failures, and fences rebuilds',
+        () =>
+          Effect.gen(function* ()
+          {
+            const driver = ProviderDriverKind.make('codex')
+            const instanceId = ProviderInstanceId.make('codex')
+            const machineProvider = {
+              instanceId,
+              driver,
+              status: 'ready',
+              enabled: true,
+              installed: true,
+              auth: { status: 'authenticated' },
+              checkedAt: '2026-09-08T00:00:00.000Z',
+              version: '1.0.0',
+              models: [],
+              slashCommands: [{ name: 'global' }],
+              skills: [{ name: 'global', path: '/global/SKILL.md', enabled: true }],
+              continuation: { groupKey: 'codex:instance:codex' },
+            } as const satisfies ServerProvider
+            const firstWorkspace = {
+              ...machineProvider,
+              checkedAt: '2026-09-08T00:01:00.000Z',
+              skills: [{ name: 'first', path: '/workspace/SKILL.md', enabled: true }],
+            } satisfies ServerProvider
+            const refreshedWorkspace = {
+              ...machineProvider,
+              checkedAt: '2026-09-08T00:02:00.000Z',
+              skills: [{ name: 'refreshed', path: '/workspace/SKILL.md', enabled: true }],
+            } satisfies ServerProvider
+            const failedWorkspace = {
+              ...machineProvider,
+              checkedAt: '2026-09-08T00:03:00.000Z',
+              status: 'error',
+              skills: [],
+            } satisfies ServerProvider
+            const rebuiltProvider = {
+              ...machineProvider,
+              checkedAt: '2026-09-08T00:04:00.000Z',
+            } satisfies ServerProvider
+            const probeCalls = yield* Ref.make(0)
+            const probeMode = yield* Ref.make<
+              'first' | 'failure' | 'refreshed' | 'timeout' | 'stale'
+            >('first')
+            const firstStarted = yield* Deferred.make<void>()
+            const releaseFirst = yield* Deferred.make<void>()
+            const timeoutStarted = yield* Deferred.make<void>()
+            const staleStarted = yield* Deferred.make<void>()
+            const releaseStale = yield* Deferred.make<void>()
+            const makeInstance = (
+              provider: ServerProvider,
+              snapshotForCwd: NonNullable<ProviderInstance['snapshotForCwd']>,
+            ): ProviderInstance => ({
+              instanceId,
+              driverKind: driver,
+              continuationIdentity: {
+                driverKind: driver,
+                continuationKey: 'codex:instance:codex',
+              },
+              resolveContinuationIdentity: Effect.succeed({
+                driverKind: driver,
+                continuationKey: 'codex:instance:codex',
+              }),
+              displayName: undefined,
+              enabled: true,
+              snapshot: {
+                resolveMaintenance: resolveManualMaintenance(driver),
+                getSnapshot: Effect.succeed(provider),
+                refresh: Effect.succeed(provider),
+                streamChanges: Stream.empty,
+              },
+              snapshotForCwd,
+              adapter: {} as ProviderInstance['adapter'],
+              textGeneration: {} as ProviderInstance['textGeneration'],
+            })
+            const firstInstance = makeInstance(
+              machineProvider,
+              Effect.fn('testWorkspaceSnapshotForCwd')(function* ()
+              {
+                yield* Ref.update(probeCalls, (count) => count + 1)
+                switch (yield* Ref.get(probeMode))
+                {
+                  case 'first':
+                    yield* Deferred.succeed(firstStarted, undefined)
+                    yield* Deferred.await(releaseFirst)
+                    return firstWorkspace
+                  case 'failure':
+                    return failedWorkspace
+                  case 'refreshed':
+                    return refreshedWorkspace
+                  case 'timeout':
+                    yield* Deferred.succeed(timeoutStarted, undefined)
+                    return yield* Effect.never
+                  case 'stale':
+                    yield* Deferred.succeed(staleStarted, undefined)
+                    yield* Deferred.await(releaseStale)
+                    return refreshedWorkspace
+                }
+              }),
+            )
+            const rebuiltInstance = makeInstance(rebuiltProvider, () =>
+              Effect.succeed(refreshedWorkspace),
+            )
+            const registryChanges = yield* PubSub.unbounded<void>()
+            const instancesRef = yield* Ref.make<ReadonlyArray<ProviderInstance>>([firstInstance])
+            const instanceRegistryLayer = Layer.succeed(
+              ProviderInstanceRegistry.ProviderInstanceRegistry,
+              {
+                getInstance: (requestedId) =>
+                  Ref.get(instancesRef).pipe(
+                    Effect.map((instances) =>
+                      instances.find((instance) => instance.instanceId === requestedId),
+                    ),
+                  ),
+                listInstances: Ref.get(instancesRef),
+                listUnavailable: Effect.succeed([]),
+                streamChanges: Stream.fromPubSub(registryChanges),
+                subscribeChanges: PubSub.subscribe(registryChanges),
+              },
+            )
+            const configLayer = ServerConfig.layerTest(process.cwd(), {
+              prefix: 't3-provider-registry-workspace-snapshot-',
+            })
+            const scope = yield* Scope.make()
+            yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+            const runtimeServices = yield* Layer.build(
+              ProviderRegistryLive.pipe(
+                Layer.provideMerge(instanceRegistryLayer),
+                Layer.provideMerge(configLayer),
+                Layer.provideMerge(NodeServices.layer),
+              ),
+            ).pipe(Scope.provide(scope))
+
+            yield* Effect.gen(function* ()
+            {
+              const registry = yield* ProviderRegistry.ProviderRegistry
+              const expectedWorkspaceCheckedAt = DateTime.formatIso(yield* DateTime.now)
+              const firstRefresh = yield* registry
+                .refreshWorkspaceSnapshot({ instanceId, cwd: '/workspace/.' })
+                .pipe(Effect.forkChild)
+              yield* Deferred.await(firstStarted)
+              const duplicateRefresh = yield* registry
+                .refreshWorkspaceSnapshot({ instanceId, cwd: '/workspace' })
+                .pipe(Effect.forkChild)
+              yield* Effect.yieldNow
+              assert.strictEqual(yield* Ref.get(probeCalls), 1)
+              yield* Deferred.succeed(releaseFirst, undefined)
+              yield* Fiber.join(firstRefresh)
+              yield* Fiber.join(duplicateRefresh)
+              assert.strictEqual(
+                (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.skills[0]?.name,
+                'first',
+              )
+              assert.strictEqual(
+                (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.checkedAt,
+                expectedWorkspaceCheckedAt,
+              )
+
+              const config = yield* ServerConfig.ServerConfig
+              const filePath = yield* resolveProviderStatusCachePath({
+                cacheDir: config.providerStatusCacheDir,
+                instanceId,
+              })
+              assert.strictEqual(
+                (yield* readProviderStatusCache(filePath))?.workspaceSnapshots,
+                undefined,
+              )
+
+              yield* Ref.set(probeMode, 'failure')
+              yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: '/workspace' })
+              assert.strictEqual(yield* Ref.get(probeCalls), 2)
+              assert.strictEqual(
+                (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.skills[0]?.name,
+                'first',
+              )
+
+              yield* Ref.set(probeMode, 'refreshed')
+              yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: '/workspace' })
+              assert.strictEqual(yield* Ref.get(probeCalls), 3)
+              assert.strictEqual(
+                (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.skills[0]?.name,
+                'refreshed',
+              )
+
+              yield* Ref.set(probeMode, 'timeout')
+              const timedOut = yield* registry
+                .refreshWorkspaceSnapshot({ instanceId, cwd: '/workspace' })
+                .pipe(Effect.forkChild)
+              yield* Deferred.await(timeoutStarted)
+              yield* TestClock.adjust('21 seconds')
+              yield* Fiber.join(timedOut)
+              assert.strictEqual(yield* Ref.get(probeCalls), 4)
+              assert.strictEqual(
+                (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.skills[0]?.name,
+                'refreshed',
+              )
+
+              yield* Ref.set(probeMode, 'stale')
+              const staleRefresh = yield* registry
+                .refreshWorkspaceSnapshot({ instanceId, cwd: '/workspace' })
+                .pipe(Effect.forkChild)
+              yield* Deferred.await(staleStarted)
+              yield* Ref.set(instancesRef, [rebuiltInstance])
+              yield* PubSub.publish(registryChanges, undefined)
+              let providers = yield* registry.getProviders
+              for (
+                let attempt = 0;
+                attempt < 50 && providers[0]?.checkedAt !== rebuiltProvider.checkedAt;
+                attempt += 1
+              )
+              {
+                yield* Effect.yieldNow
+                providers = yield* registry.getProviders
+              }
+              assert.strictEqual(providers[0]?.checkedAt, rebuiltProvider.checkedAt)
+              assert.strictEqual(providers[0]?.workspaceSnapshots, undefined)
+              yield* Deferred.succeed(releaseStale, undefined)
+              yield* Fiber.join(staleRefresh)
+              assert.strictEqual((yield* registry.getProviders)[0]?.workspaceSnapshots, undefined)
+            }).pipe(Effect.provide(runtimeServices))
+          }),
+      )
 
       it('preserves previously discovered provider models when a refresh returns none', () =>
       {

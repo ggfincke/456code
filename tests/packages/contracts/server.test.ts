@@ -48,6 +48,7 @@ describe('ServerProvider', () =>
       {
         expect(parsed.slashCommands).toEqual([])
         expect(parsed.skills).toEqual([])
+        expect(parsed.workspaceSnapshots).toBeUndefined()
         expect(parsed.capabilities).toBeUndefined()
         expect(parsed.versionAdvisory).toBeUndefined()
         expect(parsed.updateState).toBeUndefined()
@@ -109,6 +110,39 @@ describe('ServerProvider', () =>
   ])('$label', ({ input, assert }) =>
   {
     assert(decodeServerProvider(input))
+  })
+
+  it('decodes bounded workspace catalog fields without changing the machine catalog', () =>
+  {
+    const parsed = decodeServerProvider({
+      ...baseProvider,
+      slashCommands: [{ name: 'global' }],
+      skills: [{ name: 'global', path: '/global/SKILL.md', enabled: true }],
+      workspaceSnapshots: [
+        {
+          cwd: '/workspace/project',
+          checkedAt: '2026-09-08T00:01:00.000Z',
+          slashCommands: [{ name: 'project' }],
+          skills: [{ name: 'project', path: '/workspace/project/SKILL.md', enabled: true }],
+        },
+      ],
+    })
+
+    expect(parsed.skills[0]?.name).toBe('global')
+    expect(parsed.workspaceSnapshots?.[0]?.skills[0]?.name).toBe('project')
+    expect(() =>
+      decodeServerProvider({
+        ...baseProvider,
+        workspaceSnapshots: [
+          {
+            cwd: '   ',
+            checkedAt: '2026-09-08T00:01:00.000Z',
+            slashCommands: [],
+            skills: [],
+          },
+        ],
+      }),
+    ).toThrow()
   })
 
   it('decodes available and external provider account usage states', () =>

@@ -101,6 +101,14 @@ export const ServerProviderSkill = Schema.Struct({
 })
 export type ServerProviderSkill = typeof ServerProviderSkill.Type
 
+export const ServerProviderWorkspaceSnapshot = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  checkedAt: IsoDateTime,
+  slashCommands: Schema.Array(ServerProviderSlashCommand),
+  skills: Schema.Array(ServerProviderSkill),
+})
+export type ServerProviderWorkspaceSnapshot = typeof ServerProviderWorkspaceSnapshot.Type
+
 // availability of a configured provider instance from the runtime's POV.
 //
 //  - `available` — the build ships this driver and an instance is wired
@@ -239,6 +247,7 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  workspaceSnapshots: Schema.optionalKey(Schema.Array(ServerProviderWorkspaceSnapshot)),
   accountUsage: Schema.optionalKey(ServerProviderAccountUsage),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),

@@ -26,7 +26,9 @@ const makeRuntime = (
   runOpenCodeCommand: () => Effect.die('unused runtime method'),
   createOpenCodeSdkClient: () => ({}) as never,
   loadOpenCodeInventory: () => Effect.die('unused runtime method'),
+  loadOpenCodeSkills: () => Effect.die('unused runtime method'),
   loadInventoryFromCli: () => Effect.die('unused runtime method'),
+  loadSkillsFromCli: () => Effect.die('unused runtime method'),
 })
 
 const makeServer = Effect.fn('makeServer')(function* (index: number)
