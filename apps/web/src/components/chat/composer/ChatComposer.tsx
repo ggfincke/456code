@@ -1014,6 +1014,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return buildComposerSlashMenuItems({
         provider: selectedProvider,
         query: composerTrigger.query,
+        showProviderSlashCommands: composerTrigger.rangeStart === 0,
         builtInItems,
         slashCommands: selectedProviderStatus?.slashCommands ?? [],
         skills: providerSkills,

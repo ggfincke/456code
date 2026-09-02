@@ -56,14 +56,16 @@ describe('searchProviderSkills', () =>
     expect(searchProviderSkills(skills, 'gfc').map((skill) => skill.name)).toEqual(['gh-fix-ci'])
   })
 
-  it('omits disabled skills from results', () =>
+  it('omits skills the user cannot invoke', () =>
   {
     const skills = [
       makeSkill({ name: 'ui', displayName: 'Ui', enabled: false }),
+      makeSkill({ name: 'private-ui', displayName: 'Private Ui', userInvocable: false }),
       makeSkill({ name: 'frontend-design', displayName: 'Frontend Design' }),
     ]
 
     expect(searchProviderSkills(skills, 'ui').map((skill) => skill.name)).toEqual([])
+    expect(searchProviderSkills(skills, '').map((skill) => skill.name)).toEqual(['frontend-design'])
   })
 })
 

@@ -45,6 +45,7 @@ describe('buildComposerSlashMenuItems', () =>
     const items = buildComposerSlashMenuItems({
       provider: claudeDriver,
       query: '',
+      showProviderSlashCommands: true,
       builtInItems,
       slashCommands: [
         { name: 'ui', description: 'Provider slash UI' },
@@ -78,6 +79,7 @@ describe('buildComposerSlashMenuItems', () =>
     const items = buildComposerSlashMenuItems({
       provider: claudeDriver,
       query: 'ui',
+      showProviderSlashCommands: true,
       builtInItems,
       slashCommands: [
         { name: 'ui', description: 'Provider slash UI' },
@@ -101,6 +103,7 @@ describe('buildComposerSlashMenuItems', () =>
     const items = buildComposerSlashMenuItems({
       provider: claudeDriver,
       query: 'ui',
+      showProviderSlashCommands: true,
       builtInItems,
       slashCommands: [{ name: 'ui' }],
       skills: [makeSkill({ name: 'ui', displayName: 'Ui' })],
@@ -119,5 +122,26 @@ describe('buildComposerSlashMenuItems', () =>
 
     expect(replacement).toBe('$ui ')
     expect(result.text).toBe('$review-follow-up $ui ')
+  })
+
+  it('keeps skills but hides provider commands after earlier prompt text', () =>
+  {
+    const items = buildComposerSlashMenuItems({
+      provider: claudeDriver,
+      query: '',
+      showProviderSlashCommands: false,
+      builtInItems,
+      slashCommands: [{ name: 'compact' }],
+      skills: [
+        makeSkill({ name: 'review' }),
+        makeSkill({ name: 'private-review', userInvocable: false }),
+      ],
+    })
+
+    expect(items.map((item) => item.id)).toEqual([
+      'slash:model',
+      'slash:plan',
+      'skill:claudeAgent:review',
+    ])
   })
 })

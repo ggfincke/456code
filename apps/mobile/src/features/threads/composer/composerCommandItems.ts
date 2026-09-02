@@ -9,6 +9,11 @@ import {
   type ServerProviderSkill,
 } from '@t3tools/contracts'
 import {
+  getProviderSkillsForSlashMenu,
+  getProviderSlashCommandsForSlashMenu,
+  isProviderSkillUserInvocable,
+} from '@t3tools/client-runtime/providerSkills'
+import {
   serializeComposerFileLink,
   type ComposerTrigger,
   type ComposerTriggerKind,
@@ -38,8 +43,11 @@ export function buildMobileComposerCommandItems(input: {
 {
   const { trigger, selectedProviderStatus } = input
   if (!trigger) return []
-  const providerSkills = (selectedProviderStatus?.skills ?? []).filter(
-    (skill) => skill.name.toLowerCase() !== 'orchestrate',
+  const providerSkills = getProviderSkillsForSlashMenu(
+    (selectedProviderStatus?.skills ?? []).filter(
+      (skill) => skill.name.toLowerCase() !== 'orchestrate',
+    ),
+    true,
   )
 
   if (trigger.kind === 'slash-command')
@@ -69,13 +77,13 @@ export function buildMobileComposerCommandItems(input: {
         type: 'slash-command' as const,
         label: `/${item.command}`,
       }))
-    const collidingSkillNames = new Set(
-      providerSkills.filter((skill) => skill.enabled).map((skill) => skill.name.toLowerCase()),
+    const providerSlashCommands = getProviderSlashCommandsForSlashMenu(
+      trigger.rangeStart === 0 ? (selectedProviderStatus?.slashCommands ?? []) : [],
+      providerSkills,
     )
     const providerCommands: ComposerCommandItem[] = []
-    for (const command of selectedProviderStatus?.slashCommands ?? [])
+    for (const command of providerSlashCommands)
     {
-      if (collidingSkillNames.has(command.name.toLowerCase())) continue
       if (!command.name.toLowerCase().includes(query)) continue
       // feedback for Codex needs the session and logs of an existing thread
       if (
@@ -138,7 +146,7 @@ export function searchMobileComposerSkills(
   query: string,
 ): ComposerCommandItem[]
 {
-  const enabledSkills = skills.filter((s) => s.enabled)
+  const enabledSkills = skills.filter(isProviderSkillUserInvocable)
   const normalizedQuery = normalizeSearchQuery(query, {
     trimLeadingPattern: /^\$+/,
   })
