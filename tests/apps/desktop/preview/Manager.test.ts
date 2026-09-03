@@ -113,6 +113,103 @@ const withManager = <A>(
   }).pipe(Effect.provide(layer), Effect.scoped)
 
 const TEST_FAVICON = 'data:image/png;base64,cG5n'
+const TEST_ANNOTATION = {
+  id: 'annotation_1',
+  pageUrl: 'https://example.com',
+  pageTitle: 'Example',
+  comment: 'Tighten this spacing',
+  elements: [],
+  regions: [{ id: 'region_1', rect: { x: 5, y: 6, width: 20, height: 30 } }],
+  strokes: [],
+  styleChanges: [],
+  screenshot: null,
+  createdAt: '2026-06-11T00:00:00.000Z',
+} as const
+
+const TEST_ANNOTATION_IMAGE = {
+  getSize: () => ({ width: 20, height: 30 }),
+  toDataURL: () => 'data:image/png;base64,cGljaw==',
+}
+
+const makePickerWebContents = (
+  capturePage: () => Promise<unknown>,
+  onSend?: (channel: string, ...args: ReadonlyArray<unknown>) => void,
+) =>
+{
+  type Listener = (...args: ReadonlyArray<unknown>) => void
+  const listeners = new Map<string, Set<Listener>>()
+  const ipcListeners = new Map<string, Set<Listener>>()
+  const addListener = (registry: Map<string, Set<Listener>>, event: string, listener: Listener) =>
+  {
+    const registered = registry.get(event) ?? new Set<Listener>()
+    registered.add(listener)
+    registry.set(event, registered)
+  }
+  const removeListener = (
+    registry: Map<string, Set<Listener>>,
+    event: string,
+    listener: Listener,
+  ) =>
+  {
+    const registered = registry.get(event)
+    registered?.delete(listener)
+    if (registered?.size === 0) registry.delete(event)
+  }
+  const send = vi.fn((channel: string, ...args: ReadonlyArray<unknown>) =>
+  {
+    webviewSend(channel, ...args)
+    onSend?.(channel, ...args)
+  })
+  const webContents = {
+    id: 42,
+    isDestroyed: () => false,
+    getType: () => 'webview',
+    getURL: () => 'https://example.com',
+    getTitle: () => 'Example',
+    isLoading: () => false,
+    isFocused: () => true,
+    isDevToolsOpened: () => false,
+    getZoomFactor: () => 1,
+    setZoomFactor: vi.fn(),
+    setAudioMuted: vi.fn(),
+    isCurrentlyAudible: () => false,
+    on: vi.fn((event: string, listener: Listener) => addListener(listeners, event, listener)),
+    once: vi.fn((event: string, listener: Listener) => addListener(listeners, event, listener)),
+    off: vi.fn((event: string, listener: Listener) => removeListener(listeners, event, listener)),
+    ipc: {
+      on: vi.fn((channel: string, listener: Listener) =>
+        addListener(ipcListeners, channel, listener),
+      ),
+      off: vi.fn((channel: string, listener: Listener) =>
+        removeListener(ipcListeners, channel, listener),
+      ),
+      removeListener: vi.fn((channel: string, listener: Listener) =>
+        removeListener(ipcListeners, channel, listener),
+      ),
+    },
+    send,
+    capturePage,
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    setIgnoreMenuShortcuts: vi.fn(),
+    setWindowOpenHandler: vi.fn(),
+    debugger: {
+      isAttached: () => false,
+      attach: vi.fn(),
+      sendCommand: vi.fn(async () => undefined),
+      on: vi.fn(),
+      off: vi.fn(),
+    },
+  }
+  return {
+    emitIpc: (channel: string, ...args: ReadonlyArray<unknown>) =>
+    {
+      for (const listener of ipcListeners.get(channel) ?? []) listener({}, ...args)
+    },
+    ipcListenerCount: (channel: string) => ipcListeners.get(channel)?.size ?? 0,
+    send,
+    webContents: webContents as never,
+  }
+}
 
 const makeSourcePng = (): Buffer =>
 {
@@ -1525,6 +1622,154 @@ describe('PreviewManager', () =>
 
         listeners.get('did-start-navigation')?.({}, 'https://example.com/next', false, true)
         expect(yield* Fiber.join(pick)).toBeNull()
+      }),
+    ),
+  )
+
+  effectIt.effect('returns crop-free annotations when native capture rejects or times out', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        const capturePage = vi.fn<() => Promise<unknown>>()
+        capturePage.mockRejectedValueOnce(new Error('capture failed'))
+        capturePage.mockImplementationOnce(() => new Promise<never>(() => undefined))
+        const preview = makePickerWebContents(capturePage)
+        fromId.mockReturnValue(preview.webContents)
+        yield* manager.createTab('tab_capture_failure')
+        yield* manager.registerWebview('tab_capture_failure', 42)
+
+        const rejectedPick = yield* manager
+          .pickElement('tab_capture_failure')
+          .pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        const rejectedSession = preview.send.mock.calls.find(
+          ([channel]) => channel === 'preview:start-pick',
+        )?.[1]
+        preview.emitIpc('preview:element-picked', rejectedSession, TEST_ANNOTATION, null)
+        const rejectedResult = yield* Fiber.join(rejectedPick)
+
+        expect(rejectedResult).toEqual({
+          ...TEST_ANNOTATION,
+          screenshot: null,
+          screenshotFailed: true,
+        })
+        expect(preview.send).toHaveBeenCalledWith('preview:annotation-captured', rejectedSession)
+
+        const timedOutPick = yield* manager
+          .pickElement('tab_capture_failure')
+          .pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        const timedOutSession = preview.send.mock.calls.findLast(
+          ([channel]) => channel === 'preview:start-pick',
+        )?.[1]
+        preview.emitIpc(
+          'preview:element-picked',
+          timedOutSession,
+          { ...TEST_ANNOTATION, id: 'annotation_2' },
+          null,
+        )
+        yield* TestClock.adjust('6 seconds')
+        const timedOutResult = yield* Fiber.join(timedOutPick)
+
+        expect(timedOutResult).toMatchObject({
+          id: 'annotation_2',
+          screenshot: null,
+          screenshotFailed: true,
+        })
+        expect(preview.send).toHaveBeenCalledWith('preview:annotation-captured', timedOutSession)
+        expect(capturePage).toHaveBeenCalledTimes(2)
+      }),
+    ),
+  )
+
+  effectIt.effect('fences a replaced capture and admits one submission per session', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        let resolveFirstCapture: ((image: typeof TEST_ANNOTATION_IMAGE) => void) | undefined
+        const firstCapture = new Promise<typeof TEST_ANNOTATION_IMAGE>((resolve) =>
+        {
+          resolveFirstCapture = resolve
+        })
+        const capturePage = vi
+          .fn<() => Promise<unknown>>()
+          .mockImplementationOnce(() => firstCapture)
+          .mockResolvedValue(TEST_ANNOTATION_IMAGE)
+        const preview = makePickerWebContents(capturePage)
+        fromId.mockReturnValue(preview.webContents)
+        yield* manager.createTab('tab_replaced_pick')
+        yield* manager.registerWebview('tab_replaced_pick', 42)
+
+        const firstPick = yield* manager.pickElement('tab_replaced_pick').pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        const firstSession = preview.send.mock.calls.find(
+          ([channel]) => channel === 'preview:start-pick',
+        )?.[1]
+        preview.emitIpc('preview:element-picked', firstSession, TEST_ANNOTATION, null)
+        preview.emitIpc('preview:element-picked', firstSession, TEST_ANNOTATION, null)
+        yield* Effect.yieldNow
+        expect(capturePage).toHaveBeenCalledOnce()
+
+        const secondPick = yield* manager.pickElement('tab_replaced_pick').pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        expect(yield* Fiber.join(firstPick)).toBeNull()
+        expect(preview.ipcListenerCount('preview:element-picked')).toBe(1)
+        const secondSession = preview.send.mock.calls.findLast(
+          ([channel]) => channel === 'preview:start-pick',
+        )?.[1]
+
+        resolveFirstCapture?.(TEST_ANNOTATION_IMAGE)
+        yield* Effect.promise(() => Promise.resolve())
+        yield* Effect.yieldNow
+        expect(preview.send).not.toHaveBeenCalledWith('preview:annotation-captured', firstSession)
+
+        preview.emitIpc(
+          'preview:element-picked',
+          secondSession,
+          { ...TEST_ANNOTATION, id: 'annotation_2' },
+          null,
+        )
+        const secondResult = yield* Fiber.join(secondPick)
+
+        expect(secondResult).toMatchObject({
+          id: 'annotation_2',
+          screenshot: {
+            dataUrl: TEST_ANNOTATION_IMAGE.toDataURL(),
+            width: 20,
+            height: 30,
+          },
+        })
+        expect(preview.send).toHaveBeenCalledWith('preview:annotation-captured', secondSession)
+        expect(preview.ipcListenerCount('preview:element-picked')).toBe(0)
+        expect(capturePage).toHaveBeenCalledTimes(2)
+      }),
+    ),
+  )
+
+  effectIt.effect('accepts a picker reply sent synchronously with start', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        let preview: ReturnType<typeof makePickerWebContents>
+        preview = makePickerWebContents(
+          () => Promise.resolve(TEST_ANNOTATION_IMAGE),
+          (channel, ...args) =>
+          {
+            if (channel !== 'preview:start-pick') return
+            preview.emitIpc('preview:element-picked', args[0], TEST_ANNOTATION, null)
+          },
+        )
+        fromId.mockReturnValue(preview.webContents)
+        yield* manager.createTab('tab_synchronous_pick')
+        yield* manager.registerWebview('tab_synchronous_pick', 42)
+
+        const result = yield* manager.pickElement('tab_synchronous_pick')
+
+        expect(result).toMatchObject({
+          id: TEST_ANNOTATION.id,
+          screenshot: { dataUrl: TEST_ANNOTATION_IMAGE.toDataURL() },
+        })
+        expect(preview.ipcListenerCount('preview:element-picked')).toBe(0)
       }),
     ),
   )

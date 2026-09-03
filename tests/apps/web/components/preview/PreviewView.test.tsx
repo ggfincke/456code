@@ -1,20 +1,34 @@
 // tests/apps/web/components/preview/PreviewView.test.tsx
-// verify preview view navigation behavior
+// verify preview view behavior
 
 // @vitest-environment happy-dom
 
-import { EnvironmentId, ThreadId } from '@t3tools/contracts'
+import {
+  EnvironmentId,
+  type PreviewAnnotationPayload,
+  type ScopedThreadRef,
+  ThreadId,
+} from '@t3tools/contracts'
 import { act, Profiler } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const mocks = vi.hoisted(() => ({
+  addImage: vi.fn(),
+  addPreviewAnnotation: vi.fn(),
+  cancelPickElement: vi.fn(async (_tabId: string): Promise<void> => undefined),
+  capturePreviewAnnotationScreenshot: vi.fn(),
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
+  pickElement: vi.fn(),
   rememberPreviewUrl: vi.fn(),
   readPreparedConnection: vi.fn(() => ({ httpBaseUrl: 'http://172.25.85.75:3773' })),
+  stackedThreadToast: vi.fn((toast: unknown) => toast),
+  toastAdd: vi.fn(),
   submittedUrl: null as ((url: string) => void) | null,
   emptyStateUrl: null as ((url: string) => void) | null,
+  pickElementAction: null as (() => void) | null,
+  pickActive: false,
   showEmptyState: false,
   loading: false,
 }))
@@ -36,11 +50,15 @@ vi.mock('~/browser/browserDefaults', () => ({
 vi.mock('~/composerDraftStore', () => ({
   useComposerDraftStore: (
     select: (store: { addPreviewAnnotation: () => void; addImage: () => void }) => unknown,
-  ) => select({ addPreviewAnnotation: vi.fn(), addImage: vi.fn() }),
+  ) =>
+    select({
+      addPreviewAnnotation: mocks.addPreviewAnnotation,
+      addImage: mocks.addImage,
+    }),
 }))
 
 vi.mock('~/lib/previewAnnotation', () => ({
-  previewAnnotationScreenshotFile: vi.fn(),
+  capturePreviewAnnotationScreenshot: mocks.capturePreviewAnnotationScreenshot,
 }))
 
 vi.mock('~/localApi', () => ({
@@ -114,18 +132,28 @@ vi.mock('~/browser/browserSurfaceStore', () => ({
 }))
 
 vi.mock('~/components/ui/toast', () => ({
-  stackedThreadToast: vi.fn(),
-  toastManager: { add: vi.fn() },
+  stackedThreadToast: mocks.stackedThreadToast,
+  toastManager: { add: mocks.toastAdd },
 }))
 
 vi.mock('../../../../../apps/web/src/browser/previewBridge', () => ({
-  previewBridge: { navigate: mocks.navigate },
+  previewBridge: {
+    cancelPickElement: mocks.cancelPickElement,
+    navigate: mocks.navigate,
+    pickElement: mocks.pickElement,
+  },
 }))
 
 vi.mock('../../../../../apps/web/src/components/preview/PreviewChromeRow', () => ({
-  PreviewChromeRow: (props: { onSubmit: (url: string) => void }) =>
+  PreviewChromeRow: (props: {
+    onSubmit: (url: string) => void
+    onPickElement?: (() => void) | undefined
+    pickActive?: boolean | undefined
+  }) =>
   {
     mocks.submittedUrl = props.onSubmit
+    mocks.pickElementAction = props.onPickElement ?? null
+    mocks.pickActive = props.pickActive ?? false
     return null
   },
 }))
@@ -165,18 +193,58 @@ const TEST_THREAD_REF = {
   threadId: ThreadId.make('thread-1'),
 } as const
 const TEST_RUNTIME_TAB_ID = previewRuntimeTabId(TEST_THREAD_REF, null, 'tab-1')
+const TEST_ANNOTATION: PreviewAnnotationPayload = {
+  id: 'annotation-1',
+  pageUrl: 'http://localhost:5173',
+  pageTitle: 'Preview',
+  comment: 'Tighten this card.',
+  elements: [],
+  regions: [],
+  strokes: [],
+  styleChanges: [],
+  screenshot: {
+    dataUrl: 'data:image/png;base64,cG5n',
+    width: 200,
+    height: 100,
+    cropRect: { x: 10, y: 20, width: 200, height: 100 },
+  },
+  createdAt: '2026-09-05T00:00:00.000Z',
+}
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
-describe('PreviewView navigation', () =>
+async function mountPreview(threadRef: ScopedThreadRef = TEST_THREAD_REF)
+{
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  await act(async () =>
+  {
+    root.render(<PreviewView threadRef={threadRef} tabId="tab-1" visible />)
+  })
+  return { container, root }
+}
+
+describe('PreviewView', () =>
 {
   beforeEach(() =>
   {
+    mocks.addImage.mockClear()
+    mocks.addPreviewAnnotation.mockClear()
+    mocks.cancelPickElement.mockClear()
+    mocks.capturePreviewAnnotationScreenshot.mockReset()
+    mocks.capturePreviewAnnotationScreenshot.mockResolvedValue({ status: 'none' })
     mocks.navigate.mockClear()
+    mocks.pickElement.mockReset()
+    mocks.pickElement.mockResolvedValue(null)
     mocks.rememberPreviewUrl.mockClear()
     mocks.readPreparedConnection.mockClear()
+    mocks.stackedThreadToast.mockClear()
+    mocks.toastAdd.mockClear()
     mocks.submittedUrl = null
     mocks.emptyStateUrl = null
+    mocks.pickElementAction = null
+    mocks.pickActive = false
     mocks.showEmptyState = false
     mocks.loading = false
   })
@@ -284,5 +352,230 @@ describe('PreviewView navigation', () =>
       },
       'http://172.25.85.75:5173/app?mode=test#top',
     )
+  })
+
+  it('attaches a captured crop and restores focus after the pick settles', async () =>
+  {
+    const screenshotFile = new File(['png'], 'preview-annotation-annotation-1.png', {
+      type: 'image/png',
+    })
+    mocks.pickElement.mockResolvedValueOnce(TEST_ANNOTATION)
+    mocks.capturePreviewAnnotationScreenshot.mockResolvedValueOnce({
+      status: 'captured',
+      file: screenshotFile,
+    })
+    const focusTarget = document.createElement('button')
+    document.body.append(focusTarget)
+    const { container, root } = await mountPreview()
+
+    try
+    {
+      focusTarget.focus()
+      await act(async () => mocks.pickElementAction?.())
+
+      await vi.waitFor(() => expect(mocks.addImage).toHaveBeenCalledTimes(1))
+      expect(mocks.addPreviewAnnotation).toHaveBeenCalledWith(TEST_THREAD_REF, TEST_ANNOTATION)
+      expect(mocks.addImage).toHaveBeenCalledWith(
+        TEST_THREAD_REF,
+        expect.objectContaining({
+          id: TEST_ANNOTATION.id,
+          previewUrl: TEST_ANNOTATION.screenshot?.dataUrl,
+          file: screenshotFile,
+        }),
+      )
+      expect(mocks.toastAdd).not.toHaveBeenCalled()
+      expect(mocks.pickActive).toBe(false)
+      expect(document.activeElement).toBe(focusTarget)
+    }
+    finally
+    {
+      await act(async () => root.unmount())
+      container.remove()
+      focusTarget.remove()
+    }
+  })
+
+  it.each([
+    {
+      name: 'desktop capture failure',
+      picked: { ...TEST_ANNOTATION, screenshot: null, screenshotFailed: true },
+      capture: { status: 'none' as const },
+    },
+    {
+      name: 'local conversion failure',
+      picked: TEST_ANNOTATION,
+      capture: { status: 'failed' as const },
+    },
+  ])(
+    'retains crop-free metadata and unlocks the next pick after $name',
+    async ({ picked, capture }) =>
+    {
+      mocks.pickElement.mockResolvedValueOnce(picked).mockResolvedValueOnce(null)
+      mocks.capturePreviewAnnotationScreenshot.mockResolvedValueOnce(capture)
+      const { container, root } = await mountPreview()
+
+      try
+      {
+        await act(async () => mocks.pickElementAction?.())
+
+        await vi.waitFor(() => expect(mocks.addPreviewAnnotation).toHaveBeenCalledTimes(1))
+        expect(mocks.addPreviewAnnotation).toHaveBeenCalledWith(
+          TEST_THREAD_REF,
+          expect.objectContaining({
+            id: picked.id,
+            screenshot: null,
+          }),
+        )
+        expect(mocks.addImage).not.toHaveBeenCalled()
+        expect(mocks.stackedThreadToast).toHaveBeenCalledWith({
+          type: 'error',
+          title: 'Could not capture the picked element',
+          description: 'The annotation was kept without the screenshot.',
+        })
+        expect(mocks.toastAdd).toHaveBeenCalledTimes(1)
+        expect(mocks.pickActive).toBe(false)
+
+        await act(async () => mocks.pickElementAction?.())
+        await vi.waitFor(() => expect(mocks.pickElement).toHaveBeenCalledTimes(2))
+      }
+      finally
+      {
+        await act(async () => root.unmount())
+        container.remove()
+      }
+    },
+  )
+
+  it('cancels a pending conversion locally before starting the next pick', async () =>
+  {
+    let resolveCapture!: (capture: { readonly status: 'captured'; readonly file: File }) => void
+    const pendingCapture = new Promise<{
+      readonly status: 'captured'
+      readonly file: File
+    }>((resolve) =>
+    {
+      resolveCapture = resolve
+    })
+    mocks.pickElement.mockResolvedValueOnce(TEST_ANNOTATION).mockResolvedValueOnce(null)
+    mocks.capturePreviewAnnotationScreenshot.mockReturnValueOnce(pendingCapture)
+    const originalFocusTarget = document.createElement('button')
+    const cancelFocusTarget = document.createElement('button')
+    document.body.append(originalFocusTarget, cancelFocusTarget)
+    const { container, root } = await mountPreview()
+
+    try
+    {
+      originalFocusTarget.focus()
+      await act(async () => mocks.pickElementAction?.())
+      await vi.waitFor(() =>
+        expect(mocks.capturePreviewAnnotationScreenshot).toHaveBeenCalledWith(TEST_ANNOTATION),
+      )
+      expect(mocks.pickActive).toBe(true)
+
+      cancelFocusTarget.focus()
+      await act(async () => mocks.pickElementAction?.())
+      expect(mocks.cancelPickElement).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID)
+      expect(mocks.pickActive).toBe(false)
+      expect(document.activeElement).toBe(originalFocusTarget)
+
+      const screenshotFile = new File(['png'], 'late.png', { type: 'image/png' })
+      await act(async () =>
+      {
+        resolveCapture({ status: 'captured', file: screenshotFile })
+        await pendingCapture
+      })
+      expect(mocks.addPreviewAnnotation).not.toHaveBeenCalled()
+      expect(mocks.addImage).not.toHaveBeenCalled()
+      expect(mocks.toastAdd).not.toHaveBeenCalled()
+
+      await act(async () => mocks.pickElementAction?.())
+      await vi.waitFor(() => expect(mocks.pickElement).toHaveBeenCalledTimes(2))
+    }
+    finally
+    {
+      await act(async () => root.unmount())
+      container.remove()
+      originalFocusTarget.remove()
+      cancelFocusTarget.remove()
+    }
+  })
+
+  it('fences late screenshot conversion from a replacement thread and its focus cleanup', async () =>
+  {
+    let resolveSecond!: (annotation: PreviewAnnotationPayload | null) => void
+    let resolveFirstCapture!: (capture: { readonly status: 'failed' }) => void
+    const firstCapture = new Promise<{ readonly status: 'failed' }>((resolve) =>
+    {
+      resolveFirstCapture = resolve
+    })
+    const secondPick = new Promise<PreviewAnnotationPayload | null>((resolve) =>
+    {
+      resolveSecond = resolve
+    })
+    mocks.pickElement.mockResolvedValueOnce(TEST_ANNOTATION).mockReturnValueOnce(secondPick)
+    mocks.capturePreviewAnnotationScreenshot
+      .mockReturnValueOnce(firstCapture)
+      .mockResolvedValueOnce({ status: 'none' })
+    const firstFocusTarget = document.createElement('button')
+    const replacementFocusTarget = document.createElement('button')
+    document.body.append(firstFocusTarget, replacementFocusTarget)
+    const { container, root } = await mountPreview()
+    const replacementThreadRef = {
+      environmentId: EnvironmentId.make('environment-2'),
+      threadId: ThreadId.make('thread-2'),
+    } as const
+
+    try
+    {
+      firstFocusTarget.focus()
+      await act(async () => mocks.pickElementAction?.())
+      await vi.waitFor(() =>
+        expect(mocks.capturePreviewAnnotationScreenshot).toHaveBeenCalledWith(TEST_ANNOTATION),
+      )
+      expect(mocks.pickActive).toBe(true)
+
+      await act(async () =>
+      {
+        root.render(<PreviewView threadRef={replacementThreadRef} tabId="tab-1" visible />)
+      })
+      replacementFocusTarget.focus()
+      await act(async () => mocks.pickElementAction?.())
+      expect(mocks.pickActive).toBe(true)
+
+      await act(async () =>
+      {
+        resolveFirstCapture({ status: 'failed' })
+        await firstCapture
+      })
+      expect(mocks.addPreviewAnnotation).not.toHaveBeenCalled()
+      expect(mocks.toastAdd).not.toHaveBeenCalled()
+      expect(mocks.pickActive).toBe(true)
+      expect(document.activeElement).toBe(replacementFocusTarget)
+
+      const replacementAnnotation = {
+        ...TEST_ANNOTATION,
+        id: 'annotation-2',
+        screenshot: null,
+      }
+      await act(async () =>
+      {
+        resolveSecond(replacementAnnotation)
+        await secondPick
+      })
+      await vi.waitFor(() => expect(mocks.addPreviewAnnotation).toHaveBeenCalledTimes(1))
+      expect(mocks.addPreviewAnnotation).toHaveBeenCalledWith(
+        replacementThreadRef,
+        replacementAnnotation,
+      )
+      expect(mocks.pickActive).toBe(false)
+      expect(document.activeElement).toBe(replacementFocusTarget)
+    }
+    finally
+    {
+      await act(async () => root.unmount())
+      container.remove()
+      firstFocusTarget.remove()
+      replacementFocusTarget.remove()
+    }
   })
 })

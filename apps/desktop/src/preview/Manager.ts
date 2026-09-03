@@ -210,13 +210,17 @@ const normalizeCaptureRect = (value: unknown): PreviewAnnotationRect | null =>
   }
 }
 
+const ANNOTATION_SCREENSHOT_TIMEOUT = '5 seconds'
+
+// keep a stalled guest compositor from stranding the annotation session
 const captureAnnotationScreenshot = (
   tabId: string,
   wc: Electron.WebContents,
   cropRect: PreviewAnnotationRect | null,
 ): Effect.Effect<PreviewAnnotationPayload['screenshot'], PreviewManagerError> =>
   Effect.tryPromise({
-    try: () =>
+    // the signal parameter keeps the promise wrapper interruptible on timeout
+    try: (_signal) =>
       wc.capturePage(
         cropRect
           ? {
@@ -245,6 +249,15 @@ const captureAnnotationScreenshot = (
         cropRect: cropRect ?? { x: 0, y: 0, width: size.width, height: size.height },
       }
     }),
+    Effect.timeoutOption(ANNOTATION_SCREENSHOT_TIMEOUT),
+    Effect.flatMap((screenshot) =>
+      Option.isSome(screenshot)
+        ? Effect.succeed(screenshot.value)
+        : Effect.logWarning('Preview annotation screenshot timed out.', {
+            tabId,
+            webContentsId: wc.id,
+          }).pipe(Effect.as(null)),
+    ),
   )
 
 const findZoomStep = (current: number): number =>

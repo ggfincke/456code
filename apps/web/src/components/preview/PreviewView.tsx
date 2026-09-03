@@ -14,7 +14,7 @@ import { normalizePreviewUrl } from '@t3tools/shared/preview'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useComposerDraftStore } from '~/composerDraftStore'
-import { previewAnnotationScreenshotFile } from '~/lib/previewAnnotation'
+import { capturePreviewAnnotationScreenshot } from '~/lib/previewAnnotation'
 import { ensureLocalApi } from '~/localApi'
 import {
   rememberPreviewUrl,
@@ -65,6 +65,19 @@ interface Props
 
 const localApi = typeof window === 'undefined' ? null : ensureLocalApi()
 
+function restorePickFocus(element: HTMLElement | null): void
+{
+  if (!element?.isConnected || typeof element.focus !== 'function') return
+  try
+  {
+    element.focus({ preventScroll: true })
+  }
+  catch
+  {
+    // some elements throw on focus after their browsing context detaches
+  }
+}
+
 // single-tab preview surface: chrome row on top, one webview below, empty
 // state when no session exists for the thread.
 export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, visible }: Props)
@@ -73,6 +86,8 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
   const [pickActive, setPickActive] = useState(false)
   const activeRecordingTabId = useActiveBrowserRecordingTabId()
   const pickActiveRef = useRef(false)
+  const pickAttemptRef = useRef(0)
+  const pickFocusRef = useRef<HTMLElement | null>(null)
   const isMountedRef = useRef(true)
   const previewState = useThreadPreviewState(threadRef)
   const addPreviewAnnotation = useComposerDraftStore((store) => store.addPreviewAnnotation)
@@ -545,7 +560,13 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
     if (!previewBridge || !runtimeTabId) return
     if (pickActiveRef.current)
     {
+      pickAttemptRef.current += 1
+      pickActiveRef.current = false
+      setPickActive(false)
+      const previouslyFocused = pickFocusRef.current
+      pickFocusRef.current = null
       void previewBridge.cancelPickElement(runtimeTabId).catch(() => undefined)
+      restorePickFocus(previouslyFocused)
       return
     }
     // snapshot whatever the user was focused on (typically the chat
@@ -555,26 +576,41 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
     // every pick they'd have to click back into the textarea.
     const previouslyFocused =
       typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null
+    const attempt = ++pickAttemptRef.current
+    pickFocusRef.current = previouslyFocused
     pickActiveRef.current = true
     setPickActive(true)
     void (async () =>
     {
       try
       {
-        const annotation = await previewBridge.pickElement(runtimeTabId)
-        if (!annotation) return
+        const picked = await previewBridge.pickElement(runtimeTabId)
+        if (!picked || !isMountedRef.current || pickAttemptRef.current !== attempt) return
+        const capture = await capturePreviewAnnotationScreenshot(picked)
+        if (!isMountedRef.current || pickAttemptRef.current !== attempt) return
+        const cropDropped = picked.screenshotFailed === true || capture.status === 'failed'
+        const annotation = cropDropped ? { ...picked, screenshot: null } : picked
         addPreviewAnnotation(threadRef, annotation)
-        const screenshotFile = await previewAnnotationScreenshotFile(annotation)
-        if (screenshotFile && annotation.screenshot)
+        if (cropDropped)
+        {
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title: 'Could not capture the picked element',
+              description: 'The annotation was kept without the screenshot.',
+            }),
+          )
+        }
+        if (capture.status === 'captured' && !cropDropped && annotation.screenshot)
         {
           addImage(threadRef, {
             type: 'image',
             id: annotation.id,
-            name: screenshotFile.name,
-            mimeType: screenshotFile.type,
-            sizeBytes: screenshotFile.size,
+            name: capture.file.name,
+            mimeType: capture.file.type,
+            sizeBytes: capture.file.size,
             previewUrl: annotation.screenshot.dataUrl,
-            file: screenshotFile,
+            file: capture.file,
           })
         }
       }
@@ -584,27 +620,17 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
       }
       finally
       {
-        pickActiveRef.current = false
-        // avoid `setState on unmounted component` if the panel/thread closed
-        // while the pick was in flight.
-        if (isMountedRef.current) setPickActive(false)
-        // best-effort: restore focus to whatever the user had before the
-        // pick stole it into the guest webContents. Skip if the previously-
-        // focused element was unmounted or is no longer focusable.
-        if (
-          previouslyFocused &&
-          previouslyFocused.isConnected &&
-          typeof previouslyFocused.focus === 'function'
-        )
+        if (pickAttemptRef.current === attempt)
         {
-          try
-          {
-            previouslyFocused.focus({ preventScroll: true })
-          }
-          catch
-          {
-            // some elements throw on .focus() (detached iframes, etc.).
-          }
+          pickActiveRef.current = false
+          pickFocusRef.current = null
+          // avoid `setState on unmounted component` if the panel/thread closed
+          // while the pick was in flight.
+          if (isMountedRef.current) setPickActive(false)
+          // best-effort: restore focus to whatever the user had before the
+          // pick stole it into the guest webContents. Skip if the previously-
+          // focused element was unmounted or is no longer focusable.
+          if (isMountedRef.current) restorePickFocus(previouslyFocused)
         }
       }
     })()
@@ -617,15 +643,17 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
   {
     return () =>
     {
+      pickAttemptRef.current += 1
       if (!pickActiveRef.current) return
       pickActiveRef.current = false
+      pickFocusRef.current = null
       if (previewBridge && runtimeTabId)
       {
         void previewBridge.cancelPickElement(runtimeTabId).catch(() => undefined)
       }
       if (isMountedRef.current) setPickActive(false)
     }
-  }, [runtimeTabId])
+  }, [runtimeTabId, threadRef.environmentId, threadRef.threadId])
 
   // subscribe only while visible; `toggle-panel` is owned by ChatView's
   // URL-aware handler regardless of whether the panel is currently mounted.
