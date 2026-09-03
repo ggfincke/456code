@@ -259,6 +259,7 @@ export const makeAntigravityAuth = Effect.fn('makeAntigravityAuth')(function* <
             if (activeFlow !== flow || operation !== 'auth') return
             if (flow.pending)
             {
+              if (flow.pending.authorizationUrl === authorization.authorizationUrl) return
               return yield* new AcpErrors.AcpTransportError({
                 detail: 'Antigravity started more than one Google sign-in request.',
                 cause: undefined,

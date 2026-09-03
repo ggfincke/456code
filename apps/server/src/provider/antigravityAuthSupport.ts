@@ -26,9 +26,12 @@ export const ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE =
   'Sign in to Antigravity in Settings before you continue.'
 
 const maxAuthorizationUrlLength = 16_384
+const maxBrowserHelperLineLength =
+  ANTIGRAVITY_AUTH_BROWSER_MARKER.length + maxAuthorizationUrlLength + 2
 const maxStdoutLineBytes = 16 * 1024 * 1024
 const authPrefixBytes = new TextEncoder().encode(ANTIGRAVITY_AUTH_STDOUT_PREFIX)
 const decodeUrl = Schema.decodeUnknownEffect(Schema.URLFromString)
+const decodeBrowserHelperUrl = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.String))
 const ProfileSettingsFile = Schema.Struct({
   auth: Schema.Struct({ type: Schema.Literal('oauth-personal') }),
 })
@@ -409,3 +412,50 @@ export function makeAntigravityStdoutTransform(
     })
 }
 
+// consume all native stderr so authorization URLs and fragments never reach logs.
+export function makeAntigravityStderrHandler(
+  input: {
+    readonly onAuthorizationUrl?: (
+      authorizationUrl: string,
+    ) => Effect.Effect<void, AcpErrors.AcpError>
+  } = {},
+)
+{
+  let pending = ''
+  const handleLine = (line: string) =>
+  {
+    const message = line.endsWith('\r') ? line.slice(0, -1) : line
+    if (message.length > maxBrowserHelperLineLength)
+    {
+      return Effect.void
+    }
+    const url = message.startsWith(ANTIGRAVITY_AUTH_BROWSER_MARKER)
+      ? decodeBrowserHelperUrl(message.slice(ANTIGRAVITY_AUTH_BROWSER_MARKER.length))
+      : undefined
+    if (url === undefined)
+    {
+      return Effect.void
+    }
+    return url.pipe(
+      Effect.flatMap(parseAntigravityAuthorizationUrl),
+      Effect.matchEffect({
+        onFailure: () => Effect.void,
+        onSuccess: (request) =>
+          input.onAuthorizationUrl
+            ? input.onAuthorizationUrl(request.authorizationUrl)
+            : Effect.fail(authSupportError(ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE)),
+      }),
+    )
+  }
+
+  return Effect.fn('antigravityAuthSupport.handleStderr')(function* (text: string)
+  {
+    const lines = `${pending}${text}`.split('\n')
+    pending = lines.pop() ?? ''
+    if (pending.length > maxBrowserHelperLineLength)
+    {
+      pending = ''
+    }
+    yield* Effect.forEach(lines, handleLine, { discard: true })
+  })
+}
