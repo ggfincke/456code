@@ -44,6 +44,7 @@ export function AssistantCitationChip({
     sourceAnchor?: AssistantCitationSourceAnchor | undefined
     onOpenChange: (open: boolean) => void
     onSave: (comment: string) => boolean
+    onSaveAndSend?: (comment: string) => boolean
   }
 })
 {
@@ -162,6 +163,16 @@ export function AssistantCitationChip({
                   commentEditor.onOpenChange(false)
                   return true
                 }}
+                {...(commentEditor.onSaveAndSend
+                  ? {
+                      onSubmitAndSend: (comment: string) =>
+                        {
+                        if (!commentEditor.onSaveAndSend?.(comment)) return false
+                        commentEditor.onOpenChange(false)
+                        return true
+                      },
+                    }
+                  : {})}
                 onCancel={() => commentEditor.onOpenChange(false)}
               />
             </PopoverPopup>

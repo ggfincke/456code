@@ -45,7 +45,9 @@ export type ComposerCitationCommentTarget = {
 export const ComposerCitationCommentContext = createContext<{
   openComment: ComposerCitationCommentTarget | null
   onOpenChange: (nodeKey: NodeKey, open: boolean) => void
+  onSubmitAndSend: () => void
 }>({ openComment: null, onOpenChange: () =>
+{}, onSubmitAndSend: () =>
 {} })
 
 export function $consumeComposerCitationCommentRequest(requestRef: {
@@ -133,6 +135,12 @@ function ComposerCitationDecorator(props: { citation: AssistantCitation; nodeKey
             commentContext.onOpenChange(props.nodeKey, open)
           },
           onSave: onSaveComment,
+          onSaveAndSend: (comment) =>
+          {
+            if (!onSaveComment(comment)) return false
+            commentContext.onSubmitAndSend()
+            return true
+          },
         }}
         onRemove={onRemove}
       />

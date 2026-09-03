@@ -3696,6 +3696,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 onChange={onPromptChange}
                 onCommandKeyDown={onComposerCommandKey}
                 onPaste={onComposerPaste}
+                onCitationSubmitAndSend={submitComposer}
                 placeholder={
                   isComposerApprovalState
                     ? (activePendingApproval?.detail ?? 'Resolve this approval request to continue')

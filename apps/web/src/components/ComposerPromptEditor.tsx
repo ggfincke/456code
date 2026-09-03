@@ -1044,6 +1044,7 @@ interface ComposerPromptEditorProps
     event: KeyboardEvent,
   ) => boolean
   onPaste: React.ClipboardEventHandler<HTMLElement>
+  onCitationSubmitAndSend?: () => void
   editorRef: React.RefObject<ComposerPromptEditorHandle | null>
 }
 
@@ -1793,6 +1794,7 @@ function ComposerPromptEditorInner({
   onChange,
   onCommandKeyDown,
   onPaste,
+  onCitationSubmitAndSend,
   editorRef,
 }: ComposerPromptEditorProps)
 {
@@ -1823,8 +1825,10 @@ function ComposerPromptEditorInner({
           open ? { nodeKey } : current?.nodeKey === nodeKey ? null : current,
         )
       },
+      onSubmitAndSend: onCitationSubmitAndSend ?? (() =>
+      {}),
     }),
-    [openCitationComment],
+    [onCitationSubmitAndSend, openCitationComment],
   )
   const terminalContextActions = useMemo(
     () => ({ onRemoveTerminalContext }),
@@ -2135,6 +2139,7 @@ export function ComposerPromptEditor({
   onChange,
   onCommandKeyDown,
   onPaste,
+  onCitationSubmitAndSend,
   editorRef,
 }: ComposerPromptEditorProps)
 {
@@ -2179,6 +2184,7 @@ export function ComposerPromptEditor({
         onRemoveTerminalContext={onRemoveTerminalContext}
         onChange={onChange}
         onPaste={onPaste}
+        {...(onCitationSubmitAndSend ? { onCitationSubmitAndSend } : {})}
         editorRef={editorRef}
         {...(onCommandKeyDown ? { onCommandKeyDown } : {})}
         {...(className ? { className } : {})}

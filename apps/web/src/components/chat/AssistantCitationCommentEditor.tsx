@@ -10,11 +10,13 @@ export function AssistantCitationCommentEditor({
   citation,
   inputRef,
   onSubmit,
+  onSubmitAndSend,
   onCancel,
 }: {
   citation: AssistantCitation
   inputRef?: Ref<HTMLTextAreaElement>
   onSubmit: (comment: string) => boolean
+  onSubmitAndSend?: (comment: string) => boolean
   onCancel: () => void
 })
 {
@@ -23,6 +25,12 @@ export function AssistantCitationCommentEditor({
   const submit = () =>
   {
     if (!commentTooLong) onSubmit(comment)
+  }
+  const submitAndSend = () =>
+  {
+    if (commentTooLong) return
+    if (onSubmitAndSend) onSubmitAndSend(comment)
+    else onSubmit(comment)
   }
 
   return (
@@ -42,7 +50,7 @@ export function AssistantCitationCommentEditor({
       <textarea
         ref={inputRef}
         aria-label="Comment on selected text"
-        aria-description="Enter to save the citation comment; Shift+Enter for a new line."
+        aria-description="Enter to save the citation comment; Command/Ctrl+Enter to save and send; Shift+Enter for a new line."
         aria-invalid={commentTooLong || undefined}
         placeholder="Add an optional comment..."
         rows={2}
@@ -59,7 +67,8 @@ export function AssistantCitationCommentEditor({
           )
           {
             event.preventDefault()
-            submit()
+            if (event.metaKey || event.ctrlKey) submitAndSend()
+            else submit()
           }
         }}
       />
