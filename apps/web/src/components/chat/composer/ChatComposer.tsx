@@ -23,6 +23,10 @@ import {
 } from '@t3tools/contracts'
 import type { EnvironmentConnectionPresentation } from '@t3tools/client-runtime/connection'
 import {
+  resolveProviderSkillsForCwd,
+  resolveProviderSlashCommandsForCwd,
+} from '@t3tools/client-runtime/providerSkills'
+import {
   fileAttachmentTooLargeMessage,
   formatAttachmentSize,
 } from '@t3tools/client-runtime/state/attachments'
@@ -205,11 +209,14 @@ import {
 } from './composerSlashCommandValidation'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { useEnvironmentQuery } from '../../../state/query'
+import { serverEnvironment } from '../../../state/server'
+import { useAtomCommand } from '../../../state/use-atom-command'
 import { workersEnvironment } from '../../../state/workers'
 import * as Option from 'effect/Option'
 
 // readiness input literal -> the readiness atom family keys on its JSON form
 const WORKERS_READINESS_INPUT = {}
+const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000
 
 import { runtimeModeForSend, type ChatComposerHandle } from './chatComposerHandle'
 
@@ -635,6 +642,73 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   )
+  const selectedProviderSkills = useMemo(
+    () =>
+      selectedProviderStatus ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd) : [],
+    [gitCwd, selectedProviderStatus],
+  )
+  const selectedProviderSlashCommands = useMemo(
+    () =>
+      selectedProviderStatus
+        ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
+        : [],
+    [gitCwd, selectedProviderStatus],
+  )
+  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
+    reportFailure: false,
+  })
+  const workspaceRefreshKeyRef = useRef<string | null>(null)
+  const workspaceRefreshRetryRef = useRef<{ key: string; notBefore: number } | null>(null)
+  const hasWorkspaceSnapshot = Boolean(
+    gitCwd &&
+    selectedProviderStatus?.workspaceSnapshots?.some((snapshot) => snapshot.cwd === gitCwd),
+  )
+  const hadWorkspaceSnapshotRef = useRef(false)
+  useEffect(() =>
+  {
+    if (hadWorkspaceSnapshotRef.current && !hasWorkspaceSnapshot)
+    {
+      workspaceRefreshKeyRef.current = null
+      workspaceRefreshRetryRef.current = null
+    }
+    hadWorkspaceSnapshotRef.current = hasWorkspaceSnapshot
+  }, [hasWorkspaceSnapshot])
+  useEffect(() =>
+  {
+    if (!gitCwd || !selectedProviderEntry) return
+    const key = `${environmentId}:${selectedProviderEntry.instanceId}:${gitCwd}`
+    if (workspaceRefreshKeyRef.current === key) return
+    if (hasWorkspaceSnapshot)
+    {
+      workspaceRefreshKeyRef.current = key
+      workspaceRefreshRetryRef.current = null
+      return
+    }
+    const retry = workspaceRefreshRetryRef.current
+    if (retry?.key === key && Date.now() < retry.notBefore) return
+    workspaceRefreshKeyRef.current = key
+    const retryLater = () =>
+    {
+      if (workspaceRefreshKeyRef.current !== key) return
+      workspaceRefreshKeyRef.current = null
+      workspaceRefreshRetryRef.current = {
+        key,
+        notBefore: Date.now() + WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS,
+      }
+    }
+    void refreshProviders({
+      environmentId,
+      input: { instanceId: selectedProviderEntry.instanceId, cwd: gitCwd },
+    }).then((result) =>
+    {
+      const refreshed =
+        result._tag === 'Success' &&
+        result.value.providers
+          .find((provider) => provider.instanceId === selectedProviderEntry.instanceId)
+          ?.workspaceSnapshots?.some((snapshot) => snapshot.cwd === gitCwd)
+      if (!refreshed) retryLater()
+    }, retryLater)
+  }, [environmentId, gitCwd, hasWorkspaceSnapshot, refreshProviders, selectedProviderEntry])
   const selectedProviderCapabilities =
     selectedProviderStatus?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
   const supportsImageAttachments =
@@ -644,11 +718,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderCapabilities.orchestrateInstructionDelivery !== 'unsupported' &&
     selectedProviderCapabilities.orchestrateBaseModes.includes(collaborationMode.baseMode)
   const providerSkills = useMemo(
-    () =>
-      (selectedProviderStatus?.skills ?? []).filter(
-        (skill) => skill.name.toLowerCase() !== 'orchestrate',
-      ),
-    [selectedProviderStatus],
+    () => selectedProviderSkills.filter((skill) => skill.name.toLowerCase() !== 'orchestrate'),
+    [selectedProviderSkills],
   )
   // readiness explains orchestrate mode and plan handoff availability
   const workersReadinessQuery = useEnvironmentQuery(
@@ -923,10 +994,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       prompt,
     ],
   )
-  const providerSupportsCompact =
-    selectedProviderStatus?.slashCommands.some(
-      (command) => command.name.toLowerCase() === 'compact',
-    ) ?? false
+  const providerSupportsCompact = selectedProviderSlashCommands.some(
+    (command) => command.name.toLowerCase() === 'compact',
+  )
 
   const requestCompactNow = useCallback(() =>
   {
@@ -1016,7 +1086,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         query: composerTrigger.query,
         showProviderSlashCommands: composerTrigger.rangeStart === 0,
         builtInItems,
-        slashCommands: selectedProviderStatus?.slashCommands ?? [],
+        slashCommands: selectedProviderSlashCommands,
         skills: providerSkills,
       })
     }
@@ -1040,7 +1110,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerProviderControls,
     providerSkills,
     selectedProvider,
-    selectedProviderStatus,
+    selectedProviderSlashCommands,
     workspaceEntries.entries,
   ])
 
@@ -1891,7 +1961,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         })
         return
       }
-      if (blockUnknownComposerSlashCommand(prompt, selectedProviderStatus?.slashCommands ?? []))
+      if (blockUnknownComposerSlashCommand(prompt, selectedProviderSlashCommands))
       {
         event?.preventDefault()
         return
@@ -1899,7 +1969,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (
         shouldConfirmCompactComposerSlashCommand({
           text: prompt,
-          providerSlashCommands: selectedProviderStatus?.slashCommands ?? [],
+          providerSlashCommands: selectedProviderSlashCommands,
           hasAttachmentsOrContext:
             composerImages.length > 0 ||
             composerFiles.length > 0 ||
@@ -1941,7 +2011,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable,
       onSend,
       prompt,
-      selectedProviderStatus,
+      selectedProviderSlashCommands,
       shouldBlurMobileComposerOnSubmit,
     ],
   )
@@ -2973,7 +3043,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedProvider,
         selectedModel,
         selectedProviderModels,
-        selectedProviderSlashCommands: selectedProviderStatus?.slashCommands ?? [],
+        selectedProviderSlashCommands,
         selectedProviderCapabilities,
         runtimeMode: runtimeModeForSend(
           runtimeMode,
@@ -3015,7 +3085,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedPromptEffort,
       selectedProvider,
       selectedProviderModels,
-      selectedProviderStatus,
+      selectedProviderSlashCommands,
       runtimeMode,
       selectedProviderCapabilities,
     ],
@@ -3543,7 +3613,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     ? composerTerminalContexts
                     : []
                 }
-                skills={selectedProviderStatus?.skills ?? []}
+                skills={selectedProviderSkills}
                 {...(showMobilePendingAnswerActions ? { className: 'max-sm:pb-11' } : {})}
                 onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                 onChange={onPromptChange}

@@ -35,6 +35,8 @@ type ComposerCommandGroup = {
 export function buildMobileComposerCommandItems(input: {
   readonly trigger: ComposerTrigger | null
   readonly selectedProviderStatus: ServerProvider | null
+  readonly providerSkills?: ReadonlyArray<ServerProviderSkill>
+  readonly providerSlashCommands?: ServerProvider['slashCommands']
   readonly modelOptions: ReadonlyArray<ModelOption>
   readonly interactionMode: CollaborationMode
   readonly hasThread: boolean
@@ -44,7 +46,7 @@ export function buildMobileComposerCommandItems(input: {
   const { trigger, selectedProviderStatus } = input
   if (!trigger) return []
   const providerSkills = getProviderSkillsForSlashMenu(
-    (selectedProviderStatus?.skills ?? []).filter(
+    (input.providerSkills ?? selectedProviderStatus?.skills ?? []).filter(
       (skill) => skill.name.toLowerCase() !== 'orchestrate',
     ),
     true,
@@ -78,7 +80,9 @@ export function buildMobileComposerCommandItems(input: {
         label: `/${item.command}`,
       }))
     const providerSlashCommands = getProviderSlashCommandsForSlashMenu(
-      trigger.rangeStart === 0 ? (selectedProviderStatus?.slashCommands ?? []) : [],
+      trigger.rangeStart === 0
+        ? (input.providerSlashCommands ?? selectedProviderStatus?.slashCommands ?? [])
+        : [],
       providerSkills,
     )
     const providerCommands: ComposerCommandItem[] = []

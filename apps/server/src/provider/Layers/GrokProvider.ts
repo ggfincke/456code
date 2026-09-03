@@ -34,6 +34,7 @@ import {
 } from '../maintenance/providerMaintenance.ts'
 import { makeGrokAcpRuntime, resolveGrokAcpBaseModelId } from '../acp/GrokAcpSupport.ts'
 import { GROK_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
+import { discoverGrokSkills } from '../Drivers/GrokSkills.ts'
 
 const GROK_PRESENTATION = {
   displayName: 'Grok',
@@ -318,12 +319,17 @@ export const checkGrokProviderStatus = Effect.fn('checkGrokProviderStatus')(func
     discoveredModels.length > 0
       ? grokModelsFromSettings(grokSettings.customModels, discoveredModels)
       : fallbackModels
+  const skills = yield* discoverGrokSkills(grokSettings, environment).pipe(
+    Effect.tapError((cause) => Effect.logDebug('Grok skill discovery failed.', { cause })),
+    Effect.orElseSucceed(() => []),
+  )
 
   return buildServerProvider({
     presentation: GROK_PRESENTATION,
     enabled: grokSettings.enabled,
     checkedAt,
     models,
+    skills,
     probe: {
       installed: true,
       version,

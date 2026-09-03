@@ -107,6 +107,33 @@ describe('mobile composer menu policy', () =>
     ).toEqual(['cmd:model', 'cmd:default', 'skill:review'])
   })
 
+  it('uses the exact-workspace skill and command arrays supplied by the hook', () =>
+  {
+    const provider = {
+      driver: 'cursor',
+      slashCommands: [{ name: 'machine-command' }],
+      skills: [{ name: 'machine-skill', path: '/skills/machine', enabled: true }],
+    } as unknown as ServerProvider
+
+    const items = buildMobileComposerCommandItems({
+      trigger: detectComposerTrigger('/', 1),
+      selectedProviderStatus: provider,
+      providerSkills: [{ name: 'project-skill', path: '/skills/project', enabled: true }],
+      providerSlashCommands: [{ name: 'project-command' }],
+      modelOptions: [],
+      interactionMode: { baseMode: 'default', orchestrate: false },
+      hasThread: true,
+      pathEntries: [],
+    })
+
+    expect(items.map((item) => item.id)).toEqual([
+      'cmd:model',
+      'cmd:default',
+      'pcmd:project-command',
+      'skill:project-skill',
+    ])
+  })
+
   it('searches model sources without changing the selected instance or model options', () =>
   {
     const selection = {
