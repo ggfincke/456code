@@ -221,5 +221,6 @@ export const discoverAntigravitySkills = Effect.fn('discoverAntigravitySkills')(
     { directory: path.resolve(input.cwd, '.gemini', 'skills'), scope: 'project' },
     { directory: cliSkills, scope: 'user' },
     { directory: path.resolve(input.cwd, '.agents', 'skills'), scope: 'project' },
+    { directory: path.resolve(input.cwd, '.agent', 'skills'), scope: 'project' },
   ])
 })
