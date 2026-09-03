@@ -40,6 +40,7 @@ import { preloadWorkspaceFileContents } from './preload-workspace-file'
 import { SourceFileSurface } from './SourceFileSurface'
 import { ThreadFileNavigatorPane } from './thread-file-navigator-pane'
 import { WorkspaceFileImagePreview } from './WorkspaceFileImagePreview'
+import { WorkspaceFilePreviewError } from './WorkspaceFilePreviewError'
 import { WorkspaceFileWebPreview } from './WorkspaceFileWebPreview'
 import {
   basename,
@@ -91,6 +92,7 @@ function defaultViewMode(path: string | null): FileViewMode
 
 function FileContent(props: {
   readonly activeMode: FileViewMode
+  readonly environmentId: EnvironmentId
   readonly previewAsset: AssetUrlState
   readonly fileContents: string | null
   readonly fileError: string | null
@@ -112,14 +114,7 @@ function FileContent(props: {
   )
   {
     return (
-      <View className="flex-1 items-center justify-center bg-sheet px-6">
-        <EmptyState
-          title="Preview unavailable"
-          detail={props.previewAsset.error}
-          actionLabel="Try again"
-          onAction={props.previewAsset.retry}
-        />
-      </View>
+      <WorkspaceFilePreviewError environmentId={props.environmentId} failure={props.previewAsset} />
     )
   }
 
@@ -672,6 +667,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps)
         </NativeHeaderToolbar>
         <FileContent
           activeMode={resolvedActiveMode}
+          environmentId={environmentId}
           previewAsset={previewAsset}
           fileContents={fileData?.contents ?? null}
           fileError={fileQuery.error}
