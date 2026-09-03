@@ -465,6 +465,7 @@ export type RequestResolvedPayload = typeof RequestResolvedPayload.Type
 const UserInputQuestionOption = Schema.Struct({
   label: TrimmedNonEmptyStringSchema,
   description: Schema.String,
+  value: Schema.optional(Schema.String),
 })
 export type UserInputQuestionOption = typeof UserInputQuestionOption.Type
 

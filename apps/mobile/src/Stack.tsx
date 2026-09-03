@@ -49,6 +49,7 @@ import { SettingsAppearanceRouteScreen } from './features/settings/SettingsAppea
 import { SettingsClientStorageRouteScreen } from './features/settings/SettingsClientStorageRouteScreen'
 import { SettingsAuthRouteScreen } from './features/settings/SettingsAuthRouteScreen'
 import { SettingsEnvironmentsRouteScreen } from './features/settings/SettingsEnvironmentsRouteScreen'
+import { SettingsProviderSetupRouteScreen } from './features/settings/SettingsProviderSetupRouteScreen'
 import { SettingsRouteScreen } from './features/settings/SettingsRouteScreen'
 import { SettingsWaitlistRouteScreen } from './features/settings/SettingsWaitlistRouteScreen'
 import { SettingsUsageRouteScreen } from './features/settings/SettingsUsageRouteScreen'
@@ -157,6 +158,13 @@ const SettingsSheetStack = createNativeStackNavigator({
       linking: 'environment-new',
       options: {
         title: 'Add Environment',
+      },
+    }),
+    SettingsProviderSetup: createNativeStackScreen({
+      screen: SettingsProviderSetupRouteScreen,
+      linking: 'providers/:environmentId/:instanceId',
+      options: {
+        title: 'Antigravity',
       },
     }),
     SettingsArchive: createNativeStackScreen({

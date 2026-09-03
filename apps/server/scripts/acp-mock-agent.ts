@@ -17,6 +17,7 @@ import * as AcpProviderExtensions from 'effect-acp/provider-extensions'
 import type * as AcpSchema from 'effect-acp/schema'
 
 const requestLogPath = process.env.T3_ACP_REQUEST_LOG_PATH
+const antigravity = process.env.T3_ACP_ANTIGRAVITY === '1'
 const exitLogPath = process.env.T3_ACP_EXIT_LOG_PATH
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === '1'
 const emitParallelToolBurst = process.env.T3_ACP_EMIT_PARALLEL_TOOL_BURST === '1'
@@ -38,8 +39,10 @@ const omitXAiPromptCompleteStopReason =
 const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === '1'
 const emitLoadReplay = process.env.T3_ACP_EMIT_LOAD_REPLAY === '1'
 const earlyLoadResponseBeforeReplay = process.env.T3_ACP_EARLY_LOAD_RESPONSE_BEFORE_REPLAY === '1'
-const advertiseResume = process.env.T3_ACP_ADVERTISE_RESUME === '1'
-const advertisedAuthMethodIds = (process.env.T3_ACP_AUTH_METHOD_IDS ?? '')
+const advertiseResume = antigravity || process.env.T3_ACP_ADVERTISE_RESUME === '1'
+const advertisedAuthMethodIds = (
+  process.env.T3_ACP_AUTH_METHOD_IDS ?? (antigravity ? 'oauth-personal' : '')
+)
   .split(',')
   .map((methodId) => methodId.trim())
   .filter((methodId) => methodId.length > 0)
@@ -67,10 +70,10 @@ const permissionOptionIds = {
   allowAlways: process.env.T3_ACP_ALLOW_ALWAYS_OPTION_ID ?? 'allow-always',
   rejectOnce: process.env.T3_ACP_REJECT_ONCE_OPTION_ID ?? 'reject-once',
 }
-const sessionId = 'mock-session-1'
+const sessionId = antigravity ? 'b75db7e9-cd99-40e5-aa63-ac2b4674a6a9' : 'mock-session-1'
 
-let currentModeId = coralModes || geminiModes ? 'default' : 'ask'
-let currentModelId = 'default'
+let currentModeId = antigravity || coralModes || geminiModes ? 'default' : 'ask'
+let currentModelId = antigravity ? 'gemini-test-low' : 'default'
 let currentCoralRuntimeMode = 'approval-required'
 let parameterizedModelPicker = false
 let currentReasoning = 'medium'
@@ -155,6 +158,34 @@ process.once('exit', (code) =>
 
 function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption>
 {
+  if (antigravity)
+  {
+    return [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: currentModelId,
+        options: [
+          { value: 'gemini-test-low', name: 'Gemini test low' },
+          { value: 'gemini-test-high', name: 'Gemini test high' },
+        ],
+      },
+      {
+        id: 'mode',
+        name: 'Mode',
+        category: 'mode',
+        type: 'select',
+        currentValue: currentModeId,
+        options: [
+          { value: 'default', name: 'Default' },
+          { value: 'auto_edit', name: 'Auto edit' },
+          { value: 'yolo', name: 'YOLO' },
+        ],
+      },
+    ]
+  }
   if (parameterizedModelPicker)
   {
     const baseOptions: Array<AcpSchema.SessionConfigOption> = [
@@ -333,32 +364,38 @@ function availableModels(): ReadonlyArray<{
   }))
 }
 
-const availableModes: ReadonlyArray<AcpSchema.SessionMode> = coralModes
-  ? [{ id: 'default', name: 'Default' }]
-  : geminiModes
-    ? [
-        { id: 'default', name: 'Default', description: 'Prompts for approval' },
-        { id: 'autoEdit', name: 'Auto Edit', description: 'Auto-approves edit tools' },
-        { id: 'yolo', name: 'YOLO', description: 'Auto-approves all tools' },
-        { id: 'plan', name: 'Plan', description: 'Read-only mode' },
-      ]
-    : [
-        {
-          id: 'ask',
-          name: 'Ask',
-          description: 'Request permission before making any changes',
-        },
-        {
-          id: 'architect',
-          name: 'Architect',
-          description: 'Design and plan software systems without implementation',
-        },
-        {
-          id: 'code',
-          name: 'Code',
-          description: 'Write and modify code with full tool access',
-        },
-      ]
+const availableModes: ReadonlyArray<AcpSchema.SessionMode> = antigravity
+  ? [
+      { id: 'default', name: 'Default' },
+      { id: 'auto_edit', name: 'Auto edit' },
+      { id: 'yolo', name: 'YOLO' },
+    ]
+  : coralModes
+    ? [{ id: 'default', name: 'Default' }]
+    : geminiModes
+      ? [
+          { id: 'default', name: 'Default', description: 'Prompts for approval' },
+          { id: 'autoEdit', name: 'Auto Edit', description: 'Auto-approves edit tools' },
+          { id: 'yolo', name: 'YOLO', description: 'Auto-approves all tools' },
+          { id: 'plan', name: 'Plan', description: 'Read-only mode' },
+        ]
+      : [
+          {
+            id: 'ask',
+            name: 'Ask',
+            description: 'Request permission before making any changes',
+          },
+          {
+            id: 'architect',
+            name: 'Architect',
+            description: 'Design and plan software systems without implementation',
+          },
+          {
+            id: 'code',
+            name: 'Code',
+            description: 'Write and modify code with full tool access',
+          },
+        ]
 
 function modeState(): AcpSchema.SessionModeState
 {
@@ -413,13 +450,46 @@ const program = Effect.gen(function* ()
 
   yield* agent.handleAuthenticate(() => Effect.succeed({}))
 
+  const notifyAntigravityCommands = () =>
+    antigravity
+      ? Effect.gen(function* ()
+        {
+          yield* agent.client.sessionUpdate({
+            sessionId: 'foreign-startup-session',
+            update: {
+              sessionUpdate: 'available_commands_update',
+              availableCommands: [{ name: 'foreign-command', description: 'Not the root session' }],
+            },
+          })
+          yield* agent.client.sessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'ignored startup content' },
+            },
+          })
+          yield* agent.client.sessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: 'available_commands_update',
+              availableCommands: [
+                { name: 'plan', description: 'Create a plan' },
+                { name: 'logout', description: 'Sign out' },
+              ],
+            },
+          })
+        })
+      : Effect.void
+
   yield* agent.handleCreateSession(() =>
-    Effect.succeed({
-      sessionId,
-      modes: modeState(),
-      models: modelState(),
-      configOptions: configOptions(),
-    }),
+    notifyAntigravityCommands().pipe(
+      Effect.as({
+        sessionId,
+        modes: modeState(),
+        models: modelState(),
+        configOptions: configOptions(),
+      }),
+    ),
   )
 
   const emitLoadReplayNotifications = (requestedSessionId: string) =>
@@ -517,11 +587,13 @@ const program = Effect.gen(function* ()
   )
 
   yield* agent.handleResumeSession(() =>
-    Effect.succeed({
-      modes: modeState(),
-      models: modelState(),
-      configOptions: configOptions(),
-    }),
+    notifyAntigravityCommands().pipe(
+      Effect.as({
+        modes: modeState(),
+        models: modelState(),
+        configOptions: configOptions(),
+      }),
+    ),
   )
 
   yield* agent.handleExtRequest(

@@ -125,26 +125,16 @@ describe('providerCapabilities', () =>
     {
       driver: 'antigravity',
       expected: {
-        defaultRuntimeMode: 'auto-accept-edits',
-        sessionModelSwitch: 'unsupported',
+        defaultRuntimeMode: 'approval-required',
+        sessionModelSwitch: 'in-session',
         supportedInteractionModes: ['default'],
-        supportedRuntimeModes: ['auto-accept-edits', 'full-access'],
-        activeTurnInput: 'unsupported',
+        supportedRuntimeModes: ['approval-required', 'auto', 'auto-accept-edits', 'full-access'],
+        activeTurnInput: 'supported',
         conversationRollback: 'unsupported',
         orchestrateInstructionDelivery: 'prompt-prefix',
         orchestrateBaseModes: ['default'],
-        runtimeModeWarnings: [
-          {
-            id: 'antigravity-full-access-v1',
-            mode: 'full-access',
-            severity: 'danger',
-            requiresAcknowledgement: true,
-            message:
-              'Antigravity will run with --dangerously-skip-permissions. ' +
-              '456code cannot review or approve individual tool calls.',
-          },
-        ],
-        supportedAttachmentTypes: [],
+        runtimeModeWarnings: [],
+        supportedAttachmentTypes: ['image'],
       },
     },
   ] as const)('returns the canonical $driver matrix', ({ driver, expected }) =>

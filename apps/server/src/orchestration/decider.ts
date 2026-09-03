@@ -2238,6 +2238,27 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
     }
 
+    case 'thread.provider-continuation.clear':
+    {
+      yield* requireThread({ readModel, command, threadId: command.threadId })
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.provider-continuation-clear-requested',
+        payload: {
+          threadId: command.threadId,
+          expectedProviderInstanceId: command.expectedProviderInstanceId,
+          expectedBindingGeneration: command.expectedBindingGeneration,
+          expectedSource: command.expectedSource,
+          createdAt: command.createdAt,
+        },
+      }
+    }
+
     case 'thread.messages.import':
     {
       const thread = yield* requireThread({

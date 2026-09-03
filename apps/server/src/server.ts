@@ -8,6 +8,7 @@ import {
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Stream from 'effect/Stream'
 import { FetchHttpClient, HttpRouter, HttpServer } from 'effect/unstable/http'
 import * as HttpApi from 'effect/unstable/httpapi/HttpApi'
 import * as HttpApiBuilder from 'effect/unstable/httpapi/HttpApiBuilder'
@@ -41,6 +42,10 @@ import { ProviderAdapterRegistryLive } from './provider/Layers/ProviderAdapterRe
 import { ProviderBackgroundTaskRegistryLive } from './provider/Layers/ProviderBackgroundTaskRegistry.ts'
 import * as ProviderEventLoggers from './provider/Layers/ProviderEventLoggers.ts'
 import { ProviderServiceLive } from './provider/Layers/ProviderService.ts'
+import { ProviderAuthServiceLive } from './provider/Layers/ProviderAuthService.ts'
+import { AntigravityInstallation } from './provider/AntigravityInstallation.ts'
+import { ProviderInstanceRegistry } from './provider/Services/ProviderInstanceRegistry.ts'
+import { ProviderRegistry } from './provider/Services/ProviderRegistry.ts'
 import { ProviderSessionReaperLive } from './provider/Layers/ProviderSessionReaper.ts'
 import * as OpenCodeRuntime from './provider/opencodeRuntime.ts'
 import * as CheckpointDiffQuery from './orchestration/Layers/CheckpointDiffQuery.ts'
@@ -440,7 +445,36 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 )
 
+const AntigravityInstallationRefreshLive = Layer.effectDiscard(
+  Effect.gen(function* ()
+  {
+    const installation = yield* AntigravityInstallation
+    const instances = yield* ProviderInstanceRegistry
+    const providers = yield* ProviderRegistry
+    yield* installation.changes.pipe(
+      Stream.map((state) => state.installedVersion),
+      Stream.changes,
+      Stream.drop(1),
+      Stream.runForEach(() =>
+        instances.listInstances.pipe(
+          Effect.flatMap((current) =>
+            Effect.forEach(
+              current.filter((instance) => instance.driverKind === 'antigravity'),
+              (instance) => providers.refreshInstance(instance.instanceId),
+              { discard: true },
+            ),
+          ),
+          Effect.ignoreCause({ log: true }),
+        ),
+      ),
+      Effect.forkScoped,
+    )
+  }),
+)
+
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  Layer.provideMerge(AntigravityInstallationRefreshLive),
+  Layer.provideMerge(ProviderAuthServiceLive),
   // core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -480,6 +514,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
     Layer.provideMerge(ServerEnvironmentLayerLive),
   )
   .pipe(
+    Layer.provideMerge(AntigravityInstallation.layer),
     Layer.provideMerge(ArchitectureQueryLayerLive),
     Layer.provideMerge(ArchitectureProjectionLayerLive),
     Layer.provideMerge(CurrentWorktreeArchitectureLayerLive),

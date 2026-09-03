@@ -111,6 +111,14 @@ export interface ProviderServiceShape
     context?: ProviderEffectContext,
   ) => Effect.Effect<void, ProviderServiceError>
 
+  // clear only the exact legacy cursor that the client confirmed.
+  readonly clearContinuationIfExact: (input: {
+    readonly threadId: ThreadId
+    readonly expectedProviderInstanceId: ProviderInstanceId
+    readonly expectedBindingGeneration: string
+    readonly expectedSource: 'antigravity.stream-json'
+  }) => Effect.Effect<boolean, ProviderServiceError>
+
   // capture the exact durable provider generation for lifecycle-safe cleanup.
   readonly captureSessionIdentity: (input: {
     readonly threadId: ThreadId

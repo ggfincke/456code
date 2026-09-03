@@ -377,6 +377,7 @@ interface ProviderInstanceCardProps
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void
   readonly onRunUpdate?: (() => void) | undefined
   readonly isUpdating?: boolean | undefined
+  readonly setupContent?: ReactNode | undefined
 }
 
 // a single configured provider-instance row in the Providers settings
@@ -419,6 +420,7 @@ export function ProviderInstanceCard({
   onModelOrderChange,
   onRunUpdate,
   isUpdating = false,
+  setupContent,
 }: ProviderInstanceCardProps)
 {
   const enabled = instance.enabled ?? true
@@ -827,6 +829,8 @@ export function ProviderInstanceCard({
                 onChange={updateConfig}
               />
             ) : null}
+
+            {setupContent}
 
             {driverOption !== undefined ? (
               <ProviderModelsSection

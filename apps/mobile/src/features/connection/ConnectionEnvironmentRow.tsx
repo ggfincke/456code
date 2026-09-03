@@ -2,9 +2,10 @@
 // render connection environment row
 
 import { SymbolView } from '../../components/AppSymbol'
+import { useAtomValue } from '@effect/atom-react'
 import { connectionStatusText } from '@t3tools/client-runtime/connection'
 import type { AtomCommandResult } from '@t3tools/client-runtime/state/runtime'
-import type { EnvironmentId } from '@t3tools/contracts'
+import type { EnvironmentId, ProviderInstanceId } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { useCallback, useState } from 'react'
@@ -15,6 +16,9 @@ import { AppText as Text, AppTextInput as TextInput } from '../../components/App
 import { cn } from '../../lib/cn'
 import { copyTextWithHaptic } from '../../lib/copyTextWithHaptic'
 import type { ConnectedEnvironmentSummary } from '../../state/remote-runtime-types'
+import { serverEnvironment } from '../../state/server'
+import { ProviderSetupLink } from '../settings/ProviderSetupLink'
+import { providerNeedsSetup } from '../settings/provider-setup-state'
 import { ConnectionStatusDot } from './ConnectionStatusDot'
 
 function connectionStatusLabel(environment: ConnectedEnvironmentSummary): string | null
@@ -36,8 +40,14 @@ export function ConnectionEnvironmentRow(props: {
     environmentId: EnvironmentId,
     updates: { readonly label: string; readonly displayUrl: string },
   ) => Promise<AtomCommandResult<unknown, unknown>>
+  readonly onSetupProvider: (input: {
+    readonly environmentId: EnvironmentId
+    readonly instanceId: ProviderInstanceId
+  }) => void
 })
 {
+  const config = useAtomValue(serverEnvironment.configValueAtom(props.environment.environmentId))
+  const setupProviders = config?.providers.filter(providerNeedsSetup) ?? []
   const [label, setLabel] = useState(props.environment.environmentLabel)
   const [url, setUrl] = useState(props.environment.displayUrl)
 
@@ -176,6 +186,19 @@ export function ConnectionEnvironmentRow(props: {
               </View>
             </>
           )}
+
+          {setupProviders.map((provider) => (
+            <ProviderSetupLink
+              key={provider.instanceId}
+              provider={provider}
+              onPress={() =>
+                props.onSetupProvider({
+                  environmentId: props.environment.environmentId,
+                  instanceId: provider.instanceId,
+                })
+              }
+            />
+          ))}
 
           <View className="flex-row justify-end gap-2">
             {props.environment.isRelayManaged ? null : (

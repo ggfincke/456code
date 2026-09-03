@@ -4,6 +4,7 @@
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Deferred from 'effect/Deferred'
+import type * as PlatformError from 'effect/PlatformError'
 import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
@@ -45,9 +46,14 @@ export type AcpIncomingNotification =
       readonly params: unknown
     }
 
+export interface AcpStdio extends Omit<Stdio.Stdio, 'stdin'>
+{
+  readonly stdin: Stream.Stream<Uint8Array, PlatformError.PlatformError | AcpError.AcpError>
+}
+
 export interface AcpPatchedProtocolOptions
 {
-  readonly stdio: Stdio.Stdio
+  readonly stdio: AcpStdio
   readonly maximumIncomingConnectionBytes?: number
   readonly maximumIncomingFrameBytes?: number
   readonly maximumRetainedNotifications?: number
@@ -56,6 +62,9 @@ export interface AcpPatchedProtocolOptions
   readonly logIncoming?: boolean
   readonly logOutgoing?: boolean
   readonly logger?: (event: AcpProtocolLogEvent) => Effect.Effect<void, never>
+  readonly transformSessionUpdate?: (
+    notification: AcpSchema.SessionNotification,
+  ) => AcpSchema.SessionNotification
   readonly onIncomingConnectionBytes?: (consumedBytes: number) => void
   readonly onNotification?: (
     notification: AcpIncomingNotification,
@@ -505,7 +514,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
               ({
                 _tag: 'SessionUpdate',
                 method: CLIENT_METHODS.session_update,
-                params,
+                params: options.transformSessionUpdate?.(params) ?? params,
               }) satisfies AcpIncomingNotification,
           ),
           Effect.mapError((cause) =>

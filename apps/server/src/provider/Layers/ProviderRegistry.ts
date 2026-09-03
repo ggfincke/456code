@@ -283,7 +283,15 @@ const buildSnapshotSource = (instance: ProviderInstance): LiveProviderSnapshotSo
     ? {}
     : { continuationUnavailableReason: instance.continuationUnavailableReason }),
   getSnapshot: instance.snapshot.getSnapshot,
-  refresh: instance.snapshot.refresh,
+  refresh:
+    instance.refreshModels === undefined
+      ? instance.snapshot.refresh
+      : instance.refreshModels.pipe(
+          Effect.catch(() =>
+            Effect.logWarning('Provider model refresh failed; retaining current catalog.'),
+          ),
+          Effect.andThen(instance.snapshot.getSnapshot),
+        ),
   streamChanges: instance.snapshot.streamChanges,
 })
 

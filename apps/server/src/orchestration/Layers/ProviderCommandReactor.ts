@@ -51,6 +51,7 @@ import {
   ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
+  ProviderContinuationIncompatibleError,
   ProviderInstanceNotFoundError,
   ProviderSessionNotFoundError,
   ProviderUnsupportedError,
@@ -109,6 +110,7 @@ const isProviderRequestNotDispatched = Schema.is(
   Schema.TaggedStruct('ProviderRequestNotDispatched', {}),
 )
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError)
+const isProviderContinuationIncompatibleError = Schema.is(ProviderContinuationIncompatibleError)
 const isProviderDriverKind = Schema.is(ProviderDriverKind)
 const isProviderInstanceNotFoundError = Schema.is(ProviderInstanceNotFoundError)
 const isProviderSessionNotFoundError = Schema.is(ProviderSessionNotFoundError)
@@ -128,6 +130,7 @@ type ProviderIntentEvent = Extract<
       | 'thread.user-input-response-requested'
       | 'thread.orchestrate-plan-response-requested'
       | 'thread.session-stop-requested'
+      | 'thread.provider-continuation-clear-requested'
   }
 >
 
@@ -430,7 +433,8 @@ function isProviderIntentEvent(event: OrchestrationEvent): event is ProviderInte
     event.type === 'thread.approval-response-requested' ||
     event.type === 'thread.user-input-response-requested' ||
     event.type === 'thread.orchestrate-plan-response-requested' ||
-    event.type === 'thread.session-stop-requested'
+    event.type === 'thread.session-stop-requested' ||
+    event.type === 'thread.provider-continuation-clear-requested'
   )
 }
 
@@ -953,6 +957,7 @@ const make = Effect.gen(function* ()
     readonly threadId: ThreadId
     readonly detail: string
     readonly createdAt: string
+    readonly continuationIncompatibility?: OrchestrationSession['continuationIncompatibility']
   })
   {
     const thread = yield* resolveLatestThreadShell(input.threadId)
@@ -973,6 +978,9 @@ const make = Effect.gen(function* ()
         status: session?.status === 'stopped' ? 'stopped' : 'error',
         activeTurnId: null,
         lastError: input.detail,
+        ...(input.continuationIncompatibility === undefined
+          ? {}
+          : { continuationIncompatibility: input.continuationIncompatibility }),
         updatedAt: input.createdAt,
       },
       createdAt: input.createdAt,
@@ -984,6 +992,7 @@ const make = Effect.gen(function* ()
     readonly detail: string
     readonly createdAt: string
     readonly requestId?: string
+    readonly continuationIncompatibility?: OrchestrationSession['continuationIncompatibility']
   })
   {
     yield* setThreadSessionErrorOnTurnStartFailure(input)
@@ -1904,10 +1913,20 @@ const make = Effect.gen(function* ()
         return Effect.void
       }
       const detail = formatFailureDetail(cause)
+      const failure = Cause.findErrorOption(cause)
+      const incompatibility =
+        Option.isSome(failure) && isProviderContinuationIncompatibleError(failure.value)
+          ? {
+              currentSource: failure.value.currentSource,
+              requiredSource: failure.value.requiredSource,
+              bindingGeneration: failure.value.bindingGeneration,
+            }
+          : undefined
       return reportTurnStartFailure({
         threadId: event.payload.threadId,
         detail,
         createdAt: event.payload.createdAt,
+        ...(incompatibility === undefined ? {} : { continuationIncompatibility: incompatibility }),
       })
     }
 
@@ -2747,6 +2766,44 @@ const make = Effect.gen(function* ()
     })
   })
 
+  const processProviderContinuationClearRequested = Effect.fn(
+    'processProviderContinuationClearRequested',
+  )(function* (
+    event: Extract<ProviderIntentEvent, { type: 'thread.provider-continuation-clear-requested' }>,
+  )
+  {
+    const thread = yield* resolveLatestThreadShell(event.payload.threadId)
+    const incompatibility = thread?.session?.continuationIncompatibility
+    if (
+      !thread?.session ||
+      thread.session.providerInstanceId !== event.payload.expectedProviderInstanceId ||
+      incompatibility?.bindingGeneration !== event.payload.expectedBindingGeneration ||
+      incompatibility.currentSource !== event.payload.expectedSource
+    )
+    {
+      return
+    }
+    const cleared = yield* providerService.clearContinuationIfExact({
+      threadId: event.payload.threadId,
+      expectedProviderInstanceId: event.payload.expectedProviderInstanceId,
+      expectedBindingGeneration: event.payload.expectedBindingGeneration,
+      expectedSource: event.payload.expectedSource,
+    })
+    if (!cleared) return
+    const { continuationIncompatibility: _cleared, ...session } = thread.session
+    yield* setThreadSession({
+      threadId: thread.id,
+      session: {
+        ...session,
+        status: 'stopped',
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: event.payload.createdAt,
+      },
+      createdAt: event.payload.createdAt,
+    })
+  })
+
   const processDomainEvent = Effect.fn('processDomainEvent')(function* (
     event: ProviderOrderedEvent,
   )
@@ -2806,6 +2863,9 @@ const make = Effect.gen(function* ()
         return
       case 'thread.session-stop-requested':
         yield* processSessionStopRequested(event)
+        return
+      case 'thread.provider-continuation-clear-requested':
+        yield* processProviderContinuationClearRequested(event)
         return
     }
   })

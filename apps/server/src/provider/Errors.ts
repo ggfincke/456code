@@ -3,6 +3,7 @@
 
 import * as Schema from 'effect/Schema'
 
+import { ProviderInstanceId } from '@t3tools/contracts'
 import type { CheckpointStoreError } from '../checkpointing/Errors.ts'
 
 /**
@@ -131,6 +132,24 @@ export class ProviderValidationError extends Schema.TaggedError<ProviderValidati
   }
 }
 
+/** A persisted provider cursor requires an explicit, generation-fenced fresh start. */
+export class ProviderContinuationIncompatibleError extends Schema.TaggedError<ProviderContinuationIncompatibleError>()(
+  'ProviderContinuationIncompatibleError',
+  {
+    threadId: Schema.String,
+    providerInstanceId: ProviderInstanceId,
+    currentSource: Schema.Literal('antigravity.stream-json'),
+    requiredSource: Schema.Literal('antigravity.official-acp'),
+    bindingGeneration: Schema.String,
+  },
+)
+{
+  override get message(): string
+  {
+    return 'This Antigravity thread uses the retired CLI continuation format. Confirm a fresh official ACP session to continue.'
+  }
+}
+
 /**
  * ProviderUnsupportedError - Requested provider is not implemented.
  */
@@ -236,6 +255,7 @@ export type ProviderAdapterError =
 
 export type ProviderServiceError =
   | ProviderValidationError
+  | ProviderContinuationIncompatibleError
   | ProviderUnsupportedError
   | ProviderWorkspaceMissingError
   | ProviderInstanceNotFoundError

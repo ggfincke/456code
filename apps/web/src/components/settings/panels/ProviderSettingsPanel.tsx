@@ -37,6 +37,7 @@ import { stackedThreadToast, toastManager } from '../../ui/toast'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { AddProviderInstanceDialog } from '../AddProviderInstanceDialog'
 import { ProviderInstanceCard } from '../ProviderInstanceCard'
+import { ProviderSetupSection } from '../ProviderSetupSection'
 import { buildProviderInstanceUpdatePatch } from '../SettingsPanels.logic'
 import { DRIVER_OPTIONS, getDriverOption } from '../providerDriverMeta'
 import {
@@ -545,6 +546,20 @@ export function ProviderSettingsPanel()
                 onClick={() => resetDefaultInstance(row.driver)}
               />
             ) : null
+          const commitProviderUpdate = (next: ProviderInstanceConfig) =>
+          {
+            const wasEnabled = resolveProviderInstanceEnabled(row.instance)
+            const isDisabling = next.enabled === false && wasEnabled
+            const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId
+            if (shouldClearTextGen)
+            {
+              updateProviderInstance(row, next, {
+                textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+              })
+              return
+            }
+            updateProviderInstance(row, next)
+          }
           return (
             <ProviderInstanceCard
               key={row.instanceId}
@@ -559,23 +574,7 @@ export function ProviderSettingsPanel()
                   [row.instanceId]: open,
                 }))
               }
-              onUpdate={(next) =>
-              {
-                const wasEnabled = resolveProviderInstanceEnabled(row.instance)
-                const isDisabling = next.enabled === false && wasEnabled
-                const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId
-                if (shouldClearTextGen)
-                {
-                  updateProviderInstance(row, next, {
-                    textGenerationModelSelection:
-                      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                  })
-                }
-                else
-                {
-                  updateProviderInstance(row, next)
-                }
-              }}
+              onUpdate={commitProviderUpdate}
               onDelete={row.isDefault ? undefined : () => deleteProviderInstance(row.instanceId)}
               headerAction={headerAction}
               hiddenModels={modelPreferences.hiddenModels}
@@ -609,6 +608,22 @@ export function ProviderSettingsPanel()
                   : undefined
               }
               isUpdating={showInlineUpdateButton ? isInstanceUpdateRunning : undefined}
+              setupContent={
+                row.driver === 'antigravity' && primaryEnvironment ? (
+                  <ProviderSetupSection
+                    environmentId={primaryEnvironment.environmentId}
+                    environmentLabel={primaryEnvironment.label}
+                    instanceId={row.instanceId}
+                    provider={liveProvider}
+                    config={row.instance.config}
+                    enabled={resolveProviderInstanceEnabled(row.instance)}
+                    onEnable={() => commitProviderUpdate({ ...row.instance, enabled: true })}
+                    onConfigChange={(config) =>
+                      commitProviderUpdate({ ...row.instance, config } as ProviderInstanceConfig)
+                    }
+                  />
+                ) : undefined
+              }
             />
           )
         })}

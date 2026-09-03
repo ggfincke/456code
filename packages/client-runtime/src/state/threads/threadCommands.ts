@@ -8,6 +8,7 @@ import { createAtomCommandScheduler, createEnvironmentCommand } from '../runtime
 import {
   type ArchiveThreadInput,
   type CreateThreadInput,
+  type ClearThreadProviderContinuationInput,
   type DeleteThreadInput,
   type DismissThreadUserInputInput,
   type InterruptThreadTurnInput,
@@ -30,6 +31,7 @@ import {
   type UnsnoozeThreadInput,
   type UpdateThreadMetadataInput,
   archiveThread,
+  clearThreadProviderContinuation,
   createThread,
   deleteThread,
   dismissThreadUserInput,
@@ -57,6 +59,7 @@ import type { EnvironmentRegistry } from '../../connection/registry.ts'
 
 export type {
   ArchiveThreadInput,
+  ClearThreadProviderContinuationInput,
   CreateThreadInput,
   DeleteThreadInput,
   DismissThreadUserInputInput,
@@ -221,6 +224,13 @@ export function createThreadEnvironmentAtoms<R, E>(
     stopSession: createEnvironmentCommand(runtime, {
       label: 'environment-data:commands:thread:stop-session',
       execute: (input: StopThreadSessionInput) => stopThreadSession(input),
+      scheduler,
+      concurrency,
+    }),
+    clearProviderContinuation: createEnvironmentCommand(runtime, {
+      label: 'environment-data:commands:thread:clear-provider-continuation',
+      execute: (input: ClearThreadProviderContinuationInput) =>
+        clearThreadProviderContinuation(input),
       scheduler,
       concurrency,
     }),

@@ -108,23 +108,13 @@ export const GEMINI_PROVIDER_CAPABILITIES = {
 } as const satisfies ProviderRuntimeCapabilities
 
 export const ANTIGRAVITY_PROVIDER_CAPABILITIES = {
-  defaultRuntimeMode: 'auto-accept-edits',
-  sessionModelSwitch: 'unsupported',
+  defaultRuntimeMode: 'approval-required',
+  sessionModelSwitch: 'in-session',
   supportedInteractionModes: ['default'],
-  supportedRuntimeModes: ['auto-accept-edits', 'full-access'],
-  runtimeModeWarnings: [
-    {
-      id: 'antigravity-full-access-v1',
-      mode: 'full-access',
-      severity: 'danger',
-      requiresAcknowledgement: true,
-      message:
-        'Antigravity will run with --dangerously-skip-permissions. ' +
-        '456code cannot review or approve individual tool calls.',
-    },
-  ],
-  supportedAttachmentTypes: [],
-  activeTurnInput: 'unsupported',
+  supportedRuntimeModes: ['approval-required', 'auto', 'auto-accept-edits', 'full-access'],
+  runtimeModeWarnings: [],
+  supportedAttachmentTypes: ['image'],
+  activeTurnInput: 'supported',
   conversationRollback: 'unsupported',
   orchestrateInstructionDelivery: 'prompt-prefix',
   orchestrateBaseModes: ['default'],

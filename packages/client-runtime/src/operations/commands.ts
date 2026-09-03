@@ -57,6 +57,8 @@ export type DismissThreadUserInputInput = CommandInput<'thread.user-input.dismis
 export type RespondToThreadOrchestratePlanInput = CommandInput<'thread.orchestrate-plan.respond'>
 export type RevertThreadCheckpointInput = CommandInput<'thread.checkpoint.revert'>
 export type StopThreadSessionInput = CommandInput<'thread.session.stop'>
+export type ClearThreadProviderContinuationInput =
+  CommandInput<'thread.provider-continuation.clear'>
 export type SwitchThreadProviderInput = CommandInput<'thread.provider.switch'>
 
 type DispatchTag = typeof ORCHESTRATION_WS_METHODS.dispatchCommand
@@ -405,6 +407,21 @@ export const stopThreadSession: (input: StopThreadSessionInput) => CommandEffect
     createdAt: metadata.createdAt,
   })
 })
+
+export const clearThreadProviderContinuation: (
+  input: ClearThreadProviderContinuationInput,
+) => CommandEffect = Effect.fn('EnvironmentCommands.clearThreadProviderContinuation')(
+  function* (input)
+  {
+    const metadata = yield* timestampedCommandMetadata(input)
+    return yield* dispatch({
+      ...input,
+      type: 'thread.provider-continuation.clear',
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    })
+  },
+)
 
 // moving a started thread to another provider instance is an explicit command,
 // never a side effect of a turn: `expectedCurrentInstanceId` lets the server

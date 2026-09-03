@@ -3,7 +3,6 @@
 
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
-import * as Stdio from 'effect/Stdio'
 import * as Layer from 'effect/Layer'
 import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
@@ -36,6 +35,14 @@ export interface AcpClientOptions
   readonly maximumPendingNotifications?: number
   readonly maximumRetainedNotifications?: number
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>
+  readonly transformStdout?: (
+    stdout: ChildProcessSpawner.ChildProcessHandle['stdout'],
+  ) => AcpProtocol.AcpStdio['stdin']
+  readonly transformSessionUpdate?: (
+    notification: AcpSchema.SessionNotification,
+  ) => AcpSchema.SessionNotification
+  // runtime owners that inspect native stderr consume it themselves.
+  readonly drainStderr?: boolean
   readonly onIncomingConnectionBytes?: (consumedBytes: number) => void
   readonly onTermination?: (error: AcpError.AcpError) => Effect.Effect<void, never, never>
 }
@@ -276,7 +283,7 @@ interface BufferedNotificationHandler<A>
 }
 
 export const make = Effect.fn('effect-acp/AcpClient.make')(function* (
-  stdio: Stdio.Stdio,
+  stdio: AcpProtocol.AcpStdio,
   options: AcpClientOptions = {},
   terminationError?: Effect.Effect<AcpError.AcpError>,
 ): Effect.fn.Return<AcpClient['Service'], never, Scope.Scope>
@@ -415,6 +422,9 @@ export const make = Effect.fn('effect-acp/AcpClient.make')(function* (
     ...(options.logIncoming !== undefined ? { logIncoming: options.logIncoming } : {}),
     ...(options.logOutgoing !== undefined ? { logOutgoing: options.logOutgoing } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
+    ...(options.transformSessionUpdate
+      ? { transformSessionUpdate: options.transformSessionUpdate }
+      : {}),
     ...(options.onIncomingConnectionBytes
       ? { onIncomingConnectionBytes: options.onIncomingConnectionBytes }
       : {}),
@@ -603,8 +613,10 @@ export const make = Effect.fn('effect-acp/AcpClient.make')(function* (
   })
 })
 
-export const layer = (stdio: Stdio.Stdio, options: AcpClientOptions = {}): Layer.Layer<AcpClient> =>
-  Layer.effect(AcpClient, make(stdio, options))
+export const layer = (
+  stdio: AcpProtocol.AcpStdio,
+  options: AcpClientOptions = {},
+): Layer.Layer<AcpClient> => Layer.effect(AcpClient, make(stdio, options))
 
 export const layerChildProcess = (
   handle: ChildProcessSpawner.ChildProcessHandle,
@@ -616,6 +628,13 @@ const makeChildProcessClient = Effect.fn('effect-acp/AcpClient.makeChildProcessC
   options: AcpClientOptions,
 )
 {
-  yield* Stream.runDrain(handle.stderr).pipe(Effect.ignore, Effect.forkScoped)
-  return yield* make(makeChildStdio(handle), options, makeTerminationError(handle))
+  if (options.drainStderr !== false)
+  {
+    yield* Stream.runDrain(handle.stderr).pipe(Effect.ignore, Effect.forkScoped)
+  }
+  const stdio = {
+    ...makeChildStdio(handle),
+    stdin: options.transformStdout?.(handle.stdout) ?? handle.stdout,
+  }
+  return yield* make(stdio, options, makeTerminationError(handle))
 })
