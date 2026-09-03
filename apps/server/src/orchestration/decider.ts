@@ -830,11 +830,11 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         type: 'thread.settled',
         payload: {
           threadId: command.threadId,
-          settledAt: alreadySettled ? thread.settledAt : occurredAt,
+          settledAt: automatic ? command.settledAt : alreadySettled ? thread.settledAt : occurredAt,
           // a re-emission is a projected no-op: keep the existing updatedAt
           // so duplicate settles neither rewind nor churn ordering. A fresh
           // settle stamps the command time.
-          updatedAt: alreadySettled ? thread.updatedAt : occurredAt,
+          updatedAt: automatic || alreadySettled ? thread.updatedAt : occurredAt,
         },
       } satisfies PlannedOrchestrationEvent
       const lifecycleEvents: Array<PlannedOrchestrationEvent> = [settledEvent]

@@ -92,11 +92,11 @@ export function resolveAutoSettlementAt(input: {
     ])
     if (userAnchor !== null && Date.parse(pullRequest.terminalAt) >= Date.parse(userAnchor))
     {
-      return input.now
+      return activityAt ?? thread.createdAt
     }
   }
   if (input.autoSettleAfterDays === null || activityAt === null) return null
   return Date.parse(activityAt) < Date.parse(input.now) - input.autoSettleAfterDays * DAY_MS
-    ? input.now
+    ? activityAt
     : null
 }
