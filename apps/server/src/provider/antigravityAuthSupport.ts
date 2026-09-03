@@ -27,7 +27,9 @@ export const ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE =
 
 const maxAuthorizationUrlLength = 16_384
 const maxBrowserHelperLineLength =
-  ANTIGRAVITY_AUTH_BROWSER_MARKER.length + maxAuthorizationUrlLength + 2
+  Math.max(ANTIGRAVITY_AUTH_BROWSER_MARKER.length, ANTIGRAVITY_AUTH_STDOUT_PREFIX.length) +
+  maxAuthorizationUrlLength +
+  2
 const maxStdoutLineBytes = 16 * 1024 * 1024
 const authPrefixBytes = new TextEncoder().encode(ANTIGRAVITY_AUTH_STDOUT_PREFIX)
 const decodeUrl = Schema.decodeUnknownEffect(Schema.URLFromString)
@@ -429,9 +431,11 @@ export function makeAntigravityStderrHandler(
     {
       return Effect.void
     }
-    const url = message.startsWith(ANTIGRAVITY_AUTH_BROWSER_MARKER)
-      ? decodeBrowserHelperUrl(message.slice(ANTIGRAVITY_AUTH_BROWSER_MARKER.length))
-      : undefined
+    const url = message.startsWith(ANTIGRAVITY_AUTH_STDOUT_PREFIX)
+      ? Effect.succeed(message.slice(ANTIGRAVITY_AUTH_STDOUT_PREFIX.length))
+      : message.startsWith(ANTIGRAVITY_AUTH_BROWSER_MARKER)
+        ? decodeBrowserHelperUrl(message.slice(ANTIGRAVITY_AUTH_BROWSER_MARKER.length))
+        : undefined
     if (url === undefined)
     {
       return Effect.void
