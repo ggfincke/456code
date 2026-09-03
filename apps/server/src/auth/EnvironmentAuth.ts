@@ -57,6 +57,7 @@ import * as PairingGrantStore from './PairingGrantStore.ts'
 import * as ServerSecretStore from './ServerSecretStore.ts'
 import * as SessionStore from './SessionStore.ts'
 import { verifyRequestDpopProof } from './dpop.ts'
+import * as ServerEnvironment from '../environment/ServerEnvironment.ts'
 import { layerConfig as SqlitePersistenceLayer } from '../persistence/Layers/Sqlite.ts'
 
 export * from './EnvironmentAuthErrors.ts'
@@ -255,6 +256,39 @@ function parseDpopToken(request: HttpServerRequest.HttpServerRequest): string | 
   return token.length > 0 ? token : null
 }
 
+export function selectRequestCredential(
+  request: HttpServerRequest.HttpServerRequest,
+  cookieName: string,
+  legacyCookieName: string | undefined,
+)
+{
+  const cookieToken = request.cookies[cookieName]
+  if (cookieToken !== undefined)
+  {
+    return { token: cookieToken, source: 'cookie' } as const
+  }
+
+  const bearerToken = parseBearerToken(request)
+  if (bearerToken !== null)
+  {
+    return { token: bearerToken, source: 'bearer' } as const
+  }
+
+  const dpopToken = parseDpopToken(request)
+  if (dpopToken !== null)
+  {
+    return { token: dpopToken, source: 'dpop' } as const
+  }
+
+  const legacyToken = legacyCookieName ? request.cookies[legacyCookieName] : undefined
+  if (legacyToken !== undefined)
+  {
+    return { token: legacyToken, source: 'legacy-cookie' } as const
+  }
+
+  return undefined
+}
+
 export const make = Effect.gen(function* ()
 {
   const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy
@@ -295,20 +329,22 @@ export const make = Effect.gen(function* ()
     request: HttpServerRequest.HttpServerRequest,
   ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> =>
   {
-    const cookieToken = request.cookies[sessions.cookieName]
-    const bearerToken = parseBearerToken(request)
+    const credential = selectRequestCredential(
+      request,
+      sessions.cookieName,
+      sessions.legacyCookieName,
+    )
     const dpopToken = parseDpopToken(request)
-    const credential = cookieToken ?? bearerToken ?? dpopToken
-    if (!credential)
+    if (!credential?.token)
     {
       return Effect.fail(new ServerAuthMissingCredentialError({}))
     }
-    return authenticateToken(credential).pipe(
+    return authenticateToken(credential.token).pipe(
       Effect.flatMap((session) =>
       {
         if (session.proofKeyThumbprint)
         {
-          if (!dpopToken || dpopToken !== credential)
+          if (!dpopToken || dpopToken !== credential.token)
           {
             return Effect.fail(
               new ServerAuthInvalidCredentialError({
@@ -722,4 +758,7 @@ export const layer = Layer.effect(EnvironmentAuth, make).pipe(
 
 export const storageLayer = Layer.mergeAll(ServerSecretStore.layer, SqlitePersistenceLayer)
 
-export const runtimeLayer = layer.pipe(Layer.provideMerge(storageLayer))
+export const runtimeLayer = layer.pipe(
+  Layer.provideMerge(storageLayer),
+  Layer.provide(ServerEnvironment.layer),
+)

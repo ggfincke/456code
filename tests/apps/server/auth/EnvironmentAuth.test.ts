@@ -2,17 +2,24 @@
 // verify environment auth behavior
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
-import { AuthAdministrativeScopes } from '@t3tools/contracts'
+import { AuthAdministrativeScopes, EnvironmentId } from '@t3tools/contracts'
 import { expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
+import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as PairingGrantStore from '../../../../apps/server/src/auth/PairingGrantStore.ts'
 import * as EnvironmentAuth from '../../../../apps/server/src/auth/EnvironmentAuth.ts'
 
 import * as ServerSecretStore from '../../../../apps/server/src/auth/ServerSecretStore.ts'
+import * as SessionStore from '../../../../apps/server/src/auth/SessionStore.ts'
+
+const serverEnvironmentLayer = Layer.succeed(ServerEnvironment.ServerEnvironment, {
+  getEnvironmentId: Effect.succeed(EnvironmentId.make('environment-auth-test')),
+  getDescriptor: Effect.die(new Error('unused in environment auth tests')),
+})
 
 const makeServerConfigLayer = (overrides?: Partial<ServerConfig.ServerConfig['Service']>) =>
   Layer.effect(
@@ -31,15 +38,17 @@ const makeEnvironmentAuthLayer = (overrides?: Partial<ServerConfig.ServerConfig[
   EnvironmentAuth.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
     Layer.provide(ServerSecretStore.layer),
+    Layer.provide(serverEnvironmentLayer),
     Layer.provide(makeServerConfigLayer(overrides)),
   )
 
 const makeCookieRequest = (
+  cookieName: string,
   sessionToken: string,
 ): Parameters<EnvironmentAuth.EnvironmentAuth['Service']['authenticateHttpRequest']>[0] =>
   ({
     cookies: {
-      t3_session: sessionToken,
+      [cookieName]: sessionToken,
     },
     headers: {},
   }) as unknown as Parameters<
@@ -87,6 +96,7 @@ it.layer(NodeServices.layer)('EnvironmentAuth.layer', (it) =>
     Effect.gen(function* ()
     {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth
+      const sessions = yield* SessionStore.SessionStore
 
       const pairingCredential = yield* serverAuth.issuePairingCredential()
       const exchanged = yield* serverAuth.createBrowserSession(
@@ -94,7 +104,7 @@ it.layer(NodeServices.layer)('EnvironmentAuth.layer', (it) =>
         requestMetadata,
       )
       const verified = yield* serverAuth.authenticateHttpRequest(
-        makeCookieRequest(exchanged.sessionToken),
+        makeCookieRequest(sessions.cookieName, exchanged.sessionToken),
       )
 
       expect(verified.sessionId.length).toBeGreaterThan(0)
@@ -107,6 +117,61 @@ it.layer(NodeServices.layer)('EnvironmentAuth.layer', (it) =>
       ])
       expect(verified.subject).toBe('one-time-token')
     }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
+  )
+
+  it.effect('prefers a bearer token over a stale legacy cookie', () =>
+    Effect.gen(function* ()
+    {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth
+      const sessions = yield* SessionStore.SessionStore
+      const bearer = yield* serverAuth.issueSession()
+      const verified = yield* serverAuth.authenticateHttpRequest({
+        cookies: { [sessions.legacyCookieName ?? 't3_session']: 'stale' },
+        headers: { authorization: `Bearer ${bearer.token}` },
+      } as never)
+
+      expect(verified.sessionId).toBe(bearer.sessionId)
+    }).pipe(Effect.provide(makeEnvironmentAuthLayer({ mode: 'web', host: '192.168.1.50' }))),
+  )
+
+  it.effect('selects credentials in cookie, bearer, DPoP, then legacy order', () =>
+    Effect.sync(() =>
+    {
+      const request = (cookies: Record<string, string>, authorization?: string) =>
+        ({
+          cookies,
+          headers: authorization ? { authorization } : {},
+        }) as never
+
+      expect(
+        EnvironmentAuth.selectRequestCredential(
+          request({ t3_session_current: 'current', t3_session: 'legacy' }, 'Bearer bearer'),
+          't3_session_current',
+          't3_session',
+        ),
+      ).toEqual({ token: 'current', source: 'cookie' })
+      expect(
+        EnvironmentAuth.selectRequestCredential(
+          request({ t3_session: 'legacy' }, 'Bearer bearer'),
+          't3_session_current',
+          't3_session',
+        ),
+      ).toEqual({ token: 'bearer', source: 'bearer' })
+      expect(
+        EnvironmentAuth.selectRequestCredential(
+          request({ t3_session: 'legacy' }, 'DPoP dpop'),
+          't3_session_current',
+          't3_session',
+        ),
+      ).toEqual({ token: 'dpop', source: 'dpop' })
+      expect(
+        EnvironmentAuth.selectRequestCredential(
+          request({ t3_session: 'legacy' }),
+          't3_session_current',
+          't3_session',
+        ),
+      ).toEqual({ token: 'legacy', source: 'legacy-cookie' })
+    }),
   )
 
   it.effect('does not exchange ordinary pairing grants for administrative access tokens', () =>
@@ -164,6 +229,7 @@ it.layer(NodeServices.layer)('EnvironmentAuth.layer', (it) =>
     Effect.gen(function* ()
     {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth
+      const sessions = yield* SessionStore.SessionStore
 
       const pairingUrl = yield* serverAuth.issueStartupPairingUrl('http://127.0.0.1:3773')
       const token = new URLSearchParams(new URL(pairingUrl).hash.slice(1)).get('token')
@@ -177,7 +243,7 @@ it.layer(NodeServices.layer)('EnvironmentAuth.layer', (it) =>
 
       const exchanged = yield* serverAuth.createBrowserSession(token ?? '', requestMetadata)
       const verified = yield* serverAuth.authenticateHttpRequest(
-        makeCookieRequest(exchanged.sessionToken),
+        makeCookieRequest(sessions.cookieName, exchanged.sessionToken),
       )
 
       expect(verified.scopes).toEqual([
@@ -200,13 +266,14 @@ it.layer(NodeServices.layer)('EnvironmentAuth.layer', (it) =>
       Effect.gen(function* ()
       {
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth
+        const sessions = yield* SessionStore.SessionStore
 
         const administrativeExchange = yield* serverAuth.createBrowserSession(
           'desktop-bootstrap-token',
           requestMetadata,
         )
         const administrativeSession = yield* serverAuth.authenticateHttpRequest(
-          makeCookieRequest(administrativeExchange.sessionToken),
+          makeCookieRequest(sessions.cookieName, administrativeExchange.sessionToken),
         )
         const pairingCredential = yield* serverAuth.issuePairingCredential({
           label: 'Julius iPhone',
@@ -223,7 +290,7 @@ it.layer(NodeServices.layer)('EnvironmentAuth.layer', (it) =>
           },
         )
         const clientSession = yield* serverAuth.authenticateHttpRequest(
-          makeCookieRequest(clientExchange.sessionToken),
+          makeCookieRequest(sessions.cookieName, clientExchange.sessionToken),
         )
         const clientsBeforeRevoke = yield* serverAuth.listClientSessions(
           administrativeSession.sessionId,

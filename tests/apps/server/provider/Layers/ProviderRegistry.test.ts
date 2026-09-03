@@ -2,6 +2,7 @@
 // verifies provider snapshot aggregation, refresh, and instance routing
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { describe, it, assert } from '@effect/vitest'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
@@ -21,6 +22,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ServerSettings,
+  ServerSettingsError,
   type ProviderInstanceConfigMap,
   type ServerProvider,
   type ServerProviderSlashCommand,
@@ -307,18 +309,45 @@ function makeCodexProbeSnapshot(
 
 function makeMutableServerSettingsService(
   initial: ContractServerSettings = DEFAULT_SERVER_SETTINGS,
+  options: {
+    readonly failStreamCurrentReads?: number
+    readonly onStreamCurrentReadFailure?: Effect.Effect<void>
+  } = {},
 )
 {
   return Effect.gen(function* ()
   {
     const settingsRef = yield* Ref.make(initial)
     const changes = yield* PubSub.unbounded<ContractServerSettings>()
+    const remainingStreamCurrentReadFailures = yield* Ref.make(options.failStreamCurrentReads ?? 0)
 
     return {
       start: Effect.void,
       ready: Effect.void,
       getSettings: Ref.get(settingsRef),
-      streamCurrentAndChanges: Stream.fromEffect(Ref.get(settingsRef)),
+      streamCurrentAndChanges: Stream.unwrap(
+        Effect.gen(function* ()
+        {
+          const subscription = yield* PubSub.subscribe(changes)
+          const shouldFailCurrentRead = yield* Ref.modify(
+            remainingStreamCurrentReadFailures,
+            (remaining) => [remaining > 0, Math.max(0, remaining - 1)],
+          )
+          if (shouldFailCurrentRead)
+          {
+            yield* options.onStreamCurrentReadFailure ?? Effect.void
+            return yield* new ServerSettingsError({
+              settingsPath: '<provider-registry-test>',
+              operation: 'read-file',
+              cause: new Error('synthetic stream current-read failure'),
+            })
+          }
+          return Stream.concat(
+            Stream.fromEffect(Ref.get(settingsRef)),
+            Stream.fromSubscription(subscription),
+          ).pipe(Stream.changes)
+        }),
+      ),
       updateSettings: (patch) =>
         Effect.gen(function* ()
         {
@@ -1839,13 +1868,15 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       // aggregator sync pipeline and asserts that `getProviders` reflects
       // the new background probe's outcome.
       //
-      it.effect('re-probes when settings change the codex binaryPath', () =>
+      it.effect('recovers a failed settings read and re-probes a changed codex binaryPath', () =>
         Effect.gen(function* ()
         {
           const firstMissing = `t3code_codex_first_`
           const secondMissing = `t3code_codex_second_`
           const spawnedCommands: Array<string> = []
-          const serverSettings = yield* makeMutableServerSettingsService(
+          const allowLazySettingsStream = yield* Deferred.make<void>()
+          const firstStreamCurrentReadFailed = yield* Deferred.make<void>()
+          const mutableServerSettings = yield* makeMutableServerSettingsService(
             decodeServerSettings(
               deepMerge(encodedDefaultServerSettings, {
                 providers: {
@@ -1857,7 +1888,22 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 },
               }),
             ),
+            {
+              failStreamCurrentReads: 1,
+              onStreamCurrentReadFailure: Deferred.succeed(
+                firstStreamCurrentReadFailed,
+                undefined,
+              ).pipe(Effect.asVoid),
+            },
           )
+          const serverSettings = {
+            ...mutableServerSettings,
+            streamChanges: Stream.unwrap(
+              Deferred.await(allowLazySettingsStream).pipe(
+                Effect.as(mutableServerSettings.streamChanges),
+              ),
+            ),
+          } satisfies ServerSettingsModule.ServerSettingsService['Service']
           const scope = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
           const providerRegistryLayer = ProviderRegistryLive.pipe(
@@ -1915,10 +1961,18 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             )
             assert.strictEqual(initialCodex?.status, 'error')
             assert.strictEqual(initialCodex?.installed, false)
+            // the combined watcher emits the current snapshot again, but an
+            // unchanged reconciliation must not launch a duplicate probe.
             assert.deepStrictEqual(spawnedCommands, [firstMissing])
 
+            // wait until the watcher's initial current read fails, then
+            // publish while it is backing off. Its next subscription must
+            // read the latest snapshot and resume normal change handling.
+            yield* Deferred.await(firstStreamCurrentReadFailed)
+
             // drive a settings change. The Hydration layer's
-            // `SettingsWatcherLive` consumes this via `streamChanges`,
+            // `SettingsWatcherLive` consumes this via
+            // `streamCurrentAndChanges`,
             // calls `reconcile`, which rebuilds the codex instance (the
             // envelope changed because `binaryPath` differs -> `entryEqual`
             // is false). The registry's `Stream.runForEach(
@@ -1930,6 +1984,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 codex: { enabled: true, binaryPath: secondMissing },
               },
             })
+            // start the legacy stream only after publishing. A watcher that
+            // does not subscribe before reading current settings has already
+            // lost this update.
+            yield* Deferred.succeed(allowLazySettingsStream, undefined)
 
             // poll until the injected process boundary observes the new
             // executable. This verifies the public settings-to-probe behavior

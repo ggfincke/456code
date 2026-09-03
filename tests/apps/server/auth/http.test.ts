@@ -15,6 +15,7 @@ import {
   AuthStandardClientScopes,
   AuthRelayWriteScope,
   AuthSessionId,
+  EnvironmentId,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
   EnvironmentAuthInvalidError,
@@ -37,6 +38,7 @@ import {
 } from '../../../../apps/server/src/auth/http.ts'
 import * as ServerSecretStore from '../../../../apps/server/src/auth/ServerSecretStore.ts'
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
+import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as ServerStorageLease from '../../../../apps/server/src/serverStorageLease.ts'
 
@@ -49,6 +51,12 @@ const makeEnvironmentAuthLayer = () =>
   EnvironmentAuth.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
     Layer.provide(ServerSecretStore.layer),
+    Layer.provide(
+      Layer.succeed(ServerEnvironment.ServerEnvironment, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make('environment-http-auth-test')),
+        getDescriptor: Effect.die(new Error('unused in environment HTTP auth tests')),
+      }),
+    ),
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: 't3-http-auth-test-' })),
   )
 

@@ -422,8 +422,11 @@ const ProjectFaviconResolverLayerLive = ProjectFaviconResolver.layer.pipe(
   Layer.provide(ProjectFileLoader.layer),
 )
 
+const ServerEnvironmentLayerLive = ServerEnvironment.layer
+
 const AuthLayerLive = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provide(ServerEnvironmentLayerLive),
   Layer.provide(ServerSecretStore.layer),
 )
 
@@ -469,7 +472,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ArchitectureAdmissionLayerLive),
   Layer.provideMerge(ProposalPreviewLayerLive),
   Layer.provideMerge(DiffAnalysisLayerLive),
-  Layer.provideMerge(ServerEnvironment.layer),
+  Layer.provideMerge(ServerEnvironmentLayerLive),
 ).pipe(
   Layer.provideMerge(ArchitectureQueryLayerLive),
   Layer.provideMerge(ArchitectureProjectionLayerLive),

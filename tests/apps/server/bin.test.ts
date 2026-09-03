@@ -44,6 +44,7 @@ import { Command } from 'effect/unstable/cli'
 import { cli, makeCli } from '../../../apps/server/src/bin.ts'
 import { ProjectLiveServerIncompatibleError } from '../../../apps/server/src/cli/project.ts'
 import * as ServerConfig from '../../../apps/server/src/config.ts'
+import * as ServerEnvironment from '../../../apps/server/src/environment/ServerEnvironment.ts'
 import * as ServerStorageLease from '../../../apps/server/src/serverStorageLease.ts'
 import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
@@ -208,6 +209,7 @@ const withLiveProjectCliServer = <A, E, R>(
         Layer.provideMerge(
           EnvironmentAuth.layer.pipe(
             Layer.provideMerge(SqlitePersistenceLayerLive),
+            Layer.provide(ServerEnvironment.layer),
             Layer.provide(ServerSecretStore.layer),
           ),
         ),
