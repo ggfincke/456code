@@ -303,6 +303,18 @@ export const makeAntigravityProvider = Effect.fn('makeAntigravityProvider')(func
     })
   })
 
+  const onConfigOptionsUpdated = Effect.fn('AntigravityProvider.onConfigOptionsUpdated')(function* (
+    configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
+  )
+  {
+    const models = buildAntigravityModelsFromSession({ configOptions })
+    yield* SubscriptionRef.update(metadata, (state) =>
+      state.draft.auth.status !== 'authenticated'
+        ? state
+        : { ...state, draft: { ...state.draft, models } },
+    )
+  })
+
   const onAvailableCommands = Effect.fn('AntigravityProvider.onAvailableCommands')(function* (
     commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
     cwd?: string,
@@ -379,6 +391,7 @@ export const makeAntigravityProvider = Effect.fn('makeAntigravityProvider')(func
   return {
     snapshot: { ...managed, getSnapshot },
     onSessionStarted,
+    onConfigOptionsUpdated,
     onAvailableCommands,
     onSignedOut: clearAccountMetadata(),
     onAuthRequired: clearAccountMetadata(),

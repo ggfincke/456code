@@ -348,6 +348,112 @@ const layer = ServerConfig.layerTest(process.cwd(), {
 
 it.layer(layer)('AntigravityAdapter', (it) =>
 {
+  it.effect(
+    'runs native auth, resume, models, commands, and streaming through the ACP transport',
+    () =>
+      Effect.gen(function* ()
+      {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const crypto = yield* Crypto.Crypto
+        const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: 't3-antigravity-transport-',
+        })
+        const mockAgentPath = yield* path.fromFileUrl(
+          new URL('../../../../../apps/server/scripts/acp-mock-agent.ts', import.meta.url),
+        )
+        const requestLog = path.join(cwd, 'requests.ndjson')
+        const commands: string[] = []
+        const modelSelections: string[] = []
+        const observed: ProviderRuntimeEvent[] = []
+        const completed = yield* Deferred.make<void>()
+        const adapter = yield* makeAntigravityAdapter(decodeSettings({ enabled: true }), {
+          instanceId,
+          withProcess: (_stop, task) => task,
+          makeRuntime: (input) =>
+            makeAntigravityAcpRuntime({
+              ...input,
+              childProcessSpawner,
+              spawn: {
+                command: process.execPath,
+                args: [mockAgentPath],
+                cwd: input.cwd,
+                env: {
+                  ...process.env,
+                  T3_ACP_ANTIGRAVITY: '1',
+                  T3_ACP_REQUEST_LOG_PATH: requestLog,
+                },
+                extendEnv: false,
+              },
+            }).pipe(Effect.provideService(Crypto.Crypto, crypto)),
+          onAvailableCommands: (available) =>
+            Effect.sync(() =>
+            {
+              commands.push(...available.map((command) => command.name))
+            }),
+          onConfigOptionsUpdated: (configOptions) =>
+            Effect.sync(() =>
+            {
+              const model = configOptions.find((option) => option.category === 'model')
+              if (model?.type === 'select') modelSelections.push(model.currentValue)
+            }),
+        })
+        yield* adapter.streamEvents.pipe(
+          Stream.map(({ event }) => event),
+          Stream.runForEach((event) =>
+            Effect.gen(function* ()
+            {
+              observed.push(event)
+              if (event.type === 'turn.completed') yield* Deferred.succeed(completed, undefined)
+            }),
+          ),
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        const original = yield* adapter.startSession({
+          runtimeSessionBinding,
+          threadId,
+          cwd,
+          runtimeMode: 'auto-accept-edits',
+          modelSelection: { instanceId, model: nativeAlternative },
+        })
+        yield* adapter.stopSession(threadId)
+        const resumed = yield* adapter.startSession({
+          runtimeSessionBinding,
+          threadId,
+          cwd,
+          runtimeMode: 'auto-accept-edits',
+          modelSelection: { instanceId, model: nativeAlternative },
+          resumeCursor: original.resumeCursor,
+        })
+        expect(resumed.model).toBe(nativeAlternative)
+        yield* adapter.sendTurn({ threadId, input: 'Reply with one short line.' })
+        yield* Deferred.await(completed)
+        expect(commands).toEqual(['plan', 'logout', 'plan', 'logout'])
+        expect(modelSelections.length).toBeGreaterThan(0)
+        expect(modelSelections.every((model) => model === nativeAlternative)).toBe(true)
+        expect(
+          observed
+            .filter((event) => event.type === 'content.delta')
+            .map((event) => event.payload.delta)
+            .join(''),
+        ).toBe('hello from mock')
+        const lines = (yield* fileSystem.readFileString(requestLog)).trim().split('\n')
+        const requests = yield* decodeRequestLog(lines)
+        expect(
+          requests
+            .filter((request) => request.method === 'authenticate')
+            .map((request) => request.params),
+        ).toEqual([{ methodId: 'oauth-personal' }, { methodId: 'oauth-personal' }])
+        expect(requests.some((request) => request.method === 'session/resume')).toBe(true)
+        expect(requests.some((request) => request.method === 'session/load')).toBe(false)
+        expect(
+          requests
+            .filter((request) => request.method === 'session/set_mode')
+            .map((request) => request.params),
+        ).toContainEqual({ sessionId: nativeSessionId, modeId: 'auto_edit' })
+      }),
+  )
 
   it.effect('reapplies the exact saved model and mode after a native resume', () =>
     Effect.gen(function* ()

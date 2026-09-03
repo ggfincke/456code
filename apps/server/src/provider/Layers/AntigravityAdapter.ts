@@ -147,6 +147,9 @@ export interface AntigravityAdapterOptions
     commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
     cwd: string,
   ) => Effect.Effect<void>
+  readonly onConfigOptionsUpdated?: (
+    configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
+  ) => Effect.Effect<void>
   readonly onAuthRequired?: Effect.Effect<void>
   // model the provider default alias selects, when the account offers it.
   readonly defaultModel?: Effect.Effect<string | undefined>
@@ -615,6 +618,9 @@ export const makeAntigravityAdapter = Effect.fn('makeAntigravityAdapter')(functi
         return
       case 'AvailableCommandsUpdated':
         yield* options.onAvailableCommands?.(event.availableCommands, context.cwd) ?? Effect.void
+        return
+      case 'ConfigOptionsUpdated':
+        yield* options.onConfigOptionsUpdated?.(event.configOptions) ?? Effect.void
         return
       case 'AssistantItemStarted':
       case 'AssistantItemCompleted':

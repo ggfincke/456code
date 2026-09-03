@@ -215,6 +215,10 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             {
               return Deferred.succeed(event.acknowledge, undefined).pipe(Effect.asVoid)
             }
+            if (event._tag === 'ConfigOptionsUpdated')
+            {
+              return provider.onConfigOptionsUpdated(event.configOptions)
+            }
             return event._tag === 'AvailableCommandsUpdated'
               ? provider.onAvailableCommands(event.availableCommands)
               : Effect.void
@@ -269,6 +273,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         makeRuntime,
         withProcess: authFlow.withProcess,
         onSessionStarted: provider.onSessionStarted,
+        onConfigOptionsUpdated: provider.onConfigOptionsUpdated,
         onAvailableCommands: provider.onAvailableCommands,
         onAuthRequired: provider.onAuthRequired,
         ...(loggers.native ? { nativeEventLogger: loggers.native } : {}),
