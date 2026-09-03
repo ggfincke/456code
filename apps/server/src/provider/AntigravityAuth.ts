@@ -522,7 +522,7 @@ export const makeAntigravityAuth = Effect.fn('makeAntigravityAuth')(function* <
             }).pipe(
               Effect.scoped,
               Effect.timeoutOrElse({
-                duration: '30 seconds',
+                duration: '90 seconds',
                 orElse: () => Effect.fail(setupError('logout', 'Antigravity sign-out timed out.')),
               }),
             ),

@@ -35,7 +35,7 @@ import { ANTIGRAVITY_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
 const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] })
 const MAX_WORKSPACE_SNAPSHOTS = 16
-const HEALTH_CHECK_TIMEOUT = '45 seconds'
+const HEALTH_CHECK_TIMEOUT = '90 seconds'
 const SIGN_IN_MESSAGE = 'Sign in with Google to use Antigravity.'
 const AUTH_UNCHECKED_MESSAGE = 'Antigravity is installed. Google account access is not checked yet.'
 

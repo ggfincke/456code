@@ -374,6 +374,60 @@ it.layer(testLayer)('Antigravity provider snapshots', (it) =>
     ),
   )
 
+  it.effect('allows a slow packaged runtime health check to finish', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const harness = yield* makeHarness()
+        yield* harness.initialize
+        const entered = yield* Deferred.make<void>()
+        const initialized = yield* Deferred.make<EffectAcpSchema.InitializeResponse>()
+        yield* Ref.set(
+          harness.probe,
+          Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(initialized))),
+        )
+
+        const refresh = yield* harness.provider.snapshot.refresh.pipe(Effect.forkChild)
+        yield* Deferred.await(entered)
+        yield* TestClock.adjust('47 seconds')
+        yield* Deferred.succeed(initialized, initializeResult)
+        const snapshot = yield* Fiber.join(refresh)
+
+        expect(snapshot).toMatchObject({
+          installed: true,
+          status: 'warning',
+          auth: { status: 'unknown' },
+        })
+      }),
+    ),
+  )
+
+  it.effect('closes a stalled health probe at its deadline', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const harness = yield* makeHarness()
+        yield* harness.initialize
+        const entered = yield* Deferred.make<void>()
+        const closed = yield* Deferred.make<void>()
+        yield* Ref.set(
+          harness.probe,
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.succeed(closed, undefined)),
+          ),
+        )
+        const refresh = yield* harness.provider.snapshot.refresh.pipe(Effect.forkChild)
+        yield* Deferred.await(entered)
+        yield* TestClock.adjust('90 seconds')
+        const snapshot = yield* Fiber.join(refresh)
+        yield* Deferred.await(closed)
+        expect(snapshot.status).toBe('error')
+        expect(snapshot.message).toContain('90 seconds')
+      }),
+    ),
+  )
+
   it.effect('distinguishes missing executables from a failed installed executable', () =>
     Effect.scoped(
       Effect.gen(function* ()
