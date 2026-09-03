@@ -384,6 +384,7 @@ interface OpenCodeSessionContext
   readonly openCodeSessionId: string
   readonly relatedSessionIds: Set<string>
   readonly resolvedRequestIds: Set<string>
+  readonly autoRepliedRequestIds: Set<string>
   readonly emittedTerminalRequestIds: Set<string>
   readonly requestRelationRetries: Map<string, OpenCodeRequestRelationRetry>
   readonly pendingPermissions: Map<string, PermissionRequest>
@@ -1076,6 +1077,8 @@ export function makeOpenCodeAdapter(
       Queue.offer(runtimeEvents, { binding: context.runtimeSessionBinding, event }).pipe(
         Effect.asVoid,
       )
+    const emitUnsafe = (context: OpenCodeSessionContext, event: ProviderRuntimeEvent) =>
+      Queue.offerUnsafe(runtimeEvents, { binding: context.runtimeSessionBinding, event })
     const writeNativeEvent = (
       threadId: ThreadId,
       event: {
@@ -1747,6 +1750,74 @@ export function makeOpenCodeAdapter(
       return false
     })
 
+    const openPermissionRequest = Effect.fn('openPermissionRequest')(function* (
+      context: OpenCodeSessionContext,
+      request: PermissionRequest,
+      raw: unknown,
+    )
+    {
+      const base = yield* buildEventBase({
+        threadId: context.session.threadId,
+        turnId: context.activeTurnId,
+        requestId: request.id,
+        raw,
+      })
+      const stopped = yield* Ref.get(context.stopped)
+      if (
+        stopped ||
+        context.emittedTerminalRequestIds.has(request.id) ||
+        context.pendingPermissions.has(request.id)
+      )
+      {
+        return
+      }
+      const patterns = request.patterns.filter((pattern) => pattern !== '*')
+      const detail =
+        request.permission === 'bash' && patterns.length > 0
+          ? patterns.join('\n')
+          : [request.permission.replaceAll('_', ' '), ...patterns].join('\n')
+      context.autoRepliedRequestIds.delete(request.id)
+      context.pendingPermissions.set(request.id, request)
+      emitUnsafe(context, {
+        ...base,
+        type: 'request.opened',
+        payload: {
+          requestType: mapPermissionToRequestType(request.permission),
+          detail,
+          args: request.metadata,
+          options: [
+            { decision: 'accept', label: 'Allow once' },
+            {
+              decision: 'acceptAlways',
+              label: 'Allow for workspace',
+            },
+            { decision: 'decline', label: 'Deny' },
+          ],
+        },
+      })
+    })
+
+    // full access still receives asks from doom-loop checks and subagent sessions
+    const autoReplyFullAccess = Effect.fn('autoReplyFullAccess')(function* (
+      context: OpenCodeSessionContext,
+      request: PermissionRequest,
+      raw: unknown,
+    )
+    {
+      // once avoids widening supervised sessions sharing the same directory
+      const replied = yield* runOpenCodeSdk('permission.reply', (signal) =>
+        context.client.permission.reply({ requestID: request.id, reply: 'once' }, { signal }),
+      ).pipe(
+        Effect.timeout('10 seconds'),
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      )
+      if (!replied)
+      {
+        yield* openPermissionRequest(context, request, raw)
+      }
+    })
+
     const emitPendingOpenCodeRequest = Effect.fn('emitPendingOpenCodeRequest')(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeAskedRequestEvent,
@@ -1764,21 +1835,17 @@ export function makeOpenCodeAdapter(
         {
           return
         }
-        context.pendingPermissions.set(request.id, request)
-        yield* emit(context, {
-          ...(yield* buildEventBase({
-            threadId: context.session.threadId,
-            turnId: context.activeTurnId,
-            requestId: request.id,
-            raw,
-          })),
-          type: 'request.opened',
-          payload: {
-            requestType: mapPermissionToRequestType(request.permission),
-            detail: request.patterns.length > 0 ? request.patterns.join('\n') : request.permission,
-            args: request.metadata,
-          },
-        })
+        if (context.session.runtimeMode === 'full-access')
+        {
+          // keep the event pump free while OpenCode acknowledges the automatic reply
+          context.resolvedRequestIds.add(request.id)
+          context.autoRepliedRequestIds.add(request.id)
+          yield* autoReplyFullAccess(context, request, raw).pipe(
+            Effect.forkIn(context.sessionScope),
+          )
+          return
+        }
+        yield* openPermissionRequest(context, request, raw)
         return
       }
 
@@ -2897,6 +2964,7 @@ export function makeOpenCodeAdapter(
         openCodeSessionId: started.openCodeSession.id,
         relatedSessionIds: new Set([started.openCodeSession.id]),
         resolvedRequestIds: new Set(),
+        autoRepliedRequestIds: new Set(),
         emittedTerminalRequestIds: new Set(),
         requestRelationRetries: new Map(),
         pendingPermissions: new Map(),
