@@ -246,7 +246,7 @@ export function ProviderSetupSection(props: {
             <p role="status" className="text-xs text-muted-foreground">
               {installationStatusMessage}
             </p>
-            {installation?.message ? (
+            {installation?.message && installation.message !== installationStatusMessage ? (
               <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
                 {installation.message}
               </p>
