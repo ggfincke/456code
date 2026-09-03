@@ -654,6 +654,7 @@ function liveWorkEntryLabel(
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
+  viewedImagePath?: string | null,
 ): string | null
 {
   const blocks: string[] = []
@@ -670,7 +671,7 @@ function buildToolCallExpandedBody(
   {
     blocks.push(workEntry.command.trim())
   }
-  if (workEntry.detail?.trim())
+  if (workEntry.detail?.trim() && workEntry.detail.trim() !== viewedImagePath)
   {
     blocks.push(workEntry.detail.trim())
   }
@@ -837,6 +838,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
 })
 {
   const { workEntry, workspaceRoot } = props
+  const { threadRef, onImageExpand } = use(TimelineRowCtx)
   const activity = use(TimelineRowActivityCtx)
   const [expanded, setExpanded] = useState(false)
   const iconConfig = workToneIcon(workEntry.tone)
@@ -855,8 +857,16 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : rawPreview
   const displayText = preview ? `${heading} - ${preview}` : heading
   const metadataLabel = subagentMetadataLabel(workEntry)
-  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot)
-  const canExpand = expandedBody !== null
+  const viewedImagePath = workEntryViewedImagePath(workEntry)
+  const viewedImage =
+    viewedImagePath && threadRef
+      ? resolveViewedImageAsset(viewedImagePath, {
+          threadId: threadRef.threadId,
+          workspaceRoot,
+        })
+      : null
+  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot, viewedImagePath)
+  const canExpand = expandedBody !== null || viewedImage !== null
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry)
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -1020,15 +1030,24 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </div>
         </div>
       </div>
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
-            {expandedBody}
-          </pre>
+          {viewedImage && threadRef ? (
+            <ViewedWorkImage
+              environmentId={threadRef.environmentId}
+              image={viewedImage}
+              onExpand={(src, name) => onImageExpand({ images: [{ src, name }], index: 0 })}
+            />
+          ) : null}
+          {expandedBody ? (
+            <pre className="mt-2 max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+              {expandedBody}
+            </pre>
+          ) : null}
         </div>
       ) : null}
     </div>
