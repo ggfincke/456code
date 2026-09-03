@@ -770,16 +770,9 @@ const buildUserMessageEffect = Effect.fn('buildUserMessageEffect')(function* (
   // the last known `$skill` mention so the native CLI runs it and keeps the
   // surrounding prose in order.
   const dispatch = planClaudeSkillDispatch(text, dependencies.skillNames)
-  if (dispatch)
+  if (dispatch?.leadingText !== undefined)
   {
-    if (dispatch.leadingText !== undefined)
-    {
-      sdkContent.push({ type: 'text', text: dispatch.leadingText })
-    }
-  }
-  else if (text.length > 0)
-  {
-    sdkContent.push({ type: 'text', text })
+    sdkContent.push({ type: 'text', text: dispatch.leadingText })
   }
 
   for (const attachment of input.attachments ?? [])
@@ -832,9 +825,15 @@ const buildUserMessageEffect = Effect.fn('buildUserMessageEffect')(function* (
     )
   }
 
+  // image blocks must precede the final text so Claude can still expand a
+  // hand-typed or composer-generated slash command.
   if (dispatch)
   {
     sdkContent.push({ type: 'text', text: dispatch.commandText })
+  }
+  else if (text.length > 0)
+  {
+    sdkContent.push({ type: 'text', text })
   }
 
   return buildUserMessage({ sdkContent })
