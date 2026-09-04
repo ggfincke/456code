@@ -40,6 +40,22 @@ const asEventId = (value: string): EventId => EventId.make(value)
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value)
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 
+function makeSqlStatementCounter()
+{
+  let statements = 0
+  const tracer = Tracer.make({
+    span: (options) =>
+    {
+      if (options.name === 'sql.execute')
+      {
+        statements += 1
+      }
+      return new Tracer.NativeSpan(options)
+    },
+  })
+  return { tracer, count: () => statements }
+}
+
 const clearProjectionTables = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* ()
   {
@@ -552,6 +568,63 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
       {
         assert.deepEqual(threadDetail.value, snapshot.threads[0])
       }
+
+      const counter = makeSqlStatementCounter()
+      const context = yield* snapshotQuery
+        .getThreadRuntimeContext(ThreadId.make('thread-1'))
+        .pipe(Effect.withTracer(counter.tracer))
+      assert.equal(counter.count(), 1)
+      assert.equal(context._tag, 'Some')
+      if (context._tag === 'Some')
+      {
+        assert.deepEqual(context.value, {
+          id: ThreadId.make('thread-1'),
+          title: 'Thread 1',
+          modelSelection: snapshot.threads[0]?.modelSelection,
+          providerSwitch: snapshot.threads[0]?.providerSwitch,
+          session: snapshot.threads[0]?.session,
+        })
+      }
+
+      yield* sql`
+        UPDATE projection_threads
+        SET model_selection_json = '{"instanceId":"claude-secondary","model":"claude-opus-4-6"}',
+            provider_switch_json = '{"phase":"compacting","targetInstanceId":"claude-secondary","targetModel":"claude-opus-4-6","requestedAt":"2026-02-24T00:00:10.000Z","sourceModelSelection":{"instanceId":"codex","model":"gpt-5-codex"}}'
+        WHERE thread_id = 'thread-1'
+      `
+      yield* sql`
+        UPDATE projection_thread_sessions
+        SET status = 'starting', active_turn_id = NULL, provider_name = 'claudeAgent',
+            provider_instance_id = 'claude-secondary', last_error = 'Starting another session'
+        WHERE thread_id = 'thread-1'
+      `
+      const changedContext = yield* snapshotQuery.getThreadRuntimeContext(ThreadId.make('thread-1'))
+      assert.equal(changedContext._tag, 'Some')
+      if (changedContext._tag === 'Some')
+      {
+        assert.deepEqual(changedContext.value.modelSelection, {
+          instanceId: ProviderInstanceId.make('claude-secondary'),
+          model: 'claude-opus-4-6',
+        })
+        assert.deepEqual(changedContext.value.providerSwitch, {
+          phase: 'compacting',
+          targetInstanceId: ProviderInstanceId.make('claude-secondary'),
+          targetModel: 'claude-opus-4-6',
+          requestedAt: '2026-02-24T00:00:10.000Z',
+          sourceModelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+        })
+        assert.equal(changedContext.value.session?.status, 'starting')
+        assert.equal(changedContext.value.session?.activeTurnId, null)
+        assert.equal(changedContext.value.session?.providerName, 'claudeAgent')
+        assert.equal(
+          changedContext.value.session?.providerInstanceId,
+          ProviderInstanceId.make('claude-secondary'),
+        )
+        assert.equal(changedContext.value.session?.lastError, 'Starting another session')
+      }
     }),
   )
 
@@ -831,6 +904,31 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
         [ThreadId.make('thread-archived')],
       )
       assert.equal(archivedShellSnapshot.threads[0]?.archivedAt, '2026-04-06T00:00:06.000Z')
+
+      const activeContext = yield* snapshotQuery.getThreadRuntimeContext(
+        ThreadId.make('thread-active'),
+      )
+      assert.equal(activeContext._tag, 'Some')
+      if (activeContext._tag === 'Some')
+      {
+        assert.equal(activeContext.value.session, null)
+      }
+      for (const threadId of ['thread-archived', 'thread-missing'])
+      {
+        assert.equal(
+          (yield* snapshotQuery.getThreadRuntimeContext(ThreadId.make(threadId)))._tag,
+          'None',
+        )
+      }
+      yield* sql`
+        UPDATE projection_threads
+        SET deleted_at = '2026-04-06T00:00:08.000Z'
+        WHERE thread_id = 'thread-active'
+      `
+      assert.equal(
+        (yield* snapshotQuery.getThreadRuntimeContext(ThreadId.make('thread-active')))._tag,
+        'None',
+      )
     }),
   )
 

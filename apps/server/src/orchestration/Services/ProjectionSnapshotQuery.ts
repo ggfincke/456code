@@ -211,6 +211,19 @@ export interface ProjectionSnapshotQueryShape
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>
 
+  // read the active thread and session facts used to ingest provider events.
+  readonly getThreadRuntimeContext: (
+    threadId: ThreadId,
+  ) => Effect.Effect<
+    Option.Option<
+      Pick<
+        OrchestrationThreadShell,
+        'id' | 'title' | 'modelSelection' | 'providerSwitch' | 'session'
+      >
+    >,
+    ProjectionRepositoryError
+  >
+
   // check whether an active or archived thread has completed session import
   // without hydrating its imported transcript.
   readonly isThreadImportFinalized: (

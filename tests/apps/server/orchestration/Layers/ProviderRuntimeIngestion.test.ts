@@ -38,6 +38,7 @@ import * as PubSub from 'effect/PubSub'
 import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
+import * as Tracer from 'effect/Tracer'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { it as effectIt } from '@effect/vitest'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
@@ -88,6 +89,33 @@ const asEventId = (value: string): EventId => EventId.make(value)
 const asMessageId = (value: string): MessageId => MessageId.make(value)
 const asThreadId = (value: string): ThreadId => ThreadId.make(value)
 const asTurnId = (value: string): TurnId => TurnId.make(value)
+
+function makeRuntimeContextQueryCounter()
+{
+  let statements = 0
+  const tracer = Tracer.make({
+    span: (options) =>
+    {
+      const span = new Tracer.NativeSpan(options)
+      const end = span.end.bind(span)
+      span.end = (endTime, exit) =>
+      {
+        end(endTime, exit)
+        const query = span.attributes.get('db.query.text')
+        if (
+          typeof query === 'string' &&
+          query.includes('threads.model_selection_json AS "modelSelection"') &&
+          query.includes('LEFT JOIN projection_thread_sessions AS sessions')
+        )
+        {
+          statements += 1
+        }
+      }
+      return span
+    },
+  })
+  return { tracer, count: () => statements }
+}
 
 type LegacyProviderRuntimeEvent = {
   readonly type: string
@@ -357,6 +385,7 @@ describe('ProviderRuntimeIngestion', () =>
     // so the fixture needs a real repo rather than an empty .git directory
     NodeChildProcess.execFileSync('git', ['init', '--quiet'], { cwd: workspaceRoot })
     const provider = createProviderServiceHarness()
+    const runtimeContextCounter = makeRuntimeContextQueryCounter()
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
@@ -411,25 +440,27 @@ describe('ProviderRuntimeIngestion', () =>
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.succeed(Tracer.Tracer, runtimeContextCounter.tracer)),
     )
-    runtime = ManagedRuntime.make(layer)
-    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService))
-    const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery))
-    const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService))
-    const delivery = await runtime.runPromise(Effect.service(OrchestrationReactorDelivery))
-    const sql = await runtime.runPromise(Effect.service(SqlClient.SqlClient))
-    const admission = await runtime.runPromise(makeProviderRuntimeInboxTestAdmission)
+    const testRuntime = ManagedRuntime.make(layer)
+    runtime = testRuntime
+    const engine = await testRuntime.runPromise(Effect.service(OrchestrationEngineService))
+    const snapshotQuery = await testRuntime.runPromise(Effect.service(ProjectionSnapshotQuery))
+    const ingestion = await testRuntime.runPromise(Effect.service(ProviderRuntimeIngestionService))
+    const delivery = await testRuntime.runPromise(Effect.service(OrchestrationReactorDelivery))
+    const sql = await testRuntime.runPromise(Effect.service(SqlClient.SqlClient))
+    const admission = await testRuntime.runPromise(makeProviderRuntimeInboxTestAdmission)
     provider.setAdmission(admission.append)
     scope = await Effect.runPromise(Scope.make('sequential'))
-    await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)))
+    await testRuntime.runPromise(ingestion.start().pipe(Scope.provide(scope)))
     const drain = async () =>
     {
       await provider.flushAdmissions()
-      await Effect.runPromise(ingestion.drain)
+      await testRuntime.runPromise(ingestion.drain)
     }
 
     const createdAt = '2026-01-01T00:00:00.000Z'
-    await Effect.runPromise(
+    await testRuntime.runPromise(
       engine.dispatch({
         type: 'project.create',
         commandId: CommandId.make('cmd-provider-project-create'),
@@ -443,7 +474,7 @@ describe('ProviderRuntimeIngestion', () =>
         createdAt,
       }),
     )
-    await Effect.runPromise(
+    await testRuntime.runPromise(
       engine.dispatch({
         type: 'thread.create',
         commandId: CommandId.make('cmd-thread-create'),
@@ -461,7 +492,7 @@ describe('ProviderRuntimeIngestion', () =>
         createdAt,
       }),
     )
-    await Effect.runPromise(
+    await testRuntime.runPromise(
       engine.dispatch({
         type: 'thread.session.set',
         commandId: CommandId.make('cmd-session-seed'),
@@ -489,13 +520,14 @@ describe('ProviderRuntimeIngestion', () =>
 
     return {
       engine,
-      readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      readModel: () => testRuntime.runPromise(snapshotQuery.getSnapshot()),
       emit: provider.emit,
       setProviderSession: provider.setSession,
       readRuntimeIngestionProgress: () =>
         runtime!.runPromise(delivery.getProgress('provider-runtime-ingestion')),
       sql,
       drain,
+      runtimeContextQueryCount: runtimeContextCounter.count,
       domainSubscriptionCount: () => domainSubscriptionCount,
     }
   }
@@ -2117,7 +2149,7 @@ describe('ProviderRuntimeIngestion', () =>
     expect(proposedPlan?.planMarkdown).toBe('## Buffered plan\n\n- first\n- second')
   })
 
-  it('buffers assistant deltas by default until completion', async () =>
+  it('buffers assistant deltas with one runtime-context query per event until completion', async () =>
   {
     const harness = await createHarness()
     const now = '2026-01-01T00:00:00.000Z'
@@ -2136,21 +2168,27 @@ describe('ProviderRuntimeIngestion', () =>
         thread.session?.status === 'running' && thread.session?.activeTurnId === 'turn-buffered',
     )
 
-    harness.emit({
-      type: 'content.delta',
-      eventId: asEventId('evt-message-delta-buffered'),
-      provider: ProviderDriverKind.make('codex'),
-      createdAt: now,
-      threadId: asThreadId('thread-1'),
-      turnId: asTurnId('turn-buffered'),
-      itemId: asItemId('item-buffered'),
-      payload: {
-        streamKind: 'assistant_text',
-        delta: 'buffer me',
-      },
-    })
+    const eventCount = 16
+    const before = harness.runtimeContextQueryCount()
+    for (let index = 0; index < eventCount; index += 1)
+    {
+      harness.emit({
+        type: 'content.delta',
+        eventId: asEventId(`evt-message-delta-buffered-${index}`),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: now,
+        threadId: asThreadId('thread-1'),
+        turnId: asTurnId('turn-buffered'),
+        itemId: asItemId('item-buffered'),
+        payload: {
+          streamKind: 'assistant_text',
+          delta: 'a',
+        },
+      })
+    }
 
     await harness.drain()
+    expect(harness.runtimeContextQueryCount() - before).toBe(eventCount)
     const midReadModel = await harness.readModel()
     const midThread = midReadModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
     expect(
@@ -2182,7 +2220,7 @@ describe('ProviderRuntimeIngestion', () =>
     const message = thread.messages.find(
       (entry: ProviderRuntimeTestMessage) => entry.id === 'assistant:item-buffered',
     )
-    expect(message?.text).toBe('buffer me')
+    expect(message?.text).toBe('a'.repeat(eventCount))
     expect(message?.streaming).toBe(false)
   })
 
