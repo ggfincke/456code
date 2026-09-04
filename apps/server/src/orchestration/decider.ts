@@ -3,15 +3,18 @@
 
 import {
   EventId,
+  MessageId,
   MAX_SCRIPT_ID_LENGTH,
   normalizeCollaborationMode,
   SCRIPT_RUN_COMMAND_PATTERN,
+  UserInputRequestedPayload,
   type OrchestrateRunExecution,
   type OrchestrateRunExecutionJob,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
+  type OrchestrationThreadActivity,
   type ThreadOrchestratePlanResponseRequestedPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
   ThreadImportContinuationActivityPayload,
@@ -22,7 +25,9 @@ import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifi
 import * as DateTime from 'effect/DateTime'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
 import type * as PlatformError from 'effect/PlatformError'
+import * as Predicate from 'effect/Predicate'
 import * as Schema from 'effect/Schema'
 
 import { OrchestrationCommandInvariantError } from './Errors.ts'
@@ -48,6 +53,7 @@ import { projectEvent } from './projector.ts'
 
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN)
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
+const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload)
 
 function sameRunExecutionJob(
   left: OrchestrateRunExecutionJob,
@@ -281,6 +287,7 @@ function hasOpenBlockingRequest(thread: {
     if (requestId === null) continue
     if (isBlockingRequestActivityKind(activity.kind))
     {
+      if (activity.kind === 'user-input.requested' && payload?.responseMode === 'message') continue
       openRequestIds.add(requestId)
     }
     else if (isBlockingRequestResolutionActivityKind(activity.kind))
@@ -475,9 +482,11 @@ const decideCommandSequence = Effect.fn('decideCommandSequence')(function* ({
 export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand')(function* ({
   command,
   readModel,
+  userInputActivity,
 }: {
   readonly command: OrchestrationCommand
   readonly readModel: OrchestrationReadModel
+  readonly userInputActivity?: OrchestrationThreadActivity
 }): Effect.fn.Return<
   DecideOrchestrationCommandResult,
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
@@ -1950,11 +1959,78 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
 
     case 'thread.user-input.respond':
     {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       })
+      const request = userInputActivity
+      if (
+        request &&
+        Predicate.isObject(request.payload) &&
+        request.payload.responseMode === 'message'
+      )
+      {
+        const payload = decodeUserInputRequestedPayload(request.payload)
+        if (request.kind !== 'user-input.requested' || Option.isNone(payload))
+        {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: 'This question has already been answered.',
+          })
+        }
+        const replies: string[] = []
+        for (const question of payload.value.questions)
+        {
+          const answer = command.answers[question.id]
+          if (typeof answer !== 'string' || answer.trim().length === 0)
+          {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: 'Answer each question before sending.',
+            })
+          }
+          replies.push(`${question.question}\n${answer.trim()}`)
+        }
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            {
+              type: 'thread.activity.append',
+              commandId: command.commandId,
+              threadId: command.threadId,
+              createdAt: command.createdAt,
+              activity: {
+                id: EventId.make(`async-answer:${command.requestId}`),
+                kind: 'user-input.resolved',
+                summary: 'User input submitted',
+                tone: 'info',
+                turnId: request.turnId,
+                createdAt: command.createdAt,
+                payload: {
+                  requestId: command.requestId,
+                  responseMode: 'message',
+                  answers: command.answers,
+                },
+              },
+            },
+            {
+              type: 'thread.turn.start',
+              commandId: command.commandId,
+              threadId: command.threadId,
+              createdAt: command.createdAt,
+              runtimeMode: thread.runtimeMode,
+              interactionMode: thread.interactionMode,
+              message: {
+                messageId: MessageId.make(`async-answer:${command.requestId}`),
+                role: 'user',
+                text: replies.join('\n\n'),
+                attachments: [],
+              },
+            },
+          ],
+        })
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: 'thread',

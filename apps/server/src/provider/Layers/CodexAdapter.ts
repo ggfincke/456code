@@ -169,6 +169,42 @@ function trimText(value: string | undefined | null): string | undefined
   return trimmed && trimmed.length > 0 ? trimmed : undefined
 }
 
+const MAX_CODEX_ASYNC_QUESTIONS = 16
+const MAX_CODEX_ASYNC_QUESTION_TITLE_CHARS = 2_000
+const MAX_CODEX_ASYNC_QUESTION_OPTIONS = 32
+const MAX_CODEX_ASYNC_QUESTION_OPTION_CHARS = 1_000
+const decodeAsyncQuestions = Schema.decodeUnknownOption(
+  Schema.Array(
+    Schema.Struct({
+      title: Schema.String.check(
+        Schema.isPattern(/\S/),
+        Schema.isMaxLength(MAX_CODEX_ASYNC_QUESTION_TITLE_CHARS),
+      ),
+      options: Schema.optional(
+        Schema.NullOr(
+          Schema.Array(
+            Schema.String.check(
+              Schema.isPattern(/\S/),
+              Schema.isMaxLength(MAX_CODEX_ASYNC_QUESTION_OPTION_CHARS),
+            ),
+          ).check(Schema.isMaxLength(MAX_CODEX_ASYNC_QUESTION_OPTIONS)),
+        ),
+      ),
+    }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CODEX_ASYNC_QUESTIONS)),
+)
+
+function readCodexAsyncQuestions(
+  item: Extract<CodexLifecycleItem, { type: 'agentMessage' }> | null,
+)
+{
+  if (item?.delivery !== 'async') return undefined
+  return Option.getOrUndefined(decodeAsyncQuestions(item.questions))?.map((question) => ({
+    title: question.title.trim(),
+    options: (question.options ?? []).map((option) => option.trim()),
+  }))
+}
+
 // this provider reports windows but never a status, so the pre-failure band has to be derived.
 // 90% used is the same line isProviderUsageWindowDanger draws in the web usage meter, so the
 // work-log row and the meter agree instead of disagreeing about when a limit is about to bite
@@ -1102,6 +1138,29 @@ function mapToRuntimeEvents(
     if (!item)
     {
       return []
+    }
+    const asyncQuestions = readCodexAsyncQuestions(item.type === 'agentMessage' ? item : null)
+    if (asyncQuestions)
+    {
+      return [
+        {
+          ...runtimeEventBase(event, canonicalThreadId),
+          type: 'user-input.requested',
+          requestId: RuntimeRequestId.make(`codex-async:${canonicalThreadId}:${item.id}`),
+          eventId: EventId.make(`codex-async:${canonicalThreadId}:${item.id}`),
+          payload: {
+            responseMode: 'message',
+            questions: asyncQuestions.map((question, index) => ({
+              id: String(index),
+              header: 'Question',
+              question: question.title,
+              options: (question.options ?? []).map((label) => ({ label, description: '' })),
+              allowCustomAnswer: true,
+              multiSelect: false,
+            })),
+          },
+        },
+      ]
     }
     const itemType = toCanonicalItemType(item.type)
     if (itemType === 'plan')

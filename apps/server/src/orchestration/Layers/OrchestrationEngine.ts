@@ -320,9 +320,16 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 }
               }
 
+              const userInputActivity =
+                envelope.command.type === 'thread.user-input.respond'
+                  ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
+                  : Option.none()
               const eventBase = yield* decideOrchestrationCommand({
                 command: envelope.command,
                 readModel: commandReadModel,
+                ...(Option.isSome(userInputActivity)
+                  ? { userInputActivity: userInputActivity.value }
+                  : {}),
               }).pipe(
                 Effect.provideService(Crypto.Crypto, crypto),
                 Effect.mapError((cause) =>

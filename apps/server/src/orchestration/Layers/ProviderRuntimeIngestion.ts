@@ -1279,7 +1279,8 @@ const make = Effect.gen(function* ()
       }
 
       const pauseForUserTurnId =
-        event.type === 'request.opened' || event.type === 'user-input.requested'
+        event.type === 'request.opened' ||
+        (event.type === 'user-input.requested' && event.payload.responseMode !== 'message')
           ? toTurnId(event.turnId)
           : undefined
       if (pauseForUserTurnId)

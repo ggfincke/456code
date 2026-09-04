@@ -2,6 +2,7 @@
 // loads orchestration projection snapshots
 
 import {
+  ApprovalRequestId,
   EventId,
   ModelSelection,
   NonNegativeInt,
@@ -143,6 +144,10 @@ const ThreadActivityKindsLookupInput = Schema.Struct({
 const ThreadActivityIdsLookupInput = Schema.Struct({
   activityIds: Schema.Array(EventId),
 })
+const UserInputActivityLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  requestId: ApprovalRequestId,
+})
 const ProjectionThreadActivityIdRowSchema = Schema.Struct({ activityId: EventId })
 const ProjectionThreadRuntimeContextDbRowSchema = Schema.Struct({
   id: ThreadId,
@@ -247,7 +252,10 @@ const THREAD_DETAIL_ACTIVITY_SELECTION_SQL = `
       INDEXED BY idx_projection_thread_activities_command_relevant
       ON activity.thread_id = thread.thread_id
     WHERE thread.thread_id = ?
-      AND thread.pending_user_input_count > 0
+      AND (
+        thread.pending_user_input_count > 0
+        OR json_extract(activity.payload_json, '$.responseMode') = 'message'
+      )
       AND activity.kind IN (
         ${THREAD_DETAIL_COMMAND_ACTIVITY_SQL_LIST}
       )
@@ -397,6 +405,39 @@ function mapThreadActivityRow(
 const makeProjectionSnapshotQuery = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
+  const getUserInputActivityRow = SqlSchema.findOneOption({
+    Request: UserInputActivityLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, requestId }) => sql`
+      SELECT
+        activity_id AS "activityId",
+        thread_id AS "threadId",
+        turn_id AS "turnId",
+        tone,
+        kind,
+        summary,
+        payload_json AS "payload",
+        sequence,
+        created_at AS "createdAt"
+      FROM projection_thread_activities
+      WHERE thread_id = ${threadId}
+        AND kind IN ('user-input.requested', 'user-input.resolved')
+        AND json_valid(payload_json) = 1
+        AND json_extract(payload_json, '$.requestId') = ${requestId}
+      ORDER BY sequence DESC, created_at DESC, activity_id DESC
+      LIMIT 1
+    `,
+  })
+  const getUserInputActivity: ProjectionSnapshotQueryShape['getUserInputActivity'] = (input) =>
+    getUserInputActivityRow(input).pipe(
+      Effect.map(Option.map(mapThreadActivityRow)),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          'ProjectionSnapshotQuery.getUserInputActivity:query',
+          'ProjectionSnapshotQuery.getUserInputActivity:decodeRow',
+        ),
+      ),
+    )
   const readThreadSearch = SqlSchema.findAll({
     Request: ThreadSearchRequest,
     Result: ThreadSearchRow,
@@ -3655,6 +3696,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
 
   return {
     getCommandReadModel,
+    getUserInputActivity,
     searchThreads,
     getSnapshot,
     getShellSnapshot,
