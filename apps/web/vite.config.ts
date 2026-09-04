@@ -1,7 +1,6 @@
 // apps/web/vite.config.ts
 // configure web Vite+ behavior
 
-import tailwindcss from '@tailwindcss/vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
@@ -13,6 +12,7 @@ import pkg from './package.json' with { type: 'json' }
 import * as NodeURL from 'node:url'
 
 import { loadRepoEnv } from '../../scripts/lib/public-config'
+import { tailwindPlugins } from './vite/tailwind'
 
 // tsconfigPaths only applies "~/*" to files it considers part of this package,
 // so the relocated tests under repo-root tests/apps/web can't resolve it. An
@@ -123,7 +123,7 @@ export default defineConfig(() =>
         parserOpts: { plugins: ['typescript', 'jsx'] },
         presets: [reactCompilerPreset()],
       }),
-      tailwindcss(),
+      tailwindPlugins(bundledDev),
     ],
     optimizeDeps: {
       include: [

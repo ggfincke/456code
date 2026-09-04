@@ -29,6 +29,7 @@
     "@types/pngjs": "6.0.5",
     "@types/react": "~19.2.18",
     "@types/react-dom": "~19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
     "@xterm/xterm": "^6.0.0",
     "effect": "catalog:",
     "effect-acp": "workspace:*",
