@@ -16,7 +16,6 @@ describe('applyAuthAccessStreamEvent', () =>
   {
     const pairingLink = {
       id: 'pairing-link',
-      credential: 'credential',
       scopes: ['orchestration:read'],
       subject: 'subject',
       label: 'Phone',
@@ -65,7 +64,6 @@ describe('applyAuthAccessStreamEvent', () =>
         pairingLinks: [
           {
             id: 'pairing-link',
-            credential: 'credential',
             scopes: ['orchestration:read'],
             subject: 'subject',
             label: 'Phone',

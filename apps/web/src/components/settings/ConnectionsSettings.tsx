@@ -21,6 +21,7 @@ import {
   AuthTerminalOperateScope,
   type AuthClientSession,
   type AuthEnvironmentScope,
+  type AuthPairingCredentialResult,
   type AuthPairingLink,
   type AdvertisedEndpoint,
   type DesktopDiscoveredSshHost,
@@ -70,7 +71,6 @@ import { Button } from '../ui/button'
 import { Group, GroupSeparator } from '../ui/group'
 import { AnimatedHeight } from '../AnimatedHeight'
 import {
-  createServerPairingCredential,
   revokeOtherServerClientSessions,
   revokeServerClientSession,
   revokeServerPairingLink,
@@ -137,6 +137,13 @@ import { parsePairingUrlFields, parseRemotePairingFields } from './connections/p
 const DEFAULT_TAILSCALE_SERVE_PORT = 443
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = []
 const EMPTY_DISCOVERED_SSH_HOSTS: ReadonlyArray<DesktopDiscoveredSshHost> = []
+const EMPTY_PAIRING_CREDENTIALS: ReadonlyMap<string, string> = new Map()
+
+type EnvironmentPairingCredentialState = {
+  readonly environmentId: EnvironmentId | null
+  readonly generation: number
+  readonly credentials: ReadonlyMap<string, string>
+}
 
 // sentinels for the consolidated WSL backend picker. The colon is
 // rejected by DISTRO_NAME_PATTERN (validated on the desktop side) so
@@ -219,6 +226,49 @@ export function ConnectionsSettings()
   const [desktopAccessManagementMutationError, setDesktopAccessManagementMutationError] = useState<
     string | null
   >(null)
+  // creation responses stay scoped to the environment generation that requested them
+  const [pairingCredentialState, setPairingCredentialState] =
+    useState<EnvironmentPairingCredentialState>(() => ({
+      environmentId: primaryEnvironmentId,
+      generation: 0,
+      credentials: EMPTY_PAIRING_CREDENTIALS,
+    }))
+  const pairingCredentialGeneration =
+    pairingCredentialState.environmentId === primaryEnvironmentId
+      ? pairingCredentialState.generation
+      : pairingCredentialState.generation + 1
+  const createdPairingCredentials =
+    pairingCredentialState.environmentId === primaryEnvironmentId
+      ? pairingCredentialState.credentials
+      : EMPTY_PAIRING_CREDENTIALS
+  if (pairingCredentialState.environmentId !== primaryEnvironmentId)
+  {
+    setPairingCredentialState({
+      environmentId: primaryEnvironmentId,
+      generation: pairingCredentialGeneration,
+      credentials: EMPTY_PAIRING_CREDENTIALS,
+    })
+  }
+  const handlePairingLinkCreated = useCallback(
+    (created: AuthPairingCredentialResult) =>
+    {
+      setPairingCredentialState((current) =>
+      {
+        if (
+          current.environmentId !== primaryEnvironmentId ||
+          current.generation !== pairingCredentialGeneration
+        )
+        {
+          return current
+        }
+        return {
+          ...current,
+          credentials: new Map(current.credentials).set(created.id, created.credential),
+        }
+      })
+    },
+    [pairingCredentialGeneration, primaryEnvironmentId],
+  )
   const [revokingDesktopPairingLinkId, setRevokingDesktopPairingLinkId] = useState<string | null>(
     null,
   )
@@ -1449,6 +1499,7 @@ export function ConnectionsSettings()
         presentation={presentation}
         isLoading={isLoadingDesktopAccessManagement}
         pairingLinks={visibleDesktopPairingLinks}
+        createdPairingCredentials={createdPairingCredentials}
         clientSessions={desktopClientSessions}
         revokingPairingLinkId={revokingDesktopPairingLinkId}
         revokingClientSessionId={revokingDesktopClientSessionId}
@@ -1565,6 +1616,7 @@ export function ConnectionsSettings()
               title="Authorized clients"
               headerAction={
                 <AuthorizedClientsHeaderAction
+                  onPairingLinkCreated={handlePairingLinkCreated}
                   clientSessions={desktopClientSessions}
                   isRevokingOtherClients={isRevokingOtherDesktopClients}
                   onRevokeOtherClients={handleRevokeOtherDesktopClients}
