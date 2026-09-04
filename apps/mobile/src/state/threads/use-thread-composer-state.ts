@@ -40,6 +40,7 @@ import {
   appendComposerDraftAttachments,
   appendComposerDraftText,
   clearComposerDraftContent,
+  ComposerDraftPersistenceError,
   composerDraftsAtom,
   ensureComposerDraftsLoaded,
   getComposerDraftSnapshot,
@@ -338,7 +339,16 @@ export function useThreadComposerState()
     enqueuePromise.catch((error: unknown) =>
     {
       // append attachments uncapped so newer draft images cannot displace them
-      void mergeComposerDraftContent(threadKey, { text, attachments: [] })
+      void mergeComposerDraftContent(threadKey, { text, attachments: [] }).catch(
+        (restoreError: unknown) =>
+        {
+          setPendingConnectionError(
+            restoreError instanceof ComposerDraftPersistenceError
+              ? restoreError.message
+              : 'Failed to restore the queued message draft.',
+          )
+        },
+      )
       appendComposerDraftAttachments(threadKey, attachments)
       setPendingConnectionError(
         error instanceof Error ? error.message : 'Failed to save the queued message.',
