@@ -582,7 +582,7 @@ function toNormalizedWorkLogEntry(
     activity.kind === 'task.completed'
   const taskSummary = isTaskActivity ? asNonEmptyString(payload?.summary) : null
   const taskDetailAsLabel =
-    isTaskActivity && !taskSummary ? asNonEmptyString(payload?.detail) : null
+    isTaskActivity && !taskSummary && !toolTitle ? asNonEmptyString(payload?.detail) : null
   const itemType = extractWorkLogItemType(payload)
   const requestKind = extractWorkLogRequestKind(payload, requestKindFromRequestType)
   const toolCallId = isTaskActivity ? null : extractToolCallId(activity, payload)
@@ -614,7 +614,7 @@ function toNormalizedWorkLogEntry(
           ? 'info'
           : activity.tone,
     activityKind: activity.kind,
-    ...(detail ? { detail } : {}),
+    ...(detail && detail !== toolTitle ? { detail } : {}),
     ...(viewedImagePath ? { viewedImagePath } : {}),
     ...(commandPreview.command ? { command: commandPreview.command } : {}),
     ...(commandPreview.rawCommand ? { rawCommand: commandPreview.rawCommand } : {}),

@@ -64,6 +64,42 @@ function makeThread(
 
 describe('buildThreadFeed', () =>
 {
+  it('keeps an idle subagent batch inactive with its unavailable-child detail rather than a completion', () =>
+  {
+    const thread = makeThread({
+      id: ThreadId.make('idle-batch'),
+      projectId: ProjectId.make('project'),
+      title: 'Batch',
+      activities: [
+        makeActivity({
+          id: EventId.make('idle-batch-update'),
+          kind: 'task.updated',
+          summary: 'Task idle',
+          createdAt: '2026-09-09T12:00:00.000Z',
+          payload: {
+            taskId: 'launch-call',
+            taskType: 'subagent_batch',
+            status: 'idle',
+            title: 'Antigravity subagent batch',
+            detail: 'Turn ended. Individual agent status is unavailable.',
+          },
+        }),
+      ],
+    })
+    expect(buildThreadFeed(thread)[0]).toMatchObject({
+      type: 'activity-group',
+      activities: [
+        {
+          summary: 'Antigravity subagent batch',
+          status: null,
+          icon: 'agent',
+          detail: 'Turn ended. Individual agent status is unavailable.',
+          canExpand: true,
+        },
+      ],
+    })
+  })
+
   it('preserves a viewed workspace image path for the authenticated expanded work renderer', () =>
   {
     const thread = makeThread({

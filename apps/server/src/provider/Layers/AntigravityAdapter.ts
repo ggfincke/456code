@@ -196,7 +196,7 @@ function subagentLinkage(toolCallId: string)
 {
   return {
     taskId: RuntimeTaskId.make(toolCallId),
-    taskType: 'subagent',
+    taskType: 'subagent_batch',
     toolUseId: toolCallId,
     title: 'Antigravity subagent batch',
   } as const
