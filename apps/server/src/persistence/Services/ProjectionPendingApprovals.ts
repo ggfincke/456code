@@ -65,6 +65,11 @@ export interface ProjectionPendingApprovalRepositoryShape
     input: ListProjectionPendingApprovalsInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionPendingApproval>, ProjectionRepositoryError>
 
+  // count pending approvals without loading resolved request history.
+  readonly countPendingByThreadId: (
+    input: ListProjectionPendingApprovalsInput,
+  ) => Effect.Effect<number, ProjectionRepositoryError>
+
   // read a pending approval row by request id.
   readonly getByRequestId: (
     input: GetProjectionPendingApprovalInput,

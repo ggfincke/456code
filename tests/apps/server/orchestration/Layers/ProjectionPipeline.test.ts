@@ -3072,6 +3072,183 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
     }),
   )
 
+  it.effect('maintains shell summaries without reading message bodies', () =>
+    Effect.gen(function* ()
+    {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const eventStore = yield* OrchestrationEventStore
+      const sql = yield* SqlClient.SqlClient
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
+
+      const { threadId } = yield* seedStalePendingThread(
+        appendAndProject,
+        'shell-summary',
+        '2026-03-01T08:00:00.000Z',
+      )
+      const turnId = TurnId.make('turn-shell-summary-1')
+
+      yield* appendAndProject({
+        type: 'thread.message-sent',
+        eventId: EventId.make('evt-shell-summary-message'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-03-01T08:00:02.000Z',
+        commandId: CommandId.make('cmd-shell-summary-message'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-shell-summary-message'),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.make('message-shell-summary-user'),
+          role: 'user',
+          text: 'please do the thing',
+          turnId,
+          streaming: false,
+          createdAt: '2026-03-01T08:00:02.000Z',
+          updatedAt: '2026-03-01T08:00:02.000Z',
+        },
+      })
+
+      yield* appendAndProject({
+        type: 'thread.activity-appended',
+        eventId: EventId.make('evt-shell-summary-user-input'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-03-01T08:00:03.000Z',
+        commandId: CommandId.make('cmd-shell-summary-user-input'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-shell-summary-user-input'),
+        metadata: {},
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.make('activity-shell-summary-user-input'),
+            tone: 'info',
+            kind: 'user-input.requested',
+            summary: 'User input requested',
+            payload: {
+              requestId: 'user-input-request-shell-summary-1',
+              questions: [
+                {
+                  id: 'confirm',
+                  header: 'Confirm',
+                  question: 'Proceed?',
+                  options: [{ label: 'yes', description: 'Proceed' }],
+                },
+              ],
+            },
+            turnId,
+            createdAt: '2026-03-01T08:00:03.000Z',
+          },
+        },
+      })
+
+      // invalid attachment metadata fails the former full-message summary read.
+      yield* sql`
+        UPDATE projection_thread_messages
+        SET attachments_json = '{not-json'
+        WHERE thread_id = ${threadId}
+      `
+      yield* sql`
+        INSERT INTO projection_pending_approvals (
+          request_id, thread_id, turn_id, status, decision, created_at, resolved_at
+        ) VALUES
+          ('summary-pending', ${threadId}, NULL, 'pending', NULL,
+           '2026-03-01T08:00:04.000Z', NULL),
+          ('summary-resolved', ${threadId}, NULL, 'resolved', 'accept',
+           '2026-03-01T08:00:04.000Z', '2026-03-01T08:00:04.000Z'),
+          ('summary-other-thread', 'thread-shell-summary-other', NULL, 'pending', NULL,
+           '2026-03-01T08:00:04.000Z', NULL)
+      `
+      yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id, thread_id, turn_id, plan_markdown, implemented_at,
+          implementation_thread_id, created_at, updated_at
+        ) VALUES (
+          'summary-plan', ${threadId}, ${turnId}, '# Plan', NULL,
+          NULL, '2026-03-01T08:00:04.000Z', '2026-03-01T08:00:04.000Z'
+        )
+      `
+
+      const refreshEvents = [
+        {
+          type: 'thread.session-set',
+          eventId: EventId.make('evt-shell-summary-session'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: '2026-03-01T08:00:05.000Z',
+          commandId: CommandId.make('cmd-shell-summary-session'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-shell-summary-session'),
+          metadata: {},
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: 'ready',
+              providerName: 'codex',
+              runtimeMode: 'approval-required',
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: '2026-03-01T08:00:05.000Z',
+            },
+          },
+        },
+        {
+          type: 'thread.turn-diff-completed',
+          eventId: EventId.make('evt-shell-summary-turn'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: '2026-03-01T08:00:06.000Z',
+          commandId: CommandId.make('cmd-shell-summary-turn'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-shell-summary-turn'),
+          metadata: {},
+          payload: {
+            threadId,
+            turnId,
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.make('refs/t3/checkpoints/thread-shell-summary/1'),
+            status: 'ready',
+            files: [],
+            assistantMessageId: MessageId.make('message-shell-summary-assistant'),
+            completedAt: '2026-03-01T08:00:06.000Z',
+          },
+        },
+      ] satisfies ReadonlyArray<Parameters<typeof eventStore.append>[0]>
+
+      for (const event of refreshEvents)
+      {
+        yield* appendAndProject(event)
+        const summary = yield* sql<{
+          readonly latestUserMessageAt: string | null
+          readonly pendingApprovalCount: number
+          readonly pendingUserInputCount: number
+          readonly hasActionableProposedPlan: number
+        }>`
+          SELECT
+            latest_user_message_at AS "latestUserMessageAt",
+            pending_approval_count AS "pendingApprovalCount",
+            pending_user_input_count AS "pendingUserInputCount",
+            has_actionable_proposed_plan AS "hasActionableProposedPlan"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `
+        assert.deepEqual(summary, [
+          {
+            latestUserMessageAt: '2026-03-01T08:00:02.000Z',
+            pendingApprovalCount: 1,
+            pendingUserInputCount: 1,
+            hasActionableProposedPlan: 1,
+          },
+        ])
+      }
+    }),
+  )
+
   it.effect('ignores non-stale provider approval response failures', () =>
     Effect.gen(function* ()
     {
