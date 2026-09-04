@@ -42,6 +42,16 @@ export interface SelectableMarkdownSkill
   readonly displayName?: string | null
 }
 
+export interface MarkdownImageRequest
+{
+  readonly href: string
+  readonly alt: string | null
+  readonly title: string | null
+}
+
+// let the host resolve environment-owned image paths before rendering
+export type MarkdownImageRenderer = (image: MarkdownImageRequest) => import('react').ReactNode
+
 export interface MarkdownFileContextMenuAction
 {
   readonly id: string
@@ -64,6 +74,7 @@ export interface SelectableMarkdownTextProps
   readonly onLinkPress?: (href: string) => void
   readonly fileContextMenu?: (href: string) => MarkdownFileContextMenu | undefined
   readonly onFileContextMenuAction?: (href: string, actionId: string) => void
+  readonly renderImage?: MarkdownImageRenderer
   readonly marginTop?: number
   readonly marginBottom?: number
 }

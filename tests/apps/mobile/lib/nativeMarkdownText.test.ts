@@ -33,7 +33,10 @@ vi.mock(
 )
 vi.mock(
   '../../../../apps/mobile/modules/code456-markdown-text/src/NativeMarkdownBlock.ios',
-  () => ({ NativeMarkdownBlock: () => null }),
+  () => ({
+    MarkdownImageRendererContext: createContext(null),
+    NativeMarkdownBlock: () => null,
+  }),
 )
 
 import { SelectableMarkdownText } from '../../../../apps/mobile/modules/code456-markdown-text/src/SelectableMarkdownText.ios'

@@ -11,7 +11,7 @@ import {
   nativeMarkdownDocumentRuns,
   nativeMarkdownWithPreservedSoftBreaks,
 } from './nativeMarkdownText'
-import { NativeMarkdownBlock } from './NativeMarkdownBlock.ios'
+import { MarkdownImageRendererContext, NativeMarkdownBlock } from './NativeMarkdownBlock.ios'
 import {
   MarkdownFileActionsContext,
   NativeMarkdownSelectableText,
@@ -26,6 +26,8 @@ const EMPTY_SKILLS: ReadonlyArray<SelectableMarkdownSkill> = []
 export type {
   MarkdownCodeHighlighter,
   MarkdownHighlightedToken,
+  MarkdownImageRenderer,
+  MarkdownImageRequest,
   NativeMarkdownTextStyle,
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,
@@ -45,7 +47,7 @@ export function SelectableMarkdownText({
   onLinkPress,
   fileContextMenu,
   onFileContextMenuAction,
-
+  renderImage,
   marginTop = 0,
   marginBottom = 0,
 }: SelectableMarkdownTextProps)
@@ -84,6 +86,7 @@ export function SelectableMarkdownText({
 
   return (
     <MarkdownFileActionsContext.Provider value={fileActions}>
+      <MarkdownImageRendererContext.Provider value={renderImage ?? null}>
         {/* a percentage width creates cyclic measurement in shrink-to-fit message bubbles. */}
         <View style={{ flexShrink: 1, minWidth: 0, marginTop, marginBottom }}>
           {chunks === undefined ? (
@@ -124,6 +127,7 @@ export function SelectableMarkdownText({
             })
           )}
         </View>
+      </MarkdownImageRendererContext.Provider>
     </MarkdownFileActionsContext.Provider>
   )
 }

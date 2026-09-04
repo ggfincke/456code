@@ -22,6 +22,7 @@ import { renderAssistantCitationsAsText } from '@t3tools/shared/assistantCitatio
 import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
+  type MarkdownImageRenderer,
   type SelectableMarkdownSkill,
 } from '../../../native/SelectableMarkdownText'
 
@@ -165,6 +166,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
   readonly markdownStyles: MarkdownStyleSets['assistant']
   readonly markdownLinkHandlers: MarkdownLinkHandlers
   readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined
+  readonly renderImage: MarkdownImageRenderer
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined
 })
 {
@@ -192,14 +194,24 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
         markdown={markdown}
         skills={props.skills}
         textStyle={props.markdownStyles.nativeTextStyle}
+        renderImage={props.renderImage}
         {...props.markdownLinkHandlers}
       />
     ) : (
       <Markdown
         key={`markdown:${segment.sourceOffset}`}
         options={{ gfm: true }}
-        renderers={props.markdownStyles.renderers}
-
+        renderers={{
+          ...props.markdownStyles.renderers,
+          image: ({ node }) =>
+            node.href
+              ? (props.renderImage({
+                  href: node.href,
+                  alt: node.alt ?? null,
+                  title: node.title ?? null,
+                }) ?? undefined)
+              : undefined,
+        }}
         styles={props.markdownStyles.styles}
         theme={props.markdownStyles.theme}
       >
@@ -221,6 +233,7 @@ export function renderFeedEntry(
     readonly onToggleWorkRow: (rowId: string) => void
     readonly onToggleTurnFold: (turnId: TurnId) => void
     readonly onPressImage: (uri: string, headers?: Record<string, string>) => void
+    readonly renderImage: MarkdownImageRenderer
     readonly markdownLinkHandlers: MarkdownLinkHandlers
     readonly iconSubtleColor: string | import('react-native').ColorValue
     readonly userBubbleColor: string | import('react-native').ColorValue
@@ -369,6 +382,7 @@ export function renderFeedEntry(
             markdownStyles={styles}
             markdownLinkHandlers={props.markdownLinkHandlers}
             onUseArtifactTemplate={props.onUseArtifactTemplate}
+            renderImage={props.renderImage}
             skills={props.skills}
           />
         ) : null}

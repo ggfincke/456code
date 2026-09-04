@@ -6,6 +6,7 @@ import { type LegendListRef } from '@legendapp/list/react-native'
 import { HeaderHeightContext } from '@react-navigation/elements'
 import { useNavigation } from '@react-navigation/native'
 import type { EnvironmentId, MessageId, ThreadId, TurnId } from '@t3tools/contracts'
+import { resolveMediaSource } from '@t3tools/client-runtime/media-source'
 import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from '@t3tools/shared/chatList'
 import * as Haptics from 'expo-haptics'
@@ -41,6 +42,7 @@ import { copyTextWithHaptic } from '../../lib/copyTextWithHaptic'
 import { useThemeColor } from '../../lib/useThemeColor'
 import {
   type MarkdownFileContextMenu,
+  type MarkdownImageRenderer,
   type SelectableMarkdownSkill,
 } from '../../native/SelectableMarkdownText'
 
@@ -59,6 +61,11 @@ import { useAppearancePreferences } from '../settings/appearance/AppearancePrefe
 import { collapsedWorkLogHeight, WORK_GROUP_TOGGLE_HEIGHT } from './thread-work-log'
 import type { ThreadContentPresentation } from './threadContentPresentation'
 import { fileChipMenu, resolveFileChipTarget, type FileChipAction } from './fileChipMenu'
+import {
+  ThreadMarkdownImage,
+  ThreadMarkdownImageUnavailable,
+  ThreadMarkdownImageView,
+} from './ThreadMarkdownImage'
 
 // animate content shifts only near the live end of the feed
 const FEED_ITEM_LAYOUT_DURATION_MS = 180
@@ -556,6 +563,41 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
   {
     setExpandedImage({ uri, headers })
   }, [])
+  const renderMarkdownImage = useCallback<MarkdownImageRenderer>(
+    (image) =>
+    {
+      const media = resolveMediaSource(image.href, {
+        threadId: props.threadId,
+        workspaceRoot: props.workspaceRoot,
+        imageEmbed: true,
+      })
+      if (media === null || media.kind !== 'image' || media.access === 'unavailable')
+      {
+        return <ThreadMarkdownImageUnavailable alt={image.alt} />
+      }
+      if (media.access === 'direct')
+      {
+        return (
+          <ThreadMarkdownImageView
+            uri={media.uri}
+            unavailable={false}
+            alt={image.alt}
+            onPressImage={onPressImage}
+          />
+        )
+      }
+      return (
+        <ThreadMarkdownImage
+          environmentId={props.environmentId}
+          resource={media.resource}
+          alt={image.alt}
+          srcFragment={media.srcFragment}
+          onPressImage={onPressImage}
+        />
+      )
+    },
+    [onPressImage, props.environmentId, props.threadId, props.workspaceRoot],
+  )
 
   // premeasure fixed chrome rows and let messages use per-type estimates
   const workingRowHeight =
@@ -597,6 +639,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
         onToggleWorkRow,
         onToggleTurnFold,
         onPressImage,
+        renderImage: renderMarkdownImage,
         markdownLinkHandlers,
         iconSubtleColor,
         userBubbleColor,
@@ -621,6 +664,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
       onCopyWorkRow,
       markdownLinkHandlers,
       onPressImage,
+      renderMarkdownImage,
       onToggleTurnFold,
       onToggleWorkGroup,
       onToggleWorkRow,
