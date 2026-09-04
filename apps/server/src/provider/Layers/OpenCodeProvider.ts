@@ -327,6 +327,7 @@ export const makePendingOpenCodeProvider = (
       [],
       openCodeSettings.customModels,
       DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+      openCodeSettings.customModelMetadata,
     )
 
     if (!openCodeSettings.enabled)
@@ -375,6 +376,7 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
   const resolvedEnvironment = environment ?? process.env
   const checkedAt = DateTime.formatIso(yield* DateTime.now)
   const customModels = openCodeSettings.customModels
+  const customModelMetadata = openCodeSettings.customModelMetadata
   const isExternalServer = openCodeSettings.serverUrl.trim().length > 0
 
   const fallback = (
@@ -393,7 +395,12 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
       presentation: OPENCODE_PRESENTATION,
       enabled: openCodeSettings.enabled,
       checkedAt,
-      models: providerModelsFromSettings([], customModels, DEFAULT_OPENCODE_MODEL_CAPABILITIES),
+      models: providerModelsFromSettings(
+        [],
+        customModels,
+        DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+        customModelMetadata,
+      ),
       probe: {
         installed: failure.installed,
         version,
@@ -410,7 +417,12 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
       presentation: OPENCODE_PRESENTATION,
       enabled: false,
       checkedAt,
-      models: providerModelsFromSettings([], customModels, DEFAULT_OPENCODE_MODEL_CAPABILITIES),
+      models: providerModelsFromSettings(
+        [],
+        customModels,
+        DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+        customModelMetadata,
+      ),
       probe: {
         installed: false,
         version: null,
@@ -460,7 +472,12 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
         presentation: OPENCODE_PRESENTATION,
         enabled: openCodeSettings.enabled,
         checkedAt,
-        models: providerModelsFromSettings([], customModels, DEFAULT_OPENCODE_MODEL_CAPABILITIES),
+        models: providerModelsFromSettings(
+          [],
+          customModels,
+          DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+          customModelMetadata,
+        ),
         probe: {
           installed: true,
           version,
@@ -516,6 +533,7 @@ export const checkOpenCodeProviderStatus = Effect.fn('checkOpenCodeProviderStatu
     flattenOpenCodeModels(inventory),
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+    customModelMetadata,
   )
   const connectedCount = inventory.providerList.connected.length
   const skills = openCodeSkillsToServerProviderSkills(inventory.skills)

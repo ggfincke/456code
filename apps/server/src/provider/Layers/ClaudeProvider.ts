@@ -16,6 +16,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
+import * as Ref from 'effect/Ref'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 import {
   createModelCapabilities,
@@ -50,6 +51,7 @@ import { resolveClaudeSdkExecutablePath } from '../Drivers/ClaudeExecutable.ts'
 import { makeClaudeEnvironment } from '../Drivers/ClaudeHome.ts'
 import { discoverClaudeSkills } from '../Drivers/ClaudeSkills.ts'
 import { CLAUDE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
+import { type ClaudeScopedLimitNames, recordClaudeScopedLimitNames } from './claudeUsageLimits.ts'
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -742,6 +744,8 @@ function normalizeClaudeWindow(input: {
   readonly id: string
   readonly label: string
   readonly scopeLabel?: string | undefined
+  readonly kind: 'session' | 'weekly' | 'monthly'
+  readonly windowDurationMins: number
   readonly utilization: number | null | undefined
   readonly resetsAt?: string | null | undefined
 }): ServerProviderAccountUsageWindow | null
@@ -752,8 +756,10 @@ function normalizeClaudeWindow(input: {
     id: input.id,
     label: input.label,
     ...(input.scopeLabel ? { scopeLabel: input.scopeLabel } : {}),
+    kind: input.kind,
     usedPercent: clampClaudeUsagePercent(input.utilization),
     resetsAt: input.resetsAt ?? null,
+    windowDurationMins: input.windowDurationMins,
   }
 }
 
@@ -773,6 +779,8 @@ function normalizeClaudeModelScopedWindows(
       id,
       label: 'Week',
       scopeLabel,
+      kind: 'weekly',
+      windowDurationMins: 7 * 24 * 60,
       utilization: limit.utilization,
       resetsAt: limit.resets_at,
     })
@@ -820,12 +828,16 @@ export function mapClaudeAccountUsage(
     normalizeClaudeWindow({
       id: 'five-hour',
       label: '5h',
+      kind: 'session',
+      windowDurationMins: 5 * 60,
       utilization: limits.five_hour?.utilization,
       resetsAt: limits.five_hour?.resets_at,
     }),
     normalizeClaudeWindow({
       id: 'seven-day',
       label: 'Week',
+      kind: 'weekly',
+      windowDurationMins: 7 * 24 * 60,
       utilization: limits.seven_day?.utilization,
       resetsAt: limits.seven_day?.resets_at,
     }),
@@ -833,6 +845,8 @@ export function mapClaudeAccountUsage(
       id: 'seven-day-oauth-apps',
       label: 'Week',
       scopeLabel: 'OAuth apps',
+      kind: 'weekly',
+      windowDurationMins: 7 * 24 * 60,
       utilization: limits.seven_day_oauth_apps?.utilization,
       resetsAt: limits.seven_day_oauth_apps?.resets_at,
     }),
@@ -840,6 +854,8 @@ export function mapClaudeAccountUsage(
       id: 'seven-day-opus',
       label: 'Week',
       scopeLabel: 'Opus',
+      kind: 'weekly',
+      windowDurationMins: 7 * 24 * 60,
       utilization: limits.seven_day_opus?.utilization,
       resetsAt: limits.seven_day_opus?.resets_at,
     }),
@@ -847,6 +863,8 @@ export function mapClaudeAccountUsage(
       id: 'seven-day-sonnet',
       label: 'Week',
       scopeLabel: 'Sonnet',
+      kind: 'weekly',
+      windowDurationMins: 7 * 24 * 60,
       utilization: limits.seven_day_sonnet?.utilization,
       resetsAt: limits.seven_day_sonnet?.resets_at,
     }),
@@ -855,6 +873,8 @@ export function mapClaudeAccountUsage(
       id: 'extra-usage',
       label: 'Month',
       scopeLabel: 'Extra usage',
+      kind: 'monthly',
+      windowDurationMins: 30 * 24 * 60,
       utilization: limits.extra_usage?.utilization,
     }),
   ].filter((window): window is ServerProviderAccountUsageWindow => window !== null)
@@ -1055,6 +1075,7 @@ export const checkClaudeProviderStatus = Effect.fn('checkClaudeProviderStatus')(
   ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
+  scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -1067,6 +1088,7 @@ export const checkClaudeProviderStatus = Effect.fn('checkClaudeProviderStatus')(
     BUILT_IN_MODELS,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+    claudeSettings.customModelMetadata,
   )
 
   if (!claudeSettings.enabled)
@@ -1162,6 +1184,7 @@ export const checkClaudeProviderStatus = Effect.fn('checkClaudeProviderStatus')(
     getBuiltInClaudeModelsForVersion(parsedVersion),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+    claudeSettings.customModelMetadata,
   )
   const versionUpgradeMessage = supportsClaudeOpus5(parsedVersion)
     ? undefined
@@ -1205,6 +1228,15 @@ export const checkClaudeProviderStatus = Effect.fn('checkClaudeProviderStatus')(
       authMethod: capabilities.tokenSource,
     }) ?? apiProviderAuthMetadata(capabilities.apiProvider)
   const accountUsage = mapClaudeAccountUsage(capabilities.planUsage, checkedAt)
+  if (scopedLimitNames)
+  {
+    yield* recordClaudeScopedLimitNames(
+      scopedLimitNames,
+      capabilities.planUsage?.status === 'available'
+        ? capabilities.planUsage.rateLimits
+        : undefined,
+    )
+  }
   return buildServerProvider({
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,
@@ -1239,6 +1271,7 @@ export const makePendingClaudeProvider = (
       BUILT_IN_MODELS,
       claudeSettings.customModels,
       DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+      claudeSettings.customModelMetadata,
     )
 
     if (!claudeSettings.enabled)

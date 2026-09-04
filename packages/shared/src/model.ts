@@ -2,14 +2,17 @@
 // create model capabilities
 
 import {
+  type CustomModelMetadata,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
-  type ModelCapabilities,
+  ModelCapabilities,
   type ModelSelection,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
 } from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 
 const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make('codex')
 
@@ -297,6 +300,60 @@ export function normalizeCustomModelSlug(model: string | null | undefined): stri
   }
 
   return model.trim() || null
+}
+
+export interface CustomModelDefinition
+{
+  readonly slug: string
+  readonly name: string
+  readonly capabilities: ModelCapabilities | null
+}
+
+const decodeCustomModelCapabilities = Schema.decodeUnknownOption(ModelCapabilities)
+
+// resolve legacy custom slugs against optional slug-keyed metadata
+export function readCustomModelEntries(
+  value: unknown,
+  metadataValue?: CustomModelMetadata | unknown,
+): CustomModelDefinition[]
+{
+  if (!Array.isArray(value)) return []
+  const metadata =
+    metadataValue !== null && typeof metadataValue === 'object'
+      ? (metadataValue as Record<string, unknown>)
+      : {}
+  const entries: CustomModelDefinition[] = []
+  const seen = new Set<string>()
+  for (const raw of value)
+  {
+    const slug = normalizeCustomModelSlug(typeof raw === 'string' ? raw : null)
+    if (!slug || seen.has(slug)) continue
+    seen.add(slug)
+    const candidate = Object.hasOwn(metadata, slug) ? metadata[slug] : undefined
+    const record =
+      candidate !== null && typeof candidate === 'object'
+        ? (candidate as { readonly name?: unknown; readonly capabilities?: unknown })
+        : undefined
+    const name =
+      (typeof record?.name === 'string' ? normalizeCustomModelSlug(record.name) : null) ?? slug
+    const capabilities =
+      record?.capabilities === undefined || record.capabilities === null
+        ? null
+        : Option.getOrNull(decodeCustomModelCapabilities(record.capabilities))
+    entries.push({
+      slug,
+      name,
+      capabilities: capabilities
+        ? createModelCapabilities({ optionDescriptors: capabilities.optionDescriptors ?? [] })
+        : null,
+    })
+  }
+  return entries
+}
+
+export function readCustomModelSlugs(value: unknown): string[]
+{
+  return readCustomModelEntries(value).map((entry) => entry.slug)
 }
 
 export function resolveSelectableModel(

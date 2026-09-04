@@ -16,7 +16,26 @@ import {
   getProviderOptionStringSelectionValue,
   normalizeCustomModelSlug,
   normalizeModelSlug,
+  readCustomModelEntries,
 } from '../../../packages/shared/src/model.ts'
+
+it('retains legacy slug storage while applying only matching validated custom metadata', () =>
+{
+  const options = {
+    optionDescriptors: [{ id: 'fastMode', label: 'Fast mode', type: 'boolean' as const }],
+  }
+  const slugs = ['legacy', 'custom', 'custom']
+  expect(
+    readCustomModelEntries(slugs, {
+      custom: { name: 'Private model', capabilities: options },
+      orphan: { name: 'Removed model', capabilities: options },
+    }),
+  ).toEqual([
+    { slug: 'legacy', name: 'legacy', capabilities: null },
+    { slug: 'custom', name: 'Private model', capabilities: createModelCapabilities(options) },
+  ])
+  expect(slugs).toEqual(['legacy', 'custom', 'custom'])
+})
 
 it('preserves extended Claude slash commands without treating absolute paths as commands', () =>
 {

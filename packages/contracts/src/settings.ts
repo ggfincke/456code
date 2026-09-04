@@ -5,7 +5,11 @@ import * as Duration from 'effect/Duration'
 import * as Schema from 'effect/Schema'
 import * as SchemaTransformation from 'effect/SchemaTransformation'
 import { TrimmedNonEmptyString, TrimmedString } from './baseSchemas.ts'
-import { DEFAULT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from './model.ts'
+import {
+  CustomModelMetadata,
+  DEFAULT_TEXT_GENERATION_MODEL,
+  ProviderOptionSelections,
+} from './model.ts'
 import { ModelSelection } from './orchestration.ts'
 import {
   DEFAULT_PREVIEW_APPEARANCE,
@@ -280,6 +284,9 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
   },
   {
     order: ['binaryPath', 'homePath', 'shadowHomePath', 'launchArgs'],
@@ -312,6 +319,9 @@ export const ClaudeSettings = makeProviderSettingsSchema(
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
     launchArgs: Schema.String.pipe(
       Schema.withDecodingDefault(Effect.succeed('')),
@@ -360,6 +370,9 @@ export const CursorSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
   },
   {
     order: ['binaryPath', 'apiEndpoint'],
@@ -383,6 +396,9 @@ export const GrokSettings = makeProviderSettingsSchema(
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
   {
@@ -450,6 +466,9 @@ export const GeminiSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
   },
   {
     order: ['binaryPath'],
@@ -489,6 +508,9 @@ export const AntigravitySettings = makeProviderSettingsSchema(
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
   {
@@ -539,6 +561,9 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
   {
@@ -747,6 +772,7 @@ const CodexSettingsPatch = Schema.Struct({
   shadowHomePath: Schema.optionalKey(TrimmedString),
   launchArgs: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const ClaudeSettingsPatch = Schema.Struct({
@@ -754,6 +780,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   homePath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
   launchArgs: Schema.optionalKey(TrimmedString),
 })
 
@@ -762,12 +789,14 @@ const CursorSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   apiEndpoint: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const GrokSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const CoralSettingsPatch = Schema.Struct({
@@ -781,6 +810,7 @@ const GeminiSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const AntigravitySettingsPatch = Schema.Struct({
@@ -789,6 +819,7 @@ const AntigravitySettingsPatch = Schema.Struct({
   agent: Schema.optionalKey(TrimmedString),
   sandbox: Schema.optionalKey(Schema.Boolean),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const OpenCodeSettingsPatch = Schema.Struct({
@@ -797,6 +828,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
   serverUrl: Schema.optionalKey(TrimmedString),
   serverPassword: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 export const ServerSettingsPatch = Schema.Struct({

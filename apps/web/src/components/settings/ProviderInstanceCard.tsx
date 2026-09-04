@@ -15,9 +15,12 @@ import {
 } from 'lucide-react'
 import * as Arr from 'effect/Array'
 import * as Result from 'effect/Result'
+import * as Schema from 'effect/Schema'
+import * as Option from 'effect/Option'
 import { useState, type ReactNode } from 'react'
 import {
   isProviderDriverKind,
+  CustomModelMetadata,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
   type ProviderInstanceId,
@@ -25,6 +28,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from '@t3tools/contracts'
+import { readCustomModelEntries } from '@t3tools/shared/model'
 
 import { cn } from '../../lib/utils'
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard'
@@ -114,6 +118,7 @@ function nextConfigBlobWithValue(
 export function deriveProviderModelsForDisplay(input: {
   readonly liveModels: ReadonlyArray<ServerProviderModel> | undefined
   readonly customModels: ReadonlyArray<string>
+  readonly customModelMetadata?: CustomModelMetadata
 }): ReadonlyArray<ServerProviderModel>
 {
   const liveCustomModelsBySlug = new Map(
@@ -122,14 +127,14 @@ export function deriveProviderModelsForDisplay(input: {
     ),
   )
   const serverModels = input.liveModels?.filter((model) => !model.isCustom) ?? []
-  const customModels = input.customModels.map(
-    (slug) =>
-      liveCustomModelsBySlug.get(slug) ?? {
-        slug,
-        name: slug,
-        isCustom: true,
-        capabilities: null,
-      },
+  const customModels = readCustomModelEntries(input.customModels, input.customModelMetadata).map(
+    (entry) => ({
+      slug: entry.slug,
+      name: entry.name,
+      isCustom: true,
+      capabilities:
+        entry.capabilities ?? liveCustomModelsBySlug.get(entry.slug)?.capabilities ?? null,
+    }),
   )
   return [...serverModels, ...customModels]
 }
@@ -471,12 +476,21 @@ export function ProviderInstanceCard({
     : null
 
   const customModels = readConfigStringArray(instance.config, 'customModels')
+  const customModelMetadata: CustomModelMetadata = Option.getOrElse(
+    Schema.decodeUnknownOption(CustomModelMetadata)(
+      typeof instance.config === 'object' && instance.config !== null
+        ? (instance.config as Record<string, unknown>).customModelMetadata
+        : undefined,
+    ),
+    () => ({}),
+  )
   // server-returned models may lag behind settings writes. Treat probe
   // models as the source for built-ins only; custom rows come directly
   // from the current instance config so add/remove reflects immediately.
   const modelsForDisplay = deriveProviderModelsForDisplay({
     liveModels: liveProvider?.models,
     customModels,
+    customModelMetadata,
   })
 
   const updateDisplayName = (value: string) =>
@@ -519,6 +533,12 @@ export function ProviderInstanceCard({
   const updateCustomModels = (next: ReadonlyArray<string>) =>
   {
     const nextConfig = nextConfigBlobWithValue(instance.config, 'customModels', [...next])
+    const nextMetadata = { ...customModelMetadata }
+    for (const slug of customModels)
+    {
+      if (!next.includes(slug)) delete nextMetadata[slug]
+    }
+    nextConfig.customModelMetadata = nextMetadata
     const { config: _omit, ...rest } = instance
     onUpdate({ ...rest, config: nextConfig } as ProviderInstanceConfig)
   }
@@ -814,6 +834,22 @@ export function ProviderInstanceCard({
                 driverKind={driverKind}
                 models={modelsForDisplay}
                 customModels={customModels}
+                customModelMetadata={customModelMetadata}
+                onCustomModelMetadataChange={(slug, metadata) =>
+                  {
+                  const nextMetadata = { ...customModelMetadata }
+                  if (metadata === null) delete nextMetadata[slug]
+                  else
+                    Object.defineProperty(nextMetadata, slug, {
+                      value: metadata,
+                      enumerable: true,
+                      configurable: true,
+                      writable: true,
+                    })
+                  updateConfig(
+                    nextConfigBlobWithValue(instance.config, 'customModelMetadata', nextMetadata),
+                  )
+                }}
                 hiddenModels={hiddenModels}
                 favoriteModels={favoriteModels}
                 modelOrder={modelOrder}

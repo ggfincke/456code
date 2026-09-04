@@ -39,6 +39,39 @@ const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabil
 
 describe('providerModelsFromSettings', () =>
 {
+  it('uses current custom names and descriptors without adding orphan metadata or overriding built-ins', () =>
+  {
+    const builtIn = {
+      slug: 'built-in',
+      name: 'Provider catalog',
+      isCustom: false,
+      capabilities: null,
+    }
+    const metadataCapabilities = createModelCapabilities({
+      optionDescriptors: [{ id: 'fastMode', label: 'Fast mode', type: 'boolean' }],
+    })
+    expect(
+      providerModelsFromSettings(
+        [builtIn],
+        ['built-in', 'custom'],
+        OPENCODE_CUSTOM_MODEL_CAPABILITIES,
+        {
+          'built-in': { name: 'Must not replace built-in' },
+          custom: { name: 'My custom model', capabilities: metadataCapabilities },
+          removed: { name: 'Must not be restored' },
+        },
+      ),
+    ).toEqual([
+      builtIn,
+      {
+        slug: 'custom',
+        name: 'My custom model',
+        isCustom: true,
+        capabilities: metadataCapabilities,
+      },
+    ])
+  })
+
   it('applies the provided capabilities to custom models', () =>
   {
     const models = providerModelsFromSettings(

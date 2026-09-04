@@ -132,6 +132,17 @@ export const ModelCapabilities = Schema.Struct({
 })
 export type ModelCapabilities = typeof ModelCapabilities.Type
 
+// optional presentation and capability overrides for one legacy custom-model slug
+export const CustomModelMetadataEntry = Schema.Struct({
+  name: Schema.optional(TrimmedNonEmptyString),
+  capabilities: Schema.optional(ModelCapabilities),
+})
+export type CustomModelMetadataEntry = typeof CustomModelMetadataEntry.Type
+
+// keep metadata keyed by slug so customModels remains a compatible string array
+export const CustomModelMetadata = Schema.Record(Schema.String, CustomModelMetadataEntry)
+export type CustomModelMetadata = typeof CustomModelMetadata.Type
+
 const CODEX_DRIVER_KIND = ProviderDriverKind.make('codex')
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make('claudeAgent')
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make('cursor')

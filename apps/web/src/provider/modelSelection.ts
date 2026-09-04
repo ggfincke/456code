@@ -11,6 +11,8 @@ import {
 import {
   createModelSelection,
   normalizeCustomModelSlug,
+  readCustomModelEntries,
+  type CustomModelDefinition,
   resolveSelectableModel,
 } from '@t3tools/shared/model'
 import { UnifiedSettings } from '@t3tools/contracts/settings'
@@ -44,7 +46,7 @@ function readInstanceCustomModels(
   settings: UnifiedSettings,
   instanceId: ProviderInstanceId,
   driverKind: ProviderDriverKind,
-): ReadonlyArray<string>
+): ReadonlyArray<CustomModelDefinition>
 {
   const instance = settings.providerInstances?.[instanceId]
   const config = instance?.config
@@ -53,7 +55,7 @@ function readInstanceCustomModels(
     const value = (config as Record<string, unknown>).customModels
     if (Array.isArray(value))
     {
-      return value.filter((entry): entry is string => typeof entry === 'string')
+      return readCustomModelEntries(value, (config as Record<string, unknown>).customModelMetadata)
     }
   }
   const defaultInstanceId = defaultInstanceIdForDriver(driverKind)
@@ -67,7 +69,10 @@ function readInstanceCustomModels(
     const customModels = (legacyConfig as Record<string, unknown>).customModels
     if (Array.isArray(customModels))
     {
-      return customModels.filter((entry): entry is string => typeof entry === 'string')
+      return readCustomModelEntries(
+        customModels,
+        (legacyConfig as Record<string, unknown>).customModelMetadata,
+      )
     }
   }
   return []
@@ -203,7 +208,11 @@ export function getAppModelOptions(
   // see the user's authored custom models.
   const defaultInstanceId = defaultInstanceIdForDriver(provider)
   const customModels = readInstanceCustomModels(settings, defaultInstanceId, provider)
-  for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs))
+  const customBySlug = new Map(customModels.map((model) => [model.slug, model]))
+  for (const slug of normalizeCustomModelSlugs(
+    customModels.map((model) => model.slug),
+    builtInModelSlugs,
+  ))
   {
     if (seen.has(slug))
     {
@@ -213,7 +222,7 @@ export function getAppModelOptions(
     seen.add(slug)
     options.push({
       slug,
-      name: slug,
+      name: customBySlug.get(slug)?.name ?? slug,
       isCustom: true,
     })
   }
@@ -254,7 +263,11 @@ export function getAppModelOptionsForInstance(
   )
 
   const customModels = readInstanceCustomModels(settings, entry.instanceId, entry.driverKind)
-  for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs))
+  const customBySlug = new Map(customModels.map((model) => [model.slug, model]))
+  for (const slug of normalizeCustomModelSlugs(
+    customModels.map((model) => model.slug),
+    builtInModelSlugs,
+  ))
   {
     if (seen.has(slug))
     {
@@ -262,7 +275,7 @@ export function getAppModelOptionsForInstance(
     }
 
     seen.add(slug)
-    options.push({ slug, name: slug, isCustom: true })
+    options.push({ slug, name: customBySlug.get(slug)?.name ?? slug, isCustom: true })
   }
 
   const preferences = readInstanceModelPreferences(settings, entry.instanceId)
