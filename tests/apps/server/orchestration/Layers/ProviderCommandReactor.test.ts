@@ -650,6 +650,7 @@ describe('ProviderCommandReactor', () =>
 
     return {
       engine,
+      snapshotQuery,
       readModel: () => runTest(snapshotQuery.getSnapshot()),
       // one place that manually runs the test runtime; keeps the per-test
       // call sites free of Effect.runPromise
@@ -2312,14 +2313,21 @@ describe('ProviderCommandReactor', () =>
   effectIt.effect('settles a failed provider startup and allows a clean retry', () =>
     Effect.gen(function* ()
     {
+      const providerInstanceId = ProviderInstanceId.make('claude-secondary')
+      const provider = ProviderDriverKind.make('claudeAgent')
       let failStartup = true
       const harness = yield* Effect.promise(() =>
         createHarness({
+          threadModelSelection: {
+            instanceId: providerInstanceId,
+            model: 'claude-opus-4-6',
+          },
+          instanceDriverKind: provider,
           startSessionEffect: (session) =>
             failStartup
               ? Effect.fail(
                   new ProviderAdapterRequestError({
-                    provider: 'codex',
+                    provider,
                     method: 'thread.start',
                     detail: 'deterministic startup failure',
                   }),
@@ -2347,16 +2355,26 @@ describe('ProviderCommandReactor', () =>
       yield* Effect.promise(() =>
         waitFor(async () =>
         {
-          const readModel = await harness.readModel()
+          const current = await harness.readModel()
+          const currentSession = current.threads.find(
+            (entry) => entry.id === ThreadId.make('thread-1'),
+          )?.session
           return (
-            readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))?.session
-              ?.status === 'error'
+            currentSession?.status === 'error' &&
+            currentSession.lastError?.includes('deterministic startup failure') === true
           )
         }),
       )
       let readModel = yield* Effect.promise(() => harness.readModel())
       let thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
-      expect(thread?.session?.lastError).toContain('deterministic startup failure')
+      expect(thread?.session).toMatchObject({
+        status: 'error',
+        providerName: provider,
+        providerInstanceId,
+        runtimeMode: 'approval-required',
+        activeTurnId: null,
+        lastError: expect.stringContaining('deterministic startup failure'),
+      })
       expect(harness.sendTurn).not.toHaveBeenCalled()
 
       failStartup = false
@@ -2379,11 +2397,93 @@ describe('ProviderCommandReactor', () =>
       readModel = yield* Effect.promise(() => harness.readModel())
       thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
       expect(thread?.session?.status).toBe('starting')
+      expect(thread?.session?.providerName).toBe(provider)
+      expect(thread?.session?.providerInstanceId).toBe(providerInstanceId)
+      expect(thread?.session?.runtimeMode).toBe('approval-required')
       expect(thread?.session?.lastError).toBeNull()
     }),
   )
 
-  it('does not overwrite an existing custom thread title on the first turn', async () =>
+  effectIt.effect('preserves a newer stopped session when provider startup fails', () =>
+    Effect.gen(function* ()
+    {
+      const providerInstanceId = ProviderInstanceId.make('claude-secondary')
+      const provider = ProviderDriverKind.make('claudeAgent')
+      const startupAttempted = yield* Deferred.make<void>()
+      const releaseStartupFailure = yield* Deferred.make<void>()
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          threadModelSelection: {
+            instanceId: providerInstanceId,
+            model: 'claude-opus-4-6',
+          },
+          instanceDriverKind: provider,
+          startSessionEffect: () =>
+            Deferred.succeed(startupAttempted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseStartupFailure)),
+              Effect.andThen(
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider,
+                    method: 'thread.start',
+                    detail: 'delayed startup failure',
+                  }),
+                ),
+              ),
+            ),
+        }),
+      )
+
+      yield* harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-provider-failure-stopped'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-provider-failure-stopped'),
+          role: 'user',
+          text: 'stop while startup is pending',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      })
+
+      yield* Deferred.await(startupAttempted)
+      yield* harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-stop-during-provider-startup'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'stopped',
+          providerName: provider,
+          providerInstanceId,
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: '2026-01-01T00:00:01.000Z',
+        },
+        createdAt: '2026-01-01T00:00:01.000Z',
+      })
+      yield* Deferred.succeed(releaseStartupFailure, undefined)
+      yield* Effect.promise(() => harness.drain())
+
+      const readModel = yield* Effect.promise(() => harness.readModel())
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+      expect(thread?.session).toMatchObject({
+        status: 'stopped',
+        providerName: provider,
+        providerInstanceId,
+        runtimeMode: 'approval-required',
+        activeTurnId: null,
+        lastError: expect.stringContaining('delayed startup failure'),
+      })
+      expect(harness.sendTurn).not.toHaveBeenCalled()
+    }),
+  )
+
+  it('does not generate over an existing custom thread title on the first turn', async () =>
   {
     const harness = await createHarness()
     const now = '2026-01-01T00:00:00.000Z'
@@ -2392,7 +2492,7 @@ describe('ProviderCommandReactor', () =>
     await harness.run(
       harness.engine.dispatch({
         type: 'thread.meta.update',
-        commandId: CommandId.make('cmd-thread-title-custom'),
+        commandId: CommandId.make('cmd-thread-title-custom-before-turn'),
         threadId: ThreadId.make('thread-1'),
         title: 'Keep this custom title',
       }),
@@ -2401,10 +2501,10 @@ describe('ProviderCommandReactor', () =>
     await harness.run(
       harness.engine.dispatch({
         type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-title-preserve'),
+        commandId: CommandId.make('cmd-turn-start-title-preserve-before-generation'),
         threadId: ThreadId.make('thread-1'),
         message: {
-          messageId: asMessageId('user-message-title-preserve'),
+          messageId: asMessageId('user-message-title-preserve-before-generation'),
           role: 'user',
           text: 'Please investigate reconnect failures after restarting the session.',
           attachments: [],
@@ -2423,6 +2523,63 @@ describe('ProviderCommandReactor', () =>
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
     expect(thread?.title).toBe('Keep this custom title')
   })
+
+  effectIt.effect(
+    'does not overwrite a custom title set while first-turn title generation is pending',
+    () =>
+      Effect.gen(function* ()
+      {
+        const generationStarted = yield* Deferred.make<void>()
+        const releaseGeneration = yield* Deferred.make<void>()
+        const harness = yield* Effect.promise(() => createHarness())
+        const now = '2026-01-01T00:00:00.000Z'
+        const seededTitle = 'Please investigate reconnect failures after restar...'
+        harness.generateThreadTitle.mockImplementation(() =>
+          Deferred.succeed(generationStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseGeneration)),
+            Effect.as({ title: 'Generated reconnect title' }),
+          ),
+        )
+
+        yield* harness.engine.dispatch({
+          type: 'thread.meta.update',
+          commandId: CommandId.make('cmd-thread-title-seeded'),
+          threadId: ThreadId.make('thread-1'),
+          title: seededTitle,
+        })
+
+        yield* harness.engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make('cmd-turn-start-title-preserve'),
+          threadId: ThreadId.make('thread-1'),
+          message: {
+            messageId: asMessageId('user-message-title-preserve'),
+            role: 'user',
+            text: 'Please investigate reconnect failures after restarting the session.',
+            attachments: [],
+          },
+          titleSeed: seededTitle,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          createdAt: now,
+        })
+
+        yield* Deferred.await(generationStarted)
+        yield* harness.engine.dispatch({
+          type: 'thread.meta.update',
+          commandId: CommandId.make('cmd-thread-title-custom'),
+          threadId: ThreadId.make('thread-1'),
+          title: 'Keep this custom title',
+        })
+        yield* Deferred.succeed(releaseGeneration, undefined)
+        yield* Effect.promise(() => harness.drain())
+
+        const readModel = yield* Effect.promise(() => harness.readModel())
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+        expect(harness.generateThreadTitle).toHaveBeenCalledTimes(1)
+        expect(thread?.title).toBe('Keep this custom title')
+      }),
+  )
 
   it('matches the client-seeded title even when the outgoing prompt is reformatted', async () =>
   {
@@ -3677,17 +3834,9 @@ describe('ProviderCommandReactor', () =>
     })
   })
 
-  it('stops the projected session and records a provider interrupt failure', async () =>
+  it('stops the projected session without rereading unreadable history', async () =>
   {
     const harness = await createHarness({
-      interruptTurnEffect: () =>
-        Effect.fail(
-          new ProviderAdapterRequestError({
-            provider: 'codex',
-            method: 'thread.interrupt',
-            detail: 'provider session disappeared',
-          }),
-        ),
       stopSessionEffect: () =>
         Effect.fail(
           new ProviderAdapterRequestError({
@@ -3698,6 +3847,27 @@ describe('ProviderCommandReactor', () =>
         ),
     })
     const now = '2026-01-01T00:00:00.000Z'
+    harness.interruptTurn.mockImplementation(() =>
+      harness.sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json,
+          is_streaming, created_at, updated_at
+        ) VALUES (
+          'old-unreadable-message', 'thread-1', NULL, 'assistant',
+          'Old assistant output', 'invalid json', 0, ${now}, ${now}
+        )
+      `.pipe(
+        Effect.andThen(
+          Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: 'codex',
+              method: 'thread.interrupt',
+              detail: 'provider session disappeared',
+            }),
+          ),
+        ),
+      ),
+    )
 
     await harness.run(
       harness.engine.dispatch({
@@ -3728,30 +3898,45 @@ describe('ProviderCommandReactor', () =>
 
     await waitFor(async () =>
     {
-      const thread = (await harness.readModel()).threads.find(
-        (entry) => entry.id === ThreadId.make('thread-1'),
+      const thread = Option.getOrUndefined(
+        await harness.run(harness.snapshotQuery.getThreadShellById(ThreadId.make('thread-1'))),
       )
       return thread?.session?.status === 'stopped'
     })
 
-    const thread = (await harness.readModel()).threads.find(
-      (entry) => entry.id === ThreadId.make('thread-1'),
+    const thread = Option.getOrUndefined(
+      await harness.run(harness.snapshotQuery.getThreadShellById(ThreadId.make('thread-1'))),
     )
     expect(thread?.session).toMatchObject({
       status: 'stopped',
       activeTurnId: null,
       lastError: 'provider session disappeared',
     })
-    expect(
-      thread?.activities.find((activity) => activity.kind === 'provider.turn.interrupt.failed'),
-    ).toMatchObject({
-      summary: 'Provider turn interrupt failed',
-      payload: { detail: 'provider session disappeared' },
-    })
     expect(harness.stopSession).toHaveBeenCalledWith(
       { threadId: ThreadId.make('thread-1') },
       expect.anything(),
     )
+
+    await harness.run(
+      harness.sql`
+        UPDATE projection_thread_messages
+        SET attachments_json = '[]'
+        WHERE message_id = 'old-unreadable-message'
+      `,
+    )
+    await harness.drain()
+
+    const readableThread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make('thread-1'),
+    )
+    expect(
+      readableThread?.activities.find(
+        (activity) => activity.kind === 'provider.turn.interrupt.failed',
+      ),
+    ).toMatchObject({
+      summary: 'Provider turn interrupt failed',
+      payload: { detail: 'provider session disappeared' },
+    })
   })
 
   it('stops a starting session without a bound turn when interrupt fails', async () =>
