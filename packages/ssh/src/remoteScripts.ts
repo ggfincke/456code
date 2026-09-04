@@ -261,13 +261,14 @@ require_installed_456code_cli() {
   printf 'Remote host installed %s but npm produced no 456code executable, which usually means a native dependency (node-pty) failed to build. Install a C toolchain on the remote host (Debian/Ubuntu: build-essential, Fedora/RHEL: gcc-c++ make, macOS: xcode-select --install) and try again.\\n' @@T3_PACKAGE_SPEC@@ >&2
   return 1
 }
+# the launcher records this pid, so exec the cli without an npm wrapper process
 if command -v npx >/dev/null 2>&1; then
   require_installed_456code_cli npx --yes --package @@T3_PACKAGE_SPEC@@ || exit 1
-  exec npx --yes @@T3_PACKAGE_SPEC@@ "$@"
+  exec "$CODE456_CLI_PATH" "$@"
 fi
 if command -v npm >/dev/null 2>&1; then
   require_installed_456code_cli npm exec --yes --package @@T3_PACKAGE_SPEC@@ || exit 1
-  exec npm exec --yes @@T3_PACKAGE_SPEC@@ -- "$@"
+  exec "$CODE456_CLI_PATH" "$@"
 fi
 printf 'Remote host is missing the 456code CLI and could not install @@T3_PACKAGE_SPEC@@ because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
 exit 1
