@@ -83,6 +83,8 @@ export type RecordingClaim =
 export interface BrowserControlSession
 {
   readonly webContentsId: number
+  // pin the wrapper Chromium retains while this debugger session is attached
+  readonly debugger: Electron.Debugger
   readonly semaphore: Semaphore.Semaphore
   readonly scope: Scope.Closeable
   readonly onMessage: (

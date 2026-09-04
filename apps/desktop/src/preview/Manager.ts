@@ -832,6 +832,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         {
           const semaphore = yield* Semaphore.make(1)
           const scope = yield* Scope.fork(parentScope, 'sequential')
+          const wcDebugger = wc.debugger
           const handleDebuggerMessage = Effect.fn('PreviewManager.handleDebuggerMessage')(
             function* (method: string, params: Record<string, unknown>)
             {
@@ -845,7 +846,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
                       operation: 'ackScreencastFrame',
                       webContentsId: wc.id,
                     },
-                    () => wc.debugger.sendCommand('Page.screencastFrameAck', { sessionId }),
+                    () => wcDebugger.sendCommand('Page.screencastFrameAck', { sessionId }),
                   ).pipe(Effect.ignore)
                 }
                 const tabId = yield* tabIdForWebContents(wc.id)
@@ -898,8 +899,8 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
                 attempt({ operation: 'detachControlSession', webContentsId: wc.id }, () =>
                 {
                   wc.off('destroyed', onDestroyed)
-                  wc.debugger.off('message', onMessage)
-                  if (wc.debugger.isAttached()) wc.debugger.detach()
+                  wcDebugger.off('message', onMessage)
+                  if (wcDebugger.isAttached()) wcDebugger.detach()
                 }).pipe(Effect.ignore),
               ],
               { discard: true },
@@ -907,6 +908,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           )
           const control: BrowserControlSession = {
             webContentsId: wc.id,
+            debugger: wcDebugger,
             semaphore,
             scope,
             onMessage,
@@ -926,15 +928,15 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
             yield* attempt({ operation: 'attachDebuggerListeners', webContentsId: wc.id }, () =>
             {
               wc.on('destroyed', onDestroyed)
-              wc.debugger.on('message', onMessage)
-              wc.debugger.attach('1.3')
+              wcDebugger.on('message', onMessage)
+              wcDebugger.attach('1.3')
             })
             yield* Effect.all(
               ['Runtime.enable', 'Accessibility.enable', 'Network.enable', 'Log.enable'].map(
                 (method) =>
                   attemptPromise(
                     { operation: `initializeDebugger.${method}`, webContentsId: wc.id },
-                    () => wc.debugger.sendCommand(method),
+                    () => wcDebugger.sendCommand(method),
                   ),
               ),
               { concurrency: 'unbounded', discard: true },
@@ -1057,7 +1059,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           }
           const result = yield* attemptPromise(
             { operation: `${action}.${method}`, tabId, webContentsId: wc.id },
-            () => wc.debugger.sendCommand(method, commandParams),
+            () => control.debugger.sendCommand(method, commandParams),
           )
           const after = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0
           const currentAfter = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
@@ -1088,7 +1090,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
               tabId,
               webContentsId: wc.id,
             },
-            () => wc.debugger.sendCommand(method, commandParams),
+            () => control.debugger.sendCommand(method, commandParams),
           )
         },
       )

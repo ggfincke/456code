@@ -420,6 +420,73 @@ describe('PreviewManager', () =>
     ),
   )
 
+  effectIt.effect('detaches through the pinned debugger after the webview is destroyed', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        let destroyed = false
+        let attached = false
+        let debuggerAccesses = 0
+        const debuggerOff = vi.fn()
+        const debuggerDetach = vi.fn(() =>
+        {
+          attached = false
+        })
+        const wcDebugger = {
+          isAttached: () => attached,
+          attach: vi.fn(() =>
+          {
+            attached = true
+          }),
+          detach: debuggerDetach,
+          sendCommand: vi.fn(async () => undefined),
+          on: vi.fn(),
+          off: debuggerOff,
+        }
+        fromId.mockReturnValue({
+          id: 42,
+          isDestroyed: () => destroyed,
+          getType: () => 'webview',
+          getURL: () => 'http://localhost:3200/',
+          getTitle: () => 'Preview',
+          isLoading: () => false,
+          isDevToolsOpened: () => false,
+          getZoomFactor: () => 1,
+          setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
+          reload: vi.fn(),
+          loadURL: vi.fn(async () => undefined),
+          on: vi.fn(),
+          off: vi.fn(),
+          ipc: { on: vi.fn(), off: vi.fn() },
+          send: webviewSend,
+          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
+          setWindowOpenHandler: vi.fn(),
+          get debugger()
+          {
+            debuggerAccesses += 1
+            if (destroyed) throw new Error('Object has been destroyed')
+            return wcDebugger
+          },
+        } as never)
+
+        yield* manager.createTab('tab_pinned_debugger')
+        yield* manager.registerWebview('tab_pinned_debugger', 42)
+        yield* manager.setColorScheme('tab_pinned_debugger', 'dark')
+        expect(attached).toBe(true)
+        expect(debuggerAccesses).toBe(2)
+        destroyed = true
+
+        yield* manager.navigate('tab_pinned_debugger', 'https://example.com/')
+
+        expect(debuggerOff).toHaveBeenCalledWith('message', expect.any(Function))
+        expect(debuggerDetach).toHaveBeenCalledOnce()
+      }),
+    ),
+  )
+
   effectIt.effect('publishes one canonical favicon while the document is loading', () =>
     withManager((manager) =>
       Effect.gen(function* ()
