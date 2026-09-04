@@ -33,6 +33,43 @@ function warningProvider(): ServerProvider
 
 describe('ProviderStatusBanner', () =>
 {
+  it('waits for a custom Antigravity account check without hiding real failures', () =>
+  {
+    const status: ServerProvider = {
+      ...warningProvider(),
+      instanceId: ProviderInstanceId.make('google-personal'),
+      driver: ProviderDriverKind.make('antigravity'),
+      displayName: 'Personal Google',
+      auth: { status: 'unknown' },
+      message: 'Antigravity is installed. Google account access is not checked yet.',
+    }
+    const renderBanner = (provider: ServerProvider, reAuthRequired = false) =>
+      renderToStaticMarkup(
+        <ProviderStatusBanner
+          status={provider}
+          reAuthRequired={reAuthRequired}
+          onDismiss={() =>
+          {}}
+        />,
+      )
+
+    expect(shouldShowProviderStatusBanner(status, null)).toBe(false)
+    expect(renderBanner(status)).toBe('')
+    expect(shouldShowProviderStatusBanner(status, null, true)).toBe(true)
+    expect(renderBanner(status, true)).toContain('Personal Google is unauthenticated')
+    for (const failure of [
+      { ...status, installed: false },
+      { ...status, status: 'error' as const },
+      { ...status, auth: { status: 'unauthenticated' as const } },
+      { ...status, message: 'Runtime integrity verification failed.' },
+      { ...status, driver: ProviderDriverKind.make('codex') },
+    ])
+    {
+      expect(shouldShowProviderStatusBanner(failure, null)).toBe(true)
+      expect(renderBanner(failure)).toContain('role="alert"')
+    }
+  })
+
   it('stays hidden after its current warning is dismissed', () =>
   {
     const status = warningProvider()
