@@ -210,7 +210,7 @@ export function EditableFileSurface({
   )
   const surfaceRef = useRef<HTMLDivElement>(null)
   const selectionFrameRef = useRef<number | null>(null)
-  const editorRef = useRef<Pick<Editor, 'setSelections'> | null>(null)
+  const editorRef = useRef<Pick<Editor, 'setSelections' | 'blur'> | null>(null)
   const createEditor = useCallback<EditorFactory<FileCommentAnnotationGroup, undefined>>(
     (type, options, editStateKey) =>
     {
@@ -325,6 +325,8 @@ export function EditableFileSurface({
 
   const beginComment = useCallback((range: SelectedLineRange) =>
   {
+    editorRef.current?.setSelections([])
+    editorRef.current?.blur()
     const { startLine, endLine } = normalizeFileCommentRange(range)
     const draftEntry: FileCommentAnnotationEntry = {
       id: nextFileCommentId(),
