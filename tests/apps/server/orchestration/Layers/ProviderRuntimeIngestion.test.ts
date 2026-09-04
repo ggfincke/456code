@@ -650,6 +650,116 @@ describe('ProviderRuntimeIngestion', () =>
     expect(thread.session?.lastError).toBe('turn failed')
   })
 
+  it('finalizes accepted OpenCode abort text without letting a late abort stop a newer turn', async () =>
+  {
+    const harness = await createHarness()
+    await bindSessionFence(harness, {
+      providerName: 'opencode',
+      providerInstanceId: ProviderInstanceId.make('opencode'),
+    })
+    const threadId = asThreadId('thread-1')
+    const stoppedTurnId = asTurnId('opencode-stopped-turn')
+    const nextTurnId = asTurnId('opencode-next-turn')
+    const base = {
+      provider: ProviderDriverKind.make('opencode'),
+      threadId,
+      createdAt: '2026-01-01T00:00:01.000Z',
+    }
+    harness.emit({
+      ...base,
+      type: 'turn.started',
+      eventId: asEventId('opencode-first-started'),
+      turnId: stoppedTurnId,
+    })
+    await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.session?.status === 'running' && entry.session?.activeTurnId === stoppedTurnId,
+    )
+    harness.emit({
+      ...base,
+      type: 'content.delta',
+      eventId: asEventId('opencode-first-text'),
+      turnId: stoppedTurnId,
+      itemId: asItemId('opencode-first-text-part'),
+      payload: { streamKind: 'assistant_text', delta: 'Work before the stop.' },
+    })
+    harness.emit({
+      ...base,
+      type: 'turn.aborted',
+      eventId: asEventId('opencode-first-aborted'),
+      turnId: stoppedTurnId,
+      payload: { reason: 'Interrupted by user.' },
+    })
+    await harness.drain()
+
+    let thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)
+    expect(thread?.session).toMatchObject({ status: 'ready', activeTurnId: null })
+    expect(thread?.messages).toEqual([
+      expect.objectContaining({
+        turnId: stoppedTurnId,
+        text: 'Work before the stop.',
+        streaming: false,
+      }),
+    ])
+
+    harness.emit({
+      ...base,
+      type: 'turn.started',
+      eventId: asEventId('opencode-next-started'),
+      turnId: nextTurnId,
+    })
+    await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === 'running' && entry.session?.activeTurnId === nextTurnId,
+    )
+    harness.emit({
+      ...base,
+      type: 'content.delta',
+      eventId: asEventId('opencode-next-text'),
+      turnId: nextTurnId,
+      itemId: asItemId('opencode-next-text-part'),
+      payload: { streamKind: 'assistant_text', delta: 'The next turn is running.' },
+    })
+    await harness.drain()
+    harness.emit({
+      ...base,
+      type: 'turn.aborted',
+      eventId: asEventId('opencode-late-abort'),
+      turnId: stoppedTurnId,
+      createdAt: '2026-01-01T00:00:02.000Z',
+      payload: { reason: 'Late abort from the previous turn.' },
+    })
+    await harness.drain()
+
+    thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)
+    expect(thread?.session).toMatchObject({ status: 'running', activeTurnId: nextTurnId })
+    expect(thread?.latestTurn).toMatchObject({ turnId: nextTurnId, state: 'running' })
+    harness.emit({
+      ...base,
+      type: 'item.completed',
+      eventId: asEventId('opencode-next-text-completed'),
+      turnId: nextTurnId,
+      itemId: asItemId('opencode-next-text-part'),
+      payload: { itemType: 'assistant_message', status: 'completed' },
+    })
+    await harness.drain()
+
+    thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)
+    expect(thread?.messages).toEqual([
+      expect.objectContaining({
+        turnId: stoppedTurnId,
+        text: 'Work before the stop.',
+        streaming: false,
+      }),
+      expect.objectContaining({
+        turnId: nextTurnId,
+        text: 'The next turn is running.',
+        streaming: false,
+      }),
+    ])
+  })
+
   it('applies provider session.state.changed transitions directly', async () =>
   {
     const harness = await createHarness()

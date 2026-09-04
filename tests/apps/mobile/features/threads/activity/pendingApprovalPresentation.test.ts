@@ -4,7 +4,10 @@
 import { ApprovalRequestId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
-import { derivePendingApprovalPresentation } from '../../../../../../apps/mobile/src/features/threads/activity/pendingApprovalPresentation'
+import {
+  derivePendingApprovalPresentation,
+  isApprovalResponseLocked,
+} from '../../../../../../apps/mobile/src/features/threads/activity/pendingApprovalPresentation'
 
 describe('derivePendingApprovalPresentation', () =>
 {
@@ -25,6 +28,7 @@ describe('derivePendingApprovalPresentation', () =>
     ).toEqual({
       title: 'Calendar',
       contextLabel: 'MCP elicitation',
+      lifecycleLabel: null,
       options: [
         { decision: 'accept', label: 'Allow this event' },
         { decision: 'acceptAlways', label: 'Always allow Calendar' },
@@ -44,11 +48,45 @@ describe('derivePendingApprovalPresentation', () =>
     ).toEqual({
       title: 'File change',
       contextLabel: null,
+      lifecycleLabel: null,
       options: [
         { decision: 'accept', label: 'Allow once' },
         { decision: 'acceptForSession', label: 'Allow session' },
         { decision: 'decline', label: 'Decline' },
       ],
     })
+  })
+
+  it('locks durable response states and explains their lifecycle', () =>
+  {
+    const responding = {
+      requestId: ApprovalRequestId.make('approval-3'),
+      requestKind: 'command' as const,
+      createdAt: '2026-08-26T12:00:00.000Z',
+      status: 'responding' as const,
+      requestedDecision: 'accept' as const,
+      options: [{ decision: 'accept' as const, label: 'Run once' }],
+    }
+    const unknown = {
+      ...responding,
+      requestId: ApprovalRequestId.make('approval-4'),
+      status: 'unknown' as const,
+    }
+
+    expect(derivePendingApprovalPresentation(responding).lifecycleLabel).toBe(
+      'Run once sent. Waiting for provider confirmation.',
+    )
+    expect(derivePendingApprovalPresentation(unknown).lifecycleLabel).toBe(
+      'Response status is unknown. Refresh, or restart the turn before responding again.',
+    )
+    expect(isApprovalResponseLocked(responding, null)).toBe(true)
+    expect(isApprovalResponseLocked(unknown, null)).toBe(true)
+    expect(
+      isApprovalResponseLocked(
+        { ...responding, status: 'pending' },
+        ApprovalRequestId.make('approval-3'),
+      ),
+    ).toBe(true)
+    expect(isApprovalResponseLocked({ ...responding, status: 'pending' }, null)).toBe(false)
   })
 })

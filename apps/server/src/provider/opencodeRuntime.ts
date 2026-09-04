@@ -78,6 +78,7 @@ export function resolveOpenCodeServerPassword(
 const OPENCODE_SERVER_READY_PREFIX = 'opencode server listening'
 const DEFAULT_OPENCODE_SERVER_TIMEOUT_MS = 30_000
 const DEFAULT_HOSTNAME = '127.0.0.1'
+const OPENCODE_SERVER_STARTUP_MAX_OUTPUT_CHARS = 64 * 1024
 // skill bodies can be arbitrarily large; inventory needs metadata only
 const OPENCODE_SKILL_DISCOVERY_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 export interface OpenCodeServerProcess
@@ -519,8 +520,18 @@ export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): Permissi
   // this mode approves edits only; every unrelated action stays supervised
   const editAction = runtimeMode === 'auto-accept-edits' ? 'allow' : 'ask'
 
+  // session rules override OpenCode's agent defaults
   return [
     { permission: '*', pattern: '*', action: 'ask' },
+    { permission: 'read', pattern: '*', action: 'allow' },
+    { permission: 'read', pattern: '*.env', action: 'ask' },
+    { permission: 'read', pattern: '*.env.*', action: 'ask' },
+    { permission: 'read', pattern: '*.env.example', action: 'allow' },
+    { permission: 'glob', pattern: '*', action: 'allow' },
+    { permission: 'grep', pattern: '*', action: 'allow' },
+    { permission: 'lsp', pattern: '*', action: 'allow' },
+    { permission: 'skill', pattern: '*', action: 'allow' },
+    { permission: 'todowrite', pattern: '*', action: 'allow' },
     { permission: 'bash', pattern: '*', action: 'ask' },
     { permission: 'edit', pattern: '*', action: editAction },
     { permission: 'webfetch', pattern: '*', action: 'ask' },
@@ -716,19 +727,26 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
       )
       yield* Scope.addFinalizer(runtimeScope, terminateChild)
 
-      const stdoutRef = yield* Ref.make('')
-      const stderrRef = yield* Ref.make('')
+      const stdoutRef = yield* Ref.make<string | null>('')
+      const stderrRef = yield* Ref.make<string | null>('')
       const readyDeferred = yield* Deferred.make<string, OpenCodeRuntimeError>()
 
       const setReadyFromStdoutChunk = (chunk: string) =>
-        Ref.updateAndGet(stdoutRef, (stdout) => `${stdout}${chunk}`).pipe(
-          Effect.flatMap((nextStdout) =>
+        Ref.modify(stdoutRef, (stdout) =>
+        {
+          if (stdout === null)
           {
-            const parsed = parseServerUrlFromOutput(nextStdout)
-            return parsed
-              ? Deferred.succeed(readyDeferred, parsed).pipe(Effect.ignore)
-              : Effect.void
-          }),
+            return [null, null] as const
+          }
+          const nextStdout = `${stdout}${chunk}`
+          return [
+            parseServerUrlFromOutput(nextStdout),
+            nextStdout.slice(-OPENCODE_SERVER_STARTUP_MAX_OUTPUT_CHARS),
+          ] as const
+        }).pipe(
+          Effect.flatMap((parsed) =>
+            parsed ? Deferred.succeed(readyDeferred, parsed).pipe(Effect.ignore) : Effect.void,
+          ),
         )
 
       const stdoutFiber = yield* child.stdout.pipe(
@@ -739,7 +757,13 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
       )
       const stderrFiber = yield* child.stderr.pipe(
         Stream.decodeText(),
-        Stream.runForEach((chunk) => Ref.update(stderrRef, (stderr) => `${stderr}${chunk}`)),
+        Stream.runForEach((chunk) =>
+          Ref.update(stderrRef, (stderr) =>
+            stderr === null
+              ? null
+              : `${stderr}${chunk}`.slice(-OPENCODE_SERVER_STARTUP_MAX_OUTPUT_CHARS),
+          ),
+        ),
         Effect.ignore,
         Effect.forkIn(runtimeScope),
       )
@@ -748,8 +772,8 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
         Effect.flatMap((code) =>
           Effect.gen(function* ()
           {
-            const stdout = yield* Ref.get(stdoutRef)
-            const stderr = yield* Ref.get(stderrRef)
+            const stdout = (yield* Ref.get(stdoutRef)) ?? ''
+            const stderr = (yield* Ref.get(stderrRef)) ?? ''
             const exitCode = Number(code)
             yield* Deferred.fail(
               readyDeferred,
@@ -775,15 +799,13 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
         Deferred.await(readyDeferred).pipe(Effect.timeoutOption(timeoutMs)),
       )
 
-      // startup-time fibers are no longer needed once ready has resolved (either
-      // way). The exit fiber is only interrupted on failure; on success it keeps
-      // the caller's `exitCode` effect observable until the scope closes.
-      yield* Fiber.interrupt(stdoutFiber).pipe(Effect.ignore)
-      yield* Fiber.interrupt(stderrFiber).pipe(Effect.ignore)
+      if (Exit.isFailure(readyExit) || Option.isNone(readyExit.value))
+      {
+        yield* Fiber.interruptAll([stdoutFiber, stderrFiber, exitFiber]).pipe(Effect.ignore)
+      }
 
       if (Exit.isFailure(readyExit))
       {
-        yield* Fiber.interrupt(exitFiber).pipe(Effect.ignore)
         if (Cause.hasInterruptsOnly(readyExit.cause))
           return yield* Effect.failCause(readyExit.cause)
         const squashed = Cause.squash(readyExit.cause)
@@ -797,12 +819,15 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
       const readyOption = readyExit.value
       if (Option.isNone(readyOption))
       {
-        yield* Fiber.interrupt(exitFiber).pipe(Effect.ignore)
         return yield* new OpenCodeRuntimeError({
           operation: 'startOpenCodeServerProcess',
           detail: `Timed out waiting for OpenCode server start after ${timeoutMs}ms.`,
         })
       }
+
+      // keep draining both pipes so a chatty server cannot block on full buffers
+      yield* Ref.set(stdoutRef, null)
+      yield* Ref.set(stderrRef, null)
 
       const url = readyOption.value
       const version = yield* verifyOpenCodeServerVersion(

@@ -6,7 +6,10 @@ import { Pressable, View } from 'react-native'
 
 import { AppText as Text } from '../../../components/AppText'
 import type { PendingApproval } from '../../../lib/threadActivity'
-import { derivePendingApprovalPresentation } from './pendingApprovalPresentation'
+import {
+  derivePendingApprovalPresentation,
+  isApprovalResponseLocked,
+} from './pendingApprovalPresentation'
 
 export interface PendingApprovalCardProps
 {
@@ -21,7 +24,7 @@ export interface PendingApprovalCardProps
 export function PendingApprovalCard(props: PendingApprovalCardProps)
 {
   const presentation = derivePendingApprovalPresentation(props.approval)
-  const isResponding = props.respondingApprovalId === props.approval.requestId
+  const isResponseLocked = isApprovalResponseLocked(props.approval, props.respondingApprovalId)
 
   return (
     <View className="gap-2.5 rounded-[20px] border border-adaptive-neutral-200-white-a6 bg-adaptive-neutral-100-a80-900-a80 p-4">
@@ -34,6 +37,14 @@ export function PendingApprovalCard(props: PendingApprovalCardProps)
       {presentation.contextLabel ? (
         <Text className="font-sans-medium text-xs text-adaptive-neutral-500-400">
           {presentation.contextLabel}
+        </Text>
+      ) : null}
+      {presentation.lifecycleLabel ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          className="font-sans-medium text-sm leading-normal text-adaptive-neutral-500-400"
+        >
+          {presentation.lifecycleLabel}
         </Text>
       ) : null}
       {props.approval.detail ? (
@@ -61,7 +72,7 @@ export function PendingApprovalCard(props: PendingApprovalCardProps)
             <Pressable
               key={`${option.decision}:${option.label}`}
               className={buttonClassName}
-              disabled={isResponding}
+              disabled={isResponseLocked}
               onPress={() => void props.onRespond(props.approval.requestId, option.decision)}
             >
               <Text className={labelClassName}>{option.label}</Text>

@@ -21,6 +21,7 @@ import { appAtomRegistry } from '../atom-registry'
 import { useSelectedThreadDetail } from './use-thread-detail'
 import { useThreadSelection } from './use-thread-selection'
 import { useAtomCommand } from '../use-atom-command'
+import { isApprovalResponseLocked } from '../../features/threads/activity/pendingApprovalPresentation'
 
 const userInputDraftsByRequestKeyAtom = Atom.make<
   Record<string, Record<string, PendingUserInputDraftAnswer>>
@@ -136,6 +137,12 @@ export function useSelectedThreadRequests()
         return
       }
 
+      const approval = activePendingApprovals.find((candidate) => candidate.requestId === requestId)
+      if (approval && isApprovalResponseLocked(approval, respondingApprovalId))
+      {
+        return
+      }
+
       setRespondingApprovalId(requestId)
       const result = await respondToApproval({
         environmentId: selectedThreadShell.environmentId,
@@ -148,7 +155,7 @@ export function useSelectedThreadRequests()
       setRespondingApprovalId((current) => (current === requestId ? null : current))
       return result
     },
-    [respondToApproval, selectedThreadShell],
+    [activePendingApprovals, respondToApproval, respondingApprovalId, selectedThreadShell],
   )
 
   const onSubmitUserInput = useCallback(async () =>
