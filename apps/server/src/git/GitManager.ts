@@ -159,7 +159,8 @@ export class GitManager extends Context.Service<
 const COMMIT_TIMEOUT_MS = 10 * 60_000
 const STATUS_RESULT_CACHE_TTL = Duration.seconds(1)
 const STATUS_RESULT_CACHE_CAPACITY = 2_048
-const PR_LOOKUP_CACHE_TTL = Duration.minutes(2)
+// match the automatic settlement sweep so external merges settle on its next pass.
+const PR_LOOKUP_CACHE_TTL = Duration.seconds(60)
 const PR_LOOKUP_FAILURE_BASE_TTL = Duration.seconds(20)
 const PR_LOOKUP_FAILURE_MAX_TTL = Duration.minutes(15)
 const PR_LOOKUP_CACHE_CAPACITY = 2_048
