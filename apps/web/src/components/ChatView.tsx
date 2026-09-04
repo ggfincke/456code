@@ -150,7 +150,6 @@ import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
 import { makeWorkspaceFileDropHandlers } from './chat/workspaceFileDrop'
 import { resolveAutoVisitTimestamp } from './Sidebar.logic'
 import { RightPanelTabs } from './RightPanelTabs'
-import { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
 import { BranchToolbar } from './BranchToolbar'
 import { resolveShortcutCommand, shortcutLabelForCommand } from '../keybindings'
 import PlanSidebar from './PlanSidebar'
@@ -6699,9 +6698,5 @@ function ChatViewContent(props: ChatViewProps)
 
 export default function ChatView(props: ChatViewProps)
 {
-  return (
-    <DiffWorkerPoolProvider>
-      <ChatViewContent {...props} />
-    </DiffWorkerPoolProvider>
-  )
+  return <ChatViewContent {...props} />
 }

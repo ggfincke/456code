@@ -10,6 +10,7 @@ import type {
   SelectedLineRange,
 } from '@pierre/diffs'
 import { CodeView, type CodeViewHandle, type CodeViewProps } from '@pierre/diffs/react'
+import { DiffWorkerPoolProvider } from '../DiffWorkerPoolProvider'
 import type { ScopedThreadRef } from '@t3tools/contracts'
 import { useCallback, useMemo, useState, type ReactNode, type Ref } from 'react'
 
@@ -244,38 +245,40 @@ export function AnnotatableCodeView({
 
   const hasOpenComment = draft !== null
   return (
-    <CodeView<DiffCommentAnnotationGroup>
-      {...(viewerRef ? { ref: viewerRef } : {})}
-      {...(className ? { className } : {})}
-      items={items}
-      selectedLines={selectedLines}
-      onSelectedLinesChange={setSelectedLines}
-      options={{
-        ...options,
-        enableGutterUtility: !hasOpenComment,
-        enableLineSelection: !hasOpenComment,
-        onLineSelectionEnd: beginComment,
-      }}
-      renderHeaderPrefix={(item) =>
-        item.type === 'diff'
-          ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)
-          : null
-      }
-      renderAnnotation={(annotation) => (
-        <div className="py-1">
-          {annotation.metadata.entries.map((entry) => (
-            <LocalCommentAnnotation
-              key={entry.id}
-              kind={entry.kind}
-              rangeLabel={entry.rangeLabel}
-              text={entry.text}
-              onCancel={() => removeEntry(entry.id)}
-              onComment={(text) => submitEntry(entry.id, text)}
-              onDelete={() => removeEntry(entry.id)}
-            />
-          ))}
-        </div>
-      )}
-    />
+    <DiffWorkerPoolProvider>
+      <CodeView<DiffCommentAnnotationGroup>
+        {...(viewerRef ? { ref: viewerRef } : {})}
+        {...(className ? { className } : {})}
+        items={items}
+        selectedLines={selectedLines}
+        onSelectedLinesChange={setSelectedLines}
+        options={{
+          ...options,
+          enableGutterUtility: !hasOpenComment,
+          enableLineSelection: !hasOpenComment,
+          onLineSelectionEnd: beginComment,
+        }}
+        renderHeaderPrefix={(item) =>
+          item.type === 'diff'
+            ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)
+            : null
+        }
+        renderAnnotation={(annotation) => (
+          <div className="py-1">
+            {annotation.metadata.entries.map((entry) => (
+              <LocalCommentAnnotation
+                key={entry.id}
+                kind={entry.kind}
+                rangeLabel={entry.rangeLabel}
+                text={entry.text}
+                onCancel={() => removeEntry(entry.id)}
+                onComment={(text) => submitEntry(entry.id, text)}
+                onDelete={() => removeEntry(entry.id)}
+              />
+            ))}
+          </div>
+        )}
+      />
+    </DiffWorkerPoolProvider>
   )
 }

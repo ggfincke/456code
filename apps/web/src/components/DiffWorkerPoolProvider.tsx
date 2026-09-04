@@ -4,7 +4,7 @@
 import { WorkerPoolContextProvider, useWorkerPool } from '@pierre/diffs/react'
 import DiffsWorker from '@pierre/diffs/worker/worker.js?worker'
 import * as Schema from 'effect/Schema'
-import { useEffect, useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSyntaxThemeName } from '../hooks/useSyntaxThemeName'
 import { DIFF_THEME_NAMES, type DiffThemeName } from '../lib/diffRendering'
 
@@ -62,6 +62,36 @@ function DiffWorkerThemeSync({ themeName }: { themeName: DiffThemeName })
   return null
 }
 
+function DiffWorkerReady({ children }: { children?: ReactNode })
+{
+  const workerPool = useWorkerPool()
+  const [ready, setReady] = useState(
+    () => !workerPool || workerPool.isInitialized() || !workerPool.isWorkingPool(),
+  )
+  useEffect(() =>
+  {
+    if (ready || !workerPool) return
+    let mounted = true
+    const finish = () =>
+    {
+      if (mounted) setReady(true)
+    }
+    // failed pools use pierre's existing main-thread fallback.
+    void workerPool.initialize().then(finish, finish)
+    return () =>
+    {
+      mounted = false
+    }
+  }, [ready, workerPool])
+  return ready ? (
+    children
+  ) : (
+    <div role="status" className="p-4 text-xs text-muted-foreground">
+      Loading code...
+    </div>
+  )
+}
+
 export function DiffWorkerPoolProvider({ children }: { children?: ReactNode })
 {
   const diffThemeName = useSyntaxThemeName()
@@ -100,7 +130,7 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode })
       }}
     >
       <DiffWorkerThemeSync themeName={diffThemeName} />
-      {children}
+      <DiffWorkerReady>{children}</DiffWorkerReady>
     </WorkerPoolContextProvider>
   )
 }

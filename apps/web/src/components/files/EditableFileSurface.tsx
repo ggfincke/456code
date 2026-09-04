@@ -22,6 +22,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { isBrowserPreviewFile, openFileInPreview } from '~/browser/openFileInPreview'
 import { useAssetUrlState } from '~/assets/assetUrls'
 import ChatMarkdown from '~/components/ChatMarkdown'
+import { DiffWorkerPoolProvider } from '../DiffWorkerPoolProvider'
 import { OpenInPicker } from '~/components/chat/OpenInPicker'
 import { useClientSettings } from '~/hooks/useSettings'
 import { useTheme } from '~/hooks/useTheme'
@@ -398,58 +399,60 @@ export function EditableFileSurface({
   )
 
   return (
-    <EditProvider createEditor={createEditor}>
-      <div ref={surfaceRef} className="flex min-h-0 flex-1">
-        <Virtualizer
-          className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
-          config={{
-            overscrollSize: 600,
-            intersectionObserverMargin: 1200,
-          }}
-        >
-          <File<FileCommentAnnotationGroup>
-            file={{
-              name: relativePath,
-              contents,
-              cacheKey: projectFileCacheKey(cwd, relativePath, contents),
+    <DiffWorkerPoolProvider>
+      <EditProvider createEditor={createEditor}>
+        <div ref={surfaceRef} className="flex min-h-0 flex-1">
+          <Virtualizer
+            className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+            config={{
+              overscrollSize: 600,
+              intersectionObserverMargin: 1200,
             }}
-            options={{
-              disableFileHeader: true,
-              enableGutterUtility: !hasOpenCommentForm,
-              enableLineSelection: !hasOpenCommentForm,
-              onGutterUtilityClick: setSelectedRange,
-              onLineSelectionChange: setSelectedRange,
-              onLineSelectionEnd: handleLineSelectionEnd,
-              overflow: wordWrap ? 'wrap' : 'scroll',
-              theme: syntaxThemeName,
-              themeType: resolvedTheme,
-              unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
-              onPostRender: handlePostRender,
-            }}
-            selectedLines={selectedRange}
-            lineAnnotations={lineAnnotations}
-            renderAnnotation={(annotation) => (
-              <div className="py-1">
-                {annotation.metadata.entries.map((entry) => (
-                  <LocalCommentAnnotation
-                    key={entry.id}
-                    kind={entry.kind}
-                    rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
-                    text={entry.text}
-                    onCancel={() => removeAnnotationEntry(entry.id)}
-                    onComment={(text) => submitAnnotationEntry(entry.id, text)}
-                    onDelete={() => removeAnnotationEntry(entry.id)}
-                  />
-                ))}
-              </div>
-            )}
-            className="min-h-full"
-            edit
-            onEditChange={handleEditChange}
-            onEditComplete={() => 'accept'}
-          />
-        </Virtualizer>
-      </div>
-    </EditProvider>
+          >
+            <File<FileCommentAnnotationGroup>
+              file={{
+                name: relativePath,
+                contents,
+                cacheKey: projectFileCacheKey(cwd, relativePath, contents),
+              }}
+              options={{
+                disableFileHeader: true,
+                enableGutterUtility: !hasOpenCommentForm,
+                enableLineSelection: !hasOpenCommentForm,
+                onGutterUtilityClick: setSelectedRange,
+                onLineSelectionChange: setSelectedRange,
+                onLineSelectionEnd: handleLineSelectionEnd,
+                overflow: wordWrap ? 'wrap' : 'scroll',
+                theme: syntaxThemeName,
+                themeType: resolvedTheme,
+                unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
+                onPostRender: handlePostRender,
+              }}
+              selectedLines={selectedRange}
+              lineAnnotations={lineAnnotations}
+              renderAnnotation={(annotation) => (
+                <div className="py-1">
+                  {annotation.metadata.entries.map((entry) => (
+                    <LocalCommentAnnotation
+                      key={entry.id}
+                      kind={entry.kind}
+                      rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
+                      text={entry.text}
+                      onCancel={() => removeAnnotationEntry(entry.id)}
+                      onComment={(text) => submitAnnotationEntry(entry.id, text)}
+                      onDelete={() => removeAnnotationEntry(entry.id)}
+                    />
+                  ))}
+                </div>
+              )}
+              className="min-h-full"
+              edit
+              onEditChange={handleEditChange}
+              onEditComplete={() => 'accept'}
+            />
+          </Virtualizer>
+        </div>
+      </EditProvider>
+    </DiffWorkerPoolProvider>
   )
 }
