@@ -203,9 +203,17 @@ export function useThreadComposerState()
     () => (selectedThreadKey ? (queuedMessagesByThreadKey[selectedThreadKey] ?? []) : []),
     [queuedMessagesByThreadKey, selectedThreadKey],
   )
+  const selectedThreadMessages = selectedThreadDetail?.messages
+  const selectedThreadActivities = selectedThreadDetail?.activities
   const selectedThreadFeed = useMemo(
-    () => (selectedThreadDetail ? buildThreadFeed(selectedThreadDetail) : []),
-    [selectedThreadDetail],
+    () =>
+      selectedThreadMessages && selectedThreadActivities
+        ? buildThreadFeed({
+            messages: selectedThreadMessages,
+            activities: selectedThreadActivities,
+          })
+        : [],
+    [selectedThreadActivities, selectedThreadMessages],
   )
 
   const selectedDraft = selectedThreadKey ? composerDrafts[selectedThreadKey] : null

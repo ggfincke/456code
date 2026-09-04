@@ -64,6 +64,189 @@ function makeThread(
 
 describe('buildThreadFeed', () =>
 {
+  it('reuses unchanged feed and presentation rows during an assistant text update', () =>
+  {
+    const completedTurnId = TurnId.make('completed-turn')
+    const activeTurnId = TurnId.make('active-turn')
+    const thread = makeThread({
+      id: ThreadId.make('feed-reuse'),
+      projectId: ProjectId.make('project-1'),
+      title: 'Feed reuse',
+      messages: [
+        {
+          id: MessageId.make('completed-message'),
+          role: 'assistant',
+          text: 'Completed response',
+          turnId: completedTurnId,
+          streaming: false,
+          createdAt: '2026-04-01T00:00:01.000Z',
+          updatedAt: '2026-04-01T00:00:01.000Z',
+        },
+        {
+          id: MessageId.make('streaming-message'),
+          role: 'assistant',
+          text: 'Current response',
+          turnId: activeTurnId,
+          streaming: true,
+          createdAt: '2026-04-01T00:00:05.000Z',
+          updatedAt: '2026-04-01T00:00:05.000Z',
+        },
+      ],
+      activities: [
+        makeActivity({
+          id: EventId.make('completed-tool-1'),
+          kind: 'tool.completed',
+          tone: 'tool',
+          summary: 'Read files',
+          createdAt: '2026-04-01T00:00:02.000Z',
+          turnId: completedTurnId,
+          payload: { title: 'Read files', status: 'completed' },
+        }),
+        makeActivity({
+          id: EventId.make('completed-tool-2'),
+          kind: 'tool.completed',
+          tone: 'tool',
+          summary: 'Checked files',
+          createdAt: '2026-04-01T00:00:03.000Z',
+          turnId: completedTurnId,
+          payload: { title: 'Checked files', status: 'completed' },
+        }),
+        makeActivity({
+          id: EventId.make('active-tool'),
+          kind: 'tool.updated',
+          tone: 'tool',
+          summary: 'Run checks',
+          createdAt: '2026-04-01T00:00:04.000Z',
+          turnId: activeTurnId,
+          payload: { title: 'Run checks', status: 'inProgress' },
+        }),
+      ],
+    })
+
+    const latestTurn = {
+      turnId: activeTurnId,
+      state: 'running' as const,
+      startedAt: '2026-04-01T00:00:04.000Z',
+      completedAt: null,
+    }
+    const expandedTurns = new Set([completedTurnId])
+    const expandedGroups = new Set(['completed-tool-1'])
+    const previousFeed = buildThreadFeed(thread)
+    const previousRows = deriveThreadFeedPresentation(
+      previousFeed,
+      latestTurn,
+      expandedTurns,
+      expandedGroups,
+    )
+    const updatedMessage = {
+      ...thread.messages[1]!,
+      text: 'Current response with more text',
+      updatedAt: '2026-04-01T00:00:06.000Z',
+    }
+    const nextFeed = buildThreadFeed({
+      messages: [thread.messages[0]!, updatedMessage],
+      activities: thread.activities,
+    })
+    const nextRows = deriveThreadFeedPresentation(
+      nextFeed,
+      latestTurn,
+      expandedTurns,
+      new Set(['completed-tool-1', 'unrelated-group']),
+    )
+
+    expect(nextFeed).toHaveLength(previousFeed.length)
+    expect(nextRows).toHaveLength(previousRows.length)
+    for (const [before, after] of [
+      [previousFeed, nextFeed],
+      [previousRows, nextRows],
+    ] as const)
+    {
+      for (const [index, row] of after.entries())
+      {
+        if (row.id === updatedMessage.id)
+        {
+          expect(row).not.toBe(before[index])
+          expect(row).toMatchObject({ message: updatedMessage })
+        }
+        else
+        {
+          expect(row).toBe(before[index])
+        }
+      }
+    }
+    expect(nextRows.some((row) => row.type === 'turn-fold')).toBe(true)
+    expect(nextRows.some((row) => row.type === 'work-toggle')).toBe(true)
+  })
+
+  it('regroups cached activities for message changes and pagination', () =>
+  {
+    const messages = [2, 4].map((second) => ({
+      id: MessageId.make(`message-${second}`),
+      role: 'assistant' as const,
+      text: second === 2 ? '' : 'Response',
+      streaming: false,
+      turnId: null,
+      createdAt: `2026-04-01T00:00:0${second}.000Z`,
+      updatedAt: `2026-04-01T00:00:0${second}.000Z`,
+    }))
+    const thread = makeThread({
+      id: ThreadId.make('feed-regroup'),
+      projectId: ProjectId.make('project-1'),
+      title: 'Feed grouping',
+      messages,
+      activities: [1, 3, 5].map((second) =>
+        makeActivity({
+          id: EventId.make(`work-${second}`),
+          kind: 'runtime.warning',
+          summary: `Notice ${second}`,
+          createdAt: `2026-04-01T00:00:0${second}.000Z`,
+        }),
+      ),
+    })
+
+    const initial = buildThreadFeed(thread)
+    expect(initial.map((row) => row.id)).toEqual(['work-1', 'message-4', 'work-5'])
+    const split = buildThreadFeed({
+      messages: [{ ...messages[0]!, text: 'Now visible' }, messages[1]!],
+      activities: thread.activities,
+    })
+    expect(split.map((row) => row.id)).toEqual([
+      'work-1',
+      'message-2',
+      'work-3',
+      'message-4',
+      'work-5',
+    ])
+    expect(split[0]).not.toBe(initial[0])
+    expect(split.at(-1)).toBe(initial.at(-1))
+    expect(initial[0]).toMatchObject({ activities: [{ id: 'work-1' }, { id: 'work-3' }] })
+
+    const reordered = buildThreadFeed({
+      messages: [messages[0]!, { ...messages[1]!, createdAt: '2026-04-01T00:00:06.000Z' }],
+      activities: thread.activities,
+    })
+    expect(reordered.map((row) => row.id)).toEqual(['work-1', 'message-4'])
+    expect(reordered[0]).toMatchObject({
+      activities: [{ id: 'work-1' }, { id: 'work-3' }, { id: 'work-5' }],
+    })
+
+    const olderMessage = {
+      ...messages[1]!,
+      id: MessageId.make('older-message'),
+      createdAt: '2026-04-01T00:00:00.000Z',
+    }
+    const page = buildThreadFeed(thread, { loadedMessages: [messages[1]!] })
+    expect(page.map((row) => row.id)).toEqual(['message-4', 'work-5'])
+    const prepended = buildThreadFeed(thread, { loadedMessages: [olderMessage, ...messages] })
+    expect(prepended.map((row) => row.id)).toEqual([
+      'older-message',
+      'work-1',
+      'message-4',
+      'work-5',
+    ])
+    expect(prepended.at(-1)).toBe(page.at(-1))
+  })
+
   it('drops wire-only runtime warnings while keeping actionable warnings', () =>
   {
     const thread = makeThread({
@@ -619,7 +802,10 @@ describe('buildThreadFeed', () =>
     ]
 
     const collapsed = deriveThreadFeedPresentation(feed, null, new Set())
+    const repeatedCollapsed = deriveThreadFeedPresentation(feed, null, new Set())
     expect(collapsed.map((entry) => entry.id)).toEqual(['activity-3', 'work-toggle:work-group-1'])
+    expect(repeatedCollapsed[0]).toBe(collapsed[0])
+    expect(repeatedCollapsed[1]).toBe(collapsed[1])
     expect(collapsed[1]).toMatchObject({
       type: 'work-toggle',
       groupId: 'work-group-1',
@@ -628,6 +814,7 @@ describe('buildThreadFeed', () =>
     })
 
     const expanded = deriveThreadFeedPresentation(feed, null, new Set(), new Set(['work-group-1']))
+    expect(expanded[0]).not.toBe(collapsed[0])
     expect(expanded.map((entry) => entry.id)).toEqual([
       'activity-1',
       'activity-2',
