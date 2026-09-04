@@ -183,6 +183,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   'user-input.resolved',
   'task.started',
   'task.progress',
+  'task.updated',
   'task.completed',
   'hook.started',
   'hook.progress',
@@ -234,6 +235,7 @@ const UserInputRequestedType = Schema.Literal('user-input.requested')
 const UserInputResolvedType = Schema.Literal('user-input.resolved')
 const TaskStartedType = Schema.Literal('task.started')
 const TaskProgressType = Schema.Literal('task.progress')
+const TaskUpdatedType = Schema.Literal('task.updated')
 const TaskCompletedType = Schema.Literal('task.completed')
 const HookStartedType = Schema.Literal('hook.started')
 const HookProgressType = Schema.Literal('hook.progress')
@@ -505,20 +507,34 @@ export type TaskUsageSnapshot = typeof TaskUsageSnapshot.Type
 // call; all optional because providers learn these at different lifecycle
 // points (toolUseId at spawn, agentId/model often only at completion)
 const taskAgentIdentityFields = {
+  taskType: Schema.optional(TrimmedNonEmptyStringSchema),
   toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
   agentId: Schema.optional(TrimmedNonEmptyStringSchema),
   subagentType: Schema.optional(TrimmedNonEmptyStringSchema),
   model: Schema.optional(TrimmedNonEmptyStringSchema),
+  title: Schema.optional(TrimmedNonEmptyStringSchema),
+  workflowName: Schema.optional(TrimmedNonEmptyStringSchema),
+  timelineBypass: Schema.optional(Schema.Boolean),
 }
 
 const TaskStartedPayload = Schema.Struct({
   taskId: RuntimeTaskId,
   description: Schema.optional(TrimmedNonEmptyStringSchema),
-  taskType: Schema.optional(TrimmedNonEmptyStringSchema),
-  workflowName: Schema.optional(TrimmedNonEmptyStringSchema),
   ...taskAgentIdentityFields,
 })
 export type TaskStartedPayload = typeof TaskStartedPayload.Type
+
+export const RuntimeTaskStatus = Schema.Literals([
+  'pending',
+  'running',
+  'waiting',
+  'idle',
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+])
+export type RuntimeTaskStatus = typeof RuntimeTaskStatus.Type
 
 const TaskProgressPayload = Schema.Struct({
   taskId: RuntimeTaskId,
@@ -527,9 +543,20 @@ const TaskProgressPayload = Schema.Struct({
   usage: Schema.optional(Schema.Unknown),
   tokenUsage: Schema.optional(TaskUsageSnapshot),
   lastToolName: Schema.optional(TrimmedNonEmptyStringSchema),
+  status: Schema.optional(RuntimeTaskStatus),
+  error: Schema.optional(TrimmedNonEmptyStringSchema),
   ...taskAgentIdentityFields,
 })
 export type TaskProgressPayload = typeof TaskProgressPayload.Type
+
+const TaskUpdatedPayload = Schema.Struct({
+  taskId: RuntimeTaskId,
+  status: Schema.optional(RuntimeTaskStatus),
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+  error: Schema.optional(TrimmedNonEmptyStringSchema),
+  ...taskAgentIdentityFields,
+})
+export type TaskUpdatedPayload = typeof TaskUpdatedPayload.Type
 
 const TaskCompletedPayload = Schema.Struct({
   taskId: RuntimeTaskId,
@@ -913,6 +940,13 @@ const ProviderRuntimeTaskProgressEvent = Schema.Struct({
 })
 export type ProviderRuntimeTaskProgressEvent = typeof ProviderRuntimeTaskProgressEvent.Type
 
+const ProviderRuntimeTaskUpdatedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: TaskUpdatedType,
+  payload: TaskUpdatedPayload,
+})
+export type ProviderRuntimeTaskUpdatedEvent = typeof ProviderRuntimeTaskUpdatedEvent.Type
+
 const ProviderRuntimeTaskCompletedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: TaskCompletedType,
@@ -1073,6 +1107,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeUserInputResolvedEvent,
   ProviderRuntimeTaskStartedEvent,
   ProviderRuntimeTaskProgressEvent,
+  ProviderRuntimeTaskUpdatedEvent,
   ProviderRuntimeTaskCompletedEvent,
   ProviderRuntimeHookStartedEvent,
   ProviderRuntimeHookProgressEvent,

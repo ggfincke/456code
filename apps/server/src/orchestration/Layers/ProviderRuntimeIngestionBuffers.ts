@@ -9,7 +9,7 @@ export const providerTaskKey = (threadId: ThreadId, taskId: string) => `${thread
 
 // fallback when the in-memory description cache no longer has the task name
 // (server restart, session-exit sweep, TTL/capacity eviction): earlier
-// task.started/task.progress activities for the task are persisted with it.
+// task lifecycle activities for the task are persisted with it.
 export function findTaskTitleInActivities(
   activities: ReadonlyArray<OrchestrationThreadActivity> | undefined,
   taskId: string,
@@ -22,7 +22,12 @@ export function findTaskTitleInActivities(
   for (let index = activities.length - 1; index >= 0; index -= 1)
   {
     const activity = activities[index]
-    if (!activity || (activity.kind !== 'task.started' && activity.kind !== 'task.progress'))
+    if (
+      !activity ||
+      (activity.kind !== 'task.started' &&
+        activity.kind !== 'task.progress' &&
+        activity.kind !== 'task.updated')
+    )
     {
       continue
     }
@@ -37,7 +42,8 @@ export function findTaskTitleInActivities(
     const title =
       typeof payload.title === 'string'
         ? payload.title
-        : activity.kind === 'task.started' && typeof payload.detail === 'string'
+        : (activity.kind === 'task.started' || activity.kind === 'task.updated') &&
+            typeof payload.detail === 'string'
           ? payload.detail
           : undefined
     if (title && title.trim().length > 0)

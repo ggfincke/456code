@@ -403,10 +403,47 @@ export function runtimeEventToActivities(
             detail: truncateDetail(event.payload.summary ?? event.payload.description),
             ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...(event.payload.error ? { error: truncateDetail(event.payload.error) } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
             ...(event.payload.tokenUsage !== undefined
               ? { tokenUsage: event.payload.tokenUsage }
               : {}),
+            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
+            ...(event.payload.model ? { model: event.payload.model } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ]
+    }
+
+    case 'task.updated':
+    {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: event.payload.status === 'failed' ? 'error' : 'info',
+          kind: 'task.updated',
+          summary:
+            event.payload.status === 'failed'
+              ? 'Task failed'
+              : event.payload.status
+                ? `Task ${event.payload.status}`
+                : 'Task updated',
+          payload: {
+            taskId: event.payload.taskId,
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...(event.payload.description
+              ? { detail: truncateDetail(event.payload.description) }
+              : {}),
+            ...(event.payload.error ? { error: truncateDetail(event.payload.error) } : {}),
+            ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
+            ...(event.payload.title ? { title: truncateDetail(event.payload.title, 120) } : {}),
             ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
@@ -455,6 +492,7 @@ export function runtimeEventToActivities(
               ? { totalDurationMs: event.payload.totalDurationMs }
               : {}),
             ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
             ...(event.payload.model ? { model: event.payload.model } : {}),

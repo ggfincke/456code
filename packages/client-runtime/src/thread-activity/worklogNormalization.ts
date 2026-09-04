@@ -576,7 +576,10 @@ function toNormalizedWorkLogEntry(
   const changedFiles = extractChangedFiles(payload)
   const toolTitle = asTrimmedString(payload?.title)
   const viewedImagePath = asTrimmedString(asRecord(payload?.data)?.imagePath)
-  const isTaskActivity = activity.kind === 'task.progress' || activity.kind === 'task.completed'
+  const isTaskActivity =
+    activity.kind === 'task.progress' ||
+    activity.kind === 'task.updated' ||
+    activity.kind === 'task.completed'
   const taskSummary = isTaskActivity ? asNonEmptyString(payload?.summary) : null
   const taskDetailAsLabel =
     isTaskActivity && !taskSummary ? asNonEmptyString(payload?.detail) : null
