@@ -123,7 +123,9 @@ export function CommandPalette({ children }: { children: ReactNode })
         open={state.open || projectSearchMode !== null}
         onOpenChange={projectSearchMode === null ? setOpen : closeProjectSearch}
       >
-        {children}
+        <div className="contents" inert={state.open}>
+          {children}
+        </div>
         {projectSearchMode === 'files' ? (
           <ProjectFilePicker onOpenChange={closeProjectSearch} />
         ) : projectSearchMode === 'contents' ? (
