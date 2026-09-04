@@ -30,7 +30,7 @@ import { createModelSelection, normalizeModelSlug } from '@t3tools/shared/model'
 import * as Equal from 'effect/Equal'
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
+import { persist } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 import {
   type ElementContextDraft,
@@ -78,6 +78,8 @@ import {
   PersistedComposerImageAttachment,
   type ProjectDraftSession,
   composerDebouncedStorage,
+  composerPersistStorage,
+  type ComposerPersistState,
   composerImageDedupKey,
   createDraftThreadState,
   createEmptyThreadDraft,
@@ -91,7 +93,6 @@ import {
   normalizeCurrentPersistedComposerDraftStoreState,
   normalizeTerminalContextForThread,
   normalizeTerminalContextsForThread,
-  partializeComposerDraftStoreState,
   projectDraftKey,
   removeDraftThreadReferences,
   resolveComposerDraftKey,
@@ -2184,9 +2185,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
     {
       name: COMPOSER_DRAFT_STORAGE_KEY,
       version: COMPOSER_DRAFT_STORAGE_VERSION,
-      storage: createJSONStorage(() => composerDebouncedStorage),
+      storage: composerPersistStorage,
       migrate: migratePersistedComposerDraftStoreState,
-      partialize: partializeComposerDraftStoreState,
+      partialize: (state): ComposerPersistState => ({ capturedState: state }),
       merge: (persistedState, currentState) =>
       {
         const normalizedPersisted = normalizeCurrentPersistedComposerDraftStoreState(persistedState)

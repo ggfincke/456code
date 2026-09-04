@@ -29,7 +29,8 @@ import * as Schema from 'effect/Schema'
 import { DeepMutable } from 'effect/Types'
 import { getLocalStorageItem } from '../hooks/useLocalStorage'
 import { type ElementContextDraft } from '../lib/elementContext'
-import { createDebouncedStorage, createMemoryStorage } from '../lib/storage'
+import { createDeferredStorage, createMemoryStorage } from '../lib/storage'
+import type { PersistStorage, StorageValue } from 'zustand/middleware'
 import {
   type TerminalContextDraft,
   ensureInlineTerminalContextPlaceholders,
@@ -80,10 +81,31 @@ export type DraftId = typeof DraftId.Type
 
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300
 
-export const composerDebouncedStorage = createDebouncedStorage(
+export type ComposerPersistState =
+  { capturedState: ComposerDraftStoreState } | PersistedComposerDraftStoreState
+
+export const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPersistState>>(
   typeof localStorage !== 'undefined' ? localStorage : createMemoryStorage(),
+  (value) =>
+    JSON.stringify({
+      state:
+        'capturedState' in value.state
+          ? partializeComposerDraftStoreState(value.state.capturedState)
+          : value.state,
+      version: value.version,
+    }),
   COMPOSER_PERSIST_DEBOUNCE_MS,
 )
+
+export const composerPersistStorage: PersistStorage<ComposerPersistState> = {
+  getItem: (name) =>
+  {
+    const raw = composerDebouncedStorage.getItem(name)
+    return typeof raw === 'string' ? (JSON.parse(raw) as StorageValue<ComposerPersistState>) : null
+  },
+  setItem: (name, value) => composerDebouncedStorage.setItem(name, value),
+  removeItem: (name) => composerDebouncedStorage.removeItem(name),
+}
 
 export const PersistedComposerImageAttachment = Schema.Struct({
   id: Schema.String,
