@@ -51,6 +51,7 @@ import { SettingsAuthRouteScreen } from './features/settings/SettingsAuthRouteSc
 import { SettingsEnvironmentsRouteScreen } from './features/settings/SettingsEnvironmentsRouteScreen'
 import { SettingsRouteScreen } from './features/settings/SettingsRouteScreen'
 import { SettingsWaitlistRouteScreen } from './features/settings/SettingsWaitlistRouteScreen'
+import { SettingsUsageRouteScreen } from './features/settings/SettingsUsageRouteScreen'
 import { ShowcaseCaptureCoordinator } from './features/showcase/ShowcaseCaptureCoordinator'
 import { useIncomingShare } from './features/sharing/IncomingShareProvider'
 import {
@@ -142,6 +143,13 @@ const SettingsSheetStack = createNativeStackNavigator({
       linking: 'environments',
       options: {
         title: 'Environments',
+      },
+    }),
+    SettingsUsage: createNativeStackScreen({
+      screen: SettingsUsageRouteScreen,
+      linking: 'usage',
+      options: {
+        title: 'Usage',
       },
     }),
     SettingsEnvironmentNew: createNativeStackScreen({
