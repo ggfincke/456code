@@ -6133,15 +6133,6 @@ function ChatViewContent(props: ChatViewProps)
           />
         </header>
 
-        <ThreadErrorBanner
-          error={promotedProviderAuthError ? null : visibleThreadError}
-          onDismiss={() =>
-          {
-            setThreadError(activeThread.id, null)
-            dismissThreadErrorBannerForSession(threadErrorBannerKey)
-            setThreadErrorBannerDismissTick((tick) => tick + 1)
-          }}
-        />
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
@@ -6167,13 +6158,22 @@ function ChatViewContent(props: ChatViewProps)
                 </div>
               </div>
             ) : null}
-            {/* Provider status overlays the timeline without changing its content height. */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+            {/* banners overlay the timeline without changing its content height. */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col">
               <ProviderStatusBanner
                 status={visibleProviderStatus}
                 reAuthRequired={providerReAuthRequired}
                 reAuthDetail={providerReAuthRequired ? visibleThreadError : null}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
+              />
+              <ThreadErrorBanner
+                error={promotedProviderAuthError ? null : visibleThreadError}
+                onDismiss={() =>
+                {
+                  setThreadError(activeThread.id, null)
+                  dismissThreadErrorBannerForSession(threadErrorBannerKey)
+                  setThreadErrorBannerDismissTick((tick) => tick + 1)
+                }}
               />
             </div>
             {/* Messages Wrapper */}
