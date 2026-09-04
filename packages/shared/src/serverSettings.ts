@@ -143,8 +143,27 @@ export function applyServerSettingsPatch(
 ): ServerSettings
 {
   const selectionPatch = patch.textGenerationModelSelection
-  const { automaticGitFetchInterval, ...patchForMerge } = patch
+  const {
+    automaticGitFetchInterval,
+    usagePriceOverrides: usagePriceOverridesPatch,
+    ...patchForMerge
+  } = patch
   const next = deepMerge(current, patchForMerge)
+  const usagePriceOverrides = { ...current.usagePriceOverrides }
+  if (usagePriceOverridesPatch !== undefined)
+  {
+    for (const [model, override] of Object.entries(usagePriceOverridesPatch))
+    {
+      if (override === null)
+      {
+        delete usagePriceOverrides[model]
+      }
+      else
+      {
+        setSettingsEntry(usagePriceOverrides, model, override)
+      }
+    }
+  }
   const nextWithReplacements = {
     ...next,
     ...(patch.providerInstances !== undefined
@@ -154,6 +173,7 @@ export function applyServerSettingsPatch(
       ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
       : {}),
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
+    ...(usagePriceOverridesPatch !== undefined ? { usagePriceOverrides } : {}),
   }
   if (!selectionPatch)
   {

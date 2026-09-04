@@ -20,6 +20,7 @@ import {
   ProviderInstanceId,
   type ProviderDriverKind,
 } from './providerInstance.ts'
+import { UsageModelPriceOverride } from './usage.ts'
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -646,6 +647,9 @@ export const ServerSettings = Schema.Struct({
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 })
 export type ServerSettings = typeof ServerSettings.Type
@@ -839,6 +843,9 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // the web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  usagePriceOverrides: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),
+  ),
 })
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type
 

@@ -220,7 +220,7 @@ function aggregateUsage(
       model: record.model,
       totals: record.totals,
       reportedCostUsd: record.reportedCostUsd,
-      overrides: {},
+      overrides: settings.usagePriceOverrides,
     })
     const current = buckets.get(key) ?? {
       provider: record.provider,
