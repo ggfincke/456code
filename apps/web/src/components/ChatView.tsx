@@ -2,7 +2,6 @@
 // renders thread timelines, composer state, and guarded provider dispatch
 import {
   type ApprovalRequestId,
-  type AssetResource,
   type AssistantCitation,
   type ArchitectureGraphProjection,
   type ArchitectureStandingAnchor,
@@ -83,6 +82,7 @@ import { useDiffPanelStore } from '../diffPanelStore'
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
+  createMessageAttachmentPreviewProjector,
   derivePhase,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
@@ -92,6 +92,7 @@ import {
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   isLatestTurnSettled,
+  selectHandoffImageResources,
 } from '../session-logic'
 import { deriveWorkerVerdictMap } from '../session/worklog'
 import { type LegendListRef } from '@legendapp/list/react'
@@ -124,7 +125,6 @@ import {
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
   isImageAttachment,
-  isFileAttachment,
   type SessionPhase,
   type Thread,
   type TurnDiffSummary,
@@ -2017,67 +2017,32 @@ function ChatViewContent(props: ChatViewProps)
     })
   }, [])
   const serverMessages = activeThread?.messages
-  const serverAttachmentResources = useMemo(() =>
-  {
-    const resources = new Map<string, Extract<AssetResource, { _tag: 'attachment' }>>()
-    for (const message of serverMessages ?? [])
-    {
-      for (const attachment of message.attachments ?? [])
-      {
-        if (!isImageAttachment(attachment) && !isFileAttachment(attachment)) continue
-        resources.set(attachment.id, {
-          _tag: 'attachment',
-          attachmentId: attachment.id,
-          ...(isFileAttachment(attachment)
-            ? { fileName: attachment.name, mimeType: attachment.mimeType }
-            : {}),
-        })
-      }
-    }
-    return [...resources.values()]
-  }, [serverMessages])
-  const serverAttachmentIds = useMemo(
-    () => serverAttachmentResources.map((resource) => resource.attachmentId),
-    [serverAttachmentResources],
+  const serverAttachmentResources = useMemo(
+    () => selectHandoffImageResources(serverMessages, attachmentPreviewHandoffByMessageId),
+    [attachmentPreviewHandoffByMessageId, serverMessages],
   )
   const serverAttachmentUrls = useAssetUrls(environmentId, serverAttachmentResources)
   const serverAttachmentUrlById = useMemo(
     () =>
       new Map(
-        serverAttachmentIds.flatMap((attachmentId, index) =>
+        serverAttachmentResources.flatMap((resource, index) =>
         {
           const url = serverAttachmentUrls[index]
-          return url ? [[attachmentId, url] as const] : []
+          return url ? [[resource.attachmentId, url] as const] : []
         }),
       ),
-    [serverAttachmentIds, serverAttachmentUrls],
+    [serverAttachmentResources, serverAttachmentUrls],
   )
+  const [projectServerMessagePreviews] = useState(createMessageAttachmentPreviewProjector)
   const displayServerMessages = useMemo<ReadonlyArray<ChatMessage>>(() =>
   {
     if (!serverMessages) return []
     return serverMessages.map((message) =>
-    {
-      if (!message.attachments || message.attachments.length === 0)
-      {
-        return message
-      }
-      return {
-        ...message,
-        attachments: message.attachments.map((attachment) =>
-        {
-          if (!isImageAttachment(attachment) && !isFileAttachment(attachment)) return attachment
-          const previewUrl = serverAttachmentUrlById.get(attachment.id)
-          return previewUrl
-            ? {
-                ...attachment,
-                previewUrl,
-                ...(isFileAttachment(attachment) ? { downloadable: true } : {}),
-              }
-            : attachment
-        }),
-      }
-    })
-  }, [serverAttachmentUrlById, serverMessages])
+      projectServerMessagePreviews(message, (attachment) =>
+        serverAttachmentUrlById.get(attachment.id),
+      ),
+    )
+  }, [projectServerMessagePreviews, serverAttachmentUrlById, serverMessages])
   useEffect(() =>
   {
     if (typeof Image === 'undefined' || displayServerMessages.length === 0)
