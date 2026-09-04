@@ -448,6 +448,9 @@ export function runtimeEventToActivities(
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
             ...(event.payload.model ? { model: event.payload.model } : {}),
+            ...(event.payload.timelineBypass !== undefined
+              ? { timelineBypass: event.payload.timelineBypass }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -496,6 +499,9 @@ export function runtimeEventToActivities(
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
             ...(event.payload.model ? { model: event.payload.model } : {}),
+            ...(event.payload.timelineBypass !== undefined
+              ? { timelineBypass: event.payload.timelineBypass }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
