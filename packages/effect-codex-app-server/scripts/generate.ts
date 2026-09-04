@@ -200,6 +200,43 @@ const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
   },
 }
 
+function applyCodex0151DefinitionCompatibility(
+  exportName: string,
+  definitionName: string,
+  definitionSchema: Schema.Json,
+): Schema.Json
+{
+  const isThreadResponse =
+    exportName === 'V2ThreadReadResponse' ||
+    exportName === 'V2ThreadResumeResponse' ||
+    exportName === 'V2ThreadRollbackResponse'
+  if (
+    !isThreadResponse ||
+    definitionName !== 'CodexErrorInfo' ||
+    typeof definitionSchema !== 'object'
+  )
+  {
+    return definitionSchema
+  }
+
+  const schema = definitionSchema as {
+    readonly oneOf?: ReadonlyArray<{ readonly enum?: ReadonlyArray<string> }>
+  }
+  const [firstVariant, ...remainingVariants] = schema.oneOf ?? []
+  if (!firstVariant?.enum || firstVariant.enum.includes('rateLimitExceeded'))
+  {
+    return definitionSchema
+  }
+
+  return {
+    ...definitionSchema,
+    oneOf: [
+      { ...firstVariant, enum: [...firstVariant.enum, 'rateLimitExceeded'] },
+      ...remainingVariants,
+    ],
+  }
+}
+
 const getGeneratedPaths = Effect.fn('getGeneratedPaths')(function* ()
 {
   const path = yield* Path.Path
@@ -669,7 +706,12 @@ const generateFiles = Effect.fn('generateFiles')(function* ()
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
-            Codex0150DefinitionSchemas[definitionName] ?? definitionSchema,
+            Codex0150DefinitionSchemas[definitionName] ??
+              applyCodex0151DefinitionCompatibility(
+                file.exportName,
+                definitionName,
+                definitionSchema,
+              ),
             localDefinitionNames,
             file.namespace,
             exportNameByQualifiedName,
