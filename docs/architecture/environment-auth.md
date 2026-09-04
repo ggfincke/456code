@@ -75,6 +75,12 @@ Requested scopes must be a subset of the one-time bootstrap credential grant.
 An ordinary paired client therefore cannot exchange its grant for
 `access:read`, `access:write`, or `relay:write`.
 
+The reusable `desktop-bootstrap` grant replaces active sessions with the same
+subject and authentication method. Revocation and insertion share one database
+transaction, so a failed insertion preserves the previous credential. This also
+removes stale local desktop entries from earlier launches. Browser-cookie sessions
+and sessions issued through pairing links are not replaced.
+
 ### WebSocket Ticket
 
 `POST /api/auth/websocket-ticket` accepts any authenticated session and returns
