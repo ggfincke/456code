@@ -26,7 +26,7 @@ import {
 } from '../Layers/OpenCodeProvider.ts'
 import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
-import { OpenCodeRuntime } from '../opencodeRuntime.ts'
+import { OpenCodeRuntime, type OpenCodeRuntimeShape } from '../opencodeRuntime.ts'
 import * as OpenCodeServerOwner from '../OpenCodeServerOwner.ts'
 import { type ProviderDriver, type ProviderInstance } from '../catalog/ProviderDriver.ts'
 import type { ServerProviderDraft } from '../providerSnapshot.ts'
@@ -64,6 +64,53 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
     isCommandPath: isOpenCodeNativeCommandPath,
   },
 })
+
+export const makeOpenCodeWorkspaceSkillsLoader =
+  (input: {
+    readonly settings: Pick<OpenCodeSettings, 'binaryPath' | 'serverPassword' | 'serverUrl'>
+    readonly environment: NodeJS.ProcessEnv
+    readonly runtime: Pick<
+      OpenCodeRuntimeShape,
+      'connectToOpenCodeServer' | 'createOpenCodeSdkClient' | 'loadOpenCodeSkills'
+    >
+    readonly serverOwner: Pick<OpenCodeServerOwner.OpenCodeServerOwner['Service'], 'withServer'>
+  }) =>
+  (cwd: string) =>
+    input.settings.serverUrl.trim().length > 0
+      ? Effect.scoped(
+          Effect.gen(function* ()
+            {
+            const server = yield* input.runtime.connectToOpenCodeServer({
+              binaryPath: input.settings.binaryPath,
+              directory: cwd,
+              serverUrl: input.settings.serverUrl,
+              ...(input.settings.serverPassword
+                ? { serverPassword: input.settings.serverPassword }
+                : {}),
+              environment: input.environment,
+            })
+            return yield* input.runtime.loadOpenCodeSkills(
+              input.runtime.createOpenCodeSdkClient({
+                baseUrl: server.url,
+                directory: cwd,
+                ...(input.settings.serverPassword
+                  ? { serverPassword: input.settings.serverPassword }
+                  : {}),
+              }),
+            )
+          }),
+        )
+      : input.serverOwner.withServer((server) =>
+          input.runtime.loadOpenCodeSkills(
+            input.runtime.createOpenCodeSdkClient({
+              baseUrl: server.url,
+              directory: cwd,
+              ...(server.serverPassword !== undefined
+                ? { serverPassword: server.serverPassword }
+                : {}),
+            }),
+          ),
+        )
 
 export type OpenCodeDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -162,35 +209,14 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
         Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
       )
-      const loadSkillsForCwd = (cwd: string) =>
-        effectiveConfig.serverUrl.trim().length > 0
-          ? Effect.scoped(
-              Effect.gen(function* ()
-                {
-                const server = yield* openCodeRuntime.connectToOpenCodeServer({
-                  binaryPath: effectiveConfig.binaryPath,
-                  directory: cwd,
-                  serverUrl: effectiveConfig.serverUrl,
-                  ...(effectiveConfig.serverPassword
-                    ? { serverPassword: effectiveConfig.serverPassword }
-                    : {}),
-                  environment: processEnv,
-                })
-                const client = openCodeRuntime.createOpenCodeSdkClient({
-                  baseUrl: server.url,
-                  directory: cwd,
-                  ...(effectiveConfig.serverPassword
-                    ? { serverPassword: effectiveConfig.serverPassword }
-                    : {}),
-                })
-                return yield* openCodeRuntime.loadOpenCodeSkills(client)
-              }),
-            )
-          : openCodeRuntime.loadSkillsFromCli({
-              binaryPath: effectiveConfig.binaryPath,
-              cwd,
-              environment: processEnv,
-            })
+      // local workspace catalogs reuse the instance owner so SDK responses are
+      // not truncated by CLI stdout pipe limits.
+      const loadSkillsForCwd = makeOpenCodeWorkspaceSkillsLoader({
+        settings: effectiveConfig,
+        environment: processEnv,
+        runtime: openCodeRuntime,
+        serverOwner,
+      })
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,
