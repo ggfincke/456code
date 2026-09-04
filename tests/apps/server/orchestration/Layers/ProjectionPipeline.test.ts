@@ -25,6 +25,7 @@ import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as TestClock from 'effect/testing/TestClock'
+import * as Tracer from 'effect/Tracer'
 
 import {
   ATTACHMENT_CLEANUP_GRACE,
@@ -43,6 +44,7 @@ import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
 } from '../../../../../apps/server/src/persistence/Services/OrchestrationEventStore.ts'
+import { ProjectionStateRepository } from '../../../../../apps/server/src/persistence/Services/ProjectionState.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
 import {
@@ -245,6 +247,66 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-run-execution-j
 )
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer('t3-projection-pipeline-test-')
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-cursor-batch-')))(
+  'OrchestrationProjectionPipeline cursor batches',
+  (it) =>
+  {
+    it.effect('writes a project and all projector cursors in two statements', () =>
+      Effect.gen(function* ()
+      {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline
+        const eventStore = yield* OrchestrationEventStore
+        const projectionState = yield* ProjectionStateRepository
+        const createdAt = '2026-01-01T00:00:00.000Z'
+        let statements = 0
+        const tracer = Tracer.make({
+          span: (options) =>
+          {
+            if (options.name === 'sql.execute')
+            {
+              statements += 1
+            }
+            return new Tracer.NativeSpan(options)
+          },
+        })
+        const event = yield* eventStore.append({
+          type: 'project.created',
+          eventId: EventId.make('evt-cursor-batch-project'),
+          aggregateKind: 'project',
+          aggregateId: ProjectId.make('project-cursor-batch'),
+          occurredAt: createdAt,
+          commandId: CommandId.make('cmd-cursor-batch-project'),
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make('project-cursor-batch'),
+            title: 'Cursor batch project',
+            workspaceRoot: '/tmp/project-cursor-batch',
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt,
+            updatedAt: createdAt,
+          },
+        })
+
+        yield* projectionPipeline.projectEvent(event).pipe(Effect.withTracer(tracer))
+        assert.strictEqual(statements, 2)
+        assert.deepEqual(
+          yield* projectionState.listAll(),
+          Object.values(ORCHESTRATION_PROJECTOR_NAMES)
+            .sort()
+            .map((projector) => ({
+              projector,
+              lastAppliedSequence: event.sequence,
+              updatedAt: createdAt,
+            })),
+        )
+      }),
+    )
+  },
+)
 
 it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
 {
@@ -1296,6 +1358,8 @@ it.layer(
         },
       })
 
+      const projectionState = yield* ProjectionStateRepository
+      const cursorsBeforeFailure = yield* projectionState.listAll()
       yield* sql`
         CREATE TRIGGER fail_thread_messages_projection_state_update
         BEFORE UPDATE ON projection_state
@@ -1305,39 +1369,39 @@ it.layer(
         END;
       `
 
-      const result = yield* Effect.result(
-        appendAndProject({
-          type: 'thread.message-sent',
-          eventId: EventId.make('evt-rollback-3'),
-          aggregateKind: 'thread',
-          aggregateId: ThreadId.make('thread-rollback'),
-          occurredAt: now,
-          commandId: CommandId.make('cmd-rollback-3'),
-          causationEventId: null,
-          correlationId: CorrelationId.make('cmd-rollback-3'),
-          metadata: {},
-          payload: {
-            threadId: ThreadId.make('thread-rollback'),
-            messageId: MessageId.make('message-rollback'),
-            role: 'user',
-            text: 'Rollback me',
-            attachments: [
-              {
-                type: 'image',
-                id: 'thread-rollback-att-1',
-                name: 'rollback.png',
-                mimeType: 'image/png',
-                sizeBytes: 5,
-              },
-            ],
-            turnId: null,
-            streaming: false,
-            createdAt: now,
-            updatedAt: now,
-          },
-        }),
-      )
+      const pendingEvent = yield* eventStore.append({
+        type: 'thread.message-sent',
+        eventId: EventId.make('evt-rollback-3'),
+        aggregateKind: 'thread',
+        aggregateId: ThreadId.make('thread-rollback'),
+        occurredAt: now,
+        commandId: CommandId.make('cmd-rollback-3'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-rollback-3'),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make('thread-rollback'),
+          messageId: MessageId.make('message-rollback'),
+          role: 'user',
+          text: 'Rollback me',
+          attachments: [
+            {
+              type: 'image',
+              id: 'thread-rollback-att-1',
+              name: 'rollback.png',
+              mimeType: 'image/png',
+              sizeBytes: 5,
+            },
+          ],
+          turnId: null,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+      const result = yield* Effect.result(projectionPipeline.projectEvent(pendingEvent))
       assert.equal(result._tag, 'Failure')
+      assert.deepEqual(yield* projectionState.listAll(), cursorsBeforeFailure)
 
       const rows = yield* sql<{
         readonly count: number
@@ -1352,6 +1416,23 @@ it.layer(
       const attachmentPath = path.join(attachmentsDir, 'thread-rollback-att-1.png')
       assert.isFalse(yield* exists(attachmentPath))
       yield* sql`DROP TRIGGER IF EXISTS fail_thread_messages_projection_state_update`
+
+      yield* projectionPipeline.bootstrap
+      yield* projectionPipeline.bootstrap
+      assert.deepEqual(
+        yield* projectionState.listAll(),
+        cursorsBeforeFailure.map((cursor) => ({
+          ...cursor,
+          lastAppliedSequence: pendingEvent.sequence,
+          updatedAt: pendingEvent.occurredAt,
+        })),
+      )
+      const replayedMessages = yield* sql<{ readonly text: string }>`
+        SELECT text
+        FROM projection_thread_messages
+        WHERE message_id = 'message-rollback'
+      `
+      assert.deepEqual(replayedMessages, [{ text: 'Rollback me' }])
     }),
   )
 })

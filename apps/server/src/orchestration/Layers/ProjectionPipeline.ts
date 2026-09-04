@@ -3170,15 +3170,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           }),
         { concurrency: 1 },
       )
-      yield* projectionStateRepository.upsert({
-        projector: projector.name,
-        lastAppliedSequence: event.sequence,
-        updatedAt: event.occurredAt,
-      })
     })
 
     const runProjectorForEvent = (projector: ProjectorDefinition, event: OrchestrationEvent) =>
-      sql.withTransaction(applyProjectorForEvent(projector, event))
+      sql.withTransaction(
+        Effect.gen(function* ()
+        {
+          yield* applyProjectorForEvent(projector, event)
+          yield* projectionStateRepository.upsert({
+            projector: projector.name,
+            lastAppliedSequence: event.sequence,
+            updatedAt: event.occurredAt,
+          })
+        }),
+      )
 
     const bootstrapProjector = (projector: ProjectorDefinition) =>
       projectionStateRepository
@@ -3200,8 +3205,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     const projectEvent: OrchestrationProjectionPipelineShape['projectEvent'] = (event) =>
       sql
         .withTransaction(
-          Effect.forEach(projectors, (projector) => applyProjectorForEvent(projector, event), {
-            concurrency: 1,
+          Effect.gen(function* ()
+          {
+            yield* Effect.forEach(
+              projectors,
+              (projector) => applyProjectorForEvent(projector, event),
+              { concurrency: 1 },
+            )
+            yield* projectionStateRepository.upsertMany(
+              projectors.map((projector) => ({
+                projector: projector.name,
+                lastAppliedSequence: event.sequence,
+                updatedAt: event.occurredAt,
+              })),
+            )
           }),
         )
         .pipe(
