@@ -151,17 +151,15 @@ const discoverSkillsInRoot = Effect.fn('discoverCursorSkillsInRoot')(function* (
     if (input.budget.exhausted) return
     const resolvedDirectory = yield* orUndefined(fileSystem.realPath(directory), input.budget)
     if (!resolvedDirectory) return
-    if (
-      visitedDirectories.has(resolvedDirectory) ||
-      (resolvedDirectory !== rootDirectory &&
-        !resolvedDirectory.startsWith(`${rootDirectory}${path.sep}`))
-    )
-    {
-      return
-    }
+    if (visitedDirectories.has(resolvedDirectory)) return
     visitedDirectories.add(resolvedDirectory)
+    // an external symlink is a skill package boundary: read its own metadata
+    // under the link name, but never walk the target tree.
+    const insideRoot =
+      resolvedDirectory === rootDirectory ||
+      resolvedDirectory.startsWith(`${rootDirectory}${path.sep}`)
 
-    const skillPath = path.join(resolvedDirectory, 'SKILL.md')
+    const skillPath = path.join(directory, 'SKILL.md')
     const skillInfo = yield* orUndefined(fileSystem.stat(skillPath), input.budget)
     if (skillInfo?.type === 'File')
     {
@@ -183,7 +181,7 @@ const discoverSkillsInRoot = Effect.fn('discoverCursorSkillsInRoot')(function* (
           frontmatter = parseSkillFrontmatter(contents)
         }
       }
-      const name = path.basename(resolvedDirectory).trim()
+      const name = path.basename(directory).trim()
       if (frontmatter?.cliVisible && name)
       {
         skills.push({
@@ -201,7 +199,8 @@ const discoverSkillsInRoot = Effect.fn('discoverCursorSkillsInRoot')(function* (
       }
     }
 
-    const entries = yield* orUndefined(fileSystem.readDirectory(resolvedDirectory), input.budget)
+    if (!insideRoot) return
+    const entries = yield* orUndefined(fileSystem.readDirectory(directory), input.budget)
     if (!entries) return
     for (const entry of [...entries].sort())
     {
@@ -211,7 +210,7 @@ const discoverSkillsInRoot = Effect.fn('discoverCursorSkillsInRoot')(function* (
         return
       }
       input.budget.remainingEntries -= 1
-      const child = path.join(resolvedDirectory, entry)
+      const child = path.join(directory, entry)
       const info = yield* orUndefined(fileSystem.stat(child), input.budget)
       if (info?.type !== 'Directory') continue
       if (depth >= MAX_SKILL_DEPTH)
