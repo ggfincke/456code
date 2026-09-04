@@ -2612,7 +2612,10 @@ export function makeOpenCodeAdapter(
         case 'message.part.updated':
         {
           const part = event.properties.part
-          context.partById.set(part.id, part)
+          if (part.type !== 'tool')
+          {
+            context.partById.set(part.id, part)
+          }
           const messageRole = messageRoleForPart(context, part)
 
           if (messageRole === 'assistant')
