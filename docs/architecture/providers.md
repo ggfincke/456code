@@ -70,6 +70,9 @@ after logout or plugin removal, are authoritative; disabled and missing-CLI snap
 the previous inventory. An inventory/plugin failure after a successful CLI version check does not
 classify the CLI as missing.
 
+Native OpenCode event logs omit repeated running-tool snapshots while retaining pending and terminal
+tool states, including final output and errors. Canonical and orchestration delivery are unchanged.
+
 ## Attachment delivery
 
 Accepted uploads become thread-owned managed files before provider dispatch. `ProviderService`
