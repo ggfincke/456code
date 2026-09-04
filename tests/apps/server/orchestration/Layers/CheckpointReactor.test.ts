@@ -89,6 +89,7 @@ import {
   type BeginImplementationAttemptInput,
 } from '../../../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
+import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
 import * as WorkspaceEntries from '../../../../../apps/server/src/workspace/WorkspaceEntries.ts'
 import * as WorkspacePaths from '../../../../../apps/server/src/workspace/WorkspacePaths.ts'
 import { ProviderRuntimeInbox } from '../../../../../apps/server/src/persistence/Services/ProviderRuntimeInbox.ts'
@@ -213,6 +214,7 @@ function createProviderServiceHarness(
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
+    compactThread: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
@@ -554,6 +556,9 @@ describe('CheckpointReactor', () =>
     readonly rollbackCapability?: 'exact' | 'unsupported'
     readonly rollbackFailure?: string
     readonly gitStatusRefreshCalls?: Array<string>
+    readonly pullRequestRefreshCalls?: Array<string>
+    readonly threadBranch?: string
+    readonly localStatusRefName?: string
     readonly threadOrigin?: ThreadOrigin
     readonly checkpointStoreCalls?: Array<string>
     readonly rollbackFails?: boolean
@@ -613,13 +618,19 @@ describe('CheckpointReactor', () =>
           Effect.as({
             isRepo: true,
             hasPrimaryRemote: false,
-            isDefaultRef: true,
-            refName: 'main',
+            isDefaultRef:
+              options?.localStatusRefName === undefined || options.localStatusRefName === 'main',
+            refName: options?.localStatusRefName ?? 'main',
             hasWorkingTreeChanges: false,
             workingTree: { files: [], insertions: 0, deletions: 0 },
           }),
         ),
       refreshStatus: () => Effect.die('refreshStatus should not be called in this test'),
+      refreshPullRequestStatus: (cwd: string) =>
+        Effect.sync(() =>
+        {
+          options?.pullRequestRefreshCalls?.push(cwd)
+        }).pipe(Effect.as(null)),
       streamStatus: () => Stream.empty,
     })
     const liveCheckpointStoreLayer = CheckpointStore.layer.pipe(
@@ -732,6 +743,7 @@ describe('CheckpointReactor', () =>
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(implementationAttemptLayer),
+      Layer.provideMerge(ServerSettings.layerTest()),
     )
 
     runtime = ManagedRuntime.make(layer)
@@ -906,7 +918,7 @@ describe('CheckpointReactor', () =>
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: 'approval-required',
-        branch: null,
+        branch: options?.threadBranch ?? null,
         worktreePath: options?.threadWorktreePath ?? cwd,
         ...(options?.threadOrigin === undefined ? {} : { origin: options.threadOrigin }),
         createdAt,
@@ -1281,6 +1293,74 @@ describe('CheckpointReactor', () =>
     await harness.drain()
 
     expect(gitStatusRefreshCalls).toEqual([harness.cwd])
+  })
+
+  it('refreshes a missing pull request when the completed turn branch is still checked out', async () =>
+  {
+    const pullRequestRefreshCalls: string[] = []
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: 'feature/turn-refresh',
+      localStatusRefName: 'feature/turn-refresh',
+      pullRequestRefreshCalls,
+    })
+
+    harness.provider.emit({
+      type: 'turn.completed',
+      eventId: EventId.make('evt-turn-completed-refresh-pr'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-refresh-pr'),
+      payload: { state: 'completed' },
+    })
+
+    await harness.drain()
+
+    expect(pullRequestRefreshCalls).toEqual([harness.cwd])
+  })
+
+  it('does not refresh pull request state for an auxiliary completion', async () =>
+  {
+    const pullRequestRefreshCalls: string[] = []
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: 'feature/recorded',
+      localStatusRefName: 'feature/recorded',
+      pullRequestRefreshCalls,
+    })
+    const createdAt = '2026-01-01T00:00:00.000Z'
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-set-pr-refresh-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'running',
+          providerName: 'codex',
+          runtimeMode: 'approval-required',
+          activeTurnId: asTurnId('turn-main'),
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    )
+
+    harness.provider.emit({
+      type: 'turn.completed',
+      eventId: EventId.make('evt-turn-completed-pr-refresh-aux'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt,
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-aux'),
+      payload: { state: 'completed' },
+    })
+    await harness.drain()
+
+    expect(pullRequestRefreshCalls).toEqual([])
   })
 
   it('ignores auxiliary thread turn completion while primary turn is active', async () =>

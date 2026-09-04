@@ -13,6 +13,7 @@ import {
   TurnId,
   OrchestrationEvent,
   type ProviderRuntimeEvent,
+  type VcsStatusLocalResult,
 } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import * as Crypto from 'effect/Crypto'
@@ -1333,6 +1334,34 @@ const make = Effect.gen(function* ()
     })
   })
 
+  // retry a missing PR only when the completed turn still owns this branch.
+  const refreshPullRequestAfterTurn = Effect.fn('refreshPullRequestAfterTurn')(function* (input: {
+    readonly threadId: ThreadId
+    readonly turnId: TurnId | null
+    readonly cwd: string
+    readonly local: VcsStatusLocalResult
+  })
+  {
+    const checkedOutBranch = input.local.refName
+    if (checkedOutBranch === null || input.local.isDefaultRef) return
+
+    const thread = yield* projectionSnapshotQuery
+      .getThreadShellById(input.threadId)
+      .pipe(Effect.map(Option.getOrUndefined))
+    if (!thread || thread.branch !== checkedOutBranch) return
+    if (thread.session?.activeTurnId && !sameId(thread.session.activeTurnId, input.turnId)) return
+
+    yield* vcsStatusBroadcaster.refreshPullRequestStatus(input.cwd).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning('failed to refresh pull request status after turn completion', {
+          threadId: input.threadId,
+          cwd: input.cwd,
+          detail: error.message,
+        }),
+      ),
+    )
+  })
+
   const refreshLocalGitStatusFromTurnCompletion = Effect.fn(
     'refreshLocalGitStatusFromTurnCompletion',
   )(function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' }>)
@@ -1343,16 +1372,24 @@ const make = Effect.gen(function* ()
       return
     }
 
-    yield* vcsStatusBroadcaster.refreshLocalStatus(sessionRuntime.value.cwd).pipe(
+    const local = yield* vcsStatusBroadcaster.refreshLocalStatus(sessionRuntime.value.cwd).pipe(
       Effect.catch((error) =>
         Effect.logWarning('failed to refresh local git status after turn completion', {
           threadId: event.threadId,
           turnId: event.turnId ?? null,
           cwd: sessionRuntime.value.cwd,
           detail: error.message,
-        }),
+        }).pipe(Effect.as(null)),
       ),
     )
+    if (local === null) return
+
+    yield* refreshPullRequestAfterTurn({
+      threadId: event.threadId,
+      turnId: toTurnId(event.turnId),
+      cwd: sessionRuntime.value.cwd,
+      local,
+    })
   })
 
   const ensurePreTurnBaselineFromDomainTurnStart = Effect.fn(

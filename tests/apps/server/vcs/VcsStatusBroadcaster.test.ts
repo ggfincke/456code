@@ -8,6 +8,7 @@ import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
+import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Logger from 'effect/Logger'
@@ -73,6 +74,7 @@ function makeTestLayer(state: {
   localInvalidationCalls: number
   remoteInvalidationCalls: number
   remoteStatusRefreshUpstreamValues?: Array<boolean | undefined>
+  remoteStatusRefreshMissingPullRequestValues?: Array<boolean | undefined>
 })
 {
   return VcsStatusBroadcaster.layer.pipe(
@@ -90,6 +92,9 @@ function makeTestLayer(state: {
           {
             state.remoteStatusCalls += 1
             state.remoteStatusRefreshUpstreamValues?.push(options?.refreshUpstream)
+            state.remoteStatusRefreshMissingPullRequestValues?.push(
+              options?.refreshMissingPullRequest,
+            )
             return state.currentRemoteStatus
           }),
         invalidateLocalStatus: () =>
@@ -299,6 +304,119 @@ describe('VcsStatusBroadcaster', () =>
       assert.equal(state.localInvalidationCalls, 1)
       assert.equal(state.remoteInvalidationCalls, 0)
     }).pipe(Effect.provide(makeTestLayer(state)))
+  })
+
+  it.effect('refreshes a cached missing PR only while the checkout is actively observed', () =>
+  {
+    const state = {
+      currentLocalStatus: baseLocalStatus,
+      currentRemoteStatus: baseRemoteStatus,
+      localStatusCalls: 0,
+      remoteStatusCalls: 0,
+      localInvalidationCalls: 0,
+      remoteInvalidationCalls: 0,
+      remoteStatusRefreshUpstreamValues: [] as Array<boolean | undefined>,
+      remoteStatusRefreshMissingPullRequestValues: [] as Array<boolean | undefined>,
+    }
+
+    return Effect.gen(function* ()
+    {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster
+      yield* broadcaster.getStatus({ cwd: '/repo' })
+
+      assert.isNull(yield* broadcaster.refreshPullRequestStatus('/repo'))
+      assert.equal(state.remoteStatusCalls, 1)
+
+      const scope = yield* Scope.make()
+      const snapshotDeferred = yield* Deferred.make<VcsStatusStreamEvent>()
+      yield* Stream.runForEach(
+        broadcaster.streamStatus(
+          { cwd: '/repo' },
+          { automaticRemoteRefreshInterval: Effect.succeed(Duration.zero) },
+        ),
+        (event) =>
+          event._tag === 'snapshot'
+            ? Deferred.succeed(snapshotDeferred, event).pipe(Effect.ignore)
+            : Effect.void,
+      ).pipe(Effect.forkIn(scope))
+      yield* Deferred.await(snapshotDeferred)
+
+      state.currentRemoteStatus = remoteStatusWithPr
+      const refreshed = yield* broadcaster.refreshPullRequestStatus('/repo')
+
+      assert.deepStrictEqual(refreshed, remoteStatusWithPr)
+      assert.equal(state.remoteStatusCalls, 2)
+      assert.equal(state.remoteInvalidationCalls, 0)
+      assert.deepStrictEqual(state.remoteStatusRefreshUpstreamValues, [undefined, false])
+      assert.deepStrictEqual(state.remoteStatusRefreshMissingPullRequestValues, [undefined, true])
+
+      yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(makeTestLayer(state)))
+  })
+
+  it.effect('serializes an in-flight remote poll before the turn-end PR refresh', () =>
+  {
+    const releasePoll = Deferred.makeUnsafe<void>()
+    const pollStarted = Deferred.makeUnsafe<void>()
+    let remoteReads = 0
+    const layer = VcsStatusBroadcaster.layer.pipe(
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provide(
+        Layer.mock(GitStatusReader.GitStatusReader)({
+          localStatus: () => Effect.succeed(baseLocalStatus),
+          remoteStatus: () =>
+            Effect.gen(function* ()
+            {
+              remoteReads += 1
+              if (remoteReads === 2)
+              {
+                yield* Deferred.succeed(pollStarted, undefined)
+                yield* Deferred.await(releasePoll)
+                return baseRemoteStatus
+              }
+              return remoteReads === 1 ? baseRemoteStatus : remoteStatusWithPr
+            }),
+          invalidateLocalStatus: () => Effect.void,
+          invalidateRemoteStatus: () => Effect.void,
+          invalidateStatus: () => Effect.void,
+        }),
+      ),
+    )
+
+    return Effect.gen(function* ()
+    {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster
+      yield* broadcaster.getStatus({ cwd: '/repo' })
+
+      const scope = yield* Scope.make()
+      const snapshotDeferred = yield* Deferred.make<VcsStatusStreamEvent>()
+      yield* Stream.runForEach(
+        broadcaster.streamStatus(
+          { cwd: '/repo' },
+          { automaticRemoteRefreshInterval: Effect.succeed(Duration.zero) },
+        ),
+        (event) =>
+          event._tag === 'snapshot'
+            ? Deferred.succeed(snapshotDeferred, event).pipe(Effect.ignore)
+            : Effect.void,
+      ).pipe(Effect.forkIn(scope))
+      yield* Deferred.await(snapshotDeferred)
+
+      const poll = yield* broadcaster.refreshStatus('/repo').pipe(Effect.forkScoped)
+      yield* Deferred.await(pollStarted)
+      const refresh = yield* broadcaster.refreshPullRequestStatus('/repo').pipe(Effect.forkScoped)
+      yield* Deferred.succeed(releasePoll, undefined)
+      yield* Fiber.join(poll)
+      const refreshed = yield* Fiber.join(refresh)
+
+      assert.deepStrictEqual(refreshed, remoteStatusWithPr)
+      assert.deepStrictEqual(
+        (yield* broadcaster.getStatus({ cwd: '/repo' })).pr,
+        remoteStatusWithPr.pr,
+      )
+
+      yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(layer), Effect.scoped)
   })
 
   it.effect('normalizes symlinked CWDs before cache lookup and workflow calls', () =>
