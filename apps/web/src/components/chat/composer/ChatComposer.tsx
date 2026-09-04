@@ -2379,7 +2379,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (prompt.length === 0 && images.length === 0 && files.length === 0)
     {
-      setIsStashMenuOpen((open) => !open)
+      const entries =
+        usePromptStashStore.getState().queuesByScopeKey[stashScope] ?? EMPTY_PROMPT_STASH_QUEUE
+      const entry = entries.length === 1 ? entries[0] : undefined
+      if (entry && !entry.pendingImageCount)
+      {
+        await restoreStashEntry(entry)
+      }
+      else
+      {
+        setIsStashMenuOpen((open) => !open)
+      }
       return
     }
     // a repeat ⌘S on the *same* still-unencoded snapshot would stash it
@@ -2546,9 +2556,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable,
     promptRef,
     pulseStashBadge,
+    restoreStashEntry,
     selectedModelSelection,
     stashEntryToQueue,
     stashProviderLabel,
+    stashScope,
     stashScopeInstanceId,
   ])
 
