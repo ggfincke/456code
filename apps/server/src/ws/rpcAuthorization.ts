@@ -47,6 +47,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverUpsertKeybinding, AuthOrchestrationOperateScope],
   [WS_METHODS.serverRemoveKeybinding, AuthOrchestrationOperateScope],
   [WS_METHODS.serverGetSettings, AuthOrchestrationReadScope],
+  [WS_METHODS.serverGetUsageSummary, AuthOrchestrationReadScope],
   [WS_METHODS.serverUpdateSettings, AuthOrchestrationOperateScope],
   [WS_METHODS.serverDiscoverSourceControl, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetTraceDiagnostics, AuthOrchestrationReadScope],

@@ -49,6 +49,7 @@ import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.
 import type { ProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
 import type { ServerProviderDraft } from '../providerSnapshot.ts'
 import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
+import { providerUsageAccountIdentity } from '../providerUsageLimits.ts'
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
@@ -182,6 +183,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
           Effect.provideService(Path.Path, path),
         ),
       )
+      const usageAccountFence: { current: string | undefined } = { current: undefined }
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -192,6 +194,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        usageAccountIdentity: () => usageAccountFence.current,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       })
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv)
@@ -200,8 +203,18 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
-      const checkProvider = checkCodexProviderStatus(effectiveConfig, undefined, processEnv).pipe(
+      const checkProvider = Effect.sync(() =>
+      {
+        usageAccountFence.current = undefined
+      }).pipe(
+        Effect.andThen(checkCodexProviderStatus(effectiveConfig, undefined, processEnv)),
         Effect.map(stampIdentity),
+        Effect.tap((snapshot) =>
+          Effect.sync(() =>
+          {
+            usageAccountFence.current = providerUsageAccountIdentity(snapshot)
+          }),
+        ),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       )
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)

@@ -26,6 +26,7 @@ import { fixPath } from './os-jank.ts'
 import { websocketRpcRouteLayer } from './ws.ts'
 import { ImportContinuationLive } from './import/continuation/continuation.ts'
 import * as ImportRuntime from './import/importRuntime.ts'
+import * as UsageSummary from './usage/UsageSummaryService.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import * as RemoteOpenTargets from './environment/RemoteOpenTargets.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from './persistence/Layers/Sqlite.ts'
@@ -66,6 +67,7 @@ import * as ServerRuntimeStartup from './serverRuntimeStartup.ts'
 import { OrchestrationReactorLive } from './orchestration/Layers/OrchestrationReactor.ts'
 import { RuntimeReceiptBusLive } from './orchestration/Layers/RuntimeReceiptBus.ts'
 import { ProviderRuntimeIngestionLive } from './orchestration/Layers/ProviderRuntimeIngestion.ts'
+import { ProviderUsageLimitsIngestionLive } from './provider/Layers/ProviderUsageLimitsIngestion.ts'
 import { ProviderCommandReactorLive } from './orchestration/Layers/ProviderCommandReactor.ts'
 import { CheckpointReactorLive } from './orchestration/Layers/CheckpointReactor.ts'
 import { ArchitectureAutoAnalysisReactorLive } from './orchestration/Layers/ArchitectureAutoAnalysisReactor.ts'
@@ -203,6 +205,7 @@ const PlatformServicesLive = Layer.unwrap(
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
+  Layer.provideMerge(ProviderUsageLimitsIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ArchitectureAutoAnalysisReactorLive),
@@ -512,8 +515,12 @@ const RuntimeDependenciesLive = ImportRuntimeLayerLive.pipe(
   Layer.provide(NetService.layer),
 )
 
-const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
+const RuntimeDependenciesWithUsageLive = UsageSummary.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
+)
+
+const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
+  Layer.provideMerge(RuntimeDependenciesWithUsageLive),
   Layer.provideMerge(McpCredentialBrokerLayerLive),
 )
 

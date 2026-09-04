@@ -96,6 +96,7 @@ import * as ProviderMaintenanceRunner from './provider/maintenance/providerMaint
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
 import * as ServerRuntimeStartup from './serverRuntimeStartup.ts'
 import * as ServerSettings from './serverSettings.ts'
+import * as UsageSummary from './usage/UsageSummaryService.ts'
 import * as TerminalManager from './terminal/Manager.ts'
 import * as PreviewAutomationBroker from './mcp/PreviewAutomationBroker.ts'
 import * as PreviewManager from './preview/Manager.ts'
@@ -238,6 +239,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents
       const serverSettings = yield* ServerSettings.ServerSettingsService
+      const usageSummary = yield* UsageSummary.UsageSummaryService
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem
@@ -1017,6 +1019,10 @@ const makeWsRpcLayer = (
               'rpc.aggregate': 'server',
             },
           ),
+        [WS_METHODS.serverGetUsageSummary]: (input) =>
+          observeRpcEffect(WS_METHODS.serverGetUsageSummary, usageSummary.getSummary(input), {
+            'rpc.aggregate': 'server',
+          }),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverDiscoverSourceControl,

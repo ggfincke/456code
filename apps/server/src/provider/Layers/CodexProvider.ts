@@ -39,6 +39,7 @@ import {
 } from '../providerSnapshot.ts'
 import { expandHomePath } from '../../pathExpansion.ts'
 import { CODEX_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
+import { codexResetCreditsToContract } from './codexUsageLimits.ts'
 import packageJson from '../../../package.json' with { type: 'json' }
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError)
 
@@ -138,6 +139,15 @@ function normalizeCodexWindow(input: {
 }): ServerProviderAccountUsageWindow | null
 {
   if (!input.window) return null
+  const windowDurationMins = input.window.windowDurationMins
+  const kind =
+    windowDurationMins === null || windowDurationMins === undefined
+      ? undefined
+      : windowDurationMins >= 43_200
+        ? ('monthly' as const)
+        : windowDurationMins >= 10_080
+          ? ('weekly' as const)
+          : ('session' as const)
   return {
     id: `${input.idPrefix}:${input.position}`,
     label: formatCodexRateLimitWindowLabel(
@@ -145,8 +155,12 @@ function normalizeCodexWindow(input: {
       input.position === 'primary' ? 'Primary' : 'Secondary',
     ),
     ...(input.scopeLabel ? { scopeLabel: input.scopeLabel } : {}),
+    ...(kind ? { kind } : {}),
     usedPercent: clampUsagePercent(input.window.usedPercent),
     resetsAt: codexResetTimestamp(input.window.resetsAt),
+    ...(windowDurationMins === null || windowDurationMins === undefined
+      ? {}
+      : { windowDurationMins }),
   }
 }
 
@@ -900,7 +914,12 @@ export const checkCodexProviderStatus = Effect.fn('checkCodexProviderStatus')(fu
 
   const snapshot = probeResult.success.value
   const accountStatus = accountProbeStatus(snapshot.account)
-  const accountUsage = resolveCodexAccountUsage(snapshot, checkedAt)
+  const probedAccountUsage = resolveCodexAccountUsage(snapshot, checkedAt)
+  const resetCredits = codexResetCreditsToContract(snapshot.rateLimits?.rateLimitResetCredits)
+  const accountUsage =
+    probedAccountUsage.status === 'available' && resetCredits
+      ? { ...probedAccountUsage, resetCredits }
+      : probedAccountUsage
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,

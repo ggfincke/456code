@@ -22,6 +22,10 @@ import { EditorId, RemoteOpenTarget } from './editor.ts'
 import { ModelCapabilities } from './model.ts'
 import { ProviderDriverKind, ProviderInstanceId } from './providerInstance.ts'
 import { ProviderRuntimeCapabilities } from './provider.ts'
+import {
+  ServerProviderAccountUsageWindow,
+  ServerProviderResetCredits,
+} from './providerUsageLimits.ts'
 import { ServerSettings } from './settings.ts'
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
@@ -169,19 +173,11 @@ export const ServerProviderUpdateState = Schema.Struct({
 })
 export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type
 
-export const ServerProviderAccountUsageWindow = Schema.Struct({
-  id: TrimmedNonEmptyString,
-  label: TrimmedNonEmptyString,
-  scopeLabel: Schema.optional(TrimmedNonEmptyString),
-  usedPercent: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
-  resetsAt: Schema.NullOr(IsoDateTime),
-})
-export type ServerProviderAccountUsageWindow = typeof ServerProviderAccountUsageWindow.Type
-
 const ServerProviderAvailableAccountUsage = Schema.Struct({
   status: Schema.Literal('available'),
   observedAt: IsoDateTime,
   windows: Schema.Array(ServerProviderAccountUsageWindow).check(Schema.isMinLength(1)),
+  resetCredits: Schema.optional(ServerProviderResetCredits),
 })
 
 const ServerProviderExternalAccountUsage = Schema.Struct({
