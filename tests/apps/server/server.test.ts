@@ -130,6 +130,8 @@ import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Ser
 import { ThreadDeletionReactor } from '../../../apps/server/src/orchestration/Services/ThreadDeletionReactor.ts'
 import { OrchestrationListenerCallbackError } from '../../../apps/server/src/orchestration/Errors.ts'
 import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
+import { OrchestrationEventStoreLive } from '../../../apps/server/src/persistence/Layers/OrchestrationEventStore.ts'
+import { OrchestrationEventStore } from '../../../apps/server/src/persistence/Services/OrchestrationEventStore.ts'
 import { SqlitePersistenceMemory } from '../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import { PersistenceSqlError } from '../../../apps/server/src/persistence/Errors.ts'
 import * as ProviderRegistry from '../../../apps/server/src/provider/Services/ProviderRegistry.ts'
@@ -246,6 +248,44 @@ const makeDefaultOrchestrationReadModel = () =>
     ],
   }
 }
+
+const makeThreadMessageEventBase = (
+  threadId: ThreadId,
+  id: string,
+): Omit<Extract<OrchestrationEvent, { type: 'thread.message-sent' }>, 'sequence'> =>
+{
+  const now = '2026-01-01T00:00:00.000Z'
+  return {
+    eventId: EventId.make(id),
+    aggregateKind: 'thread',
+    aggregateId: threadId,
+    occurredAt: now,
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: 'thread.message-sent',
+    payload: {
+      threadId,
+      messageId: MessageId.make(id),
+      role: 'assistant',
+      text: id,
+      turnId: null,
+      streaming: false,
+      createdAt: now,
+      updatedAt: now,
+    },
+  }
+}
+
+const makeThreadMessageEvent = (
+  sequence: number,
+  id: string,
+  threadId = defaultThreadId,
+): Extract<OrchestrationEvent, { type: 'thread.message-sent' }> => ({
+  ...makeThreadMessageEventBase(threadId, id),
+  sequence,
+})
 
 const makeDefaultOrchestrationThreadShell = (
   overrides: Partial<OrchestrationThreadShell> = {},
@@ -949,6 +989,13 @@ const buildAppUnderTest = (options?: {
         Layer.mergeAll(
           Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
             readEvents: () => Stream.empty,
+            readThreadEvents: () => Stream.empty,
+            getThreadReplayStats: () =>
+              Effect.succeed({
+                eventCount: 0,
+                payloadBytes: 0,
+                hasCreateEvent: false,
+              }),
             dispatch: () => Effect.succeed({ sequence: 0 }),
             streamDomainEvents: Stream.empty,
             latestSequence: Effect.succeed(0),
@@ -6427,7 +6474,12 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
   it.effect('replays an orchestrate plan response before the synchronization marker', () =>
     Effect.gen(function* ()
     {
-      const readEventsCalls: Array<readonly [number, number | undefined]> = []
+      const replayCalls: Array<{
+        readonly threadId: ThreadId
+        readonly fromSequenceExclusive: number
+        readonly toSequenceInclusive: number
+        readonly limit?: number
+      }> = []
       const responseEvent = {
         sequence: 2,
         eventId: EventId.make('event-orchestrate-plan-response'),
@@ -6455,10 +6507,16 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         layers: {
           orchestrationEngine: {
             latestSequence: Effect.succeed(2),
-            readEvents: (afterSequence, limit) =>
+            getThreadReplayStats: () =>
+              Effect.succeed({
+                eventCount: 1,
+                payloadBytes: 100,
+                hasCreateEvent: false,
+              }),
+            readThreadEvents: (range) =>
               Stream.sync(() =>
               {
-                readEventsCalls.push([afterSequence, limit])
+                replayCalls.push(range)
                 return responseEvent
               }),
           },
@@ -6479,7 +6537,14 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ),
       )
 
-      assert.deepEqual(readEventsCalls, [[1, 1]])
+      assert.deepEqual(replayCalls, [
+        {
+          threadId: defaultThreadId,
+          fromSequenceExclusive: 1,
+          toSequenceInclusive: 2,
+          limit: 1_000,
+        },
+      ])
       assert.deepEqual(
         Array.from(items, (item) => item.kind),
         ['event', 'synchronized'],
@@ -6596,53 +6661,62 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
-  it.effect('subscribeThread sends a fresh snapshot instead of replaying a large gap', () =>
-    Effect.gen(function* ()
-    {
-      let readEventsCalls = 0
-      const thread = makeDefaultOrchestrationReadModel().threads[0]!
+  it.effect(
+    'subscribeThread sends a fresh snapshot when its event count exceeds the replay limit',
+    () =>
+      Effect.gen(function* ()
+      {
+        let readEventsCalls = 0
+        const thread = makeDefaultOrchestrationReadModel().threads[0]!
 
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(100_000),
-            readEvents: () =>
-              Stream.sync(() =>
-              {
-                readEventsCalls += 1
-                return {} as OrchestrationEvent
-              }),
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              latestSequence: Effect.succeed(100_000),
+              getThreadReplayStats: () =>
+                Effect.succeed({
+                  eventCount: 1_001,
+                  payloadBytes: 1_000,
+                  hasCreateEvent: false,
+                }),
+              readThreadEvents: () =>
+                Stream.sync(() =>
+                {
+                  readEventsCalls += 1
+                  return {} as OrchestrationEvent
+                }),
+            },
+            projectionSnapshotQuery: {
+              getThreadDetailSnapshot: () =>
+                Effect.succeed(Option.some({ snapshotSequence: 100_000, thread })),
+            },
           },
-          projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.succeed(Option.some({ snapshotSequence: 100_000, thread })),
-          },
-        },
-      })
+        })
 
-      const wsUrl = yield* getWsServerUrl('/ws')
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-            afterSequence: 5,
-            requestCompletionMarker: true,
-          }).pipe(Stream.take(2), Stream.runCollect),
-        ),
-      )
+        const wsUrl = yield* getWsServerUrl('/ws')
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId: defaultThreadId,
+              afterSequence: 5,
+              requestCompletionMarker: true,
+            }).pipe(Stream.take(2), Stream.runCollect),
+          ),
+        )
 
-      assert.equal(items[0]?.kind, 'snapshot')
-      assert.deepEqual(items[1], { kind: 'synchronized' })
-      assert.equal(readEventsCalls, 0)
-    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+        assert.equal(items[0]?.kind, 'snapshot')
+        assert.deepEqual(items[1], { kind: 'synchronized' })
+        assert.equal(readEventsCalls, 0)
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
-  it.effect('subscribeShell snapshots instead of decoding an oversized replay payload', () =>
+  it.effect('subscriptions snapshot instead of decoding an oversized replay payload', () =>
     Effect.gen(function* ()
     {
       let readEventsCalls = 0
       let replayStatsCalls = 0
-      const shell = makeDefaultOrchestrationThreadShell()
+      const thread = makeDefaultOrchestrationReadModel().threads[0]!
+      const shell = makeDefaultOrchestrationThreadShell({ id: thread.id })
 
       yield* buildAppUnderTest({
         layers: {
@@ -6654,6 +6728,22 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
                 readEventsCalls += 1
                 return {} as OrchestrationEvent
               }),
+            readThreadEvents: () =>
+              Stream.sync(() =>
+              {
+                readEventsCalls += 1
+                return {} as OrchestrationEvent
+              }),
+            getThreadReplayStats: () =>
+              Effect.sync(() =>
+              {
+                replayStatsCalls += 1
+                return {
+                  eventCount: 5,
+                  payloadBytes: 8 * 1024 * 1024 + 1,
+                  hasCreateEvent: false,
+                }
+              }),
           },
           projectionSnapshotQuery: {
             getEventReplayStats: () =>
@@ -6662,6 +6752,8 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
                 replayStatsCalls += 1
                 return { eventCount: 5, payloadBytes: 8 * 1024 * 1024 + 1 }
               }),
+            getThreadDetailSnapshot: () =>
+              Effect.succeed(Option.some({ snapshotSequence: 5, thread })),
             getShellSnapshot: () =>
               Effect.succeed({
                 snapshotSequence: 5,
@@ -6674,6 +6766,15 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       })
 
       const wsUrl = yield* getWsServerUrl('/ws')
+      const threadItems = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: thread.id,
+            afterSequence: 0,
+            requestCompletionMarker: true,
+          }).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      )
       const shellItems = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[ORCHESTRATION_WS_METHODS.subscribeShell]({
@@ -6683,10 +6784,307 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ),
       )
 
+      assert.equal(threadItems[0]?.kind, 'snapshot')
+      assert.equal(threadItems[1]?.kind, 'synchronized')
       assert.equal(shellItems[0]?.kind, 'snapshot')
       assert.equal(shellItems[1]?.kind, 'synchronized')
-      assert.equal(replayStatsCalls, 1)
+      assert.equal(replayStatsCalls, 2)
       assert.equal(readEventsCalls, 0)
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('subscribeThread replays a sparse selected range across a large global gap', () =>
+    Effect.gen(function* ()
+    {
+      const event = makeThreadMessageEvent(99_999, 'selected-thread-replay')
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(100_000),
+            getThreadReplayStats: () =>
+              Effect.succeed({
+                eventCount: 1,
+                payloadBytes: Buffer.byteLength(jsonRequestBody(event.payload)),
+                hasCreateEvent: false,
+              }),
+            readThreadEvents: () => Stream.make(event),
+            readEvents: () => Stream.die('thread replay must not read the global event log'),
+          },
+          projectionSnapshotQuery: {
+            getEventReplayStats: () =>
+              Effect.die('thread replay must not measure the global event log'),
+            getThreadDetailSnapshot: () =>
+              Effect.die('unrelated activity must not force a thread snapshot'),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+            afterSequence: 5,
+            requestCompletionMarker: true,
+          }).pipe(
+            Stream.takeUntil((item) => item.kind === 'synchronized'),
+            Stream.runCollect,
+          ),
+        ),
+      )
+
+      assert.deepEqual(
+        items.map((item) => (item.kind === 'event' ? item.event.sequence : item.kind)),
+        [99_999, 'synchronized'],
+      )
+      assert.equal(items[0]?.kind === 'event' ? items[0].event.type : null, 'thread.message-sent')
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('subscribeThread resets cached history when its id is created again', () =>
+    Effect.gen(function* ()
+    {
+      const thread = {
+        ...makeDefaultOrchestrationReadModel().threads[0]!,
+        title: 'Recreated thread',
+      }
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(5),
+            getThreadReplayStats: () =>
+              Effect.succeed({
+                eventCount: 3,
+                payloadBytes: 1_000,
+                hasCreateEvent: true,
+              }),
+            readThreadEvents: () => Stream.die('a recreated thread must not reuse cached history'),
+          },
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: () =>
+              Effect.succeed(Option.some({ snapshotSequence: 5, thread })),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+            afterSequence: 2,
+            requestCompletionMarker: true,
+          }).pipe(
+            Stream.takeUntil((item) => item.kind === 'synchronized'),
+            Stream.runCollect,
+          ),
+        ),
+      )
+
+      const first = items[0]
+      assertTrue(first?.kind === 'snapshot')
+      assert.equal(first.snapshot.thread.title, 'Recreated thread')
+      assert.equal(first.snapshot.snapshotSequence, 5)
+      assert.deepEqual(items[1], { kind: 'synchronized' })
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  for (const { createBeforeDelete, oversized } of [
+    { createBeforeDelete: false, oversized: false },
+    { createBeforeDelete: true, oversized: false },
+    { createBeforeDelete: true, oversized: true },
+  ])
+  {
+    it.effect(
+      oversized
+        ? 'keeps the missing-snapshot error when an absent thread exceeds the replay limit'
+        : `synchronizes an absent thread after ${createBeforeDelete ? 'creation and deletion' : 'deletion'}`,
+      () =>
+        Effect.gen(function* ()
+        {
+          const store = yield* OrchestrationEventStore
+          const thread = makeDefaultOrchestrationReadModel().threads[0]!
+          if (createBeforeDelete)
+          {
+            yield* store.append({
+              eventId: EventId.make(`create-before-delete-${oversized}`),
+              aggregateKind: 'thread',
+              aggregateId: defaultThreadId,
+              occurredAt: thread.createdAt,
+              commandId: null,
+              causationEventId: null,
+              correlationId: null,
+              metadata: {},
+              type: 'thread.created',
+              payload: {
+                threadId: defaultThreadId,
+                projectId: thread.projectId,
+                title: thread.title,
+                modelSelection: thread.modelSelection,
+                runtimeMode: thread.runtimeMode,
+                interactionMode: thread.interactionMode,
+                branch: thread.branch,
+                worktreePath: thread.worktreePath,
+                createdAt: thread.createdAt,
+                updatedAt: thread.updatedAt,
+              },
+            })
+          }
+          if (oversized)
+          {
+            yield* Effect.forEach(
+              Array.from({ length: 1_000 }, (_, index) => index),
+              (index) =>
+                store.append(
+                  makeThreadMessageEventBase(defaultThreadId, `oversized-replay-${index}`),
+                ),
+              { discard: true },
+            )
+          }
+          const deletedAt = '2026-01-01T00:00:01.000Z'
+          const deleted = yield* store.append({
+            eventId: EventId.make(`deleted-replay-${createBeforeDelete}-${oversized}`),
+            aggregateKind: 'thread',
+            aggregateId: defaultThreadId,
+            occurredAt: deletedAt,
+            commandId: null,
+            causationEventId: null,
+            correlationId: null,
+            metadata: {},
+            type: 'thread.deleted',
+            payload: { threadId: defaultThreadId, deletedAt },
+          })
+
+          yield* buildAppUnderTest({
+            layers: {
+              orchestrationEngine: {
+                latestSequence: Effect.succeed(deleted.sequence),
+                getThreadReplayStats: ({ threadId, ...range }) =>
+                  store.getAggregateReplayStats({
+                    ...range,
+                    aggregateKind: 'thread',
+                    aggregateId: threadId,
+                  }),
+                readThreadEvents: ({ threadId, ...range }) =>
+                  store.readAggregateRange({
+                    ...range,
+                    aggregateKind: 'thread',
+                    aggregateId: threadId,
+                  }),
+                readEvents: store.readFromSequence,
+              },
+              projectionSnapshotQuery: {
+                getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+              },
+            },
+          })
+
+          const wsUrl = yield* getWsServerUrl('/ws')
+          yield* Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              Effect.gen(function* ()
+              {
+                const threadResult = yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+                  threadId: defaultThreadId,
+                  afterSequence: 0,
+                  requestCompletionMarker: true,
+                }).pipe(
+                  Stream.takeUntil((item) => item.kind === 'synchronized'),
+                  Stream.runCollect,
+                  Effect.result,
+                )
+                if (oversized)
+                {
+                  assertTrue(threadResult._tag === 'Failure')
+                  assert.equal(threadResult.failure._tag, 'OrchestrationGetSnapshotError')
+                  assert.equal(
+                    threadResult.failure.message,
+                    `Thread ${defaultThreadId} was not found`,
+                  )
+                  return
+                }
+                assertTrue(threadResult._tag === 'Success')
+                assert.deepEqual(threadResult.success, [{ kind: 'synchronized' }])
+
+                const shellItems = yield* client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+                  afterSequence: 0,
+                  requestCompletionMarker: true,
+                }).pipe(
+                  Stream.takeUntil((item) => item.kind === 'synchronized'),
+                  Stream.runCollect,
+                )
+                assert.deepEqual(shellItems, [
+                  {
+                    kind: 'thread-removed',
+                    sequence: deleted.sequence,
+                    threadId: defaultThreadId,
+                  },
+                  { kind: 'synchronized' },
+                ])
+              }),
+            ),
+          )
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              OrchestrationEventStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+              loopbackHttpServerTestLayer,
+            ),
+          ),
+        ),
+    )
+  }
+
+  it.effect('subscribeThread bounds replay to the captured head before live delivery', () =>
+    Effect.gen(function* ()
+    {
+      let replayHead: number | undefined
+      let headSequence = 50
+      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>()
+      const replayedEvent = makeThreadMessageEvent(3, 'event-captured-head')
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.sync(() => headSequence),
+            streamDomainEvents: Stream.fromPubSub(liveEvents),
+            getThreadReplayStats: () =>
+              Effect.sync(() =>
+              {
+                headSequence = 100
+                return { eventCount: 1, payloadBytes: 100, hasCreateEvent: false }
+              }),
+            readThreadEvents: ({ toSequenceInclusive }) =>
+            {
+              replayHead = toSequenceInclusive
+              const liveEvent = makeThreadMessageEvent(51, 'event-live-after-head')
+              return Stream.fromEffect(PubSub.publish(liveEvents, liveEvent)).pipe(
+                Stream.flatMap(() => Stream.make(replayedEvent)),
+              )
+            },
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+            afterSequence: 0,
+            requestCompletionMarker: true,
+          }).pipe(
+            Stream.takeUntil((item) => item.kind === 'synchronized'),
+            Stream.runCollect,
+          ),
+        ),
+      )
+
+      assert.deepEqual(
+        items.map((item) => (item.kind === 'event' ? item.event.sequence : item.kind)),
+        [3, 51, 'synchronized'],
+      )
+      assert.equal(replayHead, 50)
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 

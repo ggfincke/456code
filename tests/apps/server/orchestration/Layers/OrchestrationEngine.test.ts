@@ -411,6 +411,8 @@ describe('OrchestrationEngine', () =>
           return savedEvent
         }),
       readFromSequence: () => Stream.empty,
+      readAggregateRange: () => Stream.die('unused aggregate replay'),
+      getAggregateReplayStats: () => Effect.die('unused aggregate replay stats'),
       readAll: () =>
         Stream.fail(
           new PersistenceSqlError({
@@ -1219,6 +1221,8 @@ describe('OrchestrationEngine', () =>
       {
         return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive))
       },
+      readAggregateRange: () => Stream.die('unused aggregate replay'),
+      getAggregateReplayStats: () => Effect.die('unused aggregate replay stats'),
       readAll()
       {
         return Stream.fromIterable(events)
@@ -1511,6 +1515,8 @@ describe('OrchestrationEngine', () =>
       {
         return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive))
       },
+      readAggregateRange: () => Stream.die('unused aggregate replay'),
+      getAggregateReplayStats: () => Effect.die('unused aggregate replay stats'),
       readAll()
       {
         return Stream.fromIterable(events)

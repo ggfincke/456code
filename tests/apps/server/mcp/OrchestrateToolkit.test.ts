@@ -136,6 +136,8 @@ function makeLayer(
           ? makePlanEvent(4, persistedPlan)
           : makePlanEvent(42, committedPlan)
       }),
+    readThreadEvents: () => Stream.die('thread replay is not used by toolkit tests'),
+    getThreadReplayStats: () => Effect.die('thread replay stats are not used by toolkit tests'),
     dispatch: (command) =>
       Effect.sync(() =>
       {
@@ -263,6 +265,8 @@ function makeExecutionLayer(input: {
             payload: { execution: committedExecution },
           }) as OrchestrationEvent,
       ),
+    readThreadEvents: () => Stream.die('thread replay is not used by toolkit tests'),
+    getThreadReplayStats: () => Effect.die('thread replay stats are not used by toolkit tests'),
     dispatch: (command) =>
       Effect.sync(() =>
       {

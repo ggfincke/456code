@@ -375,6 +375,8 @@ describe('ProviderRuntimeIngestion', () =>
         const engine = yield* OrchestrationEngineService
         return OrchestrationEngineService.of({
           readEvents: engine.readEvents,
+          readThreadEvents: engine.readThreadEvents,
+          getThreadReplayStats: engine.getThreadReplayStats,
           dispatch: engine.dispatch,
           dispatchInternal: (command, authority) =>
             (options?.beforeDispatchInternal?.(command, authority) ?? Effect.void).pipe(
