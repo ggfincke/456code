@@ -27,7 +27,7 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { collectToolMutationTargets } from '@t3tools/shared/toolMutationTargets'
 
-import { parseTurnDiffFilesFromUnifiedDiff } from '../../checkpointing/Diffs.ts'
+import { parseTurnDiffFilesFromNumstat } from '../../checkpointing/Diffs.ts'
 import { CheckpointIdentityResolver } from '../../checkpointing/CheckpointIdentity.ts'
 import type { CheckpointStoreError } from '../../checkpointing/Errors.ts'
 import { checkpointRefForThreadTurn, resolveThreadWorkspaceCwd } from '../../checkpointing/Utils.ts'
@@ -898,11 +898,12 @@ const make = Effect.gen(function* ()
         toCheckpointRef: targetCheckpointRef,
         fallbackFromToHead: false,
         ignoreWhitespace: false,
+        format: 'numstat',
       })
       .pipe(
         Effect.map((diff): TurnDiffOutcome => ({
           derived: true,
-          files: parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
+          files: parseTurnDiffFilesFromNumstat(diff).map((file) => ({
             path: file.path,
             kind: 'modified' as const,
             additions: file.additions,
