@@ -3889,7 +3889,8 @@ function ChatViewContent(props: ChatViewProps)
   const closeExpandedImage = useCallback(() =>
   {
     setExpandedImage(null)
-  }, [])
+    scheduleComposerFocus()
+  }, [scheduleComposerFocus])
 
   const activeWorktreePath = activeThread?.worktreePath ?? null
   const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
