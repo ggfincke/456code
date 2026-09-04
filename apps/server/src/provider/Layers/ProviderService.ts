@@ -14,6 +14,7 @@ import * as NodeCrypto from 'node:crypto'
 
 import {
   EventId,
+  MessageId,
   ModelSelection,
   NonNegativeInt,
   ProviderContinuationIdentity,
@@ -25,6 +26,8 @@ import {
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   ProviderInstanceId,
+  RuntimeRequestId,
+  TurnId,
   type ProviderDriverKind,
   type ProviderContinuationIdentity as ProviderContinuationIdentityType,
   type ProviderRuntimeEvent,
@@ -37,6 +40,7 @@ import { stableStringify } from '@t3tools/shared/relaySigning'
 import * as Cause from 'effect/Cause'
 import * as Crypto from 'effect/Crypto'
 import * as DateTime from 'effect/DateTime'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
@@ -67,7 +71,11 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from '../../observability/Metrics.ts'
-import { type ProviderAdapterError, ProviderValidationError } from '../Errors.ts'
+import {
+  type ProviderAdapterError,
+  ProviderAdapterRequestError,
+  ProviderValidationError,
+} from '../Errors.ts'
 import type {
   ProviderAdapterCapabilities,
   ProviderAdapterRuntimeEvent,
@@ -167,6 +175,26 @@ interface ActiveSendControlRoute
   readonly identity: ProviderRuntimeSessionIdentity
   readonly gate: Semaphore.Semaphore
 }
+
+interface PendingCompactionRuntimeEvent
+{
+  readonly binding: ProviderAdapterRuntimeSessionBinding
+  readonly event: ProviderRuntimeEvent
+  readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+}
+
+interface PendingCompaction
+{
+  readonly completion: Deferred.Deferred<string>
+  readonly native: boolean
+  readonly providerInstanceId: ProviderInstanceId
+  readonly sessionGeneration: number
+  readonly requestId: MessageId | undefined
+  readonly earlyEvents: Array<PendingCompactionRuntimeEvent>
+  compactedEventObserved: boolean
+  expectedTurnId: TurnId | undefined
+}
+
 
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
@@ -446,12 +474,22 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   const activeSendControlRoutes = yield* Ref.make<ReadonlyMap<ThreadId, ActiveSendControlRoute>>(
     new Map(),
   )
+  const pendingCompactions = new Map<ThreadId, PendingCompaction>()
+  const timedOutNativeCompactions = new Map<ThreadId, PendingCompaction>()
   const activeSendControlRouteWakeups = yield* PubSub.unbounded<ThreadId>()
   const shuttingDown = yield* Ref.make(false)
   const shutdownHighWater = yield* Ref.make<Option.Option<number>>(Option.none())
   const shutdownGate = yield* Semaphore.make(1)
   const providerInstanceMutationGate = yield* Semaphore.make(1)
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
+  const settleCompaction = (threadId: ThreadId, pending: PendingCompaction, terminal: string) =>
+    Effect.gen(function* ()
+    {
+      if (pendingCompactions.get(threadId) !== pending) return false
+      pendingCompactions.delete(threadId)
+      yield* Deferred.succeed(pending.completion, terminal)
+      return true
+    })
   const admissionOwnerId = yield* crypto.randomUUIDv4
   const admission = yield* runtimeInbox.claimAdmissionOwner({
     ownerId: admissionOwnerId,
@@ -775,6 +813,69 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         event.type === 'session.exited' ? clearExactMcpSession(binding) : Effect.void,
       ),
     )
+
+  const isCompactedEvent = (
+    event: ProviderRuntimeEvent,
+  ): event is Extract<ProviderRuntimeEvent, { readonly type: 'thread.state.changed' }> =>
+    event.type === 'thread.state.changed' && event.payload.state === 'compacted'
+
+  const withCompactionRequestId = (
+    event: ProviderRuntimeEvent,
+    pending: PendingCompaction,
+  ): ProviderRuntimeEvent =>
+    pending.requestId === undefined
+      ? event
+      : { ...event, requestId: RuntimeRequestId.make(String(pending.requestId)) }
+
+  const compactionTerminal = (event: ProviderRuntimeEvent): string | null =>
+    event.type === 'turn.completed'
+      ? event.payload.state
+      : event.type === 'runtime.error' || event.type === 'turn.aborted'
+        ? event.type
+        : null
+
+  const publishPendingCompactionEvent = (
+    pending: PendingCompaction,
+    envelope: PendingCompactionRuntimeEvent,
+  ): Effect.Effect<void, RuntimeEventAdmissionError> =>
+    Effect.gen(function* ()
+    {
+      const { adapter, binding, event } = envelope
+      if (pendingCompactions.get(event.threadId) !== pending)
+      {
+        yield* publishRuntimeEvent(binding, event, adapter)
+        return
+      }
+      const matchesTurn = event.turnId !== undefined && event.turnId === pending.expectedTurnId
+      if (matchesTurn && isCompactedEvent(event))
+      {
+        pending.compactedEventObserved = true
+        yield* publishRuntimeEvent(binding, withCompactionRequestId(event, pending), adapter)
+        return
+      }
+      yield* publishRuntimeEvent(binding, event, adapter)
+      const terminal = compactionTerminal(event)
+      if (!matchesTurn || terminal === null) return
+      const settled = yield* settleCompaction(event.threadId, pending, terminal)
+      if (!settled || terminal !== 'completed' || pending.compactedEventObserved) return
+      yield* publishRuntimeEvent(
+        binding,
+        {
+          ...event,
+          eventId: EventId.make(`${event.eventId}:context-compaction`),
+          type: 'thread.state.changed',
+          payload: {
+            state: 'compacted',
+            compaction: { trigger: 'manual' },
+            detail: { source: 'provider-native-command' },
+          },
+          ...(pending.requestId === undefined
+            ? {}
+            : { requestId: RuntimeRequestId.make(String(pending.requestId)) }),
+        },
+        adapter,
+      )
+    })
 
   const matchesRuntimeSessionIdentity = (identity: ProviderRuntimeSessionIdentity) =>
     runtimeInbox
@@ -1759,7 +1860,55 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
             return { binding: envelope.binding, event }
           }),
         ),
-        Effect.flatMap(({ binding, event }) => publishRuntimeEvent(binding, event, source.adapter)),
+        Effect.flatMap(({ binding, event }) =>
+        {
+          const eventEnvelope = { binding, event, adapter: source.adapter }
+          const timedOut = timedOutNativeCompactions.get(event.threadId)
+          if (
+            isCompactedEvent(event) &&
+            timedOut?.providerInstanceId === binding.providerInstanceId &&
+            timedOut.sessionGeneration === binding.sessionGeneration
+          )
+          {
+            timedOutNativeCompactions.delete(event.threadId)
+            return publishRuntimeEvent(binding, event, source.adapter)
+          }
+          const pending = pendingCompactions.get(event.threadId)
+          if (
+            pending === undefined ||
+            pending.providerInstanceId !== source.instanceId ||
+            pending.sessionGeneration !== binding.sessionGeneration
+          )
+          {
+            return publishRuntimeEvent(binding, event, source.adapter)
+          }
+          if (pending.native)
+          {
+            const compacted = isCompactedEvent(event)
+            const terminal = compacted ? 'completed' : compactionTerminal(event)
+            return publishRuntimeEvent(
+              binding,
+              compacted ? withCompactionRequestId(event, pending) : event,
+              source.adapter,
+            ).pipe(
+              Effect.andThen(
+                terminal === null
+                  ? Effect.void
+                  : settleCompaction(event.threadId, pending, terminal),
+              ),
+              Effect.asVoid,
+            )
+          }
+          if (
+            pending.expectedTurnId === undefined &&
+            event.turnId !== undefined &&
+            (isCompactedEvent(event) || compactionTerminal(event) !== null)
+          )
+          {
+            return Effect.sync(() => pending.earlyEvents.push(eventEnvelope)).pipe(Effect.asVoid)
+          }
+          return publishPendingCompactionEvent(pending, eventEnvelope)
+        }),
       ),
     ).pipe(
       Effect.tapCause((cause) =>
@@ -2638,6 +2787,13 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           threadId,
           Effect.gen(function* ()
           {
+            if (pendingCompactions.has(threadId))
+            {
+              return yield* toValidationError(
+                'ProviderService.startSession',
+                'Wait for context compaction to finish or stop the session before restarting.',
+              )
+            }
             const prepareIncomingRoute = (expectedProvider?: ProviderDriverKind) =>
               Effect.gen(function* ()
               {
@@ -2855,6 +3011,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                         modelSelection: prepared.input.modelSelection,
                         runtimeModeAcknowledgements: prepared.runtimeModeAcknowledgements,
                       })
+                      timedOutNativeCompactions.delete(threadId)
                       yield* analytics.record('provider.session.started', {
                         provider: sessionWithInstance.provider,
                         runtimeMode: prepared.input.runtimeMode,
@@ -2885,209 +3042,470 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     },
   )
 
-  const sendTurn: ProviderServiceMethod<'sendTurn'> = Effect.fn('sendTurn')(
-    function* (rawInput, routingAuthority, context)
-    {
-      const parsed = yield* decodeInputOrValidationError({
-        operation: 'ProviderService.sendTurn',
-        schema: ProviderSendTurnInput,
-        payload: rawInput,
-      })
+  const sendTurnWithCompaction = Effect.fn('sendTurn')(function* (
+    rawInput: Parameters<ProviderServiceMethod<'sendTurn'>>[0],
+    routingAuthority?: Parameters<ProviderServiceMethod<'sendTurn'>>[1],
+    context?: Parameters<ProviderServiceMethod<'sendTurn'>>[2],
+    compactionOwner?: PendingCompaction,
+  )
+  {
+    const parsed = yield* decodeInputOrValidationError({
+      operation: 'ProviderService.sendTurn',
+      schema: ProviderSendTurnInput,
+      payload: rawInput,
+    })
 
-      const input = {
-        ...parsed,
-        attachments: parsed.attachments ?? [],
-      }
-      if (!input.input && input.attachments.length === 0)
+    const input = {
+      ...parsed,
+      attachments: parsed.attachments ?? [],
+    }
+    if (!input.input && input.attachments.length === 0)
+    {
+      return yield* toValidationError(
+        'ProviderService.sendTurn',
+        'Either input text or at least one attachment is required',
+      )
+    }
+    yield* Effect.annotateCurrentSpan({
+      'provider.operation': 'send-turn',
+      'provider.thread_id': input.threadId,
+      'provider.interaction_mode': input.interactionMode,
+      'provider.attachment_count': input.attachments.length,
+    })
+    let metricProvider = 'unknown'
+    let metricModel = input.modelSelection?.model
+    return yield* withProviderInstanceLifecycle(
       {
-        return yield* toValidationError(
-          'ProviderService.sendTurn',
-          'Either input text or at least one attachment is required',
+        threadId: input.threadId,
+        operation: 'ProviderService.sendTurn',
+        requireActiveThread: true,
+      },
+      Effect.gen(function* ()
+      {
+        const pending = pendingCompactions.get(input.threadId)
+        if (
+          (pending !== undefined && pending !== compactionOwner) ||
+          (compactionOwner !== undefined && pending !== compactionOwner) ||
+          timedOutNativeCompactions.has(input.threadId)
         )
-      }
-      yield* Effect.annotateCurrentSpan({
-        'provider.operation': 'send-turn',
-        'provider.thread_id': input.threadId,
-        'provider.interaction_mode': input.interactionMode,
-        'provider.attachment_count': input.attachments.length,
-      })
-      let metricProvider = 'unknown'
-      let metricModel = input.modelSelection?.model
-      return yield* withProviderInstanceLifecycle(
         {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            'Context compaction is pending; wait for completion or restart the provider session.',
+          )
+        }
+        const routed = yield* resolveRoutableSession({
           threadId: input.threadId,
           operation: 'ProviderService.sendTurn',
+          allowRecovery: true,
+          ...(routingAuthority !== undefined ? { routingAuthority } : {}),
+          ...(context !== undefined ? { context } : {}),
+        })
+        metricProvider = routed.adapter.provider
+        metricModel = input.modelSelection?.model
+        const capabilities = routed.adapter.capabilities
+        const requestedBaseMode = providerBaseInteractionMode(input)
+        const requestedOrchestrate =
+          input.orchestrate === true || input.interactionMode === 'orchestrate'
+        if (!supportsTurnMode(capabilities, input))
+        {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            requestedOrchestrate && capabilities.orchestrateInstructionDelivery === 'unsupported'
+              ? `Provider instance '${routed.instanceId}' does not support orchestrate instruction delivery.`
+              : `Provider instance '${routed.instanceId}' does not support interaction mode '${requestedBaseMode}'.`,
+          )
+        }
+        if (
+          input.modelSelection !== undefined &&
+          input.modelSelection.instanceId !== routed.instanceId
+        )
+        {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            `Provider turn model selection targets instance '${input.modelSelection.instanceId}', but thread '${input.threadId}' is bound to '${routed.instanceId}'.`,
+          )
+        }
+        const activeSession = (yield* routed.adapter.listSessions()).find(
+          (session) => session.threadId === input.threadId,
+        )
+        if (
+          capabilities.activeTurnInput === 'unsupported' &&
+          activeSession !== undefined &&
+          (activeSession.status === 'running' || activeSession.activeTurnId !== undefined)
+        )
+        {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            `Provider instance '${routed.instanceId}' does not accept input while a turn is active.`,
+          )
+        }
+        if (
+          capabilities.sessionModelSwitch === 'unsupported' &&
+          input.modelSelection !== undefined &&
+          activeSession?.model !== undefined &&
+          input.modelSelection.model !== activeSession.model
+        )
+        {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            `Provider instance '${routed.instanceId}' cannot switch models within an active session.`,
+          )
+        }
+        if (
+          input.attachments.some((attachment) => attachment.type === 'image') &&
+          !capabilities.supportedAttachmentTypes.includes('image')
+        )
+        {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            `Provider instance '${routed.instanceId}' does not support image attachments.`,
+          )
+        }
+        // tools receive verified managed paths; adapters own native attachment ingestion
+        const attachmentPaths = new Set<string>()
+        for (const attachment of input.attachments)
+        {
+          if (parsePendingAttachmentId(attachment.id) !== null)
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              'Pending uploads must be normalized before provider dispatch.',
+            )
+          }
+          const managedFile = yield* inspectManagedAttachmentFile({
+            attachmentsDir: serverConfig.attachmentsDir,
+            attachment,
+          })
+          if (managedFile === null || managedFile.sizeBytes !== attachment.sizeBytes)
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              'A managed attachment is missing or invalid.',
+            )
+          }
+          attachmentPaths.add(managedFile.path)
+        }
+        const inputWithAttachmentPaths =
+          attachmentPaths.size === 0
+            ? input
+            : {
+                ...input,
+                input: [
+                  input.input,
+                  [...attachmentPaths]
+                    .map((path) => `[Attached file: ${encodeAttachmentPath(path)}]`)
+                    .join('\n'),
+                ]
+                  .filter((part) => part !== undefined)
+                  .join('\n\n'),
+              }
+        yield* Effect.annotateCurrentSpan({
+          'provider.kind': routed.adapter.provider,
+          ...(input.modelSelection?.model ? { 'provider.model': input.modelSelection.model } : {}),
+        })
+        // turns keep the existing credential alive because running agents cannot accept rotation
+        yield* mcpSessionRegistry.touch(input.threadId)
+        // clear the prior turn before starting another so overlapping mcp calls fail closed
+        yield* mcpSessionRegistry.bindActiveTurn(input.threadId)
+        const adapterInput =
+          routed.adapter.provider === 'codex'
+            ? inputWithAttachmentPaths
+            : applyOrchestrateModeInstructions(inputWithAttachmentPaths)
+        const turn = yield* withActiveSendControlRoute(
+          'ProviderService.sendTurn',
+          routed,
+          context === undefined
+            ? routed.adapter.sendTurn(adapterInput)
+            : routed.adapter.sendTurn(adapterInput, context),
+        )
+        yield* mcpSessionRegistry.bindActiveTurn(input.threadId, turn.turnId)
+        yield* directory.upsert({
+          threadId: input.threadId,
+          provider: routed.adapter.provider,
+          providerInstanceId: routed.instanceId,
+          status: 'running',
+          ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+          runtimePayload: {
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+            activeTurnId: turn.turnId,
+            lastRuntimeEvent: 'provider.sendTurn',
+            lastRuntimeEventAt: yield* nowIso,
+          },
+        })
+        yield* analytics.record('provider.turn.sent', {
+          provider: routed.adapter.provider,
+          model: input.modelSelection?.model,
+          interactionMode: input.interactionMode,
+          attachmentCount: input.attachments.length,
+          hasInput: typeof input.input === 'string' && input.input.trim().length > 0,
+        })
+        return turn
+      }).pipe(
+        withMetrics({
+          counter: providerTurnsTotal,
+          timer: providerTurnDuration,
+          attributes: () =>
+            providerTurnMetricAttributes({
+              provider: metricProvider,
+              model: metricModel,
+              extra: {
+                operation: 'send',
+              },
+            }),
+        }),
+      ),
+    )
+  })
+
+  const sendTurn: ProviderServiceMethod<'sendTurn'> = sendTurnWithCompaction
+
+  const compactThread: ProviderServiceMethod<'compactThread'> = Effect.fn('compactThread')(
+    function* (threadId, modelSelection, requestId, context)
+    {
+      const prepared = yield* withProviderInstanceLifecycle(
+        {
+          threadId,
+          operation: 'ProviderService.compactThread',
           requireActiveThread: true,
         },
         Effect.gen(function* ()
         {
+          if (pendingCompactions.has(threadId) || timedOutNativeCompactions.has(threadId))
+          {
+            return yield* toValidationError(
+              'ProviderService.compactThread',
+              'Context compaction is pending; wait for completion or restart the provider session.',
+            )
+          }
           const routed = yield* resolveRoutableSession({
-            threadId: input.threadId,
-            operation: 'ProviderService.sendTurn',
+            threadId,
+            operation: 'ProviderService.compactThread',
             allowRecovery: true,
-            ...(routingAuthority !== undefined ? { routingAuthority } : {}),
-            ...(context !== undefined ? { context } : {}),
+            ...(context === undefined ? {} : { context }),
           })
-          metricProvider = routed.adapter.provider
-          metricModel = input.modelSelection?.model
-          const capabilities = routed.adapter.capabilities
-          const requestedBaseMode = providerBaseInteractionMode(input)
-          const requestedOrchestrate =
-            input.orchestrate === true || input.interactionMode === 'orchestrate'
-          if (!supportsTurnMode(capabilities, input))
+          const nativeCompaction = routed.adapter.compactThread
+          const compaction = nativeCompaction !== undefined
+            ? { type: 'native' as const, start: nativeCompaction }
+            : routed.adapter.provider === 'claudeAgent' || routed.adapter.provider === 'grok' || routed.adapter.provider === 'cursor'
+              ? { type: 'slash-command' as const, command: routed.adapter.provider === 'cursor' ? '/compress' : '/compact' }
+              : undefined
+          const nativeCompletionTimeout: '10 minutes' | '30 seconds' = routed.adapter.provider === 'codex' || routed.adapter.provider === 'opencode'
+            ? '10 minutes'
+            : '30 seconds'
+          if (compaction === undefined)
           {
             return yield* toValidationError(
-              'ProviderService.sendTurn',
-              requestedOrchestrate && capabilities.orchestrateInstructionDelivery === 'unsupported'
-                ? `Provider instance '${routed.instanceId}' does not support orchestrate instruction delivery.`
-                : `Provider instance '${routed.instanceId}' does not support interaction mode '${requestedBaseMode}'.`,
+              'ProviderService.compactThread',
+              `Provider '${routed.adapter.provider}' does not support context compaction.`,
             )
           }
+          const binding = yield* routed.adapter.getSessionRuntimeBinding(threadId)
           if (
-            input.modelSelection !== undefined &&
-            input.modelSelection.instanceId !== routed.instanceId
+            binding === undefined ||
+            binding.providerInstanceId !== routed.instanceId ||
+            binding.threadId !== threadId
           )
           {
             return yield* toValidationError(
-              'ProviderService.sendTurn',
-              `Provider turn model selection targets instance '${input.modelSelection.instanceId}', but thread '${input.threadId}' is bound to '${routed.instanceId}'.`,
+              'ProviderService.compactThread',
+              'The active provider session has no matching durable generation.',
             )
           }
-          const activeSession = (yield* routed.adapter.listSessions()).find(
-            (session) => session.threadId === input.threadId,
+          const session = (yield* routed.adapter.listSessions()).find(
+            (entry) => entry.threadId === threadId,
           )
           if (
-            capabilities.activeTurnInput === 'unsupported' &&
-            activeSession !== undefined &&
-            (activeSession.status === 'running' || activeSession.activeTurnId !== undefined)
+            session === undefined ||
+            session.status === 'connecting' ||
+            session.status === 'running' ||
+            session.activeTurnId !== undefined ||
+            (modelSelection !== undefined && modelSelection.instanceId !== routed.instanceId)
           )
           {
             return yield* toValidationError(
-              'ProviderService.sendTurn',
-              `Provider instance '${routed.instanceId}' does not accept input while a turn is active.`,
+              'ProviderService.compactThread',
+              'Context compaction requires an idle session owned by the selected provider instance.',
             )
           }
-          if (
-            capabilities.sessionModelSwitch === 'unsupported' &&
-            input.modelSelection !== undefined &&
-            activeSession?.model !== undefined &&
-            input.modelSelection.model !== activeSession.model
-          )
-          {
-            return yield* toValidationError(
-              'ProviderService.sendTurn',
-              `Provider instance '${routed.instanceId}' cannot switch models within an active session.`,
-            )
-          }
-          if (
-            input.attachments.some((attachment) => attachment.type === 'image') &&
-            !capabilities.supportedAttachmentTypes.includes('image')
-          )
-          {
-            return yield* toValidationError(
-              'ProviderService.sendTurn',
-              `Provider instance '${routed.instanceId}' does not support image attachments.`,
-            )
-          }
-          // tools receive verified managed paths; adapters own native attachment ingestion
-          const attachmentPaths = new Set<string>()
-          for (const attachment of input.attachments)
-          {
-            if (parsePendingAttachmentId(attachment.id) !== null)
-            {
-              return yield* toValidationError(
-                'ProviderService.sendTurn',
-                'Pending uploads must be normalized before provider dispatch.',
-              )
-            }
-            const managedFile = yield* inspectManagedAttachmentFile({
-              attachmentsDir: serverConfig.attachmentsDir,
-              attachment,
-            })
-            if (managedFile === null || managedFile.sizeBytes !== attachment.sizeBytes)
-            {
-              return yield* toValidationError(
-                'ProviderService.sendTurn',
-                'A managed attachment is missing or invalid.',
-              )
-            }
-            attachmentPaths.add(managedFile.path)
-          }
-          const inputWithAttachmentPaths =
-            attachmentPaths.size === 0
-              ? input
-              : {
-                  ...input,
-                  input: [
-                    input.input,
-                    [...attachmentPaths]
-                      .map((path) => `[Attached file: ${encodeAttachmentPath(path)}]`)
-                      .join('\n'),
-                  ]
-                    .filter((part) => part !== undefined)
-                    .join('\n\n'),
-                }
-          yield* Effect.annotateCurrentSpan({
-            'provider.kind': routed.adapter.provider,
-            ...(input.modelSelection?.model
-              ? { 'provider.model': input.modelSelection.model }
-              : {}),
-          })
-          // turns keep the existing credential alive because running agents cannot accept rotation
-          yield* mcpSessionRegistry.touch(input.threadId)
-          // clear the prior turn before starting another so overlapping mcp calls fail closed
-          yield* mcpSessionRegistry.bindActiveTurn(input.threadId)
-          const adapterInput =
-            routed.adapter.provider === 'codex'
-              ? inputWithAttachmentPaths
-              : applyOrchestrateModeInstructions(inputWithAttachmentPaths)
-          const turn = yield* withActiveSendControlRoute(
-            'ProviderService.sendTurn',
-            routed,
-            context === undefined
-              ? routed.adapter.sendTurn(adapterInput)
-              : routed.adapter.sendTurn(adapterInput, context),
-          )
-          yield* mcpSessionRegistry.bindActiveTurn(input.threadId, turn.turnId)
-          yield* directory.upsert({
-            threadId: input.threadId,
-            provider: routed.adapter.provider,
+          const pending: PendingCompaction = {
+            completion: yield* Deferred.make<string>(),
+            native: compaction.type === 'native',
             providerInstanceId: routed.instanceId,
-            status: 'running',
-            ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
-            runtimePayload: {
-              ...(input.modelSelection !== undefined
-                ? { modelSelection: input.modelSelection }
-                : {}),
-              activeTurnId: turn.turnId,
-              lastRuntimeEvent: 'provider.sendTurn',
-              lastRuntimeEventAt: yield* nowIso,
-            },
-          })
-          yield* analytics.record('provider.turn.sent', {
-            provider: routed.adapter.provider,
-            model: input.modelSelection?.model,
-            interactionMode: input.interactionMode,
-            attachmentCount: input.attachments.length,
-            hasInput: typeof input.input === 'string' && input.input.trim().length > 0,
-          })
-          return turn
-        }).pipe(
-          withMetrics({
-            counter: providerTurnsTotal,
-            timer: providerTurnDuration,
-            attributes: () =>
-              providerTurnMetricAttributes({
-                provider: metricProvider,
-                model: metricModel,
-                extra: {
-                  operation: 'send',
-                },
+            sessionGeneration: binding.sessionGeneration,
+            requestId,
+            earlyEvents: [],
+            compactedEventObserved: false,
+            expectedTurnId: undefined,
+          }
+          pendingCompactions.set(threadId, pending)
+          // reserve and dispatch under the same lifecycle permit; completion never holds it.
+          yield* mcpSessionRegistry.touch(threadId).pipe(
+            Effect.andThen(
+              compaction.type === 'native'
+                ? withActiveSendControlRoute(
+                    'ProviderService.compactThread',
+                    routed,
+                    compaction.start(threadId, modelSelection),
+                  ).pipe(
+                    Effect.timeout(nativeCompletionTimeout),
+                    Effect.catchTag('TimeoutError', (cause) =>
+                      Effect.sync(() => timedOutNativeCompactions.set(threadId, pending)).pipe(
+                        Effect.andThen(
+                          Effect.fail(
+                            new ProviderAdapterRequestError({
+                              provider: routed.adapter.provider,
+                              method: 'thread/compact',
+                              detail:
+                                'Context compaction dispatch timed out; restart the provider session before retrying.',
+                              cause,
+                            }),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : Effect.void,
+            ),
+            Effect.onError(() =>
+              Effect.sync(() =>
+              {
+                if (pendingCompactions.get(threadId) === pending)
+                  pendingCompactions.delete(threadId)
               }),
-          }),
+            ),
+            Effect.onInterrupt(() =>
+              Effect.sync(() =>
+              {
+                if (pending.native) timedOutNativeCompactions.set(threadId, pending)
+              }),
+            ),
+          )
+          return { routed, compaction, binding, pending, nativeCompletionTimeout }
+        }),
+      )
+
+      yield* Effect.annotateCurrentSpan({
+        'provider.operation': 'compact-thread',
+        'provider.kind': prepared.routed.adapter.provider,
+        'provider.thread_id': threadId,
+      })
+      const pending = prepared.pending
+      const compaction = prepared.compaction
+      const completion = pending.completion
+
+      const clearPending = Effect.sync(() =>
+      {
+        if (pendingCompactions.get(threadId) === pending) pendingCompactions.delete(threadId)
+      })
+      const awaitNative = Deferred.await(completion).pipe(
+        Effect.timeout(prepared.nativeCompletionTimeout),
+        Effect.catchTag('TimeoutError', (cause) =>
+          Effect.sync(() => timedOutNativeCompactions.set(threadId, pending)).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: prepared.routed.adapter.provider,
+                  method: 'thread/compact',
+                  detail: `Provider did not report completed context compaction within ${prepared.nativeCompletionTimeout}.`,
+                  cause,
+                }),
+              ),
+            ),
+          ),
         ),
       )
+      const awaitSlashCommand = Deferred.await(completion).pipe(
+        Effect.timeout('10 minutes'),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapterRequestError({
+              provider: prepared.routed.adapter.provider,
+              method: 'turn/start',
+              detail: `Provider did not finish context compaction within 10 minutes.`,
+              cause,
+            }),
+        ),
+      )
+      const terminal = yield* (
+        compaction.type === 'native'
+          ? awaitNative
+          : Effect.gen(function* ()
+            {
+              const turn = yield* sendTurnWithCompaction(
+                {
+                  threadId,
+                  input: compaction.command,
+                  ...(modelSelection === undefined ? {} : { modelSelection }),
+                },
+                undefined,
+                context,
+                pending,
+              ).pipe(
+                Effect.onError(() =>
+                  Effect.forEach(
+                    pending.earlyEvents.splice(0),
+                    (event) => publishRuntimeEvent(event.binding, event.event, event.adapter),
+                    { discard: true },
+                  ).pipe(
+                    Effect.catchCause((cause) =>
+                      Effect.logError('failed to admit early compaction events', { cause }),
+                    ),
+                  ),
+                ),
+                Effect.timeout('10 minutes'),
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapterRequestError({
+                      provider: prepared.routed.adapter.provider,
+                      method: 'turn/start',
+                      detail: 'Provider did not accept the context compaction command.',
+                      cause,
+                    }),
+                ),
+              )
+              pending.expectedTurnId = turn.turnId
+              for (const event of pending.earlyEvents.splice(0))
+                {
+                yield* publishPendingCompactionEvent(pending, event)
+              }
+              return yield* awaitSlashCommand
+            })
+      ).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() =>
+          {
+            if (pending.native && pendingCompactions.get(threadId) === pending)
+            {
+              timedOutNativeCompactions.set(threadId, pending)
+            }
+          }),
+        ),
+        Effect.ensuring(clearPending),
+      )
+
+      if (terminal !== 'completed')
+      {
+        return yield* new ProviderAdapterRequestError({
+          provider: prepared.routed.adapter.provider,
+          method: prepared.compaction.type === 'native' ? 'thread/compact' : 'turn/start',
+          detail: `Context compaction ended with ${terminal}.`,
+        })
+      }
+      yield* analytics.record('provider.thread.compacted', {
+        provider: prepared.routed.adapter.provider,
+      })
     },
+    Effect.mapError((cause) =>
+      isProviderRuntimeInboxAdmissionError(cause)
+        ? new ProviderAdapterRequestError({
+            provider: 'unknown',
+            method: 'thread/compact',
+            detail: 'Context compaction event admission failed.',
+            cause,
+          })
+        : cause,
+    ),
   )
 
   const interruptTurn: ProviderServiceMethod<'interruptTurn'> = Effect.fn('interruptTurn')(
@@ -3108,6 +3526,12 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         (routed) =>
           Effect.gen(function* ()
           {
+            const pending = pendingCompactions.get(input.threadId)
+            if (pending !== undefined)
+            {
+              if (pending.native) timedOutNativeCompactions.set(input.threadId, pending)
+              yield* settleCompaction(input.threadId, pending, 'turn.aborted')
+            }
             metricProvider = routed.adapter.provider
             yield* Effect.annotateCurrentSpan({
               'provider.operation': 'interrupt-turn',
@@ -3271,6 +3695,12 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
               {
                 return
               }
+              const pending = pendingCompactions.get(input.threadId)
+              if (pending !== undefined)
+              {
+                if (pending.native) timedOutNativeCompactions.set(input.threadId, pending)
+                yield* settleCompaction(input.threadId, pending, 'turn.aborted')
+              }
               metricProvider = routed.adapter.provider
               yield* Effect.annotateCurrentSpan({
                 'provider.operation': 'stop-session',
@@ -3326,6 +3756,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                     : routed.adapter.stopSession(routed.threadId, context)
                 yield* stop
                 yield* awaitSessionExit(activeIdentity)
+                timedOutNativeCompactions.delete(input.threadId)
               }
               else if (Option.isSome(identity))
               {
@@ -3932,6 +4363,11 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
 
   const runStopAll = Effect.fn('runStopAll')(function* ()
   {
+    for (const [threadId, pending] of pendingCompactions)
+    {
+      yield* settleCompaction(threadId, pending, 'turn.aborted')
+    }
+    timedOutNativeCompactions.clear()
     const stoppedAdapters: ShutdownAdapterEntry[] = []
     const closingIdentities: ProviderRuntimeSessionIdentity[] = []
 
@@ -4148,6 +4584,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   return {
     startSession,
     sendTurn,
+    compactThread,
     interruptTurn,
     respondToRequest,
     respondToUserInput,

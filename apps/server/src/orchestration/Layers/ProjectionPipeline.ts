@@ -2338,6 +2338,25 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
         case 'thread.turn-start-requested':
         {
+          const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+            threadId: event.payload.threadId,
+          })
+          if (Option.isSome(pendingTurnStart))
+          {
+            const pendingMessage = yield* projectionThreadMessageRepository.getByMessageId({
+              messageId: pendingTurnStart.value.messageId,
+            })
+            if (
+              Option.isSome(pendingMessage) &&
+              pendingMessage.value.role === 'user' &&
+              (pendingMessage.value.attachments?.length ?? 0) === 0 &&
+              pendingMessage.value.text === '/compact' &&
+              pendingTurnStart.value.sourceProposedPlanId === null
+            )
+            {
+              return
+            }
+          }
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
@@ -2348,12 +2367,40 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           return
         }
 
+        case 'thread.activity-appended':
+        {
+          if (
+            event.payload.activity.kind !== 'context-compaction' &&
+            event.payload.activity.kind !== 'provider.turn.start.failed'
+          )
+          {
+            return
+          }
+          const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+            threadId: event.payload.threadId,
+          })
+          if (
+            Option.isNone(pendingTurnStart) ||
+            String(pendingTurnStart.value.messageId) !==
+              extractActivityRequestId(event.payload.activity.payload)
+          )
+          {
+            return
+          }
+          yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
+            threadId: event.payload.threadId,
+          })
+          return
+        }
+
         case 'thread.session-set':
         {
           const turnId = event.payload.session.activeTurnId
           if (turnId === null || event.payload.session.status !== 'running')
           {
             if (
+              (event.payload.session.status === 'ready' &&
+                event.commandId?.startsWith('server:provider-session-set:') === true) ||
               event.payload.session.status === 'error' ||
               event.payload.session.status === 'stopped' ||
               event.payload.session.status === 'interrupted'
@@ -3043,6 +3090,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         eventTypes: new Set([
           'thread.created',
           'thread.turn-start-requested',
+          'thread.activity-appended',
           'thread.session-set',
           'thread.message-sent',
           'thread.turn-interrupt-requested',

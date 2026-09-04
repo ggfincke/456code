@@ -85,6 +85,12 @@ export interface ProviderAdapterShape<TError>
     context?: ProviderEffectContext,
   ) => Effect.Effect<ProviderTurnStartResult, TError>
 
+  // optional native context compaction; command fallback stays with the service
+  readonly compactThread?: (
+    threadId: ThreadId,
+    modelSelection?: ProviderSendTurnInput['modelSelection'],
+  ) => Effect.Effect<void, TError>
+
   // interrupt an active turn.
   readonly interruptTurn: (
     threadId: ThreadId,

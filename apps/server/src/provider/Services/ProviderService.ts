@@ -17,6 +17,8 @@ import type {
   ProviderDriverKind,
   ProviderInterruptTurnInput,
   ProviderInstanceId,
+  MessageId,
+  ModelSelection,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderRuntimeEvent,
@@ -76,6 +78,14 @@ export interface ProviderServiceShape
     routingAuthority?: ProviderRoutingAuthority,
     context?: ProviderEffectContext,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>
+
+  // compact the active provider context and correlate the result to its command message.
+  readonly compactThread: (
+    threadId: ThreadId,
+    modelSelection?: ModelSelection,
+    requestId?: MessageId,
+    context?: ProviderEffectContext,
+  ) => Effect.Effect<void, ProviderServiceError>
 
   // interrupt a running provider turn.
   readonly interruptTurn: (

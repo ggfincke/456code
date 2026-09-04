@@ -578,6 +578,7 @@ export function runtimeEventToActivities(
           payload: {
             state: event.payload.state,
             ...(compaction !== undefined ? { compaction } : {}),
+            ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
             ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
