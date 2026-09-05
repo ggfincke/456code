@@ -2867,6 +2867,10 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         context.terminalRefusal = message.content
         yield* emitRuntimeError(context, message.content, message)
         return
+      case 'model_refusal_fallback':
+        // surface the notice when Claude retries the request on a different model.
+        yield* emitRuntimeWarning(context, message.content, message)
+        return
       case 'worker_shutting_down':
         // host-side teardown (host_exit, remote_control_disabled, ...). The
         // stream ends right after, so surface the reason before it does.
@@ -2883,7 +2887,6 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       // typed background_tasks control request is the reconciliation source.
       // control_request_progress is per-attempt retry telemetry for in-flight
       // control requests; api_retry already has its own session.state.changed.
-      case 'model_refusal_fallback':
       case 'local_command_output':
       case 'plugin_install':
       case 'commands_changed':
