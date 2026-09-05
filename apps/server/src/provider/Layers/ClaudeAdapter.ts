@@ -9,6 +9,7 @@ import {
   type SDKMessage,
   type SDKConversationResetMessage,
   type SDKAssistantMessageError,
+  type SDKRateLimitInfo,
   type SDKResultMessage,
   type SettingSource,
   type TerminalReason,
@@ -186,6 +187,7 @@ interface ClaudeTurnState
   latestAssistantUsage: unknown | undefined
   compactedSinceLatestAssistantUsage: boolean
   nextSyntheticAssistantBlockIndex: number
+  readonly announcedUsageLimitKeys: Set<string>
 }
 
 interface AssistantTextBlockState
@@ -933,6 +935,35 @@ function presentableResultError(error: string | undefined): string | undefined
     return undefined
   }
   return trimmed
+}
+
+const CLAUDE_USAGE_LIMIT_WINDOWS = {
+  five_hour: '5-hour',
+  seven_day: '7-day',
+  seven_day_opus: '7-day Opus',
+  seven_day_sonnet: '7-day Sonnet',
+  seven_day_overage_included: '7-day model',
+  overage: 'overage',
+} satisfies Record<NonNullable<SDKRateLimitInfo['rateLimitType']>, string>
+
+function describeClaudeUsageLimit(info: SDKRateLimitInfo): string
+{
+  const window = info.rateLimitType && CLAUDE_USAGE_LIMIT_WINDOWS[info.rateLimitType]
+  return `Claude usage limit reached${window ? ` for the ${window} window` : ''}. This turn is paused; check your plan usage for when it resets.`
+}
+
+function readClaudeRateLimitInfo(value: unknown): SDKRateLimitInfo | undefined
+{
+  if (typeof value !== 'object' || value === null || !('status' in value))
+  {
+    return undefined
+  }
+  const status = value.status
+  if (status !== 'allowed' && status !== 'allowed_warning' && status !== 'rejected')
+  {
+    return undefined
+  }
+  return value as SDKRateLimitInfo
 }
 
 // a Record rather than a switch so a new SDK union member fails the build here instead of
@@ -2426,6 +2457,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         latestAssistantUsage: undefined,
         compactedSinceLatestAssistantUsage: false,
         nextSyntheticAssistantBlockIndex: -1,
+        announcedUsageLimitKeys: new Set(),
       }
       context.session = {
         ...context.session,
@@ -3001,31 +3033,54 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (message.type === 'rate_limit_event')
     {
-      const info = message.rate_limit_info
-      // the SDK re-streams this frame on every tick. keying on the transition, not the
-      // percentage, keeps a slowly-climbing window from writing a row per tick
-      const key = `${info.status}:${info.rateLimitType ?? ''}`
-      if (context.lastRateLimitKey === key)
+      const info = readClaudeRateLimitInfo(message.rate_limit_info)
+      if (info === undefined)
       {
         return
       }
-      context.lastRateLimitKey = key
-      const resetsAt = info.resetsAt === undefined ? undefined : claudeResetsAtToIso(info.resetsAt)
-      yield* offerRuntimeEvent(context, {
-        ...base,
-        type: 'account.rate-limits.updated',
-        payload: {
-          snapshot: {
-            status: info.status,
-            ...(info.rateLimitType ? { windowId: info.rateLimitType } : {}),
-            ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
-            ...(resetsAt !== undefined ? { resetsAt } : {}),
+      // the SDK re-streams this frame on every tick. keying on the transition, not the
+      // percentage, keeps a slowly-climbing window from writing a row per tick
+      const key = `${info.status}:${info.rateLimitType ?? ''}`
+      if (context.lastRateLimitKey !== key)
+      {
+        context.lastRateLimitKey = key
+        const resetsAt =
+          typeof info.resetsAt === 'number' ? claudeResetsAtToIso(info.resetsAt) : undefined
+        yield* offerRuntimeEvent(context, {
+          ...base,
+          type: 'account.rate-limits.updated',
+          payload: {
+            snapshot: {
+              status: info.status,
+              ...(info.rateLimitType ? { windowId: info.rateLimitType } : {}),
+              ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
+              ...(resetsAt !== undefined ? { resetsAt } : {}),
+            },
+            // the snapshot, not the envelope. the envelope is already carried verbatim by
+            // base.raw.payload, so wrapping it again lost the shape a consumer could read
+            rateLimits: info,
           },
-          // the snapshot, not the envelope. the envelope is already carried verbatim by
-          // base.raw.payload, so wrapping it again lost the shape a consumer could read
-          rateLimits: info,
-        },
-      })
+        })
+      }
+
+      const overageAllowed =
+        info.overageStatus === 'allowed' ||
+        info.overageStatus === 'allowed_warning' ||
+        info.isUsingOverage === true ||
+        info.overageInUse === true
+      const blocked = info.status === 'rejected' && !overageAllowed
+      if (!blocked || context.turnState === undefined)
+      {
+        return
+      }
+      const limitType = info.rateLimitType ?? 'unknown'
+      const warningKey = `${limitType}:${typeof info.resetsAt === 'number' ? info.resetsAt : 'unknown'}`
+      if (context.turnState.announcedUsageLimitKeys.has(warningKey))
+      {
+        return
+      }
+      context.turnState.announcedUsageLimitKeys.add(warningKey)
+      yield* emitRuntimeWarning(context, describeClaudeUsageLimit(info), info)
       return
     }
   })
@@ -4274,6 +4329,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         latestAssistantUsage: undefined,
         compactedSinceLatestAssistantUsage: false,
         nextSyntheticAssistantBlockIndex: -1,
+        announcedUsageLimitKeys: new Set(),
       }
 
       const updatedAt = yield* nowIso

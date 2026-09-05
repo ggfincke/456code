@@ -1670,6 +1670,133 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
+  it.effect('surfaces each rejected Claude usage window once per active turn', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const firstTurnEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      const firstTurn = yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'first turn',
+        attachments: [],
+      })
+
+      const rejectedLimit = {
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'rejected',
+          rateLimitType: 'seven_day',
+          resetsAt: 1_788_840_000,
+        },
+        uuid: 'rate-limit-rejected',
+        session_id: 'sdk-session-rate-limit',
+      } as unknown as SDKMessage
+      harness.query.emit(rejectedLimit)
+      harness.query.emit(rejectedLimit)
+      harness.query.emit({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        session_id: 'sdk-session-rate-limit',
+        uuid: 'result-rate-limit-first-turn',
+      } as unknown as SDKMessage)
+
+      const firstTurnEvents = Array.from(yield* Fiber.join(firstTurnEventsFiber))
+      const firstWarnings = firstTurnEvents.filter((event) => event.type === 'runtime.warning')
+      assert.equal(firstWarnings.length, 1)
+      assert.equal(String(firstWarnings[0]?.turnId), String(firstTurn.turnId))
+      if (firstWarnings[0]?.type === 'runtime.warning')
+      {
+        assert.equal(
+          firstWarnings[0].payload.message,
+          'Claude usage limit reached for the 7-day window. This turn is paused; check your plan usage for when it resets.',
+        )
+      }
+
+      const nextWarningFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.filter((event) => event.type === 'runtime.warning'),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+      const secondTurn = yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'second turn',
+        attachments: [],
+      })
+      harness.query.emit(rejectedLimit)
+
+      const nextWarnings = Array.from(yield* Fiber.join(nextWarningFiber))
+      assert.equal(nextWarnings.length, 1)
+      assert.equal(String(nextWarnings[0]?.turnId), String(secondTurn.turnId))
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('ignores malformed Claude rate-limit envelopes without stopping the stream', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'account.rate-limits.updated'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'rate_limit_event',
+        rate_limit_info: undefined,
+        uuid: 'rate-limit-malformed',
+        session_id: 'sdk-session-rate-limit-malformed',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour' },
+        uuid: 'rate-limit-valid-after-malformed',
+        session_id: 'sdk-session-rate-limit-malformed',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      assert.equal(
+        runtimeEvents.some((event) => event.type === 'runtime.error'),
+        false,
+      )
+      assert.equal(
+        runtimeEvents.filter((event) => event.type === 'account.rate-limits.updated').length,
+        1,
+      )
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
   it.effect('closes the session when the Claude stream aborts after a turn starts', () =>
   {
     const harness = makeHarness()
