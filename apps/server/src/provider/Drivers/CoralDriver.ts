@@ -39,11 +39,7 @@ import {
 import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
 import type { ProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
-import {
-  makeManualOnlyProviderMaintenanceCapabilities,
-  makeStaticProviderMaintenanceResolver,
-  resolveProviderMaintenanceCapabilitiesEffect,
-} from '../maintenance/providerMaintenance.ts'
+import { makeManualOnlyProviderMaintenanceCapabilities } from '../maintenance/providerMaintenance.ts'
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
@@ -54,12 +50,10 @@ import type { ServerProviderDraft } from '../providerSnapshot.ts'
 const decodeCoralSettings = Schema.decodeSync(CoralSettings)
 const DRIVER_KIND = ProviderDriverKind.make('coral')
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
-const UPDATE = makeStaticProviderMaintenanceResolver(
-  makeManualOnlyProviderMaintenanceCapabilities({
-    provider: DRIVER_KIND,
-    packageName: null,
-  }),
-)
+const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
+  provider: DRIVER_KIND,
+  packageName: null,
+})
 
 export type CoralDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -131,10 +125,6 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
         continuationGroupKey:
           continuationUnavailableReason === null ? continuationIdentity.continuationKey : null,
       })
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      })
       // status probes stay on `coral --version`; bound sessions own the Ollama inventory
       const sessionModelsRef = yield* Ref.make<ReadonlyArray<ServerProviderModel>>([])
       const snapshotPublisherRef = yield* Ref.make<{
@@ -171,7 +161,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
       )
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CoralSettings>>({
-        maintenanceCapabilities,
+        resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
@@ -193,7 +183,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
             Effect.andThen(
               enrichCoralSnapshot({
                 snapshot: currentSnapshot,
-                maintenanceCapabilities,
+                maintenanceCapabilities: MAINTENANCE_CAPABILITIES,
                 enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
                 publishSnapshot: publishWithSessionModels,
                 httpClient,

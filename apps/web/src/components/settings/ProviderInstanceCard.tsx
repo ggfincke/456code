@@ -434,6 +434,10 @@ export function ProviderInstanceCard({
   const versionLabel = getProviderVersionLabel(liveProvider?.version)
   const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory)
   const updateCommand = versionAdvisory?.updateCommand ?? null
+  const canRunUpdate =
+    onRunUpdate !== undefined &&
+    liveProvider?.versionAdvisory?.canUpdate === true &&
+    liveProvider.versionAdvisory.updateCommand !== null
   const FallbackIconComponent = driverOption?.icon
   const displayName = instance.displayName?.trim() || driverOption?.label || String(instance.driver)
   const accentColor = normalizeProviderAccentColor(instance.accentColor)
@@ -677,7 +681,7 @@ export function ProviderInstanceCard({
                           {versionAdvisory.detail}
                         </p>
                       </div>
-                      {onRunUpdate ? (
+                      {canRunUpdate ? (
                         <Button
                           type="button"
                           size="xs"
@@ -690,7 +694,7 @@ export function ProviderInstanceCard({
                           {isUpdating ? 'Updating' : 'Update now'}
                         </Button>
                       ) : null}
-                      {onRunUpdate && updateCommand ? (
+                      {canRunUpdate && updateCommand ? (
                         <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                           <span aria-hidden className="h-px flex-1 bg-border" />
                           or, update manually using

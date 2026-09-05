@@ -28,6 +28,7 @@ import {
   getProviderUpdateSidebarPillView,
   getSingleProviderUpdateProgressToastView,
   hasOneClickUpdateProviderCandidate,
+  isProviderSettingsUpdateCandidate,
   isProviderUpdateCandidate,
   isTerminalProviderUpdatePhase,
   localEnvironmentUpdateNotificationKey,
@@ -132,6 +133,31 @@ describe('provider update launch notification logic', () =>
         provider({ driver: driver('cursor'), latestVersion: '0.3.0' }),
       ]),
     ).toHaveLength(2)
+  })
+
+  it('keeps settings updates instance-scoped and excludes manual-only installs', () =>
+  {
+    const personal = provider({
+      driver: driver('codex'),
+      instanceId: instanceId('codex_personal'),
+    })
+    const work = provider({
+      driver: driver('codex'),
+      instanceId: instanceId('codex_work'),
+      updateCommand: 'bun i -g @openai/codex@latest',
+    })
+    const manual = provider({
+      driver: driver('codex'),
+      instanceId: instanceId('codex_manual'),
+      canUpdate: false,
+      updateCommand: null,
+    })
+
+    expect(
+      [personal, work, manual]
+        .filter(isProviderSettingsUpdateCandidate)
+        .map((candidate) => candidate.instanceId),
+    ).toEqual([instanceId('codex_personal'), instanceId('codex_work')])
   })
 
   it('disables one-click updates when provider instances disagree on the update command', () =>

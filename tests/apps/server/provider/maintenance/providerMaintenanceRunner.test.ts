@@ -138,6 +138,10 @@ function mockSpawnerLayer(
   handler: (
     command: string,
     args: ReadonlyArray<string>,
+    options: {
+      readonly env?: NodeJS.ProcessEnv | undefined
+      readonly extendEnv?: boolean | undefined
+    },
   ) => {
     readonly stdout?: string
     readonly stderr?: string
@@ -153,8 +157,14 @@ function mockSpawnerLayer(
       const childProcess = command as unknown as {
         readonly command: string
         readonly args: ReadonlyArray<string>
+        readonly options: {
+          readonly env?: NodeJS.ProcessEnv | undefined
+          readonly extendEnv?: boolean | undefined
+        }
       }
-      return Effect.succeed(mockHandle(handler(childProcess.command, childProcess.args)))
+      return Effect.succeed(
+        mockHandle(handler(childProcess.command, childProcess.args, childProcess.options)),
+      )
     }),
   )
 }
@@ -215,6 +225,7 @@ function makeRegistry(
 
     return {
       registry,
+      providersRef,
       updateStatesRef,
     }
   })
@@ -264,6 +275,140 @@ describe('providerMaintenanceRunner', () =>
           mockSpawnerLayer((command, args) =>
           {
             calls.push({ command, args })
+            return { stdout: 'updated' }
+          }),
+        ),
+      ),
+    )
+  })
+
+  it.effect('reports unchanged when an updater exits zero but the provider disappears', () =>
+    Effect.gen(function* ()
+    {
+      const { registry, providersRef } = yield* makeRegistry(baseProvider)
+      const updater = yield* makeTestRunner({
+        ...registry,
+        refreshInstance: () =>
+          Ref.updateAndGet(providersRef, (providers) =>
+            providers.map((provider) => ({ ...provider, installed: false, version: null })),
+          ),
+      })
+
+      const result = yield* updater.updateProvider(CODEX_DRIVER)
+      assert.strictEqual(result.providers[0]?.updateState?.status, 'unchanged')
+      assert.match(result.providers[0]?.updateState?.message ?? '', /could not verify/)
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient('0.0.0'),
+          mockSpawnerLayer(() => ({ stdout: 'updated' })),
+        ),
+      ),
+    ),
+  )
+
+  it.effect('passes the selected environment to command resolution and spawning', () =>
+  {
+    const resolutionEnvironments: NodeJS.ProcessEnv[] = []
+    const spawnEnvironments: Array<NodeJS.ProcessEnv | undefined> = []
+    const selectedEnvironment = {
+      PATH: 'C:\\provider-tools',
+      PATHEXT: '.COM;.EXE;.BAT;.CMD',
+      PROVIDER_SCOPE: 'work',
+    }
+    return Effect.gen(function* ()
+    {
+      const { registry } = yield* makeRegistry(baseProvider)
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: '@openai/codex',
+              updateExecutable: 'npm',
+              updateArgs: ['install', '-g', '@openai/codex@latest'],
+              updateLockKey: 'npm-global',
+              env: selectedEnvironment,
+            }),
+          ),
+      })
+
+      yield* updater.updateProvider(CODEX_DRIVER)
+      assert.deepStrictEqual(resolutionEnvironments, [selectedEnvironment])
+      assert.deepStrictEqual(spawnEnvironments, [selectedEnvironment])
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcessPlatform, 'win32'),
+          Layer.succeed(HostProcessEnvironment, { PATH: 'C:\\host-tools' }),
+          Layer.succeed(SpawnExecutableResolution, (command, _platform, env) =>
+          {
+            if (command === 'npm')
+            {
+              resolutionEnvironments.push(env)
+              return 'C:\\provider-tools\\npm.cmd'
+            }
+            return undefined
+          }),
+          latestVersionHttpClient('0.0.0'),
+          mockSpawnerLayer((_command, _args, options) =>
+          {
+            spawnEnvironments.push(options.env)
+            return { stdout: 'updated' }
+          }),
+        ),
+      ),
+    )
+  })
+
+  it.effect('re-resolves ownership under the lock and refuses an installer switch', () =>
+  {
+    const calls: string[] = []
+    const freshReads: boolean[] = []
+    return Effect.gen(function* ()
+    {
+      const { registry, updateStatesRef } = yield* makeRegistry(baseProvider)
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider, options) =>
+        {
+          freshReads.push(options?.fresh === true)
+          return Effect.succeed(
+            options?.fresh
+              ? makeProviderMaintenanceCapabilities({
+                  provider,
+                  packageName: '@openai/codex',
+                  updateExecutable: 'bun',
+                  updateArgs: ['i', '-g', '@openai/codex@latest'],
+                  updateLockKey: 'bun-global',
+                })
+              : lifecycleFor(provider),
+          )
+        },
+      })
+
+      const result = yield* updater.updateProvider(CODEX_DRIVER)
+      assert.deepStrictEqual(freshReads, [false, true])
+      assert.deepStrictEqual(calls, [])
+      assert.strictEqual(result.providers[0]?.updateState?.status, 'failed')
+      assert.strictEqual(
+        result.providers[0]?.updateState?.message,
+        'Provider installation changed. Refresh and try again.',
+      )
+      assert.deepStrictEqual(
+        (yield* Ref.get(updateStatesRef)).map((state) => state.status),
+        ['queued', 'running', 'failed'],
+      )
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient('0.0.0'),
+          mockSpawnerLayer((command) =>
+          {
+            calls.push(command)
             return { stdout: 'updated' }
           }),
         ),

@@ -22,6 +22,13 @@ export type ProviderUpdateCandidate = ServerProvider & {
   }
 }
 
+export type ProviderSettingsUpdateCandidate = ServerProvider & {
+  readonly versionAdvisory: NonNullable<ServerProvider['versionAdvisory']> & {
+    readonly canUpdate: true
+    readonly updateCommand: string
+  }
+}
+
 export type ProviderUpdateToastType = 'warning' | 'loading' | 'error' | 'success'
 export type ProviderUpdateToastPhase = 'initial' | 'running' | 'failed' | 'unchanged' | 'succeeded'
 
@@ -168,6 +175,18 @@ export function collectProviderUpdateCandidates(
 ): ProviderUpdateCandidate[]
 {
   return dedupeProvidersByDriver(providers.filter(isProviderUpdateCandidate))
+}
+
+export function isProviderSettingsUpdateCandidate(
+  provider: ServerProvider,
+): provider is ProviderSettingsUpdateCandidate
+{
+  return (
+    provider.enabled &&
+    provider.versionAdvisory?.status === 'behind_latest' &&
+    provider.versionAdvisory.canUpdate === true &&
+    provider.versionAdvisory.updateCommand !== null
+  )
 }
 
 export function hasOneClickUpdateProviderCandidate(

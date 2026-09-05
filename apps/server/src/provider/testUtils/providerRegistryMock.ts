@@ -14,7 +14,7 @@ export const makeProviderRegistryMock = (
   getProviders: Effect.succeed(providers),
   refresh: () => Effect.succeed(providers),
   refreshInstance: () => Effect.succeed(providers),
-  getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+  getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider, _options) =>
     Effect.succeed(makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null })),
   setProviderMaintenanceActionState: () => Effect.succeed(providers),
   streamChanges: Stream.empty,

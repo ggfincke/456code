@@ -26,11 +26,7 @@ import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnv
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
 import type { ProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
 import type { ServerProviderDraft } from '../providerSnapshot.ts'
-import {
-  makeManualOnlyProviderMaintenanceCapabilities,
-  makeStaticProviderMaintenanceResolver,
-  resolveProviderMaintenanceCapabilitiesEffect,
-} from '../maintenance/providerMaintenance.ts'
+import { makeManualOnlyProviderMaintenanceCapabilities } from '../maintenance/providerMaintenance.ts'
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
@@ -40,9 +36,10 @@ import {
 const decodeSettings = Schema.decodeSync(AntigravitySettings)
 const DRIVER_KIND = ProviderDriverKind.make('antigravity')
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
-const UPDATE = makeStaticProviderMaintenanceResolver(
-  makeManualOnlyProviderMaintenanceCapabilities({ provider: DRIVER_KIND, packageName: null }),
-)
+const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
+  provider: DRIVER_KIND,
+  packageName: null,
+})
 
 export type AntigravityDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -92,10 +89,6 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         ],
       })
       const stampIdentity = withInstanceIdentity({ instanceId, displayName, accentColor })
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      })
       const adapter = yield* makeAntigravityAdapter(effectiveConfig, {
         environment: processEnv,
         instanceId,
@@ -131,7 +124,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       const snapshot = yield* makeManagedServerProvider<
         ProviderSnapshotSettings<AntigravitySettings>
       >({
-        maintenanceCapabilities,
+        resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,

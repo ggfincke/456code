@@ -50,6 +50,28 @@ copy credentials between them, extract Google tokens, or redirect one CLI throug
 backend. Antigravity's headless protocol is not ACP, so it has a dedicated runtime rather than an
 ACP compatibility shim.
 
+## Provider update ownership
+
+A provider instance offers one-click updates only when the resolved executable proves which
+installer owns it. The maintenance resolver follows executable symlinks and recognizes exact npm
+global prefixes, pnpm, Bun, and Vite+ global layouts, provider-native layouts, and Homebrew kegs or
+casks under the active `brew --prefix`. Homebrew metadata must identify the same formula or cask.
+Missing executables, custom paths, and unresolved ownership remain manual-only while still showing
+the detected version gap.
+
+npm updates preserve the owning `--prefix` and allow install scripts only for the requested provider
+package. Every action retains the provider instance's selected environment, including native update
+variables, so both executable resolution and the spawned installer use the same `PATH` and settings
+that proved ownership. See
+[`providerMaintenance.ts`](../../apps/server/src/provider/maintenance/providerMaintenance.ts).
+
+Ownership is cached per live instance, then resolved again under the installer lock immediately
+before execution. The runner refuses the update if the installer lock changed. After a zero exit it
+refreshes ownership and provider health again; a missing provider or a still-outdated advisory is not
+reported as success. A transiently unreadable version remains acceptable when the refreshed binary
+is still installed. See
+[`providerMaintenanceRunner.ts`](../../apps/server/src/provider/maintenance/providerMaintenanceRunner.ts).
+
 ## OpenCode server and inventory ownership
 
 Each OpenCode provider instance owns one scoped local server shared by inventory probes and text

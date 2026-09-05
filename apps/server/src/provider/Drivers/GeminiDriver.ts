@@ -48,6 +48,7 @@ import { GEMINI_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
 import type { ProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
 import {
+  makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from '../maintenance/providerMaintenance.ts'
@@ -64,7 +65,6 @@ const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
   npmPackageName: '@google/gemini-cli',
-  homebrewFormula: 'gemini-cli',
   nativeUpdate: null,
 })
 
@@ -108,6 +108,7 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
     {
       const crypto = yield* Crypto.Crypto
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const fileSystem = yield* FileSystem.FileSystem
       const httpClient = yield* HttpClient.HttpClient
       const path = yield* Path.Path
       const { cwd, stateDir, attachmentsDir } = yield* ServerConfig
@@ -160,10 +161,16 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
         continuationGroupKey:
           continuationUnavailableReason === null ? continuationIdentity.continuationKey : null,
       })
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      })
+      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+        resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+          binaryPath: effectiveConfig.binaryPath,
+          env: processEnv,
+        }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        ),
+      )
       const sessionModelsRef = yield* Ref.make<ReadonlyArray<ServerProviderModel>>([])
       const sessionCapabilitiesRef = yield* Ref.make<ProviderRuntimeCapabilities>(
         GEMINI_PROVIDER_CAPABILITIES,
@@ -225,7 +232,7 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
       )
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<GeminiSettings>>({
-        maintenanceCapabilities,
+        resolveMaintenance,
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
@@ -251,13 +258,17 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
             publishSnapshot: publishWithSessionState,
           }).pipe(
             Effect.andThen(
-              enrichGeminiSnapshot({
-                snapshot: currentSnapshot,
-                maintenanceCapabilities,
-                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-                publishSnapshot: publishWithSessionState,
-                httpClient,
-              }),
+              resolveMaintenance().pipe(
+                Effect.flatMap((maintenanceCapabilities) =>
+                  enrichGeminiSnapshot({
+                    snapshot: currentSnapshot,
+                    maintenanceCapabilities,
+                    enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+                    publishSnapshot: publishWithSessionState,
+                    httpClient,
+                  }),
+                ),
+              ),
             ),
           )
         },

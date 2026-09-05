@@ -575,15 +575,19 @@ export const ProviderRegistryLive = Layer.effect(
 
     const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
       'getProviderMaintenanceCapabilitiesForInstance',
-    )(function* (instanceId: ProviderInstanceId, provider: ProviderDriverKind)
+    )(function* (
+      instanceId: ProviderInstanceId,
+      provider: ProviderDriverKind,
+      options?: { readonly fresh?: boolean },
+    )
     {
-      const instance = Array.from((yield* Ref.get(liveSubsRef)).values()).find(
-        (candidate) => candidate.instanceId === instanceId,
-      )
-      return (
-        instance?.snapshot.maintenanceCapabilities ??
-        makeManualProviderMaintenanceCapabilities(provider)
-      )
+      // resolve against the current registry entry because live subscriptions trail reconciliation
+      const instance = yield* instanceRegistry.getInstance(instanceId)
+      if (!instance || instance.driverKind !== provider)
+      {
+        return makeManualProviderMaintenanceCapabilities(provider)
+      }
+      return yield* instance.snapshot.resolveMaintenance(options)
     })
 
     // diff the aggregator's live-source set against the current

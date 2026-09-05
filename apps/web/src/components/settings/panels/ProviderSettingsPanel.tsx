@@ -28,11 +28,9 @@ import { primaryServerProvidersAtom, serverEnvironment } from '../../../state/se
 import { useAtomCommand } from '../../../state/use-atom-command'
 import { getRelativeTimeState } from '../../../timestampFormat'
 import {
-  canOneClickUpdateProviderCandidate,
-  collectProviderUpdateCandidates,
-  hasOneClickUpdateProviderCandidate,
+  isProviderSettingsUpdateCandidate,
   isProviderUpdateActive,
-  type ProviderUpdateCandidate,
+  type ProviderSettingsUpdateCandidate,
 } from '../../ProviderUpdateLaunchNotification.logic'
 import { Button } from '../../ui/button'
 import { stackedThreadToast, toastManager } from '../../ui/toast'
@@ -116,11 +114,12 @@ export function ProviderSettingsPanel()
   })
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false)
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false)
-  const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
-    ReadonlySet<ProviderDriverKind>
+  const [updatingProviderInstanceIds, setUpdatingProviderInstanceIds] = useState<
+    ReadonlySet<ProviderInstanceId>
   >(() => new Set())
   const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({})
   const refreshingRef = useRef(false)
+  const updatingInstanceIdsRef = useRef<Set<ProviderInstanceId>>(new Set())
   const providerInstancesRef = useRef(settings.providerInstances)
 
   useEffect(() =>
@@ -166,13 +165,14 @@ export function ProviderSettingsPanel()
     })
   }
 
-  const providerUpdateCandidates = useMemo(
-    () => collectProviderUpdateCandidates(serverProviders),
-    [serverProviders],
-  )
   const providerUpdateCandidateByInstanceId = useMemo(
-    () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
-    [providerUpdateCandidates],
+    () =>
+      new Map(
+        serverProviders
+          .filter(isProviderSettingsUpdateCandidate)
+          .map((candidate) => [candidate.instanceId, candidate]),
+      ),
+    [serverProviders],
   )
   const visibleProviderSettings = PROVIDER_SETTINGS.filter(
     (providerSettings) =>
@@ -223,25 +223,15 @@ export function ProviderSettingsPanel()
   }, [primaryEnvironment, refreshServerProviders])
 
   const runProviderUpdate = useCallback(
-    async (candidate: ProviderUpdateCandidate) =>
+    async (candidate: ProviderSettingsUpdateCandidate) =>
     {
       if (!primaryEnvironment) return
-      let started = false
-      setUpdatingProviderDrivers((previous) =>
-      {
-        if (previous.has(candidate.driver))
-        {
-          return previous
-        }
-        started = true
-        const next = new Set(previous)
-        next.add(candidate.driver)
-        return next
-      })
-      if (!started)
+      if (updatingInstanceIdsRef.current.has(candidate.instanceId))
       {
         return
       }
+      updatingInstanceIdsRef.current.add(candidate.instanceId)
+      setUpdatingProviderInstanceIds((previous) => new Set(previous).add(candidate.instanceId))
 
       const result = await updateProvider({
         environmentId: primaryEnvironment.environmentId,
@@ -264,14 +254,15 @@ export function ProviderSettingsPanel()
           }),
         )
       }
-      setUpdatingProviderDrivers((previous) =>
+      updatingInstanceIdsRef.current.delete(candidate.instanceId)
+      setUpdatingProviderInstanceIds((previous) =>
       {
-        if (!previous.has(candidate.driver))
+        if (!previous.has(candidate.instanceId))
         {
           return previous
         }
         const next = new Set(previous)
-        next.delete(candidate.driver)
+        next.delete(candidate.instanceId)
         return next
       })
     },
@@ -532,23 +523,13 @@ export function ProviderSettingsPanel()
           const liveProvider = serverProviders.find(
             (candidate) => candidate.instanceId === row.instanceId,
           )
-          const updateCandidate = liveProvider
-            ? providerUpdateCandidateByInstanceId.get(liveProvider.instanceId)
-            : undefined
-          const isDriverUpdateRunning =
+          const updateCandidate = providerUpdateCandidateByInstanceId.get(row.instanceId)
+          const isInstanceUpdateRunning =
             updateCandidate !== undefined &&
-            (updatingProviderDrivers.has(updateCandidate.driver) ||
-              serverProviders.some(
-                (provider) =>
-                  provider.driver === updateCandidate.driver && isProviderUpdateActive(provider),
-              ))
-          const showInlineUpdateButton =
-            updateCandidate !== undefined &&
-            hasOneClickUpdateProviderCandidate(updateCandidate, serverProviders)
-          const canRunInlineUpdate =
-            updateCandidate !== undefined &&
-            canOneClickUpdateProviderCandidate(updateCandidate, serverProviders) &&
-            !updatingProviderDrivers.has(updateCandidate.driver)
+            (updatingProviderInstanceIds.has(updateCandidate.instanceId) ||
+              isProviderUpdateActive(updateCandidate))
+          const showInlineUpdateButton = updateCandidate !== undefined
+          const canRunInlineUpdate = updateCandidate !== undefined && !isInstanceUpdateRunning
           const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
             hiddenModels: [],
             modelOrder: [],
@@ -627,7 +608,7 @@ export function ProviderSettingsPanel()
                     }
                   : undefined
               }
-              isUpdating={showInlineUpdateButton ? isDriverUpdateRunning : undefined}
+              isUpdating={showInlineUpdateButton ? isInstanceUpdateRunning : undefined}
             />
           )
         })}
