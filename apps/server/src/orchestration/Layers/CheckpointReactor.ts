@@ -1012,11 +1012,14 @@ const make = Effect.gen(function* ()
     })
   })
 
-  // captures a real git checkpoint when a turn completes via a runtime event.
+  // capture the final files left by a completed or interrupted runtime turn.
   // the outcome tells the caller which early return it took, because only
   // 'no-workspace' means the app never looked at a tree for this turn
   const captureCheckpointFromTurnCompletion = Effect.fn('captureCheckpointFromTurnCompletion')(
-    function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' }>, actionId: string)
+    function* (
+      event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' | 'turn.aborted' }>,
+      actionId: string,
+    )
     {
       const turnId = toTurnId(event.turnId)
       if (!turnId)
@@ -1036,6 +1039,16 @@ const make = Effect.gen(function* ()
       {
         return 'skipped' as const
       }
+      // ingestion has already crossed this event's durable sequence; an abort
+      // must belong to the tracked turn, not an unrelated auxiliary event.
+      if (
+        event.type === 'turn.aborted' &&
+        !sameId(thread.session?.activeTurnId, turnId) &&
+        thread.latestTurn?.turnId !== turnId
+      )
+      {
+        return 'skipped' as const
+      }
 
       const projects = yield* resolveThreadProjects(thread.projectId)
       const checkpointCwd = yield* resolveCheckpointCwd({
@@ -1051,17 +1064,17 @@ const make = Effect.gen(function* ()
         return 'no-workspace' as const
       }
 
-      // if a placeholder checkpoint exists for this turn, reuse its turn count
-      // instead of incrementing past it.
-      const existingPlaceholder = thread.checkpoints.find(
-        (checkpoint) => checkpoint.turnId === turnId && checkpoint.status === 'missing',
+      // reuse the turn's reserved identity, including a completed capture retried
+      // after its domain event persisted but before the runtime cursor advanced.
+      const existingCheckpoint = thread.checkpoints.find(
+        (checkpoint) => checkpoint.turnId === turnId,
       )
       const currentTurnCount = thread.checkpoints.reduce(
         (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
         0,
       )
-      const nextTurnCount = existingPlaceholder
-        ? existingPlaceholder.checkpointTurnCount
+      const nextTurnCount = existingCheckpoint
+        ? existingCheckpoint.checkpointTurnCount
         : currentTurnCount + 1
 
       yield* captureAndDispatchCheckpoint({
@@ -1070,83 +1083,17 @@ const make = Effect.gen(function* ()
         thread,
         cwd: checkpointCwd,
         turnCount: nextTurnCount,
-        status: checkpointStatusFromRuntime(event.payload.state),
-        assistantMessageId: undefined,
+        status:
+          event.type === 'turn.aborted'
+            ? 'ready'
+            : checkpointStatusFromRuntime(event.payload.state),
+        assistantMessageId: existingCheckpoint?.assistantMessageId ?? undefined,
         createdAt: event.createdAt,
         actionId,
       })
       return 'captured' as const
     },
   )
-
-  // captures a real git checkpoint when a placeholder checkpoint (status "missing")
-  // is detected via a domain event. This replaces the placeholder with a real
-  // git-ref-based checkpoint.
-  //
-  // ProviderRuntimeIngestion creates placeholder checkpoints on turn.diff.updated
-  // events from the Codex runtime. This handler fires when the corresponding
-  // domain event arrives, allowing the reactor to capture the actual filesystem
-  // state into a git ref and dispatch a replacement checkpoint.
-  const captureCheckpointFromPlaceholder = Effect.fn('captureCheckpointFromPlaceholder')(function* (
-    event: Extract<OrchestrationEvent, { type: 'thread.turn-diff-completed' }>,
-    actionId?: string,
-  )
-  {
-    const { threadId, turnId, checkpointTurnCount, status } = event.payload
-
-    // only replace placeholders; skip events from our own real captures.
-    if (status !== 'missing')
-    {
-      return
-    }
-
-    const thread = yield* resolveThreadDetail(threadId, MUTATION_EVIDENCE_ACTIVITY_FILTER)
-    if (!thread)
-    {
-      yield* Effect.logWarning('checkpoint capture from placeholder skipped: thread not found', {
-        threadId,
-      })
-      return
-    }
-
-    // if a real checkpoint already exists for this turn, skip.
-    if (
-      thread.checkpoints.some(
-        (checkpoint) => checkpoint.turnId === turnId && checkpoint.status !== 'missing',
-      )
-    )
-    {
-      yield* Effect.logDebug(
-        'checkpoint capture from placeholder skipped: real checkpoint already exists',
-        { threadId, turnId },
-      )
-      return
-    }
-
-    const projects = yield* resolveThreadProjects(thread.projectId)
-    const checkpointCwd = yield* resolveCheckpointCwd({
-      threadId,
-      thread,
-      projects,
-      preferSessionRuntime: true,
-    })
-    if (!checkpointCwd)
-    {
-      return
-    }
-
-    yield* captureAndDispatchCheckpoint({
-      threadId,
-      turnId,
-      thread,
-      cwd: checkpointCwd,
-      turnCount: checkpointTurnCount,
-      status: 'ready',
-      assistantMessageId: event.payload.assistantMessageId ?? undefined,
-      createdAt: event.payload.completedAt,
-      ...(actionId === undefined ? {} : { actionId }),
-    })
-  })
 
   const ensurePreTurnBaselineFromTurnStart = Effect.fn('ensurePreTurnBaselineFromTurnStart')(
     function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.started' }>, actionId: string)
@@ -1400,7 +1347,7 @@ const make = Effect.gen(function* ()
 
   const refreshLocalGitStatusFromTurnCompletion = Effect.fn(
     'refreshLocalGitStatusFromTurnCompletion',
-  )(function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' }>)
+  )(function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' | 'turn.aborted' }>)
   {
     const sessionRuntime = yield* resolveSessionRuntimeForThread(event.threadId)
     if (Option.isNone(sessionRuntime))
@@ -2492,7 +2439,7 @@ const make = Effect.gen(function* ()
       return
     }
 
-    if (event.type === 'turn.completed')
+    if (event.type === 'turn.completed' || event.type === 'turn.aborted')
     {
       const turnId = toTurnId(event.turnId)
       const outcome = yield* captureCheckpointFromTurnCompletion(event, actionId).pipe(
@@ -2678,24 +2625,6 @@ const make = Effect.gen(function* ()
           ]),
         )
       }
-      if (event.type === 'thread.turn-diff-completed' && event.payload.status === 'missing')
-      {
-        const targetCheckpointRef = checkpointRefForThreadTurn(
-          event.payload.threadId,
-          event.payload.checkpointTurnCount,
-        )
-        return encodeDomainActionPayload({ event, targetCheckpointRef }).pipe(
-          Effect.map((payloadJson) => [
-            {
-              outputIndex: 0,
-              effectKind: 'checkpoint.placeholder.capture',
-              targetKind: 'checkpoint-ref',
-              targetId: targetCheckpointRef,
-              payloadJson,
-            },
-          ]),
-        )
-      }
       if (event.type === 'thread.turn-diff-completed' && event.payload.status === 'ready')
       {
         return encodeDomainActionPayload({
@@ -2795,22 +2724,9 @@ const make = Effect.gen(function* ()
               detail: `Action ${action.actionId} does not contain a placeholder checkpoint event.`,
             })
           }
-          yield* captureCheckpointFromPlaceholder(event, action.actionId).pipe(
-            Effect.catch((error) =>
-              Effect.flatMap(nowIso, (createdAt) =>
-                appendCaptureFailureActivity({
-                  threadId: event.payload.threadId,
-                  turnId: event.payload.turnId,
-                  detail: error.message,
-                  createdAt,
-                  actionId: action.actionId,
-                }).pipe(
-                  Effect.catch(() => Effect.void),
-                  Effect.andThen(Effect.fail(error)),
-                ),
-              ),
-            ),
-          )
+          // acknowledge already-persisted legacy actions without capturing
+          // today's files for an earlier mid-turn placeholder. the durable
+          // runtime terminal event owns publication under the same turn ref.
           break
         case 'proposal-implementation.complete':
           if (

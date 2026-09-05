@@ -152,7 +152,7 @@ function approvalOutcomeFromActivity(
 function checkpointStatusToLatestTurnState(status: 'ready' | 'missing' | 'error')
 {
   if (status === 'error') return 'error' as const
-  if (status === 'missing') return 'interrupted' as const
+  // a missing git ref alone does not mean the provider turn was interrupted.
   return 'completed' as const
 }
 
@@ -1454,7 +1454,11 @@ export function projectEvent(
               ? thread.latestTurn
               : {
                   turnId: payload.turnId,
-                  state: checkpointStatusToLatestTurnState(payload.status),
+                  state:
+                    thread.latestTurn?.turnId === payload.turnId &&
+                    thread.latestTurn.state === 'interrupted'
+                      ? 'interrupted'
+                      : checkpointStatusToLatestTurnState(payload.status),
                   requestedAt:
                     thread.latestTurn?.turnId === payload.turnId
                       ? thread.latestTurn.requestedAt

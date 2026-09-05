@@ -1995,7 +1995,7 @@ describe('CheckpointReactor', () =>
     await harness.drain()
   })
 
-  it('replays a placeholder capture event appended before start', async () =>
+  it('replays a placeholder event without capturing files before a terminal runtime event', async () =>
   {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
@@ -2031,15 +2031,87 @@ describe('CheckpointReactor', () =>
     await harness.startReactor()
     await harness.drain()
 
-    expect(gitRefExists(harness.cwd, checkpointRef)).toBe(true)
+    expect(gitRefExists(harness.cwd, checkpointRef)).toBe(false)
     const durable = await harness.readDurableState()
     expect(
       durable.actions.some(
         (action) =>
           action.effectKind === 'checkpoint.placeholder.capture' && action.status === 'succeeded',
       ),
-    ).toBe(true)
+    ).toBe(false)
   })
+
+  it.each(['completed', 'aborted'] as const)(
+    'captures final files after a mid-turn placeholder when the turn is %s',
+    async (terminal) =>
+    {
+      const harness = await createHarness({ seedFilesystemCheckpoints: false })
+      const threadId = ThreadId.make('thread-1')
+      const turnId = asTurnId(`turn-final-${terminal}`)
+      const checkpointRef = checkpointRefForThreadTurn(threadId, 1)
+      harness.provider.emit({
+        type: 'turn.started',
+        eventId: EventId.make(`final-${terminal}-started`),
+        provider: ProviderDriverKind.make('codex'),
+        threadId,
+        turnId,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        payload: {},
+      })
+      await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 0))
+      await harness.drain()
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, 'README.md'), 'intermediate edit\n', 'utf8')
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: 'thread.turn.diff.complete',
+          commandId: CommandId.make(`final-${terminal}-placeholder`),
+          threadId,
+          turnId,
+          completedAt: '2026-01-01T00:00:01.000Z',
+          checkpointRef: checkpointRefForThreadTurn(threadId, 0),
+          status: 'missing',
+          files: [],
+          assistantMessageId: MessageId.make(`assistant:${turnId}`),
+          checkpointTurnCount: 1,
+          createdAt: '2026-01-01T00:00:01.000Z',
+        }),
+      )
+      await harness.drain()
+      expect(gitRefExists(harness.cwd, checkpointRef)).toBe(false)
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, 'README.md'), 'final edit\n', 'utf8')
+      if (terminal === 'aborted')
+      {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: 'thread.turn.interrupt',
+            commandId: CommandId.make(`final-${terminal}-interrupt`),
+            threadId,
+            turnId,
+            createdAt: '2026-01-01T00:00:01.500Z',
+          }),
+        )
+      }
+      harness.provider.emit({
+        ...(terminal === 'aborted'
+          ? { type: 'turn.aborted' as const, payload: { reason: 'user interrupted the turn' } }
+          : { type: 'turn.completed' as const, payload: { state: 'completed' as const } }),
+        eventId: EventId.make(`final-${terminal}-finished`),
+        provider: ProviderDriverKind.make('codex'),
+        threadId,
+        turnId,
+        createdAt: '2026-01-01T00:00:02.000Z',
+      })
+      await waitForGitRefExists(harness.cwd, checkpointRef)
+      await harness.drain()
+      const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)!
+      expect(gitShowFileAtRef(harness.cwd, checkpointRef, 'README.md')).toBe('final edit\n')
+      expect(thread.checkpoints.filter((checkpoint) => checkpoint.turnId === turnId)).toHaveLength(
+        1,
+      )
+      expect(thread.checkpoints[0]?.assistantMessageId).toBe(`assistant:${turnId}`)
+      expect(thread.latestTurn?.state).toBe(terminal === 'aborted' ? 'interrupted' : 'completed')
+    },
+  )
 
   it('uses the provider-native turn count and settled checkpoint refs for revert', async () =>
   {
