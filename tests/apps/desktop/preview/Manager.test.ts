@@ -152,6 +152,7 @@ const makeFaviconWebContents = (options?: {
   {
     currentUrl = url
   })
+  const setIgnoreMenuShortcuts = vi.fn()
   const setWindowOpenHandler = vi.fn(
     (_handler: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse) =>
       undefined,
@@ -188,6 +189,7 @@ const makeFaviconWebContents = (options?: {
     send: webviewSend,
     session: { fetch },
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    setIgnoreMenuShortcuts,
     setWindowOpenHandler,
     executeJavaScriptInIsolatedWorld,
     debugger: {
@@ -209,6 +211,7 @@ const makeFaviconWebContents = (options?: {
     loadURL,
     off,
     reload,
+    setIgnoreMenuShortcuts,
     setWindowOpenHandler,
     setDestroyed: (value: boolean) =>
     {
@@ -325,7 +328,12 @@ describe('PreviewManager', () =>
         const replacement = makeFaviconWebContents({ id: 42 })
         let active = initial.webContents
         fromId.mockImplementation(() => active)
-        const popup = () => ({ webContents: { setWindowOpenHandler: vi.fn() } })
+        const popup = () => ({
+          webContents: {
+            setIgnoreMenuShortcuts: vi.fn(),
+            setWindowOpenHandler: vi.fn(),
+          },
+        })
         const request: Electron.HandlerDetails = {
           url: 'https://accounts.example/auth',
           disposition: 'new-window',
@@ -339,11 +347,13 @@ describe('PreviewManager', () =>
           {
             yield* manager.createTab('tab_popup_lifecycle')
             yield* manager.registerWebview('tab_popup_lifecycle', 42)
+            expect(initial.setIgnoreMenuShortcuts).toHaveBeenCalledWith(true)
             const initialOpen = initial.setWindowOpenHandler.mock.calls[0]![0]
             const initialCreated = [...(initial.listeners.get('did-create-window') ?? [])][0]!
             expect(initial.listenerCount('did-create-window')).toBe(1)
             const child = popup()
             initial.emit('did-create-window', child)
+            expect(child.webContents.setIgnoreMenuShortcuts).toHaveBeenCalledWith(true)
             expect(child.webContents.setWindowOpenHandler).toHaveBeenCalledOnce()
             expect(child.webContents.setWindowOpenHandler.mock.calls[0]![0](request)).toEqual({
               action: 'deny',
@@ -358,6 +368,7 @@ describe('PreviewManager', () =>
             initialCreated(replacementChild)
             expect(replacementChild.webContents.setWindowOpenHandler).not.toHaveBeenCalled()
             replacement.emit('did-create-window', replacementChild)
+            expect(replacementChild.webContents.setIgnoreMenuShortcuts).toHaveBeenCalledWith(true)
             expect(replacementChild.webContents.setWindowOpenHandler).toHaveBeenCalledOnce()
             const replacementOpen = replacement.setWindowOpenHandler.mock.calls[0]![0]
             expect(replacementOpen(request).action).toBe('allow')
@@ -384,6 +395,29 @@ describe('PreviewManager', () =>
           action: 'deny',
         })
       }),
+  )
+
+  effectIt.effect('keeps preview shortcuts out of the host window', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        const preview = makeFaviconWebContents()
+        const sendInputEvent = vi.fn()
+        const hostWebContents = { sendInputEvent }
+        Object.assign(preview.webContents, { hostWebContents })
+        fromId.mockReturnValue(preview.webContents)
+        yield* manager.setMainWindow({
+          isDestroyed: () => false,
+          webContents: hostWebContents,
+        } as never)
+        yield* manager.createTab('tab_shortcuts')
+        yield* manager.registerWebview('tab_shortcuts', 42)
+
+        expect(preview.setIgnoreMenuShortcuts).toHaveBeenCalledWith(true)
+        expect(preview.listenerCount('before-input-event')).toBe(0)
+        expect(sendInputEvent).not.toHaveBeenCalled()
+      }),
+    ),
   )
 
   effectIt.effect('publishes one canonical favicon while the document is loading', () =>
@@ -764,6 +798,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -826,6 +861,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -888,6 +924,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -927,6 +964,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1018,6 +1056,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1085,6 +1124,7 @@ describe('PreviewManager', () =>
             goBack,
             goForward,
           },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1138,6 +1178,7 @@ describe('PreviewManager', () =>
               ipc: { on: vi.fn(), off: vi.fn() },
               send: webviewSend,
               navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+              setIgnoreMenuShortcuts: vi.fn(),
               setWindowOpenHandler: vi.fn(),
               debugger: {
                 isAttached: () => false,
@@ -1216,6 +1257,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1311,6 +1353,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1393,6 +1436,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1455,6 +1499,7 @@ describe('PreviewManager', () =>
           },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1551,6 +1596,7 @@ describe('PreviewManager', () =>
             ipc: { on: vi.fn(), off: vi.fn() },
             send: webviewSend,
             navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+            setIgnoreMenuShortcuts: vi.fn(),
             setWindowOpenHandler: vi.fn(),
             debugger: {
               isAttached: () => false,
@@ -1718,6 +1764,7 @@ describe('PreviewManager', () =>
           },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1824,6 +1871,7 @@ describe('PreviewManager', () =>
           },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -1984,6 +2032,7 @@ describe('PreviewManager', () =>
           },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,
@@ -2050,6 +2099,7 @@ describe('PreviewManager', () =>
           ipc: { on: vi.fn(), off: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
           setWindowOpenHandler: vi.fn(),
           debugger: {
             isAttached: () => false,

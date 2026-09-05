@@ -265,22 +265,6 @@ const nextZoomLevel = (current: number, direction: 'in' | 'out'): number =>
   }
   return ZOOM_LEVELS[Math.max(step - 1, 0)] ?? current
 }
-const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
-  key: string
-  meta: boolean
-  shift: boolean
-  control: boolean
-}> = Object.freeze([
-  // mod+shift+J -> preview.toggle
-  { key: 'j', meta: true, shift: true, control: false },
-  // mod+K -> command palette
-  { key: 'k', meta: true, shift: false, control: false },
-  // mod+, -> settings (macOS convention)
-  { key: ',', meta: true, shift: false, control: false },
-  // mod+W -> close tab/panel
-  { key: 'w', meta: true, shift: false, control: false },
-])
-
 // popups bypass webview-attach hardening and must not inherit the picker guest's
 // relaxed context isolation. Preserve the opener and session for OAuth replies.
 const POPUP_WINDOW_OPTIONS = {
@@ -1255,16 +1239,6 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     }
   })
 
-  const isAppShortcut = (input: Electron.Input): boolean =>
-    input.type === 'keyDown' &&
-    APP_FORWARDED_SHORTCUTS.some(
-      (shortcut) =>
-        shortcut.key.toLowerCase() === input.key.toLowerCase() &&
-        shortcut.meta === input.meta &&
-        shortcut.shift === input.shift &&
-        shortcut.control === input.control,
-    )
-
   const computeNavStatus = (wc: Electron.WebContents): PreviewNavStatus =>
   {
     const url = wc.getURL()
@@ -1606,35 +1580,10 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         }).pipe(Effect.ignore),
       )
     }
-    const forwardShortcut = Effect.fn('PreviewManager.forwardShortcut')(function* (
-      event: Electron.Event,
-      input: Electron.Input,
-    )
-    {
-      const mainWindow = yield* Ref.get(mainWindowRef)
-      if (!isAppShortcut(input) || Option.isNone(mainWindow) || mainWindow.value.isDestroyed())
-      {
-        return
-      }
-      event.preventDefault()
-      mainWindow.value.webContents.sendInputEvent({
-        type: 'keyDown',
-        keyCode: input.key,
-        modifiers: [
-          ...(input.meta ? (['meta'] as const) : []),
-          ...(input.shift ? (['shift'] as const) : []),
-          ...(input.control ? (['control'] as const) : []),
-          ...(input.alt ? (['alt'] as const) : []),
-        ],
-      })
-    })
-    const beforeInput = (event: Electron.Event, input: Electron.Input): void =>
-    {
-      runFork(forwardShortcut(event, input))
-    }
     const windowCreated = (window: BrowserWindow): void =>
     {
       if (!isCurrentAttachment()) return
+      window.webContents.setIgnoreMenuShortcuts(true)
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     }
     yield* Scope.addFinalizer(
@@ -1657,7 +1606,6 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           wc.off('did-fail-load', failed as never)
           wc.off('audio-state-changed', audioStateChanged)
           wc.off('did-create-window', windowCreated)
-          wc.off('before-input-event', beforeInput)
           wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput)
           wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
         }).pipe(Effect.ignore)
@@ -1697,6 +1645,8 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       yield* attempt({ operation: 'attachListeners', tabId, webContentsId: wc.id }, () =>
       {
+        // preview input belongs to the guest, not host menu accelerators
+        wc.setIgnoreMenuShortcuts(true)
         wc.on('did-start-navigation', navigationStarted)
         wc.on('did-navigate', syncNavigation)
         wc.on('did-navigate-in-page', syncInPageNavigation)
@@ -1725,7 +1675,6 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           )
           return { action: 'deny' }
         })
-        wc.on('before-input-event', beforeInput)
       })
     })
     yield* install().pipe(Effect.onError(() => Scope.close(scope, Exit.void).pipe(Effect.ignore)))
