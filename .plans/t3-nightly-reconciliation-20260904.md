@@ -16,7 +16,7 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `f02d28b6323d02b2802d06d6aea0c7f3205e81d3`.
+- Published `main`: `dcaba8bda6991f08568453ef0581a54394a3eafe`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -32,10 +32,14 @@ Current state:
   `f02d28b6323d02b2802d06d6aea0c7f3205e81d3`. Exact merged-main CI run
   [33950331362](https://github.com/ggfincke/456code/actions/runs/33950331362) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **04 — Desktop preview recovery**, verified; publication in progress.
-- Active branch: `sync/t3-r04-20260904`, based on published `main`.
+- Published Group 04: [PR #95](https://github.com/ggfincke/456code/pull/95) merged through merge commit
+  `dcaba8bda6991f08568453ef0581a54394a3eafe`. Exact merged-main CI run
+  [33956661399](https://github.com/ggfincke/456code/actions/runs/33956661399) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **05 — Bounded projection replay**, checkpoint verified and publication in progress.
+- Active branch: `sync/t3-r05-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 05-27 are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 06-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -797,23 +801,27 @@ The three secret-free local evidence files retained for PR upload are:
 - same-process recovery: `/tmp/t3code-group04-evidence.rjejXy/final-recovered-screenshot.png`,
   SHA-256 `cb9a81fbda7abb4bd4cccab37748774fef67398f2d8c0e2f0d09a03a7c307b95`.
 
-Each capture is 2,200 x 1,560 and was reviewed as secret-free. They remain outside the repository and
-will be uploaded to GitHub during PR publication; no `.github/pr-assets` file exists.
+Each capture is 2,200 x 1,560 and was reviewed as secret-free. All three were uploaded in the
+[Group 04 evidence comment](https://github.com/ggfincke/456code/pull/95#issuecomment-5550626650);
+no `.github/pr-assets` file exists.
 
 ### Cleanup, preservation, and publication state
 
 All owned Electron, backend, Vite, inspector, and fixture-server processes stopped. Ports 13776,
 15734, 18093, 9234, and 9235 have no listeners. The exact owned fixture and project were moved
 recoverably to `/Users/ggfincke/.Trash/t3code-group04.efrYjY` and
-`/Users/ggfincke/.Trash/t3code-group04-project.v5zc28`; the three evidence PNGs remain outside Trash
-only for the pending PR upload. The controlled browser tab was closed.
+`/Users/ggfincke/.Trash/t3code-group04-project.v5zc28`; the three evidence PNGs were retained through
+their GitHub upload, and the canonical evidence comment is linked above. The controlled browser tab
+was closed.
 
-The original checkout remains clean at `f02d28b6323d02b2802d06d6aea0c7f3205e81d3`, with original
+The original checkout remained clean through publication and was fast-forwarded only after exact
+merged-main CI passed, from `f02d28b6323d02b2802d06d6aea0c7f3205e81d3` to
+`dcaba8bda6991f08568453ef0581a54394a3eafe`, with original
 cache mtimes `.vite=1784948790` and `.vite-temp=1788016177`. The unrelated dirty Cartographer review
 worktree at `b58e8c7088ba1330f7fdf14a56430d02f2174442` was observed but not modified. All unrelated
 worktrees, refs, caches, profiles, installations, credentials, and processes remain preserved.
 
-The accepted implementation tree is preserved exactly by the following unpublished commit stack:
+The accepted implementation tree was preserved exactly by the following published commit stack:
 
 | Commit | Ownership |
 | --- | --- |
@@ -831,7 +839,66 @@ accepted pre-commit tree. PR #95's first `Check` job then demonstrated that comb
 `globalDate` directive with the new timer exception violated directive-preservation policy. The
 mechanical split above passed the exact local directive check and changed only comments; the final
 implementation fingerprint is `ff2af2be2b1b0ff43c92ef2975462831c3d962eb757fffbee8ac360e53106348`.
-The follow-up receipt commit, exact-head CI, merge commit, and exact merged-main CI remain pending.
+The follow-up receipt commit `54c85c251ab897ae430ca5344490051268e000b0` completed the PR head.
+[PR #95](https://github.com/ggfincke/456code/pull/95) passed exact-head run `33955954664`
+with all 16 workflow jobs terminal (15 successful and the intentional mobile-native-static skip; the
+full PR rollup was 19 successful and three intentional skips). It merged with merge commit
+`dcaba8bda6991f08568453ef0581a54394a3eafe`; exact merged-main run `33956661399` passed with
+the same 15-success/one-intentional-skip workflow outcome. The clean original checkout was then
+fast-forwarded to that exact green merge, and the integration worktree moved to
+`sync/t3-r05-20260904`. The old Group 04 local, live-origin, and tracking refs at
+`54c85c251ab897ae430ca5344490051268e000b0` were compare-and-deleted only after proving the exact
+merged PR head and live-main ancestry. No worktree held the branch; every unrelated ref and worktree
+was preserved.
+
+## Group 05 checkpoint receipt
+
+Group 05 started from exact green merged `main`
+`dcaba8bda6991f08568453ef0581a54394a3eafe` on `sync/t3-r05-20260904`. Its six approved sources were
+implemented across non-overlapping replay, projection, and provider-service owners:
+
+| Fork commit | Source and adaptation |
+| --- | --- |
+| `560f63617c0e828a8abc848ab7879f7e3f14d3bc` | `9a7b1e21e51609266adf657bcab0b43b6bcd445c`; resolves persisted bindings only for unique active thread IDs and preserves typed fallback, mismatches, and lifecycle locks. |
+| `26e2f0232e79be12a7ebc956bd72b42f62bced05` | `7e460f429b740180cd72730418262a2df971ba54`; adds the SQL row/UTF-8-byte replay preflight and shell snapshot fallback. |
+| `f7099aa35219988ba361a74f19134eb8e994ea25` | `50bfca43d76ced00f5d67cfbab8bc44c50eb0e53`; reads and measures only the selected thread through aggregate indexes while preserving recreation, deletion, ordering, and captured-head behavior. |
+| `5a0dc26fbcfb90b3bf415cd8020fd99e2bbdce0c` | `a9ffb8279614df6ae2f1f4b7f09a0dc42edef797`; scans CRLF-safe activity previews incrementally and hydrates client payloads in sequential 25-ID batches. |
+| `8f3fa746fe259db2cb5b91cea61dc055cc512c63` | `b17cc3d1bf0f4a5deee6dd6a470e36970b864a9b`; filters lifecycle, task, evidence, and handoff activity kinds in SQL before decoding payloads. |
+| `99bde49a06c9348c26980280ec4f7afe06cb0c59` | `e86604d3372acccd9f6a33a2c4ae46f4e2685541`; atomically appends text-only streaming deltas without reading message bodies while retaining slow-path attachment and terminal semantics. |
+
+The final focused gate passed 363 unique tests: 329 tests across 16 affected server files, 15 targeted
+server subscription/replay cases from `server.test.ts`, and 19 client-runtime shell/thread sync cases.
+The one coordinated Node 24 server typecheck passed; its output contained only existing Effect
+suggestions. Changed-scope formatting, comment/header checks, directive preservation, and
+`git diff --check` passed. Changed-scope lint exited successfully; the remaining warnings were proven
+to exist at the green base and were not changed. The accepted implementation diff spans 36 files,
+2,224 insertions, and 185 deletions. Its binary diff fingerprint from the green base is
+`e56eba4be0caf3025d252cc79edec35ce073b77edd8e0f923621186a303b3c76`.
+
+The primary agent then exercised the real web client against one isolated loopback stack, normal ACP
+ingestion, and the unchanged ACP mock behind a temporary output-expansion wrapper. The fixture first
+exposed and corrected its own catalog mismatch: `Auto` and configured `default` were truthfully
+rejected because `session/new` advertised `grok-build`; no real provider was contacted. A new
+`grok-build` thread then settled at `GROUP05 INITIAL SETTLED`. During the second prompt, tab-scoped
+CDP networking closed the actual WebSocket while the backend accepted 2,071 inbox records through
+sequence 2,073, including 1,030 completed-item and 1,026 updated-item records, and projected 2,054
+activity rows plus terminal non-streaming text `GROUP05 TERMINAL SNAPSHOT RESTORED`.
+
+On the same warm client cache, reconnect request 27 subscribed to the exact thread with
+`afterSequence: 51`. The server returned a bounded snapshot at sequence 2,110 containing 500
+activities, a ready session, a completed latest turn, and four non-streaming assistant messages,
+then sent `synchronized`. The visible UI retained both initial and terminal markers, cleared the
+offline state, and unlocked the composer. The actual 1,280x720 primary CUA capture was copied from
+the owning rollout without recapturing or exposing authentication/wire credentials; its SHA-256 is
+`cd41def29cf67dfa609ebe6068ae517a52e986076e8c31281d61c7c26a25cec1`. GitHub evidence and the
+publication/CI receipt remain pending until the PR exists.
+
+Cleanup stopped the sole retained dev session and its orphaned mock child pair, confirmed no
+listeners on ports 13,773 or 5,733, closed the owned browser tab after restoring networking, and moved
+only the run-owned base, tiny project, and fixture directory to Trash for recoverability. The verified
+JPEG remains temporarily at `/tmp/t3code-group05-evidence.QFimtc/group05-bounded-replay.jpg` until
+GitHub upload is confirmed. The unrelated client environment, original checkout, dependencies,
+caches, refs, and worktrees were preserved.
 
 ## Verification policy for every group
 
