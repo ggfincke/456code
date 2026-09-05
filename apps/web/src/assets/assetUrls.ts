@@ -3,7 +3,7 @@
 
 import { useAtomValue } from '@effect/atom-react'
 import { resolveAssetUrl } from '@t3tools/client-runtime/state/assets'
-import type { AssetResource, EnvironmentId } from '@t3tools/contracts'
+import type { AssetCreateUrlResult, AssetResource, EnvironmentId } from '@t3tools/contracts'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { useMemo } from 'react'
 
@@ -15,7 +15,11 @@ export { resolveAssetUrl } from '@t3tools/client-runtime/state/assets'
 export type AssetUrlState =
   | { readonly _tag: 'Loading' }
   | { readonly _tag: 'Failure' }
-  | { readonly _tag: 'Success'; readonly url: string }
+  | {
+      readonly _tag: 'Success'
+      readonly url: string
+      readonly imageDimensions?: AssetCreateUrlResult['imageDimensions']
+    }
 
 export function useAssetUrlState(
   environmentId: EnvironmentId,
@@ -38,7 +42,9 @@ export function useAssetUrlState(
     return { _tag: 'Loading' }
   }
   const url = resolveAssetUrl(preparedConnection.value.httpBaseUrl, result.value.relativeUrl)
-  return url === null ? { _tag: 'Failure' } : { _tag: 'Success', url }
+  return url === null
+    ? { _tag: 'Failure' }
+    : { _tag: 'Success', url, imageDimensions: result.value.imageDimensions }
 }
 
 export function useAssetUrl(environmentId: EnvironmentId, resource: AssetResource): string | null

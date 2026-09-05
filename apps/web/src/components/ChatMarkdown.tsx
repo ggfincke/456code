@@ -653,6 +653,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
     threadId: props.threadRef.threadId,
     path: props.path,
   })
+  const dimensions = assetUrl._tag === 'Success' ? assetUrl.imageDimensions : undefined
   return (
     <ChatMarkdownImage
       src={assetUrl._tag === 'Success' ? assetUrl.url + props.srcFragment : null}
@@ -660,7 +661,10 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
       alt={props.alt}
       copyMarkdown={props.copyMarkdown}
       standalone={props.standalone}
-      style={props.style}
+      style={
+        props.style ??
+        (dimensions ? authoredImageSizeStyle(dimensions.width, dimensions.height) : undefined)
+      }
       onImageExpand={props.onImageExpand}
     />
   )
