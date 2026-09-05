@@ -54,6 +54,7 @@ import {
   ProviderSessionNotFoundError,
   ProviderUnsupportedError,
   ProviderValidationError,
+  ProviderWorkspaceMissingError,
 } from '../../provider/Errors.ts'
 import type { ProviderServiceError } from '../../provider/Errors.ts'
 import {
@@ -112,6 +113,7 @@ const isProviderInstanceNotFoundError = Schema.is(ProviderInstanceNotFoundError)
 const isProviderSessionNotFoundError = Schema.is(ProviderSessionNotFoundError)
 const isProviderUnsupportedError = Schema.is(ProviderUnsupportedError)
 const isProviderValidationError = Schema.is(ProviderValidationError)
+const isProviderWorkspaceMissingError = Schema.is(ProviderWorkspaceMissingError)
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -604,6 +606,7 @@ const make = Effect.gen(function* ()
     const failure = cause.reasons.find(Cause.isFailReason)?.error
     if (
       isProviderValidationError(failure) ||
+      isProviderWorkspaceMissingError(failure) ||
       isProviderAdapterValidationError(failure) ||
       isProviderSessionNotFoundError(failure) ||
       isProviderAdapterSessionNotFoundError(failure) ||
@@ -840,6 +843,10 @@ const make = Effect.gen(function* ()
     if (providerError)
     {
       return providerError.detail
+    }
+    if (isProviderWorkspaceMissingError(failReason?.error))
+    {
+      return failReason.error.message
     }
     if (isProviderValidationError(failReason?.error))
     {

@@ -44,6 +44,7 @@ import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
+import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as PubSub from 'effect/PubSub'
@@ -75,6 +76,7 @@ import {
   type ProviderAdapterError,
   ProviderAdapterRequestError,
   ProviderValidationError,
+  ProviderWorkspaceMissingError,
 } from '../Errors.ts'
 import type {
   ProviderAdapterCapabilities,
@@ -445,6 +447,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
 {
   const analytics = yield* Effect.service(AnalyticsService.AnalyticsService)
   const serverConfig = yield* ServerConfig
+  const fileSystem = yield* FileSystem.FileSystem
   const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers
   // options-provided logger wins (test overrides); otherwise we take whatever
   // the `ProviderEventLoggers` tag exposes — `undefined` means "no canonical
@@ -2886,6 +2889,21 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
               resolvedInstanceId,
               prepareIncomingRoute(),
             )
+            if (preflight.effectiveCwd !== undefined)
+            {
+              // fail before replacing an existing session when its workspace moved or disappeared
+              const workspaceIsDirectory = yield* fileSystem.stat(preflight.effectiveCwd).pipe(
+                Effect.map((workspaceStat) => workspaceStat.type === 'Directory'),
+                Effect.catch((statError) => Effect.succeed(statError.reason._tag !== 'NotFound')),
+              )
+              if (!workspaceIsDirectory)
+              {
+                return yield* new ProviderWorkspaceMissingError({
+                  threadId,
+                  cwd: preflight.effectiveCwd,
+                })
+              }
+            }
             yield* stopOutgoingRuntimeSessionsWithinThreadPermit({
               threadId,
               incomingInstanceId: resolvedInstanceId,
