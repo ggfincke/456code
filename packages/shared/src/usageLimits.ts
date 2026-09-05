@@ -145,6 +145,11 @@ export function limitsNotice(usage: ServerProviderAccountUsage): string | null
   }
 }
 
+export function remainingPercent(window: ServerProviderAccountUsageWindow): number
+{
+  return Math.round(100 - Math.max(0, Math.min(100, window.usedPercent)))
+}
+
 function resetMillis(window: ServerProviderAccountUsageWindow): number | null
 {
   if (window.resetsAt === null) return null

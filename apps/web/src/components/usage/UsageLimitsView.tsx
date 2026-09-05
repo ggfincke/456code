@@ -3,6 +3,7 @@
 import type { LimitAccount } from '@t3tools/shared/usageLimits'
 import {
   paceOf,
+  remainingPercent,
   formatDuration,
   formatResetsIn,
   limitAccountLabel,
@@ -55,7 +56,7 @@ export function UsageLimitsView({
     windows: account.usage.windows.map((window) => ({
       ...window,
       kind: window.kind ?? 'other',
-      usedPercent: Math.round(Math.max(0, Math.min(100, window.usedPercent))),
+      remainingPercent: remainingPercent(window),
       pace: paceOf(window, now),
       resets: window.resetsAt ? [{ member: { window } }] : [],
     })),
@@ -144,20 +145,20 @@ export function UsageLimitsView({
                           </p>
                         </div>
                         <span className="shrink-0 text-sm font-semibold tabular-nums">
-                          {window.usedPercent}% used
+                          {window.remainingPercent}% left
                         </span>
                       </div>
                       <div
                         role="progressbar"
-                        aria-label={`${window.label} quota used`}
+                        aria-label={`${window.label} quota remaining`}
                         aria-valuemin={0}
                         aria-valuemax={100}
-                        aria-valuenow={window.usedPercent}
+                        aria-valuenow={window.remainingPercent}
                         className="h-2 overflow-hidden rounded-full bg-muted"
                       >
                         <div
                           className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none"
-                          style={{ width: `${window.usedPercent}%` }}
+                          style={{ width: `${window.remainingPercent}%` }}
                         />
                       </div>
                     </div>

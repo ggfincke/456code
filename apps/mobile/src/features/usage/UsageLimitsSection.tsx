@@ -2,6 +2,7 @@
 // renders native provider subscription limits on mobile
 import type { LimitAccount } from '@t3tools/shared/usageLimits'
 import {
+  remainingPercent,
   formatDuration,
   formatResetsIn,
   limitAccountLabel,
@@ -46,7 +47,7 @@ export function UsageLimitsSection({
     windows: account.usage.windows.map((window) => ({
       ...window,
       kind: window.kind ?? 'other',
-      usedPercent: Math.round(Math.max(0, Math.min(100, window.usedPercent))),
+      remainingPercent: remainingPercent(window),
       resets: window.resetsAt ? [{ member: { window } }] : [],
     })),
   }))
@@ -119,23 +120,23 @@ export function UsageLimitsSection({
                         </Text>
                       </View>
                       <Text className="text-sm font-sans-bold tabular-nums">
-                        {window.usedPercent}% used
+                        {window.remainingPercent}% left
                       </Text>
                     </View>
                     <View
                       accessible
                       accessibilityRole="progressbar"
-                      accessibilityLabel={`${window.label} quota used`}
+                      accessibilityLabel={`${window.label} quota remaining`}
                       accessibilityValue={{
                         min: 0,
                         max: 100,
-                        now: window.usedPercent,
+                        now: window.remainingPercent,
                       }}
                       className="h-2 overflow-hidden rounded-full bg-subtle"
                     >
                       <View
                         className="h-full rounded-full bg-primary"
-                        style={{ width: `${window.usedPercent}%` }}
+                        style={{ width: `${window.remainingPercent}%` }}
                       />
                     </View>
                   </View>
