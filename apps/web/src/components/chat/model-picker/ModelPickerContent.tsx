@@ -24,6 +24,7 @@ import {
 } from '../../../keybindings'
 import { useClientSettings, useUpdateClientSettings } from '~/hooks/useSettings'
 import { cn } from '~/lib/utils'
+import { isCommandPaletteOpen } from '../../../commandPaletteBus'
 import { TooltipProvider } from '../../ui/tooltip'
 import {
   isProviderInstancePickerReady,
@@ -616,7 +617,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) =>
     {
-      if (event.defaultPrevented || event.repeat)
+      if (event.defaultPrevented || event.repeat || isCommandPaletteOpen())
       {
         return
       }
@@ -630,6 +631,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       {
         return
       }
+      event.preventDefault()
+      event.stopPropagation()
 
       const targetModelKey = modelJumpModelKeys[jumpIndex]
       if (!targetModelKey)
@@ -637,8 +640,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         return
       }
       const { instanceId, slug } = splitInstanceModelKey(targetModelKey)
-      event.preventDefault()
-      event.stopPropagation()
       handleModelSelect(slug, instanceId)
     }
 
