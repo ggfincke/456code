@@ -16,7 +16,7 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `8e1785e6ca5ee582d9ad910a338d333760e2aca2`.
+- Published `main`: `e831f6cf51c01d31952b0de06c29a55b9bad9b80`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -24,11 +24,14 @@ Current state:
   `8e1785e6ca5ee582d9ad910a338d333760e2aca2`. Exact merged-main CI run
   [33941082381](https://github.com/ggfincke/456code/actions/runs/33941082381) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **02 — Authentication and privacy**, checkpoint verified; publication is in
-  progress.
-- Active branch: `sync/t3-r02-20260904`, based on published `main`.
+- Published Group 02: [PR #93](https://github.com/ggfincke/456code/pull/93) merged through merge commit
+  `e831f6cf51c01d31952b0de06c29a55b9bad9b80`. Exact merged-main CI run
+  [33945024714](https://github.com/ggfincke/456code/actions/runs/33945024714) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **03 — iOS persistence safety**, verified with publication in progress.
+- Active branch: `sync/t3-r03-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 03-27 are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 04-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -50,6 +53,11 @@ and original author date. Per-commit touched paths remain deliberately pending u
 classification; the GitHub compare endpoint does not expose commit-local paths and 468 individual
 commit downloads are not required for the inventory checkpoint. A title is never evidence of
 equivalence, inapplicability, or implementation.
+
+After Group 02's exact merged-main gate, the verified `upstream` URL fetched only frozen cutoff
+`82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` into `FETCH_HEAD` with `--no-tags` so later groups can
+inspect complete source objects. `upstream/main` remained exactly
+`fff33f9e851912363c5b1f3ac65598be35eb5f0d`; no upstream branch, tag, or newer intake moved.
 
 After all accepted groups are merged, refresh upstream/nightly refs and report every commit after
 `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` as a separate unapproved range. Do not add those commits
@@ -550,9 +558,131 @@ runtimes were preserved.
 | `971865c691b9c03941d6147ee8fece87cef3e63c` | Source `eb77683e5544e071db74831bae052bbd8a7d5f88`; original author, AuthorDate, subject/body, and contiguous two-line co-author trailer block preserved; transactional desktop-bootstrap adaptation recorded. |
 | `d6c37dfc96c091a5cd9443e4c2872ee758b60926` | Source `b6f72681da394369274121c4d1216f5d64a7a4bb`; original author, AuthorDate, subject, and contiguous four-line co-author trailer block preserved; public-host favicon adaptation recorded. |
 
-The maintained plan/ledger receipt is committed separately with local identity. Publication, hosted
-evidence URLs, PR checks, merge commit, exact merged-main CI, original-main fast-forward, and guarded
-run-owned branch cleanup remain pending and will be recorded in the next group's maintained receipt.
+The maintained plan/ledger receipt is committed separately with local identity. The reviewed stack
+was pushed without force and [PR #93](https://github.com/ggfincke/456code/pull/93) published three
+secret-free captures in the
+[Group 02 acceptance comment](https://github.com/ggfincke/456code/pull/93#issuecomment-5549304967).
+Its exact-head rollup finished with 19 successful checks and three intentional skips before merge
+commit `e831f6cf51c01d31952b0de06c29a55b9bad9b80`. Exact merged-main CI run
+[33945024714](https://github.com/ggfincke/456code/actions/runs/33945024714) completed successfully with
+15 successful jobs and the intentional mobile-native-static skip. The clean original `main` was
+fast-forwarded to that exact green merge and the integration worktree moved to
+`sync/t3-r03-20260904`.
+
+Only the old Group 02 local/live/tracking refs at
+`fae7227308105a95dc9541cc0d3908c40665e51c` were compare-and-deleted. The run-created metadata-repair
+backup at `3bfdbd5221ff7b5f6177120e934d70daedc7e537` was also compare-and-deleted after proving its tree
+exactly matched corrected source tip `d6c37dfc96c091a5cd9443e4c2872ee758b60926`. All worktrees and
+unrelated refs were preserved.
+
+## Group 03 checkpoint receipt
+
+### Scope and source adaptation
+
+Group 03 started from exact green merged `main`
+`e831f6cf51c01d31952b0de06c29a55b9bad9b80` on `sync/t3-r03-20260904`. The reviewed
+implementation is six files with 390 insertions and 94 deletions. It adapts upstream source
+`7839140e5e93d3f401d7eb45b86cf1a234eb3609` to the fork's relocated mobile state owners and
+mirrored root test layout:
+
+- outbox storage now decodes a complete snapshot before publishing any record, so one unreadable or
+  malformed record produces a typed load failure without partially hydrating the queue;
+- the outbox manager retains durable and in-memory ownership when cleanup cannot load or remove a
+  record, allowing a later retry instead of treating uncertain state as deleted;
+- composer draft hydration, mutation, cleanup, debounced persistence, sticky model selection, and
+  attachment state share one serialized retry path, preserving the last known snapshot through
+  read/write failures and the fired-debounce-during-flush race; and
+- the thread composer surfaces a recoverable restoration failure without leaking attachment data or
+  replacing the user's saved state.
+
+No database migration, provider behavior, server source, native project, dependency, or unrelated
+mobile state entered the group. Source commit
+`4b3add0b00184674014e643ba33a31b197b88aca` preserves Theo Browne's exact source Author,
+AuthorDate, subject, and empty original body, then appends the full source SHA and fork adaptation.
+
+### Focused automated gates and review
+
+All implementation commands used the worktree-local dependency graph with Node 24 through `mise`.
+From `apps/mobile`, `pnpm exec vp test run state/threads/use-composer-drafts.test.ts
+state/threads/thread-outbox.test.ts connection/environment-cleanup.test.ts` passed all 65 tests in
+three files, and `pnpm run typecheck` passed through `tsc6 --noEmit`. From the repository root, the
+six implementation/test files passed `node scripts/format-repository.ts --check --staged`,
+`pnpm exec vp lint --report-unused-disable-directives`, and `node scripts/check-js-comments.ts`.
+`git diff --check` passed. No full workspace suite ran.
+
+Independent focused review found no actionable defect and rated the implementation appropriately
+engineered. It specifically verified atomic outbox decoding, retry-preserving cleanup ownership,
+serialized draft mutation/persistence, attachment-safe restoration handling, and the major failure
+regressions. Reviewer `git diff --check` also passed independently.
+
+### Integrated iPhone persistence evidence
+
+One fresh disposable backend served two clean fixture projects through a deterministic Gemini ACP
+mock. The retained compatible `com.ggfincke.code456.dev` artifact was installed without a native
+rebuild. On the exact iPhone 17 Pro simulator
+`F8D4BC0B-E701-43AA-B56B-B95AB20E6ECE`, the primary owner paired a fresh Group 03 environment,
+selected `gemini_group03/default`, and verified a saved `G03 draft sentinel` plus one owned 24 x 24
+PNG attachment. With the backend stopped, two queued outbox rows were visible: the first retained
+the PNG and the second was text-only, both with the explicit mock model.
+
+The first attempted draft probe replaced `drafts.json` with a directory. It is explicitly **invalid
+and not acceptance evidence**: Expo FileSystemFile reports a directory at a file path as
+`exists === false`, so no read/open failure occurred and the app legitimately created a new regular
+file. This probe is retained only as evidence for why directory substitution must not be used.
+
+The corrected native probe used an existing regular `drafts.json` at mode `000`. Its pre-fault
+baseline was 7,217 bytes, mode `0644`, mtime `1788586576`, and SHA-256
+`8a1a7158bd53ae526c55c3c83391c8e255c3f7895f7e5d8d34c49dc4461bb70c`. Opening Draft Recovery
+and entering a harmless retry mutation produced the sanitized typed warning
+`Composer draft persistence operation read failed for composer-drafts/drafts.json.` The live file
+remained a regular 7,217-byte mode-`000` file with the same mtime. After stopping the app and
+restoring only mode `0644`, its SHA-256 remained exactly unchanged; the final offline launch visibly
+restored the sentinel, PNG, and mock selection.
+
+For the outbox fault, the stopped app retained the first JSON byte-for-byte at SHA-256
+`8f5a7b1e6fc0b511647b3b9078514834c0a9369e0d503617ecdb79ffa1392cf5` while only the second JSON
+was replaced with malformed data. The faulted launch emitted the sanitized typed outbox-load warning
+and did not publish the otherwise valid first record as a partial queue. Restoring the second record
+to its exact original SHA-256
+`ab2bad6100b249ae68e7cdd3a11eeab7920e1ca0706c34d17fc31973500e501c` returned both pending rows,
+including the first row's image and model selection, while the backend remained offline. No queued
+record was sent or drained.
+
+The final local evidence paths are:
+
+- restored draft, attachment, and model:
+  `/var/folders/hv/8x7nl_n50gdbsjd70yt_v7xr0000gn/T/screenshot_optimized_6a9b387f-6d00-4196-a708-0e05d177e93a.jpg`;
+- two initial offline pending rows:
+  `/var/folders/hv/8x7nl_n50gdbsjd70yt_v7xr0000gn/T/screenshot_optimized_7ad5f121-0176-4e83-9046-51d90386939e.jpg`; and
+- both rows recovered after exact restoration:
+  `/var/folders/hv/8x7nl_n50gdbsjd70yt_v7xr0000gn/T/screenshot_optimized_0d2df17c-bf92-407a-832e-5ce2ac34bcae.jpg`.
+
+XcodeBuildMCP verified, installed, launched, and stopped the retained app artifact, but semantic AXe
+inspection remained unavailable with the pinned Xcode 27 SimulatorKit interface. The already
+authorized serve-sim/CUA route performed the real pairing, photo selection, offline queueing,
+failure, retry, and recovery interactions. This is a tooling limitation, not a mocked native result.
+
+### Cleanup and preservation
+
+The fresh Group 03 environment was removed through the app's Connections UI while offline. Its
+outbox files and cache rows were absent after cleanup; the one residual Group 03 pending-task draft
+and sticky model selection were then removed while the app was stopped. The retained prior
+`http://127.0.0.1:13774/` connection, compatible development app, ignored native build/workspace,
+keychain/shared-container state, and all unrelated client data remain in place.
+
+The only imported Photos asset, `IMG_0007.PNG` / UUID
+`570565A4-C162-4E05-AA15-F591FF2663EE`, was deleted through the Photos UI and is recoverable in
+Recently Deleted for 30 days. Its trashed state is `1`, it has no active row, and all six pre-existing
+photos remain active. Owned backend, Metro, serve-sim, app, and log-helper processes terminated;
+ports 13775, 18092, and 3200 have no listeners. The exact owned simulator was shut down. Disposable
+roots `/tmp/t3code-group03.xhJ4Hh` and `/tmp/t3code-group03-fixtures.mFmCjI` were moved to the
+user's Trash after open-file checks, preserving a recovery route until Trash is emptied.
+
+The original checkout remains clean at
+`e831f6cf51c01d31952b0de06c29a55b9bad9b80`. The unrelated Cartographer worktree and every
+unrelated ref, cache, installation, simulator/runtime, credential, process, and workspace were
+preserved. Publication is authorized and in progress; PR evidence upload, exact-head CI, merge, and
+exact merged-main CI remain pending and will be recorded with the next group transition.
 
 ## Verification policy for every group
 
