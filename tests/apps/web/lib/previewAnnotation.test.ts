@@ -40,7 +40,8 @@ const annotation: PreviewAnnotationPayload = {
     },
   ],
   screenshot: {
-    dataUrl: 'data:image/png;base64,AA==',
+    dataUrl:
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     width: 100,
     height: 80,
     cropRect: { x: 10, y: 20, width: 100, height: 80 },
@@ -99,34 +100,36 @@ describe('preview annotations', () =>
     expect(extractedFirst.promptText).toBe('Fix this')
   })
 
-  it('returns the crop when the fetch resolves', async () =>
+  it('distinguishes absent, captured, and malformed screenshots without fetching data URLs', async () =>
   {
-    vi.stubGlobal('fetch', async () => new Response(new Blob(['png'], { type: 'image/png' })))
-    const capture = await capturePreviewAnnotationScreenshot(annotation)
-    expect(capture.status).toBe('captured')
-  })
-
-  it('reports none when the annotation carries no crop', async () =>
-  {
-    const capture = await capturePreviewAnnotationScreenshot({ ...annotation, screenshot: null })
-    expect(capture).toEqual({ status: 'none' })
-  })
-
-  it('fails instead of hanging when the crop never arrives', async () =>
-  {
-    vi.useFakeTimers()
-    vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined))
-    const capturePromise = capturePreviewAnnotationScreenshot(annotation, 1_000)
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(await capturePromise).toEqual({ status: 'failed' })
-  })
-
-  it('fails when the crop fetch throws', async () =>
-  {
-    vi.stubGlobal('fetch', async () =>
+    const fetchMock = vi.fn(() =>
     {
-      throw new Error('data url unreadable')
+      throw new TypeError('Failed to fetch')
     })
-    expect(await capturePreviewAnnotationScreenshot(annotation)).toEqual({ status: 'failed' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      capturePreviewAnnotationScreenshot({ ...annotation, screenshot: null }),
+    ).resolves.toEqual({ status: 'none' })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const captured = await capturePreviewAnnotationScreenshot(annotation)
+    expect(captured.status).toBe('captured')
+    if (captured.status === 'captured')
+    {
+      expect(captured.file).toMatchObject({
+        name: 'preview-annotation-annotation_1.png',
+        type: 'image/png',
+        size: 68,
+      })
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await expect(
+      capturePreviewAnnotationScreenshot({
+        ...annotation,
+        screenshot: { ...annotation.screenshot!, dataUrl: 'data:image/png;base64,not-base64!' },
+      }),
+    ).resolves.toEqual({ status: 'failed' })
   })
 })
