@@ -392,6 +392,9 @@ jobs:
             exit $code
           }
 
+      - uses: ./.github/actions/setup-apt-mirrors
+        if: matrix.platform == 'linux'
+
       - name: Install ImageMagick
         if: matrix.platform == 'linux'
         shell: bash
