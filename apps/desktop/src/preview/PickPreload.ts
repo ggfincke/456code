@@ -1,7 +1,8 @@
 // apps/desktop/src/preview/PickPreload.ts
 // runs the isolated in-page annotation picker for desktop previews
 
-// @effect-diagnostics globalDate:off globalTimers:off - This isolated Electron preload does not run inside an Effect runtime.
+// @effect-diagnostics globalDate:off - This isolated Electron preload does not run inside an Effect runtime.
+// @effect-diagnostics globalTimers:off - The picker bounds guest context inspection with a native timer.
 import { ipcRenderer } from 'electron'
 import { getElementContext } from 'react-grab/primitives'
 import type {
