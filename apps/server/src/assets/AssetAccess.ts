@@ -1,6 +1,9 @@
 // apps/server/src/assets/AssetAccess.ts
 // validates and serves attachment preview and project favicon assets
 
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from 'node:fs'
+import * as NodeFSP from 'node:fs/promises'
 import type { AssetResource } from '@t3tools/contracts'
 import {
   AssetAttachmentNotFoundError,
@@ -23,8 +26,14 @@ import {
   WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
 } from '@t3tools/shared/filePreview'
 import { PROJECT_FAVICON_FALLBACK_MARKER } from '@t3tools/shared/projectFavicon'
+import {
+  IMAGE_DIMENSIONS_HEADER_BYTES,
+  readImageDimensions,
+  type ImageDimensions,
+} from '@t3tools/shared/imageDimensions'
 import * as Clock from 'effect/Clock'
 import * as Crypto from 'effect/Crypto'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Encoding from 'effect/Encoding'
 import * as FileSystem from 'effect/FileSystem'
@@ -205,6 +214,48 @@ const resolveCanonicalWorkspaceFileForRequest = (input: {
     Effect.orElseSucceed(() => null),
   )
 
+class AssetImageHeaderError extends Data.TaggedError('AssetImageHeaderError')<{
+  readonly cause: unknown
+}>
+{}
+
+// optional metadata must not follow a replaced symlink, block on a fifo, or decode image pixels
+const readAssetImageDimensions = (filePath: string) =>
+  Effect.tryPromise({
+    try: async () =>
+    {
+      const before = await NodeFSP.lstat(filePath)
+      if (!before.isFile()) return null
+      const handle = await NodeFSP.open(
+        filePath,
+        NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK,
+      )
+      try
+      {
+        const opened = await handle.stat()
+        if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) return null
+        const bytes = new Uint8Array(Math.min(opened.size, IMAGE_DIMENSIONS_HEADER_BYTES))
+        const result = await handle.read(bytes, 0, bytes.length, 0)
+        const after = await handle.stat()
+        const current = await NodeFSP.lstat(filePath)
+        if (
+          after.size !== opened.size ||
+          after.mtimeMs !== opened.mtimeMs ||
+          current.dev !== opened.dev ||
+          current.ino !== opened.ino ||
+          !current.isFile()
+        )
+          return null
+        return readImageDimensions(bytes.subarray(0, result.bytesRead))
+      }
+      finally
+      {
+        await handle.close()
+      }
+    },
+    catch: (cause) => new AssetImageHeaderError({ cause }),
+  }).pipe(Effect.orElseSucceed((): ImageDimensions | null => null))
+
 export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (input: {
   readonly resource: AssetResource
   readonly workspaceRoot?: string
@@ -216,6 +267,7 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
   let expiresAt = (yield* Clock.currentTimeMillis) + ASSET_TOKEN_TTL_MS
   let claims: AssetClaims
   let fileName: string
+  let imageDimensions: ImageDimensions | null = null
 
   switch (input.resource._tag)
   {
@@ -311,6 +363,14 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
               expiresAt,
             }
       fileName = path.basename(resolved.relativePath)
+      if (
+        ['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(
+          path.extname(canonicalFile).toLowerCase(),
+        )
+      )
+      {
+        imageDimensions = yield* readAssetImageDimensions(canonicalFile)
+      }
       break
     }
     case 'attachment':
@@ -336,6 +396,7 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
         expiresAt,
       }
       fileName = path.basename(attachmentPath)
+      imageDimensions = yield* readAssetImageDimensions(attachmentPath)
       break
     }
     case 'project-favicon':
@@ -446,6 +507,7 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
   return {
     relativeUrl: `${ASSET_ROUTE_PREFIX}/${token}/${encodeURIComponent(fileName)}`,
     expiresAt,
+    ...(imageDimensions === null ? {} : { imageDimensions }),
   }
 })
 

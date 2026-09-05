@@ -41,6 +41,42 @@ const testLayer = Layer.mergeAll(
 
 describe('AssetAccess', () =>
 {
+  it.effect('includes bounded image header dimensions and omits unsupported metadata', () =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: 't3-asset-dimensions-' })
+      const png = new Uint8Array(33)
+      png.set([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10])
+      png.set([0x49, 0x48, 0x44, 0x52], 12)
+      const header = new DataView(png.buffer)
+      header.setUint32(8, 13)
+      header.setUint32(16, 480)
+      header.setUint32(20, 180)
+      const imagePath = path.join(root, 'diagram.png')
+      yield* fs.writeFile(imagePath, png)
+      const input = {
+        resource: {
+          _tag: 'workspace-file' as const,
+          threadId: ThreadId.make('dimensions'),
+          path: imagePath,
+        },
+        workspaceRoot: root,
+      }
+      expect((yield* issueAssetUrl(input)).imageDimensions).toEqual({ width: 480, height: 180 })
+      yield* fs.writeFileString(imagePath, 'not an image')
+      expect((yield* issueAssetUrl(input)).imageDimensions).toBeUndefined()
+
+      const config = yield* ServerConfig.ServerConfig
+      const attachmentId = 'dimensions-00000000-0000-4000-8000-000000000001'
+      yield* fs.makeDirectory(config.attachmentsDir, { recursive: true })
+      yield* fs.writeFile(path.join(config.attachmentsDir, `${attachmentId}.png`), png)
+      expect(
+        (yield* issueAssetUrl({ resource: { _tag: 'attachment', attachmentId } })).imageDimensions,
+      ).toEqual({ width: 480, height: 180 })
+    }).pipe(Effect.provide(testLayer)),
+  )
   it.effect('forces a signed generic HTML asset to download even without caller metadata', () =>
     Effect.gen(function* ()
     {
