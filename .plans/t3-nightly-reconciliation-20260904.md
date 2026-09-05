@@ -16,16 +16,19 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `b58e8c7088ba1330f7fdf14a56430d02f2174442`.
+- Published `main`: `8e1785e6ca5ee582d9ad910a338d333760e2aca2`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
-- Active publication: revised Group 01 is verified, approved, and published in
-  [PR #92](https://github.com/ggfincke/456code/pull/92). Hosted checks are pending; merge remains
-  gated on every expected check succeeding or being intentionally skipped.
-- Active branch: `sync/t3-git-service-text-safety-20260903`, based on published `main`.
+- Published Group 01: [PR #92](https://github.com/ggfincke/456code/pull/92) merged through merge commit
+  `8e1785e6ca5ee582d9ad910a338d333760e2aca2`. Exact merged-main CI run
+  [33941082381](https://github.com/ggfincke/456code/actions/runs/33941082381) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **02 — Authentication and privacy**, checkpoint verified; publication is in
+  progress.
+- Active branch: `sync/t3-r02-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Future groups are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 03-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -445,9 +448,111 @@ deletions across the following coherent commits:
 | `907a0b25b3d54c75f0b7ea56aa1e2309c0ccf543` | Source `60f2ce0279d524bd70a573f6e0b6e9fab56e4b3e`; original author, AuthorDate, subject, and `Co-authored-by: maria-rcks` trailer preserved; bounded instruction adaptation recorded. |
 
 The maintained plan/ledger publication record is committed separately with local identity. The
-reviewed stack was pushed without force to `sync/t3-git-service-text-safety-20260903`, and
-[PR #92](https://github.com/ggfincke/456code/pull/92) was opened against `main`. This receipt update
-records the external publication state without changing the reviewed implementation tree.
+reviewed stack was pushed without force and [PR #92](https://github.com/ggfincke/456code/pull/92)
+merged as `8e1785e6ca5ee582d9ad910a338d333760e2aca2`. Exact merged-main CI run
+[33941082381](https://github.com/ggfincke/456code/actions/runs/33941082381) completed successfully with
+15 successful jobs and the intentional mobile-native-static skip. The clean original `main` was
+fast-forwarded to that exact green merge, the integration worktree moved to `sync/t3-r02-20260904`,
+and only the old Group 01 local/live/tracking branch refs at
+`334457affd1c6af262dc46be764d849f94f803ec` were compare-and-deleted. All worktrees and unrelated refs
+were preserved.
+
+## Group 02 checkpoint receipt
+
+### Scope and source adaptations
+
+Group 02 started from exact green merged `main`
+`8e1785e6ca5ee582d9ad910a338d333760e2aca2` on `sync/t3-r02-20260904`. Before
+publication, its reviewed source tree contains 28 files with 1,275 insertions and 223 deletions;
+the two maintained `.plans/` files are the only additional checkpoint-document changes, and the
+index was empty before source attribution.
+
+| Source | Fork adaptation |
+| --- | --- |
+| `9d28c21a26aeef198cb064fe466e49cbeabfe09c` | Routine pairing-link snapshots, lists, and change events expose metadata only. The plaintext credential remains available solely in the creation result and in the initiating web client's transient memory; navigation, reload, and environment replacement clear it. Contracts, server serialization, web consumers, user documentation, and mirrored regression tests changed together. |
+| `eb77683e5544e071db74831bae052bbd8a7d5f88` | Reusable desktop-bootstrap exchanges alone enter the session-repository replacement transaction. Paired clients and browser sessions remain isolated; removal events publish only after commit, and insertion failure preserves the prior desktop credential. |
+| `b6f72681da394369274121c4d1216f5d64a7a4bb` | Shared strict host classification allows external favicons only for public DNS hosts. Web and iPhone Markdown suppress third-party requests for loopback, private, link-local, reserved, `.localhost`, and `.home.arpa` targets while retaining local fallback presentation and existing browser-target behavior. |
+
+No database migration, cookie import, provider-settings redesign, or unrelated auth architecture
+entered the group.
+
+### Focused automated gates
+
+All commands used Node 24 through `mise x node@24 --` and the worktree-local dependency graph.
+
+- From `apps/server`, `pnpm exec vp test run auth/PairingGrantStore.test.ts
+  auth/EnvironmentAuthAdmin.test.ts auth/SessionStore.test.ts auth/EnvironmentAuth.test.ts
+  cliAuthFormat.test.ts` passed 37 tests in five files. The three selected `server.test.ts` auth
+  cases passed with `-t 'replaces the local desktop credential|keeps pairing credentials out of raw
+  websocket|lists and revokes pairing links'`; the selected `bin.test.ts` case passed with
+  `-t 'executes auth pairing subcommands and redacts secrets from list output'`.
+- From `packages/client-runtime`, `pnpm exec vp test run state/auth.test.ts` passed two tests; from
+  `apps/web`, `pnpm exec vp test run components/settings/ConnectionsSettings.test.tsx` passed two
+  tests. The authentication lane therefore passed 45 focused tests.
+- The favicon lane passed `hostClassification.test.ts` (2), the `faviconUrlForOrigin` selection in
+  `favicon.test.ts` (15, with three unrelated project-favicon tests skipped),
+  `browserTargetResolver.test.ts` (16), web `components/markdown/links.test.tsx` (4), web
+  `lib/favicon.test.ts` (1), and mobile `feedMarkdown.test.tsx` (1): 39 assertions. Together the
+  group passed 84 focused tests.
+- `pnpm run typecheck` passed from `packages/contracts`, `packages/client-runtime`, `apps/server`,
+  and `apps/web`; `pnpm exec vp run typecheck` passed from `packages/shared` and `apps/mobile`.
+  Targeted repository formatting, `vp lint --report-unused-disable-directives` (with
+  `--deny-warnings` for the favicon lane), comment-header checks, `pnpm run lint:mobile`, dependency
+  consistency, and `git diff --check` passed. SwiftLint reported zero violations across nine Swift
+  files. Existing non-failing Effect suggestions and existing lint warnings were not expanded into
+  unrelated cleanup.
+
+No full workspace suite was run, as required by the focused-check policy.
+
+### Integrated web and iPhone evidence
+
+One disposable backend and Vite client served both clients. The final-source web flow created the
+read-only link `Group 02 creation-only visibility`: **Copy code** appeared only in the creation
+result. After navigating from General back to Connections, and again after a full reload, the
+metadata and creation-only notice remained but no copyable credential existed. Revoking that exact
+link succeeded without removing unrelated session rows.
+
+In a real mock-provider response, web rendered an external favicon only for the public
+`github.com` link; RFC1918, loopback, and `.home.arpa` fixtures used local fallback presentation and
+made no third-party favicon request. The paired iPhone opened the same disposable project/thread and
+showed the public link plus the private `.home.arpa` fallback. The existing mobile autolinker leaves
+literal local-IP and localhost fixtures as plain text, so those cases remained automated rather than
+being misreported as rendered links.
+
+The native iPhone screenshot is
+`/var/folders/hv/8x7nl_n50gdbsjd70yt_v7xr0000gn/T/screenshot_optimized_a85ee5f2-b9e0-4b81-a102-1b7360cb8b58.jpg`.
+Web captures remain in the primary owner's controlled-browser session. GitHub evidence URLs are
+pending upload during PR publication; no repository-owned PR asset was created.
+
+XcodeBuildMCP initially returned `spawn /usr/bin/xcrun ENOENT` before a real generated workspace
+existed. A clean Expo 57 prebuild/CocoaPods pass and bounded host `xcodebuild` succeeded, after which
+XcodeBuildMCP resolved, verified, installed, and launched the exact development bundle. Semantic UI
+automation remained unavailable because the installed Xcode 27 SimulatorKit/AXe combination did not
+provide the required interface, so the authorized serve-sim/CUA visual route performed the actual
+pairing, navigation, and screenshot gate. This is recorded as a tooling limitation, not a semantic
+mock success.
+
+### Cleanup, preservation, and commit map
+
+All run-owned listeners on ports 13774, 15733, 18091, and 3200 were stopped. The backend, Vite,
+Metro, serve-sim, app process, and owned Xcode log helpers were terminated after identity checks.
+Only `com.ggfincke.code456.dev` installed for this run was removed from simulator
+`F8D4BC0B-E701-43AA-B56B-B95AB20E6ECE`, and that simulator was shut down. Exact disposable paths
+`/tmp/t3code-group02.x18TLK` and `/tmp/t3code-group02-fixture.ZhjfyJ` were removed after ownership and
+open-file checks. The ignored compatible native build/workspace remains available for the next
+approved iOS gate. The original checkout stayed clean, and the unrelated Cartographer review
+worktree, all unrelated refs, installed release app state, caches, credentials, and simulator
+runtimes were preserved.
+
+| Commit | Ownership |
+| --- | --- |
+| `77a7da17a211f26c90df2b990a0fbdd36f4e4db5` | Source `9d28c21a26aeef198cb064fe466e49cbeabfe09c`; original author, AuthorDate, subject, and empty body preserved; pairing read-model adaptation recorded. |
+| `971865c691b9c03941d6147ee8fece87cef3e63c` | Source `eb77683e5544e071db74831bae052bbd8a7d5f88`; original author, AuthorDate, subject/body, and contiguous two-line co-author trailer block preserved; transactional desktop-bootstrap adaptation recorded. |
+| `d6c37dfc96c091a5cd9443e4c2872ee758b60926` | Source `b6f72681da394369274121c4d1216f5d64a7a4bb`; original author, AuthorDate, subject, and contiguous four-line co-author trailer block preserved; public-host favicon adaptation recorded. |
+
+The maintained plan/ledger receipt is committed separately with local identity. Publication, hosted
+evidence URLs, PR checks, merge commit, exact merged-main CI, original-main fast-forward, and guarded
+run-owned branch cleanup remain pending and will be recorded in the next group's maintained receipt.
 
 ## Verification policy for every group
 
