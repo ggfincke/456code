@@ -19,6 +19,7 @@ import type {
 } from 'react-native-nitro-markdown'
 import { markdownFileIconSource } from '@t3tools/mobile-markdown-text/file-icons'
 import { resolveMarkdownLinkPresentation } from '@t3tools/mobile-markdown-text/links'
+import { faviconUrlForOrigin } from '@t3tools/shared/favicon'
 import { CopyTextButton } from '../../../components/CopyTextButton'
 import {
   resolveMarkdownFontSizes,
@@ -107,14 +108,15 @@ const markdownLinkStyles = StyleSheet.create({
   },
 })
 
-const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
+export const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
   readonly children: ReactNode
   readonly color: string
   readonly host: string
   readonly href: string
 })
 {
-  const [failed, setFailed] = useState(() => failedMarkdownFaviconHosts.has(props.host))
+  const [failedHost, setFailedHost] = useState<string | null>(null)
+  const faviconUrl = faviconUrlForOrigin(`https://${props.host}`)
 
   return (
     <NativeText
@@ -128,16 +130,18 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
         textDecorationLine: 'none',
       }}
     >
-      {!failed ? (
+      {faviconUrl !== null &&
+      failedHost !== props.host &&
+      !failedMarkdownFaviconHosts.has(props.host) ? (
         <Image
           source={{
-            uri: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(props.host)}&sz=32`,
+            uri: faviconUrl,
           }}
           style={[markdownLinkStyles.inlineIcon, markdownLinkStyles.favicon]}
           onError={() =>
             {
             failedMarkdownFaviconHosts.add(props.host)
-            setFailed(true)
+            setFailedHost(props.host)
           }}
         />
       ) : (

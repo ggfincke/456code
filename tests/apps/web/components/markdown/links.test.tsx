@@ -35,6 +35,7 @@ vi.mock('../../../../../apps/web/src/browser/openFileInPreview', () => ({
 
 import {
   extractMarkdownLinkHrefs,
+  MarkdownExternalLinkContent,
   MarkdownFileLink,
 } from '../../../../../apps/web/src/components/markdown/links'
 
@@ -62,6 +63,56 @@ async function flushMicrotasks(): Promise<void>
   await Promise.resolve()
   await Promise.resolve()
 }
+
+describe('MarkdownExternalLinkContent', () =>
+{
+  it('omits private favicon requests and retries public icons after a host failure or change', async () =>
+  {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const render = async (host: string) =>
+    {
+      await act(async () =>
+      {
+        root.render(
+          <MarkdownExternalLinkContent host={host} plainText="Link">
+            Link
+          </MarkdownExternalLinkContent>,
+        )
+      })
+    }
+
+    try
+    {
+      await render('favicon-one.example.org')
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(
+        'https://www.google.com/s2/favicons?domain=favicon-one.example.org&sz=32',
+      )
+
+      await act(async () =>
+      {
+        container.querySelector('img')?.dispatchEvent(new Event('error', { bubbles: true }))
+      })
+      expect(container.querySelector('img')).toBeNull()
+      expect(container.querySelector('svg')).not.toBeNull()
+
+      await render('localhost')
+      expect(container.querySelector('img')).toBeNull()
+      expect(container.querySelector('svg')).not.toBeNull()
+
+      await render('favicon-two.example.org')
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(
+        'https://www.google.com/s2/favicons?domain=favicon-two.example.org&sz=32',
+      )
+    }
+    finally
+    {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+})
 
 describe('MarkdownFileLink', () =>
 {
