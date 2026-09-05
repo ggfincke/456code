@@ -1,15 +1,23 @@
 // tests/packages/contracts/providerRuntime.test.ts
 // verify provider runtime event behavior
 
-import { describe, expect, it } from 'vite-plus/test'
+import { describe, expect, expectTypeOf, it } from 'vite-plus/test'
 import * as Schema from 'effect/Schema'
 
-import { ProviderRuntimeEvent } from '../../../packages/contracts/src/providerRuntime.ts'
+import {
+  ProviderRuntimeEvent,
+  type ProviderRuntimeEventType,
+} from '../../../packages/contracts/src/providerRuntime.ts'
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent)
 
 describe('ProviderRuntimeEvent', () =>
 {
+  it('keeps the public event type aligned with the runtime event union', () =>
+  {
+    expectTypeOf<ProviderRuntimeEvent['type']>().toEqualTypeOf<ProviderRuntimeEventType>()
+  })
+
   it('decodes MCP elicitation approvals with persistent decision options', () =>
   {
     const parsed = decodeRuntimeEvent({

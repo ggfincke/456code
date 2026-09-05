@@ -5,6 +5,7 @@ import { describe, it, assert } from '@effect/vitest'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
+import * as FileSystem from 'effect/FileSystem'
 import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
 import * as PubSub from 'effect/PubSub'
@@ -56,6 +57,7 @@ import * as ServerSettingsModule from '../../../../../apps/server/src/serverSett
 import {
   readProviderStatusCache,
   resolveProviderStatusCachePath,
+  writeProviderStatusCache,
 } from '../../../../../apps/server/src/provider/maintenance/providerStatusCache.ts'
 import type {
   ProviderDriver,
@@ -965,6 +967,58 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         assert.deepStrictEqual(afterFailure.skills, [])
       })
 
+      it('replaces successful Codex inventories while retaining the last failed catalog', () =>
+      {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make('codex-personal'),
+          driver: ProviderDriverKind.make('codex'),
+          status: 'ready',
+          enabled: true,
+          installed: true,
+          auth: { status: 'authenticated' },
+          checkedAt: '2026-09-04T19:00:00.000Z',
+          version: '0.153.3',
+          models: ['gpt-6-astra', 'retired-alpha'].map((slug) => ({
+            slug,
+            name: slug,
+            isCustom: false,
+            capabilities: null,
+          })),
+          slashCommands: [],
+          skills: [],
+        } satisfies ServerProvider
+        const authoritativeProvider = {
+          ...previousProvider,
+          checkedAt: '2026-09-04T19:01:00.000Z',
+          models: [previousProvider.models[0]!],
+        } satisfies ServerProvider
+        const failedProvider = {
+          ...authoritativeProvider,
+          status: 'error',
+          auth: { status: 'unknown' },
+          checkedAt: '2026-09-04T19:02:00.000Z',
+          models: [],
+        } satisfies ServerProvider
+
+        const afterRemoval = mergeProviderSnapshot(previousProvider, authoritativeProvider)
+        assert.deepStrictEqual(afterRemoval.models, authoritativeProvider.models)
+        assert.deepStrictEqual(mergeProviderSnapshot(afterRemoval, failedProvider).models, [
+          authoritativeProvider.models[0]!,
+        ])
+
+        for (const clearedProvider of [
+          { ...authoritativeProvider, status: 'warning', auth: { status: 'unknown' }, models: [] },
+          { ...failedProvider, enabled: false },
+          { ...failedProvider, auth: { status: 'unauthenticated' } },
+        ] satisfies ReadonlyArray<ServerProvider>)
+        {
+          assert.deepStrictEqual(
+            mergeProviderSnapshot(previousProvider, clearedProvider).models,
+            [],
+          )
+        }
+      })
+
       it('fills missing capabilities from the previous provider snapshot', () =>
       {
         const previousProvider = {
@@ -1519,6 +1573,130 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               ])
             }).pipe(Effect.provide(runtimeServices))
           }),
+      )
+
+      it.effect('keeps a custom Codex instance removal across failure and registry restart', () =>
+        Effect.gen(function* ()
+        {
+          const fileSystem = yield* FileSystem.FileSystem
+          const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: 't3-provider-registry-codex-authoritative-',
+          })
+          const configLayer = ServerConfig.layerTest(process.cwd(), baseDir)
+          const codexDriver = ProviderDriverKind.make('codex')
+          const instanceId = ProviderInstanceId.make('codex-personal')
+          const cachedProvider = {
+            instanceId,
+            driver: codexDriver,
+            status: 'ready',
+            enabled: true,
+            installed: true,
+            auth: { status: 'authenticated' },
+            checkedAt: '2026-09-04T19:00:00.000Z',
+            version: '0.153.3',
+            models: ['gpt-6-astra', 'retired-alpha'].map((slug) => ({
+              slug,
+              name: slug,
+              isCustom: false,
+              capabilities: null,
+            })),
+            slashCommands: [],
+            skills: [],
+          } satisfies ServerProvider
+          const pendingProvider = {
+            ...cachedProvider,
+            status: 'warning',
+            installed: false,
+            auth: { status: 'unknown' },
+            models: [],
+          } satisfies ServerProvider
+          const authoritativeProvider = {
+            ...cachedProvider,
+            checkedAt: '2026-09-04T19:01:00.000Z',
+            models: [cachedProvider.models[0]!],
+          } satisfies ServerProvider
+          const failedProvider = {
+            ...authoritativeProvider,
+            status: 'error',
+            auth: { status: 'unknown' },
+            checkedAt: '2026-09-04T19:02:00.000Z',
+            models: [],
+          } satisfies ServerProvider
+          const nextProvider = yield* Ref.make<ServerProvider>(authoritativeProvider)
+          const instance = {
+            instanceId,
+            driverKind: codexDriver,
+            continuationIdentity: {
+              driverKind: codexDriver,
+              continuationKey: 'codex:instance:codex-personal',
+            },
+            resolveContinuationIdentity: Effect.succeed({
+              driverKind: codexDriver,
+              continuationKey: 'codex:instance:codex-personal',
+            }),
+            displayName: 'Codex Personal',
+            enabled: true,
+            snapshot: {
+              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
+                provider: codexDriver,
+                packageName: null,
+              }),
+              getSnapshot: Effect.succeed(pendingProvider),
+              refresh: Ref.get(nextProvider),
+              streamChanges: Stream.empty,
+            },
+            adapter: {} as ProviderInstance['adapter'],
+            textGeneration: {} as ProviderInstance['textGeneration'],
+          } satisfies ProviderInstance
+          const instanceRegistryLayer = Layer.succeed(
+            ProviderInstanceRegistry.ProviderInstanceRegistry,
+            {
+              getInstance: (candidateId) =>
+                Effect.succeed(candidateId === instanceId ? instance : undefined),
+              listInstances: Effect.succeed([instance]),
+              listUnavailable: Effect.succeed([]),
+              streamChanges: Stream.empty,
+              subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+            },
+          )
+          const filePath = yield* Effect.gen(function* ()
+          {
+            const config = yield* ServerConfig.ServerConfig
+            const path = yield* resolveProviderStatusCachePath({
+              cacheDir: config.providerStatusCacheDir,
+              instanceId,
+            })
+            yield* writeProviderStatusCache({ filePath: path, provider: cachedProvider })
+            return path
+          }).pipe(Effect.provide(configLayer))
+
+          for (const restarted of [false, true])
+          {
+            yield* Effect.gen(function* ()
+            {
+              const registry = yield* ProviderRegistry.ProviderRegistry
+              assert.deepStrictEqual((yield* registry.getProviders)[0]?.models, [
+                ...(restarted ? authoritativeProvider.models : cachedProvider.models),
+              ])
+
+              const refreshed = yield* registry.refreshInstance(instanceId)
+              assert.deepStrictEqual(refreshed[0]?.instanceId, instanceId)
+              assert.deepStrictEqual(refreshed[0]?.models, authoritativeProvider.models)
+              assert.deepStrictEqual(
+                (yield* readProviderStatusCache(filePath))?.models,
+                authoritativeProvider.models,
+              )
+            }).pipe(
+              Effect.provide(
+                ProviderRegistryLive.pipe(
+                  Layer.provideMerge(instanceRegistryLayer),
+                  Layer.provideMerge(configLayer),
+                ),
+              ),
+            )
+            yield* Ref.set(nextProvider, failedProvider)
+          }
+        }).pipe(Effect.scoped),
       )
 
       it.effect('returns the cached provider list when a manual refresh fails', () =>

@@ -6,6 +6,8 @@ import * as Schema from 'effect/Schema'
 import * as CodexSchema from 'effect-codex-app-server/schema'
 
 const decodeResumeResponse = Schema.decodeUnknownSync(CodexSchema.V2ThreadResumeResponse)
+const decodeReadResponse = Schema.decodeUnknownSync(CodexSchema.V2ThreadReadResponse)
+const decodeRollbackResponse = Schema.decodeUnknownSync(CodexSchema.V2ThreadRollbackResponse)
 const decodeAccountResponse = Schema.decodeUnknownSync(CodexSchema.V2GetAccountResponse)
 
 it.each([
@@ -142,4 +144,47 @@ it('decodes a resumed thread with an interrupted Codex 0.150 follow-up task', ()
   } as const
   const decoded = decodeResumeResponse(response)
   assert.deepStrictEqual(decoded.thread.turns?.[0]?.items[0], response.thread.turns[0]?.items[0])
+})
+
+it('decodes rate-limit failures in read, resume, and rollback thread responses', () =>
+{
+  const failedThread = {
+    cliVersion: '0.151.0',
+    createdAt: 0,
+    cwd: '/tmp/project',
+    ephemeral: false,
+    id: 'thread-1',
+    modelProvider: 'openai',
+    preview: '',
+    sessionId: 'session-1',
+    source: 'cli',
+    status: { type: 'idle' },
+    turns: [
+      {
+        error: {
+          codexErrorInfo: 'rateLimitExceeded',
+          message: 'Rate limit exceeded',
+        },
+        id: 'turn-1',
+        items: [],
+        status: 'failed',
+      },
+    ],
+    updatedAt: 0,
+  } as const
+
+  assert.deepStrictEqual(decodeReadResponse({ thread: failedThread }).thread, failedThread)
+  assert.deepStrictEqual(
+    decodeResumeResponse({
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      cwd: '/tmp/project',
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      sandbox: { type: 'dangerFullAccess' },
+      thread: failedThread,
+    }).thread,
+    failedThread,
+  )
+  assert.deepStrictEqual(decodeRollbackResponse({ thread: failedThread }).thread, failedThread)
 })

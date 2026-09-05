@@ -84,6 +84,44 @@ describe('buildCursorAcpSpawnInput', () =>
   {
     expect(buildCursorAcpSpawnInput(settings, '/tmp/project')).toEqual(expected)
   })
+
+  it('places the full-access flag before the ACP subcommand', () =>
+  {
+    expect(buildCursorAcpSpawnInput(undefined, '/tmp/project', undefined, 'full-access')).toEqual({
+      command: 'cursor-agent',
+      args: ['--force', 'acp'],
+      cwd: '/tmp/project',
+    })
+  })
+
+  it('places the auto-review flag after endpoint options and before the ACP subcommand', () =>
+  {
+    expect(
+      buildCursorAcpSpawnInput(
+        { binaryPath: '/usr/local/bin/agent', apiEndpoint: 'http://localhost:3000' },
+        '/tmp/project',
+        { CURSOR_FIXTURE: '1' },
+        'auto',
+      ),
+    ).toEqual({
+      command: '/usr/local/bin/agent',
+      args: ['-e', 'http://localhost:3000', '--auto-review', 'acp'],
+      cwd: '/tmp/project',
+      env: { CURSOR_FIXTURE: '1' },
+    })
+  })
+
+  it.each(['approval-required', 'auto-accept-edits'] as const)(
+    'keeps Cursor approval prompts in %s mode',
+    (runtimeMode) =>
+    {
+      expect(buildCursorAcpSpawnInput(undefined, '/tmp/project', undefined, runtimeMode)).toEqual({
+        command: 'cursor-agent',
+        args: ['acp'],
+        cwd: '/tmp/project',
+      })
+    },
+  )
 })
 
 describe('applyCursorAcpModelSelection', () =>

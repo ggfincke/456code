@@ -615,6 +615,7 @@ export function makeCursorAdapter(
             ...(options?.environment ? { environment: options.environment } : {}),
             childProcessSpawner,
             cwd,
+            runtimeMode: input.runtimeMode,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             ...(parsedResume?.requireExisting === true ? { sessionSetup: 'import' as const } : {}),
             clientInfo: { name: 'code456', version: '0.0.0' },

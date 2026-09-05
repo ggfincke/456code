@@ -2,11 +2,16 @@
 // verifies Claude's no-prompt initialization and structured plan usage probe
 import { ClaudeSettings } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
+import * as ClaudeSdk from '@anthropic-ai/claude-agent-sdk'
 import { assert, it } from '@effect/vitest'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
+import * as Fiber from 'effect/Fiber'
 import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
+import * as TestClock from 'effect/testing/TestClock'
+import { vi } from 'vite-plus/test'
 
 import {
   buildClaudeCapabilitiesProbeQueryOptions,
@@ -16,6 +21,8 @@ import {
 } from '../../../../../apps/server/src/provider/Layers/ClaudeProvider.ts'
 
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings)
+
+vi.mock('@anthropic-ai/claude-agent-sdk', { spy: true })
 
 it('normalizes aggregate and scoped Claude usage windows', () =>
 {
@@ -94,6 +101,7 @@ it('isolates Claude capability probes without dropping workspace setting sources
     environment: {
       HOME: '/home/user',
       ENABLE_CLAUDEAI_MCP_SERVERS: 'true',
+      FORCE_CODE_TERMINAL: '1',
     },
     cwd: '/workspace/project',
   })
@@ -109,7 +117,75 @@ it('isolates Claude capability probes without dropping workspace setting sources
   assert.equal(options.abortController, abortController)
   assert.equal(options.env?.HOME, '/home/user')
   assert.equal(options.env?.ENABLE_CLAUDEAI_MCP_SERVERS, 'false')
+  assert.equal(options.env?.FORCE_CODE_TERMINAL, undefined)
+  assert.equal(options.env?.CLAUDE_CODE_AUTO_CONNECT_IDE, '0')
+  assert.equal(options.env?.CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL, '1')
 })
+
+it.effect('preserves initialized capabilities when optional usage times out', () =>
+  Effect.gen(function* ()
+  {
+    const initializationStarted = yield* Deferred.make<void>()
+    const usageStarted = yield* Deferred.make<void>()
+    let abortSignal: AbortSignal | undefined
+    let resolveInitialization: ((value: ClaudeSdk.SDKControlInitializeResponse) => void) | undefined
+    const query = vi.spyOn(ClaudeSdk, 'query').mockImplementation(({ options }) =>
+    {
+      abortSignal = options?.abortController?.signal
+      return {
+        initializationResult: () =>
+        {
+          Deferred.doneUnsafe(initializationStarted, Effect.void)
+          return new Promise((resolve) =>
+          {
+            resolveInitialization = resolve
+          })
+        },
+        usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: () =>
+        {
+          Deferred.doneUnsafe(usageStarted, Effect.void)
+          return new Promise(() =>
+          {})
+        },
+      } as ReturnType<typeof ClaudeSdk.query>
+    })
+    yield* Effect.addFinalizer(() => Effect.sync(() => query.mockRestore()))
+
+    const probe = yield* probeClaudeCapabilities(
+      decodeClaudeSettings({ binaryPath: 'claude' }),
+    ).pipe(Effect.forkChild)
+    yield* Deferred.await(initializationStarted)
+    yield* TestClock.adjust('24 seconds')
+    yield* Effect.sync(() =>
+    {
+      resolveInitialization?.({
+        account: {
+          email: 'dev@example.com',
+          subscriptionType: 'pro',
+          tokenSource: 'oauth',
+        },
+        commands: [{ name: 'review', description: 'Review changes', argumentHint: '[path]' }],
+        agents: [],
+        output_style: 'default',
+        available_output_styles: ['default'],
+        models: [],
+      })
+    })
+    yield* Deferred.await(usageStarted)
+    yield* TestClock.adjust('4 seconds')
+
+    const capabilities = yield* Fiber.join(probe)
+    assert.deepEqual(capabilities, {
+      email: 'dev@example.com',
+      subscriptionType: 'pro',
+      tokenSource: 'oauth',
+      apiProvider: undefined,
+      planUsage: { status: 'unavailable' },
+      slashCommands: [{ name: 'review', description: 'Review changes', input: { hint: '[path]' } }],
+    })
+    assert.equal(abortSignal?.aborted, true)
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
 
 it.layer(NodeServices.layer)('Claude capability probe SDK boundary', (it) =>
 {
