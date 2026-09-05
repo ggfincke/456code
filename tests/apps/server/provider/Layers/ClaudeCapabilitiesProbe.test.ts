@@ -128,7 +128,7 @@ it.effect('preserves initialized capabilities when optional usage times out', ()
     const initializationStarted = yield* Deferred.make<void>()
     const usageStarted = yield* Deferred.make<void>()
     let abortSignal: AbortSignal | undefined
-    let resolveInitialization: ((value: Record<string, unknown>) => void) | undefined
+    let resolveInitialization: ((value: ClaudeSdk.SDKControlInitializeResponse) => void) | undefined
     const query = vi.spyOn(ClaudeSdk, 'query').mockImplementation(({ options }) =>
     {
       abortSignal = options?.abortController?.signal
@@ -147,7 +147,7 @@ it.effect('preserves initialized capabilities when optional usage times out', ()
           return new Promise(() =>
           {})
         },
-      } as unknown as ReturnType<typeof ClaudeSdk.query>
+      } as ReturnType<typeof ClaudeSdk.query>
     })
     yield* Effect.addFinalizer(() => Effect.sync(() => query.mockRestore()))
 
@@ -165,6 +165,10 @@ it.effect('preserves initialized capabilities when optional usage times out', ()
           tokenSource: 'oauth',
         },
         commands: [{ name: 'review', description: 'Review changes', argumentHint: '[path]' }],
+        agents: [],
+        output_style: 'default',
+        available_output_styles: ['default'],
+        models: [],
       })
     })
     yield* Deferred.await(usageStarted)
