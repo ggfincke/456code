@@ -222,6 +222,14 @@
     "./toolMutationTargets": {
       "types": "./src/toolMutationTargets.ts",
       "import": "./src/toolMutationTargets.ts"
+    },
+    "./hostClassification": {
+      "types": "./src/hostClassification.ts",
+      "import": "./src/hostClassification.ts"
+    },
+    "./favicon": {
+      "types": "./src/favicon.ts",
+      "import": "./src/favicon.ts"
     }
   },
   "scripts": {

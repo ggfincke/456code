@@ -1109,19 +1109,30 @@ const parseSessionCookieFromWsUrl = (
   }
 }
 
-const wsRpcProtocolLayer = (wsUrl: string, origin?: string) =>
+const wsRpcProtocolLayer = (
+  wsUrl: string,
+  origin?: string,
+  onMessage?: (message: string) => void,
+) =>
 {
   const { cookie, url } = parseSessionCookieFromWsUrl(wsUrl)
   const webSocketConstructorLayer = Layer.succeed(
     Socket.WebSocketConstructor,
     (socketUrl, protocols) =>
-      new NodeSocket.NodeWS.WebSocket(
+    {
+      const socket = new NodeSocket.NodeWS.WebSocket(
         socketUrl,
         protocols,
         cookie || origin
           ? { headers: { ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}) } }
           : undefined,
-      ) as unknown as globalThis.WebSocket,
+      )
+      if (onMessage)
+      {
+        socket.on('message', (message) => onMessage(message.toString()))
+      }
+      return socket as unknown as globalThis.WebSocket
+    },
   )
 
   return RpcClient.layerProtocolSocket().pipe(
@@ -1138,7 +1149,12 @@ const withWsRpcClient = <A, E, R>(
   wsUrl: string,
   f: (client: WsRpcClient) => Effect.Effect<A, E, R>,
   origin?: string,
-) => makeWsRpcClient.pipe(Effect.flatMap(f), Effect.provide(wsRpcProtocolLayer(wsUrl, origin)))
+  onMessage?: (message: string) => void,
+) =>
+  makeWsRpcClient.pipe(
+    Effect.flatMap(f),
+    Effect.provide(wsRpcProtocolLayer(wsUrl, origin, onMessage)),
+  )
 
 const appendSessionCookieToWsUrl = (url: string, sessionCookieHeader: string) =>
 {
@@ -1779,6 +1795,42 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
+  it.effect('replaces the local desktop credential on repeated bootstrap exchanges', () =>
+    Effect.gen(function* ()
+    {
+      yield* buildAppUnderTest()
+      const first = yield* exchangeAccessToken()
+      const second = yield* exchangeAccessToken()
+      const third = yield* exchangeAccessToken()
+
+      assert.equal(first.response.status, 200)
+      assert.equal(second.response.status, 200)
+      assert.equal(third.response.status, 200)
+
+      const clientsResponse = yield* HttpClient.get('/api/auth/clients', {
+        headers: { authorization: `Bearer ${third.body.access_token}` },
+      })
+      const clients = (yield* clientsResponse.json) as ReadonlyArray<{
+        readonly current: boolean
+        readonly subject: string
+      }>
+
+      assert.equal(clientsResponse.status, 200)
+      assert.equal(clients.length, 1)
+      assert.equal(clients[0]?.current, true)
+      assert.equal(clients[0]?.subject, 'desktop-bootstrap')
+
+      for (const previous of [first, second])
+      {
+        const response = yield* HttpClient.get('/api/auth/session', {
+          headers: { authorization: `Bearer ${previous.body.access_token}` },
+        })
+        const state = (yield* response.json) as { readonly authenticated: boolean }
+        assert.equal(state.authenticated, false)
+      }
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
   it.effect('persists token exchange client display metadata for authorized-client listings', () =>
     Effect.gen(function* ()
     {
@@ -1912,6 +1964,85 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       {
         assert.equal(events[2].payload.current, false)
       }
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
+  )
+
+  it.effect('keeps pairing credentials out of raw websocket snapshots and changes', () =>
+    Effect.gen(function* ()
+    {
+      yield* buildAppUnderTest({
+        config: {
+          host: '0.0.0.0',
+        },
+      })
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader()
+      const initialResponse = yield* HttpClient.post('/api/auth/pairing-token', {
+        headers: { cookie: ownerCookie },
+        body: yield* HttpBody.json({ label: 'Existing phone' }),
+      })
+      const initial = (yield* initialResponse.json) as {
+        readonly id: string
+        readonly credential: string
+      }
+      const snapshotSeen = yield* Deferred.make<void>()
+      const rawMessages: Array<string> = []
+      const wsUrl = appendSessionCookieToWsUrl(
+        yield* getWsServerUrl('/ws', { authenticated: false }),
+        ownerCookie,
+      )
+      const events = yield* Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const eventsFiber = yield* withWsRpcClient(
+            wsUrl,
+            (client) =>
+              client[WS_METHODS.subscribeAuthAccess]({}).pipe(
+                Stream.tap((event) =>
+                  event.type === 'snapshot'
+                    ? Deferred.succeed(snapshotSeen, undefined).pipe(Effect.ignore)
+                    : Effect.void,
+                ),
+                Stream.take(2),
+                Stream.runCollect,
+              ),
+            undefined,
+            (message) => rawMessages.push(message),
+          ).pipe(Effect.forkScoped)
+
+          yield* Deferred.await(snapshotSeen)
+          const createdResponse = yield* HttpClient.post('/api/auth/pairing-token', {
+            headers: { cookie: ownerCookie },
+            body: yield* HttpBody.json({ label: 'New phone' }),
+          })
+          const created = (yield* createdResponse.json) as {
+            readonly id: string
+            readonly credential: string
+          }
+          const received = yield* Fiber.join(eventsFiber)
+          return { created, received }
+        }),
+      ).pipe(Effect.timeout('2 seconds'))
+
+      const snapshot = events.received[0]
+      const upsert = events.received[1]
+      assert.equal(snapshot?.type, 'snapshot')
+      if (snapshot?.type === 'snapshot')
+      {
+        const listed = snapshot.payload.pairingLinks.find((link) => link.id === initial.id)
+        assert.exists(listed)
+        assert.notProperty(listed, 'credential')
+      }
+      assert.equal(upsert?.type, 'pairingLinkUpserted')
+      if (upsert?.type === 'pairingLinkUpserted')
+      {
+        assert.equal(upsert.payload.id, events.created.id)
+        assert.notProperty(upsert.payload, 'credential')
+      }
+      const rawPayloads = rawMessages.join('\n')
+      assert.notInclude(rawPayloads, initial.credential)
+      assert.notInclude(rawPayloads, events.created.credential)
+      assert.notInclude(rawPayloads, '"credential"')
     }).pipe(Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
@@ -2477,10 +2608,8 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           cookie: ownerCookie,
         },
       })
-      const listedLinks = (yield* listResponse.json) as ReadonlyArray<{
-        readonly id: string
-        readonly credential: string
-      }>
+      const listBody = yield* listResponse.text
+      const idBootstrap = yield* bootstrapBrowserSession(createdBody.id)
 
       const revokeResponse = yield* HttpClient.post('/api/auth/pairing-links/revoke', {
         headers: {
@@ -2493,7 +2622,10 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       assert.equal(createdResponse.status, 200)
       assert.equal(listResponse.status, 200)
-      assert.isTrue(listedLinks.some((entry) => entry.id === createdBody.id))
+      assert.include(listBody, createdBody.id)
+      assert.notInclude(listBody, createdBody.credential)
+      assert.notInclude(listBody, '"credential"')
+      assert.equal(idBootstrap.response.status, 401)
       assert.equal(revokeResponse.status, 200)
       assert.equal(revokedBootstrap.response.status, 401)
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),

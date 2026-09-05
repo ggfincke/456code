@@ -8,6 +8,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from '@t3tools/client-runtime/state/runtime'
+import { faviconUrlForOrigin } from '@t3tools/shared/favicon'
 import React, {
   Children,
   memo,
@@ -179,13 +180,14 @@ const failedFaviconHosts = new Set<string>()
 const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: string })
 {
   const [failedHost, setFailedHost] = useState<string | null>(null)
+  const faviconUrl = faviconUrlForOrigin(`https://${host}`)
   return (
     <span className="chat-markdown-link-favicon" aria-hidden>
-      {failedHost === host || failedFaviconHosts.has(host) ? (
+      {faviconUrl === null || failedHost === host || failedFaviconHosts.has(host) ? (
         <GlobeIcon className={MARKDOWN_LINK_FAVICON_CLASS_NAME} />
       ) : (
         <img
-          src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
+          src={faviconUrl}
           alt=""
           loading="lazy"
           draggable={false}

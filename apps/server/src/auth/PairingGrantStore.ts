@@ -377,7 +377,6 @@ export const make = Effect.gen(function* ()
         row.label
           ? ({
               id: row.id,
-              credential: row.credential,
               scopes: row.scopes,
               subject: row.subject,
               label: row.label,
@@ -386,7 +385,6 @@ export const make = Effect.gen(function* ()
             } satisfies AuthPairingLink)
           : ({
               id: row.id,
-              credential: row.credential,
               scopes: row.scopes,
               subject: row.subject,
               createdAt: row.createdAt,
@@ -461,7 +459,6 @@ export const make = Effect.gen(function* ()
       )
     yield* emitUpsert({
       id,
-      credential,
       scopes: input?.scopes ?? AuthStandardClientScopes,
       subject: input?.subject ?? 'one-time-token',
       ...(input?.label ? { label: input.label } : {}),

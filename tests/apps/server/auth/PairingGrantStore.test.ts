@@ -7,6 +7,8 @@ import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
+import * as Queue from 'effect/Queue'
+import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
@@ -206,6 +208,33 @@ it.layer(NodeServices.layer)('PairingGrantStore.layer', (it) =>
     ),
   )
 
+  it.effect('keeps credentials out of pairing lists and change events', () =>
+    Effect.gen(function* ()
+    {
+      const grants = yield* PairingGrantStore.PairingGrantStore
+      const changes = yield* Queue.unbounded<PairingGrantStore.BootstrapCredentialChange>()
+      yield* grants.streamChanges.pipe(
+        Stream.runForEach((change) => Queue.offer(changes, change)),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      const issued = yield* grants.issueOneTimeToken({ label: 'Synthetic phone' })
+      const change = yield* Queue.take(changes)
+      expect(change.type).toBe('pairingLinkUpserted')
+      if (change.type !== 'pairingLinkUpserted')
+      {
+        return yield* Effect.die(new Error('Expected a pairing link update'))
+      }
+      expect(change.pairingLink.id).toBe(issued.id)
+      expect(change.pairingLink).not.toHaveProperty('credential')
+      const listed = (yield* grants.listActive()).find((link) => link.id === issued.id)
+      expect(listed).toEqual(change.pairingLink)
+      const consumed = yield* grants.consume(issued.credential)
+      expect(consumed.scopes).toEqual(change.pairingLink.scopes)
+      expect(yield* Queue.take(changes)).toEqual({ type: 'pairingLinkRemoved', id: issued.id })
+    }).pipe(Effect.scoped, Effect.provide(makePairingGrantStoreLayer())),
+  )
+
   it.effect('lists and revokes active pairing links', () =>
     Effect.gen(function* ()
     {
@@ -218,6 +247,10 @@ it.layer(NodeServices.layer)('PairingGrantStore.layer', (it) =>
       const activeBeforeRevoke = yield* bootstrapCredentials.listActive()
       expect(activeBeforeRevoke.map((entry) => entry.id)).toContain(first.id)
       expect(activeBeforeRevoke.map((entry) => entry.id)).toContain(second.id)
+      for (const entry of activeBeforeRevoke)
+      {
+        expect(entry).not.toHaveProperty('credential')
+      }
 
       const revoked = yield* bootstrapCredentials.revoke(first.id)
       const activeAfterRevoke = yield* bootstrapCredentials.listActive()

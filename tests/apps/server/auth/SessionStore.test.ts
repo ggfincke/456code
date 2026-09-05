@@ -6,8 +6,13 @@ import { EnvironmentId } from '@t3tools/contracts'
 import { expect, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Queue from 'effect/Queue'
+import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
@@ -54,6 +59,7 @@ const repositoryFailure = new PersistenceSqlError({
 
 const failingSessionLookupRepositoryLayer = Layer.succeed(AuthSessions.AuthSessionRepository, {
   create: () => Effect.void,
+  createReplacingActive: () => Effect.succeed([]),
   getById: () => Effect.fail(repositoryFailure),
   listActive: () => Effect.succeed([]),
   revoke: () => Effect.fail(repositoryFailure),
@@ -191,6 +197,114 @@ it.layer(NodeServices.layer)('SessionStore.layer', (it) =>
         'relay:read',
       ])
     }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
+  )
+
+  it.effect('keeps concurrent replacement changes aligned with active sessions', () =>
+    Effect.gen(function* ()
+    {
+      const sessions = yield* SessionStore.SessionStore
+      const browser = yield* sessions.issue({
+        subject: 'desktop-bootstrap',
+        method: 'browser-session-cookie',
+      })
+      const staleBearerCount = 3
+      yield* Effect.forEach(Array.from({ length: staleBearerCount }), () =>
+        sessions.issue({
+          subject: 'desktop-bootstrap',
+          method: 'bearer-access-token',
+        }),
+      )
+      const initial = yield* sessions.listActive()
+      const replacementCount = 24
+      const expectedChangeCount = staleBearerCount + replacementCount * 2 - 1
+      const changesFiber = yield* sessions.streamChanges.pipe(
+        Stream.take(expectedChangeCount),
+        Stream.runCollect,
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      const replacements = yield* Effect.all(
+        Array.from({ length: replacementCount }, () =>
+          sessions.issue({
+            subject: 'desktop-bootstrap',
+            method: 'bearer-access-token',
+            replaceActiveForSubjectAndMethod: true,
+          }),
+        ),
+        { concurrency: 'unbounded' },
+      )
+      const changes = yield* Fiber.join(changesFiber)
+      const projected = new Map(initial.map((session) => [session.sessionId, session]))
+      for (const change of changes)
+      {
+        if (change.type === 'clientRemoved')
+        {
+          projected.delete(change.sessionId)
+        }
+        else
+        {
+          projected.set(change.clientSession.sessionId, change.clientSession)
+        }
+      }
+      const active = yield* sessions.listActive()
+      const replacementVerifications = yield* Effect.forEach(replacements, (replacement) =>
+        sessions.verify(replacement.token).pipe(Effect.option),
+      )
+
+      expect([...projected.keys()].toSorted()).toEqual(
+        active.map((session) => session.sessionId).toSorted(),
+      )
+      expect(active.map((session) => session.sessionId)).toContain(browser.sessionId)
+      expect(
+        active.filter(
+          (session) =>
+            session.subject === 'desktop-bootstrap' && session.method === 'bearer-access-token',
+        ),
+      ).toHaveLength(1)
+      expect(replacementVerifications.filter(Option.isSome)).toHaveLength(1)
+    }).pipe(Effect.scoped, Effect.provide(makeSessionStoreLayer())),
+  )
+
+  it.effect('rolls back replacement without publishing false session changes', () =>
+    Effect.gen(function* ()
+    {
+      const sessions = yield* SessionStore.SessionStore
+      const sql = yield* SqlClient.SqlClient
+      const previous = yield* sessions.issue({
+        subject: 'desktop-bootstrap',
+        method: 'bearer-access-token',
+      })
+      yield* sql`
+        CREATE TRIGGER reject_auth_session_insert BEFORE INSERT ON auth_sessions
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated insert failure');
+        END
+      `
+      const changes = yield* Queue.unbounded<SessionStore.SessionCredentialChange>()
+      yield* sessions.streamChanges.pipe(
+        Stream.runForEach((change) => Queue.offer(changes, change)),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      const error = yield* sessions
+        .issue({
+          subject: 'desktop-bootstrap',
+          method: 'bearer-access-token',
+          replaceActiveForSubjectAndMethod: true,
+        })
+        .pipe(Effect.flip)
+      const publishedChange = yield* Queue.poll(changes)
+
+      expect(error._tag).toBe('SessionCredentialIssueError')
+      expect(Option.isNone(publishedChange)).toBe(true)
+      expect((yield* sessions.verify(previous.token)).sessionId).toBe(previous.sessionId)
+      expect((yield* sessions.listActive()).map((session) => session.sessionId)).toEqual([
+        previous.sessionId,
+      ])
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(makeSessionStoreLayer(), SqlitePersistenceMemory)),
+    ),
   )
 
   it.effect('rejects websocket tokens once the parent session has expired', () =>

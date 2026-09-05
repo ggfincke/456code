@@ -7,6 +7,7 @@ import {
   AuthStandardClientScopes,
   type AuthClientSession,
   type AuthEnvironmentScope,
+  type AuthPairingCredentialResult,
   type AuthPairingLink,
   type AdvertisedEndpoint,
 } from '@t3tools/contracts'
@@ -127,6 +128,7 @@ export function toDesktopClientSessionRecord(
 
 type PairingLinkListRowProps = {
   pairingLink: ServerPairingLinkRecord
+  credential: string | undefined
   endpointUrl: string | null | undefined
   endpoints: ReadonlyArray<AdvertisedEndpoint>
   defaultEndpointKey: string | null
@@ -137,6 +139,7 @@ type PairingLinkListRowProps = {
 
 export const PairingLinkListRow = memo(function PairingLinkListRow({
   pairingLink,
+  credential,
   endpointUrl,
   endpoints,
   defaultEndpointKey,
@@ -153,21 +156,21 @@ export const PairingLinkListRow = memo(function PairingLinkListRow({
   const [isRevealDialogOpen, setIsRevealDialogOpen] = useState(false)
 
   const currentOriginPairingUrl = useMemo(
-    () => resolveCurrentOriginPairingUrl(pairingLink.credential),
-    [pairingLink.credential],
+    () => (credential ? resolveCurrentOriginPairingUrl(credential) : null),
+    [credential],
   )
   const hostedPairingUrl = useMemo(
     () =>
-      endpointUrl != null && endpointUrl !== ''
-        ? resolveHostedPairingUrl(endpointUrl, pairingLink.credential)
+      credential && endpointUrl != null && endpointUrl !== ''
+        ? resolveHostedPairingUrl(endpointUrl, credential)
         : null,
-    [endpointUrl, pairingLink.credential],
+    [credential, endpointUrl],
   )
   const endpointPairingUrl = useMemo(() =>
   {
     const endpoint = selectPairingEndpoint(endpoints, defaultEndpointKey)
-    return endpoint ? resolveAdvertisedEndpointPairingUrl(endpoint, pairingLink.credential) : null
-  }, [defaultEndpointKey, endpoints, pairingLink.credential])
+    return endpoint && credential ? resolveAdvertisedEndpointPairingUrl(endpoint, credential) : null
+  }, [credential, defaultEndpointKey, endpoints])
   const endpointCopyOptions = useMemo(() =>
   {
     const options: Array<{
@@ -176,13 +179,14 @@ export const PairingLinkListRow = memo(function PairingLinkListRow({
       readonly url: string
       readonly detail: string
     }> = []
+    if (!credential) return options
     for (const endpoint of endpoints)
     {
       if (endpoint.status === 'unavailable')
       {
         continue
       }
-      const url = resolveAdvertisedEndpointPairingUrl(endpoint, pairingLink.credential)
+      const url = resolveAdvertisedEndpointPairingUrl(endpoint, credential)
       options.push({
         key: endpointDefaultPreferenceKey(endpoint),
         label: endpoint.label,
@@ -191,15 +195,15 @@ export const PairingLinkListRow = memo(function PairingLinkListRow({
       })
     }
     return options
-  }, [endpoints, pairingLink.credential])
+  }, [credential, endpoints])
   const shareablePairingUrl =
     endpointPairingUrl ??
-    (endpointUrl != null && endpointUrl !== ''
-      ? (hostedPairingUrl ?? resolveDesktopPairingUrl(endpointUrl, pairingLink.credential))
+    (credential && endpointUrl != null && endpointUrl !== ''
+      ? (hostedPairingUrl ?? resolveDesktopPairingUrl(endpointUrl, credential))
       : isLoopbackHostname(window.location.hostname)
         ? null
         : currentOriginPairingUrl)
-  const revealValue = shareablePairingUrl ?? pairingLink.credential
+  const revealValue = shareablePairingUrl ?? credential ?? ''
   const isShareableHostedAppPairingUrl =
     shareablePairingUrl !== null && isHostedAppPairingUrl(shareablePairingUrl)
   const canCopyToClipboard =
@@ -260,8 +264,8 @@ export const PairingLinkListRow = memo(function PairingLinkListRow({
 
   const handleCopyCode = useCallback(() =>
   {
-    copyPairingValue(pairingLink.credential, 'code')
-  }, [copyPairingValue, pairingLink.credential])
+    if (credential) copyPairingValue(credential, 'code')
+  }, [copyPairingValue, credential])
 
   const handleCopyDefaultLink = useCallback(() =>
   {
@@ -405,15 +409,22 @@ export const PairingLinkListRow = memo(function PairingLinkListRow({
             <span aria-hidden> · </span>
             <AccessScopeSummary scopes={pairingLink.scopes} label="Pairing link scopes" />
           </p>
-          {shareablePairingUrl === null ? (
+          {!credential ? (
+            <p className="text-[11px] text-muted-foreground/70">
+              Create a new link to share from this client.
+            </p>
+          ) : shareablePairingUrl === null ? (
             <p className="text-[11px] text-muted-foreground/70">
               Copy the token and pair from another client using this backend&apos;s reachable host.
             </p>
           ) : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          <Dialog open={isRevealDialogOpen} onOpenChange={setIsRevealDialogOpen}>
-            {canCopyToClipboard ? (
+          <Dialog
+            open={credential !== undefined && isRevealDialogOpen}
+            onOpenChange={setIsRevealDialogOpen}
+          >
+            {!credential ? null : canCopyToClipboard ? (
               <>
                 {shareablePairingUrl ? (
                   <Group aria-label="Copy selected endpoint">
@@ -603,12 +614,14 @@ export const ConnectedClientListRow = memo(function ConnectedClientListRow({
 })
 
 type AuthorizedClientsHeaderActionProps = {
+  onPairingLinkCreated: (result: AuthPairingCredentialResult) => void
   clientSessions: ReadonlyArray<ServerClientSessionRecord>
   isRevokingOtherClients: boolean
   onRevokeOtherClients: () => void
 }
 
 export const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderAction({
+  onPairingLinkCreated,
   clientSessions,
   isRevokingOtherClients,
   onRevokeOtherClients,
@@ -626,7 +639,11 @@ export const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHead
     setIsCreatingPairingLink(true)
     try
     {
-      await createServerPairingCredential({ label: pairingLabel, scopes: pairingScopes })
+      const created = await createServerPairingCredential({
+        label: pairingLabel,
+        scopes: pairingScopes,
+      })
+      onPairingLinkCreated(created)
       setPairingLabel('')
       setPairingScopes([...AuthStandardClientScopes])
       setDialogOpen(false)
@@ -646,7 +663,7 @@ export const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHead
     {
       setIsCreatingPairingLink(false)
     }
-  }, [pairingLabel, pairingScopes])
+  }, [onPairingLinkCreated, pairingLabel, pairingScopes])
 
   const togglePairingScope = useCallback((scope: AuthEnvironmentScope, checked: boolean) =>
   {
@@ -793,6 +810,7 @@ type PairingClientsListProps = {
   presentation?: AccessSectionPresentation
   isLoading: boolean
   pairingLinks: ReadonlyArray<ServerPairingLinkRecord>
+  createdPairingCredentials: ReadonlyMap<string, string>
   clientSessions: ReadonlyArray<ServerClientSessionRecord>
   revokingPairingLinkId: string | null
   revokingClientSessionId: string | null
@@ -807,6 +825,7 @@ export const PairingClientsList = memo(function PairingClientsList({
   presentation = 'current',
   isLoading,
   pairingLinks,
+  createdPairingCredentials,
   clientSessions,
   revokingPairingLinkId,
   revokingClientSessionId,
@@ -820,6 +839,7 @@ export const PairingClientsList = memo(function PairingClientsList({
         <PairingLinkListRow
           key={pairingLink.id}
           pairingLink={pairingLink}
+          credential={createdPairingCredentials.get(pairingLink.id)}
           endpointUrl={endpointUrl}
           endpoints={endpoints}
           defaultEndpointKey={defaultEndpointKey}

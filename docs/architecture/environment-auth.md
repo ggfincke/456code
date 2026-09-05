@@ -20,6 +20,11 @@ OAuth-style scope strings:
 | `relay:read`            | Inspect managed relay connectivity.                                      |
 | `relay:write`           | Link, configure, or unlink managed relay connectivity.                   |
 
+Pairing-link lists and access-stream snapshots and updates contain metadata only.
+The raw credential is returned only by the creation request, after the server checks
+`access:write` and the delegated scopes. Web and desktop clients keep that response
+in memory for sharing. They do not recover credentials from access read models.
+
 Ordinary pairing links grant the four client-operation scopes and read access to
 managed relay connectivity:
 `orchestration:read orchestration:operate terminal:operate review:write relay:read`.
@@ -69,6 +74,12 @@ The response has the token-exchange shape:
 Requested scopes must be a subset of the one-time bootstrap credential grant.
 An ordinary paired client therefore cannot exchange its grant for
 `access:read`, `access:write`, or `relay:write`.
+
+The reusable `desktop-bootstrap` grant replaces active sessions with the same
+subject and authentication method. Revocation and insertion share one database
+transaction, so a failed insertion preserves the previous credential. This also
+removes stale local desktop entries from earlier launches. Browser-cookie sessions
+and sessions issued through pairing links are not replaced.
 
 ### WebSocket Ticket
 
