@@ -528,6 +528,19 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const readEvents: OrchestrationEngineShape['readEvents'] = (fromSequenceExclusive, limit) =>
     eventStore.readFromSequence(fromSequenceExclusive, limit)
 
+  const readThreadEvents: OrchestrationEngineShape['readThreadEvents'] = ({ threadId, ...range }) =>
+    eventStore.readAggregateRange({ ...range, aggregateKind: 'thread', aggregateId: threadId })
+
+  const getThreadReplayStats: OrchestrationEngineShape['getThreadReplayStats'] = ({
+    threadId,
+    ...range
+  }) =>
+    eventStore.getAggregateReplayStats({
+      ...range,
+      aggregateKind: 'thread',
+      aggregateId: threadId,
+    })
+
   const dispatchCommand = (
     command: OrchestrationCommand,
     causalSettlementAuthority: OrchestrationCausalSettlementAuthority | null,
@@ -582,6 +595,8 @@ const makeOrchestrationEngine = Effect.gen(function* ()
 
   return {
     readEvents,
+    readThreadEvents,
+    getThreadReplayStats,
     dispatch,
     dispatchInternal,
     // each access creates a fresh PubSub subscription so that multiple

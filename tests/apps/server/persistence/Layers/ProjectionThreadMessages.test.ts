@@ -1,7 +1,7 @@
 // tests/apps/server/persistence/Layers/ProjectionThreadMessages.test.ts
 // verify projection thread messages behavior
 
-import { MessageId, ThreadId } from '@t3tools/contracts'
+import { MessageId, ThreadId, TurnId } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -16,6 +16,64 @@ const layer = it.layer(
 
 layer('ProjectionThreadMessageRepository', (it) =>
 {
+  it.effect('atomically appends streaming text with prior upsert field semantics', () =>
+    Effect.gen(function* ()
+    {
+      const repository = yield* ProjectionThreadMessageRepository
+      const threadId = ThreadId.make('thread-streaming-append')
+      const messageId = MessageId.make('message-streaming-append')
+      const turnId = TurnId.make('turn-streaming-append')
+      const createdAt = '2026-02-28T18:00:00.000Z'
+      const updatedAt = '2026-02-28T18:00:01.000Z'
+      const attachments = [
+        {
+          type: 'image' as const,
+          id: 'thread-streaming-append-att-1',
+          name: 'example.png',
+          mimeType: 'image/png',
+          sizeBytes: 5,
+        },
+      ]
+
+      yield* repository.appendStreaming({
+        messageId,
+        threadId,
+        turnId,
+        role: 'assistant',
+        text: 'hello',
+        attachments,
+        createdAt,
+        updatedAt: createdAt,
+      })
+      yield* repository.appendStreaming({
+        messageId,
+        threadId: ThreadId.make('thread-streaming-append-wrong'),
+        turnId: TurnId.make('turn-streaming-append-wrong'),
+        role: 'user',
+        text: ' world',
+        createdAt: updatedAt,
+        updatedAt,
+      })
+
+      const row = yield* repository.getByMessageId({ messageId })
+      assert.equal(row._tag, 'Some')
+      if (row._tag === 'Some')
+      {
+        assert.deepEqual(row.value, {
+          messageId,
+          threadId: ThreadId.make('thread-streaming-append-wrong'),
+          turnId: TurnId.make('turn-streaming-append-wrong'),
+          role: 'user',
+          text: 'hello world',
+          attachments,
+          isStreaming: true,
+          createdAt,
+          updatedAt,
+        })
+      }
+    }),
+  )
+
   it.effect('preserves existing attachments when upsert omits attachments', () =>
     Effect.gen(function* ()
     {

@@ -252,4 +252,56 @@ projectionRepositoriesLayer('Projection repositories', (it) =>
       )
     }),
   )
+
+  it.effect('filters user-input lifecycle rows before decoding payload JSON', () =>
+    Effect.gen(function* ()
+    {
+      const activities = yield* ProjectionThreadActivityRepository
+      const sql = yield* SqlClient.SqlClient
+      const threadId = ThreadId.make('thread-user-input-lifecycle')
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-malformed-tool',
+            ${threadId},
+            NULL,
+            'tool',
+            'tool.completed',
+            'Malformed tool output',
+            '{not-json',
+            1,
+            '2026-03-24T00:00:00.000Z'
+          ),
+          (
+            'activity-user-input-requested',
+            ${threadId},
+            NULL,
+            'info',
+            'user-input.requested',
+            'User input requested',
+            '{"requestId":"request-1"}',
+            2,
+            '2026-03-24T00:00:01.000Z'
+          )
+      `
+
+      const rows = yield* activities.listUserInputLifecycleByThreadId({ threadId })
+      assert.deepStrictEqual(
+        rows.map((row) => row.activityId),
+        [EventId.make('activity-user-input-requested')],
+      )
+    }),
+  )
 })

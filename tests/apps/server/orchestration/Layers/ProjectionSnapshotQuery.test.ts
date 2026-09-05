@@ -15,13 +15,16 @@ import { assert, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as Tracer from 'effect/Tracer'
 
 import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import ProjectionThreadCommandActivityIndexesMigration from '../../../../../apps/server/src/persistence/Migrations/036_ProjectionThreadCommandActivityIndexes.ts'
 import HealOrchestratePlanRespondFailureMigration from '../../../../../apps/server/src/persistence/Migrations/069_HealOrchestratePlanRespondFailure.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { decideOrchestrationCommand } from '../../../../../apps/server/src/orchestration/decider.ts'
+import { projectThreadDetailSnapshot } from '../../../../../apps/server/src/orchestration/ActivityPayloadProjection.ts'
 import { ORCHESTRATION_PROJECTOR_NAMES } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import {
   COMMAND_THREAD_ACTIVITY_QUERY_SQL,
@@ -35,6 +38,7 @@ const asTurnId = (value: string): TurnId => TurnId.make(value)
 const asMessageId = (value: string): MessageId => MessageId.make(value)
 const asEventId = (value: string): EventId => EventId.make(value)
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 
 const clearProjectionTables = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* ()
@@ -547,6 +551,166 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
       if (threadDetail._tag === 'Some')
       {
         assert.deepEqual(threadDetail.value, snapshot.threads[0])
+      }
+    }),
+  )
+
+  it.effect('measures serialized replay bytes without decoding event payloads', () =>
+    Effect.gen(function* ()
+    {
+      const snapshotQuery = yield* ProjectionSnapshotQuery
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql`DELETE FROM orchestration_events`
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        VALUES
+          (
+            'replay-event-before',
+            'thread',
+            'thread-replay',
+            0,
+            'thread.activity-appended',
+            '2026-03-01T00:00:00.000Z',
+            NULL,
+            NULL,
+            NULL,
+            'provider',
+            '{}',
+            '{}'
+          ),
+          (
+            'replay-event-invalid-json',
+            'thread',
+            'thread-replay',
+            1,
+            'thread.activity-appended',
+            '2026-03-01T00:00:01.000Z',
+            NULL,
+            NULL,
+            NULL,
+            'provider',
+            '{not-json',
+            '{}'
+          ),
+          (
+            'replay-event-emoji',
+            'thread',
+            'thread-replay',
+            2,
+            'thread.activity-appended',
+            '2026-03-01T00:00:02.000Z',
+            NULL,
+            NULL,
+            NULL,
+            'provider',
+            '{"output":"😀"}',
+            '{}'
+          )
+      `
+      const sequenceRows = yield* sql<{
+        readonly eventId: string
+        readonly sequence: number
+      }>`
+        SELECT event_id AS "eventId", sequence
+        FROM orchestration_events
+        ORDER BY sequence ASC
+      `
+
+      const stats = yield* snapshotQuery.getEventReplayStats({
+        fromSequenceExclusive: sequenceRows[0]!.sequence,
+        toSequenceInclusive: sequenceRows[2]!.sequence,
+      })
+      assert.deepStrictEqual(stats, {
+        eventCount: 2,
+        payloadBytes: 26,
+      })
+    }),
+  )
+
+  it.effect('filters targeted activities before payload decoding', () =>
+    Effect.gen(function* ()
+    {
+      const snapshotQuery = yield* ProjectionSnapshotQuery
+      const sql = yield* SqlClient.SqlClient
+      yield* clearProjectionTables(sql)
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json, scripts_json,
+          created_at, updated_at, deleted_at
+        ) VALUES (
+          'project-filtered-detail', 'Filtered detail', '/tmp/filtered-detail',
+          '{"provider":"codex","model":"gpt-5"}', '[]',
+          '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL
+        )
+      `
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, created_at, updated_at
+        ) VALUES (
+          'thread-filtered-detail', 'project-filtered-detail', 'Filtered detail',
+          '{"provider":"codex","model":"gpt-5"}',
+          '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z'
+        )
+      `
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, sequence, created_at
+        ) VALUES
+          (
+            'activity-task-started', 'thread-filtered-detail', NULL, 'info', 'task.started',
+            'Ship the query filter', '{"taskId":"task-1"}', 1,
+            '2026-03-01T00:00:01.000Z'
+          ),
+          (
+            'activity-malformed-tool', 'thread-filtered-detail', NULL, 'tool', 'tool.completed',
+            'Malformed tool output', 'not-json', 2, '2026-03-01T00:00:02.000Z'
+          )
+      `
+
+      const withoutActivities = yield* snapshotQuery.getThreadDetailById(
+        ThreadId.make('thread-filtered-detail'),
+        { activityKinds: [] },
+      )
+      assert.equal(withoutActivities._tag, 'Some')
+      if (withoutActivities._tag === 'Some')
+      {
+        assert.deepEqual(withoutActivities.value.activities, [])
+      }
+
+      const withTaskActivities = yield* snapshotQuery.getThreadDetailById(
+        ThreadId.make('thread-filtered-detail'),
+        { activityKinds: ['task.started', 'task.progress'] },
+      )
+      assert.equal(withTaskActivities._tag, 'Some')
+      if (withTaskActivities._tag === 'Some')
+      {
+        assert.deepEqual(withTaskActivities.value.activities, [
+          {
+            id: EventId.make('activity-task-started'),
+            tone: 'info',
+            kind: 'task.started',
+            summary: 'Ship the query filter',
+            payload: { taskId: 'task-1' },
+            turnId: null,
+            sequence: 1,
+            createdAt: '2026-03-01T00:00:01.000Z',
+          },
+        ])
       }
     }),
   )
@@ -1887,9 +2051,43 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           'thread-bounded-detail',
           NULL,
           'info',
-          'runtime.note',
+          CASE
+            WHEN value = 2 THEN 'tool.updated'
+            WHEN value = 80 THEN 'tool.completed'
+            WHEN value IN (3, 70) THEN 'context-window.updated'
+            ELSE 'runtime.note'
+          END,
           'Later activity',
-          '{}',
+          CASE
+            WHEN value IN (2, 80) THEN json_object(
+              'itemType', 'command_execution',
+              'toolCallId', 'cross-batch-call',
+              'title', CASE WHEN value = 80 THEN 'Build completed' ELSE 'Build' END,
+              'status', 'completed',
+              'data', json_object(
+                'toolCallId', 'cross-batch-call',
+                'item', json_object(
+                  'command', 'vp test run',
+                  'aggregatedOutput', printf(
+                    'command output%s%s',
+                    char(13) || char(10),
+                    replace(hex(zeroblob(8192)), '00', 'x')
+                  )
+                ),
+                'rawOutput', printf(
+                  'raw output%s%s',
+                  char(13) || char(10),
+                  replace(hex(zeroblob(8192)), '00', 'y')
+                ),
+                'files', json_array(json_object('path', 'apps/server/src/snapshot.ts'))
+              )
+            )
+            WHEN value IN (3, 70) THEN json_object(
+              'usedTokens', value * 100,
+              'modelContextWindow', 100000
+            )
+            ELSE json_object('value', value)
+          END,
           value + 2,
           printf('2026-08-16T01:%02d:%02d.000Z', value / 60, value % 60)
         FROM activity_numbers
@@ -1964,6 +2162,77 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           assert.isFalse(activityIds.includes(asEventId('activity-bounded-note-001')))
           assert.isTrue(activityIds.includes(asEventId('activity-bounded-note-002')))
           assert.isTrue(activityIds.includes(asEventId('activity-bounded-note-501')))
+        }
+
+        const payloadQuerySpans: Array<{
+          readonly startTime: bigint
+          readonly endTime: bigint
+          readonly query: string
+        }> = []
+        const queryTracer = Tracer.make({
+          span: (options) =>
+          {
+            const span = new Tracer.NativeSpan(options)
+            const end = span.end.bind(span)
+            span.end = (endTime, exit) =>
+            {
+              end(endTime, exit)
+              const query = span.attributes.get('db.query.text')
+              if (
+                typeof query === 'string' &&
+                query.includes('payload_json AS "payload"') &&
+                query.includes('"activity_id" IN (')
+              )
+              {
+                payloadQuerySpans.push({ startTime: span.startTime, endTime, query })
+              }
+            }
+            return span
+          },
+        })
+        const clientSnapshot = yield* snapshotQuery
+          .getThreadDetailSnapshot(ThreadId.make('thread-bounded-detail'))
+          .pipe(Effect.withTracer(queryTracer))
+        assert.equal(clientSnapshot._tag, 'Some')
+        assert.equal(payloadQuerySpans.length, Math.ceil(503 / 25))
+        for (let index = 0; index < payloadQuerySpans.length; index += 1)
+        {
+          const current = payloadQuerySpans[index]!
+          assert.isAtMost(current.query.match(/\?/gu)?.length ?? 0, 25)
+          if (index > 0)
+          {
+            assert.isTrue(payloadQuerySpans[index - 1]!.endTime <= current.startTime)
+          }
+        }
+        if (detail._tag === 'Some' && clientSnapshot._tag === 'Some')
+        {
+          const projectedClientSnapshot = projectThreadDetailSnapshot(clientSnapshot.value)
+          const projectedRawBaseline = projectThreadDetailSnapshot({
+            snapshotSequence: clientSnapshot.value.snapshotSequence,
+            thread: detail.value,
+          })
+          assert.deepStrictEqual(projectedClientSnapshot, projectedRawBaseline)
+
+          const projectedActivities = projectedClientSnapshot.thread.activities
+          const latestContextWindow = projectedActivities.find(
+            (activity) => activity.id === asEventId('activity-bounded-note-070'),
+          )
+          assert.deepEqual(latestContextWindow?.payload, {
+            usedTokens: 7000,
+            modelContextWindow: 100000,
+          })
+
+          const completedCommand = projectedActivities.find(
+            (activity) => activity.id === asEventId('activity-bounded-note-080'),
+          )
+          assert.isDefined(completedCommand)
+          if (completedCommand)
+          {
+            const completedPayloadJson = encodeUnknownJsonString(completedCommand.payload)
+            assert.isBelow(completedPayloadJson.length, 1_000)
+            assert.notInclude(completedPayloadJson, 'xxxxxxxxxx')
+            assert.notInclude(completedPayloadJson, 'yyyyyyyyyy')
+          }
         }
       }),
   )

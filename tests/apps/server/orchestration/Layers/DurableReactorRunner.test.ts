@@ -81,6 +81,8 @@ const TestEngineLive = Layer.effect(
             ),
           ),
         ),
+      readThreadEvents: () => Stream.die('thread replay is not used by runner tests'),
+      getThreadReplayStats: () => Effect.die('thread replay stats are not used by runner tests'),
       dispatch: () => Effect.die(new Error('dispatch is not used by runner tests')),
       dispatchInternal: () =>
         Effect.die(new Error('internal dispatch is not used by runner tests')),

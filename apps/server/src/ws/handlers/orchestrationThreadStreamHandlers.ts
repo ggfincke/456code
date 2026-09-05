@@ -74,7 +74,8 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   )
 }
 
-export const RESUME_MAX_EVENT_GAP = 1_000
+const THREAD_RESUME_MAX_EVENTS = 1_000
+const ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES = 8 * 1024 * 1024
 
 export function makeOrchestrationThreadStreamHandlers({
   orchestrationEngine,
@@ -109,6 +110,8 @@ export function makeOrchestrationThreadStreamHandlers({
             { startImmediately: true },
           )
           const bufferedLiveStream = Stream.fromQueue(liveBuffer)
+          let replayOnMissingSnapshot:
+            Stream.Stream<OrchestrationThreadStreamItem, OrchestrationGetSnapshotError> | undefined
           const loadSnapshot = projectionSnapshotQuery.getThreadDetailSnapshot(input.threadId).pipe(
             Effect.mapError(
               (cause) =>
@@ -149,47 +152,78 @@ export function makeOrchestrationThreadStreamHandlers({
           // catch-up followed by the buffered/ongoing live events. Overlapping
           // events are deduped by sequence on the client.
           //
-          // bound the catch-up at the head captured before reading so it
-          // cannot chase a moving store. Stale or invalid cursors get a fresh
-          // detail snapshot instead of scanning the full global event history.
+          // measure only this thread's rows and bound the catch-up at the head
+          // captured before reading. Unrelated global traffic does not force a
+          // reset, while stale or oversized selected ranges use a fresh detail
+          // snapshot.
           if (input.afterSequence !== undefined)
           {
             const afterSequence = input.afterSequence
             const headSequence = yield* orchestrationEngine.latestSequence
-            const replayGap = headSequence - afterSequence
-            if (replayGap < 0 || replayGap > RESUME_MAX_EVENT_GAP)
-            {
-              const snapshot = yield* loadSnapshot
-              if (Option.isNone(snapshot))
-              {
-                return yield* new OrchestrationGetSnapshotError({
-                  message: `Thread ${input.threadId} was not found`,
-                  cause: input.threadId,
-                })
-              }
-              return snapshotThenLive(snapshot.value)
+            const range = {
+              threadId: input.threadId,
+              fromSequenceExclusive: afterSequence,
+              toSequenceInclusive: headSequence,
             }
-            const catchUpStream = orchestrationEngine.readEvents(afterSequence, replayGap).pipe(
-              Stream.filter(isThisThreadDetailEvent),
-              Stream.map((event) => ({
-                kind: 'event' as const,
-                event: projectActivityEvent(event),
-              })),
-              Stream.mapError(
-                (cause) =>
-                  new OrchestrationGetSnapshotError({
-                    message: `Failed to replay thread ${input.threadId} events`,
-                    cause,
-                  }),
-              ),
+            const replayStats =
+              afterSequence > headSequence
+                ? null
+                : yield* orchestrationEngine
+                    .getThreadReplayStats({
+                      ...range,
+                      maxEvents: THREAD_RESUME_MAX_EVENTS,
+                    })
+                    .pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: `Failed to measure thread ${input.threadId} replay range`,
+                            cause,
+                          }),
+                      ),
+                    )
+            if (
+              replayStats !== null &&
+              replayStats.eventCount <= THREAD_RESUME_MAX_EVENTS &&
+              replayStats.payloadBytes <= ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES
             )
-            return Stream.concat(catchUpStream, afterCatchUp)
+            {
+              const catchUpStream = orchestrationEngine
+                .readThreadEvents({ ...range, limit: THREAD_RESUME_MAX_EVENTS })
+                .pipe(
+                  Stream.filter(isThisThreadDetailEvent),
+                  Stream.map((event) => ({
+                    kind: 'event' as const,
+                    event: projectActivityEvent(event),
+                  })),
+                  Stream.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to replay thread ${input.threadId} events`,
+                        cause,
+                      }),
+                  ),
+                )
+              const replay = Stream.concat(catchUpStream, afterCatchUp)
+              if (!replayStats.hasCreateEvent)
+              {
+                return replay
+              }
+              replayOnMissingSnapshot = replay
+            }
           }
 
           const snapshot = yield* loadSnapshot
 
           if (Option.isNone(snapshot))
           {
+            // a recreated thread may already be deleted. Preserve its bounded
+            // replay so shell subscribers can apply the removal; oversized or
+            // invalid ranges still fail because no safe snapshot exists.
+            if (replayOnMissingSnapshot !== undefined)
+            {
+              return replayOnMissingSnapshot
+            }
             return yield* new OrchestrationGetSnapshotError({
               message: `Thread ${input.threadId} was not found`,
               cause: input.threadId,

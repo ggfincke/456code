@@ -9,13 +9,21 @@
 // replay, and unknown-input decoding all return typed domain errors.
 //
 // @module OrchestrationEngineService
-import type { OrchestrationCommand, OrchestrationEvent } from '@t3tools/contracts'
+import type { OrchestrationCommand, OrchestrationEvent, ThreadId } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
 import type * as Stream from 'effect/Stream'
 
 import type { OrchestrationDispatchError } from '../Errors.ts'
 import type { OrchestrationEventStoreError } from '../../persistence/Errors.ts'
+import type { OrchestrationAggregateReplayStats } from '../../persistence/Services/OrchestrationEventStore.ts'
+
+export interface OrchestrationThreadReplayRange
+{
+  readonly threadId: ThreadId
+  readonly fromSequenceExclusive: number
+  readonly toSequenceInclusive: number
+}
 
 export type OrchestrationCausalSettlementCommand = Extract<
   OrchestrationCommand,
@@ -45,6 +53,16 @@ export interface OrchestrationEngineShape
     fromSequenceExclusive: number,
     limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>
+
+  // replay only this thread through a captured authoritative head
+  readonly readThreadEvents: (
+    input: OrchestrationThreadReplayRange & { readonly limit?: number },
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
+
+  // measure a bounded thread replay without decoding its payload bodies
+  readonly getThreadReplayStats: (
+    input: OrchestrationThreadReplayRange & { readonly maxEvents: number },
+  ) => Effect.Effect<OrchestrationAggregateReplayStats, OrchestrationEventStoreError>
 
   // dispatch a validated orchestration command.
   //

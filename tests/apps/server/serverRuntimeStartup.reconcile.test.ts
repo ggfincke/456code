@@ -56,6 +56,9 @@ const makeEngineStub = (
   dispatch: OrchestrationEngine.OrchestrationEngineService['Service']['dispatch'],
 ): OrchestrationEngine.OrchestrationEngineService['Service'] => ({
   readEvents: () => Stream.empty,
+  readThreadEvents: () => Stream.die('thread replay is not used by reconciliation tests'),
+  getThreadReplayStats: () =>
+    Effect.die('thread replay stats are not used by reconciliation tests'),
   dispatch,
   dispatchInternal: () => Effect.die('unused'),
   streamDomainEvents: Stream.empty,

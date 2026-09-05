@@ -285,6 +285,7 @@ function isEphemeralMutationPath(value: string): boolean
 // describe an edit that has not run yet: an edit the user then denies would
 // otherwise be indistinguishable from one that landed
 const MUTATION_EVIDENCE_ACTIVITY_KINDS: ReadonlySet<string> = new Set(['tool.completed'])
+const MUTATION_EVIDENCE_ACTIVITY_FILTER = ['tool.completed'] as const
 
 // what a turn demonstrably wrote, read back off its own activity rows
 interface TurnMutationEvidence
@@ -728,10 +729,13 @@ const make = Effect.gen(function* ()
       : Option.none()
   })
 
-  const resolveThreadDetail = Effect.fn('resolveThreadDetail')(function* (threadId: ThreadId)
+  const resolveThreadDetail = Effect.fn('resolveThreadDetail')(function* (
+    threadId: ThreadId,
+    activityKinds: ReadonlyArray<string> = [],
+  )
   {
     return yield* projectionSnapshotQuery
-      .getThreadDetailById(threadId)
+      .getThreadDetailById(threadId, { activityKinds })
       .pipe(Effect.map(Option.getOrUndefined))
   })
 
@@ -1016,7 +1020,7 @@ const make = Effect.gen(function* ()
         return 'skipped' as const
       }
 
-      const thread = yield* resolveThreadDetail(event.threadId)
+      const thread = yield* resolveThreadDetail(event.threadId, MUTATION_EVIDENCE_ACTIVITY_FILTER)
       if (!thread)
       {
         return 'skipped' as const
@@ -1092,7 +1096,7 @@ const make = Effect.gen(function* ()
       return
     }
 
-    const thread = yield* resolveThreadDetail(threadId)
+    const thread = yield* resolveThreadDetail(threadId, MUTATION_EVIDENCE_ACTIVITY_FILTER)
     if (!thread)
     {
       yield* Effect.logWarning('checkpoint capture from placeholder skipped: thread not found', {
@@ -2440,7 +2444,10 @@ const make = Effect.gen(function* ()
       // and the later read gives that lane time to land this turn's last rows
       if (outcome === 'no-workspace' && turnId !== null)
       {
-        const completedThread = yield* resolveThreadDetail(event.threadId)
+        const completedThread = yield* resolveThreadDetail(
+          event.threadId,
+          MUTATION_EVIDENCE_ACTIVITY_FILTER,
+        )
         if (completedThread)
         {
           // the workspace directory is resolved again without the git gate: a

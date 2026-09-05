@@ -3319,21 +3319,20 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         ),
       )
       const activeSessions = sessionsByProvider.flatMap((sessions) => sessions)
-      const persistedBindings = yield* directory.listThreadIds().pipe(
-        Effect.flatMap((threadIds) =>
-          Effect.forEach(
-            threadIds,
-            (threadId) =>
-              directory
-                .getBinding(threadId)
-                .pipe(
-                  Effect.orElseSucceed(() =>
-                    Option.none<ProviderSessionDirectory.ProviderRuntimeBinding>(),
-                  ),
-                ),
-            { concurrency: 'unbounded' },
-          ),
-        ),
+      // only live adapter sessions appear here
+      // look up each unique active thread instead of scanning historical bindings
+      const persistedBindings = yield* Effect.forEach(
+        [...new Set(activeSessions.map((session) => session.threadId))],
+        (threadId) =>
+          directory
+            .getBinding(threadId)
+            .pipe(
+              Effect.orElseSucceed(() =>
+                Option.none<ProviderSessionDirectory.ProviderRuntimeBinding>(),
+              ),
+            ),
+        { concurrency: 'unbounded' },
+      ).pipe(
         Effect.orElseSucceed(
           () => [] as Array<Option.Option<ProviderSessionDirectory.ProviderRuntimeBinding>>,
         ),

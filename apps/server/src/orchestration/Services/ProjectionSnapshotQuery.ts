@@ -41,6 +41,18 @@ export interface ProjectionSnapshotSequence
   readonly snapshotSequence: number
 }
 
+export interface ProjectionEventReplayStats
+{
+  readonly eventCount: number
+  readonly payloadBytes: number
+}
+
+export interface ProjectionThreadDetailQuery
+{
+  // any explicit filter omits pinned reads; an empty list skips activity SQL.
+  readonly activityKinds?: ReadonlyArray<string>
+}
+
 export interface ProjectionThreadCheckpointContext
 {
   readonly threadId: ThreadId
@@ -137,6 +149,12 @@ export interface ProjectionSnapshotQueryShape
   // read aggregate projection counts without hydrating the full read model.
   readonly getCounts: () => Effect.Effect<ProjectionSnapshotCounts, ProjectionRepositoryError>
 
+  // measure serialized event payloads without decoding them.
+  readonly getEventReplayStats: (input: {
+    readonly fromSequenceExclusive: number
+    readonly toSequenceInclusive: number
+  }) => Effect.Effect<ProjectionEventReplayStats, ProjectionRepositoryError>
+
   // read the narrow project and imported-thread metadata needed to reconcile
   // external session history without hydrating shell or thread bodies.
   readonly getImportReconciliationContext: () => Effect.Effect<
@@ -202,6 +220,7 @@ export interface ProjectionSnapshotQueryShape
   // read a single active thread detail snapshot by id.
   readonly getThreadDetailById: (
     threadId: ThreadId,
+    query?: ProjectionThreadDetailQuery,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>
 
   // read a single active thread detail together with the projection snapshot

@@ -38,10 +38,10 @@ import * as ServerRuntimeStartup from '../../serverRuntimeStartup.ts'
 import type * as ServerSettings from '../../serverSettings.ts'
 import type { makeRpcAuthorization } from '../rpcAuthorization.ts'
 import { makeOrchestrationImportHandlers } from './orchestrationImportHandlers.ts'
-import {
-  makeOrchestrationThreadStreamHandlers,
-  RESUME_MAX_EVENT_GAP,
-} from './orchestrationThreadStreamHandlers.ts'
+import { makeOrchestrationThreadStreamHandlers } from './orchestrationThreadStreamHandlers.ts'
+
+const SHELL_RESUME_MAX_GAP = 1_000
+const ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES = 8 * 1024 * 1024
 
 type WsRpcHandlers = RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof WsRpcGroup>>
 type OrchestrationRpcMethod =
@@ -517,13 +517,33 @@ export function makeOrchestrationRpcHandlers({
             const afterSequence = input.afterSequence
             const headSequence = yield* orchestrationEngine.latestSequence
             const replayGap = headSequence - afterSequence
+            const replayStats =
+              replayGap < 0 || replayGap > SHELL_RESUME_MAX_GAP
+                ? null
+                : yield* projectionSnapshotQuery
+                    .getEventReplayStats({
+                      fromSequenceExclusive: afterSequence,
+                      toSequenceInclusive: headSequence,
+                    })
+                    .pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: 'Failed to measure orchestration shell replay range',
+                            cause,
+                          }),
+                      ),
+                    )
             // gap too large: replaying every intervening event (each a shell
             // refetch) is far more expensive than a single O(active-threads)
             // snapshot. A cursor ahead of this engine's authoritative state
-            // is also invalid, so reset it with a snapshot. Send the snapshot
-            // followed by the buffered live tail, exactly as the
-            // no-afterSequence path does.
-            if (replayGap < 0 || replayGap > RESUME_MAX_EVENT_GAP)
+            // is also invalid. Even an eligible gap must fit the SQL-measured
+            // row and serialized-byte limits before payloads are decoded.
+            if (
+              replayStats === null ||
+              replayStats.eventCount > SHELL_RESUME_MAX_GAP ||
+              replayStats.payloadBytes > ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES
+            )
             {
               const snapshot = yield* loadSnapshot
               return Stream.concat(

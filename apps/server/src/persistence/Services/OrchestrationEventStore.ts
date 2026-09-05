@@ -15,6 +15,22 @@ import type * as Stream from 'effect/Stream'
 
 import type { OrchestrationEventStoreError } from '../Errors.ts'
 
+export interface OrchestrationAggregateReplayRange
+{
+  readonly aggregateKind: OrchestrationEvent['aggregateKind']
+  readonly aggregateId: string
+  readonly fromSequenceExclusive: number
+  readonly toSequenceInclusive: number
+}
+
+export interface OrchestrationAggregateReplayStats
+{
+  readonly eventCount: number
+  readonly payloadBytes: number
+  // a creation in this range does not prove that the aggregate still exists
+  readonly hasCreateEvent: boolean
+}
+
 /**
  * OrchestrationEventStoreShape - Service API for orchestration event persistence.
  */
@@ -46,6 +62,18 @@ export interface OrchestrationEventStoreShape
     sequenceExclusive: number,
     limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
+
+  // replay one aggregate through a captured global head without decoding
+  // payloads from unrelated streams
+  readonly readAggregateRange: (
+    input: OrchestrationAggregateReplayRange & { readonly limit?: number },
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
+
+  // measure at most maxEvents + 1 rows without decoding payload bodies; the
+  // extra row tells callers to use a snapshot rather than truncate the replay
+  readonly getAggregateReplayStats: (
+    input: OrchestrationAggregateReplayRange & { readonly maxEvents: number },
+  ) => Effect.Effect<OrchestrationAggregateReplayStats, OrchestrationEventStoreError>
 
   // read all events from the beginning of the stream.
   //

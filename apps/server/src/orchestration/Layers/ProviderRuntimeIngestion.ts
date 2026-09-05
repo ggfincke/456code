@@ -88,6 +88,7 @@ export { runtimeEventToActivities }
 
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== '0'
 const PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION = 1
+const TASK_METADATA_ACTIVITY_KINDS = ['task.started', 'task.progress', 'task.completed'] as const
 
 const ProviderRuntimeIngestionBufferV1 = Schema.Struct({
   version: Schema.Literal(PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION),
@@ -379,10 +380,13 @@ const make = Effect.gen(function* ()
       )
     })
 
-  const resolveThreadDetail = Effect.fn('resolveThreadDetail')(function* (threadId: ThreadId)
+  const resolveThreadDetail = Effect.fn('resolveThreadDetail')(function* (
+    threadId: ThreadId,
+    activityKinds: ReadonlyArray<string> = [],
+  )
   {
     return yield* projectionSnapshotQuery
-      .getThreadDetailById(threadId)
+      .getThreadDetailById(threadId, { activityKinds })
       .pipe(Effect.map(Option.getOrUndefined))
   })
 
@@ -991,7 +995,8 @@ const make = Effect.gen(function* ()
           {
             return loadedThreadDetail
           }
-          loadedThreadDetail = (yield* resolveThreadDetail(thread.id)) ?? null
+          loadedThreadDetail =
+            (yield* resolveThreadDetail(thread.id, TASK_METADATA_ACTIVITY_KINDS)) ?? null
           return loadedThreadDetail
         })
 

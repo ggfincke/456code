@@ -16,6 +16,7 @@ export const makeProjectionSnapshotQueryStub = (
     Effect.die('unexpected ProjectionSnapshotQuery.getArchivedShellSnapshot'),
   getSnapshotSequence: () => Effect.die('unexpected ProjectionSnapshotQuery.getSnapshotSequence'),
   getCounts: () => Effect.die('unexpected ProjectionSnapshotQuery.getCounts'),
+  getEventReplayStats: () => Effect.die('unexpected ProjectionSnapshotQuery.getEventReplayStats'),
   getImportReconciliationContext: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.getImportReconciliationContext'),
   getActiveProjectByWorkspaceRoot: () =>
