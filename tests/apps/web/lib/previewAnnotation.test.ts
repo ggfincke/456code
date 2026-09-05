@@ -1,12 +1,13 @@
 // tests/apps/web/lib/previewAnnotation.test.ts
-// verify preview annotations behavior
+// verify preview annotation prompt and screenshot behavior
 
 import type { PreviewAnnotationPayload } from '@t3tools/contracts'
-import { describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import {
   appendPreviewAnnotationPrompt,
   buildPreviewAnnotationPrompt,
+  capturePreviewAnnotationScreenshot,
   extractTrailingPreviewAnnotation,
 } from '../../../../apps/web/src/lib/previewAnnotation'
 
@@ -39,7 +40,8 @@ const annotation: PreviewAnnotationPayload = {
     },
   ],
   screenshot: {
-    dataUrl: 'data:image/png;base64,AA==',
+    dataUrl:
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     width: 100,
     height: 80,
     cropRect: { x: 10, y: 20, width: 100, height: 80 },
@@ -49,6 +51,11 @@ const annotation: PreviewAnnotationPayload = {
 
 describe('preview annotations', () =>
 {
+  afterEach(() =>
+  {
+    vi.unstubAllGlobals()
+  })
+
   it('describes regions, drawings, styles, and screenshot context', () =>
   {
     const result = buildPreviewAnnotationPrompt(annotation)
@@ -91,5 +98,38 @@ describe('preview annotations', () =>
     expect(extractedSecond.annotation?.id).toBe('annotation_2')
     expect(extractedFirst.annotation?.id).toBe('annotation_1')
     expect(extractedFirst.promptText).toBe('Fix this')
+  })
+
+  it('distinguishes absent, captured, and malformed screenshots without fetching data URLs', async () =>
+  {
+    const fetchMock = vi.fn(() =>
+    {
+      throw new TypeError('Failed to fetch')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      capturePreviewAnnotationScreenshot({ ...annotation, screenshot: null }),
+    ).resolves.toEqual({ status: 'none' })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    const captured = await capturePreviewAnnotationScreenshot(annotation)
+    expect(captured.status).toBe('captured')
+    if (captured.status === 'captured')
+    {
+      expect(captured.file).toMatchObject({
+        name: 'preview-annotation-annotation_1.png',
+        type: 'image/png',
+        size: 68,
+      })
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await expect(
+      capturePreviewAnnotationScreenshot({
+        ...annotation,
+        screenshot: { ...annotation.screenshot!, dataUrl: 'data:image/png;base64,not-base64!' },
+      }),
+    ).resolves.toEqual({ status: 'failed' })
   })
 })

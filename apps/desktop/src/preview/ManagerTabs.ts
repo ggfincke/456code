@@ -673,9 +673,9 @@ export const createTabOperations = (deps: ManagerTabsDeps) =>
     colorScheme: DesktopPreviewColorScheme,
   )
   {
-    yield* ensureControlSession(wc)
+    const control = yield* ensureControlSession(wc)
     yield* attemptPromise({ operation: 'applyColorScheme', tabId, webContentsId: wc.id }, () =>
-      wc.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      control.debugger.sendCommand('Emulation.setEmulatedMedia', {
         features: [
           {
             name: 'prefers-color-scheme',

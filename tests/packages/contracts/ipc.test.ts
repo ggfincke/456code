@@ -1,5 +1,5 @@
 // tests/packages/contracts/ipc.test.ts
-// verify desktop environment bootstrap schema behavior
+// verify desktop IPC schema behavior
 
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vite-plus/test'
@@ -9,12 +9,14 @@ import {
   DesktopPreviewTabStateSchema,
   FAVICON_CAPTURED_AT_MAX,
   FAVICON_DATA_URL_MAX_LENGTH,
+  PreviewAnnotationPayloadSchema,
 } from '../../../packages/contracts/src/ipc.ts'
 
 const decodeDesktopEnvironmentBootstrap = Schema.decodeUnknownSync(
   DesktopEnvironmentBootstrapSchema,
 )
 const decodeDesktopPreviewTabState = Schema.decodeUnknownSync(DesktopPreviewTabStateSchema)
+const decodePreviewAnnotationPayload = Schema.decodeUnknownSync(PreviewAnnotationPayloadSchema)
 
 describe('DesktopEnvironmentBootstrapSchema', () =>
 {
@@ -34,6 +36,31 @@ describe('DesktopEnvironmentBootstrapSchema', () =>
       runningDistro: 'Ubuntu',
       httpBaseUrl: 'http://127.0.0.1:3774/',
       wsBaseUrl: 'ws://127.0.0.1:3774/',
+    })
+  })
+})
+
+describe('PreviewAnnotationPayloadSchema', () =>
+{
+  const annotation = {
+    id: 'annotation-1',
+    pageUrl: 'http://localhost:5173',
+    pageTitle: 'Preview',
+    comment: 'Tighten this card.',
+    elements: [],
+    regions: [],
+    strokes: [],
+    styleChanges: [],
+    screenshot: null,
+    createdAt: '2026-09-05T00:00:00.000Z',
+  }
+
+  it('accepts legacy payloads and preserves an optional screenshot failure', () =>
+  {
+    expect(decodePreviewAnnotationPayload(annotation)).toEqual(annotation)
+    expect(decodePreviewAnnotationPayload({ ...annotation, screenshotFailed: true })).toEqual({
+      ...annotation,
+      screenshotFailed: true,
     })
   })
 })

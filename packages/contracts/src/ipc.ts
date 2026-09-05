@@ -1005,6 +1005,8 @@ export interface PreviewAnnotationPayload
   strokes: ReadonlyArray<PreviewAnnotationStrokeTarget>
   styleChanges: ReadonlyArray<PreviewAnnotationStyleChange>
   screenshot: PreviewAnnotationScreenshot | null
+  // true when desktop crop capture failed or timed out
+  screenshotFailed?: boolean
   createdAt: string
 }
 
@@ -1019,6 +1021,7 @@ export const PreviewAnnotationPayloadSchema: Schema.Codec<PreviewAnnotationPaylo
     strokes: Schema.Array(PreviewAnnotationStrokeTargetSchema),
     styleChanges: Schema.Array(PreviewAnnotationStyleChangeSchema),
     screenshot: Schema.NullOr(PreviewAnnotationScreenshotSchema),
+    screenshotFailed: Schema.optionalKey(Schema.Boolean),
     createdAt: Schema.String,
   },
 )

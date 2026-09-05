@@ -128,13 +128,16 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
   const pickElement = Effect.fn('PreviewManager.pickElement')(function* (tabId: string)
   {
     const wc = yield* requireWebContents(tabId)
-    yield* cancelPickElement(tabId)
     const annotationTheme = yield* Ref.get(annotationThemeRef)
     const pickSequence = yield* nextCounter(pickSequenceRef)
     const sessionId = `${tabId}:${pickSequence.toString(36)}`
     return yield* Effect.callback<PreviewAnnotationPayload | null, PreviewManagerError>(
       (resume) =>
       {
+        const session: PickSession = {
+          id: sessionId,
+          cancel: Effect.suspend(() => cancelPickSession()),
+        }
         const cleanup = Effect.fn('PreviewManager.cleanupPickElement')(function* ()
         {
           yield* attempt({ operation: 'pickElement.cleanup', tabId, webContentsId: wc.id }, () =>
@@ -144,27 +147,55 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
             wc.off('did-start-navigation', onNavigated)
           }).pipe(Effect.ignore)
           yield* Ref.update(pickSessionsRef, (sessions) =>
-            replaceMap(sessions, (copy) =>
-            {
-              if (copy.get(tabId)?.id === sessionId) copy.delete(tabId)
-            }),
+            sessions.get(tabId) === session
+              ? replaceMap(sessions, (copy) =>
+                {
+                  copy.delete(tabId)
+                })
+              : sessions,
           )
         })
-        const settlePick = Effect.fn('PreviewManager.settlePickElement')(function* (
+        let settled = false
+        let captureStarted = false
+        const claimCancellation = (): boolean =>
+        {
+          if (settled) return false
+          settled = true
+          return true
+        }
+        const claimCurrentSession = Effect.fn('PreviewManager.claimCurrentPickSession')(
+          function* ()
+          {
+            if (settled) return false
+            return yield* Ref.modify(pickSessionsRef, (sessions) =>
+            {
+              if (settled || sessions.get(tabId) !== session) return [false, sessions]
+              settled = true
+              return [
+                true,
+                replaceMap(sessions, (copy) =>
+                {
+                  copy.delete(tabId)
+                }),
+              ]
+            })
+          },
+        )
+        const finishPick = Effect.fn('PreviewManager.finishPickElement')(function* (
           payload: PreviewAnnotationPayload | null,
         )
         {
-          const active = (yield* Ref.get(pickSessionsRef)).get(tabId)
-          if (!active || active.id !== sessionId) return
           yield* cleanup()
           resume(Effect.succeed(payload))
         })
         const settle = (payload: PreviewAnnotationPayload | null) =>
         {
-          runFork(settlePick(payload))
+          if (!claimCancellation()) return
+          runFork(finishPick(payload))
         }
         const cancelPickSession = Effect.fn('PreviewManager.cancelPickSession')(function* ()
         {
+          if (!claimCancellation()) return
           yield* cleanup()
           const tabs = yield* SynchronizedRef.get(tabsRef)
           const activeTab = tabs.get(tabId)
@@ -185,31 +216,53 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
           }
           resume(Effect.succeed(null))
         })
-        const cancel = cancelPickSession()
         const onMessage = (_event: Electron.IpcMainEvent, ...args: unknown[]): void =>
         {
-          if (args[0] !== sessionId) return
+          if (args[0] !== sessionId || settled) return
           const payload = args[1]
           if (!isPreviewAnnotationPayload(payload))
           {
             settle(null)
             return
           }
+          if (captureStarted) return
+          captureStarted = true
           const cropRect = normalizeCaptureRect(args[2])
           runFork(
             captureAnnotationScreenshot(tabId, wc, cropRect).pipe(
-              Effect.matchEffect({
-                onFailure: () => Effect.sync(() => settle(payload)),
-                onSuccess: (screenshot) => Effect.sync(() => settle({ ...payload, screenshot })),
+              Effect.match({
+                onFailure: () => ({
+                  ...payload,
+                  screenshot: null,
+                  screenshotFailed: true,
+                }),
+                onSuccess: (screenshot) =>
+                  screenshot === null
+                    ? {
+                        ...payload,
+                        screenshot: null,
+                        screenshotFailed: true,
+                      }
+                    : { ...payload, screenshot },
               }),
-              Effect.ensuring(
-                attempt(
-                  { operation: 'pickElement.captureComplete', tabId, webContentsId: wc.id },
-                  () =>
-                  {
-                    if (!wc.isDestroyed()) wc.send(ANNOTATION_CAPTURED_CHANNEL, sessionId)
-                  },
-                ).pipe(Effect.ignore),
+              Effect.flatMap((result) =>
+                claimCurrentSession().pipe(
+                  Effect.flatMap((claimed) =>
+                    claimed
+                      ? attempt(
+                          {
+                            operation: 'pickElement.captureComplete',
+                            tabId,
+                            webContentsId: wc.id,
+                          },
+                          () =>
+                            wc.isDestroyed()
+                              ? undefined
+                              : wc.send(ANNOTATION_CAPTURED_CHANNEL, sessionId),
+                        ).pipe(Effect.ignore, Effect.andThen(finishPick(result)))
+                      : Effect.void,
+                  ),
+                ),
               ),
             ),
           )
@@ -226,31 +279,37 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
         }
         const registerPickElement = Effect.fn('PreviewManager.registerPickElement')(function* ()
         {
+          const replaced = yield* Ref.modify(pickSessionsRef, (sessions) => [
+            settled ? null : (sessions.get(tabId) ?? null),
+            settled
+              ? sessions
+              : replaceMap(sessions, (copy) =>
+                {
+                  copy.set(tabId, session)
+                }),
+          ])
+          if (replaced) yield* replaced.cancel
+          if (settled) return
           yield* attempt({ operation: 'pickElement.register', tabId, webContentsId: wc.id }, () =>
           {
             wc.ipc.on(ELEMENT_PICKED_CHANNEL, onMessage)
             wc.once('destroyed', onDestroyed)
-            wc.once('did-start-navigation', onNavigated)
+            wc.on('did-start-navigation', onNavigated)
             if (!wc.isFocused()) wc.focus()
             wc.send(START_PICK_CHANNEL, sessionId, annotationTheme)
           })
-          yield* Ref.update(pickSessionsRef, (sessions) =>
-            replaceMap(sessions, (copy) =>
-            {
-              copy.set(tabId, { id: sessionId, cancel })
-            }),
-          )
         })
         runFork(
           registerPickElement().pipe(
             Effect.catch((error: PreviewManagerError) =>
             {
+              if (!claimCancellation()) return Effect.void
               resume(Effect.fail(error))
               return cleanup()
             }),
           ),
         )
-        return cancel
+        return session.cancel
       },
     )
   })

@@ -1,9 +1,32 @@
 // tests/apps/desktop/preview/PickPreload.test.ts
-// verify compute label position behavior
+// verifies preview picker geometry and bounded DOM fallback behavior
 
-import { describe, expect, it } from 'vite-plus/test'
+// @vitest-environment happy-dom
+
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import { computeLabelPosition } from '../../../../apps/desktop/src/preview/PickLabelPosition.ts'
+
+const { getElementContext } = vi.hoisted(() => ({
+  getElementContext: vi.fn(),
+}))
+
+vi.mock('electron', () => ({
+  ipcRenderer: {
+    on: vi.fn(),
+    off: vi.fn(),
+    send: vi.fn(),
+  },
+}))
+
+vi.mock('react-grab/primitives', () => ({ getElementContext }))
+
+afterEach(() =>
+{
+  vi.useRealTimers()
+  vi.clearAllMocks()
+  document.title = ''
+})
 
 const VIEWPORT = { viewportWidth: 1280, viewportHeight: 800 }
 
@@ -92,5 +115,34 @@ describe('computeLabelPosition', () =>
     })
     expect(x).toBeGreaterThanOrEqual(0)
     expect(y).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('captureElement', () =>
+{
+  it('returns a bounded DOM fallback when React context inspection times out', async () =>
+  {
+    vi.useFakeTimers()
+    getElementContext.mockReturnValue(new Promise<never>(() => undefined))
+    document.title = 'Preview fallback'
+    const element = document.createElement('button')
+    element.textContent = 'x'.repeat(600)
+    const { captureElement } = await import('../../../../apps/desktop/src/preview/PickPreload.ts')
+
+    const capture = captureElement(element)
+    await vi.advanceTimersByTimeAsync(5_000)
+    const result = await capture
+
+    expect(result).toMatchObject({
+      pageTitle: 'Preview fallback',
+      tagName: 'button',
+      selector: null,
+      componentName: null,
+      source: null,
+      stack: [],
+      styles: '',
+    })
+    expect(result.htmlPreview).toHaveLength(500)
+    expect(result.htmlPreview.startsWith('<button>')).toBe(true)
   })
 })

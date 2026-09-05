@@ -2,6 +2,7 @@
 // runs the isolated in-page annotation picker for desktop previews
 
 // @effect-diagnostics globalDate:off - This isolated Electron preload does not run inside an Effect runtime.
+// @effect-diagnostics globalTimers:off - The picker bounds guest context inspection with a native timer.
 import { ipcRenderer } from 'electron'
 import { getElementContext } from 'react-grab/primitives'
 import type {
@@ -63,6 +64,8 @@ import {
 let activeSession: AnnotationSession | null = null
 let idSequence = 0
 let annotationTheme: DesktopPreviewAnnotationTheme | null = null
+const ELEMENT_CONTEXT_TIMEOUT_MS = 5_000
+const HTML_PREVIEW_MAX_CHARS = 500
 
 const reportHumanPointerInput = (event: PointerEvent): void =>
 {
@@ -139,28 +142,61 @@ function toStackFrame(frame: {
   }
 }
 
-async function captureElement(element: Element): Promise<PickedElementPayload | null>
+// bound React inspection because some guest trees never settle
+export function withCaptureTimeout<A>(promise: Promise<A>, millis: number): Promise<A | null>
 {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) =>
+    {
+      timer = setTimeout(() => resolve(null), millis)
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
+
+// retain DOM context when React inspection is unavailable or times out
+export async function captureElement(element: Element): Promise<PickedElementPayload>
+{
+  const base = {
+    pageUrl: location.href,
+    pageTitle: document.title?.trim() || null,
+    tagName: element.tagName.toLowerCase(),
+    pickedAt: new Date().toISOString(),
+  }
+  const fallbackHtmlPreview = element.outerHTML.slice(0, HTML_PREVIEW_MAX_CHARS)
   try
   {
-    const context = await getElementContext(element)
-    const stack = (context.stack ?? []).map(toStackFrame)
-    return {
-      pageUrl: location.href,
-      pageTitle: document.title?.trim() || null,
-      tagName: element.tagName.toLowerCase(),
-      selector: context.selector,
-      htmlPreview: context.htmlPreview ?? '',
-      componentName: context.componentName,
-      source: stack[0] ?? null,
-      stack,
-      styles: context.styles ?? '',
-      pickedAt: new Date().toISOString(),
+    const context = await withCaptureTimeout(
+      Promise.resolve(getElementContext(element)),
+      ELEMENT_CONTEXT_TIMEOUT_MS,
+    )
+    if (context)
+    {
+      const stack = (context.stack ?? []).map(toStackFrame)
+      return {
+        ...base,
+        selector: context.selector,
+        htmlPreview: context.htmlPreview ?? '',
+        componentName: context.componentName,
+        source: stack[0] ?? null,
+        stack,
+        styles: context.styles ?? '',
+      }
     }
   }
   catch
   {
-    return null
+    // use the DOM-only payload below
+  }
+  return {
+    ...base,
+    selector: null,
+    htmlPreview: fallbackHtmlPreview,
+    componentName: null,
+    source: null,
+    stack: [],
+    styles: '',
   }
 }
 
@@ -1090,47 +1126,65 @@ function startAnnotation(sessionId: string): void
     pendingCapture = true
     submit.disabled = true
     submit.textContent = 'Capturing…'
+    const submittedPageUrl = location.href
+    const submittedPageTitle = document.title?.trim() || null
+    const submittedAt = new Date().toISOString()
+    const submittedComment = comment.value.trim()
+    const submittedElements = Array.from(selected.values(), (target) => ({
+      id: target.id,
+      element: target.element,
+      rect: rectFromDomRect(target.element.getBoundingClientRect()),
+    }))
+    const submittedRegions = [...regions]
+    const submittedStrokes = [...strokes]
+    const submittedStyleChanges = Array.from(styleChanges.values(), (change) => ({ ...change }))
     void Promise.all(
-      Array.from(selected.values()).map(async (target) =>
+      submittedElements.map(async (target) =>
       {
         const element = await captureElement(target.element)
-        if (!element) return null
-        for (const change of styleChanges.values())
+        for (const change of submittedStyleChanges)
         {
-          if (change.targetId === target.id) change.selector = element.selector
+          if (change.targetId === target.id && element.selector !== null)
+          {
+            change.selector = element.selector
+          }
         }
         return {
           id: target.id,
           element,
-          rect: rectFromDomRect(target.element.getBoundingClientRect()),
+          rect: target.rect,
         }
       }),
-    ).then((captured) =>
-    {
-      if (activeSession?.id !== sessionId) return
-      const elements = captured.filter((target) => target !== null)
-      const annotation: PreviewAnnotationPayload = {
-        id: nextId('annotation'),
-        pageUrl: location.href,
-        pageTitle: document.title?.trim() || null,
-        comment: comment.value.trim(),
-        elements,
-        regions: [...regions],
-        strokes: [...strokes],
-        styleChanges: Array.from(styleChanges.values()),
-        screenshot: null,
-        createdAt: new Date().toISOString(),
-      }
-      editor.style.display = 'none'
-      toolbar.style.display = 'none'
-      hoverOutline.style.display = 'none'
-      const screenshotRect = unionRects([
-        ...elements.map((target) => target.rect),
-        ...regions.map((region) => region.rect),
-        ...strokes.map((stroke) => stroke.bounds),
-      ])
-      ipcRenderer.send(ELEMENT_PICKED_CHANNEL, sessionId, annotation, screenshotRect)
-    })
+    )
+      .then((elements) =>
+      {
+        if (activeSession?.id !== sessionId) return
+        const annotation: PreviewAnnotationPayload = {
+          id: nextId('annotation'),
+          pageUrl: submittedPageUrl,
+          pageTitle: submittedPageTitle,
+          comment: submittedComment,
+          elements,
+          regions: submittedRegions,
+          strokes: submittedStrokes,
+          styleChanges: submittedStyleChanges,
+          screenshot: null,
+          createdAt: submittedAt,
+        }
+        editor.style.display = 'none'
+        toolbar.style.display = 'none'
+        hoverOutline.style.display = 'none'
+        const screenshotRect = unionRects([
+          ...elements.map((target) => target.rect),
+          ...submittedRegions.map((region) => region.rect),
+          ...submittedStrokes.map((stroke) => stroke.bounds),
+        ])
+        ipcRenderer.send(ELEMENT_PICKED_CHANNEL, sessionId, annotation, screenshotRect)
+      })
+      .catch(() =>
+      {
+        if (activeSession?.id === sessionId) teardown(true)
+      })
   })
   comment.addEventListener('keydown', (event) =>
   {

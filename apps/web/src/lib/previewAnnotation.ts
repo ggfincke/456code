@@ -1,5 +1,5 @@
 // apps/web/src/lib/previewAnnotation.ts
-// build preview annotation prompt
+// build preview annotation prompts and screenshot attachments
 
 import type { PreviewAnnotationPayload } from '@t3tools/contracts'
 import { buildElementContextBlock, normalizeElementContextSelection } from './elementContext'
@@ -113,14 +113,50 @@ export function extractTrailingPreviewAnnotation(prompt: string): ExtractedPrevi
   }
 }
 
-export async function previewAnnotationScreenshotFile(
-  annotation: PreviewAnnotationPayload,
-): Promise<File | null>
+const PNG_DATA_URL_PREFIX = 'data:image/png;base64,'
+
+function previewAnnotationScreenshotFile(annotation: PreviewAnnotationPayload): File | null
 {
   if (!annotation.screenshot) return null
-  const response = await fetch(annotation.screenshot.dataUrl)
-  const blob = await response.blob()
-  return new File([blob], `preview-annotation-${annotation.id}.png`, {
-    type: blob.type || 'image/png',
-  })
+  const dataUrl = annotation.screenshot.dataUrl
+  if (!dataUrl.startsWith(PNG_DATA_URL_PREFIX)) throw new Error('Invalid PNG data URL.')
+  const payload = dataUrl.slice(PNG_DATA_URL_PREFIX.length)
+  if (
+    payload.length === 0 ||
+    payload.length % 4 === 1 ||
+    /[^a-z0-9+/=]/i.test(payload) ||
+    !/^[a-z0-9+/]*={0,2}$/i.test(payload)
+  )
+  {
+    throw new Error('Invalid PNG base64 payload.')
+  }
+  const binary = atob(payload)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1)
+  {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new File([bytes], `preview-annotation-${annotation.id}.png`, { type: 'image/png' })
+}
+
+export type PreviewAnnotationCapture =
+  | { readonly status: 'captured'; readonly file: File }
+  | { readonly status: 'none' }
+  | { readonly status: 'failed' }
+
+export async function capturePreviewAnnotationScreenshot(
+  annotation: PreviewAnnotationPayload,
+): Promise<PreviewAnnotationCapture>
+{
+  if (!annotation.screenshot) return { status: 'none' }
+
+  try
+  {
+    const file = previewAnnotationScreenshotFile(annotation)
+    return file ? { status: 'captured', file } : { status: 'failed' }
+  }
+  catch
+  {
+    return { status: 'failed' }
+  }
 }
