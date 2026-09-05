@@ -13,9 +13,10 @@ global npm, pnpm, Bun, or Vite+ installs. The update runs on the provider's mach
 instance's configured environment.
 
 If the card does not show **Update now**, update the CLI using the same tool and environment that
-installed it. This is expected for missing executables, unrecognized custom installation layouts,
-unresolved binary paths, and other layouts where automatic ownership cannot be proven. Refresh
-provider status after the manual update.
+installed it. This is expected for missing executables, mise-managed provider tools, unrecognized
+custom installation layouts, unresolved binary paths, and other layouts where automatic ownership
+cannot be proven. Refresh provider status after the manual update. npm globals installed inside a
+mise-managed Node version still use the owning npm prefix and can be eligible.
 
 Homebrew-backed providers compare against the version Homebrew offers, which can temporarily trail
 another package registry. 456code also checks ownership again before execution and refuses to run if

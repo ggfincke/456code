@@ -100,4 +100,90 @@ it.layer(testLayer)('CodexDriver', (it) =>
       expect((yield* instance.snapshot.resolveMaintenance()).update).toBeNull()
     }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn), Effect.scoped),
   )
+
+  for (const fixture of [
+    {
+      name: 'keeps a mise npm-backend install manual-only',
+      installSegments: ['mise', 'installs', 'npm-openai-codex', '0.110.0'],
+      npmOwned: false,
+    },
+    {
+      name: 'keeps a mise tool alias backed by npm manual-only',
+      installSegments: ['mise', 'installs', 'codex', '0.110.0'],
+      npmOwned: false,
+    },
+    {
+      name: 'allows an npm global in a mise Node installation',
+      installSegments: ['mise', 'installs', 'node', '24.0.0'],
+      npmOwned: true,
+    },
+    {
+      name: 'allows an ordinary npm global installation',
+      installSegments: ['npm-global'],
+      npmOwned: true,
+    },
+  ] as const)
+  {
+    it.effect.skipIf(windowsHost)(fixture.name, () =>
+      Effect.gen(function* ()
+      {
+        const fileSystem = yield* FileSystem.FileSystem
+        const tempDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: '456code-codex-installer-',
+        })
+        const installPath = NodePath.join(tempDir, ...fixture.installSegments)
+        const realBinaryPath = NodePath.join(
+          installPath,
+          'lib',
+          'node_modules',
+          '@openai',
+          'codex',
+          'bin',
+          'codex.js',
+        )
+        const binaryPath = NodePath.join(tempDir, 'bin', 'codex')
+        yield* fileSystem.makeDirectory(NodePath.dirname(realBinaryPath), { recursive: true })
+        yield* fileSystem.makeDirectory(NodePath.dirname(binaryPath), { recursive: true })
+        yield* fileSystem.writeFileString(realBinaryPath, '#!/bin/sh\n')
+        yield* fileSystem.chmod(realBinaryPath, 0o755)
+        yield* fileSystem.symlink(realBinaryPath, binaryPath)
+        const realInstallPath = yield* fileSystem.realPath(installPath)
+
+        const instance = yield* CodexDriver.create({
+          instanceId: ProviderInstanceId.make('codex-installer'),
+          displayName: 'Codex installer test',
+          enabled: false,
+          environment: [],
+          config: {
+            ...CodexDriver.defaultConfig(),
+            binaryPath,
+            homePath: NodePath.join(tempDir, 'codex-home'),
+          },
+        })
+        const update = (yield* instance.snapshot.resolveMaintenance()).update
+
+        if (fixture.npmOwned)
+        {
+          expect(update).toMatchObject({
+            executable: 'npm',
+            args: [
+              'install',
+              '-g',
+              '--prefix',
+              realInstallPath,
+              '--allow-scripts=@openai/codex',
+              '@openai/codex@latest',
+            ],
+          })
+        }
+        else
+        {
+          expect(update).toBeNull()
+        }
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
+        Effect.scoped,
+      ),
+    )
+  }
 })

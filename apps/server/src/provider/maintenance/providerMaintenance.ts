@@ -238,6 +238,14 @@ export function npmGlobalPrefixFromCommandPath(
   {
     return null
   }
+  // mise's npm backend mimics a global layout inside the tool version
+  const miseTool = /\/mise\/installs\/([^/]+)\/[^/]+$/.exec(
+    ownershipPath.slice(0, packageIndex),
+  )?.[1]
+  if (miseTool && miseTool !== 'node')
+  {
+    return null
+  }
   return packageIndex === 0 ? '/' : slashPath.slice(0, packageIndex)
 }
 

@@ -296,6 +296,31 @@ it.layer(NodeServices.layer)('providerMaintenance', (it) =>
     ).toBeNull()
   })
 
+  it('keeps mise-owned packages manual while accepting npm globals under mise Node', () =>
+  {
+    expect(
+      npmGlobalPrefixFromCommandPath(
+        '/tools/mise/installs/npm-openai-codex/0.110.0/lib/node_modules/@openai/codex/bin/codex.js',
+        '@openai/codex',
+        'linux',
+      ),
+    ).toBeNull()
+    expect(
+      npmGlobalPrefixFromCommandPath(
+        '/tools/mise/installs/codex/0.110.0/lib/node_modules/@openai/codex/bin/codex.js',
+        '@openai/codex',
+        'linux',
+      ),
+    ).toBeNull()
+    expect(
+      npmGlobalPrefixFromCommandPath(
+        '/tools/mise/installs/node/24.0.0/lib/node_modules/@openai/codex/bin/codex.js',
+        '@openai/codex',
+        'linux',
+      ),
+    ).toBe('/tools/mise/installs/node/24.0.0')
+  })
+
   it.effect('proves Windows npm ownership from the manifest beside the shim', () =>
     Effect.gen(function* ()
     {
