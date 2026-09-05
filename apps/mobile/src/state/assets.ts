@@ -35,6 +35,7 @@ export type AssetUrlState =
       readonly _tag: 'Success'
       readonly url: string
       readonly retry: () => void
+      readonly imageDimensions?: AssetCreateUrlResult['imageDimensions']
     }
 
 function formatAssetUrlError(cause: Cause.Cause<unknown>): string
@@ -113,5 +114,5 @@ export function useAssetUrl(
         error: 'The preview URL returned by the environment is invalid.',
         retry,
       }
-    : { _tag: 'Success', url, retry }
+    : { _tag: 'Success', url, retry, imageDimensions: result.value.imageDimensions }
 }
