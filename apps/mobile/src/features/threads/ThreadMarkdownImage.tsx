@@ -1,8 +1,8 @@
 // apps/mobile/src/features/threads/ThreadMarkdownImage.tsx
 // render authenticated markdown images in thread and file surfaces
 
-import type { AssetResource, EnvironmentId } from '@t3tools/contracts'
-import { useState } from 'react'
+import type { AssetCreateUrlResult, AssetResource, EnvironmentId } from '@t3tools/contracts'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, View } from 'react-native'
 
 import { AppText as Text } from '../../components/AppText'
@@ -14,9 +14,20 @@ export function ThreadMarkdownImageView(props: {
   readonly alt: string | null
   readonly onPressImage: (uri: string) => void
   readonly onRetry?: (() => void) | undefined
+  readonly imageDimensions?: AssetCreateUrlResult['imageDimensions']
 })
 {
   const [failedUri, setFailedUri] = useState<string | null>(null)
+  const [measured, setMeasured] = useState<{ uri: string; width: number; height: number } | null>(
+    null,
+  )
+  const activeUri = useRef(props.uri)
+  useLayoutEffect(() =>
+  {
+    activeUri.current = props.uri
+  }, [props.uri])
+  const dimensions = (measured?.uri === props.uri ? measured : null) ?? props.imageDimensions
+  const imageStyle = { aspectRatio: dimensions ? dimensions.width / dimensions.height : 16 / 9 }
   const unavailable = props.unavailable || (props.uri !== null && failedUri === props.uri)
   return (
     <View className="w-full gap-1.5">
@@ -30,7 +41,21 @@ export function ThreadMarkdownImageView(props: {
             source={{ uri: props.uri }}
             resizeMode="contain"
             className="aspect-video w-full rounded-[10px] bg-md-code-bg"
+            style={imageStyle}
             onError={() => setFailedUri(props.uri)}
+            onLoad={(event) =>
+              {
+              const { width, height } = event.nativeEvent.source
+              if (
+                props.uri &&
+                activeUri.current === props.uri &&
+                Number.isFinite(width) &&
+                Number.isFinite(height) &&
+                width > 0 &&
+                height > 0
+              )
+                setMeasured({ uri: props.uri, width, height })
+            }}
           />
         </Pressable>
       ) : (
@@ -46,6 +71,7 @@ export function ThreadMarkdownImageView(props: {
             props.onRetry?.()
           }}
           className="aspect-video w-full items-center justify-center rounded-[10px] bg-md-code-bg"
+          style={imageStyle}
         >
           {unavailable ? (
             <Text className="text-xs text-foreground-muted">
@@ -82,6 +108,7 @@ export function ThreadMarkdownImage(props: {
       alt={props.alt}
       onPressImage={props.onPressImage}
       onRetry={'retry' in assetUrl ? assetUrl.retry : undefined}
+      imageDimensions={assetUrl._tag === 'Success' ? assetUrl.imageDimensions : undefined}
     />
   )
 }
