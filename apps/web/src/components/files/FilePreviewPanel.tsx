@@ -504,6 +504,7 @@ export default function FilePreviewPanel({
           ) : relativePath && file.data ? (
             isMarkdown && renderMarkdown ? (
               <RenderedMarkdownSurface
+                key={relativePath}
                 environmentId={environmentId}
                 cwd={cwd}
                 relativePath={relativePath}
