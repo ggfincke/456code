@@ -888,47 +888,47 @@ const make = Effect.gen(function* ()
     // reflects files created or deleted during this turn.
     yield* workspaceEntries.refresh(input.cwd)
 
-    // `derived` keeps a genuinely empty diff apart from a diff that could not be
-    // computed at all (a missing pre-turn baseline lands in the catch below).
-    // both produce zero files, but only the first says anything about where the
-    // turn's work went, and the second is already reported as a capture failure
-    const turnDiff: TurnDiffOutcome = yield* checkpointStore
-      .diffCheckpoints({
-        cwd: input.cwd,
-        fromCheckpointRef,
-        toCheckpointRef: targetCheckpointRef,
-        fallbackFromToHead: false,
-        ignoreWhitespace: false,
-        format: 'numstat',
-      })
-      .pipe(
-        Effect.map((diff): TurnDiffOutcome => ({
-          derived: true,
-          files: parseTurnDiffFilesFromNumstat(diff).map((file) => ({
-            path: file.path,
-            kind: 'modified' as const,
-            additions: file.additions,
-            deletions: file.deletions,
-          })),
-        })),
-        Effect.tapError((error) =>
-          appendCaptureFailureActivity({
-            threadId: input.threadId,
-            turnId: input.turnId,
-            detail: `Checkpoint captured, but turn diff summary is unavailable: ${error.message}`,
-            createdAt: input.createdAt,
-            ...(input.actionId === undefined ? {} : { actionId: input.actionId }),
-          }),
-        ),
-        Effect.catch((error) =>
-          Effect.logWarning('failed to derive checkpoint file summary', {
-            threadId: input.threadId,
-            turnId: input.turnId,
-            turnCount: input.turnCount,
-            detail: error.message,
-          }).pipe(Effect.as<TurnDiffOutcome>({ derived: false, files: [] })),
-        ),
-      )
+    // a newly initialized repository has no baseline; keep its captured endpoint
+    // without misreporting an empty diff or a failed capture.
+    const turnDiff: TurnDiffOutcome = yield* fromCheckpointExists
+      ? checkpointStore
+          .diffCheckpoints({
+            cwd: input.cwd,
+            fromCheckpointRef,
+            toCheckpointRef: targetCheckpointRef,
+            fallbackFromToHead: false,
+            ignoreWhitespace: false,
+            format: 'numstat',
+          })
+          .pipe(
+            Effect.map((diff): TurnDiffOutcome => ({
+              derived: true,
+              files: parseTurnDiffFilesFromNumstat(diff).map((file) => ({
+                path: file.path,
+                kind: 'modified' as const,
+                additions: file.additions,
+                deletions: file.deletions,
+              })),
+            })),
+            Effect.tapError((error) =>
+              appendCaptureFailureActivity({
+                threadId: input.threadId,
+                turnId: input.turnId,
+                detail: `Checkpoint captured, but turn diff summary is unavailable: ${error.message}`,
+                createdAt: input.createdAt,
+                ...(input.actionId === undefined ? {} : { actionId: input.actionId }),
+              }),
+            ),
+            Effect.catch((error) =>
+              Effect.logWarning('failed to derive checkpoint file summary', {
+                threadId: input.threadId,
+                turnId: input.turnId,
+                turnCount: input.turnCount,
+                detail: error.message,
+              }).pipe(Effect.as<TurnDiffOutcome>({ derived: false, files: [] })),
+            ),
+          )
+      : Effect.succeed<TurnDiffOutcome>({ derived: false, files: [] })
     const files = turnDiff.files
 
     // an empty diff paired with real mutation evidence means the work landed in

@@ -1505,7 +1505,7 @@ describe('CheckpointReactor', () =>
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1)
   })
 
-  it('appends capture failure activity when turn diff summary cannot be derived', async () =>
+  it('retains a new repository endpoint without a false failure when its baseline is absent', async () =>
   {
     const harness = await createHarness({ seedFilesystemCheckpoints: false })
     const createdAt = '2026-01-01T00:00:00.000Z'
@@ -1540,16 +1540,14 @@ describe('CheckpointReactor', () =>
     })
 
     await waitForEvent(harness.engine, (event) => event.type === 'thread.turn-diff-completed')
-    const thread = await waitForThread(
-      harness.readModel,
-      (entry) =>
-        entry.checkpoints.length === 1 &&
-        entry.activities.some((activity) => activity.kind === 'checkpoint.capture.failed'),
-    )
+    const thread = await waitForThread(harness.readModel, (entry) => entry.checkpoints.length === 1)
 
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1)
     expect(
       thread.activities.some((activity) => activity.kind === 'checkpoint.capture.failed'),
+    ).toBe(false)
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1)),
     ).toBe(true)
   })
 
