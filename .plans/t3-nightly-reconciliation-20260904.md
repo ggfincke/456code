@@ -20,8 +20,9 @@ Current state:
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
-- Active publication: revised Group 01 is verified and approved. Its provenance-preserving local
-  commits are prepared; push, PR creation, and hosted checks are in progress.
+- Active publication: revised Group 01 is verified, approved, and published in
+  [PR #92](https://github.com/ggfincke/456code/pull/92). Hosted checks are pending; merge remains
+  gated on every expected check succeeding or being intentionally skipped.
 - Active branch: `sync/t3-git-service-text-safety-20260903`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
 - Future groups are approved as plan scope but remain planned, not implemented. Their branches are
@@ -443,8 +444,10 @@ deletions across the following coherent commits:
 | `413219535e93da7b1cd259a854ea07ab5cf524eb` | Fork-only reviewer repair for remote-qualified bases, authored with local identity. |
 | `907a0b25b3d54c75f0b7ea56aa1e2309c0ccf543` | Source `60f2ce0279d524bd70a573f6e0b6e9fab56e4b3e`; original author, AuthorDate, subject, and `Co-authored-by: maria-rcks` trailer preserved; bounded instruction adaptation recorded. |
 
-The maintained plan/ledger publication record is committed separately with local identity. No branch
-was pushed and no PR existed when this local commit map was recorded.
+The maintained plan/ledger publication record is committed separately with local identity. The
+reviewed stack was pushed without force to `sync/t3-git-service-text-safety-20260903`, and
+[PR #92](https://github.com/ggfincke/456code/pull/92) was opened against `main`. This receipt update
+records the external publication state without changing the reviewed implementation tree.
 
 ## Verification policy for every group
 
