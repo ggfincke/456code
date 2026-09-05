@@ -1467,6 +1467,103 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     }),
   )
 
+  it.effect('bounds and sorts apply-patch approval details including moves', () =>
+  {
+    const fileChanges = Object.fromEntries(
+      Array.from({ length: 22 }, (_unused, index) =>
+      {
+        const descendingIndex = 21 - index
+        const filePath = `/tmp/file-${String(descendingIndex).padStart(2, '0')}.ts`
+        return [
+          filePath,
+          descendingIndex === 0
+            ? { type: 'update', unified_diff: '@@', move_path: '/tmp/renamed.ts' }
+            : { type: 'add', content: 'x' },
+        ]
+      }),
+    )
+    return Effect.gen(function* ()
+    {
+      const { adapter, runtime } = yield* startLifecycleRuntime()
+      const openedFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
+
+      yield* runtime.emit({
+        id: asEventId('evt-apply-patch-bounded'),
+        kind: 'request',
+        provider: ProviderDriverKind.make('codex'),
+        threadId: asThreadId('thread-1'),
+        createdAt: '2026-08-24T00:00:00.000Z',
+        method: 'applyPatchApproval',
+        requestKind: 'file-change',
+        requestId: ApprovalRequestId.make('req-apply-patch-bounded'),
+        turnId: asTurnId('turn-1'),
+        payload: {
+          callId: 'call-1',
+          conversationId: 'provider-thread-1',
+          reason: '   ',
+          fileChanges,
+        },
+      } satisfies ProviderEvent)
+
+      const opened = yield* Fiber.join(openedFiber)
+      NodeAssert.equal(opened._tag, 'Some')
+      if (opened._tag !== 'Some' || opened.value.type !== 'request.opened')
+      {
+        return
+      }
+      const lines = (opened.value.payload.detail ?? '').split('\n')
+      NodeAssert.equal(lines.length, 21)
+      NodeAssert.equal(lines[0], 'update /tmp/file-00.ts -> /tmp/renamed.ts')
+      NodeAssert.equal(lines[1], 'add /tmp/file-01.ts')
+      NodeAssert.equal(lines.at(-1), '+2 more')
+    })
+  })
+
+  it.effect('prefers a file approval reason and otherwise falls back to its grant root', () =>
+    Effect.gen(function* ()
+    {
+      const { adapter, runtime } = yield* startLifecycleRuntime()
+      for (const [requestId, reason, expectedDetail] of [
+        ['reason', ' Needs write access ', 'Needs write access'],
+        ['root', '   ', '/tmp/workspace'],
+      ] as const)
+      {
+        const openedFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+          Effect.forkChild,
+        )
+        yield* runtime.emit({
+          id: asEventId(`evt-file-change-${requestId}`),
+          kind: 'request',
+          provider: ProviderDriverKind.make('codex'),
+          threadId: asThreadId('thread-1'),
+          createdAt: '2026-08-24T00:00:00.000Z',
+          method: 'item/fileChange/requestApproval',
+          requestKind: 'file-change',
+          requestId: ApprovalRequestId.make(`req-file-change-${requestId}`),
+          turnId: asTurnId('turn-1'),
+          payload: {
+            itemId: `item-${requestId}`,
+            grantRoot: '/tmp/workspace',
+            reason,
+            startedAtMs: 0,
+            threadId: 'provider-thread-1',
+            turnId: 'turn-1',
+          },
+        } satisfies ProviderEvent)
+
+        const opened = yield* Fiber.join(openedFiber)
+        NodeAssert.equal(opened._tag, 'Some')
+        if (opened._tag !== 'Some' || opened.value.type !== 'request.opened')
+        {
+          return
+        }
+        NodeAssert.equal(opened.value.payload.detail, expectedDetail)
+      }
+    }),
+  )
+
   it.effect.each([
     {
       requestKind: 'command' as const,
