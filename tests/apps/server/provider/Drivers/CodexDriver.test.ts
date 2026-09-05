@@ -186,4 +186,84 @@ it.layer(testLayer)('CodexDriver', (it) =>
       ),
     )
   }
+
+  for (const nodeFirst of [false, true])
+  {
+    it.effect.skipIf(windowsHost)(
+      nodeFirst
+        ? 'uses npm when a mise Node global precedes the Homebrew mise shim'
+        : 'keeps a Homebrew mise shim manual-only',
+      () =>
+        Effect.gen(function* ()
+        {
+          const fileSystem = yield* FileSystem.FileSystem
+          const tempDir = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: '456code-codex-mise-shim-',
+          })
+          const misePath = NodePath.join(
+            tempDir,
+            'homebrew',
+            'Cellar',
+            'mise',
+            '2026.9.1',
+            'bin',
+            'mise',
+          )
+          const shimDir = NodePath.join(tempDir, 'mise', 'shims')
+          const npmPrefix = NodePath.join(tempDir, 'mise', 'installs', 'node', '24.13.0')
+          const npmBin = NodePath.join(npmPrefix, 'bin')
+          const npmEntry = NodePath.join(
+            npmPrefix,
+            'lib',
+            'node_modules',
+            '@openai',
+            'codex',
+            'bin',
+            'codex.js',
+          )
+          for (const file of [misePath, npmEntry])
+          {
+            yield* fileSystem.makeDirectory(NodePath.dirname(file), { recursive: true })
+            yield* fileSystem.writeFileString(file, '#!/bin/sh\n')
+            yield* fileSystem.chmod(file, 0o755)
+          }
+          yield* fileSystem.makeDirectory(shimDir, { recursive: true })
+          yield* fileSystem.makeDirectory(npmBin, { recursive: true })
+          yield* fileSystem.symlink(misePath, NodePath.join(shimDir, 'codex'))
+          yield* fileSystem.symlink(npmEntry, NodePath.join(npmBin, 'codex'))
+          const lookupPath = (nodeFirst ? [npmBin, shimDir] : [shimDir, npmBin]).join(
+            NodePath.delimiter,
+          )
+
+          const instance = yield* CodexDriver.create({
+            instanceId: ProviderInstanceId.make('codex-mise-shim'),
+            displayName: 'Codex mise shim test',
+            enabled: false,
+            environment: [{ name: 'PATH', value: lookupPath, sensitive: false }],
+            config: {
+              ...CodexDriver.defaultConfig(),
+              binaryPath: 'codex',
+              homePath: NodePath.join(tempDir, 'codex-home'),
+            },
+          })
+          const update = (yield* instance.snapshot.resolveMaintenance()).update
+          const realNpmPrefix = yield* fileSystem.realPath(npmPrefix)
+
+          if (nodeFirst)
+          {
+            expect(update).toMatchObject({
+              executable: 'npm',
+              args: expect.arrayContaining(['--prefix', realNpmPrefix]),
+            })
+          }
+          else
+          {
+            expect(update).toBeNull()
+          }
+        }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
+          Effect.scoped,
+        ),
+    )
+  }
 })
