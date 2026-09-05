@@ -298,6 +298,18 @@ type MarkdownImageHastNode = {
   children?: MarkdownImageHastNode[]
 }
 
+function soleBlockImage(node: MarkdownImageHastNode): MarkdownImageHastNode | undefined
+{
+  const children =
+    node.children?.filter((child) => child.type !== 'text' || child.value?.trim()) ?? []
+  if (children.length !== 1) return undefined
+  const child = children[0]
+  if (child?.tagName === 'img') return child
+  return child && ['a', 'strong', 'em'].includes(child.tagName ?? '')
+    ? soleBlockImage(child)
+    : undefined
+}
+
 function remarkPreserveCodeMeta()
 {
   return (tree: MarkdownAstNode) =>
@@ -328,6 +340,16 @@ function rehypePreserveImageSourceMeta()
   {
     const visit = (node: MarkdownImageHastNode) =>
     {
+      if (
+        node.type === 'root' ||
+        ['p', 'div', 'li', 'td', 'th', 'figure', 'center', 'blockquote'].includes(
+          node.tagName ?? '',
+        )
+      )
+      {
+        const image = soleBlockImage(node)
+        if (image) image.properties = { ...image.properties, dataStandalone: true }
+      }
       const src = node.properties?.src
       const title = node.properties?.title
       if (node.type === 'element' && node.tagName === 'img')
@@ -357,6 +379,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
       ...(defaultSchema.attributes?.img ?? []),
       'dataLocalSrc',
       'dataMarkdownTitle',
+      'dataStandalone',
     ],
   },
   protocols: {
@@ -536,32 +559,81 @@ function ChatMarkdownImage(props: {
   readonly failed?: boolean | undefined
   readonly alt: string
   readonly copyMarkdown: string
+  readonly standalone: boolean
   readonly style?: CSSProperties | undefined
   readonly imageProps?: ComponentPropsWithoutRef<'img'> | undefined
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined
 })
 {
+  const [loaded, setLoaded] = useState<{ src: string; width: number; height: number } | null>(null)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
-  if (props.failed || (props.src !== null && props.src === failedSrc))
-    return <ChatMarkdownImageFallback alt={props.alt} copyMarkdown={props.copyMarkdown} />
-  if (!props.src) return null
-  return (
+  const failed = props.failed || (props.src !== null && props.src === failedSrc)
+  const frame = props.standalone && (failed || loaded === null)
+  const style =
+    props.style ?? (loaded ? authoredImageSizeStyle(loaded.width, loaded.height) : undefined)
+  const visibleSrc = loaded?.src ?? props.src
+  const image = (src: string, hidden = false) => (
     <img
       {...props.imageProps}
-      src={props.src}
-      alt={props.alt}
+      key={src}
+      src={src}
+      alt={hidden ? '' : props.alt}
+      aria-hidden={hidden || undefined}
       loading="lazy"
       draggable={false}
-      data-markdown-copy={props.copyMarkdown}
+      data-markdown-copy={hidden ? undefined : props.copyMarkdown}
       className={cn(
         CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME,
         props.imageProps?.className,
         props.onImageExpand && 'cursor-zoom-in',
       )}
-      style={props.style}
-      {...expandableMarkdownImageProps(props.onImageExpand, props.src, props.alt)}
-      onError={() => setFailedSrc(props.src)}
+      style={
+        hidden
+          ? { position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }
+          : frame
+            ? {
+                ...style,
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                opacity: 0,
+              }
+            : style
+      }
+      {...(!hidden ? expandableMarkdownImageProps(props.onImageExpand, src, props.alt) : {})}
+      onLoad={(event) =>
+        setLoaded({
+          src,
+          width: event.currentTarget.naturalWidth,
+          height: event.currentTarget.naturalHeight,
+        })
+      }
+      onError={() => setFailedSrc(src)}
     />
+  )
+  if (failed && !props.standalone)
+    return <ChatMarkdownImageFallback alt={props.alt} copyMarkdown={props.copyMarkdown} />
+  return (
+    <span
+      data-markdown-copy={props.copyMarkdown}
+      data-image-loading={(frame && !failed) || undefined}
+      role={frame && !failed ? 'status' : undefined}
+      aria-label={frame && !failed ? 'Loading image' : undefined}
+      className={
+        frame
+          ? 'relative inline-flex! aspect-video w-64 max-w-full items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted/60'
+          : 'contents'
+      }
+      style={frame ? style : undefined}
+    >
+      {failed ? (
+        <ChatMarkdownImageFallback alt={props.alt} copyMarkdown={props.copyMarkdown} />
+      ) : visibleSrc ? (
+        image(visibleSrc)
+      ) : null}
+      {!failed && loaded && props.src && props.src !== loaded.src ? image(props.src, true) : null}
+    </span>
   )
 }
 
@@ -572,6 +644,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
   readonly copyMarkdown: string
   readonly srcFragment: string
   readonly style?: CSSProperties | undefined
+  readonly standalone: boolean
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined
 })
 {
@@ -586,6 +659,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
       failed={assetUrl._tag === 'Failure'}
       alt={props.alt}
       copyMarkdown={props.copyMarkdown}
+      standalone={props.standalone}
       style={props.style}
       onImageExpand={props.onImageExpand}
     />
@@ -1028,6 +1102,7 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
           src={imageSource.uri}
           alt={altText}
           copyMarkdown={copyMarkdown}
+          standalone={node?.properties?.dataStandalone === true}
           style={authoredSizeStyle}
           onImageExpand={imageExpand}
         />
@@ -1044,6 +1119,7 @@ const CHAT_MARKDOWN_COMPONENTS: Components = {
           copyMarkdown={copyMarkdown}
           srcFragment={markdownImageSourceFragment(classifiedSrc)}
           style={authoredSizeStyle}
+          standalone={node?.properties?.dataStandalone === true}
           onImageExpand={imageExpand}
         />
       )
