@@ -16,7 +16,7 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `41c357f8967e8ec8c78b41f3c755c6fdb7669116`.
+- Published `main`: `023572c63f64a0d7e226e11ee369fd1f6c52b346`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -40,10 +40,14 @@ Current state:
   `41c357f8967e8ec8c78b41f3c755c6fdb7669116`. Exact merged-main CI run
   [33962109060](https://github.com/ggfincke/456code/actions/runs/33962109060) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **06 — Projection/query efficiency**, checkpoint verified and publication in progress.
-- Active branch: `sync/t3-r06-20260904`, based on published `main`.
+- Published Group 06: [PR #97](https://github.com/ggfincke/456code/pull/97) merged through merge commit
+  `023572c63f64a0d7e226e11ee369fd1f6c52b346`. Exact merged-main CI run
+  [33965498899](https://github.com/ggfincke/456code/actions/runs/33965498899) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **07 — Provider reliability**, locally verified and publication in progress.
+- Active branch: `sync/t3-r07-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 07-27 are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 08-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -918,7 +922,7 @@ Group 05 local, live-origin, and tracking refs at `d4495997318839d4e56e4657483be
 were compare-and-deleted only after proving the exact merged PR head, live-main ancestry, and no
 worktree holder. Every unrelated ref and worktree was preserved.
 
-## Group 06 verified checkpoint
+## Group 06 published checkpoint
 
 Group 06 started from exact green merged `main`
 `41c357f8967e8ec8c78b41f3c755c6fdb7669116` on `sync/t3-r06-20260904`. Its five approved sources were
@@ -959,8 +963,81 @@ no remaining actionable issue.
 This group changes server query and transaction mechanics without adding a client-visible interface,
 so no duplicate web, mobile, or Electron environment was launched. Focused real-SQL, durable-engine,
 query-count, transaction rollback, and unchanged-projection tests are the integrated gate for this
-server-only group. Source-attributed commits are prepared; PR evidence, hosted CI, merge, and exact
-merged-main CI remain pending.
+server-only group. Five source-attributed commits plus a fork-only typed-fixture repair and maintained
+receipt were published in [PR #97](https://github.com/ggfincke/456code/pull/97) from exact head
+`820d738ff435470fa40d0d7ed040c379f21b8e9f`. PR CI run
+[33964794564](https://github.com/ggfincke/456code/actions/runs/33964794564) passed its full rollup with
+19 successes and three intentional skips. Merge commit
+`023572c63f64a0d7e226e11ee369fd1f6c52b346` passed exact merged-main CI run
+[33965498899](https://github.com/ggfincke/456code/actions/runs/33965498899) with 15 successes and the
+intentional mobile-native-static skip, including Windows installed-artifact acceptance and cleanup.
+The clean original checkout was fast-forwarded to that exact merge, and the run-owned Group 06 local,
+live-origin, and tracking refs at `820d738ff435470fa40d0d7ed040c379f21b8e9f` were compare-deleted
+after exact PR, holder, ancestry, and live-ref guards.
+
+## Group 07 verified checkpoint
+
+Group 07 started from exact green merged `main`
+`023572c63f64a0d7e226e11ee369fd1f6c52b346` on `sync/t3-r07-20260904`. Eight approved upstream
+sources were adapted without expanding the frozen intake. `fc262f1a28d8305951c751f2486da6ca72e6c1d1`
+adds three total title-generation attempts on a two-second exponential schedule while retrying only
+the generator and preserving the fresh-title guard, source-sequence idempotence, cancellation, and
+single durable rename. `994bd7373cf3a335c204a617604e690ed4c00cba` carries runtime mode into Cursor
+ACP and places `--auto-review` or `--force` before `acp`, retaining endpoint/environment arguments and
+supervised behavior. `f86c5e8c8700b76250ed1073700a5b9db47e2d57`,
+`a5bbad910f78cc14eef8baa94fe6f46676f78d5a`, and only the approved probe slice of
+`98a29cbaa1ccf8d8afb6d35e3e1d925ff9b5fa90` make Claude probes non-invasive, retain successful
+capability discovery when optional usage lookup fails, and surface safety-model fallback warnings;
+the source's merge-confirmation slice remains planned for Group 27. `bfef973d9ec64e580fff4197ac53085207471ffd`
+makes refreshed Codex catalogs authoritative without invalidating the current selection,
+`75ab5ab3fb6ad35117da754644c404a31b2fed84` accepts the approved thread-resume rate-limit error
+shape, and `b7d6e65021b021207424c56cb32d6d711fd875fb` restores `tool.denied` runtime-contract parity.
+
+Final focused verification passed 281 tests across eight files: 110 title/Cursor tests, 87 Claude
+adapter/provider tests, 48 provider-registry tests, 28 generated-schema tests, and eight runtime
+contract tests. A four-test Claude capability-probe rerun passed after the test-only fixture was typed
+against the public SDK initialize-response shape. Targeted Node 24 server, contracts, and
+effect-codex-app-server typechecks passed. Changed-file formatting, lint, comment/header,
+directive-preservation, and `git diff --check` passed; reported warnings were pre-existing and outside
+introduced lines. Independent peer and primary reviews found no remaining source or test finding.
+The implementation-only binary diff from the published Group 06 merge is
+`43f0c6b27876bcaad2b0650d28f31cec35a1fb678b31379b8a6acddd46f16988` across 17 source/test files.
+
+One disposable environment exercised the accepted behavior on actual web and iPhone clients without
+live provider credentials. A deterministic Cursor turn used exact arguments
+`-e http://127.0.0.1:1 --force acp`, retried title generation once, produced the final title
+`GROUP07 RETRIED TITLE`, and persisted exactly one title metadata update. The initial Codex catalog
+showed GPT-6 Astra and the disposable Joule Alpha entry on both clients. Removing only Joule Alpha
+from the temporary catalog and using the product's environment refresh left Astra current, removed
+Joule, and kept Cursor available. No per-instance refresh capability was claimed, and an accidental
+handoff confirmation was canceled without changing the active provider session.
+
+The same environment displayed a projection-only `runtime.warning` row on real web and iPhone UI
+while retaining the completed response and an unlocked composer. The generic visual fixture read
+“Group 07 fixture warning: plan usage is unavailable; provider features remain available.” with the
+detail “Disposable projection-only visual fixture.” SDK-specific Claude fallback mapping is covered
+by focused tests; no live Claude/Opus fallback was invoked or claimed as visual evidence. XcodeBuildMCP
+semantic snapshots remained unavailable because the selected Xcode 27 installation lacks the expected
+SimulatorKit private framework, so the previously approved serve-sim/CUA visual route drove the real
+iPhone flow. A 127.0.0.1 web attempt was correctly blocked by the fixture's localhost-only CORS origin;
+no security policy was weakened. A fresh localhost browser session passed instead. The native cache
+was cleared only through the G07 environment's product UI; after an exact owned-app termination to
+avoid its normal finalizer rewriting the stale in-memory snapshot, the relaunched app received all
+three projected activity rows and visibly rendered the warning.
+
+Reviewed evidence is retained outside the repository as
+`/private/tmp/t3code-group07-evidence/web-warning.jpg` (SHA-256
+`616f1f80793adde66a2c622b48c77e408b23f13f7418da93ca1f54338ebaceed`) and
+`/private/tmp/t3code-group07-evidence/iphone-warning.jpg` (SHA-256
+`36ebf1d5ac3e1ca3c4d4e86b588f96db73517643ab40a6b51c384c19f9fddaa7`) pending GitHub upload.
+The exact G07 mobile environment was removed through the real Connections UI, leaving the pre-existing
+127.0.0.1:13774 connection intact. Owned backend, Vite, Metro, manifest-shim, and serve-sim processes
+are terminal; ports 13777, 5737, 18092, 18094, and 3200 are clear; the owned simulator is shut down;
+and the compatible development client remains installed. The disposable base and tiny Git project
+were moved recoverably to Trash, while the original checkout, unrelated refs/worktrees, caches, and
+credentials were preserved. Eight source-attributed commits plus the separate fork-only typed-fixture
+repair are prepared without changing the accepted implementation hash. PR evidence upload, hosted CI,
+merge, and exact merged-main CI remain the publication gate.
 
 ## Verification policy for every group
 
