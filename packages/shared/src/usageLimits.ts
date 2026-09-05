@@ -6,6 +6,7 @@ import {
   type ServerProvider,
   type ServerProviderAccountUsage,
   type ServerProviderAccountUsageWindow,
+  type ServerProviderSlashCommand,
 } from '@t3tools/contracts'
 
 import { isProviderAvailable } from './serverSettings.ts'
@@ -197,3 +198,44 @@ export function formatResetsIn(
   return resetsAt <= now ? 'resets now' : `resets in ${formatDuration(resetsAt - now)}`
 }
 
+export const USAGE_LIMITS_COMMAND = {
+  name: 'usage-limits',
+  description: "Show this provider's usage limits",
+} satisfies ServerProviderSlashCommand
+
+export function isUsageLimitsCommand(prompt: string): boolean
+{
+  return prompt.trim().toLowerCase() === '/usage-limits'
+}
+
+export function hasProviderUsageLimits(
+  driver: ServerProvider['driver'],
+  providers: readonly ServerProvider[],
+): boolean
+{
+  return providersWithLimits(providers).some((provider) => provider.driver === driver)
+}
+
+export function withUsageLimitsCommands(providers: readonly ServerProvider[]): ServerProvider[]
+{
+  return providers.map((provider) =>
+  {
+    if (!hasProviderUsageLimits(provider.driver, providers)) return provider
+    const commands = (items: readonly ServerProviderSlashCommand[]) => [
+      ...items.filter((command) => command.name !== USAGE_LIMITS_COMMAND.name),
+      USAGE_LIMITS_COMMAND,
+    ]
+    return {
+      ...provider,
+      slashCommands: commands(provider.slashCommands),
+      ...(provider.workspaceSnapshots
+        ? {
+            workspaceSnapshots: provider.workspaceSnapshots.map((snapshot) => ({
+              ...snapshot,
+              slashCommands: commands(snapshot.slashCommands),
+            })),
+          }
+        : {}),
+    }
+  })
+}

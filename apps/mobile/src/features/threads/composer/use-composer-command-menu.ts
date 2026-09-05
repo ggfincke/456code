@@ -12,6 +12,7 @@ import {
   resolveProviderSlashCommandsForCwd,
 } from '@t3tools/client-runtime/providerSkills'
 import { detectComposerTrigger, replaceTextRange } from '@t3tools/shared/composerTrigger'
+import { USAGE_LIMITS_COMMAND } from '@t3tools/shared/usageLimits'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ComposerEditorSelection } from '../../../components/ComposerEditor'
@@ -36,6 +37,7 @@ export function useComposerCommandMenu({
   onChangeDraftMessage,
   onUpdateInteractionMode,
   onUpdateModelSelection,
+  onUsageLimits,
 }: {
   readonly draftMessage: string
   readonly environmentId: EnvironmentId | null
@@ -48,6 +50,7 @@ export function useComposerCommandMenu({
   readonly onChangeDraftMessage: (value: string) => void
   readonly onUpdateInteractionMode: (mode: CollaborationMode) => void
   readonly onUpdateModelSelection: (selection: ModelSelection) => void
+  readonly onUsageLimits?: () => void
 })
 {
   const [selection, setSelection] = useState(() => ({
@@ -183,6 +186,18 @@ export function useComposerCommandMenu({
     (item: ComposerCommandItem) =>
     {
       if (!trigger || !items.some((candidate) => candidate.id === item.id)) return
+      if (
+        item.type === 'provider-slash-command' &&
+        item.command.name === USAGE_LIMITS_COMMAND.name &&
+        onUsageLimits
+      )
+      {
+        const result = replaceTextRange(draftMessage, trigger.rangeStart, trigger.rangeEnd, '')
+        setSelection({ start: result.cursor, end: result.cursor })
+        onChangeDraftMessage(result.text)
+        onUsageLimits()
+        return
+      }
       const changesInteraction =
         item.type === 'slash-command' &&
         (item.command === 'plan' || item.command === 'orchestrate' || item.command === 'default')
@@ -219,6 +234,7 @@ export function useComposerCommandMenu({
       onChangeDraftMessage,
       onUpdateInteractionMode,
       onUpdateModelSelection,
+      onUsageLimits,
       trigger,
     ],
   )

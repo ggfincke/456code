@@ -1,6 +1,7 @@
 // apps/server/src/ws.ts
 // serves authenticated websocket rpc handlers for server capabilities
 
+import { withUsageLimitsCommands } from '@t3tools/shared/usageLimits'
 import { collectAssistantCitations } from '@t3tools/shared/assistantCitations'
 import * as Cause from 'effect/Cause'
 import * as Crypto from 'effect/Crypto'
@@ -772,45 +773,51 @@ const makeWsRpcLayer = (
           })
         })
 
-      const loadServerConfig = Effect.gen(function* ()
-      {
-        const keybindingsConfig = yield* keybindings.loadConfigState
-        const providers = yield* providerRegistry.getProviders
-        const settings = ServerSettings.redactServerSettingsForClient(
-          yield* serverSettings.getSettings,
-        )
-        const environment = yield* serverEnvironment.getDescriptor
-        const auth = yield* serverAuth.getDescriptor()
+      const loadServerConfig = (options: { readonly usageLimitsCommand: boolean }) =>
+        Effect.gen(function* ()
+        {
+          const keybindingsConfig = yield* keybindings.loadConfigState
+          const currentProviders = yield* providerRegistry.getProviders
+          const providers = options.usageLimitsCommand
+            ? withUsageLimitsCommands(currentProviders)
+            : currentProviders
+          const settings = ServerSettings.redactServerSettingsForClient(
+            yield* serverSettings.getSettings,
+          )
+          const environment = yield* serverEnvironment.getDescriptor
+          const auth = yield* serverAuth.getDescriptor()
 
-        return {
-          environment,
-          auth,
-          cwd: config.cwd,
-          keybindingsConfigPath: config.keybindingsConfigPath,
-          keybindings: keybindingsConfig.keybindings,
-          issues: keybindingsConfig.issues,
-          providers,
-          availableEditors: yield* resolveAvailableEditorsForConfig(
-            externalLauncher.resolveAvailableEditors(),
-          ),
-          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
-            remoteOpenTargets.resolveTargets(),
-          ),
-          observability: {
-            logsDirectoryPath: config.logsDir,
-            localTracingEnabled: true,
-            ...(config.otlpTracesUrl !== undefined ? { otlpTracesUrl: config.otlpTracesUrl } : {}),
-            otlpTracesEnabled: config.otlpTracesUrl !== undefined,
-            ...(config.otlpMetricsUrl !== undefined
-              ? { otlpMetricsUrl: config.otlpMetricsUrl }
-              : {}),
-            otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
-          },
-          settings,
-          shellResumeCompletionMarker: true,
-          threadResumeCompletionMarker: true,
-        }
-      })
+          return {
+            environment,
+            auth,
+            cwd: config.cwd,
+            keybindingsConfigPath: config.keybindingsConfigPath,
+            keybindings: keybindingsConfig.keybindings,
+            issues: keybindingsConfig.issues,
+            providers,
+            availableEditors: yield* resolveAvailableEditorsForConfig(
+              externalLauncher.resolveAvailableEditors(),
+            ),
+            remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
+              remoteOpenTargets.resolveTargets(),
+            ),
+            observability: {
+              logsDirectoryPath: config.logsDir,
+              localTracingEnabled: true,
+              ...(config.otlpTracesUrl !== undefined
+                ? { otlpTracesUrl: config.otlpTracesUrl }
+                : {}),
+              otlpTracesEnabled: config.otlpTracesUrl !== undefined,
+              ...(config.otlpMetricsUrl !== undefined
+                ? { otlpMetricsUrl: config.otlpMetricsUrl }
+                : {}),
+              otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
+            },
+            settings,
+            shellResumeCompletionMarker: true,
+            threadResumeCompletionMarker: true,
+          }
+        })
 
       const refreshGitStatus = (cwd: string) =>
         vcsStatusBroadcaster
@@ -910,9 +917,13 @@ const makeWsRpcLayer = (
             'rpc.aggregate': 'server',
           }),
         [WS_METHODS.serverGetConfig]: (_input) =>
-          observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
-            'rpc.aggregate': 'server',
-          }),
+          observeRpcEffect(
+            WS_METHODS.serverGetConfig,
+            loadServerConfig({ usageLimitsCommand: false }),
+            {
+              'rpc.aggregate': 'server',
+            },
+          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
@@ -1401,6 +1412,7 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeServerConfig,
             Effect.gen(function* ()
             {
+              const usageLimitsCommand = input.usageLimitsCommand === true
               const keybindingsUpdates = keybindings.streamChanges.pipe(
                 Stream.map((event) => ({
                   version: 1 as const,
@@ -1412,6 +1424,9 @@ const makeWsRpcLayer = (
                 })),
               )
               const providerStatuses = providerRegistry.streamChanges.pipe(
+                Stream.map((providers) =>
+                  usageLimitsCommand ? withUsageLimitsCommands(providers) : providers,
+                ),
                 Stream.map((providers) => ({
                   version: 1 as const,
                   type: 'providerStatuses' as const,
@@ -1434,7 +1449,7 @@ const makeWsRpcLayer = (
                 .refresh()
                 .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped)
 
-              const initialConfig = yield* loadServerConfig
+              const initialConfig = yield* loadServerConfig({ usageLimitsCommand })
               const settingsUpdates = Stream.concat(
                 Stream.succeed(initialConfig.settings),
                 serverSettings.streamCurrentAndChanges.pipe(

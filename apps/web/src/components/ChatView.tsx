@@ -5740,6 +5740,10 @@ function ChatViewContent(props: ChatViewProps)
     },
     [dispatchSend],
   )
+  const onUsageLimitsCommand = useCallback(() =>
+  {
+    void navigate({ to: '/settings/usage' })
+  }, [navigate])
 
   // the workers panel reads a host-global broker, so this thread's own plan
   // revisions supply the durable run association that scopes it
@@ -6450,6 +6454,7 @@ function ChatViewContent(props: ChatViewProps)
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
                             onSendProviderSlashCommand={onSendProviderSlashCommand}
+                            onUsageLimitsCommand={onUsageLimitsCommand}
                             onInterrupt={onInterrupt}
                             onImplementPlanWithOrchestrate={onImplementPlanWithOrchestrate}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}

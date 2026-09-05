@@ -1006,6 +1006,8 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
   payload: Schema.Struct({
     // older clients cannot decode the new event union member.
     environmentThemes: Schema.optionalKey(Schema.Boolean),
+    // clients opt in before the server advertises its locally-handled command
+    usageLimitsCommand: Schema.optionalKey(Schema.Boolean),
   }),
   success: ServerConfigStreamEvent,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),

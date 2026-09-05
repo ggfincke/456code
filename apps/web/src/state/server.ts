@@ -26,6 +26,7 @@ export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRunt
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
   // primary environments can change without reconnecting their subscriptions
   environmentThemes: true,
+  usageLimitsCommand: true,
 })
 export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,

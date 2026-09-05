@@ -206,6 +206,10 @@ function ThreadRouteContent(
   const requests = useThreadRequests()
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, 'thread interrupt')
   const navigation = useNavigation()
+  const handleUsageLimitsCommand = useCallback(() =>
+  {
+    navigation.navigate('SettingsSheet', { screen: 'SettingsUsage' })
+  }, [navigation])
   const params = props.route.params
   const environmentIdRaw = firstRouteParam(params.environmentId)
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null
@@ -768,6 +772,7 @@ function ThreadRouteContent(
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
+          onUsageLimitsCommand={handleUsageLimitsCommand}
           onDiscardQueuedMessage={composer.onDiscardFailedQueuedMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
