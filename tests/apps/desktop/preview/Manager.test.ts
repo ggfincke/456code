@@ -1594,7 +1594,11 @@ describe('PreviewManager', () =>
           }),
           once: vi.fn((event: string, listener: (...args: unknown[]) => void) =>
           {
-            listeners.set(event, listener)
+            listeners.set(event, (...args: unknown[]) =>
+            {
+              listeners.delete(event)
+              listener(...args)
+            })
           }),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },

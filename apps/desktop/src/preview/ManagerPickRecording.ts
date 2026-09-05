@@ -294,7 +294,7 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
           {
             wc.ipc.on(ELEMENT_PICKED_CHANNEL, onMessage)
             wc.once('destroyed', onDestroyed)
-            wc.once('did-start-navigation', onNavigated)
+            wc.on('did-start-navigation', onNavigated)
             if (!wc.isFocused()) wc.focus()
             wc.send(START_PICK_CHANNEL, sessionId, annotationTheme)
           })
