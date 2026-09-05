@@ -3,9 +3,11 @@
 
 import {
   EventId,
+  ModelSelection,
   NonNegativeInt,
   OrchestratePlanRevision,
   OrchestrateRunExecutionIdentity,
+  OrchestrationProviderSwitch,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
@@ -142,6 +144,13 @@ const ThreadActivityIdsLookupInput = Schema.Struct({
   activityIds: Schema.Array(EventId),
 })
 const ProjectionThreadActivityIdRowSchema = Schema.Struct({ activityId: EventId })
+const ProjectionThreadRuntimeContextDbRowSchema = Schema.Struct({
+  id: ThreadId,
+  title: Schema.String,
+  modelSelection: Schema.fromJsonString(ModelSelection),
+  providerSwitch: Schema.NullOr(Schema.fromJsonString(OrchestrationProviderSwitch)),
+  session: Schema.NullOr(ProjectionThreadSessionDbRowSchema),
+})
 const THREAD_DETAIL_COMMAND_ACTIVITY_SQL_LIST = COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS.map(
   (kind) => `'${kind}'`,
 ).join(',\n        ')
@@ -1550,6 +1559,44 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         WHERE thread_id = ${threadId}
         LIMIT 1
       `,
+  })
+
+  const getThreadRuntimeContextRow = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadRuntimeContextDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          threads.thread_id AS id,
+          threads.title,
+          threads.model_selection_json AS "modelSelection",
+          threads.provider_switch_json AS "providerSwitch",
+          sessions.thread_id AS "threadId",
+          sessions.status,
+          sessions.provider_name AS "providerName",
+          sessions.provider_instance_id AS "providerInstanceId",
+          sessions.runtime_mode AS "runtimeMode",
+          sessions.active_turn_id AS "activeTurnId",
+          sessions.last_error AS "lastError",
+          sessions.updated_at AS "updatedAt"
+        FROM projection_threads AS threads
+        LEFT JOIN projection_thread_sessions AS sessions
+          ON sessions.thread_id = threads.thread_id
+        WHERE threads.thread_id = ${threadId}
+          AND threads.deleted_at IS NULL
+          AND threads.archived_at IS NULL
+        LIMIT 1
+      `.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            id: row.id,
+            title: row.title,
+            modelSelection: row.modelSelection,
+            providerSwitch: row.providerSwitch,
+            session: row.threadId === null ? null : row,
+          })),
+        ),
+      ),
   })
 
   const getLatestTurnRowByThread = SqlSchema.findOneOption({
@@ -3290,6 +3337,26 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
       } satisfies OrchestrationThreadShell)
     })
 
+  const getThreadRuntimeContext: ProjectionSnapshotQueryShape['getThreadRuntimeContext'] =
+    Effect.fn('ProjectionSnapshotQuery.getThreadRuntimeContext')(function* (threadId)
+    {
+      const context = yield* getThreadRuntimeContextRow({ threadId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            'ProjectionSnapshotQuery.getThreadRuntimeContext:query',
+            'ProjectionSnapshotQuery.getThreadRuntimeContext:decodeRow',
+          ),
+        ),
+      )
+      return Option.map(context, (row) => ({
+        id: row.id,
+        title: row.title,
+        modelSelection: row.modelSelection,
+        providerSwitch: row.providerSwitch,
+        session: row.session === null ? null : mapSessionRow(row.session),
+      }))
+    })
+
   const isThreadImportFinalized: ProjectionSnapshotQueryShape['isThreadImportFinalized'] = (
     threadId,
   ) =>
@@ -3605,6 +3672,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
     getOrchestrateRunExecution,
     getCurrentOrchestrateRunExecution,
     getThreadShellById,
+    getThreadRuntimeContext,
     isThreadImportFinalized,
     getThreadDetailById,
     getThreadDetailSnapshot,

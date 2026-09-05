@@ -93,7 +93,11 @@ describe('persistence error correlation', () =>
       )
       assert.instanceOf(createError, PersistenceErrors.PersistenceSqlError)
       assert.deepStrictEqual(createError.correlation, { sessionId })
-      assert.equal(createError.message, 'SQL error in AuthSessionRepository.create:query')
+      assert.equal(createError.detail, 'SQLITE(1) SQL logic error')
+      assert.equal(
+        createError.message,
+        'SQL error in AuthSessionRepository.create:query: SQLITE(1) SQL logic error',
+      )
       assert.notInclude(createError.message, subject)
       assert.notInclude(createError.message, DateTime.formatIso(issuedAt))
 
@@ -104,8 +108,9 @@ describe('persistence error correlation', () =>
       assert.deepStrictEqual(revokeOtherError.correlation, { currentSessionId })
       assert.equal(
         revokeOtherError.message,
-        'SQL error in AuthSessionRepository.revokeAllExcept:query',
+        'SQL error in AuthSessionRepository.revokeAllExcept:query: SQLITE(1) SQL logic error',
       )
+      assert.equal(revokeOtherError.detail, 'SQLITE(1) SQL logic error')
       assert.notInclude(revokeOtherError.message, DateTime.formatIso(now))
     }).pipe(Effect.provide(authSessionLayer)),
   )
@@ -177,6 +182,7 @@ describe('persistence error correlation', () =>
       )
       assert.instanceOf(createError, PersistenceErrors.PersistenceSqlError)
       assert.deepStrictEqual(createError.correlation, { pairingLinkId: id })
+      assert.equal(createError.detail, 'SQLITE(1) SQL logic error')
       assert.notInclude(createError.message, credential)
       assert.notInclude(createError.message, subject)
       assert.notInclude(createError.message, DateTime.formatIso(issuedAt))
@@ -184,6 +190,7 @@ describe('persistence error correlation', () =>
       const revokeError = yield* Effect.flip(pairingLinks.revoke({ id, revokedAt: now }))
       assert.instanceOf(revokeError, PersistenceErrors.PersistenceSqlError)
       assert.deepStrictEqual(revokeError.correlation, { pairingLinkId: id })
+      assert.equal(revokeError.detail, 'SQLITE(1) SQL logic error')
       assert.notInclude(revokeError.message, credential)
       assert.notInclude(revokeError.message, DateTime.formatIso(now))
     }).pipe(Effect.provide(authPairingLinkLayer)),
@@ -258,7 +265,11 @@ describe('persistence error correlation', () =>
       )
       assert.instanceOf(sqlFailure, PersistenceErrors.PersistenceSqlError)
       assert.deepStrictEqual(sqlFailure.correlation, { threadId })
-      assert.equal(sqlFailure.message, 'SQL error in ProviderSessionRuntimeRepository.upsert:query')
+      assert.equal(sqlFailure.detail, 'SQLITE(1) SQL logic error')
+      assert.equal(
+        sqlFailure.message,
+        'SQL error in ProviderSessionRuntimeRepository.upsert:query: SQLITE(1) SQL logic error',
+      )
       assert.notInclude(sqlFailure.message, runtimePayload)
       assert.notInclude(sqlFailure.message, lastSeenAt)
     }).pipe(Effect.provide(providerSessionRuntimeLayer)),

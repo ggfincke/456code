@@ -857,7 +857,7 @@ const make = Effect.gen(function* ()
     readonly createdAt: string
   })
   {
-    const thread = yield* resolveThread(input.threadId)
+    const thread = yield* resolveLatestThreadShell(input.threadId)
     if (!thread)
     {
       return
@@ -887,11 +887,9 @@ const make = Effect.gen(function* ()
     return thread?.id === threadId ? thread : undefined
   })
 
-  const resolveLatestThread = Effect.fnUntraced(function* (threadId: ThreadId)
+  const resolveLatestThreadShell = Effect.fnUntraced(function* (threadId: ThreadId)
   {
-    return Option.getOrUndefined(
-      yield* projectionSnapshotQuery.getThreadDetailById(threadId, { activityKinds: [] }),
-    )
+    return Option.getOrUndefined(yield* projectionSnapshotQuery.getThreadShellById(threadId))
   })
 
   const ensureThreadWorktree = Effect.fnUntraced(function* (thread: OrchestrationThread)
@@ -1560,7 +1558,7 @@ const make = Effect.gen(function* ()
         })
         if (!generated) return
 
-        const thread = yield* resolveThread(input.threadId)
+        const thread = yield* resolveLatestThreadShell(input.threadId)
         if (!thread) return
         if (!canReplaceThreadTitle(thread.title, input.titleSeed))
         {
@@ -1763,7 +1761,7 @@ const make = Effect.gen(function* ()
 
       return Effect.gen(function* ()
       {
-        const latestSession = (yield* resolveLatestThread(event.payload.threadId))?.session
+        const latestSession = (yield* resolveLatestThreadShell(event.payload.threadId))?.session
         if (!isRecoverableSession(latestSession))
         {
           return
@@ -1789,7 +1787,7 @@ const make = Effect.gen(function* ()
           }),
         )
 
-        const stoppedSession = (yield* resolveLatestThread(event.payload.threadId))?.session
+        const stoppedSession = (yield* resolveLatestThreadShell(event.payload.threadId))?.session
         if (!isRecoverableSession(stoppedSession))
         {
           return

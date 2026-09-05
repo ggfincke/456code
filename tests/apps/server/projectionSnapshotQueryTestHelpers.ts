@@ -31,6 +31,8 @@ export const makeProjectionSnapshotQueryStub = (
   getCheckpointIdentity: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.getCheckpointIdentity'),
   getThreadShellById: () => Effect.die('unexpected ProjectionSnapshotQuery.getThreadShellById'),
+  getThreadRuntimeContext: () =>
+    Effect.die('unexpected ProjectionSnapshotQuery.getThreadRuntimeContext'),
   isThreadImportFinalized: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.isThreadImportFinalized'),
   getThreadDetailById: () => Effect.die('unexpected ProjectionSnapshotQuery.getThreadDetailById'),

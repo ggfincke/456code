@@ -16,7 +16,7 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `dcaba8bda6991f08568453ef0581a54394a3eafe`.
+- Published `main`: `41c357f8967e8ec8c78b41f3c755c6fdb7669116`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -36,10 +36,14 @@ Current state:
   `dcaba8bda6991f08568453ef0581a54394a3eafe`. Exact merged-main CI run
   [33956661399](https://github.com/ggfincke/456code/actions/runs/33956661399) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **05 — Bounded projection replay**, checkpoint verified and publication in progress.
-- Active branch: `sync/t3-r05-20260904`, based on published `main`.
+- Published Group 05: [PR #96](https://github.com/ggfincke/456code/pull/96) merged through merge commit
+  `41c357f8967e8ec8c78b41f3c755c6fdb7669116`. Exact merged-main CI run
+  [33962109060](https://github.com/ggfincke/456code/actions/runs/33962109060) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **06 — Projection/query efficiency**, checkpoint verified and publication in progress.
+- Active branch: `sync/t3-r06-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 06-27 are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 07-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -871,8 +875,10 @@ server subscription/replay cases from `server.test.ts`, and 19 client-runtime sh
 The one coordinated Node 24 server typecheck passed; its output contained only existing Effect
 suggestions. Changed-scope formatting, comment/header checks, directive preservation, and
 `git diff --check` passed. Changed-scope lint exited successfully; the remaining warnings were proven
-to exist at the green base and were not changed. The accepted implementation diff spans 36 files,
-2,224 insertions, and 185 deletions. Its binary diff fingerprint from the green base is
+to exist at the green base and were not changed. The accepted code/test implementation spans 34
+files, 2,153 insertions, and 158 deletions; the final published diff including the two maintained
+receipt files spans 36 files, 2,255 insertions, and 185 deletions. The implementation-only binary diff
+fingerprint from the green base is
 `e56eba4be0caf3025d252cc79edec35ce073b77edd8e0f923621186a303b3c76`.
 
 The primary agent then exercised the real web client against one isolated loopback stack, normal ACP
@@ -890,15 +896,71 @@ activities, a ready session, a completed latest turn, and four non-streaming ass
 then sent `synchronized`. The visible UI retained both initial and terminal markers, cleared the
 offline state, and unlocked the composer. The actual 1,280x720 primary CUA capture was copied from
 the owning rollout without recapturing or exposing authentication/wire credentials; its SHA-256 is
-`cd41def29cf67dfa609ebe6068ae517a52e986076e8c31281d61c7c26a25cec1`. GitHub evidence and the
-publication/CI receipt remain pending until the PR exists.
+`cd41def29cf67dfa609ebe6068ae517a52e986076e8c31281d61c7c26a25cec1`. It is published in the
+[Group 05 evidence comment](https://github.com/ggfincke/456code/pull/96#issuecomment-5551244601).
 
 Cleanup stopped the sole retained dev session and its orphaned mock child pair, confirmed no
 listeners on ports 13,773 or 5,733, closed the owned browser tab after restoring networking, and moved
-only the run-owned base, tiny project, and fixture directory to Trash for recoverability. The verified
-JPEG remains temporarily at `/tmp/t3code-group05-evidence.QFimtc/group05-bounded-replay.jpg` until
-GitHub upload is confirmed. The unrelated client environment, original checkout, dependencies,
-caches, refs, and worktrees were preserved.
+only the run-owned base, tiny project, and fixture directory to Trash for recoverability. After the
+GitHub upload was confirmed, the verified JPEG and temporary publication files were moved recoverably
+to `/Users/ggfincke/.Trash/t3code-group05-evidence.QFimtc`. The unrelated client environment, original
+checkout, dependencies, caches, refs, and worktrees were preserved.
+
+The source-attributed stack and receipt commit produced exact PR head
+`d4495997318839d4e56e4657483bef2512f6535e`. [PR #96](https://github.com/ggfincke/456code/pull/96)
+passed exact-head run `33961400191` with all 16 workflow jobs terminal (15 successful and the
+intentional mobile-native-static skip; the full PR rollup was 19 successful and three intentional
+skips), including Windows installed-artifact acceptance and cleanup. It merged through merge commit
+`41c357f8967e8ec8c78b41f3c755c6fdb7669116`; exact merged-main run `33962109060` passed with the same
+15-success/one-intentional-skip workflow outcome. The clean original checkout was fast-forwarded only
+after that exact main gate, and the integration worktree moved to `sync/t3-r06-20260904`. The old
+Group 05 local, live-origin, and tracking refs at `d4495997318839d4e56e4657483bef2512f6535e`
+were compare-and-deleted only after proving the exact merged PR head, live-main ancestry, and no
+worktree holder. Every unrelated ref and worktree was preserved.
+
+## Group 06 verified checkpoint
+
+Group 06 started from exact green merged `main`
+`41c357f8967e8ec8c78b41f3c755c6fdb7669116` on `sync/t3-r06-20260904`. Its five approved sources were
+implemented across non-overlapping projection/persistence, runtime/query, and persistence-error
+lanes:
+
+- `8ac5462920c45cdee63af15b2598909736f2ec84` replaces full message and approval hydration during
+  shell-summary refresh with scalar latest-user and pending-count queries while retaining proposed
+  plans and user-input lifecycle state.
+- `2263e13fda8c9a4f1b6f4dee32e3c9020195e2aa` batches runtime projector cursor writes in the existing
+  transaction while preserving per-projector bootstrap, event filters, cleanup enqueues, and full
+  rollback.
+- `dffb4cd3b16dc6f41aced99922950ee3083082c6` reads active runtime context through one joined query and
+  retains fork model selection, provider switch, provider-instance, hidden-thread, lifecycle, and
+  pending-turn guards.
+- `6365919f2e5bcfb4fa4020b95e19af26ae40979f` uses fresh shell state at all four late/live metadata
+  consumers: provider-start failure, post-generation title replacement, and both interrupt recovery
+  reads. Planning, send, handoff, and history-dependent paths retain their existing detail reads.
+- `dddc0bdcb2230147e207efb17df2e49dbe1bdd8c` carries normalized SQLite conditions through both SQL
+  mapper paths, preserves correlation metadata and tag-only schema summaries, bounds wrapper
+  traversal, and never copies query data or driver messages.
+
+The final-byte Node 24 focused gate passes 188 tests across seven affected suites. The one coordinated
+server typecheck passes with only existing Effect suggestions. Aggregate formatting, lint,
+comment/header checks, directive preservation, and `git diff --check` pass; five lint warnings are on
+lines unchanged from the green base. An initial typecheck exposed only a widened `SqlError` in a
+deliberate corrupt-history test fixture; the fixture now makes setup corruption fatal before the
+intended typed provider failure, and the final CommandReactor suite passes all 72 tests. The accepted
+implementation/test diff spans 20 files, 1,090 insertions, and 138 deletions, with binary diff SHA-256
+`14c631b5d1dd61050a4281dc51edae21e80ad0e7a38b719e27c161b9a4651db1` from the green base.
+
+Two earlier mistaken broad formatter invocations were interrupted and reconciled against the final
+manifest; no mid-scan byte-equality claim is made. Final targeted checks ran on the frozen bytes, and
+the implementation fingerprint was independently reverified. Independent peer review closed the two
+initially omitted late metadata consumers before the final 188-test/typecheck/static gate, and found
+no remaining actionable issue.
+
+This group changes server query and transaction mechanics without adding a client-visible interface,
+so no duplicate web, mobile, or Electron environment was launched. Focused real-SQL, durable-engine,
+query-count, transaction rollback, and unchanged-projection tests are the integrated gate for this
+server-only group. Source-attributed commits are prepared; PR evidence, hosted CI, merge, and exact
+merged-main CI remain pending.
 
 ## Verification policy for every group
 

@@ -3,6 +3,7 @@
 
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
+import * as Predicate from 'effect/Predicate'
 
 function summarizeSchemaIssue(issue: SchemaIssue.Issue): string
 {
@@ -95,6 +96,45 @@ const isPersistenceSqlError = Schema.is(PersistenceSqlError)
 const isPersistenceDecodeError = Schema.is(PersistenceDecodeError)
 const isReactorDeliveryError = Schema.is(ReactorDeliveryError)
 
+// read a normalized condition through a bounded chain of SQL wrappers
+function sqliteCondition(cause: unknown): string | undefined
+{
+  let value = cause
+  for (let depth = 0; depth < 4 && Predicate.isObject(value); depth += 1)
+  {
+    if (
+      'errcode' in value &&
+      typeof value.errcode === 'number' &&
+      'errstr' in value &&
+      typeof value.errstr === 'string'
+    )
+    {
+      return `SQLITE(${value.errcode}) ${value.errstr}`
+    }
+
+    if (
+      'name' in value &&
+      value.name === 'SQLiteError' &&
+      'errno' in value &&
+      typeof value.errno === 'number' &&
+      Number.isInteger(value.errno)
+    )
+    {
+      return `SQLITE(${value.errno})`
+    }
+
+    value = 'cause' in value ? value.cause : undefined
+  }
+
+  return undefined
+}
+
+// rejected payloads contribute only schema tags or normalized driver conditions
+function describeSqlCause(cause: unknown): string | undefined
+{
+  return Schema.isSchemaError(cause) ? summarizeSchemaIssue(cause.issue) : sqliteCondition(cause)
+}
+
 // kept for orchestration/projection call sites, which are being revamped separately.
 export function toPersistenceSqlError(
   operation: string,
@@ -102,12 +142,15 @@ export function toPersistenceSqlError(
 )
 {
   return (cause: unknown): PersistenceSqlError =>
-    new PersistenceSqlError({
+  {
+    const detail = describeSqlCause(cause)
+    return new PersistenceSqlError({
       operation,
-      detail: `Failed to execute ${operation}`,
+      ...(detail === undefined ? {} : { detail }),
       ...(correlation === undefined ? {} : { correlation }),
       cause,
     })
+  }
 }
 
 // kept for orchestration/projection call sites, which are being revamped separately.
@@ -129,11 +172,7 @@ export function toPersistenceSqlOrDecodeError(
   return (cause: unknown): PersistenceSqlError | PersistenceDecodeError =>
     Schema.isSchemaError(cause)
       ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
-      : new PersistenceSqlError({
-          operation: sqlOperation,
-          ...(correlation === undefined ? {} : { correlation }),
-          cause,
-        })
+      : toPersistenceSqlError(sqlOperation, correlation)(cause)
 }
 
 export const isPersistenceError = (u: unknown) =>

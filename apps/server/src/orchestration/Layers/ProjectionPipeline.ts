@@ -989,28 +989,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         return
       }
 
-      const [messages, proposedPlans, activities, pendingApprovals] = yield* Effect.all([
-        projectionThreadMessageRepository.listByThreadId({ threadId }),
-        projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
-        projectionThreadActivityRepository.listUserInputLifecycleByThreadId({ threadId }),
-        projectionPendingApprovalRepository.listByThreadId({ threadId }),
-      ])
+      const [latestUserMessageAt, proposedPlans, activities, pendingApprovalCount] =
+        yield* Effect.all([
+          projectionThreadMessageRepository.getLatestUserMessageAt({ threadId }),
+          projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
+          projectionThreadActivityRepository.listUserInputLifecycleByThreadId({ threadId }),
+          projectionPendingApprovalRepository.countPendingByThreadId({ threadId }),
+        ])
 
-      let latestUserMessageAt: string | null = null
-      for (const message of messages)
-      {
-        if (
-          message.role === 'user' &&
-          (latestUserMessageAt === null || message.createdAt > latestUserMessageAt)
-        )
-        {
-          latestUserMessageAt = message.createdAt
-        }
-      }
-
-      const pendingApprovalCount = pendingApprovals.filter(
-        (approval) => approval.status === 'pending',
-      ).length
       const pendingUserInputCount = derivePendingUserInputCountFromActivities(activities)
       const hasActionableProposedPlan = deriveHasActionableProposedPlan({
         latestTurnId: existingRow.value.latestTurnId,
@@ -3184,15 +3170,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           }),
         { concurrency: 1 },
       )
-      yield* projectionStateRepository.upsert({
-        projector: projector.name,
-        lastAppliedSequence: event.sequence,
-        updatedAt: event.occurredAt,
-      })
     })
 
     const runProjectorForEvent = (projector: ProjectorDefinition, event: OrchestrationEvent) =>
-      sql.withTransaction(applyProjectorForEvent(projector, event))
+      sql.withTransaction(
+        Effect.gen(function* ()
+        {
+          yield* applyProjectorForEvent(projector, event)
+          yield* projectionStateRepository.upsert({
+            projector: projector.name,
+            lastAppliedSequence: event.sequence,
+            updatedAt: event.occurredAt,
+          })
+        }),
+      )
 
     const bootstrapProjector = (projector: ProjectorDefinition) =>
       projectionStateRepository
@@ -3214,8 +3205,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     const projectEvent: OrchestrationProjectionPipelineShape['projectEvent'] = (event) =>
       sql
         .withTransaction(
-          Effect.forEach(projectors, (projector) => applyProjectorForEvent(projector, event), {
-            concurrency: 1,
+          Effect.gen(function* ()
+          {
+            yield* Effect.forEach(
+              projectors,
+              (projector) => applyProjectorForEvent(projector, event),
+              { concurrency: 1 },
+            )
+            yield* projectionStateRepository.upsertMany(
+              projectors.map((projector) => ({
+                projector: projector.name,
+                lastAppliedSequence: event.sequence,
+                updatedAt: event.occurredAt,
+              })),
+            )
           }),
         )
         .pipe(
