@@ -1,7 +1,7 @@
 // tests/apps/mobile/state/threads/thread-outbox.test.ts
 // verifies durable queued-message persistence and delivery decisions
 
-import { describe, expect, it } from '@effect/vitest'
+import { afterEach, describe, expect, it } from '@effect/vitest'
 import type {
   SetThreadInteractionModeInput,
   StartThreadTurnInput,
@@ -23,6 +23,64 @@ import { AsyncResult, AtomRegistry } from 'effect/unstable/reactivity'
 import { vi } from 'vite-plus/test'
 
 import type { DraftComposerImageAttachment } from '../../../../../apps/mobile/src/lib/composerImages'
+
+const persistedOutboxFiles = vi.hoisted(() => new Map<string, string | Error>())
+
+vi.mock('expo-file-system', () =>
+{
+  class File
+  {
+    readonly name: string
+
+    constructor(directoryOrName: unknown, name?: string)
+    {
+      this.name = name ?? String(directoryOrName)
+    }
+
+    get exists(): boolean
+    {
+      return persistedOutboxFiles.has(this.name)
+    }
+
+    create(): void
+    {}
+
+    async text(): Promise<string>
+    {
+      const value = persistedOutboxFiles.get(this.name)
+      if (value instanceof Error)
+      {
+        throw value
+      }
+      return value ?? ''
+    }
+
+    write(payload: string): void
+    {
+      persistedOutboxFiles.set(this.name, payload)
+    }
+
+    delete(): void
+    {
+      persistedOutboxFiles.delete(this.name)
+    }
+  }
+
+  return {
+    Paths: { document: '/documents' },
+    Directory: class
+    {
+      create(): void
+      {}
+
+      list(): Array<File>
+      {
+        return [...persistedOutboxFiles.keys()].map((name) => new File(name))
+      }
+    },
+    File,
+  }
+})
 
 // keep this state-level suite independent of Expo's native module loader.
 vi.mock('../../../../../apps/mobile/src/lib/composerImages', () => ({
@@ -54,7 +112,10 @@ import {
   createThreadOutboxManager,
   ThreadOutboxManagerError,
 } from '../../../../../apps/mobile/src/state/threads/thread-outbox-manager'
-import type { ThreadOutboxStorage } from '../../../../../apps/mobile/src/state/threads/thread-outbox-storage'
+import {
+  expoThreadOutboxStorage,
+  type ThreadOutboxStorage,
+} from '../../../../../apps/mobile/src/state/threads/thread-outbox-storage'
 import {
   drainExistingQueuedThreadMessage,
   drainQueuedThreadCreation,
@@ -129,6 +190,11 @@ function threadShell(
   }
 }
 
+afterEach(() =>
+{
+  persistedOutboxFiles.clear()
+})
+
 describe('thread outbox', () =>
 {
   it('groups messages by scoped thread and preserves creation order', () =>
@@ -167,6 +233,37 @@ describe('thread outbox', () =>
       }),
     ).toThrow()
   })
+
+  it.each(['read', 'decode'] as const)(
+    'rejects the entire persisted queue after a message %s failure and retries cleanly',
+    async (failure) =>
+    {
+      const first = queuedMessage({
+        messageId: 'message-1',
+        createdAt: '2026-06-08T10:00:01.000Z',
+      })
+      const second = queuedMessage({
+        messageId: 'message-2',
+        createdAt: '2026-06-08T10:00:02.000Z',
+      })
+      persistedOutboxFiles.set('message-1.json', JSON.stringify(encodeQueuedThreadMessage(first)))
+      persistedOutboxFiles.set(
+        'message-2.json',
+        failure === 'read'
+          ? new Error('persisted message unavailable')
+          : JSON.stringify({ schemaVersion: 99, ...second }),
+      )
+
+      await expect(expoThreadOutboxStorage.load()).rejects.toMatchObject({
+        _tag: 'ThreadOutboxStorageError',
+        operation: 'read-message',
+        fileName: 'message-2.json',
+      })
+
+      persistedOutboxFiles.set('message-2.json', JSON.stringify(encodeQueuedThreadMessage(second)))
+      await expect(expoThreadOutboxStorage.load()).resolves.toEqual([first, second])
+    },
+  )
 
   it('persists the exact selector snapshot while remaining compatible with v1 messages', () =>
   {
@@ -974,6 +1071,12 @@ describe('thread outbox', () =>
   it('reports environment cleanup incomplete when persisted loading fails', async () =>
   {
     const registry = AtomRegistry.make()
+    const message = queuedMessage({
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    const stored = new Map<MessageId, QueuedThreadMessage>()
+    let removeCalls = 0
     const manager = createThreadOutboxManager({
       registry,
       storage: {
@@ -981,15 +1084,27 @@ describe('thread outbox', () =>
         {
           throw new Error('storage unavailable')
         },
-        write: async () => undefined,
-        remove: async () => undefined,
+        write: async (candidate) =>
+        {
+          stored.set(candidate.messageId, candidate)
+        },
+        remove: async () =>
+        {
+          removeCalls += 1
+        },
       },
       warn: () => undefined,
     })
 
-    await expect(manager.clearEnvironment(EnvironmentId.make('environment-1'))).resolves.toEqual({
+    await manager.enqueue(message)
+    await expect(manager.clearEnvironment(message.environmentId)).resolves.toEqual({
       complete: false,
-      remainingMessageCount: 0,
+      remainingMessageCount: 1,
+    })
+    expect(stored.get(message.messageId)).toBe(message)
+    expect(removeCalls).toBe(0)
+    expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({
+      'environment-1:thread-1': [message],
     })
     registry.dispose()
   })

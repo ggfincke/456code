@@ -73,7 +73,10 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
     options.warn ??
     ((message: string, error: unknown) =>
     {
-      console.warn(message, error)
+      console.warn(
+        message,
+        error instanceof Error ? error.message : 'Thread outbox persistence failed.',
+      )
     })
   let loadPromise: Promise<void> | null = null
   let loadAttempt = 0

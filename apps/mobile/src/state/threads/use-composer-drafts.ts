@@ -129,6 +129,7 @@ let hydrated = false
 let stickySelectionChangedBeforeHydration = false
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let persistRequestedBeforeHydration = false
+let persistRetryNeeded = false
 const persistenceQueue = new SerializedAsyncQueue()
 
 interface PendingComposerDraftMutation
@@ -247,16 +248,12 @@ async function loadPersistedComposerState(): Promise<PersistedComposerState>
   }
   catch (cause)
   {
-    console.warn(
-      '[composer-drafts] ignored persisted draft failure',
-      new ComposerDraftPersistenceError({
-        operation,
-        directory: COMPOSER_DRAFTS_DIRECTORY,
-        fileName: COMPOSER_DRAFTS_FILE,
-        cause,
-      }),
-    )
-    return { drafts: {}, stickyModelSelection: null }
+    throw new ComposerDraftPersistenceError({
+      operation,
+      directory: COMPOSER_DRAFTS_DIRECTORY,
+      fileName: COMPOSER_DRAFTS_FILE,
+      cause,
+    })
   }
 }
 
@@ -302,7 +299,21 @@ function persistComposerDraftsSnapshot(drafts: Record<string, ComposerDraft>): P
     drafts,
     stickyModelSelection: appAtomRegistry.get(stickyComposerModelSelectionAtom),
   }
-  return persistenceQueue.run(() => writePersistedComposerState(state))
+  return persistenceQueue.run(async () =>
+  {
+    try
+    {
+      await writePersistedComposerState(state)
+      // update this inside the serialized operation so an older success cannot
+      // clear the retry recorded by a newer failed write
+      persistRetryNeeded = false
+    }
+    catch (error)
+    {
+      persistRetryNeeded = true
+      throw error
+    }
+  })
 }
 
 async function savePersistedComposerDrafts(drafts: Record<string, ComposerDraft>): Promise<void>
@@ -313,7 +324,10 @@ async function savePersistedComposerDrafts(drafts: Record<string, ComposerDraft>
   }
   catch (error)
   {
-    console.warn('[composer-drafts] failed to persist drafts', error)
+    console.warn(
+      '[composer-drafts] failed to persist drafts',
+      error instanceof Error ? error.message : 'Composer draft persistence failed.',
+    )
     // draft persistence is best-effort; in-memory drafts still keep working.
   }
 }
@@ -392,25 +406,63 @@ export function ensureComposerDraftsLoaded(): void
   {
     return
   }
-  loadPromise = loadPersistedComposerState()
+  const loading = loadPersistedComposerState()
     .then((persisted) =>
     {
       completeComposerDraftsHydration(persisted)
     })
     .catch((cause) =>
     {
-      console.warn(
-        '[composer-drafts] failed to hydrate drafts',
-        new ComposerDraftPersistenceError({
-          operation: 'hydrate',
-          directory: COMPOSER_DRAFTS_DIRECTORY,
-          fileName: COMPOSER_DRAFTS_FILE,
-          cause,
-        }),
-      )
-      // draft loading is best-effort; in-memory drafts still keep working.
-      completeComposerDraftsHydration({ drafts: {}, stickyModelSelection: null })
+      throw cause instanceof ComposerDraftPersistenceError
+        ? cause
+        : new ComposerDraftPersistenceError({
+            operation: 'hydrate',
+            directory: COMPOSER_DRAFTS_DIRECTORY,
+            fileName: COMPOSER_DRAFTS_FILE,
+            cause,
+          })
     })
+  loadPromise = loading
+  // hook callers are fire-and-forget; awaited storage owners still receive the
+  // typed failure, and the next call starts a fresh read
+  void loading.catch((error: ComposerDraftPersistenceError) =>
+  {
+    if (loadPromise === loading)
+    {
+      loadPromise = null
+    }
+    console.warn('[composer-drafts] failed to hydrate drafts', error.message)
+  })
+}
+
+async function waitForComposerDraftsLoaded(): Promise<void>
+{
+  ensureComposerDraftsLoaded()
+  const loading = loadPromise
+  if (loading !== null)
+  {
+    await loading
+  }
+}
+
+// persist the freshest state until no pending timer or failed write remains
+async function flushComposerDrafts(): Promise<void>
+{
+  await waitForComposerDraftsLoaded()
+  do
+  {
+    while (persistTimer !== null || persistRetryNeeded)
+    {
+      if (persistTimer !== null)
+      {
+        clearTimeout(persistTimer)
+      }
+      persistTimer = null
+      await persistComposerDraftsSnapshot(appAtomRegistry.get(composerDraftsAtom))
+    }
+    // a fired debounce already entered the queue even though its timer is null
+    await persistenceQueue.run(() => Promise.resolve())
+  } while (persistTimer !== null || persistRetryNeeded)
 }
 
 // the single funnel for synchronous draft mutations: it publishes immediately
@@ -703,36 +755,25 @@ export async function mergeComposerDraftContent(
   content: ComposerDraftContent,
 ): Promise<{ readonly skippedAttachmentCount: number }>
 {
-  ensureComposerDraftsLoaded()
-  if (loadPromise !== null)
+  let skippedAttachmentCount = 0
+  // publish through the mutation funnel before awaiting storage so a failed
+  // read cannot discard restored or newly imported in-memory content
+  updateComposerDrafts(draftKey, (current) =>
   {
-    await loadPromise
-  }
-  if (persistTimer !== null)
-  {
-    clearTimeout(persistTimer)
-    persistTimer = null
-  }
-  const current = appAtomRegistry.get(composerDraftsAtom)
-  const next = mergeComposerDraftContentState(current, draftKey, content)
-  const currentAttachmentIds = new Set(
-    normalizeDraft(current[draftKey]).attachments.map((attachment) => attachment.id),
-  )
-  const nextAttachmentIds = new Set(
-    normalizeDraft(next[draftKey]).attachments.map((attachment) => attachment.id),
-  )
-  const skippedAttachmentCount = content.attachments.filter(
-    (attachment) =>
-      !currentAttachmentIds.has(attachment.id) && !nextAttachmentIds.has(attachment.id),
-  ).length
-  // publish the content and its import receipt together before the filesystem
-  // await. Typing during persistence then builds on the receipt-bearing state,
-  // and its debounced write is serialized after this transaction.
-  if (next !== current)
-  {
-    appAtomRegistry.set(composerDraftsAtom, next)
-  }
-  await persistComposerDraftsSnapshot(next)
+    const next = mergeComposerDraftContentState(current, draftKey, content)
+    const currentAttachmentIds = new Set(
+      normalizeDraft(current[draftKey]).attachments.map((attachment) => attachment.id),
+    )
+    const nextAttachmentIds = new Set(
+      normalizeDraft(next[draftKey]).attachments.map((attachment) => attachment.id),
+    )
+    skippedAttachmentCount = content.attachments.filter(
+      (attachment) =>
+        !currentAttachmentIds.has(attachment.id) && !nextAttachmentIds.has(attachment.id),
+    ).length
+    return next
+  })
+  await flushComposerDrafts()
   return { skippedAttachmentCount }
 }
 
@@ -742,23 +783,10 @@ export async function restoreComposerDraftSnapshot(
   snapshot: ComposerDraft,
 ): Promise<void>
 {
-  ensureComposerDraftsLoaded()
-  if (loadPromise !== null)
-  {
-    await loadPromise
-  }
-  if (persistTimer !== null)
-  {
-    clearTimeout(persistTimer)
-    persistTimer = null
-  }
-  const next = restoreComposerDraftSnapshotState(
-    appAtomRegistry.get(composerDraftsAtom),
-    draftKey,
-    snapshot,
+  updateComposerDrafts(draftKey, (current) =>
+    restoreComposerDraftSnapshotState(current, draftKey, snapshot),
   )
-  appAtomRegistry.set(composerDraftsAtom, next)
-  await persistComposerDraftsSnapshot(next)
+  await flushComposerDrafts()
 }
 
 export function clearComposerDraftContent(
@@ -805,24 +833,21 @@ export function removeComposerDraftsForEnvironment(
 
 export async function clearComposerDraftsEnvironment(environmentId: EnvironmentId): Promise<void>
 {
-  ensureComposerDraftsLoaded()
-  if (loadPromise !== null)
-  {
-    await loadPromise
-  }
+  await waitForComposerDraftsLoaded()
 
   const next = removeComposerDraftsForEnvironment(
     appAtomRegistry.get(composerDraftsAtom),
     environmentId,
   )
 
+  appAtomRegistry.set(composerDraftsAtom, next)
   if (persistTimer !== null)
   {
     clearTimeout(persistTimer)
     persistTimer = null
   }
-  appAtomRegistry.set(composerDraftsAtom, next)
   await persistComposerDraftsSnapshot(next)
+  await flushComposerDrafts()
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft

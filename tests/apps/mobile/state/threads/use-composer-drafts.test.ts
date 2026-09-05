@@ -9,7 +9,10 @@ const persistedDraftFile = vi.hoisted(() => ({
   exists: false,
   payload: '',
   writes: [] as Array<string>,
+  readError: null as Error | null,
   writeError: null as Error | null,
+  queuedWriteErrors: [] as Array<Error>,
+  onWrite: null as (() => void) | null,
   readResult: null as Promise<string> | null,
 }))
 
@@ -33,16 +36,26 @@ vi.mock('expo-file-system', () => ({
     }
     text(): Promise<string>
     {
+      if (persistedDraftFile.readError !== null)
+      {
+        throw persistedDraftFile.readError
+      }
       return persistedDraftFile.readResult ?? Promise.resolve(persistedDraftFile.payload)
     }
     write(payload: string): void
     {
+      const queuedError = persistedDraftFile.queuedWriteErrors.shift()
+      if (queuedError !== undefined)
+      {
+        throw queuedError
+      }
       if (persistedDraftFile.writeError !== null)
       {
         throw persistedDraftFile.writeError
       }
       persistedDraftFile.payload = payload
       persistedDraftFile.writes.push(payload)
+      persistedDraftFile.onWrite?.()
     }
   },
 }))
@@ -73,8 +86,11 @@ afterEach(() =>
   appAtomRegistry.set(stickyComposerModelSelectionAtom, null)
   persistedDraftFile.exists = false
   persistedDraftFile.payload = ''
+  persistedDraftFile.readError = null
   persistedDraftFile.readResult = null
   persistedDraftFile.writeError = null
+  persistedDraftFile.queuedWriteErrors = []
+  persistedDraftFile.onWrite = null
   persistedDraftFile.writes = []
   vi.useRealTimers()
 })
@@ -241,6 +257,131 @@ describe('mobile composer drafts', () =>
         },
       },
     })
+  })
+
+  it.each(['read', 'decode'] as const)(
+    'keeps persisted drafts and pending edits after a %s failure, then retries hydration',
+    async (failure) =>
+    {
+      vi.resetModules()
+      vi.useFakeTimers()
+      const drafts =
+        await import('../../../../../apps/mobile/src/state/threads/use-composer-drafts')
+      const { appAtomRegistry: registry } =
+        await import('../../../../../apps/mobile/src/state/atom-registry')
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const savedKey = 'environment-1:saved-thread'
+      const pendingKey = 'environment-1:pending-thread'
+      const secretAttachment = {
+        id: 'secret-image',
+        type: 'image' as const,
+        name: 'Secret.png',
+        mimeType: 'image/png',
+        sizeBytes: 6,
+        dataUrl: 'data:image/png;base64,U0VDUkVU',
+        previewUri: 'data:image/png;base64,U0VDUkVU',
+      }
+      const savedDocument = {
+        schemaVersion: 1,
+        stickyModelSelection: {
+          instanceId: ProviderInstanceId.make('persisted-provider'),
+          model: 'persisted-model',
+        },
+        drafts: {
+          [savedKey]: {
+            text: 'secret persisted draft',
+            attachments: [secretAttachment],
+          },
+        },
+      }
+      const validPayload = JSON.stringify(savedDocument)
+      const initialPayload =
+        failure === 'read' ? validPayload : JSON.stringify({ ...savedDocument, schemaVersion: 99 })
+      const selected = {
+        instanceId: ProviderInstanceId.make('pending-provider'),
+        model: 'pending-model',
+      }
+      persistedDraftFile.exists = true
+      persistedDraftFile.payload = initialPayload
+      persistedDraftFile.readError =
+        failure === 'read'
+          ? new Error('secret persisted draft data:image/png;base64,U0VDUkVU')
+          : null
+
+      drafts.setStickyComposerModelSelection(selected)
+      drafts.setComposerDraftText(pendingKey, 'pending edit')
+
+      await expect(
+        drafts.mergeComposerDraftContent(pendingKey, { text: '', attachments: [] }),
+      ).rejects.toMatchObject({
+        _tag: 'ComposerDraftPersistenceError',
+        operation: failure,
+      })
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(persistedDraftFile.payload).toBe(initialPayload)
+      expect(persistedDraftFile.writes).toEqual([])
+      expect(registry.get(drafts.composerDraftsAtom)[pendingKey]?.text).toBe('pending edit')
+      expect(registry.get(drafts.stickyComposerModelSelectionAtom)).toEqual(selected)
+      expect(warning.mock.calls.flat().join(' ')).not.toContain('secret persisted draft')
+      expect(warning.mock.calls.flat().join(' ')).not.toContain('U0VDUkVU')
+
+      persistedDraftFile.readError = null
+      persistedDraftFile.payload = validPayload
+      await drafts.mergeComposerDraftContent(pendingKey, { text: '', attachments: [] })
+
+      expect(persistedDraftFile.writes).toHaveLength(1)
+      expect(drafts.decodePersistedComposerState(JSON.parse(persistedDraftFile.payload))).toEqual({
+        stickyModelSelection: selected,
+        drafts: {
+          [savedKey]: {
+            text: 'secret persisted draft',
+            attachments: [secretAttachment],
+            orchestrate: false,
+          },
+          [pendingKey]: {
+            text: 'pending edit',
+            attachments: [],
+            orchestrate: false,
+          },
+        },
+      })
+      warning.mockRestore()
+    },
+  )
+
+  it('drains and retries a failed debounce fired during a durable draft write', async () =>
+  {
+    vi.resetModules()
+    vi.useFakeTimers()
+    const drafts = await import('../../../../../apps/mobile/src/state/threads/use-composer-drafts')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const draftKey = 'environment-1:thread-1'
+    persistedDraftFile.exists = true
+    persistedDraftFile.payload = JSON.stringify({ schemaVersion: 1, drafts: {} })
+    await drafts.clearComposerDraftsEnvironment(EnvironmentId.make('environment-0'))
+    persistedDraftFile.writes = []
+
+    persistedDraftFile.onWrite = () =>
+    {
+      persistedDraftFile.onWrite = null
+      drafts.setComposerDraftText(draftKey, 'latest edit')
+      persistedDraftFile.queuedWriteErrors.push(new Error('secret pending draft'))
+      vi.advanceTimersByTime(200)
+    }
+
+    await drafts.restoreComposerDraftSnapshot(draftKey, {
+      text: 'durable operation',
+      attachments: [],
+    })
+
+    expect(persistedDraftFile.writes).toHaveLength(2)
+    expect(JSON.parse(persistedDraftFile.payload).drafts[draftKey]).toMatchObject({
+      text: 'latest edit',
+      attachments: [],
+    })
+    expect(warning.mock.calls.flat().join(' ')).not.toContain('secret pending draft')
+    warning.mockRestore()
   })
 
   it('hydrates selector state even when the message content is empty', () =>
