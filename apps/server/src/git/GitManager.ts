@@ -52,6 +52,7 @@ import {
   customTextGenerationPolicy,
   repositoryConventionsTextGenerationPolicy,
 } from '../textGeneration/TextGenerationPresets.ts'
+import { limitSection } from '../textGeneration/TextGenerationUtils.ts'
 import * as ProjectSetupScriptRunner from '../project/ProjectSetupScriptRunner.ts'
 import * as ProviderRegistry from '../provider/Services/ProviderRegistry.ts'
 import { extractBranchNameFromRemoteRef } from '../vcs/gitRefParse.ts'
@@ -148,6 +149,9 @@ const PR_LOOKUP_CACHE_TTL = Duration.minutes(2)
 const PR_LOOKUP_FAILURE_BASE_TTL = Duration.seconds(20)
 const PR_LOOKUP_FAILURE_MAX_TTL = Duration.minutes(15)
 const PR_LOOKUP_CACHE_CAPACITY = 2_048
+const REPOSITORY_INSTRUCTION_MAX_BYTES = 20_000
+const REPOSITORY_HISTORY_PROMPT_MAX_CHARS = 2_000
+const repositoryInstructionDecoder = new TextDecoder()
 
 export function prLookupFailureTtl(consecutiveFailures: number): Duration.Duration
 {
@@ -176,9 +180,80 @@ export const make = Effect.gen(function* ()
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner
   const crypto = yield* Crypto.Crypto
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd })
   const serverSettingsService = yield* ServerSettings.ServerSettingsService
+
+  const resolveRepositoryRoot = (cwd: string) =>
+    gitCore
+      .execute({
+        operation: 'GitManager.resolveRepositoryRoot',
+        cwd,
+        args: ['rev-parse', '--show-toplevel'],
+      })
+      .pipe(
+        Effect.flatMap((result) => fileSystem.realPath(result.stdout.trim())),
+        Effect.orElseSucceed(() => null),
+      )
+
+  const readRepositoryInstructions = (root: string, fileName: 'AGENTS.md' | 'CLAUDE.md') =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const instructionPath = yield* fileSystem.realPath(path.join(root, fileName))
+        if (path.dirname(instructionPath) !== root)
+        {
+          return ''
+        }
+
+        const pathInfo = yield* fileSystem.stat(instructionPath)
+        if (
+          pathInfo.type !== 'File' ||
+          pathInfo.size > FileSystem.Size(REPOSITORY_INSTRUCTION_MAX_BYTES)
+        )
+        {
+          return ''
+        }
+
+        const file = yield* fileSystem.open(instructionPath, { flag: 'r' })
+        const openedInfo = yield* file.stat
+        const openedPath = yield* fileSystem.realPath(instructionPath)
+        if (
+          openedPath !== instructionPath ||
+          openedInfo.type !== 'File' ||
+          openedInfo.size > FileSystem.Size(REPOSITORY_INSTRUCTION_MAX_BYTES) ||
+          openedInfo.dev !== pathInfo.dev ||
+          Option.getOrUndefined(openedInfo.ino) !== Option.getOrUndefined(pathInfo.ino)
+        )
+        {
+          return ''
+        }
+
+        const bytes = new Uint8Array(REPOSITORY_INSTRUCTION_MAX_BYTES)
+        let bytesRead = 0
+        while (bytesRead < bytes.byteLength)
+        {
+          const readSize = Number(yield* file.read(bytes.subarray(bytesRead)))
+          if (readSize === 0)
+          {
+            break
+          }
+          bytesRead += readSize
+        }
+        const finalInfo = yield* file.stat
+        if (
+          finalInfo.type !== 'File' ||
+          finalInfo.size > FileSystem.Size(REPOSITORY_INSTRUCTION_MAX_BYTES) ||
+          finalInfo.size !== FileSystem.Size(bytesRead)
+        )
+        {
+          return ''
+        }
+        return repositoryInstructionDecoder.decode(bytes.subarray(0, bytesRead)).trim()
+      }),
+    ).pipe(Effect.orElseSucceed(() => ''))
 
   const readRecentCommitSubjects = (cwd: string) =>
     gitCore
@@ -197,30 +272,55 @@ export const make = Effect.gen(function* ()
         Effect.orElseSucceed(() => []),
       )
 
-  const resolveStylePolicy = (cwd: string, style: SourceControlWritingStyleSettings) =>
+  const resolveStylePolicy = (cwd: string, settings: SourceControlTextGenerationSettings) =>
     Effect.gen(function* ()
     {
-      switch (style.mode)
+      switch (settings.style.mode)
       {
         case 'conventional_commits':
           return conventionalCommitsTextGenerationPolicy
         case 'custom':
           return customTextGenerationPolicy(
-            style.customInstructions
+            settings.style.customInstructions
               ? {
-                  commitInstructions: style.customInstructions,
-                  changeRequestInstructions: style.customInstructions,
+                  commitInstructions: settings.style.customInstructions,
+                  changeRequestInstructions: settings.style.customInstructions,
                 }
               : {},
           )
         case 'repo_conventions':
         {
           const subjects = yield* readRecentCommitSubjects(cwd)
-          if (subjects.length === 0)
+          const root = yield* resolveRepositoryRoot(cwd)
+          const agentInstructions = root ? yield* readRepositoryInstructions(root, 'AGENTS.md') : ''
+          const isClaudeWriter =
+            settings.modelSelection.instanceId === 'claudeAgent' ||
+            (yield* providerRegistry.getProviders).some(
+              (provider) =>
+                provider.instanceId === settings.modelSelection.instanceId &&
+                provider.driver === 'claudeAgent',
+            )
+          const claudeInstructions =
+            root && isClaudeWriter ? yield* readRepositoryInstructions(root, 'CLAUDE.md') : ''
+          const instructionSections = [
+            ...(agentInstructions ? [['Local AGENTS.md:', agentInstructions] as const] : []),
+            ...(claudeInstructions ? [['Local CLAUDE.md:', claudeInstructions] as const] : []),
+          ]
+          const examples = [
+            ...(subjects.length > 0
+              ? [
+                  limitSection(
+                    ['Recent commit subjects from this repository:', ...subjects].join('\n'),
+                    REPOSITORY_HISTORY_PROMPT_MAX_CHARS,
+                  ),
+                ]
+              : []),
+            ...instructionSections.map(([heading, instructions]) => `${heading}\n${instructions}`),
+          ].join('\n\n')
+          if (!examples)
           {
             return repositoryConventionsTextGenerationPolicy
           }
-          const examples = ['Recent commit subjects from this repository:', ...subjects].join('\n')
           return {
             ...repositoryConventionsTextGenerationPolicy,
             commitInstructions: `${repositoryConventionsTextGenerationPolicy.commitInstructions}\n\n${examples}`,
@@ -458,9 +558,6 @@ export const make = Effect.gen(function* ()
           ),
       ),
     )
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-
   const tempDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? '/tmp'
   const canonicalizeExistingPath = (value: string) =>
     fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => value))
@@ -1157,7 +1254,7 @@ export const make = Effect.gen(function* ()
         }
       }
 
-      const policy = yield* resolveStylePolicy(input.cwd, input.settings.style)
+      const policy = yield* resolveStylePolicy(input.cwd, input.settings)
 
       const generated = yield* textGeneration
         .generateCommitMessage({
@@ -1357,7 +1454,7 @@ export const make = Effect.gen(function* ()
     })
     const baseRangeRef = yield* resolveBaseRangeRef(cwd, baseBranch)
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseRangeRef)
-    const policy = yield* resolveStylePolicy(cwd, settings.style)
+    const policy = yield* resolveStylePolicy(cwd, settings)
     const changeRequestTemplate =
       settings.style.followChangeRequestTemplates && provider.kind === 'github'
         ? Option.getOrUndefined(yield* detectPrTemplate(cwd, baseRangeRef, gitCore.execute))

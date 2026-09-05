@@ -102,6 +102,7 @@ import * as WorkspaceFileSystem from './workspace/WorkspaceFileSystem.ts'
 import * as VcsStatusBroadcaster from './vcs/VcsStatusBroadcaster.ts'
 import * as VcsProvisioningService from './vcs/VcsProvisioningService.ts'
 import * as GitWorkflowService from './git/GitWorkflowService.ts'
+import { parseRemoteRefWithRemoteNames } from './vcs/gitRefParse.ts'
 import * as ReviewService from './review/ReviewService.ts'
 import * as ProjectSetupScriptRunner from './project/ProjectSetupScriptRunner.ts'
 import * as ServerEnvironment from './environment/ServerEnvironment.ts'
@@ -588,26 +589,42 @@ const makeWsRpcLayer = (
 
             if (bootstrap?.prepareWorktree)
             {
-              let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch
-              // startFromOrigin is a stored preference, so local-only repos fall back to the base branch
+              const shouldStartFromOrigin = bootstrap.prepareWorktree.startFromOrigin === true
+              const parsedRemoteBase = shouldStartFromOrigin
+                ? parseRemoteRefWithRemoteNames(bootstrap.prepareWorktree.baseBranch, ['origin'])
+                : null
+              let worktreeBaseRef =
+                parsedRemoteBase?.branchName ?? bootstrap.prepareWorktree.baseBranch
+              // startFromOrigin is a stored preference, so a missing remote branch falls back locally
               const startFromOrigin =
-                bootstrap.prepareWorktree.startFromOrigin === true &&
+                shouldStartFromOrigin &&
                 (yield* gitWorkflow.remoteExists({
                   cwd: bootstrap.prepareWorktree.projectCwd,
                   remoteName: 'origin',
                 }))
               if (startFromOrigin)
               {
-                yield* gitWorkflow.fetchRemote({
+                const remoteBranch =
+                  parsedRemoteBase?.branchName ?? bootstrap.prepareWorktree.baseBranch
+                const remoteBaseExists = yield* gitWorkflow.remoteBranchExists({
                   cwd: bootstrap.prepareWorktree.projectCwd,
                   remoteName: 'origin',
+                  remoteBranch,
                 })
-                const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  refName: bootstrap.prepareWorktree.baseBranch,
-                  fallbackRemoteName: 'origin',
-                })
-                worktreeBaseRef = resolvedRemoteBase.commitSha
+                if (remoteBaseExists)
+                {
+                  yield* gitWorkflow.fetchRemoteTrackingBranch({
+                    cwd: bootstrap.prepareWorktree.projectCwd,
+                    remoteName: 'origin',
+                    remoteBranch,
+                  })
+                  const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
+                    cwd: bootstrap.prepareWorktree.projectCwd,
+                    remoteName: 'origin',
+                    remoteBranch,
+                  })
+                  worktreeBaseRef = resolvedRemoteBase.commitSha
+                }
               }
               const worktree = yield* gitWorkflow.createWorktree({
                 cwd: bootstrap.prepareWorktree.projectCwd,

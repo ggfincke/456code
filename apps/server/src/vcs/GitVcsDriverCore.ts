@@ -1032,7 +1032,7 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
       }),
     )
 
-  const remoteBranchExists = (
+  const remoteTrackingBranchExists = (
     cwd: string,
     remoteName: string,
     refName: string,
@@ -1045,6 +1045,41 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
         allowNonZeroExit: true,
       },
     ).pipe(Effect.map((result) => result.exitCode === 0))
+
+  const remoteBranchExists: GitVcsDriver.GitVcsDriver['Service']['remoteBranchExists'] = Effect.fn(
+    'remoteBranchExists',
+  )(function* (input)
+  {
+    const args = [
+      'ls-remote',
+      '--exit-code',
+      '--heads',
+      input.remoteName,
+      `refs/heads/${input.remoteBranch}`,
+    ] as const
+    const result = yield* executeGit('GitVcsDriver.remoteBranchExists', input.cwd, args, {
+      allowNonZeroExit: true,
+    })
+    if (result.exitCode === 0)
+    {
+      return true
+    }
+    if (result.exitCode === 2)
+    {
+      return false
+    }
+    return yield* new GitCommandError({
+      ...gitCommandContext({
+        operation: 'GitVcsDriver.remoteBranchExists',
+        cwd: input.cwd,
+        args,
+      }),
+      detail: 'Git remote branch lookup failed.',
+      exitCode: result.exitCode,
+      stdoutLength: result.stdout.length,
+      stderrLength: result.stderr.length,
+    })
+  })
 
   const remoteExists: GitVcsDriver.GitVcsDriver['Service']['remoteExists'] = (input) =>
     executeGit('GitVcsDriver.remoteExists', input.cwd, ['remote', 'get-url', input.remoteName], {
@@ -1202,7 +1237,7 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
 
       if (
         primaryRemoteName &&
-        (yield* remoteBranchExists(cwd, primaryRemoteName, normalizedCandidate))
+        (yield* remoteTrackingBranchExists(cwd, primaryRemoteName, normalizedCandidate))
       )
       {
         return `${primaryRemoteName}/${normalizedCandidate}`
@@ -1836,9 +1871,11 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
           }
         }
 
-        const hasRemoteBranch = yield* remoteBranchExists(cwd, publishRemoteName, branch).pipe(
-          Effect.orElseSucceed(() => false),
-        )
+        const hasRemoteBranch = yield* remoteTrackingBranchExists(
+          cwd,
+          publishRemoteName,
+          branch,
+        ).pipe(Effect.orElseSucceed(() => false))
         if (hasRemoteBranch)
         {
           return {
@@ -2675,13 +2712,20 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
   const resolveRemoteTrackingCommit: GitVcsDriver.GitVcsDriver['Service']['resolveRemoteTrackingCommit'] =
     Effect.fn('resolveRemoteTrackingCommit')(function* (input)
     {
-      const remoteNames = yield* listRemoteNames(input.cwd)
-      const parsedRemoteRef = parseRemoteRefWithRemoteNames(
-        input.refName,
-        remoteNames.toSorted((left, right) => right.length - left.length),
-      )
-      const remoteRefName =
-        parsedRemoteRef?.remoteRef ?? `${input.fallbackRemoteName}/${input.refName}`
+      let remoteRefName: string
+      if ('remoteBranch' in input)
+      {
+        remoteRefName = `${input.remoteName}/${input.remoteBranch}`
+      }
+      else
+      {
+        const remoteNames = yield* listRemoteNames(input.cwd)
+        const parsedRemoteRef = parseRemoteRefWithRemoteNames(
+          input.refName,
+          remoteNames.toSorted((left, right) => right.length - left.length),
+        )
+        remoteRefName = parsedRemoteRef?.remoteRef ?? `${input.fallbackRemoteName}/${input.refName}`
+      }
       const commitSha = yield* runGitStdout('GitVcsDriver.resolveRemoteTrackingCommit', input.cwd, [
         'rev-parse',
         '--verify',
@@ -3004,6 +3048,7 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
     resolveDefaultBranchName,
     fetchRemote: (input) => withListRefsInvalidation(input.cwd, fetchRemote(input)),
     remoteExists,
+    remoteBranchExists,
     resolveRemoteTrackingCommit,
     fetchRemoteBranch: (input) => withListRefsInvalidation(input.cwd, fetchRemoteBranch(input)),
     fetchRemoteTrackingBranch: (input) =>

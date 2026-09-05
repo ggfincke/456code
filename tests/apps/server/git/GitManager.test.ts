@@ -20,6 +20,7 @@ import { expect } from 'vite-plus/test'
 import type {
   GitActionProgressEvent,
   GitPreparePullRequestThreadInput,
+  ServerProvider,
   ThreadId,
 } from '@t3tools/contracts'
 
@@ -371,6 +372,45 @@ function createTextGeneration(
   }
 }
 
+function readyProvider(instanceId: string, driver: string): ServerProvider
+{
+  return {
+    instanceId: ProviderInstanceId.make(instanceId),
+    driver: ProviderDriverKind.make(driver),
+    enabled: true,
+    installed: true,
+    version: '1.0.0',
+    status: 'ready',
+    auth: { status: 'authenticated' },
+    checkedAt: '2026-09-03T00:00:00.000Z',
+    availability: 'available',
+    models: [],
+    slashCommands: [],
+    skills: [],
+  }
+}
+
+function commitPolicyInstructions(
+  policy: TextGeneration.CommitMessageGenerationInput['policy'],
+): string
+{
+  return policy?.commitInstructions ?? ''
+}
+
+function changeRequestPolicyInstructions(
+  policy: TextGeneration.PrContentGenerationInput['policy'],
+): string
+{
+  return policy?.changeRequestInstructions ?? ''
+}
+
+function createEscapingAgentInstructionsSymlink(repoDir: string, externalDir: string): void
+{
+  const externalInstructions = NodePath.join(externalDir, 'AGENTS.md')
+  NodeFS.writeFileSync(externalInstructions, 'external rules')
+  NodeFS.symlinkSync(externalInstructions, NodePath.join(repoDir, 'AGENTS.md'))
+}
+
 function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
   service: GitHubCli.GitHubCli['Service']
   ghCalls: string[]
@@ -719,6 +759,7 @@ const seedForkMainCollisionRepo = (seedFileName: string, seedContents: string) =
 function makeManager(input?: {
   ghScenario?: FakeGhScenario
   textGeneration?: Partial<FakeGitTextGeneration>
+  providers?: ReadonlyArray<ServerProvider>
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0]
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner['Service']
 })
@@ -754,7 +795,7 @@ function makeManager(input?: {
   const managerLayer = Layer.mergeAll(
     Layer.succeed(TextGeneration.TextGeneration, textGeneration),
     Layer.mock(ProviderRegistry.ProviderRegistry)({
-      getProviders: Effect.succeed([]),
+      getProviders: Effect.succeed(input?.providers ?? []),
     }),
     Layer.succeed(
       ProjectSetupScriptRunner.ProjectSetupScriptRunner,
@@ -1758,16 +1799,18 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
     {
       const repoDir = yield* makeTempDir('t3code-git-manager-')
       yield* initRepo(repoDir)
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'CLAUDE.md'), 'Use Claude-only phrasing.')
       NodeFS.writeFileSync(NodePath.join(repoDir, 'README.md'), 'hello\nworld\n')
       const missingInstanceId = ProviderInstanceId.make('missing_writer')
       let generatedModelSelection:
         TextGeneration.CommitMessageGenerationInput['modelSelection'] | undefined
+      let generatedPolicy: TextGeneration.CommitMessageGenerationInput['policy'] = undefined
 
       const { manager } = yield* makeManager({
         serverSettings: {
           providerInstances: {
             [missingInstanceId]: {
-              driver: ProviderDriverKind.make('missing-driver'),
+              driver: ProviderDriverKind.make('claudeAgent'),
               config: {},
             },
           },
@@ -1775,11 +1818,15 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
             instanceId: missingInstanceId,
             model: 'missing-model',
           },
+          sourceControlWritingStyle: {
+            mode: 'repo_conventions' as const,
+          },
         },
         textGeneration: {
           generateCommitMessage: (input) =>
           {
             generatedModelSelection = input.modelSelection
+            generatedPolicy = input.policy
             return Effect.succeed({ subject: 'Use the available writer', body: '' })
           },
         },
@@ -1791,18 +1838,112 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
       })
 
       expect(generatedModelSelection).toEqual(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection)
+      expect(commitPolicyInstructions(generatedPolicy)).not.toContain('Local CLAUDE.md:')
     }),
   )
 
-  it.effect('preserves repository conventions style when recent history is empty', () =>
+  it.effect('uses root instructions when fallback resolves to a custom Claude writer', () =>
     Effect.gen(function* ()
     {
       const repoDir = yield* makeTempDir('t3code-git-manager-')
       yield* runGit(repoDir, ['init', '--initial-branch=main'])
       yield* runGit(repoDir, ['config', 'user.email', 'test@example.com'])
       yield* runGit(repoDir, ['config', 'user.name', 'Test User'])
+      const agentInstructions = 'Use lowercase source control text.'
+      const claudeInstructions = 'Keep pull request bodies brief.'
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'AGENTS.md'), agentInstructions)
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'CLAUDE.md'), claudeInstructions)
       NodeFS.writeFileSync(NodePath.join(repoDir, 'README.md'), 'hello\n')
       yield* runGit(repoDir, ['add', 'README.md'])
+      let generatedPolicy: TextGeneration.CommitMessageGenerationInput['policy'] = undefined
+      let generatedModelSelection:
+        TextGeneration.CommitMessageGenerationInput['modelSelection'] | undefined
+      const customClaudeId = ProviderInstanceId.make('custom_claude')
+      const missingWriterId = ProviderInstanceId.make('missing_writer')
+
+      const { manager } = yield* makeManager({
+        providers: [readyProvider(customClaudeId, 'claudeAgent')],
+        serverSettings: {
+          providerInstances: {
+            [customClaudeId]: {
+              driver: ProviderDriverKind.make('claudeAgent'),
+              enabled: true,
+              config: {},
+            },
+            [missingWriterId]: {
+              driver: ProviderDriverKind.make('codex'),
+              enabled: true,
+              config: {},
+            },
+          },
+          textGenerationModelSelection: {
+            instanceId: customClaudeId,
+            model: 'claude-sonnet-4-6',
+          },
+          sourceControlWriterModelSelection: {
+            instanceId: missingWriterId,
+            model: 'missing-model',
+          },
+          sourceControlWritingStyle: {
+            mode: 'repo_conventions' as const,
+          },
+        },
+        textGeneration: {
+          generateCommitMessage: (input) =>
+          {
+            generatedPolicy = input.policy
+            generatedModelSelection = input.modelSelection
+            return Effect.succeed({ subject: 'Create initial commit', body: '' })
+          },
+        },
+      })
+      yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: 'commit',
+      })
+
+      expect(generatedModelSelection).toEqual({
+        instanceId: customClaudeId,
+        model: 'claude-sonnet-4-6',
+      })
+      expect(generatedPolicy).toEqual({
+        kind: 'repo_conventions',
+        commitInstructions: `Follow the repository's established commit message style when examples are available.\n\nLocal AGENTS.md:\n${agentInstructions}\n\nLocal CLAUDE.md:\n${claudeInstructions}`,
+        changeRequestInstructions: `Follow the repository's established change request title and body style when examples are available.\n\nLocal AGENTS.md:\n${agentInstructions}\n\nLocal CLAUDE.md:\n${claudeInstructions}`,
+        inferRepositoryConventions: true,
+      })
+    }),
+  )
+
+  it.effect('keeps exactly 20 recent non-merge subjects with root agent instructions', () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      for (let index = 1; index <= 21; index += 1)
+      {
+        NodeFS.writeFileSync(NodePath.join(repoDir, 'history.txt'), `${index}\n`)
+        yield* runGit(repoDir, ['add', 'history.txt'])
+        yield* runGit(repoDir, ['commit', '-m', `History ${String(index).padStart(2, '0')}`])
+      }
+      yield* runGit(repoDir, ['checkout', '-b', 'merge-source'])
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'merged.txt'), 'merged\n')
+      yield* runGit(repoDir, ['add', 'merged.txt'])
+      yield* runGit(repoDir, ['commit', '-m', 'Merge source subject'])
+      yield* runGit(repoDir, ['checkout', 'main'])
+      yield* runGit(repoDir, ['merge', '--no-ff', 'merge-source', '-m', 'Merge branch subject'])
+      const expectedHistory = (yield* runGit(repoDir, [
+        'log',
+        '-n',
+        '20',
+        '--no-merges',
+        '--pretty=format:%s',
+      ])).stdout.split('\n')
+
+      const agentInstructions = 'Prefer repository terminology.'
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'AGENTS.md'), agentInstructions)
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'CLAUDE.md'), 'Claude-only instructions.')
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'README.md'), 'hello\nhistory\n')
       let generatedPolicy: TextGeneration.CommitMessageGenerationInput['policy'] = undefined
 
       const { manager } = yield* makeManager({
@@ -1815,23 +1956,183 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
           generateCommitMessage: (input) =>
           {
             generatedPolicy = input.policy
-            return Effect.succeed({ subject: 'Create initial commit', body: '' })
+            return Effect.succeed({ subject: 'Follow repository history', body: '' })
           },
         },
       })
-      yield* runStackedAction(manager, {
-        cwd: repoDir,
-        action: 'commit',
+      yield* runStackedAction(manager, { cwd: repoDir, action: 'commit' })
+
+      const instructions = commitPolicyInstructions(generatedPolicy)
+      const historySection = instructions
+        .split('Recent commit subjects from this repository:\n')[1]
+        ?.split('\n\nLocal AGENTS.md:')[0]
+      expect(historySection?.split('\n')).toEqual(expectedHistory)
+      expect(expectedHistory).toHaveLength(20)
+      expect(expectedHistory).toContain('Merge source subject')
+      expect(instructions).toContain(`Local AGENTS.md:\n${agentInstructions}`)
+      expect(instructions).not.toContain('Merge branch subject')
+      expect(instructions).not.toContain('Local CLAUDE.md:')
+    }),
+  )
+
+  it.effect('bounds repository context while retaining both root instruction files', () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const agentStart = 'agents-start-'
+      const agentEnd = '-agents-end'
+      const claudeStart = 'claude-start-'
+      const claudeEnd = '-claude-end'
+      const agentInstructions = `${agentStart}${'a'.repeat(
+        20_000 - agentStart.length - agentEnd.length,
+      )}${agentEnd}`
+      const claudeInstructions = `${claudeStart}${'c'.repeat(
+        20_000 - claudeStart.length - claudeEnd.length,
+      )}${claudeEnd}`
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'AGENTS.md'), agentInstructions)
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'CLAUDE.md'), claudeInstructions)
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'change.txt'), 'bounded instructions\n')
+      let generatedPolicy: TextGeneration.CommitMessageGenerationInput['policy'] = undefined
+      const customClaudeId = ProviderInstanceId.make('bounded_claude')
+
+      const { manager } = yield* makeManager({
+        providers: [readyProvider(customClaudeId, 'claudeAgent')],
+        serverSettings: {
+          providerInstances: {
+            [customClaudeId]: {
+              driver: ProviderDriverKind.make('claudeAgent'),
+              enabled: true,
+              config: {},
+            },
+          },
+          sourceControlWritingStyle: { mode: 'repo_conventions' as const },
+          sourceControlWriterModelSelection: null,
+          textGenerationModelSelection: {
+            instanceId: customClaudeId,
+            model: 'claude-sonnet-4-6',
+          },
+        },
+        textGeneration: {
+          generateCommitMessage: (input) =>
+          {
+            generatedPolicy = input.policy
+            return Effect.succeed({ subject: 'Bound repository instructions', body: '' })
+          },
+        },
       })
 
-      expect(generatedPolicy).toEqual({
-        kind: 'repo_conventions',
-        commitInstructions:
-          "Follow the repository's established commit message style when examples are available.",
-        changeRequestInstructions:
-          "Follow the repository's established change request title and body style when examples are available.",
-        inferRepositoryConventions: true,
+      yield* runStackedAction(manager, { cwd: repoDir, action: 'commit' })
+
+      const instructions = commitPolicyInstructions(generatedPolicy)
+      expect(instructions.length).toBeLessThanOrEqual(44_000)
+      expect(instructions).toContain('Local AGENTS.md:\nagents-start-')
+      expect(instructions).toContain('Local CLAUDE.md:\nclaude-start-')
+      expect(instructions).toContain(agentEnd)
+      expect(instructions).toContain(claudeEnd)
+      expect(instructions).not.toContain('[truncated]')
+    }),
+  )
+
+  it.effect('ignores non-root, non-file, escaping, and oversized agent instructions', () =>
+    Effect.gen(function* ()
+    {
+      const cases: ReadonlyArray<{
+        readonly name: string
+        readonly setup: (repoDir: string, externalDir: string) => void
+        readonly cwd?: (repoDir: string) => string
+      }> = [
+        { name: 'missing', setup: () => undefined },
+        {
+          name: 'directory',
+          setup: (repoDir) =>
+          {
+            const instructionsDir = NodePath.join(repoDir, 'AGENTS.md')
+            NodeFS.mkdirSync(instructionsDir)
+            NodeFS.writeFileSync(NodePath.join(instructionsDir, 'rules.md'), 'directory rules')
+          },
+        },
+        {
+          name: 'nested',
+          setup: (repoDir) =>
+          {
+            const nestedDir = NodePath.join(repoDir, 'nested')
+            NodeFS.mkdirSync(nestedDir)
+            NodeFS.writeFileSync(NodePath.join(nestedDir, 'AGENTS.md'), 'nested rules')
+          },
+          cwd: (repoDir) => NodePath.join(repoDir, 'nested'),
+        },
+        {
+          name: 'oversized UTF-8',
+          setup: (repoDir) =>
+            NodeFS.writeFileSync(NodePath.join(repoDir, 'AGENTS.md'), 'é'.repeat(10_001)),
+        },
+        ...(NodePath.sep === '\\'
+          ? []
+          : [
+              {
+                name: 'FIFO',
+                setup: (repoDir: string) =>
+                  NodeChildProcess.execFileSync('mkfifo', [NodePath.join(repoDir, 'AGENTS.md')]),
+              },
+              {
+                name: 'symlink escape',
+                setup: createEscapingAgentInstructionsSymlink,
+              },
+            ]),
+      ]
+
+      for (const testCase of cases)
+      {
+        const repoDir = yield* makeTempDir('t3code-git-manager-')
+        const externalDir = yield* makeTempDir('t3code-git-instructions-')
+        yield* initRepo(repoDir)
+        testCase.setup(repoDir, externalDir)
+        const cwd = testCase.cwd?.(repoDir) ?? repoDir
+        NodeFS.writeFileSync(NodePath.join(cwd, 'change.txt'), `${testCase.name}\n`)
+        let generatedPolicy: TextGeneration.CommitMessageGenerationInput['policy'] = undefined
+        const { manager } = yield* makeManager({
+          serverSettings: {
+            sourceControlWritingStyle: { mode: 'repo_conventions' as const },
+          },
+          textGeneration: {
+            generateCommitMessage: (input) =>
+            {
+              generatedPolicy = input.policy
+              return Effect.succeed({ subject: `Handle ${testCase.name}`, body: '' })
+            },
+          },
+        })
+
+        yield* runStackedAction(manager, { cwd, action: 'commit' })
+        expect(commitPolicyInstructions(generatedPolicy), testCase.name).not.toContain(
+          'Local AGENTS.md:',
+        )
+      }
+
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const instructions = 'a'.repeat(20_000)
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'AGENTS.md'), instructions)
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'change.txt'), 'boundary\n')
+      let generatedPolicy: TextGeneration.CommitMessageGenerationInput['policy'] = undefined
+      const { manager } = yield* makeManager({
+        serverSettings: {
+          sourceControlWritingStyle: { mode: 'repo_conventions' as const },
+        },
+        textGeneration: {
+          generateCommitMessage: (input) =>
+          {
+            generatedPolicy = input.policy
+            return Effect.succeed({ subject: 'Accept bounded instructions', body: '' })
+          },
+        },
       })
+
+      yield* runStackedAction(manager, { cwd: repoDir, action: 'commit' })
+      expect(commitPolicyInstructions(generatedPolicy)).toContain(
+        `Local AGENTS.md:\n${instructions}`,
+      )
     }),
   )
 
@@ -2755,8 +3056,10 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
       yield* runGit(repoDir, ['checkout', '-b', 'feature-create-pr'])
       const remoteDir = yield* createBareRemote()
       yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+      const agentInstructions = 'Lead with user impact.'
+      NodeFS.writeFileSync(NodePath.join(repoDir, 'AGENTS.md'), agentInstructions)
       NodeFS.writeFileSync(NodePath.join(repoDir, 'changes.txt'), 'change\n')
-      yield* runGit(repoDir, ['add', 'changes.txt'])
+      yield* runGit(repoDir, ['add', 'AGENTS.md', 'changes.txt'])
       yield* runGit(repoDir, ['commit', '-m', 'Feature commit'])
       yield* runGit(repoDir, ['push', '-u', 'origin', 'feature-create-pr'])
       yield* runGit(repoDir, ['config', 'branch.feature-create-pr.gh-merge-base', 'main'])
@@ -2766,8 +3069,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
       const { manager, ghCalls } = yield* makeManager({
         serverSettings: {
           sourceControlWritingStyle: {
-            mode: 'custom' as const,
-            customInstructions: 'Lead with user impact.',
+            mode: 'repo_conventions' as const,
           },
         },
         textGeneration: {
@@ -2806,8 +3108,11 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
       expect(result.pr.status).toBe('created')
       expect(result.pr.number).toBe(88)
       expect(generatedPolicy).toMatchObject({
-        changeRequestInstructions: 'Lead with user impact.',
+        kind: 'repo_conventions',
       })
+      expect(changeRequestPolicyInstructions(generatedPolicy)).toContain(
+        `Local AGENTS.md:\n${agentInstructions}`,
+      )
       expect(generatedChangeRequestTemplate).toBe('## What changed?\n\n## Verification')
       expect(ghCalls.filter((call) => call.startsWith('pr list '))).toHaveLength(2)
       expect(

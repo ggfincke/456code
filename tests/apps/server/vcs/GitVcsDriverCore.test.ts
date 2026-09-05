@@ -1658,6 +1658,24 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
 
         const driver = yield* GitVcsDriver.GitVcsDriver
         yield* driver.fetchRemote({ cwd, remoteName: 'origin' })
+        yield* git(cwd, ['branch', 'local-only'])
+
+        assert.equal(
+          yield* driver.remoteBranchExists({
+            cwd,
+            remoteName: 'origin',
+            remoteBranch: initialBranch,
+          }),
+          true,
+        )
+        assert.equal(
+          yield* driver.remoteBranchExists({
+            cwd,
+            remoteName: 'origin',
+            remoteBranch: 'local-only',
+          }),
+          false,
+        )
 
         const resolvedBase = yield* driver.resolveRemoteTrackingCommit({
           cwd,
@@ -1702,6 +1720,169 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
         const status = yield* driver.statusDetails(worktreePath)
         assert.equal(status.aheadCount, 0)
         assert.equal(status.aheadOfDefaultCount, 0)
+      }),
+    )
+
+    it.effect('checks advertised remote branches instead of stale local tracking refs', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* makeTmpDir()
+        const remote = yield* makeTmpDir('git-remote-')
+        const { initialBranch } = yield* initRepoWithCommit(cwd)
+        yield* git(remote, ['init', '--bare'])
+        yield* git(cwd, ['remote', 'add', 'origin', remote])
+        yield* git(cwd, ['push', '-u', 'origin', initialBranch])
+
+        const trackingRef = `refs/remotes/origin/${initialBranch}`
+        yield* git(remote, ['update-ref', '-d', `refs/heads/${initialBranch}`])
+        assert.match(yield* git(cwd, ['show-ref', '--verify', trackingRef]), /^[a-f0-9]{40} /)
+
+        const driver = yield* GitVcsDriver.GitVcsDriver
+        assert.equal(
+          yield* driver.remoteBranchExists({
+            cwd,
+            remoteName: 'origin',
+            remoteBranch: initialBranch,
+          }),
+          false,
+        )
+      }),
+    )
+
+    it.effect('fetches an exact remote branch when the configured fetch refspec excludes it', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* makeTmpDir()
+        const remote = yield* makeTmpDir('git-remote-')
+        const peer = yield* makeTmpDir('git-peer-')
+        const { initialBranch } = yield* initRepoWithCommit(cwd)
+        yield* git(remote, ['init', '--bare'])
+        yield* git(cwd, ['remote', 'add', 'origin', remote])
+        yield* git(cwd, ['push', '-u', 'origin', initialBranch])
+        yield* git(cwd, ['branch', 'tracked-only'])
+        yield* git(cwd, ['push', 'origin', 'tracked-only'])
+        yield* git(cwd, ['config', '--unset-all', 'remote.origin.fetch'])
+        yield* git(cwd, [
+          'config',
+          '--add',
+          'remote.origin.fetch',
+          '+refs/heads/tracked-only:refs/remotes/origin/tracked-only',
+        ])
+        yield* git(cwd, ['update-ref', '-d', `refs/remotes/origin/${initialBranch}`])
+
+        yield* git(peer, ['clone', remote, '.'])
+        yield* git(peer, ['config', 'user.email', 'test@test.com'])
+        yield* git(peer, ['config', 'user.name', 'Test'])
+        yield* writeTextFile(peer, 'remote-change.txt', 'remote\n')
+        yield* git(peer, ['add', 'remote-change.txt'])
+        yield* git(peer, ['commit', '-m', 'remote change'])
+        yield* git(peer, ['push', 'origin', initialBranch])
+        const remoteHead = yield* git(peer, ['rev-parse', 'HEAD'])
+
+        const driver = yield* GitVcsDriver.GitVcsDriver
+        yield* driver.fetchRemote({ cwd, remoteName: 'origin' })
+        const missingTrackingRef = yield* driver.execute({
+          operation: 'GitVcsDriver.test.narrowFetchRefspec',
+          cwd,
+          args: ['show-ref', '--verify', `refs/remotes/origin/${initialBranch}`],
+          allowNonZeroExit: true,
+        })
+        assert.notEqual(missingTrackingRef.exitCode, 0)
+        assert.equal(
+          yield* driver.remoteBranchExists({
+            cwd,
+            remoteName: 'origin',
+            remoteBranch: initialBranch,
+          }),
+          true,
+        )
+
+        yield* driver.fetchRemoteTrackingBranch({
+          cwd,
+          remoteName: 'origin',
+          remoteBranch: initialBranch,
+        })
+        const resolvedBase = yield* driver.resolveRemoteTrackingCommit({
+          cwd,
+          refName: initialBranch,
+          fallbackRemoteName: 'origin',
+        })
+
+        assert.equal(resolvedBase.commitSha, remoteHead)
+      }),
+    )
+
+    it.effect('resolves a literal remote branch that begins with the remote name', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* makeTmpDir()
+        const remote = yield* makeTmpDir('git-remote-')
+        yield* initRepoWithCommit(cwd)
+        yield* git(remote, ['init', '--bare'])
+        yield* git(cwd, ['remote', 'add', 'origin', remote])
+        yield* git(cwd, ['branch', 'release'])
+        const ordinaryReleaseCommit = yield* git(cwd, ['rev-parse', 'refs/heads/release'])
+
+        yield* writeTextFile(cwd, 'literal-remote-branch.txt', 'literal remote branch\n')
+        yield* git(cwd, ['add', 'literal-remote-branch.txt'])
+        yield* git(cwd, ['commit', '-m', 'Add literal remote branch'])
+        yield* git(cwd, ['branch', 'origin/release'])
+        const literalReleaseCommit = yield* git(cwd, ['rev-parse', 'refs/heads/origin/release'])
+        assert.notEqual(literalReleaseCommit, ordinaryReleaseCommit)
+
+        yield* git(cwd, ['push', 'origin', 'refs/heads/release:refs/heads/release'])
+        yield* git(cwd, ['push', 'origin', 'refs/heads/origin/release:refs/heads/origin/release'])
+
+        const driver = yield* GitVcsDriver.GitVcsDriver
+        yield* driver.fetchRemoteTrackingBranch({
+          cwd,
+          remoteName: 'origin',
+          remoteBranch: 'release',
+        })
+        yield* driver.fetchRemoteTrackingBranch({
+          cwd,
+          remoteName: 'origin',
+          remoteBranch: 'origin/release',
+        })
+        const resolvedBase = yield* driver.resolveRemoteTrackingCommit({
+          cwd,
+          remoteName: 'origin',
+          remoteBranch: 'origin/release',
+        })
+
+        assert.deepEqual(resolvedBase, {
+          commitSha: literalReleaseCommit,
+          remoteRefName: 'origin/origin/release',
+        })
+      }),
+    )
+
+    it.effect('preserves non-missing remote branch lookup failures', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* makeTmpDir()
+        const { initialBranch } = yield* initRepoWithCommit(cwd)
+        const driver = yield* GitVcsDriver.GitVcsDriver
+
+        const error = yield* driver
+          .remoteBranchExists({
+            cwd,
+            remoteName: 'missing-remote',
+            remoteBranch: initialBranch,
+          })
+          .pipe(Effect.flip)
+
+        assert.deepInclude(error, {
+          _tag: 'GitCommandError',
+          operation: 'GitVcsDriver.remoteBranchExists',
+          command: 'git',
+          argumentCount: 5,
+          cwd,
+          detail: 'Git remote branch lookup failed.',
+        })
+        assert.isNumber(error.exitCode)
+        assert.notEqual(error.exitCode, 2)
+        assert.isAbove(error.stderrLength ?? 0, 0)
       }),
     )
 

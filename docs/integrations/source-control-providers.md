@@ -33,6 +33,8 @@
 
 - Push a branch and create a pull request from the Git panel
 - 456code can suggest titles and descriptions based on your commits
+- With **Repository conventions** selected, generated source control text follows the project's
+  root `AGENTS.md` and recent commit subjects. Claude writers also follow the root `CLAUDE.md`
 - Supports GitHub Pull Requests, GitLab Merge Requests, and Bitbucket Pull Requests
 
 **Stay on top of open reviews**
