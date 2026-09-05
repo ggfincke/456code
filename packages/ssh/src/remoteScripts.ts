@@ -254,7 +254,10 @@ if command -v 456code >/dev/null 2>&1; then
 fi
 # npm can extract a package before a native dependency build fails, leaving no executable
 require_installed_456code_cli() {
-  CODE456_CLI_PATH="$("$@" -- sh -c 'command -v 456code' || true)"
+  if ! CODE456_CLI_PATH="$("$@" -- sh -c 'command -v 456code')"; then
+    printf 'Remote host could not install %s. See npm output above for the cause.\\n' @@T3_PACKAGE_SPEC@@ >&2
+    return 1
+  fi
   if [ -n "$CODE456_CLI_PATH" ]; then
     return 0
   fi

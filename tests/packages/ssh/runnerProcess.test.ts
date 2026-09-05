@@ -28,6 +28,43 @@ describe.skipIf(HostProcessPlatform.defaultValue() === 'win32')(
   'remote runner process ownership',
   () =>
   {
+    it.live('reports package-manager failure without claiming installation succeeded', () =>
+      Effect.gen(function* ()
+      {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const fixture = yield* fs.makeTempDirectoryScoped({ prefix: '456code-runner-failure-' })
+        yield* fs.symlink(process.execPath, path.join(fixture, 'node'))
+        const npx = path.join(fixture, 'npx')
+        yield* fs.writeFileString(
+          npx,
+          '#!/bin/sh\nprintf "registry denied\\n" >&2\nprintf "/not/an/installed/cli\\n"\nexit 27\n',
+        )
+        yield* fs.chmod(npx, 0o700)
+        const child = yield* spawner.spawn(
+          ChildProcess.make('/bin/sh', ['-s'], {
+            cwd: fixture,
+            env: { PATH: fixture },
+            stdin: Stream.make(
+              new TextEncoder().encode(
+                buildRemoteT3RunnerScript({ packageSpec: '456code@0.0.35' }),
+              ),
+            ),
+          }),
+        )
+        const [stderr, code] = yield* Effect.all(
+          [child.stderr.pipe(Stream.decodeText(), Stream.mkString), child.exitCode],
+          { concurrency: 'unbounded' },
+        )
+        assert.equal(code, 1)
+        assert.include(stderr, 'registry denied')
+        assert.include(stderr, 'could not install 456code@0.0.35')
+        assert.notInclude(stderr, 'installed 456code@')
+        assert.notInclude(stderr, 'native dependency')
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    )
+
     it.live.each(['npx', 'npm'] as const)(
       'keeps the server pid and graceful shutdown through the %s fallback',
       (packageManager) =>
