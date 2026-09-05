@@ -114,6 +114,9 @@ export const ClientSettingsSchema = Schema.Struct({
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
   ),
+  onboardingCompletedAt: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // model favorites. Historically keyed by provider kind, now
   // widened to `ProviderInstanceId` so users can favorite a specific model
   // on a custom provider instance (e.g. "Codex Personal · gpt-5") without
@@ -893,6 +896,7 @@ export const ClientSettingsPatch = Schema.Struct({
   desktopNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   glassOpacity: Schema.optionalKey(GlassOpacity),
+  onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   favorites: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({

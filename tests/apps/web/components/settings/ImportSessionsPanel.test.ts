@@ -38,6 +38,7 @@ function candidate(
     nativeSessionId: 'native-session',
     title: 'Imported work',
     cwd: '/tmp/project',
+    repositoryIdentity: null,
     gitBranch: 'main',
     model: 'gpt-5.4',
     messageCount: 4,

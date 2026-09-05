@@ -17,6 +17,7 @@ import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from '../branding'
 import { resolveServerBackedAppDisplayName } from '../branding.logic'
 import { AppSidebarLayout } from '../components/AppSidebarLayout'
 import { CommandPalette } from '../components/CommandPalette'
+import { WelcomeWizard } from '../components/onboarding/WelcomeWizard'
 import { SshPasswordPromptDialog } from '../components/desktop/SshPasswordPromptDialog'
 import { ThreadAttentionNotifier } from '../desktop/threadAttentionNotifier'
 import { ProviderUpdateLaunchNotification } from '../components/ProviderUpdateLaunchNotification'
@@ -29,7 +30,7 @@ import {
   toastManager,
 } from '../components/ui/toast'
 import { resolveAndPersistPreferredEditor } from '../lib/editorPreferences'
-import { useClientSettings } from '../hooks/useSettings'
+import { useClientSettings, useClientSettingsHydrated } from '../hooks/useSettings'
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -40,6 +41,7 @@ import { syncBrowserChromeTheme } from '../hooks/useTheme'
 import { useEnvironmentThemeSync } from '../hooks/useEnvironmentTheme'
 import { useDefaultThemeAdoption } from '../hooks/useDefaultTheme'
 import { configureClientTracing } from '../observability/clientTracing'
+import { shouldShowWelcomeWizard } from '../onboarding/welcomeGate'
 import { resolveInitialServerAuthGateState } from '../environments/primary'
 import { hasHostedPairingRequest, isHostedStaticApp } from '../hostedPairing'
 import { shellEnvironment } from '../state/shell'
@@ -128,14 +130,6 @@ function RootRouteView()
     )
   }
 
-  const appShell = (
-    <CommandPalette>
-      <AppSidebarLayout>
-        <Outlet />
-      </AppSidebarLayout>
-    </CommandPalette>
-  )
-
   return (
     <ToastProvider>
       <AnchoredToastProvider>
@@ -151,9 +145,48 @@ function RootRouteView()
         <HostedStaticEnvironmentBootstrap />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
-        {appShell}
+        <AuthenticatedAppShell authenticated={primaryEnvironmentAuthenticated} />
       </AnchoredToastProvider>
     </ToastProvider>
+  )
+}
+
+function AuthenticatedAppShell({ authenticated }: { readonly authenticated: boolean })
+{
+  const clientSettingsHydrated = useClientSettingsHydrated()
+  const onboardingCompletedAt = useClientSettings((settings) => settings.onboardingCompletedAt)
+  const serverConfig = useAtomValue(primaryServerConfigAtom)
+  const showWelcomeWizard = shouldShowWelcomeWizard({
+    authenticated,
+    clientSettingsHydrated,
+    serverConfigAvailable: serverConfig !== null,
+    onboardingCompletedAt,
+  })
+
+  if (authenticated && (!clientSettingsHydrated || serverConfig === null))
+  {
+    return <main aria-busy="true" className="min-h-screen bg-background" />
+  }
+
+  if (showWelcomeWizard && serverConfig)
+  {
+    return (
+      <main className="min-h-screen overflow-y-auto bg-background text-foreground">
+        <WelcomeWizard
+          providers={serverConfig.providers}
+          settings={serverConfig.settings}
+          platform={serverConfig.environment.platform.os}
+        />
+      </main>
+    )
+  }
+
+  return (
+    <CommandPalette>
+      <AppSidebarLayout>
+        <Outlet />
+      </AppSidebarLayout>
+    </CommandPalette>
   )
 }
 
