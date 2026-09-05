@@ -16,7 +16,7 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `e831f6cf51c01d31952b0de06c29a55b9bad9b80`.
+- Published `main`: `f02d28b6323d02b2802d06d6aea0c7f3205e81d3`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -28,10 +28,14 @@ Current state:
   `e831f6cf51c01d31952b0de06c29a55b9bad9b80`. Exact merged-main CI run
   [33945024714](https://github.com/ggfincke/456code/actions/runs/33945024714) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **03 — iOS persistence safety**, verified with publication in progress.
-- Active branch: `sync/t3-r03-20260904`, based on published `main`.
+- Published Group 03: [PR #94](https://github.com/ggfincke/456code/pull/94) merged through merge commit
+  `f02d28b6323d02b2802d06d6aea0c7f3205e81d3`. Exact merged-main CI run
+  [33950331362](https://github.com/ggfincke/456code/actions/runs/33950331362) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **04 — Desktop preview recovery**, verified; publication in progress.
+- Active branch: `sync/t3-r04-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 04-27 are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 05-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -113,7 +117,7 @@ record the evidence and disposition without manufacturing an empty adaptation co
 | **01 — Finish service/Git/text safety** | `a81a52afb`, `0e77fbd3d`, `60f2ce027` | Repair service rollback ownership, nullable snapshots, retry delay, and stale-cleanup fixtures. Preserve local-only worktree bases and contained root instruction reads. Rerun focused service, Git, generated-text, and isolated-web gates. No new intake enters this diff. |
 | **02 — Authentication and privacy** | `9d28c21a2`, `eb77683e5`, `b6f72681d` | Remove pairing secrets from routine read models; transactionally replace only desktop-bootstrap sessions; prevent private-host disclosure through third-party favicons. Test rollback, session isolation, snapshot consumers, and private/public hostname behavior. |
 | **03 — iOS persistence safety** | `7839140e5` | Preserve drafts/outbox state across read failures, expose failures, retry safely, and protect attachment ownership. Use storage fault injection and an iPhone recovery pass. |
-| **04 — Desktop preview recovery** | `19c97ea56`, `6319a9714`, `b5fb3fba0`, `098bf5329` | Pin debugger ownership, isolate preview shortcuts, preserve explicit navigation URLs, and bound capture/conversion to five seconds. Keep annotations when screenshots fail, settle picks exactly once, and fence replacements. Verify in real Electron. |
+| **04 — Desktop preview recovery** | `19c97ea56`, `6319a9714`, `b5fb3fba0`, `098bf5329` | Pin debugger ownership, isolate preview shortcuts, preserve explicit navigation URLs, and bound native capture to five seconds. Decode returned PNG data locally without an asynchronous network conversion. Keep annotations when screenshots fail, settle picks exactly once, and fence replacements. Verify in real Electron. |
 | **05 — Bounded projection replay** | `7e460f429`, `a9ffb8279`, `9a7b1e21e`, `b17cc3d1b`, `e86604d33`, `50bfca43d` | Enforce 1,000-row/8 MiB replay limits, thread-specific aggregate reads, incremental CRLF-safe scanning, 25-ID hydration batches, active-session-only binding reads, selective activity hydration, and append-without-read message updates. Test snapshot fallback, recreation, ordering, and terminal content. |
 
 ### Provider and streaming correctness
@@ -199,10 +203,11 @@ UTF-16 offsets, and quoted context expands to at most 32 lines. Malformed direct
 artifact prompts append once; clipboard, draft, stash, and modifier behavior remain durable; the
 server owns validation and quoted-data expansion.
 
-Group 04 keeps separate five-second bounds for screenshot capture and conversion. A failed screenshot
-may emit `screenshotFailed` while preserving a structured annotation without crop data, unlocking the
-composer, and notifying the user. Picks settle exactly once and teardown on timeout, navigation,
-destruction, replacement, cancellation, or success; replacement identity fences late results.
+Group 04 bounds native screenshot capture to five seconds. Returned PNG data is decoded synchronously
+and locally, eliminating the renderer's network-backed conversion wait. A failed screenshot may emit
+`screenshotFailed` while preserving a structured annotation without crop data, unlocking the composer,
+and notifying the user. Picks settle exactly once and teardown on timeout, navigation, destruction,
+replacement, cancellation, or success; replacement identity fences late results.
 
 ### iOS file state and server settlement
 
@@ -678,11 +683,151 @@ ports 13775, 18092, and 3200 have no listeners. The exact owned simulator was sh
 roots `/tmp/t3code-group03.xhJ4Hh` and `/tmp/t3code-group03-fixtures.mFmCjI` were moved to the
 user's Trash after open-file checks, preserving a recovery route until Trash is emptied.
 
-The original checkout remains clean at
-`e831f6cf51c01d31952b0de06c29a55b9bad9b80`. The unrelated Cartographer worktree and every
-unrelated ref, cache, installation, simulator/runtime, credential, process, and workspace were
-preserved. Publication is authorized and in progress; PR evidence upload, exact-head CI, merge, and
-exact merged-main CI remain pending and will be recorded with the next group transition.
+The reviewed stack was pushed without force. [PR #94](https://github.com/ggfincke/456code/pull/94)
+published all three secret-free recovery captures in the
+[Group 03 acceptance comment](https://github.com/ggfincke/456code/pull/94#issuecomment-5549861501).
+The first exact-head CI attempt retained one unresolved, non-reproducing server-shard failure in
+unchanged code: a provider-cache assertion observed the initial `checkedAt`, while Vitest reported an
+unhandled interruption rejection and identified CheckpointReactor as the latest test context. The two
+exact cases then passed individually, and their two files passed together with 74/74 tests and no
+unhandled rejection. No
+source or fixture change was made. The requested failed-job rerun replaced the displayed CI job set;
+that attempt and the complete PR rollup finished with 19 successful checks and three intentional
+skips.
+
+PR #94 merged through merge commit `f02d28b6323d02b2802d06d6aea0c7f3205e81d3`. Exact merged-main
+CI run [33950331362](https://github.com/ggfincke/456code/actions/runs/33950331362) completed successfully
+with 15 successful jobs and the intentional mobile-native-static skip. The clean original `main` was
+fast-forwarded from `e831f6cf51c01d31952b0de06c29a55b9bad9b80` to that exact green merge, and the
+integration worktree moved to `sync/t3-r04-20260904`. Only the old Group 03 local, live-origin, and
+tracking refs at `f526f71ce33d086cbd9b3b81c23361c1f55948f1` were compare-and-deleted after proving
+the merged PR head and live-main ancestry. The unrelated Cartographer worktree and every unrelated
+ref, cache, installation, simulator/runtime, credential, process, and workspace remain preserved.
+
+## Group 04 checkpoint receipt
+
+### Scope and source adaptations
+
+Group 04 started from exact green merged `main`
+`f02d28b6323d02b2802d06d6aea0c7f3205e81d3` on `sync/t3-r04-20260904`. The reviewed
+implementation is 17 files with 1,162 insertions and 241 deletions; the two maintained `.plans/`
+files are the only additional checkpoint-document changes, and the index remains empty before source
+attribution.
+
+| Source | Fork adaptation |
+| --- | --- |
+| `19c97ea56d30b3a2de31a060f8f47d6b7404b78f` | Desktop capture ownership and the shared web/contracts flow settle each pick once. A five-second native crop timeout yields a typed `screenshotFailed` result; web retains the structured annotation without crop data, restores composer ownership, and reports the failure. The active owner admits one capture at a time and replacement identities fence late results. |
+| `6319a9714881a1d25549f797c468fabebae92813` | The preview manager pins debugger sessions to the intended guest web contents and tears them down on replacement or destruction so a stale or displaced target cannot crash or settle the current request. |
+| `b5fb3fba0fb3dbd1bc2e29886232321cc06863d5` | Keyboard ownership remains inside the focused preview guest and its popup. Guest shortcuts do not activate host commands, while the same shortcut in the host composer retains its existing behavior. |
+| `098bf5329727fcd7d973bf842e6b4d50d6e7b924` | Explicit preview URL requests remain byte-for-byte navigation targets. Only discovered server URLs use environment-port resolution, preserving path case, encoded separators, query, fragment, and the explicit `0.0.0.0` host. |
+
+Two integration-discovered fork repairs remain separate from upstream attribution. A retained
+`did-start-navigation` listener keeps a pick alive through subframe navigation and cancels it only
+when the main frame navigates. The renderer now decodes a returned PNG data URL synchronously and
+locally instead of calling `fetch(data:)`, which the desktop content-security policy correctly
+blocks; no CSP, permission, or security policy was loosened. The native five-second deadline remains,
+while the asynchronous renderer conversion wait is removed entirely.
+
+The root `tests/` workspace gained only its resolution-time `react-grab` declaration and the matching
+three-line lock importer entry for the already-installed repository version. Application dependency
+metadata and versions did not change.
+
+### Focused automated, build, and review gates
+
+Implementation tests, typechecks, builds, and the final comment check used Node 24 through `mise` and
+the worktree-local dependency graph.
+The desktop lane passed 44 focused tests in `Manager.test.ts` and `PickPreload.test.ts`; the web lane
+passed 32 focused tests across browser-target resolution and preview behavior; and the contracts lane
+passed three IPC-schema tests. Targeted desktop, web, and contracts typechecks plus changed-file
+formatting, lint, comment-header checks, lock consistency, and `git diff --check` passed. The final
+web suite passed 31 tests across three files after the local-PNG repair, bringing the latest combined
+desktop/web/contracts run to 78 tests. `pnpm run build` from `apps/web`
+completed in 11.07 seconds with only the repository's expected plugin, chunk-size, and source-map
+warnings. The preceding affected desktop build also completed successfully.
+
+Independent focused review found no remaining desktop, web, or contract defect. It verified current-
+owner settlement, debugger-session pinning, replacement and navigation fencing, guest shortcut
+ownership, exact URL routing, crop-free annotation retention, and the final local PNG conversion.
+No full workspace suite ran.
+
+### Integrated Electron and browser evidence
+
+One isolated Electron 41.5.0 process owned its backend and used a persistent process-local
+`app.setPath` interceptor for `appData`, `userData`, `sessionData`, and `crashDumps`. Startup verified
+desktop version `0.0.28`, the intended application path, and every redirected profile path before UI
+work. No `HOME`, installed profile, global protocol registration, content-security policy, or provider
+credential changed.
+
+In the real Electron UI, the explicit fixture URL
+`http://0.0.0.0:18093/Case?x=a%2Fb#keep` remained byte-for-byte intact. Guest-focused Cmd+K reached
+only the fixture's key handler; host-composer Cmd+K opened the actual command palette. A named local
+popup opened and closed without forwarding its shortcut to the host.
+
+The exact guest `capturePage` fault was armed once after proving a zero-call baseline. The real
+annotation request invoked it at `2026-09-05T08:09:45.438Z` with crop
+`{ x: 4, y: 197, width: 475, height: 116 }`. After five seconds the annotation remained as a crop-free
+chip, Send stayed enabled, and annotation mode unlocked. Restoring the same guest's capture method
+without restarting let the immediately following real pick produce the `Annotated preview crop`
+thumbnail and `preview-annotation-annotation_4.png`, while retaining the earlier crop-free annotation.
+No provider turn was sent.
+
+The integrated pass also reproduced and then closed the renderer conversion defect: native
+`capturePage` returned a 950 x 232 Retina PNG of 11,221 bytes, but `fetch(data:image...)` failed under
+the existing `connect-src` policy. The UI truthfully retained the annotation and displayed
+`Could not capture the picked element` / `The annotation was kept without the screenshot.` After the
+local decoder repair, the same-process next capture succeeded as described above.
+
+One earlier attempt is deliberately excluded from acceptance: an owned Vite restart overlapped the
+pick and destroyed the guest before capture, producing zero capture calls. It was a fixture-induced
+invalid attempt, not a product failure. No shared verification process was restarted during the final
+failure-to-success pass.
+
+A fresh one-time pairing URL also authenticated the ordinary browser client, listed the owned project,
+and showed a healthy composer. Preview resources are intentionally desktop-only, so the plain-browser
+gate verified authentication and capability gating rather than claiming a native preview flow. The
+shared web preview behavior itself was exercised in Electron; no fake browser bridge was injected.
+
+The three secret-free local evidence files retained for PR upload are:
+
+- timeout retention: `/tmp/t3code-group04-evidence.rjejXy/final-timeout-retained-annotation.png`,
+  SHA-256 `3bfc74ba2632df325c1b00c3f0b5cd4c636a92f718ffd791685f4bac53009f6a`;
+- reproduced normal-conversion failure toast:
+  `/tmp/t3code-group04-evidence.rjejXy/native-normal-capture-failure-toast.png`, SHA-256
+  `5b0c872a4225982d0165de6d18ac58af9ee38790786acd18c66d3344d1bf004b`; and
+- same-process recovery: `/tmp/t3code-group04-evidence.rjejXy/final-recovered-screenshot.png`,
+  SHA-256 `cb9a81fbda7abb4bd4cccab37748774fef67398f2d8c0e2f0d09a03a7c307b95`.
+
+Each capture is 2,200 x 1,560 and was reviewed as secret-free. They remain outside the repository and
+will be uploaded to GitHub during PR publication; no `.github/pr-assets` file exists.
+
+### Cleanup, preservation, and publication state
+
+All owned Electron, backend, Vite, inspector, and fixture-server processes stopped. Ports 13776,
+15734, 18093, 9234, and 9235 have no listeners. The exact owned fixture and project were moved
+recoverably to `/Users/ggfincke/.Trash/t3code-group04.efrYjY` and
+`/Users/ggfincke/.Trash/t3code-group04-project.v5zc28`; the three evidence PNGs remain outside Trash
+only for the pending PR upload. The controlled browser tab was closed.
+
+The original checkout remains clean at `f02d28b6323d02b2802d06d6aea0c7f3205e81d3`, with original
+cache mtimes `.vite=1784948790` and `.vite-temp=1788016177`. The unrelated dirty Cartographer review
+worktree at `b58e8c7088ba1330f7fdf14a56430d02f2174442` was observed but not modified. All unrelated
+worktrees, refs, caches, profiles, installations, credentials, and processes remain preserved.
+
+The accepted implementation tree is preserved exactly by the following unpublished commit stack:
+
+| Commit | Ownership |
+| --- | --- |
+| `815bd336bd3c3d443cce2fb386da248302906266` | Source `b5fb3fba0fb3dbd1bc2e29886232321cc06863d5`; original author, AuthorDate, subject, and empty body preserved; guest/popup shortcut isolation adaptation recorded. |
+| `814174b9d531a8c4be7cac9c5576a0701a34b0bf` | Source `6319a9714881a1d25549f797c468fabebae92813`; original author, AuthorDate, subject, and `Co-authored-by: Claude Fable 5` trailer preserved; pinned-debugger adaptation recorded. |
+| `4c9f304ff63cfea9e29c462e1e12c0cee5615ba2` | Source `098bf5329727fcd7d973bf842e6b4d50d6e7b924`; original author, AuthorDate, subject, and empty body preserved; explicit-URL adaptation recorded. |
+| `8a8728028e7eaefc699ed66268debc4bac69ff2c` | Source `19c97ea56d30b3a2de31a060f8f47d6b7404b78f`; original author, AuthorDate, subject, and `Co-authored-by: Claude Fable 5.1` trailer preserved; bounded capture/ownership adaptation recorded. |
+| `fc21bcd2fde5e49a4b051cb772f573adfac7fd21` | Fork-only main-navigation listener repair, authored with local identity. |
+| `c8c51aa09ccb2c0cbb0725e86d77bf79c1f70bc1` | Fork-only synchronous local PNG decoder repair, authored with local identity. |
+
+The binary implementation diff from the green base has SHA-256
+`104600f33bb084d211e189d3a64492479a4e4aeba52bf65499953df5a3103d4a`, exactly matching the
+accepted pre-commit tree. The maintained receipt commit, PR, hosted evidence, exact-head CI, merge
+commit, and exact merged-main CI remain pending publication.
 
 ## Verification policy for every group
 
