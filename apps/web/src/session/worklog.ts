@@ -304,6 +304,17 @@ function mapWebWorkLogEntry(input: {
         : input.entry.tone,
     ...(detail ? { detail } : {}),
   }
+  if (!detail && (activity.kind === 'runtime.error' || activity.kind === 'runtime.warning'))
+  {
+    const message = asTrimmedString(payload?.message)
+    if (
+      message &&
+      normalizePreviewForComparison(message) !== normalizePreviewForComparison(activity.summary)
+    )
+    {
+      entry.detail = message
+    }
+  }
   if (isTaskActivity)
   {
     // subagent identity + usage captured by the adapter ride on task payloads

@@ -907,6 +907,47 @@ describe('workEntryIndicatesToolFailure', () =>
 
 describe('deriveWorkLogEntries', () =>
 {
+  it('retains runtime diagnostic messages that add detail beyond the row label', () =>
+  {
+    const retainedMessage =
+      'failed to load skill /repo/.agent/skills/review/SKILL.md: invalid YAML mapping value'
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        kind: 'runtime.error',
+        tone: 'error',
+        summary: 'Runtime error',
+        payload: { message: retainedMessage },
+      }),
+      makeActivity({
+        kind: 'runtime.warning',
+        tone: 'info',
+        summary: 'Reconnecting... 2/5',
+        payload: { message: 'Reconnecting... 2/5' },
+      }),
+    ])
+
+    expect(entries[0]).toMatchObject({ label: 'Runtime error', detail: retainedMessage })
+    expect(entries[1]).toMatchObject({ label: 'Reconnecting... 2/5' })
+    expect(entries[1]?.detail).toBeUndefined()
+  })
+
+  it('keeps an existing runtime diagnostic detail ahead of its fallback message', () =>
+  {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        kind: 'runtime.error',
+        tone: 'error',
+        summary: 'Runtime error',
+        payload: {
+          detail: 'Run claude auth login.',
+          message: 'Authentication failed.',
+        },
+      }),
+    ])
+
+    expect(entries[0]?.detail).toBe('Run claude auth login.')
+  })
+
   it('omits tool started entries and keeps completed entries', () =>
   {
     const activities: OrchestrationThreadActivity[] = [
