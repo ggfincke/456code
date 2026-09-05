@@ -5,6 +5,7 @@ import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
+import * as PlatformError from 'effect/PlatformError'
 import * as Schema from 'effect/Schema'
 import * as Semaphore from 'effect/Semaphore'
 
@@ -109,22 +110,33 @@ export const ensurePinnedRuntimeInstalled = Effect.fn('service.pinned_runtime.en
         )
 
         const installStep = 'installing the pinned 456code runtime (this can take a few minutes)'
+        const installArgs = [
+          'install',
+          '--prefix',
+          paths.versionDir,
+          '--no-fund',
+          '--no-audit',
+          `456code@${input.version}`,
+        ]
         yield* runner
           .run({
             command: 'npm',
-            args: [
-              'install',
-              '--prefix',
-              paths.versionDir,
-              '--no-fund',
-              '--no-audit',
-              `456code@${input.version}`,
-            ],
+            args: installArgs,
             // native deps (node-pty) can compile from source on slow boxes; the
             // ProcessRunner default of 60s would kill a healthy install.
             timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
           })
           .pipe(
+            Effect.catchTag('ProcessSpawnError', (error) =>
+              error.cause instanceof PlatformError.PlatformError &&
+              error.cause.reason._tag === 'NotFound'
+                ? runner.run({
+                    command: 'pnpm',
+                    args: ['--package=npm@11', 'dlx', 'npm', ...installArgs],
+                    timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
+                  })
+                : Effect.fail(error),
+            ),
             Effect.mapError((cause) => new PinnedRuntimeInstallError({ step: installStep, cause })),
             Effect.filterOrFail(
               (result) => result.code === 0,
