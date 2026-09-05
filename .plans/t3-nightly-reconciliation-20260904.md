@@ -823,11 +823,15 @@ The accepted implementation tree is preserved exactly by the following unpublish
 | `8a8728028e7eaefc699ed66268debc4bac69ff2c` | Source `19c97ea56d30b3a2de31a060f8f47d6b7404b78f`; original author, AuthorDate, subject, and `Co-authored-by: Claude Fable 5.1` trailer preserved; bounded capture/ownership adaptation recorded. |
 | `fc21bcd2fde5e49a4b051cb772f573adfac7fd21` | Fork-only main-navigation listener repair, authored with local identity. |
 | `c8c51aa09ccb2c0cbb0725e86d77bf79c1f70bc1` | Fork-only synchronous local PNG decoder repair, authored with local identity. |
+| `1bd22cf0d1562bb8b463695f83ec0d5ba68183c7` | Mechanical fork-only CI repair that retains the existing `globalDate` directive verbatim and declares `globalTimers` separately, with no runtime change. |
 
 The binary implementation diff from the green base has SHA-256
 `104600f33bb084d211e189d3a64492479a4e4aeba52bf65499953df5a3103d4a`, exactly matching the
-accepted pre-commit tree. The maintained receipt commit, PR, hosted evidence, exact-head CI, merge
-commit, and exact merged-main CI remain pending publication.
+accepted pre-commit tree. PR #95's first `Check` job then demonstrated that combining the existing
+`globalDate` directive with the new timer exception violated directive-preservation policy. The
+mechanical split above passed the exact local directive check and changed only comments; the final
+implementation fingerprint is `ff2af2be2b1b0ff43c92ef2975462831c3d962eb757fffbee8ac360e53106348`.
+The follow-up receipt commit, exact-head CI, merge commit, and exact merged-main CI remain pending.
 
 ## Verification policy for every group
 
