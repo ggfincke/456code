@@ -3857,6 +3857,7 @@ describe('ProviderCommandReactor', () =>
           'Old assistant output', 'invalid json', 0, ${now}, ${now}
         )
       `.pipe(
+        Effect.orDie,
         Effect.andThen(
           Effect.fail(
             new ProviderAdapterRequestError({
