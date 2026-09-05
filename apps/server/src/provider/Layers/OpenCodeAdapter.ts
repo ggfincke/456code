@@ -4337,6 +4337,9 @@ export function makeOpenCodeAdapter(
       function* (threadId)
       {
         const context = yield* ensureSessionContext(sessions, threadId)
+        const session = yield* runOpenCodeSdk('session.get', (signal) =>
+          context.client.session.get({ sessionID: context.openCodeSessionId }, { signal }),
+        ).pipe(Effect.mapError(toRequestError))
         const messages = yield* runOpenCodeSdk('session.messages', (signal) =>
           context.client.session.messages(
             {
@@ -4349,6 +4352,7 @@ export function makeOpenCodeAdapter(
         const turns: Array<OpenCodeTurnSnapshot> = []
         for (const entry of messages.data ?? [])
         {
+          if (entry.info.id === session.data?.revert?.messageID) break
           if (entry.info.role === 'assistant')
           {
             turns.push({
@@ -4369,31 +4373,25 @@ export function makeOpenCodeAdapter(
       function* (threadId, numTurns)
       {
         const context = yield* ensureSessionContext(sessions, threadId)
-        const messages = yield* runOpenCodeSdk('session.messages', (signal) =>
-          context.client.session.messages(
-            {
-              sessionID: context.openCodeSessionId,
-            },
-            { signal },
-          ),
-        ).pipe(Effect.mapError(toRequestError))
+        const snapshot = yield* readThread(threadId)
+        const targetIndex = Math.max(0, snapshot.turns.length - numTurns)
+        const target = snapshot.turns[targetIndex]
+        if (target)
+        {
+          yield* runOpenCodeSdk('session.revert', (signal) =>
+            context.client.session.revert(
+              {
+                sessionID: context.openCodeSessionId,
+                messageID: target.id,
+              },
+              { signal },
+            ),
+          ).pipe(Effect.mapError(toRequestError))
+          // native revert can move the boundary to the preceding user message
+          return yield* readThread(threadId)
+        }
 
-        const assistantMessages = (messages.data ?? []).filter(
-          (entry) => entry.info.role === 'assistant',
-        )
-        const targetIndex = assistantMessages.length - numTurns - 1
-        const target = targetIndex >= 0 ? assistantMessages[targetIndex] : null
-        yield* runOpenCodeSdk('session.revert', (signal) =>
-          context.client.session.revert(
-            {
-              sessionID: context.openCodeSessionId,
-              ...(target ? { messageID: target.info.id } : {}),
-            },
-            { signal },
-          ),
-        ).pipe(Effect.mapError(toRequestError))
-
-        return yield* readThread(threadId)
+        return snapshot
       },
     )
 
