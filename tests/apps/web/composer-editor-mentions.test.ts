@@ -121,6 +121,24 @@ describe('splitPromptIntoComposerSegments', () =>
     ])
   })
 
+  it('splits digit-leading skills but keeps currency expressions as text', () =>
+  {
+    expect(splitPromptIntoComposerSegments('Use $2spec please')).toEqual([
+      { type: 'text', text: 'Use ' },
+      { type: 'skill', name: '2spec' },
+      { type: 'text', text: ' please' },
+    ])
+    expect(splitPromptIntoComposerSegments("I'll pay $20 tomorrow")).toEqual([
+      { type: 'text', text: "I'll pay $20 tomorrow" },
+    ])
+    expect(splitPromptIntoComposerSegments('Budget is $20k tomorrow')).toEqual([
+      { type: 'text', text: 'Budget is $20k tomorrow' },
+    ])
+    expect(splitPromptIntoComposerSegments('Limit is $1e6 here')).toEqual([
+      { type: 'text', text: 'Limit is $1e6 here' },
+    ])
+  })
+
   it('does not convert an incomplete trailing skill token', () =>
   {
     expect(splitPromptIntoComposerSegments('Use $review-follow-up')).toEqual([

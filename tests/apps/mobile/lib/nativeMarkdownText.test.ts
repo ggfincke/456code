@@ -42,7 +42,7 @@ import {
   nativeMarkdownListItemBlocks,
   nativeMarkdownTextRuns,
   nativeMarkdownWithPreservedSoftBreaks,
-} from '@t3tools/mobile-markdown-text/markdown'
+} from '../../../../apps/mobile/modules/code456-markdown-text/src/nativeMarkdownText'
 
 describe('nativeMarkdownTextRuns', () =>
 {
@@ -221,6 +221,30 @@ describe('nativeMarkdownDocumentRuns', () =>
         role: 'body',
         skillName: 'ui',
         skillLabel: 'UI',
+      },
+      { text: ' for this.', role: 'body' },
+    ])
+  })
+
+  it('decorates known digit-leading skill references', () =>
+  {
+    const node: MarkdownNode = {
+      type: 'document',
+      children: [
+        {
+          type: 'paragraph',
+          children: [{ type: 'text', content: 'Use $2spec for this.' }],
+        },
+      ],
+    }
+
+    expect(nativeMarkdownDocumentRuns(node, [{ name: '2spec', displayName: '2Spec' }])).toEqual([
+      { text: 'Use ', role: 'body' },
+      {
+        text: '$2spec',
+        role: 'body',
+        skillName: '2spec',
+        skillLabel: '2Spec',
       },
       { text: ' for this.', role: 'body' },
     ])

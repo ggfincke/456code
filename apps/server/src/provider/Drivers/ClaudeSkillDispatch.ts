@@ -3,7 +3,8 @@
 
 // keep this aligned with the composer token grammar so every rendered skill
 // chip is eligible for the same server-side dispatch decision.
-const SKILL_MENTION_PATTERN = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g
+const SKILL_MENTION_PATTERN =
+  /(^|\s)\$(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s|$)/g
 
 export interface ClaudeSkillDispatch
 {
