@@ -374,9 +374,9 @@ it.layer(NodeServices.layer)('providerMaintenance', (it) =>
           provider: driver('nativePackageTool'),
           packageName: '@example/native-package-tool',
           update: {
-            command: 'native-package-tool update',
+            command: `${nativePackageToolPath} update`,
 
-            executable: 'native-package-tool',
+            executable: nativePackageToolPath,
 
             args: ['update'],
 
@@ -384,6 +384,47 @@ it.layer(NodeServices.layer)('providerMaintenance', (it) =>
           },
         })
       }),
+  )
+
+  it.each([
+    {
+      platform: 'darwin' as const,
+      binaryPath: "/Users/O'Connor/My Tools/.local/bin/native-package-tool",
+      command: "'/Users/O'\\''Connor/My Tools/.local/bin/native-package-tool' update",
+    },
+    {
+      platform: 'win32' as const,
+      binaryPath: "C:\\Users\\O'Connor\\My Tools\\.local\\bin\\native-package-tool.exe",
+      command: "& 'C:\\Users\\O''Connor\\My Tools\\.local\\bin\\native-package-tool.exe' update",
+    },
+  ])('quotes a copied $platform native update command', ({ platform, binaryPath, command }) =>
+  {
+    expect(
+      nativePackageToolUpdate.resolve({
+        binaryPath,
+        resolvedCommandPath: binaryPath,
+        platform,
+      }).update,
+    ).toMatchObject({
+      command,
+      executable: binaryPath,
+      args: ['update'],
+    })
+  })
+
+  it.effect('uses the host platform when formatting a resolved native update command', () =>
+    resolveProviderMaintenanceCapabilitiesEffect(nativePackageToolUpdate, {
+      binaryPath: 'C:\\Users\\Example User\\.local\\bin\\native-package-tool.exe',
+      env: { PATH: '' },
+    }).pipe(
+      Effect.provideService(HostProcessPlatform, 'win32'),
+      Effect.map((capabilities) =>
+      {
+        expect(capabilities.update?.command).toBe(
+          "& 'C:\\Users\\Example User\\.local\\bin\\native-package-tool.exe' update",
+        )
+      }),
+    ),
   )
 
   it.effect(
@@ -412,9 +453,9 @@ it.layer(NodeServices.layer)('providerMaintenance', (it) =>
           provider: driver('scopedPackageTool'),
           packageName: '@example/scoped-package-tool',
           update: {
-            command: 'scoped-package-tool upgrade',
+            command: `${scopedPackageToolPath} upgrade`,
 
-            executable: 'scoped-package-tool',
+            executable: scopedPackageToolPath,
 
             args: ['upgrade'],
 
