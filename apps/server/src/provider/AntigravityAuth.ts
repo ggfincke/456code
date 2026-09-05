@@ -128,6 +128,10 @@ function safeAuthFailure(cause: Cause.Cause<unknown>): string
       {
         return 'Google sign-in was not approved. Start sign-in again.'
       }
+      if (error.value.method === 'session/new' && error.value.code === -32603)
+      {
+        return 'Antigravity authenticated, but could not initialize a session or load models.'
+      }
     }
   }
   return 'Google sign-in failed. Start sign-in again.'
