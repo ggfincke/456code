@@ -1053,6 +1053,9 @@ importers:
       '@legendapp/list':
         specifier: 3.3.10
         version: 3.3.10(patch_hash=c1dd84d92bdb4cfef65e04332b101140c2e73d77eddc56b3be6c551acec68553)(react-dom@19.2.8(react@19.2.8))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)
+      '@lexical/react':
+        specifier: ^0.50.0
+        version: 0.50.0(@typescript/typescript6@6.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(yjs@13.6.31)
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(supports-color@8.1.1)(zod@4.5.4)
