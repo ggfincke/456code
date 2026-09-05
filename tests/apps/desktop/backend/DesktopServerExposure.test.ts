@@ -322,9 +322,9 @@ describe('DesktopServerExposure', () =>
     )
   })
 
-  it.effect('resolves advertised endpoints from the scoped runtime state', () =>
+  it.effect('keeps LAN and Tailscale endpoints distinct when Tailscale is enumerated first', () =>
     withHarness(
-      { ...lanNetworkInterfaces, ...tailnetNetworkInterfaces },
+      { ...tailnetNetworkInterfaces, ...lanNetworkInterfaces },
       Effect.gen(function* ()
       {
         const serverExposure = yield* DesktopServerExposure.DesktopServerExposure
@@ -335,6 +335,34 @@ describe('DesktopServerExposure', () =>
         assert.deepEqual(
           endpoints.map((endpoint) => endpoint.httpBaseUrl),
           ['http://127.0.0.1:4173/', 'http://192.168.1.20:4173/', 'http://100.90.1.2:4173/'],
+        )
+      }),
+    ),
+  )
+
+  it.effect('keeps Tailscale-only hosts network-accessible', () =>
+    withHarness(
+      tailnetNetworkInterfaces,
+      Effect.gen(function* ()
+      {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure
+        const settings = yield* DesktopAppSettings.DesktopAppSettings
+        yield* settings.setServerExposureMode('network-accessible')
+
+        const state = yield* serverExposure.configureFromSettings({ port: 4173 })
+        assert.equal(state.mode, 'network-accessible')
+        assert.equal(state.advertisedHost, null)
+        assert.equal(state.endpointUrl, null)
+        assert.equal((yield* serverExposure.backendConfig).bindHost, '0.0.0.0')
+        assert.deepEqual(
+          (yield* serverExposure.getAdvertisedEndpoints).map((endpoint) => [
+            endpoint.reachability,
+            endpoint.httpBaseUrl,
+          ]),
+          [
+            ['loopback', 'http://127.0.0.1:4173/'],
+            ['private-network', 'http://100.90.1.2:4173/'],
+          ],
         )
       }),
     ),
