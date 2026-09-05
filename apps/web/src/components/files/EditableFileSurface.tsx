@@ -124,7 +124,11 @@ export function useFileSaveCoordinator({
 >): Pick<FileSaveCoordinator, 'change'>
 {
   const writeFile = useAtomCommand(projectEnvironment.writeFile)
-  const coordinatorRef = useRef<FileSaveCoordinator | null>(null)
+  // retire each file's callback with its own ref; effect replay may reuse only that file's ref
+  const coordinatorRef = useMemo<{ current: FileSaveCoordinator | null }>(
+    () => ({ current: null }),
+    [cwd, environmentId, onPendingChange, relativePath, threadRef.threadId, writeFile],
+  )
   useLayoutEffect(() =>
   {
     const owner = Symbol('file-save-coordinator')
@@ -158,13 +162,21 @@ export function useFileSaveCoordinator({
       coordinatorRef.current = null
       coordinator.dispose()
     }
-  }, [cwd, environmentId, onPendingChange, relativePath, threadRef.threadId, writeFile])
+  }, [
+    coordinatorRef,
+    cwd,
+    environmentId,
+    onPendingChange,
+    relativePath,
+    threadRef.threadId,
+    writeFile,
+  ])
 
   return useMemo(
     () => ({
       change: (nextContents: string) => coordinatorRef.current?.change(nextContents),
     }),
-    [],
+    [coordinatorRef],
   )
 }
 
