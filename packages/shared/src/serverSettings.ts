@@ -4,6 +4,7 @@ import {
   isProviderDriverKind,
   resolveProviderInstanceEnabled,
   type ModelSelection,
+  type ProjectId,
   type ProviderDriverKind,
   type ServerProvider,
   ServerSettings,
@@ -25,6 +26,26 @@ const getLegacyProviderSettings = (
   provider: ProviderDriverKind,
 ): LegacyProviderSettings | undefined =>
   (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider]
+
+export function resolveProjectAgentBrowserAccess(
+  settings: Pick<ServerSettings, 'enableAgentBrowserAccess' | 'projectAgentBrowserAccessOverrides'>,
+  projectId: ProjectId,
+): boolean
+{
+  return Object.hasOwn(settings.projectAgentBrowserAccessOverrides, projectId)
+    ? settings.projectAgentBrowserAccessOverrides[projectId]!
+    : settings.enableAgentBrowserAccess
+}
+
+function setSettingsEntry<T>(target: Record<string, T>, key: string, value: T): void
+{
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  })
+}
 
 export function isProviderAvailable(snapshot: ServerProvider): boolean
 {
@@ -146,6 +167,7 @@ export function applyServerSettingsPatch(
   const {
     automaticGitFetchInterval,
     usagePriceOverrides: usagePriceOverridesPatch,
+    projectAgentBrowserAccessOverrides: projectAgentBrowserAccessOverridesPatch,
     ...patchForMerge
   } = patch
   const next = deepMerge(current, patchForMerge)
@@ -164,6 +186,23 @@ export function applyServerSettingsPatch(
       }
     }
   }
+  const projectAgentBrowserAccessOverrides = {
+    ...current.projectAgentBrowserAccessOverrides,
+  }
+  if (projectAgentBrowserAccessOverridesPatch !== undefined)
+  {
+    for (const [projectId, enabled] of Object.entries(projectAgentBrowserAccessOverridesPatch))
+    {
+      if (enabled === null)
+      {
+        Reflect.deleteProperty(projectAgentBrowserAccessOverrides, projectId)
+      }
+      else
+      {
+        setSettingsEntry(projectAgentBrowserAccessOverrides, projectId, enabled)
+      }
+    }
+  }
   const nextWithReplacements = {
     ...next,
     ...(patch.providerInstances !== undefined
@@ -174,6 +213,23 @@ export function applyServerSettingsPatch(
       : {}),
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
     ...(usagePriceOverridesPatch !== undefined ? { usagePriceOverrides } : {}),
+    ...(projectAgentBrowserAccessOverridesPatch !== undefined
+      ? { projectAgentBrowserAccessOverrides }
+      : {}),
+    ...(patch.defaultModelSelection !== undefined
+      ? { defaultModelSelection: patch.defaultModelSelection }
+      : {}),
+    ...(patch.defaultProjectScripts !== undefined
+      ? { defaultProjectScripts: patch.defaultProjectScripts }
+      : {}),
+    ...(patch.projectScriptOverrides !== undefined
+      ? {
+          projectScriptOverrides: {
+            ...current.projectScriptOverrides,
+            ...patch.projectScriptOverrides,
+          },
+        }
+      : {}),
   }
   if (!selectionPatch)
   {

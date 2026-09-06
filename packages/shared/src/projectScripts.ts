@@ -1,7 +1,19 @@
 // packages/shared/src/projectScripts.ts
 // expose project script cwd
 
-import type { ProjectScript } from '@t3tools/contracts'
+import type { ProjectId, ProjectScript, ServerSettings } from '@t3tools/contracts'
+
+export function resolveProjectScripts(
+  settings: Pick<ServerSettings, 'defaultProjectScripts' | 'projectScriptOverrides'>,
+  project: { readonly id: ProjectId; readonly scripts: readonly ProjectScript[] },
+): readonly ProjectScript[]
+{
+  const override = Object.hasOwn(settings.projectScriptOverrides, project.id)
+    ? settings.projectScriptOverrides[project.id]
+    : undefined
+  if (override === null) return settings.defaultProjectScripts
+  return override ?? (project.scripts.length > 0 ? project.scripts : settings.defaultProjectScripts)
+}
 
 interface ProjectScriptRuntimeEnvInput
 {

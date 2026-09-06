@@ -2,6 +2,7 @@
 // verifies shared server settings resolution
 import {
   DEFAULT_SERVER_SETTINGS,
+  ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -14,6 +15,7 @@ import {
   isModelSelectionProviderEnabled,
   normalizePersistedServerSettingString,
   parsePersistedServerObservabilitySettings,
+  resolveProjectAgentBrowserAccess,
   resolveSourceControlWriterModelSelection,
 } from '../../../packages/shared/src/serverSettings.ts'
 
@@ -324,5 +326,98 @@ describe('serverSettings helpers', () =>
       enabled: true,
       config: { homePath: '~/.codex' },
     })
+  })
+
+  it('merges exact model price overrides and removes null entries', () =>
+  {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      usagePriceOverrides: {
+        'model-a': {
+          inputCostPerMillionTokens: 1,
+          outputCostPerMillionTokens: 2,
+        },
+        'model-b': {
+          inputCostPerMillionTokens: 3,
+          outputCostPerMillionTokens: 4,
+        },
+      },
+    }
+    expect(
+      applyServerSettingsPatch(current, {
+        usagePriceOverrides: {
+          'model-a': null,
+          'model-c': {
+            inputCostPerMillionTokens: 5,
+            outputCostPerMillionTokens: 6,
+          },
+        },
+      }).usagePriceOverrides,
+    ).toEqual({
+      'model-b': {
+        inputCostPerMillionTokens: 3,
+        outputCostPerMillionTokens: 4,
+      },
+      'model-c': {
+        inputCostPerMillionTokens: 5,
+        outputCostPerMillionTokens: 6,
+      },
+    })
+  })
+
+  it('merges scoped project defaults without replacing unrelated project choices', () =>
+  {
+    const firstProjectId = ProjectId.make('project-first')
+    const secondProjectId = ProjectId.make('project-second')
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectAgentBrowserAccessOverrides: {
+        [firstProjectId]: false,
+      },
+      projectScriptOverrides: {
+        [firstProjectId]: null,
+      },
+    }
+
+    const next = applyServerSettingsPatch(current, {
+      projectAgentBrowserAccessOverrides: {
+        [firstProjectId]: null,
+        [secondProjectId]: false,
+      },
+      projectScriptOverrides: {
+        [secondProjectId]: null,
+      },
+    })
+
+    expect(next.projectAgentBrowserAccessOverrides).toEqual({
+      [secondProjectId]: false,
+    })
+    expect(next.projectScriptOverrides).toEqual({
+      [firstProjectId]: null,
+      [secondProjectId]: null,
+    })
+  })
+
+  it('treats prototype-named project ids as ordinary sparse override keys', () =>
+  {
+    const constructorId = ProjectId.make('constructor')
+    const protoId = ProjectId.make('__proto__')
+    const browserPatch = Object.defineProperty({}, protoId, {
+      enumerable: true,
+      value: true,
+    }) as Record<typeof protoId, boolean>
+    const next = applyServerSettingsPatch(
+      {
+        ...DEFAULT_SERVER_SETTINGS,
+        enableAgentBrowserAccess: false,
+      },
+      {
+        projectAgentBrowserAccessOverrides: browserPatch,
+      },
+    )
+
+    expect(resolveProjectAgentBrowserAccess(next, constructorId)).toBe(false)
+    expect(resolveProjectAgentBrowserAccess(next, protoId)).toBe(true)
+    expect(Object.getPrototypeOf(next.projectAgentBrowserAccessOverrides)).toBe(Object.prototype)
   })
 })

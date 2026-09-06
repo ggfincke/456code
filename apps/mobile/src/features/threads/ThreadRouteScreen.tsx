@@ -9,8 +9,17 @@ import {
 } from '@react-navigation/native'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Option from 'effect/Option'
-import { EnvironmentId, ThreadId, type ProjectScript } from '@t3tools/contracts'
-import { projectScriptCwd, projectScriptRuntimeEnv } from '@t3tools/shared/projectScripts'
+import {
+  DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
+  ThreadId,
+  type ProjectScript,
+} from '@t3tools/contracts'
+import {
+  projectScriptCwd,
+  projectScriptRuntimeEnv,
+  resolveProjectScripts,
+} from '@t3tools/shared/projectScripts'
 import { ScrollView, View } from 'react-native'
 import { useWorkspaceState } from '../../state/workspace'
 import { useEnvironmentQuery } from '../../state/query'
@@ -640,7 +649,12 @@ function ThreadRouteContent(
     gitOperationLabel: gitState.gitOperationLabel,
     canOpenTerminal: Boolean(selectedThreadProject?.workspaceRoot),
     canOpenFiles: Boolean(selectedThreadProject?.workspaceRoot),
-    projectScripts: selectedThreadProject?.scripts ?? [],
+    projectScripts: selectedThreadProject
+      ? resolveProjectScripts(
+          routeEnvironmentRuntime?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+          selectedThreadProject,
+        )
+      : [],
     terminalSessions: terminalMenuSessions,
     showDirectFileControl: layout.usesSplitView,
     onOpenTerminal: handleOpenTerminal,
