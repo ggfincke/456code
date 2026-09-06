@@ -8,6 +8,9 @@ import { ProjectId } from '@t3tools/contracts'
 import {
   activeThreadAnchorTimestampMs,
   getLatestThreadForProject,
+  planActiveThreadMove,
+  planActiveThreadReorder,
+  sortActiveThreadsByOrderKey,
   sortThreads,
   type ThreadSortInput,
 } from '../../../../packages/client-runtime/src/state/threadSort.ts'
@@ -263,6 +266,85 @@ describe('sortThreads', () =>
     )
 
     expect(sorted.map((thread) => thread.id)).toEqual(['thread-1', 'thread-2'])
+  })
+})
+
+describe('manual active ordering', () =>
+{
+  it('keeps new and reopened rows ahead of the arranged run', () =>
+  {
+    const threads = [
+      { id: 'arranged-last', createdAt: '2026-01-03T00:00:00.000Z', activeOrderKey: 't' },
+      { id: 'new', createdAt: '2026-01-05T00:00:00.000Z', activeOrderKey: null },
+      {
+        id: 'reopened',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        unsettledAt: '2026-01-06T00:00:00.000Z',
+        activeOrderKey: null,
+      },
+      { id: 'arranged-first', createdAt: '2026-01-04T00:00:00.000Z', activeOrderKey: 'f' },
+    ]
+
+    expect(sortActiveThreadsByOrderKey(threads).map((thread) => thread.id)).toEqual([
+      'reopened',
+      'new',
+      'arranged-first',
+      'arranged-last',
+    ])
+  })
+
+  it('uses one assignment between keyed neighbors and respects hidden reserved keys', () =>
+  {
+    const assignments = planActiveThreadReorder({
+      orderedIds: ['first', 'moved', 'last'],
+      keysById: new Map([
+        ['first', 'f'],
+        ['moved', null],
+        ['last', 't'],
+        ['hidden', 'n'],
+      ]),
+      movedId: 'moved',
+    })
+
+    expect(assignments).toHaveLength(1)
+    expect(assignments[0]?.id).toBe('moved')
+    expect(assignments[0]?.orderKey).not.toBe('n')
+    expect(assignments[0]!.orderKey > 'f').toBe(true)
+    expect(assignments[0]!.orderKey < 't').toBe(true)
+  })
+
+  it('materializes keyless rows once and supports bounded move actions', () =>
+  {
+    const orderedIds = Array.from({ length: 1_200 }, (_, index) => String(index)).toReversed()
+    const keysById = new Map(orderedIds.map((id) => [id, null]))
+    const assignments = planActiveThreadReorder({
+      orderedIds,
+      keysById,
+      movedId: orderedIds[0]!,
+    })
+    const assignedKeys = new Map(
+      assignments.map((assignment) => [assignment.id, assignment.orderKey]),
+    )
+    const sorted = sortActiveThreadsByOrderKey(
+      orderedIds.map((id) => ({
+        id,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        activeOrderKey: assignedKeys.get(id),
+      })),
+    )
+    expect(sorted.map((thread) => thread.id)).toEqual(orderedIds)
+
+    const move = planActiveThreadMove({
+      orderedIds: ['a', 'b'],
+      keysById: new Map([
+        ['a', 'f'],
+        ['b', 't'],
+      ]),
+      movedId: 'b',
+      direction: 'up',
+    })
+    expect(move).toHaveLength(1)
+    expect(move?.[0]?.id).toBe('b')
   })
 })
 

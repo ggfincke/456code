@@ -615,6 +615,7 @@ export function projectEvent(
             snoozedUntil: null,
             snoozedAt: null,
             pinnedAt: null,
+            activeOrderKey: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -682,6 +683,7 @@ export function projectEvent(
             settledOverride: 'settled',
             settledAt: payload.settledAt,
             unsettledAt: null,
+            activeOrderKey: null,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -765,6 +767,9 @@ export function projectEvent(
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.activeOrderKey !== undefined
+              ? { activeOrderKey: payload.activeOrderKey }
+              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

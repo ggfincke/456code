@@ -7,7 +7,7 @@ import { hasBlockingApprovalOutcome } from '@t3tools/client-runtime/state/thread
 import { isThreadAwarenessStale } from '@t3tools/shared/agentAwareness'
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from '@t3tools/contracts/settings'
 import {
-  activeThreadAnchorTimestampMs,
+  sortActiveThreadsByOrderKey,
   getThreadSortTimestamp,
   sortThreads,
   toSortableTimestamp,
@@ -708,14 +708,11 @@ export function sortThreadsForSidebarV2<
     readonly id: string
     readonly createdAt: string
     readonly unsettledAt?: string | null | undefined
+    readonly activeOrderKey?: string | null | undefined
   },
 >(threads: readonly T[]): T[]
 {
-  return [...threads].toSorted(
-    (left, right) =>
-      activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
-      left.id.localeCompare(right.id),
-  )
+  return sortActiveThreadsByOrderKey(threads)
 }
 
 type SettledTimestampInput = Pick<

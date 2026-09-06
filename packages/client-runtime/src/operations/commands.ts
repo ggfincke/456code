@@ -44,6 +44,7 @@ export type SnoozeThreadInput = CommandInput<'thread.snooze'>
 export type UnsnoozeThreadInput = CommandInput<'thread.unsnooze'>
 export type PinThreadInput = CommandInput<'thread.pin'>
 export type UnpinThreadInput = CommandInput<'thread.unpin'>
+export type ReorderActiveThreadInput = CommandInput<'thread.active.reorder'>
 export type UpdateThreadMetadataInput = CommandInput<'thread.meta.update'>
 export type SetThreadRuntimeModeInput = CommandInput<'thread.runtime-mode.set'>
 export type SetThreadInteractionModeInput = CommandInput<'thread.interaction-mode.set'>
@@ -240,6 +241,17 @@ export const unpinThread: (input: UnpinThreadInput) => CommandEffect = Effect.fn
   return yield* dispatch({
     ...input,
     type: 'thread.unpin',
+    commandId: yield* commandId(input),
+  })
+})
+
+export const reorderActiveThread: (input: ReorderActiveThreadInput) => CommandEffect = Effect.fn(
+  'EnvironmentCommands.reorderActiveThread',
+)(function* (input)
+{
+  return yield* dispatch({
+    ...input,
+    type: 'thread.active.reorder',
     commandId: yield* commandId(input),
   })
 })

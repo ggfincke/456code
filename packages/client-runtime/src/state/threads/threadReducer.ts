@@ -118,6 +118,7 @@ export function applyThreadDetailEvent(
           snoozedUntil: null,
           snoozedAt: null,
           pinnedAt: null,
+          activeOrderKey: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],
@@ -156,6 +157,7 @@ export function applyThreadDetailEvent(
           settledOverride: 'settled',
           settledAt: event.payload.settledAt,
           unsettledAt: null,
+          activeOrderKey: null,
           updatedAt: event.payload.updatedAt,
         },
       }
@@ -231,6 +233,9 @@ export function applyThreadDetailEvent(
           ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
           ...(event.payload.worktreePath !== undefined
             ? { worktreePath: event.payload.worktreePath }
+            : {}),
+          ...(event.payload.activeOrderKey !== undefined
+            ? { activeOrderKey: event.payload.activeOrderKey }
             : {}),
           updatedAt: event.payload.updatedAt,
         },

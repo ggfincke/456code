@@ -20,10 +20,13 @@ layer('072_ProjectionThreadsPinnedAt', (it) =>
     Effect.gen(function* ()
     {
       const sql = yield* SqlClient.SqlClient
-      assert.deepStrictEqual(currentMigrationManifest.at(-1), {
-        id: 72,
-        name: 'ProjectionThreadsPinnedAt',
-      })
+      assert.deepStrictEqual(
+        currentMigrationManifest.find((migration) => migration.id === 72),
+        {
+          id: 72,
+          name: 'ProjectionThreadsPinnedAt',
+        },
+      )
 
       yield* runMigrations({ toMigrationInclusive: 71 })
       yield* sql`

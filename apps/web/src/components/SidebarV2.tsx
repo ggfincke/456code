@@ -9,6 +9,7 @@ import {
   threadWokeAt,
 } from '@t3tools/client-runtime/state/thread-settled'
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/models'
+import { planActiveThreadMove } from '@t3tools/client-runtime/state/thread-sort'
 import {
   scopeProjectRef,
   scopeThreadRef,
@@ -1414,6 +1415,10 @@ export default function SidebarV2()
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   })
+  const reorderActiveThread = useAtomCommand(
+    threadEnvironment.reorderActive,
+    'reorder active thread',
+  )
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
   })
@@ -2162,6 +2167,9 @@ export default function SidebarV2()
   // event and defeat row memoization during streaming.
   const threadByKeyRef = useRef(threadByKey)
   threadByKeyRef.current = threadByKey
+  const activeThreadsRef = useRef(activeThreads)
+  activeThreadsRef.current = activeThreads
+  const reorderPendingRef = useRef(false)
   // handleNewThread is inherently unstable (depends on the projects list);
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread)
@@ -2708,6 +2716,17 @@ export default function SidebarV2()
         const isSettled = settledThreadKeysRef.current.has(threadKey)
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey)
         const isPinned = thread.pinnedAt != null
+        const canArrange =
+          !isImportedShelf &&
+          !isSettled &&
+          !isSnoozed &&
+          !isPinned &&
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadActiveReorder ===
+            true
+        const arrangedThreads = activeThreadsRef.current.filter(
+          (candidate) => candidate.environmentId === thread.environmentId,
+        )
+        const arrangedIndex = arrangedThreads.findIndex((candidate) => candidate.id === thread.id)
         // presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date())
         const threadWorkspacePath =
@@ -2716,27 +2735,76 @@ export default function SidebarV2()
           null
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            buildThreadActionMenuItems({
-              branch: thread.branch,
-              isPinned,
-              isSettled,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle: false,
-              isRunning:
-                thread.session?.status === 'running' && thread.session.activeTurnId != null,
-              supports: {
-                settlement: supportsSettlement,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: false,
-              },
-              snoozePresets,
-            }),
+            [
+              ...(canArrange
+                ? [
+                    { id: 'move-up', label: 'Move up', disabled: arrangedIndex <= 0 },
+                    {
+                      id: 'move-down',
+                      label: 'Move down',
+                      disabled: arrangedIndex < 0 || arrangedIndex >= arrangedThreads.length - 1,
+                    },
+                  ]
+                : []),
+              ...buildThreadActionMenuItems({
+                branch: thread.branch,
+                isPinned,
+                isSettled,
+                isSnoozed,
+                canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+                isRegeneratingTitle: false,
+                isRunning:
+                  thread.session?.status === 'running' && thread.session.activeTurnId != null,
+                supports: {
+                  settlement: supportsSettlement,
+                  snooze: supportsSnooze,
+                  pinning: supportsPinning,
+                  titleRegeneration: false,
+                },
+                snoozePresets,
+              }),
+            ],
             position,
           ),
         )
         if (clicked._tag === 'Failure') return
+        if (clicked.value === 'move-up' || clicked.value === 'move-down')
+        {
+          if (!canArrange || reorderPendingRef.current) return
+          const currentThreads = activeThreadsRef.current.filter(
+            (candidate) => candidate.environmentId === thread.environmentId,
+          )
+          const changes = planActiveThreadMove({
+            orderedIds: currentThreads.map((candidate) => candidate.id),
+            keysById: new Map(
+              threads
+                .filter((candidate) => candidate.environmentId === thread.environmentId)
+                .map((candidate) => [candidate.id, candidate.activeOrderKey]),
+            ),
+            movedId: thread.id,
+            direction: clicked.value === 'move-up' ? 'up' : 'down',
+          })
+          if (changes === null) return
+          reorderPendingRef.current = true
+          try
+          {
+            for (const change of changes)
+            {
+              const target = currentThreads.find((candidate) => candidate.id === change.id)
+              if (!target) return
+              const result = await reorderActiveThread({
+                environmentId: target.environmentId,
+                input: { threadId: target.id, orderKey: change.orderKey },
+              })
+              if (result._tag !== 'Success') return
+            }
+          }
+          finally
+          {
+            reorderPendingRef.current = false
+          }
+          return
+        }
         if (clicked.value?.startsWith('snooze:'))
         {
           const preset = snoozePresets.find(
@@ -2882,6 +2950,8 @@ export default function SidebarV2()
       projectCwdByKey,
       serverConfigs,
       startThreadRename,
+      reorderActiveThread,
+      threads,
     ],
   )
 

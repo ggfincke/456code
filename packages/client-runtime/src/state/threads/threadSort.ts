@@ -135,3 +135,180 @@ export function getLatestThreadForProject<
     )[0] ?? null
   )
 }
+
+const ACTIVE_ORDER_DIGITS = 'abcdefghijklmnopqrstuvwxyz'
+
+function isValidActiveOrderKey(key: string): boolean
+{
+  return (
+    key.length > 0 &&
+    [...key].every((character) => ACTIVE_ORDER_DIGITS.includes(character)) &&
+    key.at(-1) !== ACTIVE_ORDER_DIGITS[0]
+  )
+}
+
+function activeOrderMidpoint(before: string, after: string): string
+{
+  if (after !== '' && before >= after)
+  {
+    throw new Error('activeOrderMidpoint: bounds out of order')
+  }
+  if (after !== '')
+  {
+    let commonPrefixLength = 0
+    while (
+      (before.charAt(commonPrefixLength) || ACTIVE_ORDER_DIGITS[0]) ===
+      after.charAt(commonPrefixLength)
+    )
+    {
+      commonPrefixLength += 1
+    }
+    if (commonPrefixLength > 0)
+    {
+      return (
+        after.slice(0, commonPrefixLength) +
+        activeOrderMidpoint(before.slice(commonPrefixLength), after.slice(commonPrefixLength))
+      )
+    }
+  }
+
+  const beforeDigit = before === '' ? 0 : ACTIVE_ORDER_DIGITS.indexOf(before.charAt(0))
+  const afterDigit =
+    after === '' ? ACTIVE_ORDER_DIGITS.length : ACTIVE_ORDER_DIGITS.indexOf(after.charAt(0))
+  if (afterDigit - beforeDigit > 1)
+  {
+    return ACTIVE_ORDER_DIGITS.charAt(Math.round((beforeDigit + afterDigit) / 2))
+  }
+  if (after.length > 1)
+  {
+    return after.charAt(0)
+  }
+  return ACTIVE_ORDER_DIGITS.charAt(beforeDigit) + activeOrderMidpoint(before.slice(1), '')
+}
+
+// null bounds represent the open top and bottom of the arranged run
+export function activeOrderKeyBetween(before: string | null, after: string | null): string | null
+{
+  const lower = before ?? ''
+  const upper = after ?? ''
+  if (lower !== '' && !isValidActiveOrderKey(lower)) return null
+  if (upper !== '' && !isValidActiveOrderKey(upper)) return null
+  if (upper !== '' && lower >= upper) return null
+  return activeOrderMidpoint(lower, upper)
+}
+
+export function generateSpreadActiveOrderKeys(count: number): string[]
+{
+  let width = 2
+  let space = ACTIVE_ORDER_DIGITS.length ** width
+  while (space <= (count + 1) * 2)
+  {
+    width += 1
+    space *= ACTIVE_ORDER_DIGITS.length
+  }
+  const step = space / (count + 1)
+  const keys: string[] = []
+  for (let index = 0; index < count; index += 1)
+  {
+    let value = Math.round(step * (index + 1))
+    if (value % ACTIVE_ORDER_DIGITS.length === 0) value += 1
+    let key = ''
+    for (let digit = 0; digit < width; digit += 1)
+    {
+      key = ACTIVE_ORDER_DIGITS.charAt(value % ACTIVE_ORDER_DIGITS.length) + key
+      value = Math.floor(value / ACTIVE_ORDER_DIGITS.length)
+    }
+    keys.push(key)
+  }
+  return keys
+}
+
+export function planActiveThreadReorder(input: {
+  readonly orderedIds: readonly string[]
+  readonly keysById: ReadonlyMap<string, string | null | undefined>
+  readonly movedId: string
+}): ReadonlyArray<{ readonly id: string; readonly orderKey: string }>
+{
+  const { orderedIds, keysById, movedId } = input
+  const visibleIds = new Set(orderedIds)
+  const reservedKeys = new Set(
+    [...keysById].flatMap(([id, key]) => (!visibleIds.has(id) && key != null ? [key] : [])),
+  )
+  const movedIndex = orderedIds.indexOf(movedId)
+  if (movedIndex === -1) return []
+  const beforeId = movedIndex > 0 ? (orderedIds[movedIndex - 1] ?? null) : null
+  const afterId = movedIndex < orderedIds.length - 1 ? (orderedIds[movedIndex + 1] ?? null) : null
+  const beforeKey = beforeId === null ? null : (keysById.get(beforeId) ?? null)
+  const afterKey = afterId === null ? null : (keysById.get(afterId) ?? null)
+  if ((beforeId === null || beforeKey !== null) && (afterId === null || afterKey !== null))
+  {
+    let key = activeOrderKeyBetween(beforeKey, afterKey)
+    while (key !== null && reservedKeys.has(key))
+    {
+      key = activeOrderKeyBetween(key, afterKey)
+    }
+    if (key !== null)
+    {
+      return [{ id: movedId, orderKey: key }]
+    }
+  }
+
+  const keys = generateSpreadActiveOrderKeys(orderedIds.length + reservedKeys.size)
+    .filter((key) => !reservedKeys.has(key))
+    .slice(0, orderedIds.length)
+  return orderedIds.flatMap((id, index) =>
+  {
+    const key = keys[index]!
+    return keysById.get(id) === key ? [] : [{ id, orderKey: key }]
+  })
+}
+
+export function planActiveThreadMove(input: {
+  readonly orderedIds: readonly string[]
+  readonly keysById: ReadonlyMap<string, string | null | undefined>
+  readonly movedId: string
+  readonly direction: 'up' | 'down'
+}): ReadonlyArray<{ readonly id: string; readonly orderKey: string }> | null
+{
+  const from = input.orderedIds.indexOf(input.movedId)
+  if (from === -1) return null
+  const to = input.direction === 'up' ? from - 1 : from + 1
+  if (to < 0 || to >= input.orderedIds.length) return null
+  const orderedIds = [...input.orderedIds]
+  orderedIds.splice(from, 1)
+  orderedIds.splice(to, 0, input.movedId)
+  return planActiveThreadReorder({ ...input, orderedIds })
+}
+
+// fresh and reopened rows lead; arranged rows retain their persisted order
+export function sortActiveThreadsByOrderKey<
+  T extends {
+    readonly id: string
+    readonly createdAt: string
+    readonly unsettledAt?: string | null | undefined
+    readonly activeOrderKey?: string | null | undefined
+    readonly environmentId?: string | undefined
+  },
+>(threads: readonly T[]): T[]
+{
+  return [...threads].sort((left, right) =>
+  {
+    const leftKey = left.activeOrderKey
+    const rightKey = right.activeOrderKey
+    if (leftKey == null && rightKey != null) return -1
+    if (leftKey != null && rightKey == null) return 1
+    const order =
+      leftKey != null && rightKey != null
+        ? leftKey < rightKey
+          ? -1
+          : leftKey > rightKey
+            ? 1
+            : 0
+        : activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left)
+    return (
+      order ||
+      left.id.localeCompare(right.id) ||
+      (left.environmentId ?? '').localeCompare(right.environmentId ?? '')
+    )
+  })
+}

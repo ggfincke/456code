@@ -6,6 +6,7 @@ export {
   getLatestThreadForProject,
   getThreadSortTimestamp,
   sortThreads,
+  sortActiveThreadsByOrderKey,
   toSortableTimestamp,
   type ThreadSortInput,
 } from '@t3tools/client-runtime/state/thread-sort'

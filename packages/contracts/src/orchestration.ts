@@ -760,6 +760,7 @@ export const OrchestrationThread = Schema.Struct({
   // threads stay in their lifecycle shelves while retaining this timestamp.
   // optional so payloads from pre-pinning servers still decode.
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -838,6 +839,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -1064,6 +1066,13 @@ const ThreadUnpinCommand = Schema.Struct({
   type: Schema.Literal('thread.unpin'),
   commandId: CommandId,
   threadId: ThreadId,
+})
+
+const ThreadActiveReorderCommand = Schema.Struct({
+  type: Schema.Literal('thread.active.reorder'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  orderKey: TrimmedNonEmptyString,
 })
 
 const ThreadMetaUpdateCommand = Schema.Struct({
@@ -1295,6 +1304,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnsnoozeCommand,
   ThreadPinCommand,
   ThreadUnpinCommand,
+  ThreadActiveReorderCommand,
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1326,6 +1336,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnsnoozeCommand,
   ThreadPinCommand,
   ThreadUnpinCommand,
+  ThreadActiveReorderCommand,
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1710,6 +1721,7 @@ export const ThreadUnpinnedPayload = Schema.Struct({
 
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
+  activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(GitRefString)),
