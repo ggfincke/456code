@@ -11,6 +11,7 @@ import {
   type ProviderInstanceEnvironmentVariable,
   ProviderDriverKind,
   ProviderInstanceId,
+  resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
@@ -437,7 +438,11 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
 
 function fallbackTextGenerationProvider(settings: ServerSettings): ServerSettings
 {
-  const fallbackEntry = Object.entries(settings.providers).find(([, provider]) => provider.enabled)
+  const fallbackEntry = Object.entries(settings.providers).find(([driver, provider]) =>
+  {
+    const instance = settings.providerInstances[ProviderInstanceId.make(driver)]
+    return instance === undefined ? provider.enabled : resolveProviderInstanceEnabled(instance)
+  })
   const fallback = fallbackEntry ? ProviderDriverKind.make(fallbackEntry[0]) : undefined
   if (!fallback)
   {
