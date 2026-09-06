@@ -7,6 +7,7 @@ import {
   ProviderSetupError,
   type ServerProvider,
 } from '@t3tools/contracts'
+import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Crypto from 'effect/Crypto'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
@@ -45,6 +46,8 @@ import type { ProviderDriver, ProviderInstance } from '../catalog/ProviderDriver
 import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
 import {
   discoverAntigravitySkills,
+  discoverAntigravityUserSkills,
+  resolveAntigravityUserHome,
 } from './AntigravitySkills.ts'
 
 const DRIVER = ProviderDriverKind.make('antigravity')
@@ -93,6 +96,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       const loggers = yield* ProviderEventLoggers
       const settings = { ...config, enabled } satisfies AntigravitySettings
       const processEnvironment = mergeProviderInstanceEnvironment(environment)
+      const userHome = resolveAntigravityUserHome(yield* HostProcessPlatform, processEnvironment)
       const profileDirectory = resolveAntigravityProfileDirectory(serverConfig.stateDir, instanceId)
       const resolveContinuationIdentity = canonicalFileContinuationIdentity(
         DRIVER,
@@ -127,6 +131,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         const profile = yield* prepareAntigravityProfile({
           profileDirectory,
           baseEnv: processEnvironment,
+          userHome,
         }).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
@@ -253,9 +258,19 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
           .pipe(Effect.provideService(Scope.Scope, processScope))
       }).pipe(Effect.scoped)
 
+      const machineSkills = yield* discoverAntigravityUserSkills(userHome).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.tapError(() =>
+          Effect.logWarning('Could not read Antigravity user skills for the machine catalog.'),
+        ),
+        Effect.orElseSucceed(() => []),
+      )
+
       const provider = yield* makeAntigravityProvider(settings, {
         stampIdentity: (draft) => Effect.succeed(stampIdentity(draft)),
         probe,
+        initialSkills: machineSkills,
       }).pipe(
         Effect.mapError(
           (cause) =>
@@ -347,7 +362,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         snapshotForCwd: (cwd) =>
           !enabled
             ? provider.snapshot.getSnapshot
-            : discoverAntigravitySkills({ cwd, profileDirectory }).pipe(
+            : discoverAntigravitySkills({ cwd, userHome }).pipe(
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
                 Effect.flatMap((skills) => provider.snapshotForCwd(cwd, skills)),
