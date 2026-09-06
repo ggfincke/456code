@@ -3,7 +3,13 @@
 import { expect, it } from '@effect/vitest'
 import { NodeHttpServer } from '@effect/platform-node'
 import * as NodeServices from '@effect/platform-node/NodeServices'
-import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
+import {
+  EnvironmentId,
+  PreviewTabId,
+  ProviderInstanceId,
+  ThreadId,
+  type PreviewAutomationRequest,
+} from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -209,10 +215,7 @@ it.effect('registers annotated tools and preserves authenticated request context
     {
       const server = yield* McpServer.McpServer
       const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker
-      const routedRequests: Array<{
-        readonly operation: string
-        readonly tabId?: string | undefined
-      }> = []
+      const routedRequests: Array<PreviewAutomationRequest> = []
       const events = yield* broker.connect({
         clientId: 'mcp-test-client',
         environmentId,
@@ -312,6 +315,24 @@ it.effect('registers annotated tools and preserves authenticated request context
       expect(routedRequests.find(({ operation }) => operation === 'snapshot')?.tabId).toBe(
         alternateTabId,
       )
+
+      const metadataOnlySnapshot = yield* server
+        .callTool({
+          name: 'preview_snapshot',
+          arguments: { tabId: alternateTabId, includeImage: false },
+        })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        )
+      expect(metadataOnlySnapshot.isError).toBe(false)
+      expect(metadataOnlySnapshot.content.map((content) => content.type)).toEqual(['text'])
+      expect(metadataOnlySnapshot.structuredContent).toMatchObject({
+        screenshot: { mimeType: 'image/png', width: 10, height: 5 },
+      })
+      const snapshotRequests = routedRequests.filter(({ operation }) => operation === 'snapshot')
+      expect(snapshotRequests).toHaveLength(2)
+      expect(snapshotRequests[1]?.input).toEqual({})
 
       const actionRequests = [
         { name: 'preview_click', arguments: { x: 10, y: 10 } },
