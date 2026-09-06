@@ -313,3 +313,10 @@ Five staging/packed-CLI tests passed, including relocation with a transitive imp
 removal. Server/scripts typechecks, targeted lint, comments, and formatting passed. Full release
 smoke passed clean npm and pnpm consumers, archive checks, packaged runtime checks, and npm
 publication dry-run. No package was published. Hosted Linux/Windows smoke remains pending.
+
+Group 3 local gate passed: the production default provider preserves explicit blanks only for
+telemetry opt-out parsing; injected providers retain precedence and unrelated configuration keeps
+its existing semantics. Six analytics tests passed, now covering default production and explicit
+environment providers for all three blank opt-outs. Server typecheck and targeted formatting,
+comments, and lint passed. A full frozen reinstall restored local workspace tool links after the
+release-smoke deployment probe before typechecking; no tracked dependency changes were needed.
