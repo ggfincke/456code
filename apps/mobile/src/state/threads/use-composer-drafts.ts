@@ -871,6 +871,60 @@ export function mergeComposerDraftContentState(
   }
 }
 
+export function copyComposerDraftContentState(
+  current: Record<string, ComposerDraft>,
+  sourceDraftKey: string,
+  targetDraftKey: string,
+  targetEnvironmentId: EnvironmentId,
+): Record<string, ComposerDraft>
+{
+  if (sourceDraftKey === targetDraftKey) return current
+  const source = normalizeDraft(current[sourceDraftKey])
+  const target = normalizeDraft(current[targetDraftKey])
+  if (
+    (source.text.length === 0 && source.attachments.length === 0) ||
+    target.text.length > 0 ||
+    target.attachments.length > 0 ||
+    (target.importedShareIds?.length ?? 0) > 0
+  )
+    return current
+  const attachments = source.attachments.map((attachment) =>
+  {
+    if (
+      attachment.uploadEnvironmentId === undefined ||
+      attachment.uploadEnvironmentId === targetEnvironmentId
+    )
+      return attachment
+    const {
+      uploadedAttachmentId: _id,
+      uploadEnvironmentId: _environmentId,
+      ...localAttachment
+    } = attachment
+    return localAttachment
+  })
+  const merged = mergeComposerDraftContentState(current, targetDraftKey, {
+    text: source.text,
+    attachments,
+  })
+  return source.importedShareIds
+    ? {
+        ...merged,
+        [targetDraftKey]: { ...merged[targetDraftKey]!, importedShareIds: source.importedShareIds },
+      }
+    : merged
+}
+
+export function copyComposerDraftContentIfEmpty(
+  sourceDraftKey: string,
+  targetDraftKey: string,
+  targetEnvironmentId: EnvironmentId,
+): void
+{
+  updateComposerDrafts(targetDraftKey, (current) =>
+    copyComposerDraftContentState(current, sourceDraftKey, targetDraftKey, targetEnvironmentId),
+  )
+}
+
 // atomically moves an incoming share into a project-scoped composer draft.
 // the durable write happens before the share inbox item can be acknowledged.
 export async function mergeComposerDraftContent(

@@ -41,6 +41,7 @@ import { appAtomRegistry } from '../../../state/atom-registry'
 import {
   appendComposerDraftAttachments,
   clearComposerDraft,
+  copyComposerDraftContentIfEmpty,
   getComposerDraftSnapshot,
   isComposerDraftEmpty,
   removeComposerDraftAttachment,
@@ -72,6 +73,7 @@ import {
   EMPTY_BRANCH_REFS,
   normalizeSelectedWorktreePath,
   pendingTaskDraftKey,
+  resolveEnvironmentProjectMatch,
   type WorkspaceMode,
 } from './newTaskFlowHelpers'
 export { branchBadgeLabel } from './newTaskFlowHelpers'
@@ -571,41 +573,42 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     )
   }, [availableBranches, branchQuery])
 
-  const setProject = useCallback((project: EnvironmentProject) =>
-  {
-    const nextProjectKey = scopedProjectKey(project.environmentId, project.id)
-    setSelectedEnvironmentId(project.environmentId)
-    setSelectedProjectKey(nextProjectKey)
-  }, [])
+  const carryDraftContentTo = useCallback(
+    (project: EnvironmentProject) =>
+    {
+      if (!selectedProjectDraftKey?.startsWith('new-task:')) return
+      copyComposerDraftContentIfEmpty(
+        selectedProjectDraftKey,
+        `new-task:${scopedProjectKey(project.environmentId, project.id)}`,
+        project.environmentId,
+      )
+    },
+    [selectedProjectDraftKey],
+  )
+
+  const setProject = useCallback(
+    (project: EnvironmentProject) =>
+    {
+      carryDraftContentTo(project)
+      const nextProjectKey = scopedProjectKey(project.environmentId, project.id)
+      setSelectedEnvironmentId(project.environmentId)
+      setSelectedProjectKey(nextProjectKey)
+    },
+    [carryDraftContentTo],
+  )
 
   const selectEnvironment = useCallback(
     (environmentId: EnvironmentId) =>
     {
-      const projectsOnTarget = projects.filter((project) => project.environmentId === environmentId)
-      const repositoryKey = selectedProject?.repositoryIdentity?.canonicalKey ?? null
-      // prefer the repository identity; projects without one (e.g. not yet
-      // indexed) fall back to workspace basename, then title, so switching
-      // computers still follows the same repo instead of resetting to
-      // whatever project is first on the target machine.
-      const workspaceBasename = selectedProject?.workspaceRoot.split('/').at(-1) || null
-      const match =
-        (repositoryKey !== null
-          ? projectsOnTarget.find(
-              (project) => (project.repositoryIdentity?.canonicalKey ?? null) === repositoryKey,
-            )
-          : undefined) ??
-        (workspaceBasename !== null
-          ? projectsOnTarget.find(
-              (project) => project.workspaceRoot.split('/').at(-1) === workspaceBasename,
-            )
-          : undefined) ??
-        (selectedProject !== null
-          ? projectsOnTarget.find((project) => project.title === selectedProject.title)
-          : undefined)
+      const match = resolveEnvironmentProjectMatch(
+        projects.filter((project) => project.environmentId === environmentId),
+        selectedProject,
+      )
+      if (match) carryDraftContentTo(match)
       setSelectedEnvironmentId(environmentId)
       setSelectedProjectKey(match ? scopedProjectKey(match.environmentId, match.id) : null)
     },
-    [projects, selectedProject],
+    [projects, selectedProject, carryDraftContentTo],
   )
 
   const setWorkspaceMode = useCallback(

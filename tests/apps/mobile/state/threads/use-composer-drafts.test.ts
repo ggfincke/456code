@@ -65,6 +65,7 @@ vi.mock('expo-file-system', () => ({
 import { appAtomRegistry } from '../../../../../apps/mobile/src/state/atom-registry'
 import {
   clearComposerDraftContentState,
+  copyComposerDraftContentState,
   clearComposerDraftsEnvironment,
   composerDraftsAtom,
   decodePersistedComposerDrafts,
@@ -99,6 +100,60 @@ afterEach(() =>
 
 describe('mobile composer drafts', () =>
 {
+  it('carries a new-task prompt and local image across hosts without overwriting target choices or occupied drafts', () =>
+  {
+    const sourceKey = 'new-task:source:project'
+    const targetKey = 'new-task:target:project'
+    const source: ComposerDraft = {
+      text: 'Keep this request',
+      importedShareIds: ['share-1'],
+      attachments: [
+        {
+          id: 'image',
+          type: 'image',
+          name: 'image.png',
+          mimeType: 'image/png',
+          sizeBytes: 3,
+          dataUrl: 'data:image/png;base64,YWJj',
+          previewUri: 'file:///local/image.png',
+          uploadEnvironmentId: EnvironmentId.make('source'),
+          uploadedAttachmentId: 'source-upload',
+        },
+      ],
+    }
+    const target: ComposerDraft = {
+      text: '',
+      attachments: [],
+      runtimeMode: 'approval-required',
+      workspaceSelection: { mode: 'local', branch: 'target-branch', worktreePath: null },
+    }
+    const current = { [sourceKey]: source, [targetKey]: target }
+    const copied = copyComposerDraftContentState(
+      current,
+      sourceKey,
+      targetKey,
+      EnvironmentId.make('target'),
+    )
+    expect(copied[sourceKey]).toBe(source)
+    expect(copied[targetKey]).toMatchObject({
+      ...target,
+      text: source.text,
+      importedShareIds: source.importedShareIds,
+      attachments: [
+        { dataUrl: source.attachments[0]!.dataUrl, previewUri: source.attachments[0]!.previewUri },
+      ],
+    })
+    expect(copied[targetKey]?.attachments[0]).not.toHaveProperty('uploadEnvironmentId')
+    expect(copied[targetKey]?.attachments[0]).not.toHaveProperty('uploadedAttachmentId')
+    expect(
+      copyComposerDraftContentState(copied, sourceKey, targetKey, EnvironmentId.make('target')),
+    ).toBe(copied)
+    const occupied = { ...current, [targetKey]: { ...target, text: 'An existing target request' } }
+    expect(
+      copyComposerDraftContentState(occupied, sourceKey, targetKey, EnvironmentId.make('target')),
+    ).toBe(occupied)
+  })
+
   it('keeps sticky preferences outside drafts while clearing only successful new-task selectors', () =>
   {
     const selection = {
