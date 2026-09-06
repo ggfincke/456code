@@ -57,6 +57,7 @@ import {
   ThreadListShowMoreRow,
 } from './thread-list-items'
 import { ThreadListV2Row } from './thread-list-v2-items'
+import { ThreadArrangementSheet } from './ThreadArrangementSheet'
 import { canPinThread } from '../thread-list-pinning'
 import { THREAD_LIST_V2_SETTLED_PAGE_COUNT, type ThreadListV2Item } from './threadListV2'
 import { useThreadListV2State } from './use-thread-list-v2-state'
@@ -323,6 +324,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
 
   const {
     handleChangeRequestState,
+    moveActiveThread,
+    reorderActiveThreads,
+    openArrangement,
+    closeArrangement,
+    arrangementThreads,
+    arrangeableThreads,
     layout: threadListV2Layout,
     pinningEnvironmentIds,
     serverConfigs,
@@ -549,6 +556,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
                 pinningEnvironmentIds.has(thread.environmentId),
               )}
               onSettleThread={settleThread}
+              onOpenArrangement={openArrangement}
+              onMoveThread={
+                serverConfigs.get(thread.environmentId)?.environment.capabilities
+                  .threadActiveReorder === true
+                  ? moveActiveThread
+                  : undefined
+              }
               onUnsettleThread={unsettleThread}
               onPinThread={pinThread}
               onUnpinThread={unpinThread}
@@ -631,6 +645,14 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
               fullSwipeWidth={props.width - 20}
               onArchiveThread={archiveThread}
               onDeleteThread={confirmDeleteThread}
+              onOpenArrangement={openArrangement}
+              onMoveThread={
+                arrangeableThreads.includes(thread) &&
+                serverConfigs.get(thread.environmentId)?.environment.capabilities
+                  .threadActiveReorder === true
+                  ? moveActiveThread
+                  : undefined
+              }
               onSelectThread={handleSelectThread}
               onSwipeableClose={handleSwipeableClose}
               onSwipeableWillOpen={handleSwipeableWillOpen}
@@ -652,9 +674,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
     },
     [
       archiveThread,
+      arrangeableThreads,
       confirmDeletePendingTask,
       confirmDeleteThread,
       handleChangeRequestState,
+      moveActiveThread,
+      openArrangement,
       handleSelectThread,
       handleSwipeableClose,
       handleSwipeableWillOpen,
@@ -751,6 +776,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
 
   return (
     <>
+      {arrangementThreads !== null ? (
+        <ThreadArrangementSheet
+          threads={arrangementThreads}
+          onClose={closeArrangement}
+          onReorder={reorderActiveThreads}
+        />
+      ) : null}
       <NativeStackScreenOptions
         optionsVersion={nativeHeaderItems}
         options={{

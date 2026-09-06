@@ -512,6 +512,11 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void
+  readonly onOpenArrangement?: (thread: EnvironmentThreadShell) => void
+  readonly onMoveThread?: (
+    thread: EnvironmentThreadShell,
+    direction: 'up' | 'down',
+  ) => Promise<void>
   readonly onSwipeableWillOpen: (methods: SwipeableMethods) => void
   readonly onSwipeableClose: (methods: SwipeableMethods) => void
   readonly simultaneousSwipeGesture?: ComponentProps<
@@ -534,7 +539,14 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const pressedBackgroundColor = useThemeColor('--color-subtle')
   const selectedBackgroundColor = useThemeColor('--color-user-bubble')
 
-  const { thread, onSelectThread, onArchiveThread, onDeleteThread } = props
+  const {
+    thread,
+    onSelectThread,
+    onArchiveThread,
+    onDeleteThread,
+    onOpenArrangement,
+    onMoveThread,
+  } = props
   // subscribed per row rather than passed down: useNowMinute is one module
   // timer fanned out through useSyncExternalStore, so a row costs a Set entry
   // while a prop would re-render the whole list on every tick.
@@ -570,6 +582,19 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread])
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread])
+  const menuActions = useMemo<MenuAction[]>(
+    () => [
+      ...(onMoveThread
+        ? [
+            { id: 'arrange', title: 'Arrange tasks…', image: 'line.3.horizontal' },
+            { id: 'move-up', title: 'Move up', image: 'arrow.up' },
+            { id: 'move-down', title: 'Move down', image: 'arrow.down' },
+          ]
+        : []),
+      ...THREAD_ROW_MENU_ACTIONS,
+    ],
+    [onMoveThread],
+  )
   const primaryAction = useMemo(
     () => ({
       accessibilityLabel: `Archive ${thread.title}`,
@@ -584,8 +609,11 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     {
       if (nativeEvent.event === 'archive') handleArchive()
       if (nativeEvent.event === 'delete') handleDelete()
+      if (nativeEvent.event === 'arrange') onOpenArrangement?.(thread)
+      if (nativeEvent.event === 'move-up') void onMoveThread?.(thread, 'up')
+      if (nativeEvent.event === 'move-down') void onMoveThread?.(thread, 'down')
     },
-    [handleArchive, handleDelete],
+    [handleArchive, handleDelete, onOpenArrangement, onMoveThread, thread],
   )
 
   // a failed queued message outranks the live status pill: it is the state the
@@ -785,7 +813,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
         // interaction is hosted by the component view and the underlying
         // UIButton passes touches through, so row taps and swipes keep working).
         <ControlPillMenu
-          actions={THREAD_ROW_MENU_ACTIONS}
+          actions={menuActions}
           onPressAction={handleMenuAction}
           shouldOpenOnLongPress
         >

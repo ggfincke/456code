@@ -46,6 +46,30 @@ function makeThread(
 
 const NOW = '2026-06-02T00:00:00.000Z'
 
+describe('persisted active arrangement', () =>
+{
+  it('keeps saved positions behind a newly reopened task', () =>
+  {
+    const tasks = [
+      makeThread({ id: ThreadId.make('later'), title: 'Later', activeOrderKey: 't' }),
+      makeThread({ id: ThreadId.make('first'), title: 'First', activeOrderKey: 'h' }),
+      makeThread({
+        id: ThreadId.make('reopened'),
+        title: 'Reopened',
+        activeOrderKey: null,
+        unsettledAt: NOW,
+      }),
+    ]
+    const layout = buildThreadListV2Items({
+      threads: tasks,
+      environmentId: null,
+      searchQuery: '',
+      now: NOW,
+    })
+    expect(layout.items.map((item) => item.thread.id)).toEqual(['reopened', 'first', 'later'])
+  })
+})
+
 describe('resolveThreadListV2Status', () =>
 {
   it('prioritizes approval over a running session', () =>

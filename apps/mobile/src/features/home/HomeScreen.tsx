@@ -39,6 +39,7 @@ import {
   ThreadListShowMoreRow,
 } from '../threads/thread-list-items'
 import { ThreadListV2Row } from '../threads/thread-list-v2-items'
+import { ThreadArrangementSheet } from '../threads/sidebar/ThreadArrangementSheet'
 import { canPinThread } from '../threads/thread-list-pinning'
 import { THREAD_LIST_V2_SETTLED_PAGE_COUNT, type ThreadListV2Item } from '../threads/threadListV2'
 import { useThreadListV2State } from '../threads/use-thread-list-v2-state'
@@ -469,6 +470,12 @@ export function HomeScreen(props: HomeScreenProps)
   )
   const {
     handleChangeRequestState,
+    moveActiveThread,
+    reorderActiveThreads,
+    openArrangement,
+    closeArrangement,
+    arrangementThreads,
+    arrangeableThreads,
     layout: threadListV2Layout,
     pinningEnvironmentIds,
     serverConfigs,
@@ -530,6 +537,13 @@ export function HomeScreen(props: HomeScreenProps)
           pinningEnvironmentIds.has(item.thread.environmentId),
         )}
         onSettleThread={handleSettleThread}
+        onOpenArrangement={openArrangement}
+        onMoveThread={
+          serverConfigs.get(item.thread.environmentId)?.environment.capabilities
+            .threadActiveReorder === true
+            ? moveActiveThread
+            : undefined
+        }
         onUnsettleThread={handleUnsettleThread}
         onPinThread={handlePinThread}
         onUnpinThread={handleUnpinThread}
@@ -544,6 +558,8 @@ export function HomeScreen(props: HomeScreenProps)
     ),
     [
       handleChangeRequestState,
+      moveActiveThread,
+      openArrangement,
       handleDeleteThread,
       handlePinThread,
       handleSettleThread,
@@ -659,6 +675,14 @@ export function HomeScreen(props: HomeScreenProps)
               }
               isLast={item.isLast}
               onArchiveThread={props.onArchiveThread}
+              onOpenArrangement={openArrangement}
+              onMoveThread={
+                arrangeableThreads.includes(thread) &&
+                serverConfigs.get(thread.environmentId)?.environment.capabilities
+                  .threadActiveReorder === true
+                  ? moveActiveThread
+                  : undefined
+              }
               onDeleteThread={props.onDeleteThread}
               onSelectThread={props.onSelectThread}
               onSwipeableClose={handleSwipeableClose}
@@ -683,6 +707,10 @@ export function HomeScreen(props: HomeScreenProps)
       handleSwipeableWillOpen,
       matchesByKey,
       projectCwdByKey,
+      arrangeableThreads,
+      openArrangement,
+      moveActiveThread,
+      serverConfigs,
       props.onArchiveThread,
       props.onDeletePendingTask,
       props.onDeleteThread,
@@ -873,6 +901,13 @@ export function HomeScreen(props: HomeScreenProps)
   {
     return (
       <View className="flex-1 bg-screen">
+        {arrangementThreads !== null ? (
+          <ThreadArrangementSheet
+            threads={arrangementThreads}
+            onClose={closeArrangement}
+            onReorder={reorderActiveThreads}
+          />
+        ) : null}
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <FlatList
             data={threadListV2Items}
@@ -915,6 +950,13 @@ export function HomeScreen(props: HomeScreenProps)
 
   return (
     <View className="flex-1 bg-screen">
+      {arrangementThreads !== null ? (
+        <ThreadArrangementSheet
+          threads={arrangementThreads}
+          onClose={closeArrangement}
+          onReorder={reorderActiveThreads}
+        />
+      ) : null}
       {/* Sticky headers are deliberately not wired up: LegendList's JS sticky
           implementation mispositions pinned headers at mount under iOS
           automatic content insets (headers render one nav-inset too low until

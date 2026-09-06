@@ -3,11 +3,14 @@
 
 import { useAtomValue } from '@effect/atom-react'
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
+import { planActiveThreadReorder } from '@t3tools/client-runtime/state/thread-sort'
 import type { EnvironmentId, ProjectId } from '@t3tools/contracts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useNowMinute } from '../../../lib/useNowMinute'
 import { environmentServerConfigsAtom } from '../../../state/server'
+import { threadEnvironment } from '../../../state/threads'
+import { useAtomCommand } from '../../../state/use-atom-command'
 import {
   buildThreadListV2Items,
   THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
@@ -30,6 +33,19 @@ export function useThreadListV2State(input: {
   readonly autoSettleOnMerge: boolean
 })
 {
+  const reorderActiveThread = useAtomCommand(
+    threadEnvironment.reorderActive,
+    'reorder active thread',
+  )
+  const reorderPendingRef = useRef(false)
+  const [arrangementEnvironmentId, setArrangementEnvironmentId] = useState<EnvironmentId | null>(
+    null,
+  )
+  const openArrangement = useCallback(
+    (thread: EnvironmentThreadShell) => setArrangementEnvironmentId(thread.environmentId),
+    [],
+  )
+  const closeArrangement = useCallback(() => setArrangementEnvironmentId(null), [])
   const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
     ReadonlyMap<string, ChangeRequestState>
   >(() => new Map())
@@ -121,10 +137,6 @@ export function useThreadListV2State(input: {
   }, [serverConfigs])
   const layout = useMemo(() =>
   {
-    if (!input.enabled)
-    {
-      return { items: [], hiddenSettledCount: 0, snoozedCount: 0, nextSnoozeWakeAt: null }
-    }
     return buildThreadListV2Items({
       threads: input.threads.filter((thread) => thread.archivedAt === null),
       environmentId: input.environmentId,
@@ -142,7 +154,6 @@ export function useThreadListV2State(input: {
     })
   }, [
     changeRequestStateByKey,
-    input.enabled,
     input.autoSettleOnMerge,
     input.environmentId,
     input.projectRefs,
@@ -156,7 +167,82 @@ export function useThreadListV2State(input: {
     snoozeEnvironmentIds,
     snoozeWakeTick,
   ])
-  const nextSnoozeWakeAt = layout.nextSnoozeWakeAt
+  const nextSnoozeWakeAt = input.enabled ? layout.nextSnoozeWakeAt : null
+  const arrangeableThreads = useMemo(
+    () =>
+      layout.items
+        .filter((item) => item.variant === 'card' && !item.pinned)
+        .map((item) => item.thread),
+    [layout.items],
+  )
+  const reorderActiveThreads = useCallback(
+    async (active: ReadonlyArray<EnvironmentThreadShell>, movedId: string) =>
+    {
+      const thread = active.find((candidate) => candidate.id === movedId)
+      if (!thread) return
+      if (
+        reorderPendingRef.current ||
+        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadActiveReorder !==
+          true
+      )
+        return
+      const currentIds = new Set(
+        arrangeableThreads
+          .filter((candidate) => candidate.environmentId === thread.environmentId)
+          .map((candidate) => candidate.id),
+      )
+      if (
+        active.some(
+          (candidate) =>
+            candidate.environmentId !== thread.environmentId || !currentIds.has(candidate.id),
+        )
+      )
+        return
+      const changes = planActiveThreadReorder({
+        orderedIds: active.map((candidate) => candidate.id),
+        keysById: new Map(
+          input.threads
+            .filter((candidate) => candidate.environmentId === thread.environmentId)
+            .map((candidate) => [candidate.id, candidate.activeOrderKey]),
+        ),
+        movedId,
+      })
+      reorderPendingRef.current = true
+      try
+      {
+        for (const change of changes)
+        {
+          const target = active.find((candidate) => candidate.id === change.id)
+          if (!target) return
+          const result = await reorderActiveThread({
+            environmentId: target.environmentId,
+            input: { threadId: target.id, orderKey: change.orderKey },
+          })
+          if (result._tag !== 'Success') return
+        }
+      }
+      finally
+      {
+        reorderPendingRef.current = false
+      }
+    },
+    [arrangeableThreads, input.threads, reorderActiveThread, serverConfigs],
+  )
+  const moveActiveThread = useCallback(
+    async (thread: EnvironmentThreadShell, direction: 'up' | 'down') =>
+    {
+      const active = arrangeableThreads.filter(
+        (candidate) => candidate.environmentId === thread.environmentId,
+      )
+      const from = active.findIndex((candidate) => candidate.id === thread.id)
+      const to = from + (direction === 'up' ? -1 : 1)
+      if (from < 0 || to < 0 || to >= active.length) return
+      const moved = active.splice(from, 1)[0]!
+      active.splice(to, 0, moved)
+      await reorderActiveThreads(active, thread.id)
+    },
+    [arrangeableThreads, reorderActiveThreads],
+  )
   useEffect(() =>
   {
     if (nextSnoozeWakeAt === null) return
@@ -169,7 +255,18 @@ export function useThreadListV2State(input: {
 
   return {
     handleChangeRequestState,
-    layout,
+    moveActiveThread,
+    arrangeableThreads,
+    reorderActiveThreads,
+    openArrangement,
+    closeArrangement,
+    arrangementThreads:
+      arrangementEnvironmentId === null
+        ? null
+        : arrangeableThreads.filter((thread) => thread.environmentId === arrangementEnvironmentId),
+    layout: input.enabled
+      ? layout
+      : { items: [], hiddenSettledCount: 0, snoozedCount: 0, nextSnoozeWakeAt: null },
     pinningEnvironmentIds,
     serverConfigs,
     settlementEnvironmentIds,
