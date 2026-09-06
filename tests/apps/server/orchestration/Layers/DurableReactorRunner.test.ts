@@ -91,6 +91,7 @@ const TestEngineLive = Layer.effect(
         return feed.stream
       },
       streamDomainEventsForAggregate: () => feed.stream,
+      registerDomainEventAdmission: () => Effect.void,
       latestSequence: feed.snapshot.pipe(Effect.map((events) => events.at(-1)?.sequence ?? 0)),
     })
   }),
@@ -427,6 +428,291 @@ describe('DurableReactorRunner', () =>
           Option.getOrThrow(yield* delivery.getProgress('thread-deletion')).cursorSequence,
           2,
         )
+      }).pipe(Effect.provide(makeTestLayer())),
+    ),
+  )
+
+  it.effect('executes same-thread controls ahead of a leased turn without advancing FIFO', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const runner = yield* DurableReactorRunner
+        const delivery = yield* OrchestrationReactorDelivery
+        const feed = yield* TestEventFeed
+        const sql = yield* SqlClient.SqlClient
+        const turnStarted = yield* Deferred.make<void>()
+        const releaseTurn = yield* Deferred.make<void>()
+        const controlExecuted = yield* Deferred.make<void>()
+        const calls = yield* Ref.make<ReadonlyArray<string>>([])
+        yield* prepareProgress('provider-command', 'durable')
+        yield* sql`
+          INSERT INTO projection_thread_sessions (
+            thread_id,
+            status,
+            provider_name,
+            provider_session_id,
+            provider_thread_id,
+            active_turn_id,
+            last_error,
+            updated_at
+          ) VALUES (
+            'thread-1',
+            'running',
+            'codex',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            ${NOW}
+          )
+        `
+        yield* feed.append(event(1), false)
+        yield* feed.append(event(2), false)
+        yield* feed.append(event(3), false)
+
+        const plan = (source: OrchestrationEvent) =>
+        {
+          const effectKind =
+            source.sequence === 1
+              ? 'thread.turn-start-requested'
+              : 'thread.approval-response-requested'
+          return Effect.succeed([
+            {
+              outputIndex: 0,
+              effectKind,
+              targetKind: 'thread',
+              targetId: source.sequence === 2 ? 'thread-2' : 'thread-1',
+              payloadJson: '{}',
+            },
+          ])
+        }
+        const reactorDefinition: DurableReactorDefinition = {
+          reactorId: 'provider-command',
+          operationVersion: 1,
+          plan,
+          aheadOfCursor: {
+            blockerEffectKind: 'thread.turn-start-requested',
+            effectKinds: ['thread.approval-response-requested'],
+            plan: (source) => (source.sequence === 1 ? Effect.succeed([]) : plan(source)),
+          },
+          execute: (action) =>
+            Ref.update(calls, (values) => [
+              ...values,
+              `${action.effectKind}:${action.targetId}`,
+            ]).pipe(
+              Effect.andThen(
+                action.effectKind === 'thread.turn-start-requested'
+                  ? Deferred.succeed(turnStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(releaseTurn)),
+                    )
+                  : action.targetId === 'thread-1'
+                    ? Deferred.succeed(controlExecuted, undefined)
+                    : Effect.void,
+              ),
+              Effect.as({ status: 'succeeded' as const }),
+            ),
+          classify: () => 'retryable',
+          onLeaseExpiry: 'unknown',
+        }
+
+        yield* runner.start(reactorDefinition)
+        yield* Deferred.await(turnStarted)
+        yield* Deferred.await(controlExecuted)
+        assert.equal(
+          Option.getOrThrow(yield* delivery.getProgress('provider-command')).cursorSequence,
+          0,
+        )
+        assert.deepStrictEqual(yield* Ref.get(calls), [
+          'thread.turn-start-requested:thread-1',
+          'thread.approval-response-requested:thread-1',
+        ])
+        const pendingOtherThread = yield* sql<{ readonly status: string }>`
+          SELECT status
+          FROM orchestration_reactor_actions
+          WHERE reactor_id = 'provider-command'
+            AND source_sequence = 2
+        `
+        assert.deepStrictEqual(pendingOtherThread, [{ status: 'pending' }])
+
+        yield* Deferred.succeed(releaseTurn, undefined)
+        yield* runner.drainThrough('provider-command', 3)
+        assert.deepStrictEqual(yield* Ref.get(calls), [
+          'thread.turn-start-requested:thread-1',
+          'thread.approval-response-requested:thread-1',
+          'thread.approval-response-requested:thread-2',
+        ])
+      }).pipe(Effect.provide(makeTestLayer())),
+    ),
+  )
+
+  it.effect('keeps sparse ahead controls hidden from ordinary claims', () =>
+    Effect.gen(function* ()
+    {
+      const delivery = yield* OrchestrationReactorDelivery
+      const sql = yield* SqlClient.SqlClient
+      yield* prepareProgress('provider-command', 'durable')
+      yield* delivery.materialize({
+        reactorId: 'provider-command',
+        operationVersion: 1,
+        sourceSequence: 1,
+        sourceEventId: EventId.make('event-1'),
+        mode: 'durable',
+        actions: [
+          {
+            outputIndex: 0,
+            effectKind: 'thread.turn-start-requested',
+            targetKind: 'thread',
+            targetId: 'thread-1',
+            payloadJson: '{}',
+          },
+        ],
+        now: NOW,
+      })
+      assert.equal(
+        yield* delivery.materializeAhead({
+          reactorId: 'provider-command',
+          operationVersion: 1,
+          ownerId: 'prestart-owner',
+          sourceSequence: 3,
+          sourceEventId: EventId.make('event-3'),
+          actions: [
+            {
+              outputIndex: 0,
+              effectKind: 'thread.approval-response-requested',
+              targetKind: 'thread',
+              targetId: 'thread-1',
+              payloadJson: '{}',
+            },
+          ],
+          now: NOW,
+        }),
+        true,
+      )
+      yield* sql`
+        UPDATE orchestration_reactor_actions
+        SET status = 'succeeded', completed_at = ${NOW}
+        WHERE reactor_id = 'provider-command' AND source_sequence = 1
+      `
+
+      assert.equal(
+        Option.isNone(
+          yield* delivery.claimNext({
+            reactorId: 'provider-command',
+            ownerId: 'prestart-owner',
+            leaseDurationMs: 30_000,
+            now: NOW,
+          }),
+        ),
+        true,
+      )
+      assert.equal(
+        yield* delivery.advanceCursor({
+          reactorId: 'provider-command',
+          sourceSequence: 1,
+          expectedPreviousSequence: 0,
+          now: NOW,
+        }),
+        true,
+      )
+      assert.equal(
+        Option.isNone(
+          yield* delivery.claimNext({
+            reactorId: 'provider-command',
+            ownerId: 'prestart-owner',
+            leaseDurationMs: 30_000,
+            now: NOW,
+          }),
+        ),
+        true,
+      )
+    }).pipe(Effect.provide(makeTestLayer())),
+  )
+
+  it.effect('does not run ahead controls against a prior owner after restart', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const runner = yield* DurableReactorRunner
+        const delivery = yield* OrchestrationReactorDelivery
+        const feed = yield* TestEventFeed
+        const sql = yield* SqlClient.SqlClient
+        const executions = yield* Ref.make(0)
+        yield* prepareProgress('provider-command', 'durable')
+        yield* feed.append(event(1), false)
+        yield* feed.append(event(2), false)
+
+        const plan = (source: OrchestrationEvent) =>
+          Effect.succeed([
+            {
+              outputIndex: 0,
+              effectKind:
+                source.sequence === 1
+                  ? 'thread.turn-start-requested'
+                  : 'thread.approval-response-requested',
+              targetKind: 'thread',
+              targetId: 'thread-1',
+              payloadJson: '{}',
+            },
+          ])
+        for (let sequence = 1; sequence <= 2; sequence += 1)
+        {
+          const source = event(sequence)
+          yield* delivery.materialize({
+            reactorId: 'provider-command',
+            operationVersion: 1,
+            sourceSequence: sequence,
+            sourceEventId: source.eventId,
+            mode: 'durable',
+            actions: yield* plan(source),
+            now: NOW,
+          })
+        }
+        yield* sql`
+          UPDATE orchestration_reactor_actions
+          SET
+            status = 'leased',
+            attempt_count = 1,
+            lease_owner = 'prior-owner',
+            lease_epoch = 1,
+            lease_expires_at = '2026-01-01T00:01:00.000Z'
+          WHERE reactor_id = 'provider-command' AND source_sequence = 1
+        `
+
+        yield* runner.start({
+          reactorId: 'provider-command',
+          operationVersion: 1,
+          plan,
+          aheadOfCursor: {
+            blockerEffectKind: 'thread.turn-start-requested',
+            effectKinds: ['thread.approval-response-requested'],
+            plan: (source) => (source.sequence === 2 ? plan(source) : Effect.succeed([])),
+          },
+          execute: () =>
+            Ref.update(executions, (count) => count + 1).pipe(
+              Effect.as({ status: 'succeeded' as const }),
+            ),
+          classify: () => 'retryable',
+          onLeaseExpiry: 'unknown',
+        })
+        yield* Effect.yieldNow
+        assert.equal(yield* Ref.get(executions), 0)
+
+        yield* TestClock.adjust('2 minutes')
+        yield* runner.drain('provider-command')
+        assert.equal(yield* Ref.get(executions), 0)
+        const rows = yield* sql<{
+          readonly sourceSequence: number
+          readonly status: string
+        }>`
+          SELECT source_sequence AS "sourceSequence", status
+          FROM orchestration_reactor_actions
+          WHERE reactor_id = 'provider-command'
+          ORDER BY source_sequence
+        `
+        assert.deepStrictEqual(rows, [
+          { sourceSequence: 1, status: 'unknown' },
+          { sourceSequence: 2, status: 'pending' },
+        ])
       }).pipe(Effect.provide(makeTestLayer())),
     ),
   )

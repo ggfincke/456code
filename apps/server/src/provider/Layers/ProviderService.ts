@@ -161,6 +161,13 @@ interface AdapterRoutingState
   readonly reconfiguring: ReadonlySet<ProviderInstanceId>
 }
 
+interface ActiveSendControlRoute
+{
+  readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+  readonly identity: ProviderRuntimeSessionIdentity
+  readonly gate: Semaphore.Semaphore
+}
+
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
   numTurns: NonNegativeInt,
@@ -436,6 +443,10 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   const adapterReconcileWakeups = yield* PubSub.unbounded<void>()
   const sessionLifecycleLocks = yield* makeKeyedSemaphore<ThreadId>()
   const adapterLifecycleLocks = yield* makeKeyedSemaphore<ProviderInstanceId>()
+  const activeSendControlRoutes = yield* Ref.make<ReadonlyMap<ThreadId, ActiveSendControlRoute>>(
+    new Map(),
+  )
+  const activeSendControlRouteWakeups = yield* PubSub.unbounded<ThreadId>()
   const shuttingDown = yield* Ref.make(false)
   const shutdownHighWater = yield* Ref.make<Option.Option<number>>(Option.none())
   const shutdownGate = yield* Semaphore.make(1)
@@ -2314,6 +2325,195 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     } as const
   })
 
+  const withActiveSendControlRoute = <A, E, R>(
+    operation: string,
+    routed: {
+      readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+      readonly instanceId: ProviderInstanceId
+      readonly threadId: ThreadId
+    },
+    effect: Effect.Effect<A, E, R>,
+  ) =>
+    Effect.acquireUseRelease(
+      Effect.gen(function* ()
+      {
+        const current = Option.getOrUndefined(
+          yield* runtimeInbox
+            .getCurrentSession({
+              providerInstanceId: routed.instanceId,
+              threadId: routed.threadId,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                toValidationError(
+                  operation,
+                  'Unable to read the active durable provider session generation.',
+                  cause,
+                ),
+              ),
+            ),
+        )
+        if (current === undefined || current.provider !== routed.adapter.provider)
+        {
+          return yield* toValidationError(
+            operation,
+            `Provider session '${routed.instanceId}:${routed.threadId}' has no active durable generation.`,
+          )
+        }
+        const identity: ProviderRuntimeSessionIdentity = {
+          provider: current.provider,
+          providerInstanceId: routed.instanceId,
+          threadId: routed.threadId,
+          sessionGeneration: current.sessionGeneration,
+        }
+        if (!(yield* adapterHasExactSession(operation, routed.adapter, identity)))
+        {
+          return yield* toValidationError(
+            operation,
+            `Provider session '${routed.instanceId}:${routed.threadId}' is not active.`,
+          )
+        }
+        const route: ActiveSendControlRoute = {
+          adapter: routed.adapter,
+          identity,
+          gate: yield* Semaphore.make(1),
+        }
+        const installed = yield* Ref.modify(activeSendControlRoutes, (currentRoutes) =>
+        {
+          if (currentRoutes.has(routed.threadId))
+          {
+            return [false, currentRoutes] as const
+          }
+          const next = new Map(currentRoutes)
+          next.set(routed.threadId, route)
+          return [true, next] as const
+        })
+        if (!installed)
+        {
+          return yield* toValidationError(
+            operation,
+            `Provider session '${routed.instanceId}:${routed.threadId}' already has an active send route.`,
+          )
+        }
+        yield* PubSub.publish(activeSendControlRouteWakeups, routed.threadId)
+        return route
+      }),
+      () => effect,
+      (route) =>
+        route.gate.withPermit(
+          Ref.update(activeSendControlRoutes, (currentRoutes) =>
+          {
+            if (currentRoutes.get(routed.threadId) !== route)
+            {
+              return currentRoutes
+            }
+            const next = new Map(currentRoutes)
+            next.delete(routed.threadId)
+            return next
+          }),
+        ),
+    )
+
+  const withProviderLiveControl = <A, E, R>(
+    input: {
+      readonly threadId: ThreadId
+      readonly operation: string
+      readonly context?: ProviderEffectContext
+    },
+    use: (routed: {
+      readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+      readonly instanceId: ProviderInstanceId
+      readonly threadId: ThreadId
+      readonly isActive: boolean
+    }) => Effect.Effect<A, E, R>,
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const routeWakeups = yield* PubSub.subscribe(activeSendControlRouteWakeups)
+        while (true)
+        {
+          const candidate = (yield* Ref.get(activeSendControlRoutes)).get(input.threadId)
+          if (candidate !== undefined)
+          {
+            const borrowed = yield* candidate.gate.withPermit(
+              Effect.gen(function* ()
+              {
+                if ((yield* Ref.get(activeSendControlRoutes)).get(input.threadId) !== candidate)
+                {
+                  return Option.none<A>()
+                }
+                yield* requireRunning(input.operation)
+                yield* requireActiveThread(input.operation, input.threadId)
+                const routed = yield* resolveRoutableSession({
+                  threadId: input.threadId,
+                  operation: input.operation,
+                  allowRecovery: false,
+                  expectedProviderInstanceId: candidate.identity.providerInstanceId,
+                })
+                if (!routed.isActive || routed.adapter !== candidate.adapter)
+                {
+                  return yield* toValidationError(
+                    input.operation,
+                    `Active provider session '${candidate.identity.providerInstanceId}:${input.threadId}' changed before the live control could be delivered.`,
+                  )
+                }
+                if (
+                  !(yield* matchesRuntimeSessionIdentity(candidate.identity)) ||
+                  !(yield* adapterHasExactSession(
+                    input.operation,
+                    routed.adapter,
+                    candidate.identity,
+                  ))
+                )
+                {
+                  return yield* toValidationError(
+                    input.operation,
+                    `Active provider session '${candidate.identity.providerInstanceId}:${input.threadId}' changed before the live control could be delivered.`,
+                  )
+                }
+                return Option.some(yield* use(routed))
+              }),
+            )
+            if (Option.isSome(borrowed))
+            {
+              return borrowed.value
+            }
+          }
+
+          const serialized = withProviderInstanceLifecycle(
+            {
+              threadId: input.threadId,
+              operation: input.operation,
+              requireActiveThread: true,
+            },
+            Effect.flatMap(
+              resolveRoutableSession({
+                threadId: input.threadId,
+                operation: input.operation,
+                allowRecovery: true,
+                ...(input.context !== undefined ? { context: input.context } : {}),
+              }),
+              use,
+            ),
+          ).pipe(Effect.map((value) => ({ _tag: 'completed' as const, value })))
+          const routePublished = Effect.gen(function* ()
+          {
+            while ((yield* PubSub.take(routeWakeups)) !== input.threadId)
+            {
+              // wait for this thread's send route; other publications belong to other controls
+            }
+            return { _tag: 'route-published' as const }
+          })
+          const outcome = yield* Effect.raceFirst(serialized, routePublished)
+          if (outcome._tag === 'completed')
+          {
+            return outcome.value
+          }
+        }
+      }),
+    )
+
   const withProviderInstanceLifecycle = <A, E, R>(
     input: {
       readonly threadId: ThreadId
@@ -2841,9 +3041,13 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
             routed.adapter.provider === 'codex'
               ? inputWithAttachmentPaths
               : applyOrchestrateModeInstructions(inputWithAttachmentPaths)
-          const turn = yield* context === undefined
-            ? routed.adapter.sendTurn(adapterInput)
-            : routed.adapter.sendTurn(adapterInput, context)
+          const turn = yield* withActiveSendControlRoute(
+            'ProviderService.sendTurn',
+            routed,
+            context === undefined
+              ? routed.adapter.sendTurn(adapterInput)
+              : routed.adapter.sendTurn(adapterInput, context),
+          )
           yield* mcpSessionRegistry.bindActiveTurn(input.threadId, turn.turnId)
           yield* directory.upsert({
             threadId: input.threadId,
@@ -2895,42 +3099,37 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         payload: rawInput,
       })
       let metricProvider = 'unknown'
-      return yield* withProviderInstanceLifecycle(
+      return yield* withProviderLiveControl(
         {
           threadId: input.threadId,
           operation: 'ProviderService.interruptTurn',
-          requireActiveThread: true,
+          ...(context !== undefined ? { context } : {}),
         },
-        Effect.gen(function* ()
-        {
-          const routed = yield* resolveRoutableSession({
-            threadId: input.threadId,
-            operation: 'ProviderService.interruptTurn',
-            allowRecovery: true,
-            ...(context !== undefined ? { context } : {}),
-          })
-          metricProvider = routed.adapter.provider
-          yield* Effect.annotateCurrentSpan({
-            'provider.operation': 'interrupt-turn',
-            'provider.kind': routed.adapter.provider,
-            'provider.thread_id': input.threadId,
-            'provider.turn_id': input.turnId,
-          })
-          yield* context === undefined
-            ? routed.adapter.interruptTurn(routed.threadId, input.turnId)
-            : routed.adapter.interruptTurn(routed.threadId, input.turnId, context)
-          yield* analytics.record('provider.turn.interrupted', {
-            provider: routed.adapter.provider,
-          })
-        }).pipe(
-          withMetrics({
-            counter: providerTurnsTotal,
-            outcomeAttributes: () =>
-              providerMetricAttributes(metricProvider, {
-                operation: 'interrupt',
-              }),
-          }),
-        ),
+        (routed) =>
+          Effect.gen(function* ()
+          {
+            metricProvider = routed.adapter.provider
+            yield* Effect.annotateCurrentSpan({
+              'provider.operation': 'interrupt-turn',
+              'provider.kind': routed.adapter.provider,
+              'provider.thread_id': input.threadId,
+              'provider.turn_id': input.turnId,
+            })
+            yield* context === undefined
+              ? routed.adapter.interruptTurn(routed.threadId, input.turnId)
+              : routed.adapter.interruptTurn(routed.threadId, input.turnId, context)
+            yield* analytics.record('provider.turn.interrupted', {
+              provider: routed.adapter.provider,
+            })
+          }).pipe(
+            withMetrics({
+              counter: providerTurnsTotal,
+              outcomeAttributes: () =>
+                providerMetricAttributes(metricProvider, {
+                  operation: 'interrupt',
+                }),
+            }),
+          ),
       )
     },
   )
@@ -2944,48 +3143,43 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         payload: rawInput,
       })
       let metricProvider = 'unknown'
-      return yield* withProviderInstanceLifecycle(
+      return yield* withProviderLiveControl(
         {
           threadId: input.threadId,
           operation: 'ProviderService.respondToRequest',
-          requireActiveThread: true,
+          ...(context !== undefined ? { context } : {}),
         },
-        Effect.gen(function* ()
-        {
-          const routed = yield* resolveRoutableSession({
-            threadId: input.threadId,
-            operation: 'ProviderService.respondToRequest',
-            allowRecovery: true,
-            ...(context !== undefined ? { context } : {}),
-          })
-          metricProvider = routed.adapter.provider
-          yield* Effect.annotateCurrentSpan({
-            'provider.operation': 'respond-to-request',
-            'provider.kind': routed.adapter.provider,
-            'provider.thread_id': input.threadId,
-            'provider.request_id': input.requestId,
-          })
-          yield* context === undefined
-            ? routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision)
-            : routed.adapter.respondToRequest(
-                routed.threadId,
-                input.requestId,
-                input.decision,
-                context,
-              )
-          yield* analytics.record('provider.request.responded', {
-            provider: routed.adapter.provider,
-            decision: input.decision,
-          })
-        }).pipe(
-          withMetrics({
-            counter: providerTurnsTotal,
-            outcomeAttributes: () =>
-              providerMetricAttributes(metricProvider, {
-                operation: 'approval-response',
-              }),
-          }),
-        ),
+        (routed) =>
+          Effect.gen(function* ()
+          {
+            metricProvider = routed.adapter.provider
+            yield* Effect.annotateCurrentSpan({
+              'provider.operation': 'respond-to-request',
+              'provider.kind': routed.adapter.provider,
+              'provider.thread_id': input.threadId,
+              'provider.request_id': input.requestId,
+            })
+            yield* context === undefined
+              ? routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision)
+              : routed.adapter.respondToRequest(
+                  routed.threadId,
+                  input.requestId,
+                  input.decision,
+                  context,
+                )
+            yield* analytics.record('provider.request.responded', {
+              provider: routed.adapter.provider,
+              decision: input.decision,
+            })
+          }).pipe(
+            withMetrics({
+              counter: providerTurnsTotal,
+              outcomeAttributes: () =>
+                providerMetricAttributes(metricProvider, {
+                  operation: 'approval-response',
+                }),
+            }),
+          ),
       )
     },
   )
@@ -3000,44 +3194,39 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       payload: rawInput,
     })
     let metricProvider = 'unknown'
-    return yield* withProviderInstanceLifecycle(
+    return yield* withProviderLiveControl(
       {
         threadId: input.threadId,
         operation: 'ProviderService.respondToUserInput',
-        requireActiveThread: true,
+        ...(context !== undefined ? { context } : {}),
       },
-      Effect.gen(function* ()
-      {
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: 'ProviderService.respondToUserInput',
-          allowRecovery: true,
-          ...(context !== undefined ? { context } : {}),
-        })
-        metricProvider = routed.adapter.provider
-        yield* Effect.annotateCurrentSpan({
-          'provider.operation': 'respond-to-user-input',
-          'provider.kind': routed.adapter.provider,
-          'provider.thread_id': input.threadId,
-          'provider.request_id': input.requestId,
-        })
-        yield* context === undefined
-          ? routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers)
-          : routed.adapter.respondToUserInput(
-              routed.threadId,
-              input.requestId,
-              input.answers,
-              context,
-            )
-      }).pipe(
-        withMetrics({
-          counter: providerTurnsTotal,
-          outcomeAttributes: () =>
-            providerMetricAttributes(metricProvider, {
-              operation: 'user-input-response',
-            }),
-        }),
-      ),
+      (routed) =>
+        Effect.gen(function* ()
+        {
+          metricProvider = routed.adapter.provider
+          yield* Effect.annotateCurrentSpan({
+            'provider.operation': 'respond-to-user-input',
+            'provider.kind': routed.adapter.provider,
+            'provider.thread_id': input.threadId,
+            'provider.request_id': input.requestId,
+          })
+          yield* context === undefined
+            ? routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers)
+            : routed.adapter.respondToUserInput(
+                routed.threadId,
+                input.requestId,
+                input.answers,
+                context,
+              )
+        }).pipe(
+          withMetrics({
+            counter: providerTurnsTotal,
+            outcomeAttributes: () =>
+              providerMetricAttributes(metricProvider, {
+                operation: 'user-input-response',
+              }),
+          }),
+        ),
     )
   })
 

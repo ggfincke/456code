@@ -30,7 +30,6 @@ import {
 import { isTemporaryWorktreeBranch } from '@t3tools/shared/git'
 import { buildGeneratedWorktreeBranchName } from './ProviderCommandWorktree.ts'
 import { stableStringify } from '@t3tools/shared/relaySigning'
-import * as Cache from 'effect/Cache'
 import * as Cause from 'effect/Cause'
 import * as Crypto from 'effect/Crypto'
 import * as DateTime from 'effect/DateTime'
@@ -128,6 +127,14 @@ type ProviderIntentEvent = Extract<
       | 'thread.session-stop-requested'
   }
 >
+
+type ProviderControlEvent = Extract<
+  ProviderIntentEvent,
+  {
+    type: 'thread.turn-interrupt-requested' | 'thread.approval-response-requested'
+  }
+>
+type ProviderOrderedEvent = Exclude<ProviderIntentEvent, ProviderControlEvent>
 
 type ProviderSwitchFailureReasonCode =
   | 'compaction-timeout'
@@ -326,6 +333,15 @@ interface PlannedProviderSnapshot
   readonly requiresNewThreadForModelChange?: boolean | undefined
 }
 
+interface ProviderControlExecutionState
+{
+  readonly actionId: string
+  commandSequence: number
+  readonly effectContext: ProviderEffectContext
+  providerInvocationMayHaveBeenReceived: boolean
+  unknownProviderFailureDetail: string | undefined
+}
+
 const ProviderActionPayloadSchema = Schema.fromJsonString(
   Schema.Struct({
     event: OrchestrationEvent,
@@ -403,6 +419,14 @@ function isProviderIntentEvent(event: OrchestrationEvent): event is ProviderInte
     event.type === 'thread.user-input-response-requested' ||
     event.type === 'thread.orchestrate-plan-response-requested' ||
     event.type === 'thread.session-stop-requested'
+  )
+}
+
+function isProviderControlEvent(event: ProviderIntentEvent): event is ProviderControlEvent
+{
+  return (
+    event.type === 'thread.turn-interrupt-requested' ||
+    event.type === 'thread.approval-response-requested'
   )
 }
 
@@ -520,6 +544,8 @@ const make = Effect.gen(function* ()
     activeActionId === undefined
       ? crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)))
       : Effect.sync(() => reactorCommandId(activeActionId!, tag, activeActionCommandSeq++))
+  const controlCommandId = (state: ProviderControlExecutionState, tag: string) =>
+    Effect.sync(() => reactorCommandId(state.actionId, tag, state.commandSequence++))
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make))
 
   const threadModelSelections = new Map<string, ModelSelection>()
@@ -642,34 +668,40 @@ const make = Effect.gen(function* ()
       invokeProvider(providerService.rollbackConversation(input, activeEffectContext)),
   })
 
-  const appendProviderFailureActivity = (input: {
-    readonly threadId: ThreadId
-    readonly kind:
-      | 'provider.turn.start.failed'
-      | 'provider.turn.interrupt.failed'
-      | 'provider.approval.respond.failed'
-      | 'provider.user-input.respond.failed'
-      | 'provider.orchestrate-plan.respond.failed'
-      | 'provider.session.stop.failed'
-    readonly summary: string
-    readonly detail: string
-    readonly turnId: TurnId | null
-    readonly createdAt: string
-    readonly requestId?: string
-    readonly runId?: string
-    readonly revision?: number
-    readonly approvalOutcome?: {
-      readonly requestId: string
-      readonly status: 'pending' | 'stale-terminal' | 'unknown'
-      readonly requestedDecision:
-        'accept' | 'acceptForSession' | 'acceptAlways' | 'decline' | 'cancel'
+  const appendProviderFailureActivity = (
+    input: {
+      readonly threadId: ThreadId
+      readonly kind:
+        | 'provider.turn.start.failed'
+        | 'provider.turn.interrupt.failed'
+        | 'provider.approval.respond.failed'
+        | 'provider.user-input.respond.failed'
+        | 'provider.orchestrate-plan.respond.failed'
+        | 'provider.session.stop.failed'
+      readonly summary: string
       readonly detail: string
-      readonly actionId?: string
-      readonly updatedAt: string
-    }
-  }) =>
+      readonly turnId: TurnId | null
+      readonly createdAt: string
+      readonly requestId?: string
+      readonly runId?: string
+      readonly revision?: number
+      readonly approvalOutcome?: {
+        readonly requestId: string
+        readonly status: 'pending' | 'stale-terminal' | 'unknown'
+        readonly requestedDecision:
+          'accept' | 'acceptForSession' | 'acceptAlways' | 'decline' | 'cancel'
+        readonly detail: string
+        readonly actionId?: string
+        readonly updatedAt: string
+      }
+    },
+    controlState?: ProviderControlExecutionState,
+  ) =>
     Effect.all({
-      commandId: serverCommandId('provider-failure-activity'),
+      commandId:
+        controlState === undefined
+          ? serverCommandId('provider-failure-activity')
+          : controlCommandId(controlState, 'provider-failure-activity'),
       eventId: serverEventId(),
     }).pipe(
       Effect.flatMap(({ commandId, eventId }) =>
@@ -730,19 +762,25 @@ const make = Effect.gen(function* ()
       ),
     )
 
-  const appendApprovalAcceptedActivity = (input: {
-    readonly thread: OrchestrationThread
-    readonly requestId: string
-    readonly decision: 'accept' | 'acceptForSession' | 'acceptAlways' | 'decline' | 'cancel'
-    readonly createdAt: string
-  }) =>
+  const appendApprovalAcceptedActivity = (
+    input: {
+      readonly thread: Pick<OrchestrationThread, 'id' | 'session'>
+      readonly requestId: string
+      readonly decision: 'accept' | 'acceptForSession' | 'acceptAlways' | 'decline' | 'cancel'
+      readonly createdAt: string
+    },
+    controlState?: ProviderControlExecutionState,
+  ) =>
     Effect.all({
-      commandId: serverCommandId('provider-approval-accepted'),
+      commandId:
+        controlState === undefined
+          ? serverCommandId('provider-approval-accepted')
+          : controlCommandId(controlState, 'provider-approval-accepted'),
       eventId: serverEventId(),
     }).pipe(
       Effect.flatMap(({ commandId, eventId }) =>
       {
-        const actionId = activeActionId
+        const actionId = controlState?.actionId ?? activeActionId
         const acceptanceEvidence = {
           ...(input.thread.session?.providerName === null ||
           input.thread.session?.providerName === undefined
@@ -796,6 +834,26 @@ const make = Effect.gen(function* ()
     return Cause.pretty(cause)
   }
 
+  const invokeControlProvider = <A>(
+    state: ProviderControlExecutionState,
+    effect: Effect.Effect<A, ProviderServiceError>,
+  ) =>
+    Effect.sync(() =>
+    {
+      state.providerInvocationMayHaveBeenReceived = true
+    }).pipe(
+      Effect.andThen(effect),
+      Effect.tapCause((cause) =>
+        Effect.sync(() =>
+        {
+          if (!isDeterminateProviderFailure(cause))
+          {
+            state.unknownProviderFailureDetail = formatFailureDetail(cause)
+          }
+        }),
+      ),
+    )
+
   const progressProviderSwitch = (input: {
     readonly threadId: ThreadId
     readonly requestId?: EventId
@@ -846,12 +904,18 @@ const make = Effect.gen(function* ()
     })
   })
 
-  const setThreadSession = (input: {
-    readonly threadId: ThreadId
-    readonly session: OrchestrationSession
-    readonly createdAt: string
-  }) =>
-    serverCommandId('provider-session-set').pipe(
+  const setThreadSession = (
+    input: {
+      readonly threadId: ThreadId
+      readonly session: OrchestrationSession
+      readonly createdAt: string
+    },
+    controlState?: ProviderControlExecutionState,
+  ) =>
+    (controlState === undefined
+      ? serverCommandId('provider-session-set')
+      : controlCommandId(controlState, 'provider-session-set')
+    ).pipe(
       Effect.flatMap((commandId) =>
         orchestrationEngine.dispatch({
           type: 'thread.session.set',
@@ -895,7 +959,7 @@ const make = Effect.gen(function* ()
 
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId)
   {
-    const thread = requireActiveEnvironment().thread
+    const thread = yield* Effect.sync(() => requireActiveEnvironment().thread)
     return thread?.id === threadId ? thread : undefined
   })
 
@@ -1737,9 +1801,10 @@ const make = Effect.gen(function* ()
 
   const processTurnInterruptRequested = Effect.fn('processTurnInterruptRequested')(function* (
     event: Extract<ProviderIntentEvent, { type: 'thread.turn-interrupt-requested' }>,
+    controlState: ProviderControlExecutionState,
   )
   {
-    const thread = yield* resolveThread(event.payload.threadId)
+    const thread = yield* resolveLatestThreadShell(event.payload.threadId)
     if (!thread)
     {
       return
@@ -1747,14 +1812,17 @@ const make = Effect.gen(function* ()
     const session = thread.session
     if (!session || session.status === 'stopped')
     {
-      return yield* appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: 'provider.turn.interrupt.failed',
-        summary: 'Provider turn interrupt failed',
-        detail: 'No active provider session is bound to this thread.',
-        turnId: event.payload.turnId ?? null,
-        createdAt: event.payload.createdAt,
-      })
+      return yield* appendProviderFailureActivity(
+        {
+          threadId: event.payload.threadId,
+          kind: 'provider.turn.interrupt.failed',
+          summary: 'Provider turn interrupt failed',
+          detail: 'No active provider session is bound to this thread.',
+          turnId: event.payload.turnId ?? null,
+          createdAt: event.payload.createdAt,
+        },
+        controlState,
+      )
     }
 
     const recoverInterruptFailure = (cause: Cause.Cause<unknown>) =>
@@ -1786,8 +1854,12 @@ const make = Effect.gen(function* ()
           return
         }
 
-        yield* invokeProvider(
-          providerService.stopSession({ threadId: event.payload.threadId }, activeEffectContext),
+        yield* invokeControlProvider(
+          controlState,
+          providerService.stopSession(
+            { threadId: event.payload.threadId },
+            controlState.effectContext,
+          ),
         ).pipe(
           Effect.catchCause((stopCause) =>
           {
@@ -1812,31 +1884,41 @@ const make = Effect.gen(function* ()
           return
         }
 
-        yield* setThreadSession({
-          threadId: event.payload.threadId,
-          session: {
-            ...stoppedSession,
-            status: 'stopped',
-            activeTurnId: null,
-            lastError: detail,
-            updatedAt: event.payload.createdAt,
+        yield* setThreadSession(
+          {
+            threadId: event.payload.threadId,
+            session: {
+              ...stoppedSession,
+              status: 'stopped',
+              activeTurnId: null,
+              lastError: detail,
+              updatedAt: event.payload.createdAt,
+            },
+            createdAt: event.payload.createdAt,
           },
-          createdAt: event.payload.createdAt,
-        })
-        yield* appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: 'provider.turn.interrupt.failed',
-          summary: 'Provider turn interrupt failed',
-          detail,
-          turnId: event.payload.turnId ?? null,
-          createdAt: event.payload.createdAt,
-        })
+          controlState,
+        )
+        yield* appendProviderFailureActivity(
+          {
+            threadId: event.payload.threadId,
+            kind: 'provider.turn.interrupt.failed',
+            summary: 'Provider turn interrupt failed',
+            detail,
+            turnId: event.payload.turnId ?? null,
+            createdAt: event.payload.createdAt,
+          },
+          controlState,
+        )
       })
     }
 
     // orchestration turn ids are not provider turn ids, so interrupt by session
-    yield* invokeProvider(
-      providerService.interruptTurn({ threadId: event.payload.threadId }, activeEffectContext),
+    yield* invokeControlProvider(
+      controlState,
+      providerService.interruptTurn(
+        { threadId: event.payload.threadId },
+        controlState.effectContext,
+      ),
     ).pipe(Effect.catchCause(recoverInterruptFailure))
   })
 
@@ -2120,9 +2202,10 @@ const make = Effect.gen(function* ()
 
   const processApprovalResponseRequested = Effect.fn('processApprovalResponseRequested')(function* (
     event: Extract<ProviderIntentEvent, { type: 'thread.approval-response-requested' }>,
+    controlState: ProviderControlExecutionState,
   )
   {
-    const thread = yield* resolveThread(event.payload.threadId)
+    const thread = yield* resolveLatestThreadShell(event.payload.threadId)
     if (!thread)
     {
       return
@@ -2131,44 +2214,51 @@ const make = Effect.gen(function* ()
     if (!hasSession)
     {
       const detail = 'No active provider session is bound to this thread.'
-      return yield* appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: 'provider.approval.respond.failed',
-        summary: 'Provider approval response failed',
-        detail,
-        turnId: null,
-        createdAt: event.payload.createdAt,
-        requestId: event.payload.requestId,
-        approvalOutcome: {
-          requestId: event.payload.requestId,
-          status: 'stale-terminal',
-          requestedDecision: event.payload.decision,
+      return yield* appendProviderFailureActivity(
+        {
+          threadId: event.payload.threadId,
+          kind: 'provider.approval.respond.failed',
+          summary: 'Provider approval response failed',
           detail,
-          ...(activeActionId === undefined ? {} : { actionId: activeActionId }),
-          updatedAt: event.payload.createdAt,
+          turnId: null,
+          createdAt: event.payload.createdAt,
+          requestId: event.payload.requestId,
+          approvalOutcome: {
+            requestId: event.payload.requestId,
+            status: 'stale-terminal',
+            requestedDecision: event.payload.decision,
+            detail,
+            actionId: controlState.actionId,
+            updatedAt: event.payload.createdAt,
+          },
         },
-      })
+        controlState,
+      )
     }
 
-    yield* invokeProvider(
+    yield* invokeControlProvider(
+      controlState,
       providerService.respondToRequest(
         {
           threadId: event.payload.threadId,
           requestId: event.payload.requestId,
           decision: event.payload.decision,
         },
-        activeEffectContext,
+        controlState.effectContext,
       ),
     ).pipe(
       Effect.andThen(
         thread.session?.providerName === 'opencode'
           ? Effect.void
-          : appendApprovalAcceptedActivity({
-              thread,
-              requestId: event.payload.requestId,
-              decision: event.payload.decision,
-              createdAt: event.payload.createdAt,
-            }),
+          : appendApprovalAcceptedActivity(
+              {
+                thread,
+                requestId: event.payload.requestId,
+                decision: event.payload.decision,
+                createdAt: event.payload.createdAt,
+              },
+              controlState,
+            ),
       ),
       Effect.catchCause((cause) =>
       {
@@ -2182,23 +2272,26 @@ const make = Effect.gen(function* ()
         const detail = staleTerminal
           ? stalePendingRequestDetail('approval', event.payload.requestId)
           : formatFailureDetail(cause)
-        return appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: 'provider.approval.respond.failed',
-          summary: 'Provider approval response failed',
-          detail,
-          turnId: null,
-          createdAt: event.payload.createdAt,
-          requestId: event.payload.requestId,
-          approvalOutcome: {
-            requestId: event.payload.requestId,
-            status: failureStatus,
-            requestedDecision: event.payload.decision,
+        return appendProviderFailureActivity(
+          {
+            threadId: event.payload.threadId,
+            kind: 'provider.approval.respond.failed',
+            summary: 'Provider approval response failed',
             detail,
-            ...(activeActionId === undefined ? {} : { actionId: activeActionId }),
-            updatedAt: event.payload.createdAt,
+            turnId: null,
+            createdAt: event.payload.createdAt,
+            requestId: event.payload.requestId,
+            approvalOutcome: {
+              requestId: event.payload.requestId,
+              status: failureStatus,
+              requestedDecision: event.payload.decision,
+              detail,
+              actionId: controlState.actionId,
+              updatedAt: event.payload.createdAt,
+            },
           },
-        }).pipe(
+          controlState,
+        ).pipe(
           Effect.tap(() =>
           {
             // once OpenCode's unknown outcome is durable, replaying the reply risks
@@ -2208,7 +2301,7 @@ const make = Effect.gen(function* ()
             {
               return Effect.sync(() =>
               {
-                unknownProviderFailureDetail = undefined
+                controlState.unknownProviderFailureDetail = undefined
               })
             }
             return Effect.void
@@ -2216,6 +2309,69 @@ const make = Effect.gen(function* ()
         )
       }),
     )
+  })
+
+  const executeProviderControlAction = Effect.fn('executeProviderControlAction')(function* (
+    action: Parameters<DurableReactorDefinition['execute']>[0],
+    event: ProviderControlEvent,
+    environment: PlannedProviderEnvironment | null,
+  )
+  {
+    if (environment === null)
+    {
+      return yield* new ProviderCommandPayloadError({
+        detail: `Action ${action.actionId} is missing its planned environment.`,
+      })
+    }
+    const state: ProviderControlExecutionState = {
+      actionId: action.actionId,
+      commandSequence: 0,
+      effectContext: {
+        actionId: action.actionId,
+        idempotencyKey: action.actionId,
+        sourceSequence: action.sourceSequence,
+        operationVersion: action.operationVersion,
+      },
+      providerInvocationMayHaveBeenReceived: false,
+      unknownProviderFailureDetail: undefined,
+    }
+    const execution = yield* Effect.exit(
+      event.type === 'thread.turn-interrupt-requested'
+        ? processTurnInterruptRequested(event, state)
+        : processApprovalResponseRequested(event, state),
+    )
+    if (state.unknownProviderFailureDetail !== undefined)
+    {
+      return {
+        status: 'unknown' as const,
+        detail: state.unknownProviderFailureDetail,
+      }
+    }
+    if (execution._tag === 'Success')
+    {
+      return { status: 'succeeded' as const }
+    }
+    if (Cause.hasInterruptsOnly(execution.cause))
+    {
+      return yield* Effect.failCause(execution.cause)
+    }
+    if (isDeterminateProviderFailure(execution.cause))
+    {
+      yield* Effect.logWarning('provider command reactor handled determinate provider rejection', {
+        eventType: event.type,
+        threadId: event.payload.threadId,
+        cause: Cause.pretty(execution.cause),
+      })
+      return { status: 'succeeded' as const }
+    }
+    if (state.providerInvocationMayHaveBeenReceived)
+    {
+      return {
+        status: 'unknown' as const,
+        detail: formatFailureDetail(execution.cause),
+      }
+    }
+    return yield* Effect.failCause(execution.cause)
   })
 
   const processUserInputResponseRequested = Effect.fn('processUserInputResponseRequested')(
@@ -2405,7 +2561,7 @@ const make = Effect.gen(function* ()
   })
 
   const processDomainEvent = Effect.fn('processDomainEvent')(function* (
-    event: ProviderIntentEvent,
+    event: ProviderOrderedEvent,
   )
   {
     yield* Effect.annotateCurrentSpan({
@@ -2454,12 +2610,6 @@ const make = Effect.gen(function* ()
         return
       case 'thread.provider-switch-requested':
         yield* processProviderSwitchRequested(event)
-        return
-      case 'thread.turn-interrupt-requested':
-        yield* processTurnInterruptRequested(event)
-        return
-      case 'thread.approval-response-requested':
-        yield* processApprovalResponseRequested(event)
         return
       case 'thread.user-input-response-requested':
         yield* processUserInputResponseRequested(event)
@@ -2768,9 +2918,37 @@ const make = Effect.gen(function* ()
     } satisfies PlannedProviderEnvironment
   })
 
+  const planControlAhead = (event: OrchestrationEvent) =>
+  {
+    if (!isProviderIntentEvent(event) || !isProviderControlEvent(event))
+    {
+      return Effect.succeed([])
+    }
+    return planEnvironment(event).pipe(
+      Effect.flatMap((environment) => encodeProviderActionPayload({ event, environment })),
+      Effect.map(
+        (payloadJson) =>
+          [
+            {
+              outputIndex: 0,
+              effectKind: event.type,
+              targetKind: 'thread',
+              targetId: event.payload.threadId,
+              payloadJson,
+            },
+          ] satisfies ReactorActionDraft[],
+      ),
+    )
+  }
+
   const definition: DurableReactorDefinition = {
     reactorId: REACTOR_ID,
     operationVersion: OPERATION_VERSION,
+    aheadOfCursor: {
+      blockerEffectKind: 'thread.turn-start-requested',
+      effectKinds: ['thread.approval-response-requested', 'thread.turn-interrupt-requested'],
+      plan: planControlAhead,
+    },
     plan: (event) =>
     {
       if (!isProviderIntentEvent(event))
@@ -2911,6 +3089,14 @@ const make = Effect.gen(function* ()
         return yield* new ProviderCommandPayloadError({
           detail: `Action ${action.actionId} does not match its provider event target.`,
         })
+      }
+      if (isProviderControlEvent(providerEvent))
+      {
+        return yield* executeProviderControlAction(
+          action,
+          providerEvent,
+          decoded.environment as PlannedProviderEnvironment | null,
+        )
       }
 
       activeActionId = action.actionId

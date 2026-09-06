@@ -100,60 +100,75 @@ const make = Effect.gen(function* ()
       Effect.mapError(toReactorDeliveryError('OrchestrationReactorDelivery.getProgress:query')),
     )
 
+  const insertActions = Effect.fnUntraced(function* (input: {
+    readonly reactorId: Parameters<OrchestrationReactorDeliveryShape['materialize']>[0]['reactorId']
+    readonly operationVersion: number
+    readonly sourceSequence: number
+    readonly sourceEventId: string
+    readonly actions: ReadonlyArray<
+      Parameters<OrchestrationReactorDeliveryShape['materialize']>[0]['actions'][number]
+    >
+    readonly now: string
+    readonly status: 'shadow' | 'pending'
+  })
+  {
+    for (const action of input.actions)
+    {
+      const identity = {
+        reactorId: input.reactorId,
+        sourceSequence: input.sourceSequence,
+        sourceEventId: input.sourceEventId,
+        outputIndex: action.outputIndex,
+        effectKind: action.effectKind,
+        targetKind: action.targetKind,
+        targetId: action.targetId,
+        operationVersion: input.operationVersion,
+      } as const
+      yield* sql`
+        INSERT INTO orchestration_reactor_actions (
+          action_id,
+          reactor_id,
+          source_sequence,
+          source_event_id,
+          output_index,
+          effect_kind,
+          target_kind,
+          target_id,
+          operation_version,
+          payload_json,
+          status,
+          available_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${makeReactorActionId(identity)},
+          ${input.reactorId},
+          ${input.sourceSequence},
+          ${input.sourceEventId},
+          ${action.outputIndex},
+          ${action.effectKind},
+          ${action.targetKind},
+          ${action.targetId},
+          ${input.operationVersion},
+          ${action.payloadJson},
+          ${input.status},
+          ${input.now},
+          ${input.now},
+          ${input.now}
+        )
+        ON CONFLICT DO NOTHING
+      `
+    }
+  })
+
   const materialize: OrchestrationReactorDeliveryShape['materialize'] = (input) =>
     sql
       .withTransaction(
         Effect.gen(function* ()
         {
           const status = input.mode === 'shadow' ? 'shadow' : 'pending'
-          for (const action of input.actions)
-          {
-            const identity = {
-              reactorId: input.reactorId,
-              sourceSequence: input.sourceSequence,
-              sourceEventId: input.sourceEventId,
-              outputIndex: action.outputIndex,
-              effectKind: action.effectKind,
-              targetKind: action.targetKind,
-              targetId: action.targetId,
-              operationVersion: input.operationVersion,
-            } as const
-            yield* sql`
-              INSERT INTO orchestration_reactor_actions (
-                action_id,
-                reactor_id,
-                source_sequence,
-                source_event_id,
-                output_index,
-                effect_kind,
-                target_kind,
-                target_id,
-                operation_version,
-                payload_json,
-                status,
-                available_at,
-                created_at,
-                updated_at
-              )
-              VALUES (
-                ${makeReactorActionId(identity)},
-                ${input.reactorId},
-                ${input.sourceSequence},
-                ${input.sourceEventId},
-                ${action.outputIndex},
-                ${action.effectKind},
-                ${action.targetKind},
-                ${action.targetId},
-                ${input.operationVersion},
-                ${action.payloadJson},
-                ${status},
-                ${input.now},
-                ${input.now},
-                ${input.now}
-              )
-              ON CONFLICT DO NOTHING
-            `
-          }
+          yield* insertActions({ ...input, status })
 
           if (input.mode === 'shadow')
           {
@@ -174,6 +189,36 @@ const make = Effect.gen(function* ()
       .pipe(
         Effect.mapError(
           toReactorDeliveryError('OrchestrationReactorDelivery.materialize:transaction'),
+        ),
+      )
+
+  const materializeAhead: OrchestrationReactorDeliveryShape['materializeAhead'] = (input) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* ()
+        {
+          const allowed = yield* sql<{ readonly changed: number }>`
+            SELECT 1 AS changed
+            FROM orchestration_reactor_progress
+            WHERE reactor_id = ${input.reactorId}
+              AND mode = 'durable'
+              AND active_owner_id = ${input.ownerId}
+              AND (
+                high_water_sequence IS NULL
+                OR ${input.sourceSequence} <= high_water_sequence
+              )
+          `
+          if (allowed.length === 0)
+          {
+            return false
+          }
+          yield* insertActions({ ...input, status: 'pending' })
+          return true
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toReactorDeliveryError('OrchestrationReactorDelivery.materializeAhead:transaction'),
         ),
       )
 
@@ -202,7 +247,7 @@ const make = Effect.gen(function* ()
         WHERE candidate.reactor_id = ${reactorId}
           AND progress.mode = 'durable'
           AND progress.active_owner_id = ${ownerId}
-          AND candidate.source_sequence > progress.cursor_sequence
+          AND candidate.source_sequence = progress.cursor_sequence + 1
           AND (
             progress.high_water_sequence IS NULL
             OR candidate.source_sequence <= progress.high_water_sequence
@@ -269,6 +314,130 @@ const make = Effect.gen(function* ()
       .pipe(
         Effect.mapError(
           toReactorDeliveryError('OrchestrationReactorDelivery.claimNext:transaction'),
+        ),
+      )
+
+  const claimAheadAction = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      reactorId: Schema.String,
+      ownerId: Schema.String,
+      blockerEffectKind: Schema.String,
+      effectKinds: Schema.Array(Schema.String),
+      now: Schema.String,
+      leaseExpiresAt: Schema.String,
+    }),
+    Result: ReactorActionRecord,
+    execute: ({ reactorId, ownerId, blockerEffectKind, effectKinds, now, leaseExpiresAt }) => sql`
+      UPDATE orchestration_reactor_actions
+      SET
+        status = 'leased',
+        attempt_count = attempt_count + 1,
+        lease_owner = ${ownerId},
+        lease_epoch = COALESCE(lease_epoch, 0) + 1,
+        lease_expires_at = ${leaseExpiresAt},
+        updated_at = ${now}
+      WHERE action_id = (
+        SELECT candidate.action_id
+        FROM orchestration_reactor_actions AS candidate
+        JOIN orchestration_reactor_progress AS progress
+          ON progress.reactor_id = candidate.reactor_id
+        WHERE candidate.reactor_id = ${reactorId}
+          AND progress.mode = 'durable'
+          AND progress.active_owner_id = ${ownerId}
+          AND candidate.source_sequence > progress.cursor_sequence
+          AND (
+            progress.high_water_sequence IS NULL
+            OR candidate.source_sequence <= progress.high_water_sequence
+          )
+          AND candidate.effect_kind IN ${sql.in(effectKinds)}
+          AND candidate.status IN ('pending', 'retryable')
+          AND candidate.available_at <= ${now}
+          AND EXISTS (
+            SELECT 1
+            FROM projection_thread_sessions AS session
+            WHERE candidate.target_kind = 'thread'
+              AND session.thread_id = candidate.target_id
+              AND session.status != 'stopped'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM orchestration_reactor_actions AS blocker
+            WHERE blocker.reactor_id = candidate.reactor_id
+              AND blocker.status = 'leased'
+              AND blocker.lease_owner = ${ownerId}
+              AND blocker.lease_expires_at > ${now}
+              AND blocker.effect_kind = ${blockerEffectKind}
+              AND blocker.target_kind = candidate.target_kind
+              AND blocker.target_id = candidate.target_id
+              AND blocker.source_sequence > progress.cursor_sequence
+              AND (
+                blocker.source_sequence < candidate.source_sequence
+                OR (
+                  blocker.source_sequence = candidate.source_sequence
+                  AND blocker.output_index < candidate.output_index
+                )
+              )
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM orchestration_reactor_actions AS earlier
+            WHERE earlier.reactor_id = candidate.reactor_id
+              AND earlier.effect_kind IN ${sql.in(effectKinds)}
+              AND earlier.target_kind = candidate.target_kind
+              AND earlier.target_id = candidate.target_id
+              AND earlier.status NOT IN ('succeeded', 'resolved', 'shadow')
+              AND earlier.source_sequence > progress.cursor_sequence
+              AND (
+                earlier.source_sequence < candidate.source_sequence
+                OR (
+                  earlier.source_sequence = candidate.source_sequence
+                  AND earlier.output_index < candidate.output_index
+                )
+              )
+          )
+        ORDER BY
+          candidate.source_sequence ASC,
+          candidate.output_index ASC,
+          candidate.action_id ASC
+        LIMIT 1
+      )
+      RETURNING
+        action_id AS "actionId",
+        reactor_id AS "reactorId",
+        source_sequence AS "sourceSequence",
+        source_event_id AS "sourceEventId",
+        output_index AS "outputIndex",
+        effect_kind AS "effectKind",
+        target_kind AS "targetKind",
+        target_id AS "targetId",
+        operation_version AS "operationVersion",
+        payload_json AS "payloadJson",
+        status,
+        attempt_count AS "attemptCount",
+        available_at AS "availableAt",
+        lease_owner AS "leaseOwner",
+        lease_epoch AS "leaseEpoch",
+        lease_expires_at AS "leaseExpiresAt",
+        last_error AS "lastError",
+        outcome_json AS "outcomeJson"
+    `,
+  })
+
+  const claimNextAhead: OrchestrationReactorDeliveryShape['claimNextAhead'] = (input) =>
+    sql
+      .withTransaction(
+        claimAheadAction({
+          reactorId: input.reactorId,
+          ownerId: input.ownerId,
+          blockerEffectKind: input.blockerEffectKind,
+          effectKinds: input.effectKinds,
+          now: input.now,
+          leaseExpiresAt: addMilliseconds(input.now, input.leaseDurationMs),
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toReactorDeliveryError('OrchestrationReactorDelivery.claimNextAhead:transaction'),
         ),
       )
 
@@ -652,7 +821,9 @@ const make = Effect.gen(function* ()
     ensureProgress,
     getProgress,
     materialize,
+    materializeAhead,
     claimNext,
+    claimNextAhead,
     renewLease,
     recordOutcome,
     advanceCursor,

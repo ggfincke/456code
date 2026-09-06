@@ -341,7 +341,9 @@ describe('ProviderCommandReactor', () =>
         turnId: asTurnId(`turn-${nextTurnIndex++}`),
       }),
     )
-    const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void)
+    const interruptTurn = vi.fn<ProviderServiceShape['interruptTurn']>(
+      (_input, _context) => input?.interruptTurnEffect?.() ?? Effect.void,
+    )
     const respondToRequest = vi.fn<ProviderServiceShape['respondToRequest']>(() => Effect.void)
     const respondToUserInput = vi.fn<ProviderServiceShape['respondToUserInput']>(() => Effect.void)
     const getInstanceInfo = vi.fn((instanceId: ProviderInstanceId) =>
@@ -1003,7 +1005,7 @@ describe('ProviderCommandReactor', () =>
   {
     const harness = await createHarness()
     const releaseFirst = Effect.runSync(Deferred.make<void>())
-    harness.sendTurn.mockImplementation((input: unknown) =>
+    harness.sendTurn.mockImplementation((_input: unknown) =>
     {
       const result = {
         threadId: ThreadId.make('thread-1'),
@@ -1045,6 +1047,202 @@ describe('ProviderCommandReactor', () =>
       { input: 'ordered message 1' },
       { input: 'ordered message 2' },
     ])
+  })
+
+  it('delivers one durable approval while its provider turn is awaiting permission', async () =>
+  {
+    const harness = await createHarness()
+    const releaseTurn = await harness.run(Deferred.make<void>())
+    const now = '2026-01-01T00:00:00.000Z'
+    harness.sendTurn.mockImplementation(() =>
+      Deferred.await(releaseTurn).pipe(
+        Effect.as({
+          threadId: ThreadId.make('thread-1'),
+          turnId: asTurnId('turn-awaiting-approval'),
+        }),
+      ),
+    )
+    harness.respondToRequest.mockImplementation(() =>
+      Deferred.succeed(releaseTurn, undefined).pipe(Effect.asVoid),
+    )
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-awaiting-approval'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('message-awaiting-approval'),
+          role: 'user',
+          text: 'wait for permission',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: now,
+      }),
+    )
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-provider-requested-approval'),
+        threadId: ThreadId.make('thread-1'),
+        activity: {
+          id: EventId.make('activity-provider-requested-approval'),
+          tone: 'approval',
+          kind: 'approval.requested',
+          summary: 'Command approval requested',
+          payload: { requestId: 'approval-while-turn-pending', requestKind: 'command' },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    const approvalCommand = {
+      type: 'thread.approval.respond' as const,
+      commandId: CommandId.make('cmd-approval-while-turn-pending'),
+      threadId: ThreadId.make('thread-1'),
+      requestId: asApprovalRequestId('approval-while-turn-pending'),
+      decision: 'accept' as const,
+      createdAt: now,
+    }
+    await harness.run(harness.engine.dispatch(approvalCommand))
+    await harness.run(harness.engine.dispatch(approvalCommand))
+
+    await waitFor(() => harness.respondToRequest.mock.calls.length === 1)
+    await harness.drain()
+    await harness.drain()
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1)
+    expect(harness.respondToRequest).toHaveBeenCalledTimes(1)
+    const actions = await harness.run(harness.sql<{
+      readonly actionId: string
+      readonly effectKind: string
+      readonly status: string
+    }>`
+      SELECT
+        action_id AS "actionId",
+        effect_kind AS "effectKind",
+        status
+      FROM orchestration_reactor_actions
+      WHERE reactor_id = 'provider-command'
+        AND effect_kind IN (
+          'thread.turn-start-requested',
+          'thread.approval-response-requested'
+        )
+      ORDER BY source_sequence
+    `)
+    expect(actions).toHaveLength(2)
+    expect(actions.map((action) => action.status)).toEqual(['succeeded', 'succeeded'])
+    const turnAction = actions.find((action) => action.effectKind === 'thread.turn-start-requested')
+    const approvalAction = actions.find(
+      (action) => action.effectKind === 'thread.approval-response-requested',
+    )
+    expect(harness.sendTurn.mock.calls[0]?.[2]).toMatchObject({
+      actionId: turnAction?.actionId,
+      idempotencyKey: turnAction?.actionId,
+    })
+    expect(harness.respondToRequest.mock.calls[0]?.[1]).toMatchObject({
+      actionId: approvalAction?.actionId,
+      idempotencyKey: approvalAction?.actionId,
+    })
+  })
+
+  it('delivers a durable interrupt while its provider turn is pending', async () =>
+  {
+    const harness = await createHarness({ startReactor: false })
+    const releaseTurn = await harness.run(Deferred.make<void>())
+    const now = '2026-01-01T00:00:00.000Z'
+    const snapshotSequence = (await harness.readModel()).snapshotSequence
+    await harness.run(
+      harness.delivery.ensureProgress({
+        reactorId: 'provider-command',
+        operationVersion: 1,
+        initialSequence: snapshotSequence,
+        mode: 'durable',
+        now,
+      }),
+    )
+    harness.sendTurn.mockImplementation(() =>
+      Deferred.await(releaseTurn).pipe(
+        Effect.as({
+          threadId: ThreadId.make('thread-1'),
+          turnId: asTurnId('turn-awaiting-interrupt'),
+        }),
+      ),
+    )
+    harness.interruptTurn.mockImplementation(() =>
+      Deferred.succeed(releaseTurn, undefined).pipe(Effect.asVoid),
+    )
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-awaiting-interrupt'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('message-awaiting-interrupt'),
+          role: 'user',
+          text: 'wait until interrupted',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.interrupt',
+        commandId: CommandId.make('cmd-interrupt-while-turn-pending'),
+        threadId: ThreadId.make('thread-1'),
+        createdAt: now,
+      }),
+    )
+    expect((await harness.readModel()).threads[0]?.session).toBeNull()
+    expect(harness.sendTurn).not.toHaveBeenCalled()
+    expect(harness.interruptTurn).not.toHaveBeenCalled()
+
+    await harness.startReactor()
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+    await waitFor(() => harness.interruptTurn.mock.calls.length === 1)
+    await harness.drain()
+    await harness.drain()
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1)
+    expect(harness.interruptTurn).toHaveBeenCalledTimes(1)
+    const actions = await harness.run(harness.sql<{
+      readonly actionId: string
+      readonly effectKind: string
+      readonly status: string
+    }>`
+      SELECT
+        action_id AS "actionId",
+        effect_kind AS "effectKind",
+        status
+      FROM orchestration_reactor_actions
+      WHERE reactor_id = 'provider-command'
+        AND effect_kind IN (
+          'thread.turn-start-requested',
+          'thread.turn-interrupt-requested'
+        )
+      ORDER BY source_sequence
+    `)
+    expect(actions).toHaveLength(2)
+    expect(actions.map((action) => action.status)).toEqual(['succeeded', 'succeeded'])
+    const turnAction = actions.find((action) => action.effectKind === 'thread.turn-start-requested')
+    const interruptAction = actions.find(
+      (action) => action.effectKind === 'thread.turn-interrupt-requested',
+    )
+    expect(harness.sendTurn.mock.calls[0]?.[2]).toMatchObject({
+      actionId: turnAction?.actionId,
+      idempotencyKey: turnAction?.actionId,
+    })
+    expect(harness.interruptTurn.mock.calls[0]?.[1]).toMatchObject({
+      actionId: interruptAction?.actionId,
+      idempotencyKey: interruptAction?.actionId,
+    })
   })
 
   it('blocks unknown delivery without retry until an operator resolves it', async () =>
@@ -2817,12 +3015,12 @@ describe('ProviderCommandReactor', () =>
     runGit(cwd, ['commit', '-m', 'Initial'])
     runGit(cwd, ['branch', '-m', '456code/1234abcd'])
 
-    const generationStarted = Effect.runSync(Deferred.make<void>())
-    const releaseGeneration = Effect.runSync(Deferred.make<void>())
     const harness = await createHarness({
       workspaceRoot: cwd,
       withRuntimeIngestion: true,
     })
+    const generationStarted = await harness.run(Deferred.make<void>())
+    const releaseGeneration = await harness.run(Deferred.make<void>())
     harness.generateBranchName.mockImplementation(() =>
       Deferred.succeed(generationStarted, undefined).pipe(
         Effect.andThen(Deferred.await(releaseGeneration)),

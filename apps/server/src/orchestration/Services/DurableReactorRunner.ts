@@ -27,6 +27,13 @@ export interface DurableReactorDefinition
   ) => Effect.Effect<ReadonlyArray<ReactorActionDraft>, unknown>
   readonly execute: (action: ReactorActionRecord) => Effect.Effect<ReactorEffectResult, unknown>
   readonly classify: (cause: unknown, action: ReactorActionRecord) => ReactorFailureClass
+  readonly aheadOfCursor?: {
+    readonly blockerEffectKind: string
+    readonly effectKinds: readonly [string, ...Array<string>]
+    readonly plan: (
+      event: OrchestrationEvent,
+    ) => Effect.Effect<ReadonlyArray<ReactorActionDraft>, unknown>
+  }
   // reconcile owner-local fences before a durable action becomes terminally
   // blocked. If this fails, the action remains leased/recoverable instead of
   // publishing a blocked state that its owner has not made internally safe.
