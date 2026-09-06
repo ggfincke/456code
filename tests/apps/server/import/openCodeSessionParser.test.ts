@@ -24,7 +24,7 @@ const fixtureStorageRoot = NodePath.resolve(
   NodeURL.fileURLToPath(new URL('./fixtures/opencode/storage', import.meta.url)),
 )
 const temporaryPaths: string[] = []
-const encodeUnknownJsonString = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 async function temporaryStorage(): Promise<string>
 {

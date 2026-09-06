@@ -2,7 +2,6 @@
 // defines orchestration commands, events, projections, and import rpc schemas
 
 import * as Effect from 'effect/Effect'
-import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import * as SchemaTransformation from 'effect/SchemaTransformation'
@@ -2240,9 +2239,12 @@ export const TurnCountRange = Schema.Struct({
   Schema.makeFilter(
     (input) =>
       input.fromTurnCount <= input.toTurnCount ||
-      new SchemaIssue.InvalidValue(Option.some(input.fromTurnCount), {
-        message: 'fromTurnCount must be less than or equal to toTurnCount',
-      }),
+      new SchemaIssue.InvalidValue(
+        {
+          message: 'fromTurnCount must be less than or equal to toTurnCount',
+        },
+        input.fromTurnCount,
+      ),
     { identifier: 'OrchestrationTurnDiffRange' },
   ),
 )
@@ -2488,7 +2490,7 @@ export const OrchestrationSearchThreadsResult = Schema.Struct({
 })
 export type OrchestrationSearchThreadsResult = typeof OrchestrationSearchThreadsResult.Type
 
-export class OrchestrationSearchThreadsError extends Schema.TaggedErrorClass<OrchestrationSearchThreadsError>()(
+export class OrchestrationSearchThreadsError extends Schema.TaggedError<OrchestrationSearchThreadsError>()(
   'OrchestrationSearchThreadsError',
   { message: TrimmedNonEmptyString },
 )
@@ -2541,7 +2543,7 @@ export const OrchestrationRpcSchemas = {
   },
 } as const
 
-export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetSnapshotError>()(
+export class OrchestrationGetSnapshotError extends Schema.TaggedError<OrchestrationGetSnapshotError>()(
   'OrchestrationGetSnapshotError',
   {
     message: TrimmedNonEmptyString,
@@ -2550,7 +2552,7 @@ export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<Orche
 )
 {}
 
-export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<OrchestrationDispatchCommandError>()(
+export class OrchestrationDispatchCommandError extends Schema.TaggedError<OrchestrationDispatchCommandError>()(
   'OrchestrationDispatchCommandError',
   {
     message: TrimmedNonEmptyString,
@@ -2572,7 +2574,7 @@ export const CheckpointIdentityErrorCode = Schema.Literals([
 ])
 export type CheckpointIdentityErrorCode = typeof CheckpointIdentityErrorCode.Type
 
-export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<OrchestrationGetTurnDiffError>()(
+export class OrchestrationGetTurnDiffError extends Schema.TaggedError<OrchestrationGetTurnDiffError>()(
   'OrchestrationGetTurnDiffError',
   {
     message: TrimmedNonEmptyString,
@@ -2582,7 +2584,7 @@ export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<Orche
 )
 {}
 
-export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass<OrchestrationGetFullThreadDiffError>()(
+export class OrchestrationGetFullThreadDiffError extends Schema.TaggedError<OrchestrationGetFullThreadDiffError>()(
   'OrchestrationGetFullThreadDiffError',
   {
     message: TrimmedNonEmptyString,
@@ -2592,7 +2594,7 @@ export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass
 )
 {}
 
-export class OrchestrationGetRunDiffError extends Schema.TaggedErrorClass<OrchestrationGetRunDiffError>()(
+export class OrchestrationGetRunDiffError extends Schema.TaggedError<OrchestrationGetRunDiffError>()(
   'OrchestrationGetRunDiffError',
   {
     message: TrimmedNonEmptyString,
@@ -2610,7 +2612,7 @@ export const OrchestrationRunExecutionErrorCode = Schema.Literals([
 ])
 export type OrchestrationRunExecutionErrorCode = typeof OrchestrationRunExecutionErrorCode.Type
 
-export class OrchestrationGetRunExecutionDiffV1Error extends Schema.TaggedErrorClass<OrchestrationGetRunExecutionDiffV1Error>()(
+export class OrchestrationGetRunExecutionDiffV1Error extends Schema.TaggedError<OrchestrationGetRunExecutionDiffV1Error>()(
   'OrchestrationGetRunExecutionDiffV1Error',
   {
     message: TrimmedNonEmptyString,

@@ -225,7 +225,7 @@ export type RuntimeRecoveryReactorMutation = typeof RuntimeRecoveryReactorMutati
 export const RuntimeRecoverySubjectKind = Schema.Literals(['reactor-action', 'checkpoint-revert'])
 export type RuntimeRecoverySubjectKind = typeof RuntimeRecoverySubjectKind.Type
 
-export class RuntimeRecoveryNotFoundError extends Schema.TaggedErrorClass<RuntimeRecoveryNotFoundError>()(
+export class RuntimeRecoveryNotFoundError extends Schema.TaggedError<RuntimeRecoveryNotFoundError>()(
   'RuntimeRecoveryNotFoundError',
   {
     code: Schema.Literal('not_found'),
@@ -242,7 +242,7 @@ export class RuntimeRecoveryNotFoundError extends Schema.TaggedErrorClass<Runtim
   }
 }
 
-export class RuntimeRecoveryConflictError extends Schema.TaggedErrorClass<RuntimeRecoveryConflictError>()(
+export class RuntimeRecoveryConflictError extends Schema.TaggedError<RuntimeRecoveryConflictError>()(
   'RuntimeRecoveryConflictError',
   {
     code: Schema.Literal('stale_state'),
@@ -259,7 +259,7 @@ export class RuntimeRecoveryConflictError extends Schema.TaggedErrorClass<Runtim
   }
 }
 
-export class RuntimeRecoveryInvalidCursorError extends Schema.TaggedErrorClass<RuntimeRecoveryInvalidCursorError>()(
+export class RuntimeRecoveryInvalidCursorError extends Schema.TaggedError<RuntimeRecoveryInvalidCursorError>()(
   'RuntimeRecoveryInvalidCursorError',
   {
     code: Schema.Literal('invalid_cursor'),
@@ -283,7 +283,7 @@ export const RuntimeRecoveryActionDeniedReason = Schema.Literals([
 ])
 export type RuntimeRecoveryActionDeniedReason = typeof RuntimeRecoveryActionDeniedReason.Type
 
-export class RuntimeRecoveryActionDeniedError extends Schema.TaggedErrorClass<RuntimeRecoveryActionDeniedError>()(
+export class RuntimeRecoveryActionDeniedError extends Schema.TaggedError<RuntimeRecoveryActionDeniedError>()(
   'RuntimeRecoveryActionDeniedError',
   {
     code: Schema.Literal('action_denied'),
@@ -299,7 +299,7 @@ export class RuntimeRecoveryActionDeniedError extends Schema.TaggedErrorClass<Ru
   }
 }
 
-export class RuntimeRecoveryInternalError extends Schema.TaggedErrorClass<RuntimeRecoveryInternalError>()(
+export class RuntimeRecoveryInternalError extends Schema.TaggedError<RuntimeRecoveryInternalError>()(
   'RuntimeRecoveryInternalError',
   {
     code: Schema.Literal('internal_error'),

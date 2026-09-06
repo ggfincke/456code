@@ -2,7 +2,6 @@
 // parse yaml
 
 import * as Effect from 'effect/Effect'
-import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as SchemaGetter from 'effect/SchemaGetter'
 import * as SchemaIssue from 'effect/SchemaIssue'
@@ -46,8 +45,7 @@ export function parseYaml<E extends string>(
   return SchemaGetter.transformOrFail((input: E) =>
     Effect.try({
       try: () => parseYamlString(input, options) as unknown,
-      catch: (error) =>
-        new SchemaIssue.InvalidValue(Option.none(), { message: formatYamlParseError(error) }),
+      catch: (error) => new SchemaIssue.InvalidValue({ message: formatYamlParseError(error) }),
     }),
   )
 }
@@ -60,8 +58,7 @@ export function stringifyYaml(
   return SchemaGetter.transformOrFail((input: unknown) =>
     Effect.try({
       try: () => stringifyYamlValue(input, options),
-      catch: () =>
-        new SchemaIssue.InvalidValue(Option.none(), { message: 'Failed to stringify YAML.' }),
+      catch: () => new SchemaIssue.InvalidValue({ message: 'Failed to stringify YAML.' }),
     }),
   )
 }

@@ -13,6 +13,8 @@ import {
   verifyDpopProof,
 } from '../../../packages/shared/src/dpop.ts'
 
+const P256_ORDER = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n
+
 function signDpopProof(input: {
   readonly method: string
   readonly url: string
@@ -41,8 +43,13 @@ function signDpopProof(input: {
   const signature = NodeCrypto.sign('sha256', Buffer.from(`${header}.${payload}`), {
     key: input.privateKey,
     dsaEncoding: 'ieee-p1363',
-  }).toString('base64url')
-  return `${header}.${payload}.${signature}`
+  })
+  const s = BigInt(`0x${signature.subarray(32).toString('hex')}`)
+  if (s <= P256_ORDER / 2n)
+  {
+    Buffer.from((P256_ORDER - s).toString(16).padStart(64, '0'), 'hex').copy(signature, 32)
+  }
+  return `${header}.${payload}.${signature.toString('base64url')}`
 }
 
 describe('verifyDpopProof', () =>
@@ -59,7 +66,7 @@ describe('verifyDpopProof', () =>
     publicJwk,
   })
 
-  it('verifies an ES256 DPoP proof and returns the RFC 7638 thumbprint', () =>
+  it('verifies a high-S ES256 DPoP proof and returns the RFC 7638 thumbprint', () =>
   {
     const thumbprint = computeDpopJwkThumbprint(publicJwk)
     const result = verifyDpopProof({

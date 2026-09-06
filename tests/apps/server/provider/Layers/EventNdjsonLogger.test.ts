@@ -17,7 +17,7 @@ import {
   makeProviderEventNdjsonLoggers,
 } from '../../../../../apps/server/src/provider/Layers/EventNdjsonLogger.ts'
 
-const encodeUnknownJson = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 function parseLogLine(line: string)
 {

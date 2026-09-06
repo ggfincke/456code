@@ -34,7 +34,7 @@ interface RateLimitEntry
   readonly retryAt: number
 }
 
-export class SourceControlRateLimitPausedError extends Schema.TaggedErrorClass<SourceControlRateLimitPausedError>()(
+export class SourceControlRateLimitPausedError extends Schema.TaggedError<SourceControlRateLimitPausedError>()(
   'SourceControlRateLimitPausedError',
   {
     provider: SourceControlProviderKindSchema,

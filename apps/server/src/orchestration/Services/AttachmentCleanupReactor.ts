@@ -8,7 +8,7 @@ import type * as Scope from 'effect/Scope'
 
 import type { PersistenceSqlError } from '../../persistence/Errors.ts'
 
-export class AttachmentCleanupDeliveryError extends Schema.TaggedErrorClass<AttachmentCleanupDeliveryError>()(
+export class AttachmentCleanupDeliveryError extends Schema.TaggedError<AttachmentCleanupDeliveryError>()(
   'AttachmentCleanupDeliveryError',
   {
     cleanupKey: Schema.String,

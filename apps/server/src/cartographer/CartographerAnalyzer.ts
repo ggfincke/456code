@@ -19,7 +19,7 @@ import * as Semaphore from 'effect/Semaphore'
 import * as ProcessRunner from '../process/processRunner.ts'
 
 // precompiled at module scope so no sync schema call sits inside an effect generator
-const decodePackageJsonText = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const decodePackageJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const CARTOGRAPHER_PACKAGE_NAME = '@t3tools/cartographer-core'
 const CARTOGRAPHER_PACKAGE_JSON = `${CARTOGRAPHER_PACKAGE_NAME}/package.json`

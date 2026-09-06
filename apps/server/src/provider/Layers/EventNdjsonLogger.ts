@@ -25,7 +25,7 @@ const DEFAULT_BATCH_SIZE = 128
 const DEFAULT_BUFFER_CAPACITY = 1_024
 const GLOBAL_THREAD_SEGMENT = '_global'
 const LOG_SCOPE = 'provider-observability'
-const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
 export type EventNdjsonStream = 'native' | 'canonical' | 'orchestration'
 

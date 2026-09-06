@@ -630,7 +630,7 @@ const ArchitectureToolErrorFields = Schema.Struct({
   }),
 )
 
-export class ArchitectureToolError extends Schema.TaggedErrorClass<ArchitectureToolError>()(
+export class ArchitectureToolError extends Schema.TaggedError<ArchitectureToolError>()(
   'ArchitectureToolError',
   ArchitectureToolErrorFields,
 )

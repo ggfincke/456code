@@ -44,7 +44,7 @@ const DesktopSshPromptPresentationOperation = Schema.Literals([
 ])
 type DesktopSshPromptPresentationOperation = typeof DesktopSshPromptPresentationOperation.Type
 
-export class DesktopSshPromptRequestIdGenerationError extends Schema.TaggedErrorClass<DesktopSshPromptRequestIdGenerationError>()(
+export class DesktopSshPromptRequestIdGenerationError extends Schema.TaggedError<DesktopSshPromptRequestIdGenerationError>()(
   'DesktopSshPromptRequestIdGenerationError',
   {
     destination: Schema.String,
@@ -58,7 +58,7 @@ export class DesktopSshPromptRequestIdGenerationError extends Schema.TaggedError
   }
 }
 
-export class DesktopSshPromptWindowUnavailableError extends Schema.TaggedErrorClass<DesktopSshPromptWindowUnavailableError>()(
+export class DesktopSshPromptWindowUnavailableError extends Schema.TaggedError<DesktopSshPromptWindowUnavailableError>()(
   'DesktopSshPromptWindowUnavailableError',
   {
     destination: Schema.String,
@@ -74,7 +74,7 @@ export class DesktopSshPromptWindowUnavailableError extends Schema.TaggedErrorCl
   }
 }
 
-export class DesktopSshPromptPresentationError extends Schema.TaggedErrorClass<DesktopSshPromptPresentationError>()(
+export class DesktopSshPromptPresentationError extends Schema.TaggedError<DesktopSshPromptPresentationError>()(
   'DesktopSshPromptPresentationError',
   {
     requestId: Schema.NullOr(Schema.String),
@@ -90,7 +90,7 @@ export class DesktopSshPromptPresentationError extends Schema.TaggedErrorClass<D
   }
 }
 
-export class DesktopSshPromptTimedOutError extends Schema.TaggedErrorClass<DesktopSshPromptTimedOutError>()(
+export class DesktopSshPromptTimedOutError extends Schema.TaggedError<DesktopSshPromptTimedOutError>()(
   'DesktopSshPromptTimedOutError',
   {
     requestId: Schema.String,
@@ -104,7 +104,7 @@ export class DesktopSshPromptTimedOutError extends Schema.TaggedErrorClass<Deskt
   }
 }
 
-export class DesktopSshPromptCancelledError extends Schema.TaggedErrorClass<DesktopSshPromptCancelledError>()(
+export class DesktopSshPromptCancelledError extends Schema.TaggedError<DesktopSshPromptCancelledError>()(
   'DesktopSshPromptCancelledError',
   {
     requestId: Schema.String,
@@ -118,7 +118,7 @@ export class DesktopSshPromptCancelledError extends Schema.TaggedErrorClass<Desk
   }
 }
 
-export class DesktopSshPromptWindowClosedError extends Schema.TaggedErrorClass<DesktopSshPromptWindowClosedError>()(
+export class DesktopSshPromptWindowClosedError extends Schema.TaggedError<DesktopSshPromptWindowClosedError>()(
   'DesktopSshPromptWindowClosedError',
   {
     requestId: Schema.String,
@@ -132,7 +132,7 @@ export class DesktopSshPromptWindowClosedError extends Schema.TaggedErrorClass<D
   }
 }
 
-export class DesktopSshPromptServiceStoppedError extends Schema.TaggedErrorClass<DesktopSshPromptServiceStoppedError>()(
+export class DesktopSshPromptServiceStoppedError extends Schema.TaggedError<DesktopSshPromptServiceStoppedError>()(
   'DesktopSshPromptServiceStoppedError',
   {
     requestId: Schema.String,
@@ -146,7 +146,7 @@ export class DesktopSshPromptServiceStoppedError extends Schema.TaggedErrorClass
   }
 }
 
-export class DesktopSshPromptInvalidRequestIdError extends Schema.TaggedErrorClass<DesktopSshPromptInvalidRequestIdError>()(
+export class DesktopSshPromptInvalidRequestIdError extends Schema.TaggedError<DesktopSshPromptInvalidRequestIdError>()(
   'DesktopSshPromptInvalidRequestIdError',
   {
     requestId: Schema.String,
@@ -159,7 +159,7 @@ export class DesktopSshPromptInvalidRequestIdError extends Schema.TaggedErrorCla
   }
 }
 
-export class DesktopSshPromptExpiredError extends Schema.TaggedErrorClass<DesktopSshPromptExpiredError>()(
+export class DesktopSshPromptExpiredError extends Schema.TaggedError<DesktopSshPromptExpiredError>()(
   'DesktopSshPromptExpiredError',
   {
     requestId: Schema.String,

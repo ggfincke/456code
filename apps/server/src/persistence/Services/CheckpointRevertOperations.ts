@@ -155,7 +155,7 @@ export const MarkCheckpointRevertManualInput = Schema.Struct({
 })
 export type MarkCheckpointRevertManualInput = typeof MarkCheckpointRevertManualInput.Type
 
-export class CheckpointRevertOperationConflictError extends Schema.TaggedErrorClass<CheckpointRevertOperationConflictError>()(
+export class CheckpointRevertOperationConflictError extends Schema.TaggedError<CheckpointRevertOperationConflictError>()(
   'CheckpointRevertOperationConflictError',
   {
     operationId: Schema.String,
@@ -174,7 +174,7 @@ export class CheckpointRevertOperationConflictError extends Schema.TaggedErrorCl
   }
 }
 
-export class CheckpointRevertTransitionError extends Schema.TaggedErrorClass<CheckpointRevertTransitionError>()(
+export class CheckpointRevertTransitionError extends Schema.TaggedError<CheckpointRevertTransitionError>()(
   'CheckpointRevertTransitionError',
   {
     operationId: Schema.String,

@@ -28,7 +28,7 @@ const providerAdministrativeTitlePrefixes = [
   '<user_action>',
   '<user_instructions>',
 ] as const
-const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 function isRecord(value: unknown): value is Record<string, unknown>
 {

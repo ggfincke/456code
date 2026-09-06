@@ -33,7 +33,7 @@ export const ServerStorageLeaseOwner = Schema.Struct({
 })
 export type ServerStorageLeaseOwner = typeof ServerStorageLeaseOwner.Type
 
-export class ServerStorageLeaseConflictError extends Schema.TaggedErrorClass<ServerStorageLeaseConflictError>()(
+export class ServerStorageLeaseConflictError extends Schema.TaggedError<ServerStorageLeaseConflictError>()(
   'ServerStorageLeaseConflictError',
   {
     canonicalBaseDir: Schema.String,
@@ -53,7 +53,7 @@ export class ServerStorageLeaseConflictError extends Schema.TaggedErrorClass<Ser
   }
 }
 
-export class ServerStorageLeaseIoError extends Schema.TaggedErrorClass<ServerStorageLeaseIoError>()(
+export class ServerStorageLeaseIoError extends Schema.TaggedError<ServerStorageLeaseIoError>()(
   'ServerStorageLeaseIoError',
   {
     operation: Schema.Literals([
@@ -80,7 +80,7 @@ export class ServerStorageLeaseIoError extends Schema.TaggedErrorClass<ServerSto
   }
 }
 
-export class ServerStorageLeaseBoundaryError extends Schema.TaggedErrorClass<ServerStorageLeaseBoundaryError>()(
+export class ServerStorageLeaseBoundaryError extends Schema.TaggedError<ServerStorageLeaseBoundaryError>()(
   'ServerStorageLeaseBoundaryError',
   {
     canonicalBaseDir: Schema.String,

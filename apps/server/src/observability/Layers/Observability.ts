@@ -7,6 +7,8 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as References from 'effect/References'
 import * as Tracer from 'effect/Tracer'
+import * as FetchHttpClient from 'effect/unstable/http/FetchHttpClient'
+import * as OtlpExporter from 'effect/unstable/observability/OtlpExporter'
 import * as OtlpMetrics from 'effect/unstable/observability/OtlpMetrics'
 import * as OtlpSerialization from 'effect/unstable/observability/OtlpSerialization'
 import * as OtlpTracer from 'effect/unstable/observability/OtlpTracer'
@@ -66,7 +68,7 @@ export const ObservabilityLive = Layer.unwrap(
           BrowserTraceCollector.layer(sink),
         )
       }),
-    ).pipe(Layer.provideMerge(otlpSerializationLayer))
+    ).pipe(Layer.provideMerge(otlpSerializationLayer), Layer.provide(OtlpExporter.layerFlusher))
 
     const metricsLayer =
       config.otlpMetricsUrl === undefined
@@ -83,6 +85,8 @@ export const ObservabilityLive = Layer.unwrap(
             },
           }).pipe(Layer.provideMerge(otlpSerializationLayer))
 
-    return Layer.mergeAll(ServerLoggerLive, traceReferencesLayer, tracerLayer, metricsLayer)
+    return Layer.mergeAll(ServerLoggerLive, traceReferencesLayer, tracerLayer, metricsLayer).pipe(
+      Layer.provide(FetchHttpClient.layer),
+    )
   }),
 )

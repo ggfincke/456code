@@ -15,13 +15,13 @@ import * as CodexError from '../../../packages/effect-codex-app-server/src/error
 import * as CodexProtocol from '../../../packages/effect-codex-app-server/src/protocol.ts'
 import * as CodexRpc from '../../../packages/effect-codex-app-server/src/rpc.ts'
 import { makeInMemoryStdio } from '../../../packages/effect-codex-app-server/src/_internal/stdio.ts'
-const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const encoder = new TextEncoder()
 
 const encodeJsonl = (value: unknown) => encoder.encode(`${encodeUnknownJsonString(value)}\n`)
 
-const decodeJson = Schema.decodeEffect(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))
 const decodeAccountTokenUsageResponse = Schema.decodeUnknownEffect(
   CodexRpc.CLIENT_REQUEST_RESPONSES['account/usage/read'],
 )

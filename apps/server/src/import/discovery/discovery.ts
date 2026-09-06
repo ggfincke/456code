@@ -89,7 +89,7 @@ const importCatalogPrefixBytes = 64 * 1024
 const importScanTimeoutMs = 60_000
 const defaultAcpScanPhaseTimeoutMs = Math.floor(importScanTimeoutMs / 2)
 const exactTailCandidateLimit = 256
-const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 export interface ImportDiscoveryResourceLimits
 {
@@ -160,7 +160,7 @@ interface ImportScanProgress
   truncated: boolean
 }
 
-class ImportDiscoveryOperationError extends Schema.TaggedErrorClass<ImportDiscoveryOperationError>()(
+class ImportDiscoveryOperationError extends Schema.TaggedError<ImportDiscoveryOperationError>()(
   'ImportDiscoveryOperationError',
   {
     operation: Schema.Literal('discover'),

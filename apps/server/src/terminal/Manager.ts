@@ -112,7 +112,7 @@ const DEFAULT_OPEN_ROWS = 30
 const TERMINAL_ENV_BLOCKLIST = new Set(['PORT', 'ELECTRON_RENDERER_PORT', 'ELECTRON_RUN_AS_NODE'])
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<TerminalSubprocessCheckError>()(
+class TerminalSubprocessCheckError extends Schema.TaggedError<TerminalSubprocessCheckError>()(
   'TerminalSubprocessCheckError',
   {
     cause: Schema.optional(Schema.Defect()),
@@ -137,7 +137,7 @@ class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<TerminalSubpr
   }
 }
 
-class TerminalProcessSignalError extends Schema.TaggedErrorClass<TerminalProcessSignalError>()(
+class TerminalProcessSignalError extends Schema.TaggedError<TerminalProcessSignalError>()(
   'TerminalProcessSignalError',
   {
     cause: Schema.optional(Schema.Defect()),

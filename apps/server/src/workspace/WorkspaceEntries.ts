@@ -28,7 +28,7 @@ import { isExplicitRelativePath, isWindowsAbsolutePath } from '@t3tools/shared/p
 import * as WorkspacePaths from './WorkspacePaths.ts'
 import * as WorkspaceSearchIndex from './WorkspaceSearchIndex.ts'
 
-export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedErrorClass<WorkspaceEntriesWindowsPathUnsupportedError>()(
+export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedError<WorkspaceEntriesWindowsPathUnsupportedError>()(
   'WorkspaceEntriesWindowsPathUnsupportedError',
   {
     cwd: Schema.optional(Schema.String),
@@ -44,7 +44,7 @@ export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedEr
   }
 }
 
-export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedErrorClass<WorkspaceEntriesCurrentProjectRequiredError>()(
+export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedError<WorkspaceEntriesCurrentProjectRequiredError>()(
   'WorkspaceEntriesCurrentProjectRequiredError',
   {
     partialPath: Schema.String,
@@ -57,7 +57,7 @@ export class WorkspaceEntriesCurrentProjectRequiredError extends Schema.TaggedEr
   }
 }
 
-export class WorkspaceEntriesReadDirectoryError extends Schema.TaggedErrorClass<WorkspaceEntriesReadDirectoryError>()(
+export class WorkspaceEntriesReadDirectoryError extends Schema.TaggedError<WorkspaceEntriesReadDirectoryError>()(
   'WorkspaceEntriesReadDirectoryError',
   {
     cwd: Schema.optional(Schema.String),

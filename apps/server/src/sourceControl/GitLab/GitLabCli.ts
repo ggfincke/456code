@@ -39,7 +39,7 @@ const gitLabCliDecodeErrorContext = {
   cause: Schema.Defect(),
 }
 
-export class GitLabCliUnavailableError extends Schema.TaggedErrorClass<GitLabCliUnavailableError>()(
+export class GitLabCliUnavailableError extends Schema.TaggedError<GitLabCliUnavailableError>()(
   'GitLabCliUnavailableError',
   gitLabCliExecutionErrorContext,
 )
@@ -55,7 +55,7 @@ export class GitLabCliUnavailableError extends Schema.TaggedErrorClass<GitLabCli
   }
 }
 
-export class GitLabCliAuthenticationError extends Schema.TaggedErrorClass<GitLabCliAuthenticationError>()(
+export class GitLabCliAuthenticationError extends Schema.TaggedError<GitLabCliAuthenticationError>()(
   'GitLabCliAuthenticationError',
   gitLabCliExecutionErrorContext,
 )
@@ -71,7 +71,7 @@ export class GitLabCliAuthenticationError extends Schema.TaggedErrorClass<GitLab
   }
 }
 
-export class GitLabMergeRequestNotFoundError extends Schema.TaggedErrorClass<GitLabMergeRequestNotFoundError>()(
+export class GitLabMergeRequestNotFoundError extends Schema.TaggedError<GitLabMergeRequestNotFoundError>()(
   'GitLabMergeRequestNotFoundError',
   {
     ...gitLabCliExecutionErrorContext,
@@ -115,7 +115,7 @@ export class GitLabMergeRequestNotFoundError extends Schema.TaggedErrorClass<Git
   }
 }
 
-export class GitLabCliCommandError extends Schema.TaggedErrorClass<GitLabCliCommandError>()(
+export class GitLabCliCommandError extends Schema.TaggedError<GitLabCliCommandError>()(
   'GitLabCliCommandError',
   gitLabCliExecutionErrorContext,
 )
@@ -165,7 +165,7 @@ export class GitLabCliCommandError extends Schema.TaggedErrorClass<GitLabCliComm
   }
 }
 
-export class GitLabMergeRequestListDecodeError extends Schema.TaggedErrorClass<GitLabMergeRequestListDecodeError>()(
+export class GitLabMergeRequestListDecodeError extends Schema.TaggedError<GitLabMergeRequestListDecodeError>()(
   'GitLabMergeRequestListDecodeError',
   {
     ...gitLabCliDecodeErrorContext,
@@ -184,7 +184,7 @@ export class GitLabMergeRequestListDecodeError extends Schema.TaggedErrorClass<G
   }
 }
 
-export class GitLabMergeRequestDecodeError extends Schema.TaggedErrorClass<GitLabMergeRequestDecodeError>()(
+export class GitLabMergeRequestDecodeError extends Schema.TaggedError<GitLabMergeRequestDecodeError>()(
   'GitLabMergeRequestDecodeError',
   {
     ...gitLabCliDecodeErrorContext,
@@ -204,7 +204,7 @@ export class GitLabMergeRequestDecodeError extends Schema.TaggedErrorClass<GitLa
   }
 }
 
-export class GitLabRepositoryDecodeError extends Schema.TaggedErrorClass<GitLabRepositoryDecodeError>()(
+export class GitLabRepositoryDecodeError extends Schema.TaggedError<GitLabRepositoryDecodeError>()(
   'GitLabRepositoryDecodeError',
   {
     ...gitLabCliDecodeErrorContext,
@@ -229,7 +229,7 @@ export class GitLabRepositoryDecodeError extends Schema.TaggedErrorClass<GitLabR
   }
 }
 
-export class GitLabNamespaceDecodeError extends Schema.TaggedErrorClass<GitLabNamespaceDecodeError>()(
+export class GitLabNamespaceDecodeError extends Schema.TaggedError<GitLabNamespaceDecodeError>()(
   'GitLabNamespaceDecodeError',
   {
     ...gitLabCliDecodeErrorContext,

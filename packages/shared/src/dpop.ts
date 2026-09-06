@@ -1,8 +1,8 @@
 // packages/shared/src/dpop.ts
 // compute dpop jwk thumbprint
 
-import { p256 } from '@noble/curves/nist'
-import { sha256 } from '@noble/hashes/sha2'
+import { p256 } from '@noble/curves/nist.js'
+import { sha256 } from '@noble/hashes/sha2.js'
 import * as Encoding from 'effect/Encoding'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
@@ -182,6 +182,7 @@ export function verifyDpopProof(input: {
       {
         prehash: false,
         format: 'compact',
+        lowS: false,
       },
     )
     return verified

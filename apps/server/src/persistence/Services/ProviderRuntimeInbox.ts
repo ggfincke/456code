@@ -94,7 +94,7 @@ export const ProviderRuntimeInboxDiagnostics = Schema.Struct({
 })
 export type ProviderRuntimeInboxDiagnostics = typeof ProviderRuntimeInboxDiagnostics.Type
 
-export class ProviderRuntimeInboxAdmissionError extends Schema.TaggedErrorClass<ProviderRuntimeInboxAdmissionError>()(
+export class ProviderRuntimeInboxAdmissionError extends Schema.TaggedError<ProviderRuntimeInboxAdmissionError>()(
   'ProviderRuntimeInboxAdmissionError',
   {
     reason: Schema.Literals([

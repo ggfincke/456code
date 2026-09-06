@@ -12,7 +12,7 @@ const electronSafeStorageErrorFields = {
   cause: Schema.Defect(),
 }
 
-export class ElectronSafeStorageAvailabilityError extends Schema.TaggedErrorClass<ElectronSafeStorageAvailabilityError>()(
+export class ElectronSafeStorageAvailabilityError extends Schema.TaggedError<ElectronSafeStorageAvailabilityError>()(
   'ElectronSafeStorageAvailabilityError',
   {
     ...electronSafeStorageErrorFields,
@@ -25,7 +25,7 @@ export class ElectronSafeStorageAvailabilityError extends Schema.TaggedErrorClas
   }
 }
 
-export class ElectronSafeStorageEncryptError extends Schema.TaggedErrorClass<ElectronSafeStorageEncryptError>()(
+export class ElectronSafeStorageEncryptError extends Schema.TaggedError<ElectronSafeStorageEncryptError>()(
   'ElectronSafeStorageEncryptError',
   {
     ...electronSafeStorageErrorFields,
@@ -38,7 +38,7 @@ export class ElectronSafeStorageEncryptError extends Schema.TaggedErrorClass<Ele
   }
 }
 
-export class ElectronSafeStorageDecryptError extends Schema.TaggedErrorClass<ElectronSafeStorageDecryptError>()(
+export class ElectronSafeStorageDecryptError extends Schema.TaggedError<ElectronSafeStorageDecryptError>()(
   'ElectronSafeStorageDecryptError',
   {
     ...electronSafeStorageErrorFields,

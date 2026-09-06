@@ -33,7 +33,7 @@ const azureDevOpsCommandErrorFields = {
   cause: Schema.Defect(),
 }
 
-export class AzureDevOpsCliUnavailableError extends Schema.TaggedErrorClass<AzureDevOpsCliUnavailableError>()(
+export class AzureDevOpsCliUnavailableError extends Schema.TaggedError<AzureDevOpsCliUnavailableError>()(
   'AzureDevOpsCliUnavailableError',
   azureDevOpsCommandErrorFields,
 )
@@ -49,7 +49,7 @@ export class AzureDevOpsCliUnavailableError extends Schema.TaggedErrorClass<Azur
   }
 }
 
-export class AzureDevOpsCliAuthenticationError extends Schema.TaggedErrorClass<AzureDevOpsCliAuthenticationError>()(
+export class AzureDevOpsCliAuthenticationError extends Schema.TaggedError<AzureDevOpsCliAuthenticationError>()(
   'AzureDevOpsCliAuthenticationError',
   azureDevOpsCommandErrorFields,
 )
@@ -65,7 +65,7 @@ export class AzureDevOpsCliAuthenticationError extends Schema.TaggedErrorClass<A
   }
 }
 
-export class AzureDevOpsPullRequestNotFoundError extends Schema.TaggedErrorClass<AzureDevOpsPullRequestNotFoundError>()(
+export class AzureDevOpsPullRequestNotFoundError extends Schema.TaggedError<AzureDevOpsPullRequestNotFoundError>()(
   'AzureDevOpsPullRequestNotFoundError',
   azureDevOpsCommandErrorFields,
 )
@@ -81,7 +81,7 @@ export class AzureDevOpsPullRequestNotFoundError extends Schema.TaggedErrorClass
   }
 }
 
-export class AzureDevOpsCommandFailedError extends Schema.TaggedErrorClass<AzureDevOpsCommandFailedError>()(
+export class AzureDevOpsCommandFailedError extends Schema.TaggedError<AzureDevOpsCommandFailedError>()(
   'AzureDevOpsCommandFailedError',
   azureDevOpsCommandErrorFields,
 )
@@ -142,7 +142,7 @@ const azureDevOpsDecodeErrorFields = {
   cause: Schema.Defect(),
 }
 
-export class AzureDevOpsPullRequestListDecodeError extends Schema.TaggedErrorClass<AzureDevOpsPullRequestListDecodeError>()(
+export class AzureDevOpsPullRequestListDecodeError extends Schema.TaggedError<AzureDevOpsPullRequestListDecodeError>()(
   'AzureDevOpsPullRequestListDecodeError',
   {
     operation: Schema.Literal('listPullRequests'),
@@ -161,7 +161,7 @@ export class AzureDevOpsPullRequestListDecodeError extends Schema.TaggedErrorCla
   }
 }
 
-export class AzureDevOpsPullRequestDecodeError extends Schema.TaggedErrorClass<AzureDevOpsPullRequestDecodeError>()(
+export class AzureDevOpsPullRequestDecodeError extends Schema.TaggedError<AzureDevOpsPullRequestDecodeError>()(
   'AzureDevOpsPullRequestDecodeError',
   {
     operation: Schema.Literal('getPullRequest'),
@@ -186,7 +186,7 @@ const AzureDevOpsRepositoryDecodeOperation = Schema.Literals([
   'createRepository',
 ])
 
-export class AzureDevOpsRepositoryDecodeError extends Schema.TaggedErrorClass<AzureDevOpsRepositoryDecodeError>()(
+export class AzureDevOpsRepositoryDecodeError extends Schema.TaggedError<AzureDevOpsRepositoryDecodeError>()(
   'AzureDevOpsRepositoryDecodeError',
   {
     operation: AzureDevOpsRepositoryDecodeOperation,

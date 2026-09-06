@@ -47,7 +47,7 @@ interface CompletionFault
   failuresRemaining: number
 }
 
-class ProviderRuntimeInboxRunnerTestError extends Schema.TaggedErrorClass<ProviderRuntimeInboxRunnerTestError>()(
+class ProviderRuntimeInboxRunnerTestError extends Schema.TaggedError<ProviderRuntimeInboxRunnerTestError>()(
   'ProviderRuntimeInboxRunnerTestError',
   { detail: Schema.String },
 )

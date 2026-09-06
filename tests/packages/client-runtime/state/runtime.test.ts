@@ -50,7 +50,7 @@ const QUERY_ENVIRONMENT = new PrimaryConnectionTarget({
   wsBaseUrl: 'wss://query.example.test',
 })
 
-class TestQueryError extends Schema.TaggedErrorClass<TestQueryError>()('TestQueryError', {
+class TestQueryError extends Schema.TaggedError<TestQueryError>()('TestQueryError', {
   message: Schema.String,
 })
 {}

@@ -157,7 +157,7 @@ export const AttachmentLifecycleDiagnostics = Schema.Struct({
 })
 export type AttachmentLifecycleDiagnostics = typeof AttachmentLifecycleDiagnostics.Type
 
-export class AttachmentStagingConflictError extends Schema.TaggedErrorClass<AttachmentStagingConflictError>()(
+export class AttachmentStagingConflictError extends Schema.TaggedError<AttachmentStagingConflictError>()(
   'AttachmentStagingConflictError',
   { stagingKey: Schema.String, detail: Schema.String },
 )

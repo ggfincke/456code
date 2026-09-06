@@ -42,7 +42,7 @@ import {
 // compiled once at module scope; rebuilding per call is a lint-flagged cost
 const decodeOrchestratePlanRevision = Schema.decodeUnknownEffect(OrchestratePlanRevision)
 const decodeOrchestrateRunExecution = Schema.decodeUnknownEffect(OrchestrateRunExecution)
-const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 function orchestratePlanError(
   operation: string,

@@ -34,7 +34,7 @@ export interface ResolvedCheckpointIdentity
   readonly legacyMode: 'none' | 'null-root' | 'pre-oid'
 }
 
-export class CheckpointCaptureIdentityMissingError extends Schema.TaggedErrorClass<CheckpointCaptureIdentityMissingError>()(
+export class CheckpointCaptureIdentityMissingError extends Schema.TaggedError<CheckpointCaptureIdentityMissingError>()(
   'CheckpointCaptureIdentityMissingError',
   {
     operation: CheckpointIdentityOperation,
@@ -53,7 +53,7 @@ export class CheckpointCaptureIdentityMissingError extends Schema.TaggedErrorCla
   }
 }
 
-export class CheckpointRepositoryMismatchError extends Schema.TaggedErrorClass<CheckpointRepositoryMismatchError>()(
+export class CheckpointRepositoryMismatchError extends Schema.TaggedError<CheckpointRepositoryMismatchError>()(
   'CheckpointRepositoryMismatchError',
   {
     operation: CheckpointIdentityOperation,
@@ -75,7 +75,7 @@ export class CheckpointRepositoryMismatchError extends Schema.TaggedErrorClass<C
   }
 }
 
-export class CheckpointRefOidMismatchError extends Schema.TaggedErrorClass<CheckpointRefOidMismatchError>()(
+export class CheckpointRefOidMismatchError extends Schema.TaggedError<CheckpointRefOidMismatchError>()(
   'CheckpointRefOidMismatchError',
   {
     operation: CheckpointIdentityOperation,
@@ -107,7 +107,7 @@ export class CheckpointRefOidMismatchError extends Schema.TaggedErrorClass<Check
   }
 }
 
-export class CheckpointCaptureRootUnavailableError extends Schema.TaggedErrorClass<CheckpointCaptureRootUnavailableError>()(
+export class CheckpointCaptureRootUnavailableError extends Schema.TaggedError<CheckpointCaptureRootUnavailableError>()(
   'CheckpointCaptureRootUnavailableError',
   {
     operation: CheckpointIdentityOperation,
@@ -125,7 +125,7 @@ export class CheckpointCaptureRootUnavailableError extends Schema.TaggedErrorCla
   }
 }
 
-export class CheckpointDestructiveLegacyRefusalError extends Schema.TaggedErrorClass<CheckpointDestructiveLegacyRefusalError>()(
+export class CheckpointDestructiveLegacyRefusalError extends Schema.TaggedError<CheckpointDestructiveLegacyRefusalError>()(
   'CheckpointDestructiveLegacyRefusalError',
   {
     operation: Schema.Literal('revert'),
@@ -165,7 +165,7 @@ export interface ResolvedRepositoryObjectRevision
   readonly commitOid: string
 }
 
-export class RepositoryRevisionUnavailableError extends Schema.TaggedErrorClass<RepositoryRevisionUnavailableError>()(
+export class RepositoryRevisionUnavailableError extends Schema.TaggedError<RepositoryRevisionUnavailableError>()(
   'RepositoryRevisionUnavailableError',
   {
     cwd: Schema.String,
@@ -180,7 +180,7 @@ export class RepositoryRevisionUnavailableError extends Schema.TaggedErrorClass<
   }
 }
 
-export class RepositoryRevisionMismatchError extends Schema.TaggedErrorClass<RepositoryRevisionMismatchError>()(
+export class RepositoryRevisionMismatchError extends Schema.TaggedError<RepositoryRevisionMismatchError>()(
   'RepositoryRevisionMismatchError',
   {
     cwd: Schema.String,
@@ -198,7 +198,7 @@ export class RepositoryRevisionMismatchError extends Schema.TaggedErrorClass<Rep
   }
 }
 
-export class RepositoryRevisionOidMismatchError extends Schema.TaggedErrorClass<RepositoryRevisionOidMismatchError>()(
+export class RepositoryRevisionOidMismatchError extends Schema.TaggedError<RepositoryRevisionOidMismatchError>()(
   'RepositoryRevisionOidMismatchError',
   {
     cwd: Schema.String,

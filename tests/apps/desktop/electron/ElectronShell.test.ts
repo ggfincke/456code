@@ -3,7 +3,8 @@
 
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import { beforeEach, vi } from 'vite-plus/test'
+import * as Fiber from 'effect/Fiber'
+import { beforeEach, expect, vi } from 'vite-plus/test'
 
 const { openExternalMock, writeTextMock } = vi.hoisted(() => ({
   openExternalMock: vi.fn(),
@@ -28,6 +29,38 @@ describe('ElectronShell', () =>
     openExternalMock.mockReset()
     writeTextMock.mockReset()
   })
+
+  it.effect('waits until Electron finishes writing clipboard text', () =>
+    Effect.gen(function* ()
+    {
+      const pending = Promise.withResolvers<void>()
+      writeTextMock.mockReturnValue(pending.promise)
+
+      const electronShell = yield* ElectronShell.ElectronShell
+      const copying = yield* electronShell.copyText('copied link').pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+
+      expect(writeTextMock).toHaveBeenCalledWith('copied link')
+      expect(copying.pollUnsafe()).toBeUndefined()
+      pending.resolve()
+      yield* Fiber.join(copying)
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  )
+
+  it.effect('propagates rejected clipboard writes', () =>
+    Effect.gen(function* ()
+    {
+      const cause = new Error('clipboard unavailable')
+      writeTextMock.mockRejectedValue(cause)
+
+      const electronShell = yield* ElectronShell.ElectronShell
+      const error = yield* electronShell
+        .copyText('copied link')
+        .pipe(Effect.catchDefect((defect) => Effect.succeed(defect)))
+
+      expect(error).toBe(cause)
+    }).pipe(Effect.provide(ElectronShell.layer)),
+  )
 
   it.effect('opens web and remote editor URLs', () =>
     Effect.gen(function* ()

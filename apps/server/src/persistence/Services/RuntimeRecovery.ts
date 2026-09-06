@@ -93,7 +93,7 @@ export interface RuntimeRecoveryCheckpointPageCursor
   readonly operationId: string
 }
 
-export class RuntimeRecoveryPersistenceNotFoundError extends Schema.TaggedErrorClass<RuntimeRecoveryPersistenceNotFoundError>()(
+export class RuntimeRecoveryPersistenceNotFoundError extends Schema.TaggedError<RuntimeRecoveryPersistenceNotFoundError>()(
   'RuntimeRecoveryPersistenceNotFoundError',
   {
     subjectKind: Schema.Literals(['reactor-action', 'checkpoint-revert']),
@@ -102,7 +102,7 @@ export class RuntimeRecoveryPersistenceNotFoundError extends Schema.TaggedErrorC
 )
 {}
 
-export class RuntimeRecoveryPersistenceStaleError extends Schema.TaggedErrorClass<RuntimeRecoveryPersistenceStaleError>()(
+export class RuntimeRecoveryPersistenceStaleError extends Schema.TaggedError<RuntimeRecoveryPersistenceStaleError>()(
   'RuntimeRecoveryPersistenceStaleError',
   {
     subjectKind: Schema.Literals(['reactor-action', 'checkpoint-revert']),

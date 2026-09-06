@@ -29,7 +29,7 @@ import { deriveServerPaths } from '../../../../apps/server/src/config.ts'
 import { SERVER_STORAGE_LEASE_FILE } from '../../../../apps/server/src/serverStorageLease.ts'
 import { renderTerminalQrCode } from '../../../../apps/server/src/startupAccess.ts'
 
-const encodeUnknownJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const descriptor = {
   environmentId: 'pair-test-environment',

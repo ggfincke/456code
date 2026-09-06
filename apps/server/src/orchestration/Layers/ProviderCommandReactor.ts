@@ -394,7 +394,7 @@ const ProviderActionPayloadSchema = Schema.fromJsonString(
 const encodeProviderActionPayload = Schema.encodeEffect(ProviderActionPayloadSchema)
 const decodeProviderActionPayload = Schema.decodeUnknownEffect(ProviderActionPayloadSchema)
 
-class ProviderCommandPayloadError extends Schema.TaggedErrorClass<ProviderCommandPayloadError>()(
+class ProviderCommandPayloadError extends Schema.TaggedError<ProviderCommandPayloadError>()(
   'ProviderCommandPayloadError',
   { detail: Schema.String },
 )
@@ -402,7 +402,7 @@ class ProviderCommandPayloadError extends Schema.TaggedErrorClass<ProviderComman
 
 const isProviderCommandPayloadError = Schema.is(ProviderCommandPayloadError)
 
-class ProviderSwitchCompensationReadError extends Schema.TaggedErrorClass<ProviderSwitchCompensationReadError>()(
+class ProviderSwitchCompensationReadError extends Schema.TaggedError<ProviderSwitchCompensationReadError>()(
   'ProviderSwitchCompensationReadError',
   { threadId: ThreadId },
 )

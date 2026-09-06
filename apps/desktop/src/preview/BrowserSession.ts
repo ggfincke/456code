@@ -28,7 +28,7 @@ const ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
   'geolocation',
 ])
 
-export class BrowserSessionPartitionDerivationError extends Schema.TaggedErrorClass<BrowserSessionPartitionDerivationError>()(
+export class BrowserSessionPartitionDerivationError extends Schema.TaggedError<BrowserSessionPartitionDerivationError>()(
   'BrowserSessionPartitionDerivationError',
   {
     scope: Schema.String,
@@ -42,7 +42,7 @@ export class BrowserSessionPartitionDerivationError extends Schema.TaggedErrorCl
   }
 }
 
-export class BrowserSessionCreationError extends Schema.TaggedErrorClass<BrowserSessionCreationError>()(
+export class BrowserSessionCreationError extends Schema.TaggedError<BrowserSessionCreationError>()(
   'BrowserSessionCreationError',
   {
     scope: Schema.String,
@@ -57,7 +57,7 @@ export class BrowserSessionCreationError extends Schema.TaggedErrorClass<Browser
   }
 }
 
-export class BrowserSessionStorageClearError extends Schema.TaggedErrorClass<BrowserSessionStorageClearError>()(
+export class BrowserSessionStorageClearError extends Schema.TaggedError<BrowserSessionStorageClearError>()(
   'BrowserSessionStorageClearError',
   {
     partition: Schema.String,
@@ -71,7 +71,7 @@ export class BrowserSessionStorageClearError extends Schema.TaggedErrorClass<Bro
   }
 }
 
-export class BrowserSessionCacheClearError extends Schema.TaggedErrorClass<BrowserSessionCacheClearError>()(
+export class BrowserSessionCacheClearError extends Schema.TaggedError<BrowserSessionCacheClearError>()(
   'BrowserSessionCacheClearError',
   {
     partition: Schema.String,
@@ -183,7 +183,7 @@ export const make = Effect.gen(function* BrowserSessionMake()
           Effect.tryPromise({
             try: () =>
               browserSession.clearStorageData({
-                storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers'],
+                storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers'],
               }),
             catch: (cause) =>
               new BrowserSessionStorageClearError({

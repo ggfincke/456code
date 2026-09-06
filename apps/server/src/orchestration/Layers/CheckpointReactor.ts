@@ -93,7 +93,7 @@ const RuntimeCheckpointBufferState = Schema.fromJsonString(
 const decodeRuntimeCheckpointBufferState = Schema.decodeUnknownEffect(RuntimeCheckpointBufferState)
 const RUNTIME_CHECKPOINT_BUFFER_JSON = '{"version":1}'
 
-class CheckpointDomainPayloadError extends Schema.TaggedErrorClass<CheckpointDomainPayloadError>()(
+class CheckpointDomainPayloadError extends Schema.TaggedError<CheckpointDomainPayloadError>()(
   'CheckpointDomainPayloadError',
   { detail: Schema.String },
 )
@@ -101,7 +101,7 @@ class CheckpointDomainPayloadError extends Schema.TaggedErrorClass<CheckpointDom
 
 // retryable failure of a durable checkpoint step: a missing journal field, a
 // target that moved under the operation, or an unreadable journal detail
-class CheckpointOperationError extends Schema.TaggedErrorClass<CheckpointOperationError>()(
+class CheckpointOperationError extends Schema.TaggedError<CheckpointOperationError>()(
   'CheckpointOperationError',
   { detail: Schema.String },
 )
@@ -112,7 +112,7 @@ class CheckpointOperationError extends Schema.TaggedErrorClass<CheckpointOperati
   }
 }
 
-class CheckpointRuntimeConsumerError extends Schema.TaggedErrorClass<CheckpointRuntimeConsumerError>()(
+class CheckpointRuntimeConsumerError extends Schema.TaggedError<CheckpointRuntimeConsumerError>()(
   'CheckpointRuntimeConsumerError',
   { detail: Schema.String, cause: Schema.optional(Schema.Defect()) },
 )

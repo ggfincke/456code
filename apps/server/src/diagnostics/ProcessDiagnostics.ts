@@ -45,7 +45,7 @@ export class ProcessDiagnostics extends Context.Service<
 >()('456code/diagnostics/ProcessDiagnostics')
 {}
 
-class ProcessDiagnosticsQueryTimeoutError extends Schema.TaggedErrorClass<ProcessDiagnosticsQueryTimeoutError>()(
+class ProcessDiagnosticsQueryTimeoutError extends Schema.TaggedError<ProcessDiagnosticsQueryTimeoutError>()(
   'ProcessDiagnosticsQueryTimeoutError',
   {
     command: Schema.String,
@@ -61,7 +61,7 @@ class ProcessDiagnosticsQueryTimeoutError extends Schema.TaggedErrorClass<Proces
   }
 }
 
-class ProcessDiagnosticsQueryFailedError extends Schema.TaggedErrorClass<ProcessDiagnosticsQueryFailedError>()(
+class ProcessDiagnosticsQueryFailedError extends Schema.TaggedError<ProcessDiagnosticsQueryFailedError>()(
   'ProcessDiagnosticsQueryFailedError',
   {
     command: Schema.String,
@@ -83,7 +83,7 @@ class ProcessDiagnosticsQueryFailedError extends Schema.TaggedErrorClass<Process
   }
 }
 
-class ProcessDiagnosticsServerProcessSignalError extends Schema.TaggedErrorClass<ProcessDiagnosticsServerProcessSignalError>()(
+class ProcessDiagnosticsServerProcessSignalError extends Schema.TaggedError<ProcessDiagnosticsServerProcessSignalError>()(
   'ProcessDiagnosticsServerProcessSignalError',
   { pid: Schema.Number },
 )
@@ -94,7 +94,7 @@ class ProcessDiagnosticsServerProcessSignalError extends Schema.TaggedErrorClass
   }
 }
 
-class ProcessDiagnosticsNotDescendantError extends Schema.TaggedErrorClass<ProcessDiagnosticsNotDescendantError>()(
+class ProcessDiagnosticsNotDescendantError extends Schema.TaggedError<ProcessDiagnosticsNotDescendantError>()(
   'ProcessDiagnosticsNotDescendantError',
   {
     pid: Schema.Number,
@@ -108,7 +108,7 @@ class ProcessDiagnosticsNotDescendantError extends Schema.TaggedErrorClass<Proce
   }
 }
 
-class ProcessDiagnosticsSignalFailedError extends Schema.TaggedErrorClass<ProcessDiagnosticsSignalFailedError>()(
+class ProcessDiagnosticsSignalFailedError extends Schema.TaggedError<ProcessDiagnosticsSignalFailedError>()(
   'ProcessDiagnosticsSignalFailedError',
   {
     pid: Schema.Number,

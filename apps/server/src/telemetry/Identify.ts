@@ -26,7 +26,7 @@ const ClaudeJsonSchema = Schema.Struct({
 export const TelemetryIdentitySource = Schema.Literals(['codex', 'claude', 'anonymous'])
 export type TelemetryIdentitySource = typeof TelemetryIdentitySource.Type
 
-export class TelemetryIdentityReadError extends Schema.TaggedErrorClass<TelemetryIdentityReadError>()(
+export class TelemetryIdentityReadError extends Schema.TaggedError<TelemetryIdentityReadError>()(
   'TelemetryIdentityReadError',
   {
     source: TelemetryIdentitySource,
@@ -41,7 +41,7 @@ export class TelemetryIdentityReadError extends Schema.TaggedErrorClass<Telemetr
   }
 }
 
-export class TelemetryIdentityDecodeError extends Schema.TaggedErrorClass<TelemetryIdentityDecodeError>()(
+export class TelemetryIdentityDecodeError extends Schema.TaggedError<TelemetryIdentityDecodeError>()(
   'TelemetryIdentityDecodeError',
   {
     source: Schema.Literals(['codex', 'claude']),
@@ -56,7 +56,7 @@ export class TelemetryIdentityDecodeError extends Schema.TaggedErrorClass<Teleme
   }
 }
 
-export class TelemetryAnonymousIdGenerationError extends Schema.TaggedErrorClass<TelemetryAnonymousIdGenerationError>()(
+export class TelemetryAnonymousIdGenerationError extends Schema.TaggedError<TelemetryAnonymousIdGenerationError>()(
   'TelemetryAnonymousIdGenerationError',
   {
     source: Schema.Literal('anonymous'),
@@ -71,7 +71,7 @@ export class TelemetryAnonymousIdGenerationError extends Schema.TaggedErrorClass
   }
 }
 
-export class TelemetryAnonymousIdPersistenceError extends Schema.TaggedErrorClass<TelemetryAnonymousIdPersistenceError>()(
+export class TelemetryAnonymousIdPersistenceError extends Schema.TaggedError<TelemetryAnonymousIdPersistenceError>()(
   'TelemetryAnonymousIdPersistenceError',
   {
     source: Schema.Literal('anonymous'),
@@ -86,7 +86,7 @@ export class TelemetryAnonymousIdPersistenceError extends Schema.TaggedErrorClas
   }
 }
 
-export class TelemetryIdentityHashError extends Schema.TaggedErrorClass<TelemetryIdentityHashError>()(
+export class TelemetryIdentityHashError extends Schema.TaggedError<TelemetryIdentityHashError>()(
   'TelemetryIdentityHashError',
   {
     source: TelemetryIdentitySource,

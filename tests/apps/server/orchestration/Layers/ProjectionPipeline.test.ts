@@ -58,8 +58,8 @@ import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestr
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { makeTestServerStorageLeaseLayer } from '../../support/serverStorageLease.ts'
 
-const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
-const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
   Layer.merge(OrchestrationProjectionPipelineLive, AttachmentCleanupReactorLive).pipe(

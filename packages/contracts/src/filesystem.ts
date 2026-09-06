@@ -31,7 +31,7 @@ export const FilesystemBrowseFailure = Schema.Literals([
 ])
 export type FilesystemBrowseFailure = typeof FilesystemBrowseFailure.Type
 
-export class FilesystemBrowseError extends Schema.TaggedErrorClass<FilesystemBrowseError>()(
+export class FilesystemBrowseError extends Schema.TaggedError<FilesystemBrowseError>()(
   'FilesystemBrowseError',
   {
     partialPath: Schema.optional(TrimmedNonEmptyString),

@@ -55,12 +55,9 @@ const decodeLeaseOwner = Schema.decodeUnknownEffect(Schema.fromJsonString(Server
 const decodeEnvironmentId = Schema.decodeUnknownEffect(EnvironmentId)
 const decodeUrl = Schema.decodeUnknownEffect(Schema.URLFromString)
 
-export class PairCommandError extends Schema.TaggedErrorClass<PairCommandError>()(
-  'PairCommandError',
-  {
-    message: Schema.String,
-  },
-)
+export class PairCommandError extends Schema.TaggedError<PairCommandError>()('PairCommandError', {
+  message: Schema.String,
+})
 {}
 
 interface PairTarget

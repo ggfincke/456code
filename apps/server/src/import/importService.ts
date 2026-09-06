@@ -88,8 +88,8 @@ const sourceHistoryOnlyReason = 'the source is not resumable'
 const maximumDateEpochMillis = 8_640_000_000_000_000
 export const ACP_IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000
 export const IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000
-const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
-const encodeUnknownJsonStringSync = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
+const encodeUnknownJsonStringSync = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 export interface ImportRequestContext
 {
@@ -306,7 +306,7 @@ function boundedResultMessage(error: unknown): string
     : `${message.slice(0, IMPORT_RESULT_MESSAGE_MAX_CHARS - 1)}…`
 }
 
-class ImportSessionOperationError extends Schema.TaggedErrorClass<ImportSessionOperationError>()(
+class ImportSessionOperationError extends Schema.TaggedError<ImportSessionOperationError>()(
   'ImportSessionOperationError',
   {
     operation: Schema.Literals(['read', 'parse', 'persist']),

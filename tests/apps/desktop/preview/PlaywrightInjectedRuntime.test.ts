@@ -11,7 +11,14 @@ import {
   playwrightInjectedRuntimeSource,
 } from '../../../../apps/desktop/src/preview/PlaywrightInjectedRuntime.ts'
 
-const bundleWithSourceLiteral = (literal: string): string => `const source3 = ${literal};\n  }\n});`
+const bundleWithSourceLiteral = (
+  literal: string,
+  moduleName = 'injectedScriptSource',
+  symbol = 'source4',
+): string => `var ${symbol};\nvar init_${moduleName} = __esm({
+  "packages/playwright-core/src/generated/${moduleName}.ts"() {
+    "use strict";
+    ${symbol} = ${literal};\n  }\n});`
 
 describe('playwright injected runtime', () =>
 {
@@ -21,6 +28,24 @@ describe('playwright injected runtime', () =>
       const source = yield* playwrightInjectedRuntimeSource()
       expect(source.length).toBeGreaterThan(100_000)
       expect(source).toContain('InjectedScript')
+      expect(source).toContain('parseSelector')
+      expect(source).toContain('querySelector')
+      expect(source).toContain('elementState')
+    }),
+  )
+
+  effectIt.effect('selects the injected-script module after internal symbols are renumbered', () =>
+    Effect.gen(function* ()
+    {
+      const expected = 'InjectedScript'.repeat(10_000)
+      const bundle = [
+        bundleWithSourceLiteral(`'${'utility'.repeat(20_000)}'`, 'utilityScriptSource', 'source3'),
+        bundleWithSourceLiteral(`'${expected}'`, 'injectedScriptSource', 'source17'),
+      ].join('\n')
+
+      expect(yield* extractPlaywrightInjectedRuntimeSource(bundle, '/tmp/coreBundle.js')).toBe(
+        expected,
+      )
     }),
   )
 
@@ -37,13 +62,20 @@ describe('playwright injected runtime', () =>
     Effect.gen(function* ()
     {
       const error = yield* Effect.flip(
-        extractPlaywrightInjectedRuntimeSource("const source = 'missing';", '/tmp/coreBundle.js'),
+        extractPlaywrightInjectedRuntimeSource(
+          bundleWithSourceLiteral(
+            `'${'utility'.repeat(20_000)}'`,
+            'utilityScriptSource',
+            'source3',
+          ),
+          '/tmp/coreBundle.js',
+        ),
       )
 
       expect(error).toMatchObject({
         _tag: 'PlaywrightSourceMarkerNotFoundError',
         bundlePath: '/tmp/coreBundle.js',
-        marker: 'source3 = ',
+        marker: '"packages/playwright-core/src/generated/injectedScriptSource.ts"() {',
       })
       expect('cause' in error).toBe(false)
     }),

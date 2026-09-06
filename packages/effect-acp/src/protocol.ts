@@ -88,7 +88,7 @@ const decodeElicitationComplete = Schema.decodeUnknownEffect(
   AcpSchema.CompleteElicitationNotification,
 )
 const decodeCancelRequest = Schema.decodeUnknownEffect(AcpSchema.CancelRequestNotification)
-const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 const parserFactory = RpcSerialization.ndJsonRpc()
 const protocolMessageQueueCapacity = 256
 
@@ -136,11 +136,11 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
   const outgoing = yield* Queue.bounded<string | Uint8Array, Cause.Done<void>>(
     protocolMessageQueueCapacity,
   )
-  const nextRequestId = yield* Ref.make(1n)
+  const nextRequestId = yield* Ref.make(1)
   const terminationHandled = yield* Ref.make(false)
   const terminationError = yield* Ref.make<AcpError.AcpError | undefined>(undefined)
-  const extPending = yield* Ref.make(new Map<string, AcpPendingRequest>())
-  const extInboundInterrupts = yield* Ref.make(new Map<string, Effect.Effect<void>>())
+  const extPending = yield* Ref.make(new Map<string | number, AcpPendingRequest>())
+  const extInboundInterrupts = yield* Ref.make(new Map<string | number, Effect.Effect<void>>())
 
   const logProtocol = (event: AcpProtocolLogEvent) =>
   {
@@ -181,7 +181,10 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
         : 'requestId' in message
           ? message.requestId
           : undefined
-    const requestId = encodedRequestId === '' ? undefined : encodedRequestId
+    const requestId =
+      encodedRequestId === undefined || encodedRequestId === ''
+        ? undefined
+        : String(encodedRequestId)
     const encoded = yield* Effect.try({
       try: () =>
       {
@@ -198,7 +201,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
           return `${encodeUnknownJsonString({
             jsonrpc: '2.0',
             method: PROTOCOL_METHODS.cancel_request,
-            params: { requestId: normalizeRequestId(message.requestId) },
+            params: { requestId: message.requestId },
           })}\n`
         }
         return parser.encode(message)
@@ -239,7 +242,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
   })
 
   const resolveExtPending = (
-    requestId: string,
+    requestId: string | number,
     onFound: (pendingRequest: AcpPendingRequest) => Effect.Effect<void>,
   ) =>
     Ref.modify(extPending, (pending) =>
@@ -254,7 +257,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       return [onFound(pendingRequest), next] as const
     }).pipe(Effect.flatten)
 
-  const removeExtPending = (requestId: string) =>
+  const removeExtPending = (requestId: string | number) =>
     Ref.update(extPending, (pending) =>
     {
       if (!pending.has(requestId))
@@ -266,10 +269,10 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       return next
     })
 
-  const completeExtPendingFailure = (requestId: string, error: AcpError.AcpError) =>
+  const completeExtPendingFailure = (requestId: string | number, error: AcpError.AcpError) =>
     resolveExtPending(requestId, ({ deferred }) => Deferred.fail(deferred, error))
 
-  const completeExtPendingSuccess = (requestId: string, value: unknown) =>
+  const completeExtPendingSuccess = (requestId: string | number, value: unknown) =>
     resolveExtPending(requestId, ({ deferred }) => Deferred.succeed(deferred, value))
 
   const failAllExtPending = (error: AcpError.AcpError) =>
@@ -283,7 +286,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
 
   const interruptAllExtInbound = Ref.getAndSet(
     extInboundInterrupts,
-    new Map<string, Effect.Effect<void>>(),
+    new Map<string | number, Effect.Effect<void>>(),
   ).pipe(
     Effect.flatMap((interrupts) =>
       Effect.forEach(interrupts.values(), (interrupt) => interrupt, { discard: true }),
@@ -342,7 +345,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       ] as const
     }).pipe(Effect.flatten)
 
-  const respondWithSuccess = (requestId: string, value: unknown) =>
+  const respondWithSuccess = (requestId: string | number, value: unknown) =>
     offerOutgoing({
       _tag: 'Exit',
       requestId,
@@ -352,7 +355,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       },
     })
 
-  const respondWithError = (requestId: string, error: AcpError.AcpRequestError) =>
+  const respondWithError = (requestId: string | number, error: AcpError.AcpRequestError) =>
     offerOutgoing({
       _tag: 'Exit',
       requestId,
@@ -430,7 +433,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
                 message.id,
                 AcpError.AcpRequestError.fromExtensionResponseEncodingError(
                   message.tag,
-                  message.id,
+                  String(message.id),
                   error,
                 ),
               ),
@@ -464,18 +467,21 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       ),
       Effect.flatMap(({ requestId }) =>
       {
-        const normalizedRequestId = String(requestId)
+        if (requestId === null)
+        {
+          return Effect.void
+        }
         return Ref.get(extInboundInterrupts).pipe(
           Effect.flatMap((interrupts) =>
           {
-            const interrupt = interrupts.get(normalizedRequestId)
+            const interrupt = interrupts.get(requestId)
             if (interrupt)
             {
               return interrupt
             }
             return Queue.offer(serverQueue, {
               _tag: 'Interrupt',
-              requestId: normalizedRequestId,
+              requestId,
             })
           }),
           Effect.asVoid,
@@ -568,7 +574,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
             message.requestId,
             AcpError.AcpRequestError.fromProtocolError(failure.error, {
               method: pendingRequest.method,
-              requestId: message.requestId,
+              requestId: String(message.requestId),
               cause: message.exit.cause,
             }),
           )
@@ -577,7 +583,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
           message.requestId,
           AcpError.AcpRequestError.fromExtensionResponseFailure(
             pendingRequest.method,
-            message.requestId,
+            String(message.requestId),
             message.exit.cause,
           ),
         )
@@ -604,7 +610,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
                   message.requestId,
                   AcpError.AcpRequestError.unsupportedStreamingResponse(
                     pendingRequest.method,
-                    message.requestId,
+                    String(message.requestId),
                   ),
                 )
               : Queue.offer(clientQueue, message).pipe(Effect.asVoid)
@@ -871,13 +877,10 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       return yield* terminated
     }
 
-    const requestId = yield* Ref.modify(
-      nextRequestId,
-      (current) => [current, current + 1n] as const,
-    )
+    const requestId = yield* Ref.modify(nextRequestId, (current) => [current, current + 1] as const)
     const deferred = yield* Deferred.make<unknown, AcpError.AcpError>()
     yield* Ref.update(extPending, (pending) =>
-      new Map(pending).set(String(requestId), { deferred, method }),
+      new Map(pending).set(requestId, { deferred, method }),
     )
     return yield* Effect.gen(function* ()
     {
@@ -888,7 +891,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       }
       yield* offerOutgoing({
         _tag: 'Request',
-        id: String(requestId),
+        id: requestId,
         tag: method,
         payload,
         headers: [],
@@ -897,10 +900,10 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
     }).pipe(
       Effect.onInterrupt(() =>
         sendNotification(PROTOCOL_METHODS.cancel_request, {
-          requestId: normalizeRequestId(String(requestId)),
+          requestId,
         }),
       ),
-      Effect.ensuring(removeExtPending(String(requestId))),
+      Effect.ensuring(removeExtPending(requestId)),
     )
   })
 
@@ -919,14 +922,6 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
     notify: sendNotification,
   } satisfies AcpPatchedProtocol
 })
-
-function normalizeRequestId(requestId: string): string | number
-{
-  const numericRequestId = Number(requestId)
-  return Number.isSafeInteger(numericRequestId) && String(numericRequestId) === requestId
-    ? numericRequestId
-    : requestId
-}
 
 function isProtocolError(
   value: unknown,

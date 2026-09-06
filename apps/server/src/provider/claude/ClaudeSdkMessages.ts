@@ -5,8 +5,8 @@ import type { RuntimeContentStreamKind } from '@t3tools/contracts'
 import * as Exit from 'effect/Exit'
 import * as Schema from 'effect/Schema'
 
-const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString)
-const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString)
+const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown))
+const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown))
 
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, 'assistant_text' | 'reasoning_text'>
 

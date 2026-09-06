@@ -15,7 +15,7 @@ const ElectronNotificationOperation = Schema.Literals([
   'set-overlay-badge',
 ])
 
-export class ElectronNotificationOperationError extends Schema.TaggedErrorClass<ElectronNotificationOperationError>()(
+export class ElectronNotificationOperationError extends Schema.TaggedError<ElectronNotificationOperationError>()(
   'ElectronNotificationOperationError',
   {
     operation: ElectronNotificationOperation,
@@ -72,20 +72,33 @@ export const make = Effect.gen(function* ()
   return ElectronNotifications.of({
     isSupported: Effect.sync(() => Electron.Notification.isSupported()),
     show: (input) =>
-      Effect.try({
+      Effect.tryPromise({
         try: () =>
-        {
-          const notification = new Electron.Notification({
-            title: input.title,
-            body: input.body,
-            ...(input.subtitle === undefined ? {} : { subtitle: input.subtitle }),
-          })
-          // the click handler has to be attached before show(): a banner the
-          // user clicks immediately would otherwise do nothing, which is the
-          // whole point of raising it.
-          notification.on('click', input.onClick)
-          notification.show()
-        },
+          new Promise<void>((resolve, reject) =>
+          {
+            const notification = new Electron.Notification({
+              title: input.title,
+              body: input.body,
+              ...(input.subtitle === undefined ? {} : { subtitle: input.subtitle }),
+            })
+            const onShow = () =>
+            {
+              notification.removeListener('failed', onFailed)
+              resolve()
+            }
+            const onFailed = (_event: Electron.Event, error: string) =>
+            {
+              notification.removeListener('show', onShow)
+              notification.removeListener('click', input.onClick)
+              reject(new Error(error))
+            }
+            // native delivery failures arrive asynchronously, including unsigned macos builds.
+            notification.once('show', onShow)
+            notification.once('failed', onFailed)
+            // attach before show so an immediate click still opens the thread.
+            notification.on('click', input.onClick)
+            notification.show()
+          }),
         catch: (cause) =>
           new ElectronNotificationOperationError({ operation: 'show', platform, cause }),
       }),

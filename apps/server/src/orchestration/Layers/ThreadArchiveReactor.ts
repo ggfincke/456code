@@ -71,7 +71,7 @@ const encodeOutcome = Schema.encodeSync(
   ),
 )
 
-class ThreadArchivePayloadError extends Schema.TaggedErrorClass<ThreadArchivePayloadError>()(
+class ThreadArchivePayloadError extends Schema.TaggedError<ThreadArchivePayloadError>()(
   'ThreadArchivePayloadError',
   { detail: Schema.String },
 )

@@ -140,7 +140,7 @@ export interface CodexAppServerProtocolErrorShape
   readonly data?: unknown
 }
 
-export class CodexAppServerSpawnError extends Schema.TaggedErrorClass<CodexAppServerSpawnError>()(
+export class CodexAppServerSpawnError extends Schema.TaggedError<CodexAppServerSpawnError>()(
   'CodexAppServerSpawnError',
   {
     command: Schema.optional(Schema.String),
@@ -156,7 +156,7 @@ export class CodexAppServerSpawnError extends Schema.TaggedErrorClass<CodexAppSe
   }
 }
 
-export class CodexAppServerProcessExitedError extends Schema.TaggedErrorClass<CodexAppServerProcessExitedError>()(
+export class CodexAppServerProcessExitedError extends Schema.TaggedError<CodexAppServerProcessExitedError>()(
   'CodexAppServerProcessExitedError',
   {
     code: Schema.optional(Schema.Number),
@@ -173,7 +173,7 @@ export class CodexAppServerProcessExitedError extends Schema.TaggedErrorClass<Co
   }
 }
 
-export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<CodexAppServerProtocolParseError>()(
+export class CodexAppServerProtocolParseError extends Schema.TaggedError<CodexAppServerProtocolParseError>()(
   'CodexAppServerProtocolParseError',
   {
     operation: CodexAppServerProtocolParseOperation,
@@ -252,7 +252,7 @@ export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<Co
   }
 }
 
-export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexAppServerTransportError>()(
+export class CodexAppServerTransportError extends Schema.TaggedError<CodexAppServerTransportError>()(
   'CodexAppServerTransportError',
   {
     operation: CodexAppServerTransportOperation,
@@ -267,7 +267,7 @@ export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexA
   }
 }
 
-export class CodexAppServerIdentifierGenerationError extends Schema.TaggedErrorClass<CodexAppServerIdentifierGenerationError>()(
+export class CodexAppServerIdentifierGenerationError extends Schema.TaggedError<CodexAppServerIdentifierGenerationError>()(
   'CodexAppServerIdentifierGenerationError',
   {
     purpose: CodexAppServerIdentifierPurpose,
@@ -281,7 +281,7 @@ export class CodexAppServerIdentifierGenerationError extends Schema.TaggedErrorC
   }
 }
 
-export class CodexAppServerInputStreamEndedError extends Schema.TaggedErrorClass<CodexAppServerInputStreamEndedError>()(
+export class CodexAppServerInputStreamEndedError extends Schema.TaggedError<CodexAppServerInputStreamEndedError>()(
   'CodexAppServerInputStreamEndedError',
   {},
 )
@@ -292,7 +292,7 @@ export class CodexAppServerInputStreamEndedError extends Schema.TaggedErrorClass
   }
 }
 
-export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexAppServerRequestError>()(
+export class CodexAppServerRequestError extends Schema.TaggedError<CodexAppServerRequestError>()(
   'CodexAppServerRequestError',
   {
     code: Schema.Number,

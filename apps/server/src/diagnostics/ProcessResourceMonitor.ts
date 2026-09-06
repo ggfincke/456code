@@ -38,7 +38,7 @@ export interface ProcessResourceSample
   readonly isServerRoot: boolean
 }
 
-export class ProcessResourceSamplingError extends Schema.TaggedErrorClass<ProcessResourceSamplingError>()(
+export class ProcessResourceSamplingError extends Schema.TaggedError<ProcessResourceSamplingError>()(
   'ProcessResourceSamplingError',
   {
     failureTag: ServerProcessResourceHistoryFailureTag,

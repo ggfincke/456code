@@ -55,7 +55,7 @@ export const ProjectSearchContentsResult = Schema.Struct({
 })
 export type ProjectSearchContentsResult = typeof ProjectSearchContentsResult.Type
 
-export class ProjectSearchContentsError extends Schema.TaggedErrorClass<ProjectSearchContentsError>()(
+export class ProjectSearchContentsError extends Schema.TaggedError<ProjectSearchContentsError>()(
   'ProjectSearchContentsError',
   { message: TrimmedNonEmptyString },
 )
@@ -83,7 +83,7 @@ export const ProjectEntriesFailure = Schema.Literals([
 ])
 export type ProjectEntriesFailure = typeof ProjectEntriesFailure.Type
 
-export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSearchEntriesError>()(
+export class ProjectSearchEntriesError extends Schema.TaggedError<ProjectSearchEntriesError>()(
   'ProjectSearchEntriesError',
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -99,7 +99,7 @@ export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSe
 )
 {}
 
-export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectListEntriesError>()(
+export class ProjectListEntriesError extends Schema.TaggedError<ProjectListEntriesError>()(
   'ProjectListEntriesError',
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -148,7 +148,7 @@ export const ProjectFileOperation = Schema.Literals([
 ])
 export type ProjectFileOperation = typeof ProjectFileOperation.Type
 
-export class ProjectReadFileError extends Schema.TaggedErrorClass<ProjectReadFileError>()(
+export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileError>()(
   'ProjectReadFileError',
   {
     cwd: Schema.optional(TrimmedNonEmptyString),
@@ -176,7 +176,7 @@ export const ProjectWriteFileResult = Schema.Struct({
 })
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type
 
-export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteFileError>()(
+export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileError>()(
   'ProjectWriteFileError',
   {
     cwd: Schema.optional(TrimmedNonEmptyString),

@@ -44,7 +44,7 @@ interface LoadedStoredFile extends OpenCodeStoredFile
   readonly mtimeMs: number
 }
 
-const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 export interface LoadedOpenCodeSession
 {
@@ -82,7 +82,7 @@ export interface OpenCodeLoadOptions
   readonly maximumJsonFiles?: number
 }
 
-export class OpenCodeStorageError extends Schema.TaggedErrorClass<OpenCodeStorageError>()(
+export class OpenCodeStorageError extends Schema.TaggedError<OpenCodeStorageError>()(
   'OpenCodeStorageError',
   {
     operation: Schema.Literals(['discover', 'layout', 'read', 'stat']),

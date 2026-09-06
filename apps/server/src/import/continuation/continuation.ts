@@ -68,7 +68,7 @@ export interface ResolvedContinuationInstance
 
 // dependency failures are funneled into one tagged error so bind() keeps a
 // closed error channel and can always fold failures into a history-only outcome
-export class ImportContinuationDepError extends Schema.TaggedErrorClass<ImportContinuationDepError>()(
+export class ImportContinuationDepError extends Schema.TaggedError<ImportContinuationDepError>()(
   'ImportContinuationDepError',
   { message: Schema.String },
 )

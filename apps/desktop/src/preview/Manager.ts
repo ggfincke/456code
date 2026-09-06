@@ -29,6 +29,7 @@ import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import {
   type BrowserWindow,
   type Session,
+  ClipboardItem,
   clipboard,
   nativeImage,
   shell,
@@ -128,7 +129,7 @@ export {
   PreviewWebviewNotInitializedError,
 } from './ManagerErrors.ts'
 
-const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 const DEFAULT_ANNOTATION_THEME: DesktopPreviewAnnotationTheme = {
   colorScheme: 'light',
   radius: '0.625rem',
@@ -1831,8 +1832,14 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       return yield* new PreviewArtifactImageLoadError({ artifactPath: resolvedPath })
     }
-    yield* attempt({ operation: 'copyArtifactToClipboard.write', artifactPath: resolvedPath }, () =>
-      clipboard.writeImage(image),
+    yield* attemptPromise(
+      { operation: 'copyArtifactToClipboard.write', artifactPath: resolvedPath },
+      () =>
+        clipboard.write([
+          new ClipboardItem({
+            'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }),
+          }),
+        ]),
     )
   })
 

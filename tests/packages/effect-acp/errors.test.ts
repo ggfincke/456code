@@ -13,7 +13,7 @@ import * as AcpError from '../../../packages/effect-acp/src/errors.ts'
 const decodeNestedNumberPayload = Schema.decodeUnknownEffect(
   Schema.Struct({ profile: Schema.Struct({ token: Schema.Number }) }),
 )
-const encodeUnknownJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 describe('effect-acp errors', () =>
 {

@@ -480,7 +480,7 @@ export const ProjectReadMdxDocumentFailure = Schema.Literals([
 ])
 export type ProjectReadMdxDocumentFailure = typeof ProjectReadMdxDocumentFailure.Type
 
-export class ProjectReadMdxDocumentError extends Schema.TaggedErrorClass<ProjectReadMdxDocumentError>()(
+export class ProjectReadMdxDocumentError extends Schema.TaggedError<ProjectReadMdxDocumentError>()(
   'ProjectReadMdxDocumentError',
   {
     threadId: Schema.optional(ThreadId),

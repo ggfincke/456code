@@ -368,7 +368,7 @@ export const ProposalFailureCode = Schema.Literals([
 ])
 export type ProposalFailureCode = typeof ProposalFailureCode.Type
 
-export class ProposalError extends Schema.TaggedErrorClass<ProposalError>()('ProposalError', {
+export class ProposalError extends Schema.TaggedError<ProposalError>()('ProposalError', {
   operation: TrimmedNonEmptyString,
   code: ProposalFailureCode,
   detail: TrimmedNonEmptyString,

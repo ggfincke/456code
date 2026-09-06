@@ -122,7 +122,7 @@ const decodeProviderRuntimeIngestionBuffer = Schema.decodeUnknownEffect(
   Schema.fromJsonString(ProviderRuntimeIngestionBufferV1),
 )
 
-class ProviderRuntimeIngestionReplayError extends Schema.TaggedErrorClass<ProviderRuntimeIngestionReplayError>()(
+class ProviderRuntimeIngestionReplayError extends Schema.TaggedError<ProviderRuntimeIngestionReplayError>()(
   'ProviderRuntimeIngestionReplayError',
   {
     detail: Schema.String,

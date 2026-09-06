@@ -35,7 +35,7 @@ interface RuntimeRecoveryEffectPolicy
   }>
 }
 
-export class RuntimeRecoveryPolicyDeniedError extends Schema.TaggedErrorClass<RuntimeRecoveryPolicyDeniedError>()(
+export class RuntimeRecoveryPolicyDeniedError extends Schema.TaggedError<RuntimeRecoveryPolicyDeniedError>()(
   'RuntimeRecoveryPolicyDeniedError',
   {
     reason: Schema.Literals([
