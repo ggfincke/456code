@@ -306,3 +306,10 @@ tests, directive comparison against origin/main, targeted formatting/comment che
 passed (one pre-existing intentional literal-concatenation warning). Windows execution and the
 uncached Ubuntu Node 24 bootstrap/PTY probe remain hosted gates. The Node 22 lane deliberately
 disables setup cache so native installation cannot pass solely through reused build results.
+
+Group 2 local gate passed under Node 24.20.0: isolated frozen deployment followed by a standalone
+frozen hoisted installation preserves the full workspace policies and exact pruned lockfile.
+Five staging/packed-CLI tests passed, including relocation with a transitive import after source
+removal. Server/scripts typechecks, targeted lint, comments, and formatting passed. Full release
+smoke passed clean npm and pnpm consumers, archive checks, packaged runtime checks, and npm
+publication dry-run. No package was published. Hosted Linux/Windows smoke remains pending.

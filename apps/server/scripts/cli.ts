@@ -21,6 +21,7 @@ import {
 } from '../../../scripts/lib/brand-assets.ts'
 import {
   assertPackedServerArchive,
+  prepareCartographerDependencyWorkspace,
   stageServerPublishPackage,
 } from '../../../scripts/lib/server-publish-package.ts'
 import { fromYaml } from '@t3tools/shared/schemaYaml'
@@ -244,7 +245,7 @@ const publishCmd = Command.make(
       const icons = yield* preparePublishIcons(repoRoot, serverDir, version)
 
       const deployArgs = [
-        '--config.node-linker=hoisted',
+        '--node-linker=isolated',
         '--config.allow-unused-patches=true',
         '--ignore-scripts',
         '--frozen-lockfile',
@@ -266,6 +267,32 @@ const publishCmd = Command.make(
         }),
       )
 
+      const dependencyWorkspace = path.join(publishRoot, 'cartographer-core-dependencies')
+      prepareCartographerDependencyWorkspace(
+        repoRoot,
+        cartographerDeployDirectory,
+        dependencyWorkspace,
+      )
+      const installCommand = yield* resolveSpawnCommand('pnpm', [
+        '--dir',
+        dependencyWorkspace,
+        'install',
+        '--prod',
+        '--ignore-scripts',
+        '--frozen-lockfile',
+        '--config.allow-unused-patches=true',
+        '--node-linker=hoisted',
+      ])
+      yield* Effect.log('[cli] Materializing the frozen Cartographer dependency closure')
+      yield* runCommand(
+        ChildProcess.make(installCommand.command, installCommand.args, {
+          cwd: repoRoot,
+          stdout: config.verbose ? 'inherit' : 'ignore',
+          stderr: 'inherit',
+          shell: installCommand.shell,
+        }),
+      )
+
       stageServerPublishPackage({
         repoRoot,
         stageDirectory,
@@ -273,10 +300,7 @@ const publishCmd = Command.make(
         serverManifest: serverPackageJson,
         cartographerCoreManifest: cartographerCorePackageJson,
         workspaceCatalog: workspaceConfig.catalog ?? {},
-        cartographerDependencyClosureDirectory: path.join(
-          cartographerDeployDirectory,
-          'node_modules',
-        ),
+        cartographerDependencyClosureDirectory: path.join(dependencyWorkspace, 'node_modules'),
       })
       for (const icon of icons)
       {
