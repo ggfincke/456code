@@ -67,6 +67,7 @@ function isStalePendingRequestFailureDetail(detail: string | undefined): boolean
     normalized.includes('stale pending approval request') ||
     normalized.includes('stale pending user-input request') ||
     normalized.includes('unknown pending approval request') ||
+    normalized.includes('unknown pending codex approval request') ||
     normalized.includes('unknown pending permission request') ||
     normalized.includes('unknown pending user-input request') ||
     normalized.includes('unknown pending user input request') ||
@@ -167,6 +168,7 @@ export function derivePendingApprovals(
 ): PendingApproval[]
 {
   const openByRequestId = new Map<ApprovalRequestId, PendingApproval>()
+  const closedRequestIds = new Set<ApprovalRequestId>()
   const ordered = [...activities].sort(compareOrchestrationThreadActivities)
 
   for (const activity of ordered)
@@ -189,6 +191,7 @@ export function derivePendingApprovals(
 
     if (activity.kind === 'approval.requested' && requestId && requestKind)
     {
+      if (closedRequestIds.has(requestId)) continue
       openByRequestId.set(requestId, {
         requestId,
         requestKind,
@@ -202,6 +205,7 @@ export function derivePendingApprovals(
 
     if (activity.kind === 'approval.resolved' && requestId)
     {
+      closedRequestIds.add(requestId)
       openByRequestId.delete(requestId)
       continue
     }
@@ -212,6 +216,7 @@ export function derivePendingApprovals(
       isStalePendingRequestFailureDetail(detail)
     )
     {
+      closedRequestIds.add(requestId)
       openByRequestId.delete(requestId)
     }
   }
@@ -250,6 +255,7 @@ export function derivePendingUserInputs(
 ): PendingUserInput[]
 {
   const openByRequestId = new Map<ApprovalRequestId, PendingUserInput>()
+  const closedRequestIds = new Set<ApprovalRequestId>()
   const ordered = [...activities].sort(compareOrchestrationThreadActivities)
 
   for (const activity of ordered)
@@ -263,6 +269,7 @@ export function derivePendingUserInputs(
 
     if (activity.kind === 'user-input.requested' && requestId)
     {
+      if (closedRequestIds.has(requestId)) continue
       const questions = parseUserInputQuestions(payload)
       if (!questions)
       {
@@ -280,6 +287,7 @@ export function derivePendingUserInputs(
 
     if (activity.kind === 'user-input.resolved' && requestId)
     {
+      closedRequestIds.add(requestId)
       openByRequestId.delete(requestId)
       continue
     }
@@ -290,6 +298,7 @@ export function derivePendingUserInputs(
       isStalePendingRequestFailureDetail(detail)
     )
     {
+      closedRequestIds.add(requestId)
       openByRequestId.delete(requestId)
     }
   }
