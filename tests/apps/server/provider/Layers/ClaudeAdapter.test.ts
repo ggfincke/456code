@@ -1847,6 +1847,117 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
+  it.effect('retains Claude authentication guidance through a generic terminal API error', () =>
+  {
+    const harness = makeHarness({
+      claudeConfig: { homePath: "/tmp/Claude config's" },
+    })
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+        cwd: "/tmp/repo path's",
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'assistant',
+        error: 'authentication_failed',
+        message: { content: [] },
+        parent_tool_use_id: null,
+        session_id: 'sdk-session-auth-failure',
+        uuid: 'assistant-auth-failure',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        terminal_reason: 'api_error',
+        session_id: 'sdk-session-auth-failure',
+        uuid: 'result-auth-failure',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      const expectedMessage =
+        'Claude could not authenticate. For subscription login, run `claude auth login` on this environment\'s machine from "/tmp/repo path\'s", with CLAUDE_CONFIG_DIR set to "/tmp/Claude config\'s", then start a new thread. For API-key authentication, check this instance\'s configured credentials.'
+      const runtimeErrors = runtimeEvents.filter((event) => event.type === 'runtime.error')
+      assert.equal(runtimeErrors.length, 2)
+      assert.equal(runtimeErrors[0]?.payload.message, expectedMessage)
+      assert.equal(runtimeErrors[1]?.payload.message, expectedMessage)
+      const completed = runtimeEvents.find((event) => event.type === 'turn.completed')
+      assert.equal(completed?.type, 'turn.completed')
+      if (completed?.type === 'turn.completed')
+      {
+        assert.equal(completed.payload.state, 'failed')
+        assert.equal(completed.payload.errorMessage, expectedMessage)
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('keeps HTTP 429 Claude success frames failed', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        api_error_status: 429,
+        terminal_reason: 'api_error',
+        session_id: 'sdk-session-http-429',
+        uuid: 'result-http-429',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      const completed = runtimeEvents.find((event) => event.type === 'turn.completed')
+      assert.equal(completed?.type, 'turn.completed')
+      if (completed?.type === 'turn.completed')
+      {
+        assert.equal(completed.payload.state, 'failed')
+        assert.equal(
+          completed.payload.errorMessage,
+          'Claude rate limited this request (HTTP 429). The turn stopped before it finished.',
+        )
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
   it.effect('closes the session when the Claude stream aborts after a turn starts', () =>
   {
     const harness = makeHarness()

@@ -9,6 +9,7 @@ import * as Effect from 'effect/Effect'
 import * as Path from 'effect/Path'
 
 import {
+  claudeSignedOutMessage,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   makeClaudeEnvironment,
@@ -96,5 +97,17 @@ it.layer(NodeServices.layer)('ClaudeHome', (it) =>
         )
       }),
     )
+
+    it('quotes the spawned Claude environment in authentication guidance', () =>
+    {
+      expect(
+        claudeSignedOutMessage({
+          configDir: "/tmp/Claude config's",
+          cwd: "/tmp/repo path's",
+        }),
+      ).toBe(
+        'Claude could not authenticate. For subscription login, run `claude auth login` on this environment\'s machine from "/tmp/repo path\'s", with CLAUDE_CONFIG_DIR set to "/tmp/Claude config\'s", then start a new thread. For API-key authentication, check this instance\'s configured credentials.',
+      )
+    })
   })
 })

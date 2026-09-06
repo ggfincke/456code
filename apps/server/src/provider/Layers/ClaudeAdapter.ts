@@ -128,7 +128,7 @@ import {
   toolResultStreamKind,
 } from '../claude/ClaudeToolProjection.ts'
 import { resolveClaudeSdkExecutablePath } from '../Drivers/ClaudeExecutable.ts'
-import { makeClaudeEnvironment } from '../Drivers/ClaudeHome.ts'
+import { claudeSignedOutMessage, makeClaudeEnvironment } from '../Drivers/ClaudeHome.ts'
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
@@ -187,7 +187,9 @@ interface ClaudeTurnState
   latestAssistantUsage: unknown | undefined
   compactedSinceLatestAssistantUsage: boolean
   nextSyntheticAssistantBlockIndex: number
+  authenticationFailureMessage: string | undefined
   readonly announcedUsageLimitKeys: Set<string>
+  readonly rejectedRateLimitTypes: Set<string>
 }
 
 interface AssistantTextBlockState
@@ -890,7 +892,10 @@ function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStat
 
 // SDKResultSuccess carries no `errors` array, so a turn that failed inside a success frame has no
 // message to show; name the cause instead of falling back to a bare 'Claude turn failed.'
-function successResultErrorMessage(result: SDKResultMessage): string | undefined
+function successResultErrorMessage(
+  result: SDKResultMessage,
+  failureHint?: string,
+): string | undefined
 {
   if (result.subtype !== 'success')
   {
@@ -916,6 +921,14 @@ function successResultErrorMessage(result: SDKResultMessage): string | undefined
     return apiErrorStatus === 429
       ? 'Claude rate limited this request (HTTP 429). The turn stopped before it finished.'
       : `Claude returned HTTP ${apiErrorStatus}. The turn stopped before it finished.`
+  }
+  if (
+    failureHint !== undefined &&
+    (result.terminal_reason === 'api_error' ||
+      (result.is_error && result.terminal_reason === undefined))
+  )
+  {
+    return failureHint
   }
   return result.terminal_reason === undefined
     ? undefined
@@ -2442,9 +2455,22 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     // turnStatusFromResult now marks that frame failed: a runtime.error raised here is wiped
     // ~0.5 s later by any turn.completed that is not itself 'failed', since
     // ProviderRuntimeIngestion nulls lastError whenever the session goes ready
+    const assistantFailureMessage =
+      message.error === 'authentication_failed'
+        ? claudeSignedOutMessage({
+            configDir: claudeEnvironment.CLAUDE_CONFIG_DIR,
+            cwd: path.resolve(context.session.cwd ?? '.'),
+          })
+        : message.error === undefined
+          ? undefined
+          : assistantErrorMessage(message.error)
     if (message.error !== undefined)
     {
-      yield* emitRuntimeError(context, assistantErrorMessage(message.error), message.error)
+      yield* emitRuntimeError(
+        context,
+        assistantFailureMessage ?? assistantErrorMessage(message.error),
+        message.error,
+      )
     }
 
     // auto-start a synthetic turn for assistant messages that arrive without
@@ -2464,7 +2490,9 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         latestAssistantUsage: undefined,
         compactedSinceLatestAssistantUsage: false,
         nextSyntheticAssistantBlockIndex: -1,
+        authenticationFailureMessage: undefined,
         announcedUsageLimitKeys: new Set(),
+        rejectedRateLimitTypes: new Set(),
       }
       context.session = {
         ...context.session,
@@ -2529,6 +2557,10 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (context.turnState)
     {
+      if (message.error === 'authentication_failed')
+      {
+        context.turnState.authenticationFailureMessage = assistantFailureMessage
+      }
       context.turnState.items.push(message.message)
       if (
         normalizeClaudeActiveTokenUsage(
@@ -2565,10 +2597,16 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     const status = refusal === undefined ? turnStatusFromResult(message) : 'failed'
     const rawError = message.subtype === 'success' ? undefined : message.errors[0]
+    const turnFailureHint =
+      context.turnState?.authenticationFailureMessage ??
+      (context.turnState && context.turnState.rejectedRateLimitTypes.size > 0
+        ? 'Claude usage limit reached. The turn stopped before it finished; check your plan usage for when it resets.'
+        : undefined)
     const errorMessage =
       (message.subtype === 'success'
-        ? successResultErrorMessage(message)
-        : firstPresentableResultError(message.errors)) ?? refusal
+        ? successResultErrorMessage(message, turnFailureHint)
+        : (firstPresentableResultError(message.errors) ??
+          (message.terminal_reason === 'api_error' ? turnFailureHint : undefined))) ?? refusal
 
     const resumeAttempt = context.resumeAttempt
     const isResumeHandshake =
@@ -3076,11 +3114,22 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         info.isUsingOverage === true ||
         info.overageInUse === true
       const blocked = info.status === 'rejected' && !overageAllowed
+      const limitType = info.rateLimitType ?? 'unknown'
+      if (context.turnState)
+      {
+        if (blocked)
+        {
+          context.turnState.rejectedRateLimitTypes.add(limitType)
+        }
+        else
+        {
+          context.turnState.rejectedRateLimitTypes.delete(limitType)
+        }
+      }
       if (!blocked || context.turnState === undefined)
       {
         return
       }
-      const limitType = info.rateLimitType ?? 'unknown'
       const warningKey = `${limitType}:${typeof info.resetsAt === 'number' ? info.resetsAt : 'unknown'}`
       if (context.turnState.announcedUsageLimitKeys.has(warningKey))
       {
@@ -4336,7 +4385,9 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         latestAssistantUsage: undefined,
         compactedSinceLatestAssistantUsage: false,
         nextSyntheticAssistantBlockIndex: -1,
+        authenticationFailureMessage: undefined,
         announcedUsageLimitKeys: new Set(),
+        rejectedRateLimitTypes: new Set(),
       }
 
       const updatedAt = yield* nowIso
