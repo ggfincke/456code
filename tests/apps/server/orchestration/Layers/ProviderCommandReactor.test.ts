@@ -4445,6 +4445,252 @@ describe('ProviderCommandReactor', () =>
     ])
   })
 
+  it('reserves successful OpenCode approval resolution for native runtime evidence', async () =>
+  {
+    const harness = await createHarness()
+    const now = '2026-01-01T00:00:00.000Z'
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-set-for-opencode-approval'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'running',
+          providerName: 'opencode',
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-opencode-approval-requested'),
+        threadId: ThreadId.make('thread-1'),
+        activity: {
+          id: EventId.make('activity-opencode-approval-requested'),
+          tone: 'approval',
+          kind: 'approval.requested',
+          summary: 'Command approval requested',
+          payload: { requestId: 'opencode-approval-request', requestKind: 'command' },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.approval.respond',
+        commandId: CommandId.make('cmd-opencode-approval-respond'),
+        threadId: ThreadId.make('thread-1'),
+        requestId: asApprovalRequestId('opencode-approval-request'),
+        decision: 'accept',
+        createdAt: now,
+      }),
+    )
+    await waitFor(() => harness.respondToRequest.mock.calls.length === 1)
+    await harness.drain()
+
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make('thread-1'),
+    )
+    expect(thread?.activities.some((activity) => activity.kind === 'approval.resolved')).toBe(false)
+    expect(thread?.approvalOutcomes).toEqual([
+      expect.objectContaining({
+        requestId: 'opencode-approval-request',
+        status: 'responding',
+        requestedDecision: 'accept',
+      }),
+    ])
+  })
+
+  it('keeps a proven-undispatched OpenCode approval pending and retryable', async () =>
+  {
+    const harness = await createHarness()
+    const now = '2026-01-01T00:00:00.000Z'
+    harness.respondToRequest.mockImplementation(() =>
+      Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: ProviderDriverKind.make('opencode'),
+          method: 'permission.reply',
+          detail: 'OpenCode is still loading this permission request. Try again.',
+          cause: { _tag: 'ProviderRequestNotDispatched' },
+        }),
+      ),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-set-for-opencode-loading-approval'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'running',
+          providerName: 'opencode',
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-opencode-loading-approval-requested'),
+        threadId: ThreadId.make('thread-1'),
+        activity: {
+          id: EventId.make('activity-opencode-loading-approval-requested'),
+          tone: 'approval',
+          kind: 'approval.requested',
+          summary: 'Command approval requested',
+          payload: { requestId: 'opencode-loading-approval', requestKind: 'command' },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.approval.respond',
+        commandId: CommandId.make('cmd-opencode-loading-approval-respond'),
+        threadId: ThreadId.make('thread-1'),
+        requestId: asApprovalRequestId('opencode-loading-approval'),
+        decision: 'accept',
+        createdAt: now,
+      }),
+    )
+    await waitFor(async () =>
+    {
+      const thread = (await harness.readModel()).threads.find(
+        (entry) => entry.id === ThreadId.make('thread-1'),
+      )
+      return Boolean(
+        thread?.activities.some((activity) => activity.kind === 'provider.approval.respond.failed'),
+      )
+    })
+    await harness.drain()
+
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make('thread-1'),
+    )
+    expect(thread?.approvalOutcomes).toEqual([
+      expect.objectContaining({
+        requestId: 'opencode-loading-approval',
+        status: 'pending',
+        requestedDecision: 'accept',
+      }),
+    ])
+    const progress = await harness.run(harness.delivery.getProgress('provider-command'))
+    expect(progress._tag === 'Some' ? progress.value.blockedSequence : null).toBeNull()
+  })
+
+  it('does not let an ambiguous OpenCode approval fence an interrupt', async () =>
+  {
+    const harness = await createHarness()
+    const now = '2026-01-01T00:00:00.000Z'
+    harness.respondToRequest.mockImplementation(() =>
+      Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: ProviderDriverKind.make('opencode'),
+          method: 'permission.reply',
+          detail: 'OpenCode permission reply timed out after dispatch.',
+        }),
+      ),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-set-for-opencode-timeout'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'running',
+          providerName: 'opencode',
+          runtimeMode: 'approval-required',
+          activeTurnId: asTurnId('turn-1'),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-opencode-timeout-approval-requested'),
+        threadId: ThreadId.make('thread-1'),
+        activity: {
+          id: EventId.make('activity-opencode-timeout-approval-requested'),
+          tone: 'approval',
+          kind: 'approval.requested',
+          summary: 'Command approval requested',
+          payload: { requestId: 'opencode-timeout-approval', requestKind: 'command' },
+          turnId: asTurnId('turn-1'),
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.approval.respond',
+        commandId: CommandId.make('cmd-opencode-timeout-approval-respond'),
+        threadId: ThreadId.make('thread-1'),
+        requestId: asApprovalRequestId('opencode-timeout-approval'),
+        decision: 'accept',
+        createdAt: now,
+      }),
+    )
+    await harness.drain()
+
+    const failedThread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make('thread-1'),
+    )
+    expect(failedThread?.approvalOutcomes).toEqual([
+      expect.objectContaining({
+        requestId: 'opencode-timeout-approval',
+        status: 'unknown',
+        requestedDecision: 'accept',
+      }),
+    ])
+    expect(failedThread?.activities.some((activity) => activity.kind === 'approval.resolved')).toBe(
+      false,
+    )
+    const approvalActions = await harness.run(harness.sql<{ readonly status: string }>`
+      SELECT status
+      FROM orchestration_reactor_actions
+      WHERE reactor_id = 'provider-command'
+        AND effect_kind = 'thread.approval-response-requested'
+    `)
+    expect(approvalActions).toEqual([{ status: 'succeeded' }])
+    await harness.drain()
+    expect(harness.respondToRequest).toHaveBeenCalledTimes(1)
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.interrupt',
+        commandId: CommandId.make('cmd-turn-interrupt-after-opencode-timeout'),
+        threadId: ThreadId.make('thread-1'),
+        turnId: asTurnId('turn-1'),
+        createdAt: '2026-01-01T00:01:00.000Z',
+      }),
+    )
+    await harness.drain()
+
+    expect(harness.interruptTurn).toHaveBeenCalledTimes(1)
+    expect(harness.interruptTurn.mock.calls[0]?.[0]).toEqual({ threadId: 'thread-1' })
+    const progress = await harness.run(harness.delivery.getProgress('provider-command'))
+    expect(progress._tag === 'Some' ? progress.value.blockedSequence : null).toBeNull()
+  })
+
   it('reacts to thread.user-input.respond by forwarding structured user input answers', async () =>
   {
     const harness = await createHarness()

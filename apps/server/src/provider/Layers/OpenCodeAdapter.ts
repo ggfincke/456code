@@ -165,6 +165,34 @@ export function isOpenCodeNotFound(cause: unknown): boolean
   return false
 }
 
+function isOpenCodePermissionNotFound(cause: unknown, requestId: string): boolean
+{
+  const seen = new Set<unknown>()
+  const queue: Array<unknown> = [cause]
+  for (let steps = 0; queue.length > 0 && steps < 32; steps += 1)
+  {
+    const node = queue.shift()
+    if (node === null || typeof node !== 'object' || seen.has(node))
+    {
+      continue
+    }
+    seen.add(node)
+    const record = node as Record<string, unknown>
+    if (record._tag === 'PermissionNotFoundError' && record.requestID === requestId)
+    {
+      return true
+    }
+    for (const key of ['cause', 'body', 'error', 'data'] as const)
+    {
+      if (record[key] !== undefined)
+      {
+        queue.push(record[key])
+      }
+    }
+  }
+  return false
+}
+
 // whether two directory spellings name the same location. Raw string
 // equality misreads a trailing slash, `.`/`..` segment, or symlinked cwd
 // (macOS `/tmp` -> `/private/tmp`) as a cwd change, needlessly forking the
@@ -436,6 +464,7 @@ export interface OpenCodeAdapterLiveOptions
 }
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
+const PROVIDER_REQUEST_NOT_DISPATCHED_TAG = 'ProviderRequestNotDispatched'
 
 // map a tagged OpenCodeRuntimeError produced by {@link runOpenCodeSdk} into
 // the adapter-boundary `ProviderAdapterRequestError`. SDK-method-level call
@@ -2561,21 +2590,36 @@ export function makeOpenCodeAdapter(
         case 'message.part.delta':
         {
           const existingPart = context.partById.get(event.properties.partID)
-          if (!existingPart)
+          if (
+            !existingPart ||
+            (existingPart.type !== 'text' && existingPart.type !== 'reasoning') ||
+            event.properties.field !== 'text'
+          )
           {
             break
           }
           const role = messageRoleForPart(context, existingPart)
-          if (role !== 'assistant')
-          {
-            break
-          }
-          const streamKind = resolveTextStreamKind(existingPart)
           const delta = event.properties.delta
           if (delta.length === 0)
           {
             break
           }
+          if (role !== 'assistant')
+          {
+            if (role === undefined)
+            {
+              const { nextText } = appendOpenCodeAssistantTextDelta(
+                textFromPart(existingPart) ?? '',
+                delta,
+              )
+              context.partById.set(event.properties.partID, {
+                ...existingPart,
+                text: nextText,
+              })
+            }
+            break
+          }
+          const streamKind = resolveTextStreamKind(existingPart)
           const previousText =
             context.emittedTextByPartId.get(event.properties.partID) ??
             textFromPart(existingPart) ??
