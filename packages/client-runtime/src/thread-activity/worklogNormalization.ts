@@ -425,6 +425,19 @@ function extractWorkLogToolLifecycleStatus(
 ): WorkLogToolLifecycleStatus | undefined
 {
   const status = payload?.status
+  if (status === 'pending' || status === 'running' || status === 'waiting')
+  {
+    return 'inProgress'
+  }
+  if (status === 'cancelled' || status === 'interrupted')
+  {
+    return 'stopped'
+  }
+  // a batch idles after its parent turn ends; ordinary idle tasks can still resume
+  if (status === 'idle' && payload?.taskType === 'subagent_batch')
+  {
+    return 'stopped'
+  }
   if (
     status === 'inProgress' ||
     status === 'completed' ||
