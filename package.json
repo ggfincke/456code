@@ -48,6 +48,7 @@
     "@oxlint/plugins": "^1.81.0",
     "@types/node": "catalog:",
     "@typescript/native": "catalog:",
+    "node-gyp": "13.0.2",
     "prettier": "3.9.6",
     "prettier-plugin-brace-style": "0.10.3",
     "typescript": "catalog:",

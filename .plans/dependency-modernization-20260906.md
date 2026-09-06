@@ -289,3 +289,20 @@ have stopped. The DMG is unmounted, previous clipboard restored, and the root ed
 Ignored artifacts and isolated state remain available for review. The implementation is committed on
 `chore/dependency-modernization`; no release publication, EAS submission, or installed-app replacement
 was performed.
+
+## PR 101 CI remediation
+
+Approved follow-up: repair Windows bootstrap, install under Node 24 before Cartographer runtime
+verification, stage portable release dependencies, preserve telemetry blank opt-outs, regenerate
+mobile themes, and scope directive preservation to owned source. Four co-authored commit groups
+are authorized, followed by push and hosted CI verification. No merge or release is authorized.
+
+- Group 1 implemented: native Windows VP_HOME paths, root node-gyp 13.0.2, a cold Node 24
+  bootstrap/PTY probe in the Node 22 lane, preserved runtime matrix, and owned-source directive guard.
+- Groups 2-4 pending. Final hosted CI and isolated mobile appearance acceptance pending.
+
+Group 1 local gate: frozen installation under Node 24.20.0 passed; four directive regression
+tests, directive comparison against origin/main, targeted formatting/comment checks and lint
+passed (one pre-existing intentional literal-concatenation warning). Windows execution and the
+uncached Ubuntu Node 24 bootstrap/PTY probe remain hosted gates. The Node 22 lane deliberately
+disables setup cache so native installation cannot pass solely through reused build results.

@@ -122,3 +122,29 @@ it('passes when a directive and its guarded statement are removed together', () 
     NodeFS.rmSync(cwd, { recursive: true, force: true })
   }
 })
+
+it('ignores vendor directive changes while enforcing owned source', () =>
+{
+  const cwd = makeFixture()
+  try
+  {
+    const vendor = NodePath.join(cwd, '.repos', 'fixture', 'source.ts')
+    NodeFS.mkdirSync(NodePath.dirname(vendor), { recursive: true })
+    NodeFS.writeFileSync(vendor, `${directive}\nJSON.parse('{}')\n`)
+    git(cwd, ['add', '.repos'])
+    git(cwd, ['commit', '-m', 'vendor fixture'])
+    NodeFS.writeFileSync(vendor, "JSON.parse('{}')\n")
+    assert.equal(runCheck(cwd).status, 0)
+
+    const owned = NodePath.join(cwd, 'fixture.ts')
+    NodeFS.writeFileSync(owned, NodeFS.readFileSync(owned, 'utf8').replace(directive, ''))
+    const result = runCheck(cwd)
+    assert.equal(result.status, 1)
+    assert.include(result.stderr, 'fixture.ts: dropped directive')
+    assert.notInclude(result.stderr, '.repos/')
+  }
+  finally
+  {
+    NodeFS.rmSync(cwd, { recursive: true, force: true })
+  }
+})
