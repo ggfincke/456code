@@ -299,7 +299,7 @@ are authorized, followed by push and hosted CI verification. No merge or release
 
 - Group 1 implemented: native Windows VP_HOME paths, root node-gyp 13.0.2, a cold Node 24
   bootstrap/PTY probe in the Node 22 lane, preserved runtime matrix, and owned-source directive guard.
-- Groups 2-4 pending. Final hosted CI and isolated mobile appearance acceptance pending.
+- Groups 2-4 implemented and locally verified below. Final hosted CI remains pending.
 
 Group 1 local gate: frozen installation under Node 24.20.0 passed; four directive regression
 tests, directive comparison against origin/main, targeted formatting/comment checks and lint
@@ -320,3 +320,14 @@ its existing semantics. Six analytics tests passed, now covering default product
 environment providers for all three blank opt-outs. Server typecheck and targeted formatting,
 comments, and lint passed. A full frozen reinstall restored local workspace tool links after the
 release-smoke deployment probe before typechecking; no tracked dependency changes were needed.
+
+Group 4 local gate passed under Node 24.20.0: the generator owns the neutral hue notation
+change from `0` to `none`; generated variable JSON is unchanged. Generator idempotence, three
+generation tests, mobile typecheck, and Metro iOS export passed. The primary agent verified a
+connected isolated thread and its retained composer draft in both light and dark appearance on
+the existing compatible rebuilt iPhone 17e client (iOS 26.5), loading this worktree's Metro bundle.
+The live serve-sim stream was available in the in-app browser. The semantic automation helper
+could not load its configured Xcode framework, so the existing supported thread deep link,
+Simulator appearance control, and screenshots supplied the appearance proof. No global Xcode
+configuration was changed. The app, backend, Metro, stream, and task-booted Simulator were stopped;
+light appearance was restored. Prior isolated fixture state was preserved.
