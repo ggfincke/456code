@@ -1797,6 +1797,56 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
+  it.effect('uses the first presentable Claude result error after internal diagnostics', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        errors: ['[ede_diagnostic] internal state', 'Readable provider failure'],
+        session_id: 'sdk-session-diagnostic-first',
+        uuid: 'result-diagnostic-first',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      const runtimeError = runtimeEvents.find((event) => event.type === 'runtime.error')
+      assert.equal(runtimeError?.type, 'runtime.error')
+      if (runtimeError?.type === 'runtime.error')
+      {
+        assert.equal(runtimeError.payload.message, 'Readable provider failure')
+      }
+      const completed = runtimeEvents.find((event) => event.type === 'turn.completed')
+      assert.equal(completed?.type, 'turn.completed')
+      if (completed?.type === 'turn.completed')
+      {
+        assert.equal(completed.payload.errorMessage, 'Readable provider failure')
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
   it.effect('closes the session when the Claude stream aborts after a turn starts', () =>
   {
     const harness = makeHarness()

@@ -937,6 +937,13 @@ function presentableResultError(error: string | undefined): string | undefined
   return trimmed
 }
 
+function firstPresentableResultError(
+  errors: ReadonlyArray<string> | undefined,
+): string | undefined
+{
+  return errors?.map(presentableResultError).find((error) => error !== undefined)
+}
+
 const CLAUDE_USAGE_LIMIT_WINDOWS = {
   five_hour: '5-hour',
   seven_day: '7-day',
@@ -2561,7 +2568,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     const errorMessage =
       (message.subtype === 'success'
         ? successResultErrorMessage(message)
-        : presentableResultError(rawError)) ?? refusal
+        : firstPresentableResultError(message.errors)) ?? refusal
 
     const resumeAttempt = context.resumeAttempt
     const isResumeHandshake =
