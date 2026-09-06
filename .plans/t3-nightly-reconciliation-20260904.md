@@ -1207,8 +1207,8 @@ The source-attributed local commits are `942f66fb3` (`108f295cc`), `2296fd932` (
 (`44dc8ae25`). Fork-native integration commits are `9d3e602c1`, `fd9b15fa5`, and `f36bf6402`.
 Original source authors, AuthorDates, subjects, bodies, and trailers are retained where applicable.
 
-The checkpoint is verified and committed locally. Push, PR, and merge receipts remain pending.
-Groups 10-27 remain queued and unchanged.
+The checkpoint is verified and published in [PR #100](https://github.com/ggfincke/456code/pull/100).
+Exact-head checks and the merge receipt remain pending. Groups 10-27 remain queued and unchanged.
 
 ## Verification policy for every group
 
