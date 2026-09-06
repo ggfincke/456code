@@ -63,6 +63,7 @@ import { REFRESH_MODELS_ACTION, useProviderCatalogRefresh } from './provider-cat
 import { composerConnectionStatus, type ComposerStatusPillState } from './threadComposerStatus'
 import {
   composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
   composerAttachmentUploadsAtom,
 } from '../../../state/composer-attachment-uploads'
 import { canSubmitManualCompaction, resolveComposerSubmitHandler } from './threadComposerSubmit'
@@ -355,6 +356,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     serverConfig: props.serverConfig,
     states: uploadStates,
   })
+  const attachmentsUploading = composerAttachmentsStillUploading({
+    environmentId: props.environmentId,
+    attachments: props.draftAttachments,
+    serverConfig: props.serverConfig,
+    states: uploadStates,
+  })
   const canSend =
     hasContent &&
     !compactionPending &&
@@ -369,7 +376,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         ? 'Wait for the current turn'
         : hasUnsupportedAttachments
           ? 'Remove unsupported attachments'
-          : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
+          : props.connectionState !== 'connected' ||
+              props.activeThreadBusy ||
+              props.queueCount > 0 ||
+              attachmentsUploading
             ? 'Queue'
             : 'Send'
   const modelOptions = useMemo(

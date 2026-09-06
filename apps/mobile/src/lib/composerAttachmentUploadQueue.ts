@@ -38,9 +38,23 @@ export function composerAttachmentUploadBlockReason(input: {
   {
     const state = input.states[composerAttachmentUploadKey(input.environmentId, attachment.id)]
     if (state?.status === 'failed') return 'Retry or remove the failed attachment'
-    if (state?.status !== 'ready') return 'Attachment still uploading'
   }
   return null
+}
+
+export function composerAttachmentsStillUploading(input: {
+  readonly environmentId: EnvironmentId
+  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>
+  readonly serverConfig: UploadServerConfig | null | undefined
+  readonly states: Readonly<Record<string, ComposerAttachmentUploadState>>
+}): boolean
+{
+  if (input.serverConfig?.environment.capabilities.attachmentUploads !== true) return false
+  return input.attachments.some((attachment) =>
+  {
+    const state = input.states[composerAttachmentUploadKey(input.environmentId, attachment.id)]
+    return state?.status !== 'ready' && state?.status !== 'failed'
+  })
 }
 
 export function createComposerAttachmentUploadQueue(options: {

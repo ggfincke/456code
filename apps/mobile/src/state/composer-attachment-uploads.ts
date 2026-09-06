@@ -34,6 +34,7 @@ import { useRemoteConnectionStatus } from './use-remote-environment-registry'
 
 export {
   composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
 } from '../lib/composerAttachmentUploadQueue'
 
 export const composerAttachmentUploadsAtom = Atom.make<

@@ -47,6 +47,7 @@ import { useProjects } from '../../../state/entities'
 import { useServerConfigs } from '../../../state/entities'
 import {
   composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
   composerAttachmentUploadsAtom,
 } from '../../../state/composer-attachment-uploads'
 import { deriveThreadTitleFromPrompt } from '../../../lib/projectThreadStartTurn'
@@ -124,6 +125,16 @@ export function NewTaskDraftScreen(props: {
         states: uploadStates,
       })
     : null
+  const attachmentsUploading =
+    environmentConnected &&
+    selectedProject !== null &&
+    composerAttachmentsStillUploading({
+      environmentId: selectedProject.environmentId,
+      attachments: flow.attachments,
+      serverConfig: selectedServerConfig,
+      states: uploadStates,
+    })
+  const queuesInsteadOfStarting = !environmentConnected || attachmentsUploading
   const promptInputRef = useRef<ComposerEditorHandle>(null)
   const [isComposerFocused, setIsComposerFocused] = useState(false)
   const loadedBranchesProjectKeyRef = useRef<string | null>(null)
@@ -1039,11 +1050,10 @@ export function NewTaskDraftScreen(props: {
 
     const editingPendingTask = flow.editingPendingTask
 
-    if (!environmentConnected)
+    if (queuesInsteadOfStarting)
     {
-      // offline: park the task in the outbox; the drain sends it when the
-      // environment reconnects. Editing an existing pending task re-queues it
-      // under its original identifiers.
+      // offline or still uploading: keep the durable task in the outbox
+      // until its environment and attachments are ready.
       const metadata = editingPendingTask
         ? {
             threadId: editingPendingTask.threadId,
@@ -1274,11 +1284,13 @@ export function NewTaskDraftScreen(props: {
           ? attachmentUploadBlockReason
           : flow.submitting
             ? 'Starting task'
-            : environmentConnected
-              ? 'Start task'
-              : 'Queue task'
+            : attachmentsUploading
+              ? 'Queue task, sends when uploads finish'
+              : environmentConnected
+                ? 'Start task'
+                : 'Queue task'
       }
-      icon={environmentConnected ? 'arrow.up' : 'tray.and.arrow.up'}
+      icon={queuesInsteadOfStarting ? 'tray.and.arrow.up' : 'arrow.up'}
       onPress={() => void handleStart()}
       variant="primary"
       showChevron={false}
