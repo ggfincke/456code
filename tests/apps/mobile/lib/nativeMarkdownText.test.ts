@@ -1,8 +1,39 @@
 // tests/apps/mobile/lib/nativeMarkdownText.test.ts
 // verifies native markdown text conversion behavior
 
-import { describe, expect, it } from 'vite-plus/test'
+import { createElement, type ReactNode } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { MarkdownNode } from 'react-native-nitro-markdown/headless'
+import type { NativeMarkdownTextStyle } from '@t3tools/mobile-markdown-text/types'
+
+const { nativeParse, renderSelectableText } = vi.hoisted(() =>
+{
+  vi.stubGlobal('__DEV__', false)
+  return {
+    nativeParse: vi.fn(),
+    renderSelectableText: vi.fn<
+      (props: { readonly runs: ReadonlyArray<{ readonly text: string }> }) => null
+    >(() => null),
+  }
+})
+
+vi.mock('react-native-nitro-modules', () => ({
+  NitroModules: { createHybridObject: () => ({ parseWithOptions: nativeParse }) },
+}))
+vi.mock('react-native', () => ({
+  View: ({ children }: { readonly children?: ReactNode }) => createElement('div', null, children),
+}))
+vi.mock(
+  '../../../../apps/mobile/modules/code456-markdown-text/src/NativeMarkdownSelectableText.ios',
+  () => ({ NativeMarkdownSelectableText: renderSelectableText }),
+)
+vi.mock(
+  '../../../../apps/mobile/modules/code456-markdown-text/src/NativeMarkdownBlock.ios',
+  () => ({ NativeMarkdownBlock: () => null }),
+)
+
+import { SelectableMarkdownText } from '../../../../apps/mobile/modules/code456-markdown-text/src/SelectableMarkdownText.ios'
 
 import {
   nativeMarkdownChunkSpacing,
@@ -792,5 +823,65 @@ describe('nativeMarkdownDocumentChunks', () =>
     expect(nativeMarkdownChunkSpacing(headingChunk, firstList)).toBe(10)
     expect(nativeMarkdownChunkSpacing(firstList, secondList)).toBe(12)
     expect(nativeMarkdownChunkSpacing(firstList, headingChunk)).toBe(20)
+  })
+})
+
+describe('SelectableMarkdownText parser fallback', () =>
+{
+  const textStyle: NativeMarkdownTextStyle = {
+    color: '#111',
+    strongColor: '#111',
+    mutedColor: '#777',
+    linkColor: '#00f',
+    inlineCodeColor: '#111',
+    codeColor: '#111',
+    codeBackgroundColor: '#eee',
+    codeBlockBackgroundColor: '#eee',
+    fileTextColor: '#111',
+    skillTextColor: '#111',
+    quoteMarkerColor: '#777',
+    dividerColor: '#777',
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: 'System',
+    headingFontFamily: 'System',
+    boldFontFamily: 'System',
+  }
+  const highlightCode = async () => []
+
+  beforeEach(() =>
+  {
+    nativeParse.mockReset()
+    renderSelectableText.mockClear()
+  })
+
+  it('renders the original source as selectable plain text when the native parser fails', () =>
+  {
+    const markdown = '# Heading\n\n**Keep** &lt;source&gt; and $ui\n```ts\nconst n = 1\n```'
+    nativeParse.mockImplementationOnce(() =>
+    {
+      throw new Error('native parser failed')
+    })
+
+    renderToStaticMarkup(
+      createElement(SelectableMarkdownText, { markdown, textStyle, highlightCode }),
+    )
+
+    expect(nativeParse).toHaveBeenCalledWith(markdown, { gfm: true, html: true, math: false })
+    expect(renderSelectableText).toHaveBeenCalledOnce()
+    expect(renderSelectableText.mock.lastCall?.[0].runs).toEqual([{ text: markdown }])
+  })
+
+  it('preserves the full source when the headless parser rejects input over its UTF-8 byte limit', () =>
+  {
+    const markdown = '📝'.repeat((10 * 1024 * 1024) / 4 + 1)
+
+    renderToStaticMarkup(
+      createElement(SelectableMarkdownText, { markdown, textStyle, highlightCode }),
+    )
+
+    expect(nativeParse).not.toHaveBeenCalled()
+    expect(renderSelectableText).toHaveBeenCalledOnce()
+    expect(renderSelectableText.mock.lastCall?.[0].runs).toEqual([{ text: markdown }])
   })
 })

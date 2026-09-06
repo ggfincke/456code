@@ -8,7 +8,7 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { useSyntaxThemeName } from '../hooks/useSyntaxThemeName'
 import { DIFF_THEME_NAMES, type DiffThemeName } from '../lib/diffRendering'
 
-export class DiffWorkerError extends Schema.TaggedErrorClass<DiffWorkerError>()('DiffWorkerError', {
+export class DiffWorkerError extends Schema.TaggedError<DiffWorkerError>()('DiffWorkerError', {
   operation: Schema.Literals(['create-worker', 'get-render-options', 'set-render-options']),
   themeName: Schema.Literals([
     DIFF_THEME_NAMES.light,

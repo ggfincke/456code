@@ -38,7 +38,9 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
     color: var(--diffs-selection-number-fg) !important;
   }
 `
-export type FilePostRender = NonNullable<FileOptions<unknown>['onPostRender']>
+export type FilePostRender = <Annotation>(
+  ...args: Parameters<NonNullable<FileOptions<Annotation, undefined>['onPostRender']>>
+) => void
 
 export function clampFileLine(contents: string, requestedLine: number): number
 {

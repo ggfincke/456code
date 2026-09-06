@@ -8,9 +8,6 @@ import type {
   ScopedThreadRef,
 } from '@t3tools/contracts'
 import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
-import { VirtualizedFile, type SelectedLineRange } from '@pierre/diffs'
-import { Editor } from '@pierre/diffs/editor'
-import { EditorProvider, File, type FileOptions, Virtualizer } from '@pierre/diffs/react'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,

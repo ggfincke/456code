@@ -9,15 +9,15 @@ import type {
 } from '@t3tools/contracts'
 import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
 import { VirtualizedFile, type SelectedLineRange } from '@pierre/diffs'
-import { Editor } from '@pierre/diffs/editor'
-import { EditorProvider, File, type FileOptions, Virtualizer } from '@pierre/diffs/react'
+import { Editor, type EditorChangeEvent, type EditorFactory } from '@pierre/diffs/edit'
+import { EditProvider, File, type FileOptions, Virtualizer } from '@pierre/diffs/react'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from '@t3tools/client-runtime/state/runtime'
 import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from 'lucide-react'
 import * as Schema from 'effect/Schema'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { isBrowserPreviewFile, openFileInPreview } from '~/browser/openFileInPreview'
 import { useAssetUrlState } from '~/assets/assetUrls'
@@ -119,13 +119,14 @@ export function useFileSaveCoordinator({
 }: Pick<
   EditableFileSurfaceProps,
   'environmentId' | 'cwd' | 'relativePath' | 'threadRef' | 'onPendingChange'
->): FileSaveCoordinator
+>): Pick<FileSaveCoordinator, 'change'>
 {
   const writeFile = useAtomCommand(projectEnvironment.writeFile)
-  const coordinator = useMemo(() =>
+  const coordinatorRef = useRef<FileSaveCoordinator | null>(null)
+  useLayoutEffect(() =>
   {
     const owner = Symbol('file-save-coordinator')
-    return new FileSaveCoordinator({
+    const coordinator = new FileSaveCoordinator({
       debounceMs: FILE_SAVE_DEBOUNCE_MS,
       onPendingChange: (pending) => onPendingChange(relativePath, owner, pending),
       persist: (nextContents) =>
@@ -149,10 +150,20 @@ export function useFileSaveCoordinator({
         confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents)
       },
     })
+    coordinatorRef.current = coordinator
+    return () =>
+    {
+      coordinatorRef.current = null
+      coordinator.dispose()
+    }
   }, [cwd, environmentId, onPendingChange, relativePath, threadRef.threadId, writeFile])
 
-  useEffect(() => () => coordinator.dispose(), [coordinator])
-  return coordinator
+  return useMemo(
+    () => ({
+      change: (nextContents: string) => coordinatorRef.current?.change(nextContents),
+    }),
+    [],
+  )
 }
 
 export function EditableFileSurface({
@@ -185,6 +196,16 @@ export function EditableFileSurface({
   )
   const surfaceRef = useRef<HTMLDivElement>(null)
   const selectionFrameRef = useRef<number | null>(null)
+  const editorRef = useRef<Pick<Editor, 'setSelections'> | null>(null)
+  const createEditor = useCallback<EditorFactory<FileCommentAnnotationGroup, undefined>>(
+    (type, options, editStateKey) =>
+    {
+      const editor = new Editor(type, options, editStateKey)
+      editorRef.current = editor
+      return editor
+    },
+    [],
+  )
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
     cwd,
@@ -192,49 +213,39 @@ export function EditableFileSurface({
     threadRef,
     onPendingChange,
   })
-  const editor = useMemo(
-    () =>
-      new Editor<FileCommentAnnotationGroup>({
-        onChange: (file, nextLineAnnotations) =>
-        {
-          setProjectFileQueryData(environmentId, cwd, relativePath, file.contents)
-          saveCoordinator.change(file.contents)
-          if (nextLineAnnotations)
-          {
-            const remapped = remapFileCommentAnnotations(
-              nextLineAnnotations as FileCommentLineAnnotation[],
-            )
-            setLineAnnotations(remapped)
-            for (const annotation of remapped)
-            {
-              for (const entry of annotation.metadata.entries)
-              {
-                if (entry.kind !== 'comment') continue
-                addReviewComment(
-                  composerDraftTarget,
-                  buildFileReviewComment({
-                    id: entry.id,
-                    filePath: relativePath,
-                    startLine: entry.startLine,
-                    endLine: entry.endLine,
-                    text: entry.text,
-                    contents: file.contents,
-                  }),
-                )
-              }
-            }
-          }
-        },
-      }),
-    [addReviewComment, composerDraftTarget, cwd, environmentId, relativePath, saveCoordinator],
-  )
-
-  useEffect(
-    () => () =>
+  const handleEditChange = useCallback(
+    ({
+      file,
+      lineAnnotations: nextLineAnnotations,
+    }: EditorChangeEvent<'file', FileCommentAnnotationGroup, undefined>) =>
     {
-      editor.cleanUp()
+      setProjectFileQueryData(environmentId, cwd, relativePath, file.contents)
+      saveCoordinator.change(file.contents)
+      if (nextLineAnnotations)
+      {
+        const remapped = remapFileCommentAnnotations(nextLineAnnotations)
+        setLineAnnotations(remapped)
+        for (const annotation of remapped)
+        {
+          for (const entry of annotation.metadata.entries)
+          {
+            if (entry.kind !== 'comment') continue
+            addReviewComment(
+              composerDraftTarget,
+              buildFileReviewComment({
+                id: entry.id,
+                filePath: relativePath,
+                startLine: entry.startLine,
+                endLine: entry.endLine,
+                text: entry.text,
+                contents: file.contents,
+              }),
+            )
+          }
+        }
+      }
     },
-    [editor],
+    [addReviewComment, composerDraftTarget, cwd, environmentId, relativePath, saveCoordinator],
   )
 
   const removeAnnotationEntry = useCallback(
@@ -347,11 +358,11 @@ export function EditableFileSurface({
     if (!root) return
     return installFileEditorDismissal({
       root,
-      editor,
+      editor: { setSelections: (selections) => editorRef.current?.setSelections(selections) },
       isBlocked: () => hasOpenCommentForm,
       onDismiss: () => setSelectedRange(null),
     })
-  }, [editor, hasOpenCommentForm, setSelectedRange])
+  }, [hasOpenCommentForm, setSelectedRange])
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) =>
     {
@@ -387,7 +398,7 @@ export function EditableFileSurface({
   )
 
   return (
-    <EditorProvider editor={editor}>
+    <EditProvider createEditor={createEditor}>
       <div ref={surfaceRef} className="flex min-h-0 flex-1">
         <Virtualizer
           className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
@@ -433,10 +444,12 @@ export function EditableFileSurface({
               </div>
             )}
             className="min-h-full"
-            contentEditable
+            edit
+            onEditChange={handleEditChange}
+            onEditComplete={() => 'accept'}
           />
         </Virtualizer>
       </div>
-    </EditorProvider>
+    </EditProvider>
   )
 }

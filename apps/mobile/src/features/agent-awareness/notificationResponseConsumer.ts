@@ -4,7 +4,7 @@
 import type { NotificationResponse } from 'expo-notifications'
 import * as Schema from 'effect/Schema'
 
-export class NotificationNavigationError extends Schema.TaggedErrorClass<NotificationNavigationError>()(
+export class NotificationNavigationError extends Schema.TaggedError<NotificationNavigationError>()(
   'NotificationNavigationError',
   {
     operation: Schema.Literals(['read', 'route', 'clear']),

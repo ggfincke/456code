@@ -6,7 +6,7 @@ import * as Schema from 'effect/Schema'
 
 const MOBILE_PAIRING_URL_PARAM = 'pairingUrl'
 
-export class PairingQrPayloadEmptyError extends Schema.TaggedErrorClass<PairingQrPayloadEmptyError>()(
+export class PairingQrPayloadEmptyError extends Schema.TaggedError<PairingQrPayloadEmptyError>()(
   'PairingQrPayloadEmptyError',
   {},
 )

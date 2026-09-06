@@ -19,7 +19,7 @@ const PrimaryEnvironmentUrlKind = Schema.Literals([
 ])
 type PrimaryEnvironmentUrlKind = typeof PrimaryEnvironmentUrlKind.Type
 
-export class PrimaryEnvironmentUrlInvalidError extends Schema.TaggedErrorClass<PrimaryEnvironmentUrlInvalidError>()(
+export class PrimaryEnvironmentUrlInvalidError extends Schema.TaggedError<PrimaryEnvironmentUrlInvalidError>()(
   'PrimaryEnvironmentUrlInvalidError',
   {
     source: PrimaryEnvironmentTargetSource,
@@ -34,7 +34,7 @@ export class PrimaryEnvironmentUrlInvalidError extends Schema.TaggedErrorClass<P
   }
 }
 
-export class PrimaryEnvironmentProtocolUnsupportedError extends Schema.TaggedErrorClass<PrimaryEnvironmentProtocolUnsupportedError>()(
+export class PrimaryEnvironmentProtocolUnsupportedError extends Schema.TaggedError<PrimaryEnvironmentProtocolUnsupportedError>()(
   'PrimaryEnvironmentProtocolUnsupportedError',
   {
     source: PrimaryEnvironmentTargetSource,
@@ -48,7 +48,7 @@ export class PrimaryEnvironmentProtocolUnsupportedError extends Schema.TaggedErr
   }
 }
 
-export class DesktopEnvironmentBootstrapIncompleteError extends Schema.TaggedErrorClass<DesktopEnvironmentBootstrapIncompleteError>()(
+export class DesktopEnvironmentBootstrapIncompleteError extends Schema.TaggedError<DesktopEnvironmentBootstrapIncompleteError>()(
   'DesktopEnvironmentBootstrapIncompleteError',
   {
     hasHttpBaseUrl: Schema.Boolean,
