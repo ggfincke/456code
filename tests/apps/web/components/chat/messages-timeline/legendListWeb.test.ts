@@ -34,6 +34,7 @@ describe.each(['react.js', 'react.mjs'])('installed LegendList %s', (bundle) =>
     const updateScroll = vi.fn()
     const context = {
       values,
+      scrollAxisGap: 0,
       state: {
         props: {
           data: ['anchor', 'unknown', 'growing-tool'],
@@ -60,6 +61,8 @@ describe.each(['react.js', 'react.mjs'])('installed LegendList %s', (bundle) =>
         set$: (_ctx: unknown, key: string, value: number) => values.set(key, value),
         getId: (_state: unknown, index: number) => context.state.props.data[index],
         getKnownOrFixedItemSize: (_ctx: unknown, index: number) => sizes[index],
+        getStylePaddingEnd: loadFunction(bundle, 'getStylePaddingEnd', {}),
+        updateContentMetricsState: vi.fn(),
         updateScroll,
       },
     )
@@ -67,7 +70,7 @@ describe.each(['react.js', 'react.mjs'])('installed LegendList %s', (bundle) =>
     expect(update(context)).toBe(84)
     expect(values.get('anchoredEndSpaceSize')).toBe(84)
     expect(onSizeChanged).toHaveBeenLastCalledWith(84)
-    expect(updateScroll).toHaveBeenCalledWith(context, 0, true)
+    expect(updateScroll).toHaveBeenCalledWith(context, 0, true, { markHasScrolled: false })
     expect(onReady).not.toHaveBeenCalled()
 
     sizes[2] = 40
@@ -107,6 +110,7 @@ describe.each(['react.js', 'react.mjs'])('installed LegendList %s', (bundle) =>
       useCallback: (callback: () => void) => callback,
     }
     const render = loadFunction<() => void>(bundle, 'ScrollAdjust', {
+      window,
       useStateContext: () => context,
       React3: reactHooks,
       React3__namespace: reactHooks,

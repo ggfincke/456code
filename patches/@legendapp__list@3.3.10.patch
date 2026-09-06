@@ -876,3 +876,33 @@ index 69f7e84d9f872fb80675b2c66150ee4f0fb2abf3..916f37f171d7c9e578f1814a972191ae
       * Number of columns to render items in.
       * @default 1
       */
+diff --git a/react.js b/react.js
+--- a/react.js
++++ b/react.js
+@@ -6577,7 +6577,10 @@
+               const temporaryPadding = temporaryPaddingRef.current;
+               resetPaddingRafRef.current = void 0;
+               temporaryPaddingRef.current = void 0;
+-              if (contentNode.style[axis.paddingEndProp] === (temporaryPadding == null ? void 0 : temporaryPadding.value)) {
++              // browsers can round fractional pixel strings after the temporary write
++              const currentPadding = contentNode.style[axis.paddingEndProp];
++              const expectedPadding = temporaryPadding == null ? void 0 : temporaryPadding.value;
++              if (currentPadding === expectedPadding || (currentPadding.endsWith("px") && expectedPadding?.endsWith("px") && Math.abs(Number.parseFloat(currentPadding) - Number.parseFloat(expectedPadding)) < 0.001)) {
+                 contentNode.style[axis.paddingEndProp] = temporaryPadding.baseline;
+               }
+             });
+diff --git a/react.mjs b/react.mjs
+--- a/react.mjs
++++ b/react.mjs
+@@ -6556,7 +6556,10 @@
+               const temporaryPadding = temporaryPaddingRef.current;
+               resetPaddingRafRef.current = void 0;
+               temporaryPaddingRef.current = void 0;
+-              if (contentNode.style[axis.paddingEndProp] === (temporaryPadding == null ? void 0 : temporaryPadding.value)) {
++              // browsers can round fractional pixel strings after the temporary write
++              const currentPadding = contentNode.style[axis.paddingEndProp];
++              const expectedPadding = temporaryPadding == null ? void 0 : temporaryPadding.value;
++              if (currentPadding === expectedPadding || (currentPadding.endsWith("px") && expectedPadding?.endsWith("px") && Math.abs(Number.parseFloat(currentPadding) - Number.parseFloat(expectedPadding)) < 0.001)) {
+                 contentNode.style[axis.paddingEndProp] = temporaryPadding.baseline;
+               }
+             });

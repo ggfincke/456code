@@ -331,3 +331,17 @@ could not load its configured Xcode framework, so the existing supported thread 
 Simulator appearance control, and screenshots supplied the appearance proof. No global Xcode
 configuration was changed. The app, backend, Metro, stream, and task-booted Simulator were stopped;
 light appearance was restored. Prior isolated fixture state was preserved.
+
+Hosted follow-up at `4853825141`: Check, all three server shards, all three Cartographer runtimes,
+Linux release smoke, mobile native static analysis, and the WSL producer passed. The general Test
+job exposed four LegendList fixture failures. The upstream web implementation now requires gap,
+padding, metrics, and browser bindings absent from the extracted-function fixtures. Updating those
+bindings also exposed upstream's new exact-string padding reset, which fails the existing browser
+rounding regression. The web bundle patch now tolerates sub-millipixel rounding while preserving
+upstream's protection against unrelated padding changes. Both CommonJS and ESM entrypoints retain
+the behavior; native entrypoints are unchanged.
+
+The four existing LegendList tests, web typecheck, scoped formatting/lint, and frozen reinstall
+passed under Node 24.20.0. The primary agent paired a controlled isolated browser, inspected the
+long thread at its end, and scrolled to earlier rendered Markdown while the composer stayed in
+place. The browser and development processes were stopped. Final hosted acceptance remains pending.
