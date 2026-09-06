@@ -133,3 +133,21 @@ export function codexRateLimitsFailureMessage(error: CodexErrors.CodexAppServerE
   }
 }
 
+export function mergeCodexRateLimits(
+  previous: CodexRateLimitSnapshot | undefined,
+  update: CodexRateLimitSnapshot,
+): CodexRateLimitSnapshot | undefined
+{
+  if (!previous) return update
+  return {
+    ...previous,
+    ...(update.limitId !== undefined ? { limitId: update.limitId } : {}),
+    ...(update.planType !== undefined ? { planType: update.planType } : {}),
+    ...(update.rateLimitReachedType !== undefined
+      ? { rateLimitReachedType: update.rateLimitReachedType }
+      : {}),
+    ...(update.primary !== undefined ? { primary: update.primary } : {}),
+    ...(update.secondary !== undefined ? { secondary: update.secondary } : {}),
+  }
+}
+

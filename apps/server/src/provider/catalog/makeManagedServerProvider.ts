@@ -14,11 +14,26 @@ import * as Semaphore from 'effect/Semaphore'
 
 import type { ServerProviderShape } from '../Services/ServerProvider.ts'
 import { ServerSettingsError } from '@t3tools/contracts'
+import {
+  applyUsageLimitsUpdate,
+  providerUsageAccountIdentity,
+  resolveAccountUsageAfterProbe,
+} from '../providerUsageLimits.ts'
 
 interface ProviderSnapshotState
 {
   readonly snapshot: ServerProvider
   readonly enrichmentGeneration: number
+}
+
+function withAccountUsage(
+  snapshot: ServerProvider,
+  accountUsage: ServerProvider['accountUsage'],
+): ServerProvider
+{
+  if (snapshot.accountUsage === accountUsage) return snapshot
+  const { accountUsage: _previous, ...rest } = snapshot
+  return accountUsage ? { ...rest, accountUsage } : rest
 }
 
 export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(function* <
@@ -63,15 +78,18 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
   {
     const snapshotToPublish = yield* Ref.modify(snapshotStateRef, (state) =>
     {
-      if (state.enrichmentGeneration !== generation || Equal.equals(state.snapshot, nextSnapshot))
+      if (state.enrichmentGeneration !== generation)
       {
         return [null, state] as const
       }
+      // preserve runtime usage updates that arrived after enrichment started
+      const merged = withAccountUsage(nextSnapshot, state.snapshot.accountUsage)
+      if (Equal.equals(state.snapshot, merged)) return [null, state] as const
       return [
-        nextSnapshot,
+        merged,
         {
           ...state,
-          snapshot: nextSnapshot,
+          snapshot: merged,
         },
       ] as const
     })
@@ -138,20 +156,34 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
       return state.snapshot
     }
 
-    const nextSnapshot = yield* input.checkProvider
-    const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) =>
-    {
-      const generation = input.enrichSnapshot
-        ? state.enrichmentGeneration + 1
-        : state.enrichmentGeneration
-      return [
-        generation,
-        {
-          snapshot: nextSnapshot,
-          enrichmentGeneration: generation,
-        },
-      ] as const
-    })
+    const probedSnapshot = yield* input.checkProvider
+    const { snapshot: nextSnapshot, generation: nextGeneration } = yield* Ref.modify(
+      snapshotStateRef,
+      (state) =>
+      {
+        const generation = input.enrichSnapshot
+          ? state.enrichmentGeneration + 1
+          : state.enrichmentGeneration
+        const snapshot = withAccountUsage(
+          probedSnapshot,
+          resolveAccountUsageAfterProbe({
+            published: state.snapshot.accountUsage,
+            probed: probedSnapshot.accountUsage,
+            sameAccount:
+              providerUsageAccountIdentity(state.snapshot) !== undefined &&
+              providerUsageAccountIdentity(state.snapshot) ===
+                providerUsageAccountIdentity(probedSnapshot),
+          }),
+        )
+        return [
+          { snapshot, generation },
+          {
+            snapshot,
+            enrichmentGeneration: generation,
+          },
+        ] as const
+      },
+    )
     yield* Ref.set(settingsRef, nextSettings)
     yield* PubSub.publish(changesPubSub, nextSnapshot)
     yield* restartSnapshotEnrichment(nextSettings, nextSnapshot, nextGeneration)
@@ -165,6 +197,51 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
     const nextSettings = yield* input.getSettings
     return yield* applySnapshot(nextSettings, { forceRefresh: true })
   })
+
+  const applyUsageLimits: ServerProviderShape['applyUsageLimits'] = (update) =>
+    Effect.gen(function* ()
+    {
+      const snapshotToPublish = yield* Ref.modify(snapshotStateRef, (state) =>
+      {
+        if (
+          state.snapshot.accountUsage?.status !== 'available' ||
+          providerUsageAccountIdentity(state.snapshot) !== update.accountIdentity
+        )
+        {
+          return [null, state] as const
+        }
+        const accountUsage = applyUsageLimitsUpdate({
+          previous: state.snapshot.accountUsage,
+          update,
+        })
+        if (accountUsage === state.snapshot.accountUsage) return [null, state] as const
+        const snapshot = withAccountUsage(state.snapshot, accountUsage)
+        return [snapshot, { ...state, snapshot }] as const
+      })
+      if (snapshotToPublish !== null)
+      {
+        yield* PubSub.publish(changesPubSub, snapshotToPublish)
+      }
+    })
+
+  const invalidateUsageLimits: ServerProviderShape['invalidateUsageLimits'] = (observedAt) =>
+    Effect.gen(function* ()
+    {
+      const snapshotToPublish = yield* Ref.modify(snapshotStateRef, (state) =>
+      {
+        if (state.snapshot.accountUsage === undefined) return [null, state] as const
+        const snapshot = withAccountUsage(state.snapshot, {
+          status: 'unavailable',
+          observedAt,
+          message: 'Refreshing account usage after authentication changed.',
+        })
+        return [snapshot, { ...state, snapshot }] as const
+      })
+      if (snapshotToPublish !== null)
+      {
+        yield* PubSub.publish(changesPubSub, snapshotToPublish)
+      }
+    })
 
   yield* Stream.runForEach(input.streamSettings, (nextSettings) =>
     Effect.asVoid(applySnapshot(nextSettings)),
@@ -189,6 +266,8 @@ export const makeManagedServerProvider = Effect.fn('makeManagedServerProvider')(
     resolveMaintenance: input.resolveMaintenance,
     getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
     refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
+    applyUsageLimits,
+    invalidateUsageLimits,
     get streamChanges()
     {
       return Stream.fromPubSub(changesPubSub)
