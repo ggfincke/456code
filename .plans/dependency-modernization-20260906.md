@@ -345,3 +345,18 @@ The four existing LegendList tests, web typecheck, scoped formatting/lint, and f
 passed under Node 24.20.0. The primary agent paired a controlled isolated browser, inspected the
 long thread at its end, and scrolled to earlier rendered Markdown while the composer stayed in
 place. The browser and development processes were stopped. Final hosted acceptance remains pending.
+
+Hosted acceptance checkpoints:
+
+- Run [34064182639](https://github.com/ggfincke/456code/actions/runs/34064182639) verified Windows
+  bootstrap/toolchain, packed npm/pnpm CLI shims, exact N/N+1 unsigned NSIS artifact production,
+  and installed-artifact/update acceptance on `4853825141`. Its only failure was the four
+  LegendList tests repaired above.
+- Run [34064666914](https://github.com/ggfincke/456code/actions/runs/34064666914) on `7658e91734`
+  passed the general Test job, all server shards, all Cartographer runtime lanes, Check (including
+  downstream typechecks/builds), Linux release smoke, WSL native production, and mobile native
+  static analysis. Windows jobs were still completing when this checkpoint was written.
+- [PR 101](https://github.com/ggfincke/456code/pull/101) carries the final exact-head hosted result;
+  completion requires all applicable checks there to pass. Expected EAS and label-definition
+  skips are acceptable. Signed-release gates, merging, releasing, EAS submission, and replacing
+  the installed application remain separate. The original checkout and persisted data are intact.
