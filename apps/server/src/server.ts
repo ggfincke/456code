@@ -103,6 +103,7 @@ import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from './auth/http
 import * as ServerSecretStore from './auth/ServerSecretStore.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import * as ProcessDiagnostics from './diagnostics/ProcessDiagnostics.ts'
+import * as HostResources from './diagnostics/HostResources.ts'
 import * as ProcessResourceMonitor from './diagnostics/ProcessResourceMonitor.ts'
 import * as TraceDiagnostics from './diagnostics/TraceDiagnostics.ts'
 import * as WorkerBrokerStore from './workers/WorkerBrokerStore.ts'
@@ -519,8 +520,12 @@ const RuntimeDependenciesWithUsageLive = UsageSummary.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 )
 
-const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
+const RuntimeDependenciesWithCapacityLive = HostResources.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesWithUsageLive),
+)
+
+const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
+  Layer.provideMerge(RuntimeDependenciesWithCapacityLive),
   Layer.provideMerge(McpCredentialBrokerLayerLive),
 )
 

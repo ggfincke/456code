@@ -39,6 +39,29 @@ describe('ClientSettings word wrap', () =>
   })
 })
 
+describe('ClientSettings load balancing', () =>
+{
+  it('is opt-in and bounds persisted machine weights including an explicit disabled weight', () =>
+  {
+    const settings = decodeClientSettings({})
+    expect(settings.loadBalancingEnabled).toBe(false)
+    expect(settings.loadBalancingWeights).toEqual({})
+    expect(
+      decodeClientSettingsPatch({
+        loadBalancingEnabled: true,
+        loadBalancingWeights: { local: 0, remote: 100 },
+      }),
+    ).toEqual({
+      loadBalancingEnabled: true,
+      loadBalancingWeights: { local: 0, remote: 100 },
+    })
+    for (const weight of [-1, 101, 0.5])
+    {
+      expect(() => decodeClientSettingsPatch({ loadBalancingWeights: { host: weight } })).toThrow()
+    }
+  })
+})
+
 describe('ClientSettings browser defaults', () =>
 {
   it('decodes defaults and accepts one bounded preferences patch', () =>

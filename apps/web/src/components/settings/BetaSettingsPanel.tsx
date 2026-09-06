@@ -11,6 +11,7 @@ import {
 } from '../../hooks/useSettings'
 import { resolveAutoSettlementPreferences } from '../../lib/threadAutoSettlement'
 import { primaryServerConfigAtom } from '../../state/server'
+import { useEnvironments } from '../../state/environments'
 import { Input } from '../ui/input'
 import { Switch } from '../ui/switch'
 import { SettingsPageContainer, SettingsRow, SettingsSection } from './settingsLayout'
@@ -67,6 +68,9 @@ function AutoSettleDaysInput({
 export function BetaSettingsPanel()
 {
   const sidebarV2Enabled = useClientSettings((settings) => settings.sidebarV2Enabled)
+  const loadBalancingEnabled = useClientSettings((settings) => settings.loadBalancingEnabled)
+  const loadBalancingWeights = useClientSettings((settings) => settings.loadBalancingWeights)
+  const { environments } = useEnvironments()
   const legacyAutoSettleAfterDays = useClientSettings(
     (settings) => settings.sidebarAutoSettleAfterDays,
   )
@@ -87,6 +91,51 @@ export function BetaSettingsPanel()
   return (
     <SettingsPageContainer>
       <SettingsSection title="Beta features">
+        <SettingsRow
+          title="Balance new tasks across connected hosts"
+          description="Opt in to selecting a healthy connected copy of the same project with the same available provider and model. Existing tasks and explicit workspace selections stay on their selected host."
+          control={
+            <Switch
+              checked={loadBalancingEnabled}
+              onCheckedChange={(checked) =>
+                updateClientSettings({ loadBalancingEnabled: Boolean(checked) })
+              }
+              aria-label="Balance new tasks across connected hosts"
+            />
+          }
+        />
+        {loadBalancingEnabled
+          ? environments.map((environment) => (
+              <SettingsRow
+                key={environment.environmentId}
+                title={`${environment.label} weight`}
+                description="0 excludes this host; 100 gives it full weight. Disconnected, stale, or overloaded hosts are never selected."
+                control={
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    aria-label={`${environment.label} balancing weight`}
+                    value={loadBalancingWeights[environment.environmentId] ?? 100}
+                    onChange={(event) =>
+                      {
+                      if (event.target.value === '') return
+                      const value = Number(event.target.value)
+                      if (Number.isInteger(value) && value >= 0 && value <= 100)
+                        {
+                        updateClientSettings({
+                          loadBalancingWeights: {
+                            ...loadBalancingWeights,
+                            [environment.environmentId]: value,
+                          },
+                        })
+                      }
+                    }}
+                  />
+                }
+              />
+            ))
+          : null}
         <SettingsRow
           id="settings-sidebar-v2"
           title="Sidebar v2"

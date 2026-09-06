@@ -381,6 +381,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: 'environment-data:server:process-diagnostics',
       tag: WS_METHODS.serverGetProcessDiagnostics,
     }),
+    hostResources: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:server:host-resources',
+      tag: WS_METHODS.serverGetHostResources,
+    }),
+    readHostResources: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:read-host-resources',
+      tag: WS_METHODS.serverGetHostResources,
+    }),
     processResourceHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:server:process-resource-history',
       tag: WS_METHODS.serverGetProcessResourceHistory,

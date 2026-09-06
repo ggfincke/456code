@@ -164,6 +164,7 @@ import {
   ServerSelfUpdateInput,
   ServerSelfUpdateResult,
   ServerTraceDiagnosticsResult,
+  HostResourcesSnapshot,
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
@@ -326,6 +327,7 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: 'server.discoverSourceControl',
   serverGetTraceDiagnostics: 'server.getTraceDiagnostics',
   serverGetProcessDiagnostics: 'server.getProcessDiagnostics',
+  serverGetHostResources: 'server.getHostResources',
   serverGetProcessResourceHistory: 'server.getProcessResourceHistory',
   serverSignalProcess: 'server.signalProcess',
 
@@ -442,6 +444,12 @@ export const WsServerGetTraceDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetTrace
 export const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetProcessDiagnostics, {
   payload: Schema.Struct({}),
   success: ServerProcessDiagnosticsResult,
+  error: EnvironmentAuthorizationError,
+})
+
+export const WsServerGetHostResourcesRpc = Rpc.make(WS_METHODS.serverGetHostResources, {
+  payload: Schema.Struct({}),
+  success: HostResourcesSnapshot,
   error: EnvironmentAuthorizationError,
 })
 
@@ -1088,6 +1096,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetHostResourcesRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
   WsCloudGetRelayClientStatusRpc,

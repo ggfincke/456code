@@ -114,6 +114,7 @@ import * as ProjectSetupScriptRunner from './project/ProjectSetupScriptRunner.ts
 import * as ServerEnvironment from './environment/ServerEnvironment.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import * as ProcessDiagnostics from './diagnostics/ProcessDiagnostics.ts'
+import * as HostResources from './diagnostics/HostResources.ts'
 import * as ProcessResourceMonitor from './diagnostics/ProcessResourceMonitor.ts'
 import * as TraceDiagnostics from './diagnostics/TraceDiagnostics.ts'
 import * as WorkerBrokerStore from './workers/WorkerBrokerStore.ts'
@@ -241,6 +242,7 @@ const makeWsRpcLayer = (
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents
       const serverSettings = yield* ServerSettings.ServerSettingsService
       const usageSummary = yield* UsageSummary.UsageSummaryService
+      const hostResources = yield* HostResources.HostResources
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem
@@ -1055,6 +1057,10 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.serverGetProcessDiagnostics]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
+            'rpc.aggregate': 'server',
+          }),
+        [WS_METHODS.serverGetHostResources]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetHostResources, hostResources.read, {
             'rpc.aggregate': 'server',
           }),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>

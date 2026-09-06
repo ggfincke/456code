@@ -28,6 +28,15 @@ import {
 } from './providerUsageLimits.ts'
 import { ServerSettings } from './settings.ts'
 
+export const HostResourcesSnapshot = Schema.Struct({
+  sampledAt: NonNegativeInt,
+  cpuUtilization: Schema.NullOr(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+  cpuCount: NonNegativeInt,
+  availableMemoryBytes: NonNegativeInt,
+  totalMemoryBytes: NonNegativeInt,
+})
+export type HostResourcesSnapshot = typeof HostResourcesSnapshot.Type
+
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal('keybindings.malformed-config'),
   message: TrimmedNonEmptyString,
