@@ -151,7 +151,7 @@ export const makeAntigravityProvider = Effect.fn('makeAntigravityProvider')(func
         installed: false,
         version: null,
         status: 'warning',
-        auth: { status: 'unknown' },
+        auth: { status: 'unknown', type: 'oauth-personal' },
         message: settings.enabled
           ? 'Checking Antigravity availability.'
           : 'Antigravity is disabled in 456code settings.',

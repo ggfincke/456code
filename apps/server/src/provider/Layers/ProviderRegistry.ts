@@ -117,13 +117,17 @@ function omitProviderWorkspaceSnapshots(provider: ServerProvider): ServerProvide
 
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean =>
 {
+  const isAntigravity = provider.driver === ProviderDriverKind.make('antigravity')
   const isCodex = provider.driver === ProviderDriverKind.make('codex')
-  if (!isCodex && provider.driver !== ProviderDriverKind.make('opencode'))
+  if (!isAntigravity && !isCodex && provider.driver !== ProviderDriverKind.make('opencode'))
   {
     return true
   }
 
-  if (isCodex && (!provider.enabled || provider.auth.status === 'unauthenticated'))
+  if (
+    (isAntigravity || isCodex) &&
+    (!provider.enabled || provider.auth.status === 'unauthenticated')
+  )
   {
     return false
   }
@@ -134,7 +138,37 @@ const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean =>
   const isPendingInitialProbe =
     provider.enabled && !provider.installed && provider.status === 'warning'
   const didInstalledProviderProbeFail = provider.installed && provider.status === 'error'
-  return isPendingInitialProbe || didInstalledProviderProbeFail
+  const isPendingAntigravityAuthentication =
+    isAntigravity &&
+    provider.installed &&
+    provider.status === 'warning' &&
+    provider.auth.status === 'unknown'
+  return (
+    isPendingAntigravityAuthentication || isPendingInitialProbe || didInstalledProviderProbeFail
+  )
+}
+
+const carrySavedAntigravityAccount = (
+  previousProvider: ServerProvider,
+  nextProvider: ServerProvider,
+): Pick<ServerProvider, 'auth' | 'status'> | undefined =>
+{
+  const antigravity = ProviderDriverKind.make('antigravity')
+  if (
+    nextProvider.driver !== antigravity ||
+    previousProvider.driver !== antigravity ||
+    !nextProvider.enabled ||
+    !nextProvider.installed ||
+    nextProvider.status !== 'warning' ||
+    nextProvider.auth.status !== 'unknown' ||
+    nextProvider.auth.type !== 'oauth-personal' ||
+    previousProvider.auth.status !== 'authenticated' ||
+    previousProvider.auth.type !== 'oauth-personal'
+  )
+  {
+    return undefined
+  }
+  return { auth: previousProvider.auth, status: 'ready' }
 }
 
 const mergeProviderModels = (
@@ -174,28 +208,32 @@ export const mergeProviderSnapshot = (
   previousProvider: ServerProvider | undefined,
   nextProvider: ServerProvider,
 ): ServerProvider =>
-  !previousProvider
-    ? nextProvider
-    : {
-        ...nextProvider,
-        models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
-        ...(nextProvider.workspaceSnapshots !== undefined
-          ? { workspaceSnapshots: nextProvider.workspaceSnapshots }
-          : previousProvider.workspaceSnapshots !== undefined
-            ? { workspaceSnapshots: previousProvider.workspaceSnapshots }
-            : {}),
-        ...(nextProvider.driver === ProviderDriverKind.make('opencode') &&
-        shouldRetainMissingProviderModels(nextProvider)
-          ? {
-              slashCommands:
-                nextProvider.slashCommands.length === 0
-                  ? previousProvider.slashCommands
-                  : nextProvider.slashCommands,
-              skills:
-                nextProvider.skills.length === 0 ? previousProvider.skills : nextProvider.skills,
-            }
-          : {}),
-      }
+{
+  if (!previousProvider) return nextProvider
+  const savedAccount = carrySavedAntigravityAccount(previousProvider, nextProvider)
+  const { message: _uncheckedMessage, ...nextWithoutMessage } = nextProvider
+  return {
+    ...(savedAccount ? nextWithoutMessage : nextProvider),
+    ...savedAccount,
+    models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
+    ...(nextProvider.workspaceSnapshots !== undefined
+      ? { workspaceSnapshots: nextProvider.workspaceSnapshots }
+      : previousProvider.workspaceSnapshots !== undefined
+        ? { workspaceSnapshots: previousProvider.workspaceSnapshots }
+        : {}),
+    ...((nextProvider.driver === ProviderDriverKind.make('opencode') &&
+      shouldRetainMissingProviderModels(nextProvider)) ||
+    savedAccount !== undefined
+      ? {
+          slashCommands:
+            nextProvider.slashCommands.length === 0
+              ? previousProvider.slashCommands
+              : nextProvider.slashCommands,
+          skills: nextProvider.skills.length === 0 ? previousProvider.skills : nextProvider.skills,
+        }
+      : {}),
+  }
+}
 
 export const mergeProviderSnapshots = (
   previousProviders: ReadonlyArray<ServerProvider>,
