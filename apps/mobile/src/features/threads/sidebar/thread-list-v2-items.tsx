@@ -18,7 +18,10 @@ import { ProviderIcon } from '../../../components/ProviderIcon'
 import { cn } from '../../../lib/cn'
 import { relativeTime } from '../../../lib/time'
 import { useThemeColor } from '../../../lib/useThemeColor'
-import { useThreadOutboxFailureReason } from '../../../state/use-thread-outbox'
+import {
+  useThreadOutboxFailureReason,
+  useThreadOutboxPendingCount,
+} from '../../../state/use-thread-outbox'
 import { useThreadPr } from '../../../state/use-thread-pr'
 import { ThreadSwipeable } from '../../home/thread-swipe-actions'
 import { resolveThreadListV2Presentation, type ThreadListV2Status } from './threadListV2'
@@ -41,6 +44,7 @@ const STATUS_LABEL_BY_STATUS: Partial<
   approval: { label: 'Approval', className: 'text-adaptive-amber-700-300' },
   input: { label: 'Input', className: 'text-adaptive-indigo-600-300' },
   working: { label: 'Working', className: 'text-adaptive-sky-600-400' },
+  pending: { label: 'Pending', className: 'text-foreground-muted' },
   failed: { label: 'Failed', className: 'text-adaptive-red-700-300' },
 }
 
@@ -175,6 +179,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const pr = useThreadPr(thread, props.projectCwd ?? props.project?.workspaceRoot ?? null)
   const queuedFailureReason = useThreadOutboxFailureReason(thread.environmentId, thread.id)
+  const queuedPendingCount = useThreadOutboxPendingCount(thread.environmentId, thread.id)
   const prState = pr?.state ?? null
   const threadKey = `${thread.environmentId}:${thread.id}`
   useEffect(() =>
@@ -199,6 +204,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     thread,
     queuedFailureReason,
     prAccessibilityLabel,
+    queuedPendingCount,
   )
   const status = presentation.status
   const statusLabel = STATUS_LABEL_BY_STATUS[status]

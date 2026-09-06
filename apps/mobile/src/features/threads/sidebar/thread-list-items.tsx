@@ -21,7 +21,10 @@ import { relativeTime } from '../../../lib/time'
 import { useNowMinute } from '../../../lib/useNowMinute'
 import { useThemeColor } from '../../../lib/useThemeColor'
 import type { PendingNewTask } from '../../../state/use-pending-new-tasks'
-import { useThreadOutboxFailureReason } from '../../../state/use-thread-outbox'
+import {
+  useThreadOutboxFailureReason,
+  useThreadOutboxPendingCount,
+} from '../../../state/use-thread-outbox'
 import { useThreadPr, type ThreadPr } from '../../../state/use-thread-pr'
 import type { HomeGroupDisplayAction } from '../../home/homeListItems'
 import { ThreadSwipeable } from '../../home/thread-swipe-actions'
@@ -541,6 +544,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   // a queued message that exhausted delivery reports here: the thread may never
   // be opened, and the composer detail surface is only visible once it is.
   const queuedFailureReason = useThreadOutboxFailureReason(thread.environmentId, thread.id)
+  const queuedPendingCount = useThreadOutboxPendingCount(thread.environmentId, thread.id)
   const timestamp = relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)
   const searchLabel = props.searchMatch
     ? `, ${props.searchMatch.source === 'user' ? 'You' : 'Agent'}: ${props.searchMatch.snippet}`
@@ -549,7 +553,9 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     (pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title) + searchLabel
   const threadAccessibilityLabel =
     queuedFailureReason === null
-      ? prAccessibilityLabel
+      ? queuedPendingCount > 0
+        ? `${prAccessibilityLabel}, ${queuedPendingCount} pending ${queuedPendingCount === 1 ? 'message' : 'messages'}`
+        : prAccessibilityLabel
       : `${prAccessibilityLabel}, failed: ${queuedFailureReason}`
   const subtitleParts = [props.environmentLabel, thread.branch].filter((part): part is string =>
     Boolean(part),
@@ -587,6 +593,10 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const statusPill =
     queuedFailureReason !== null ? (
       <QueuedFailurePill />
+    ) : queuedPendingCount > 0 ? (
+      <View className="rounded-full bg-adaptive-neutral-500-a12-a16 px-1.5 py-0.5">
+        <Text className="text-3xs font-sans-bold text-foreground-muted">Pending</Text>
+      </View>
     ) : effectiveStatus ? (
       <View className={`${effectiveStatus.pillClassName} rounded-full px-1.5 py-0.5`}>
         <Text className={`text-3xs font-sans-bold ${effectiveStatus.textClassName}`}>

@@ -14,7 +14,7 @@ import { isImportedHistoryOnlyThread } from '../thread-list-pinning'
 // four visual states, three colors: color is reserved for "act now"
 // (approval), "in motion" (working), and "broken" (failed). Ready is the
 // unlabeled resting state.
-export type ThreadListV2Status = 'approval' | 'input' | 'working' | 'failed' | 'ready'
+export type ThreadListV2Status = 'approval' | 'input' | 'working' | 'pending' | 'failed' | 'ready'
 
 // settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more. Shared by the compact Home list and
@@ -25,6 +25,7 @@ export const THREAD_LIST_V2_SETTLED_PAGE_COUNT = 25
 export function resolveThreadListV2Status(
   thread: Pick<EnvironmentThreadShell, 'hasPendingApprovals' | 'hasPendingUserInput' | 'session'>,
   outboxFailureReason: string | null = null,
+  outboxPendingCount: number = 0,
 ): ThreadListV2Status
 {
   if (outboxFailureReason !== null)
@@ -38,6 +39,10 @@ export function resolveThreadListV2Status(
   if (thread.hasPendingUserInput)
   {
     return 'input'
+  }
+  if (outboxPendingCount > 0)
+  {
+    return 'pending'
   }
   if (thread.session?.status === 'running' || thread.session?.status === 'starting')
   {
@@ -66,16 +71,19 @@ export function resolveThreadListV2Presentation(
   >,
   outboxFailureReason: string | null,
   baseAccessibilityLabel: string = thread.title,
+  outboxPendingCount: number = 0,
 ): ThreadListV2Presentation
 {
-  const status = resolveThreadListV2Status(thread, outboxFailureReason)
+  const status = resolveThreadListV2Status(thread, outboxFailureReason, outboxPendingCount)
   return {
     status,
     failureReason:
       outboxFailureReason ?? (status === 'failed' ? thread.session?.lastError || null : null),
     accessibilityLabel:
       outboxFailureReason === null
-        ? baseAccessibilityLabel
+        ? outboxPendingCount > 0
+          ? `${baseAccessibilityLabel}, ${outboxPendingCount} pending ${outboxPendingCount === 1 ? 'message' : 'messages'}`
+          : baseAccessibilityLabel
         : `${baseAccessibilityLabel}, failed: ${outboxFailureReason}`,
   }
 }
