@@ -24,6 +24,7 @@ import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Queue from 'effect/Queue'
+import * as Result from 'effect/Result'
 import * as Stream from 'effect/Stream'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
@@ -32,6 +33,10 @@ import * as ServerConfig from '../../config.ts'
 import * as ImportDiscovery from '../../import/discovery/discovery.ts'
 import * as ImportService from '../../import/importService.ts'
 import { normalizeDispatchCommand } from '../../orchestration/Normalizer.ts'
+import {
+  makeLiveStreamBudget,
+  type RetainedLiveItem,
+} from '../../orchestration/LiveStreamBudget.ts'
 import type * as OrchestrationEngine from '../../orchestration/Services/OrchestrationEngine.ts'
 import type * as ProjectionSnapshotQuery from '../../orchestration/Services/ProjectionSnapshotQuery.ts'
 import * as ServerRuntimeStartup from '../../serverRuntimeStartup.ts'
@@ -362,15 +367,6 @@ export function makeOrchestrationRpcHandlers({
       return output
     })
 
-  const coalesceShellLiveStream = <E, R>(
-    stream: Stream.Stream<ShellLiveInput, E, R>,
-  ): Stream.Stream<OrchestrationShellStreamItem, E, R> =>
-    stream.pipe(
-      Stream.groupedWithin(SHELL_COALESCE_MAX_CHUNK, SHELL_COALESCE_WINDOW),
-      Stream.mapEffect(coalesceShellLiveInputs),
-      Stream.flatMap((items) => Stream.fromIterable(items)),
-    )
-
   return {
     [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
       observeRpcEffect(
@@ -466,16 +462,60 @@ export function makeOrchestrationRpcHandlers({
           // sequence but the live subscription is not attached yet). Every
           // path below emits from this same buffered live tail. Overlapping
           // events are deduped by sequence on the client.
-          const liveBuffer = yield* Queue.unbounded<ShellLiveInput>()
-          yield* Effect.forkScoped(
-            orchestrationEngine.streamDomainEvents.pipe(
-              Stream.runForEach((event) =>
-                Queue.offer(liveBuffer, { kind: 'event' as const, event }),
-              ),
-            ),
-            { startImmediately: true },
+          const liveBudget = yield* makeLiveStreamBudget()
+          const liveBuffer = yield* Queue.unbounded<
+            RetainedLiveItem<ShellLiveInput>,
+            OrchestrationGetSnapshotError
+          >()
+          let liveBufferClosed = false
+          const closeLiveBuffer = (error?: OrchestrationGetSnapshotError) =>
+            Effect.gen(function* ()
+            {
+              if (liveBufferClosed)
+              {
+                return
+              }
+              liveBufferClosed = true
+              liveBudget.release(yield* Queue.clear(liveBuffer).pipe(Effect.orDie))
+              if (error !== undefined)
+              {
+                yield* Queue.fail(liveBuffer, error)
+              }
+              yield* Queue.shutdown(liveBuffer)
+            })
+          yield* Effect.addFinalizer(() => closeLiveBuffer())
+          yield* liveBudget.failed.pipe(
+            Effect.catchTags({ OrchestrationGetSnapshotError: closeLiveBuffer }),
+            Effect.forkScoped,
           )
-          const bufferedLiveStream = coalesceShellLiveStream(Stream.fromQueue(liveBuffer))
+          yield* orchestrationEngine.registerDomainEventAdmission((event) =>
+          {
+            const retained = liveBudget.retainUnsafe({ kind: 'event' as const, event }, event)
+            if (Result.isFailure(retained))
+            {
+              return false
+            }
+            if (Queue.offerUnsafe(liveBuffer, retained.success))
+            {
+              return true
+            }
+            liveBudget.release([retained.success])
+            liveBudget.failUnsafe(
+              new OrchestrationGetSnapshotError({
+                message: 'The live event buffer closed before delivery.',
+              }),
+            )
+            return false
+          })
+          const coalesceRetainedInputs = (items: ReadonlyArray<RetainedLiveItem<ShellLiveInput>>) =>
+            coalesceShellLiveInputs(items.map((item) => item.value)).pipe(
+              Effect.flatMap((output) => liveBudget.replace(items, output)),
+            )
+          const bufferedLiveStream = Stream.fromQueue(liveBuffer).pipe(
+            Stream.groupedWithin(SHELL_COALESCE_MAX_CHUNK, SHELL_COALESCE_WINDOW),
+            Stream.mapEffect(coalesceRetainedInputs),
+            Stream.flatMap((items) => Stream.fromIterable(items)),
+          )
 
           const loadSnapshot = projectionSnapshotQuery.getShellSnapshot().pipe(
             Effect.tapError((cause) =>
@@ -493,18 +533,21 @@ export function makeOrchestrationRpcHandlers({
           // offer the completion marker into the same queue as live events.
           // anything buffered while snapshot/replay work was in flight is
           // therefore delivered before the client is told it is synchronized.
-          const synchronizedThenLive =
+          const synchronizedThenLive = liveBudget.deliver(
             input.requestCompletionMarker === true
               ? Stream.concat(
                   Stream.fromEffect(
-                    Queue.offer(liveBuffer, { kind: 'synchronized' as const }).pipe(
+                    liveBudget.retain({ kind: 'synchronized' as const }).pipe(
+                      Effect.flatMap((item) => Queue.offer(liveBuffer, item)),
+                      Effect.uninterruptible,
                       Effect.andThen(Queue.takeAll(liveBuffer)),
-                      Effect.flatMap(coalesceShellLiveInputs),
+                      Effect.flatMap(coalesceRetainedInputs),
                     ),
                   ).pipe(Stream.flatMap((items) => Stream.fromIterable(items))),
                   bufferedLiveStream,
                 )
-              : bufferedLiveStream
+              : bufferedLiveStream,
+          )
 
           // when the client already holds a shell snapshot (cached, or loaded
           // over HTTP) it passes that snapshot's sequence, and we resume by

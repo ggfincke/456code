@@ -118,6 +118,7 @@ function makeEngine(dispatched: OrchestrationCommand[])
       Effect.die('thread replay stats are not used by availability tests'),
     streamDomainEvents: Stream.empty,
     streamDomainEventsForAggregate: () => Stream.empty,
+    registerDomainEventAdmission: () => Effect.void,
     latestSequence: Effect.succeed(0),
   })
 }

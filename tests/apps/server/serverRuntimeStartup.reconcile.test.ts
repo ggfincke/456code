@@ -63,6 +63,7 @@ const makeEngineStub = (
   dispatchInternal: () => Effect.die('unused'),
   streamDomainEvents: Stream.empty,
   streamDomainEventsForAggregate: () => Stream.empty,
+  registerDomainEventAdmission: () => Effect.void,
   latestSequence: Effect.succeed(0),
 })
 
