@@ -16,7 +16,7 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `023572c63f64a0d7e226e11ee369fd1f6c52b346`.
+- Published `main`: `9a797692a24ad2d2df2ff8e6691f6fb0ef883709`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -44,10 +44,15 @@ Current state:
   `023572c63f64a0d7e226e11ee369fd1f6c52b346`. Exact merged-main CI run
   [33965498899](https://github.com/ggfincke/456code/actions/runs/33965498899) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **07 — Provider reliability**, locally verified and publication in progress.
-- Active branch: `sync/t3-r07-20260904`, based on published `main`.
+- Published Group 07: [PR #98](https://github.com/ggfincke/456code/pull/98) merged through merge commit
+  `9a797692a24ad2d2df2ff8e6691f6fb0ef883709`. Exact merged-main CI run
+  [33973168375](https://github.com/ggfincke/456code/actions/runs/33973168375) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **08 — OpenCode lifecycle follow-ups**, implementation and integrated verification
+  accepted; cleanup and publication remain.
+- Active branch: `sync/t3-r08-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 08-27 are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 09-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -1025,19 +1030,92 @@ was cleared only through the G07 environment's product UI; after an exact owned-
 avoid its normal finalizer rewriting the stale in-memory snapshot, the relaunched app received all
 three projected activity rows and visibly rendered the warning.
 
-Reviewed evidence is retained outside the repository as
-`/private/tmp/t3code-group07-evidence/web-warning.jpg` (SHA-256
-`616f1f80793adde66a2c622b48c77e408b23f13f7418da93ca1f54338ebaceed`) and
-`/private/tmp/t3code-group07-evidence/iphone-warning.jpg` (SHA-256
-`36ebf1d5ac3e1ca3c4d4e86b588f96db73517643ab40a6b51c384c19f9fddaa7`) pending GitHub upload.
+Reviewed web and iPhone evidence is published in
+[PR #98 comment 5552543049](https://github.com/ggfincke/456code/pull/98#issuecomment-5552543049).
 The exact G07 mobile environment was removed through the real Connections UI, leaving the pre-existing
 127.0.0.1:13774 connection intact. Owned backend, Vite, Metro, manifest-shim, and serve-sim processes
 are terminal; ports 13777, 5737, 18092, 18094, and 3200 are clear; the owned simulator is shut down;
 and the compatible development client remains installed. The disposable base and tiny Git project
 were moved recoverably to Trash, while the original checkout, unrelated refs/worktrees, caches, and
 credentials were preserved. Eight source-attributed commits plus the separate fork-only typed-fixture
-repair are prepared without changing the accepted implementation hash. PR evidence upload, hosted CI,
-merge, and exact merged-main CI remain the publication gate.
+repair were published from exact PR head `d81c303e97ce3ff9a073508a153cf4bc8bd31eb1`.
+PR CI passed its complete 22-check rollup with 19 successes and three intentional skips. Merge commit
+`9a797692a24ad2d2df2ff8e6691f6fb0ef883709` passed exact merged-main CI run
+[33973168375](https://github.com/ggfincke/456code/actions/runs/33973168375) with 15 successes and the
+intentional mobile-native-static skip. The clean original checkout was fast-forwarded to that merge,
+and the exact run-owned Group 07 local, live-origin, and tracking refs were compare-deleted after PR,
+holder, ancestry, and live-ref guards.
+
+## Group 08 active checkpoint
+
+Group 08 started from exact green merged `main`
+`9a797692a24ad2d2df2ff8e6691f6fb0ef883709` on `sync/t3-r08-20260904`. The approved OpenCode server
+lifecycle lane is locally verified and awaiting publication. The non-overlapping client/logger lane adds durable mobile
+approval locking and lifecycle copy for `responding` and `unknown` outcomes while preserving dynamic
+provider options, labels, and request identity. It deliberately does not duplicate approval lifecycle
+state in the thread-detail reducer: both clients already merge the authoritative shell outcome, and
+the web surface already locks and explains those states. The `ec8b2119c377f5c1dbe6235b221ef98eca31a96e`
+slice omits only repeated native OpenCode running-tool snapshots from provider NDJSON logs; pending,
+completed, failed, unknown, malformed, canonical, and orchestration records remain unchanged.
+
+The frozen checkpoint passes 222 focused tests: seven EventNdjsonLogger tests, three mobile approval
+presentation tests, 24 OpenCode environment, inventory, and permission-runtime tests, plus 188 adapter,
+runtime-ingestion, and command-reactor tests. The coordinated server and mobile typechecks and exact
+changed-file formatting, lint, comment/header checks, and `git diff --check` pass. Peer review found no
+remaining issue before the integrated gate began.
+
+The focused server targets ran from `apps/server` with
+`mise x node@24 -- pnpm exec vp test run <targets>`: `provider/Layers/OpenCodeAdapter.test.ts` passed
+62 tests, `orchestration/Layers/ProviderRuntimeIngestion.test.ts` passed 49,
+`orchestration/Layers/ProviderCommandReactor.test.ts` passed 77,
+`provider/Layers/EventNdjsonLogger.test.ts` passed seven, and the three
+`provider/opencodeRuntime.{environment,inventory,permissions}.test.ts` targets passed 24. From
+`apps/mobile`, the same command targeting
+`features/threads/activity/pendingApprovalPresentation.test.ts` passed three. Both affected packages
+passed `mise x node@24 -- pnpm run typecheck`. From the repository root,
+`node scripts/format-repository.ts --check --staged <20-file manifest>`, the changed-TypeScript-file
+forms of `pnpm exec vp lint --report-unused-disable-directives`, `node
+scripts/check-js-comments.ts`, and
+`node scripts/check-directive-preservation.ts` passed, followed by `git diff --check`.
+
+The final 20-file manifest consists of two maintained `.plans` receipts, three mobile source files
+and one mirrored mobile test, five server source files and seven mirrored server tests, plus two
+maintained provider/observability docs. The accepted implementation/source-doc diff against Group 07
+merge `9a797692a24ad2d2df2ff8e6691f6fb0ef883709` has SHA-256
+`c52e9f333e9876acff9f6b642c61804ba228927052df86b99906419dddc5aeb8` when computed with
+`git diff --binary <merge> -- apps packages tests docs | shasum -a 256`; `.plans` receipt text is
+deliberately outside that implementation fingerprint.
+
+One shared disposable web/iPhone environment has exercised the approved real-client approval paths.
+An automatic full-access reply failure fell back to one manual card; an abrupt SSE disconnect
+reconnected without duplicating the request, and the real manual HTTP success cleared the card even
+though the fixture intentionally omitted the native reply event. A second request timed out into the
+same durable `unknown` and non-retryable presentation on web and iPhone, and a real disabled-button
+attempt did not resubmit it. That first Stop exposed an integration defect: the Stop command was
+durably recorded as `thread.turn-interrupt-requested` sequence 41, but the earlier approval action at
+sequence 38 remained `unknown`, fenced the provider-command cursor at sequence 37, and prevented the
+provider abort from running. The repair preserves the durable `unknown` approval outcome without
+falsely resolving the approval, records the OpenCode approval-response action as handled, and leaves
+generic provider unknown-action fencing unchanged.
+
+A clean replacement environment then repeated the whole affected lifecycle on the repaired bytes.
+The same SSE reconnect and single manual approval behavior passed; the second approval again became
+durably `unknown` on web and iPhone with no disabled-button resubmission. A real iPhone Stop then
+closed the approval, interrupted the turn, restored both composers, and advanced the provider-command
+cursor through the succeeded approval and interrupt actions. A deliberately late native permission
+reply increased only the disposable sidecar's event sequence: it did not reopen a canonical request,
+increment the reply count, or change the stopped client state after web reload. No live provider
+credential or provider turn was used. XcodeBuildMCP semantic inspection remained unavailable because
+the host's pinned Xcode-beta SimulatorKit private framework is absent; the previously approved
+serve-sim/CUA visual-control route exercised the real installed iPhone client, and exact simulator
+screenshots captured the unknown and post-late stopped states. Root-controlled UI removed only the
+fresh `13778` mobile environment and preserved the pre-existing `13774` connection. The owned
+sidecar, web/backend, Metro, serve-sim, and app processes stopped; ports `4098`, `5738`, `13778`,
+`18095`, and `18096` have no listeners; and the simulator returned to shutdown while the compatible
+development client remained installed. Both disposable bases and projects were moved recoverably to
+Trash after their reproduction evidence was recorded. The two safe final screenshots remain in one
+run-owned temporary evidence directory for GitHub upload. Source attribution, publication, and exact
+merged-main CI remain required before Group 08 completes.
 
 ## Verification policy for every group
 

@@ -104,6 +104,9 @@ const isKnownAttachment = Schema.is(ChatKnownAttachment)
 const isProviderAdapterSessionClosedError = Schema.is(ProviderAdapterSessionClosedError)
 const isProviderAdapterSessionNotFoundError = Schema.is(ProviderAdapterSessionNotFoundError)
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError)
+const isProviderRequestNotDispatched = Schema.is(
+  Schema.TaggedStruct('ProviderRequestNotDispatched', {}),
+)
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError)
 const isProviderDriverKind = Schema.is(ProviderDriverKind)
 const isProviderInstanceNotFoundError = Schema.is(ProviderInstanceNotFoundError)
@@ -452,6 +455,12 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<unknown>): bool
   )
 }
 
+function isApprovalRequestNotDispatched(cause: Cause.Cause<unknown>): boolean
+{
+  const error = findProviderAdapterRequestError(cause)
+  return error !== undefined && isProviderRequestNotDispatched(error.cause)
+}
+
 function isUnknownPendingUserInputRequestError(cause: Cause.Cause<unknown>): boolean
 {
   const error = findProviderAdapterRequestError(cause)
@@ -572,7 +581,9 @@ const make = Effect.gen(function* ()
     if (isProviderAdapterRequestError(failure))
     {
       return (
-        isUnknownPendingApprovalRequestError(cause) || isUnknownPendingUserInputRequestError(cause)
+        isApprovalRequestNotDispatched(cause) ||
+        isUnknownPendingApprovalRequestError(cause) ||
+        isUnknownPendingUserInputRequestError(cause)
       )
     }
     return false
@@ -649,7 +660,7 @@ const make = Effect.gen(function* ()
     readonly revision?: number
     readonly approvalOutcome?: {
       readonly requestId: string
-      readonly status: 'stale-terminal' | 'unknown'
+      readonly status: 'pending' | 'stale-terminal' | 'unknown'
       readonly requestedDecision:
         'accept' | 'acceptForSession' | 'acceptAlways' | 'decline' | 'cancel'
       readonly detail: string
@@ -2150,16 +2161,24 @@ const make = Effect.gen(function* ()
       ),
     ).pipe(
       Effect.andThen(
-        appendApprovalAcceptedActivity({
-          thread,
-          requestId: event.payload.requestId,
-          decision: event.payload.decision,
-          createdAt: event.payload.createdAt,
-        }),
+        thread.session?.providerName === 'opencode'
+          ? Effect.void
+          : appendApprovalAcceptedActivity({
+              thread,
+              requestId: event.payload.requestId,
+              decision: event.payload.decision,
+              createdAt: event.payload.createdAt,
+            }),
       ),
       Effect.catchCause((cause) =>
       {
         const staleTerminal = isUnknownPendingApprovalRequestError(cause)
+        const notDispatched = isApprovalRequestNotDispatched(cause)
+        const failureStatus = notDispatched
+          ? ('pending' as const)
+          : staleTerminal
+            ? ('stale-terminal' as const)
+            : ('unknown' as const)
         const detail = staleTerminal
           ? stalePendingRequestDetail('approval', event.payload.requestId)
           : formatFailureDetail(cause)
@@ -2173,13 +2192,28 @@ const make = Effect.gen(function* ()
           requestId: event.payload.requestId,
           approvalOutcome: {
             requestId: event.payload.requestId,
-            status: staleTerminal ? 'stale-terminal' : 'unknown',
+            status: failureStatus,
             requestedDecision: event.payload.decision,
             detail,
             ...(activeActionId === undefined ? {} : { actionId: activeActionId }),
             updatedAt: event.payload.createdAt,
           },
-        })
+        }).pipe(
+          Effect.tap(() =>
+          {
+            // once OpenCode's unknown outcome is durable, replaying the reply risks
+            // duplication while fencing this lane would strand an explicit Stop;
+            // this completes local failure handling, not provider delivery
+            if (thread.session?.providerName === 'opencode' && failureStatus === 'unknown')
+            {
+              return Effect.sync(() =>
+              {
+                unknownProviderFailureDetail = undefined
+              })
+            }
+            return Effect.void
+          }),
+        )
       }),
     )
   })

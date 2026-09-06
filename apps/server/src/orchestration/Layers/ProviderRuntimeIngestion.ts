@@ -1053,8 +1053,8 @@ const make = Effect.gen(function* ()
             {
               return sameId(activeTurnId, eventTurnId)
             }
-            // an untargeted completion cannot prove it belongs to a turn this thread ran
-            return eventTurnId !== undefined
+            // a named completion can recover a lost start; a late abort cannot close idle state
+            return event.type === 'turn.completed' && eventTurnId !== undefined
           default:
             return true
         }
@@ -1419,7 +1419,10 @@ const make = Effect.gen(function* ()
         })
       }
 
-      if (event.type === 'turn.completed')
+      if (
+        event.type === 'turn.completed' ||
+        (event.type === 'turn.aborted' && shouldApplyThreadLifecycle)
+      )
       {
         const detailedThread = yield* getLoadedThreadDetail()
         const messages = detailedThread?.messages ?? []

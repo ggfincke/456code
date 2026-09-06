@@ -135,6 +135,69 @@ describe('EventNdjsonLogger', () =>
     }),
   )
 
+  it.effect('omits repeated OpenCode running tool snapshots only from native logs', () =>
+    Effect.gen(function* ()
+    {
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 't3-provider-log-'))
+      const basePath = NodePath.join(tempDir, 'provider-events.ndjson')
+      const threadId = ThreadId.make('thread-tool-lifecycle')
+      const toolEvent = (state: unknown) => ({
+        event: {
+          type: 'message.part.updated',
+          payload: { properties: { part: { type: 'tool', state } } },
+        },
+      })
+      const retainedNativeEvents = [
+        toolEvent({ status: 'pending', input: { command: 'run-build' } }),
+        toolEvent({ status: 'completed', output: 'Build complete' }),
+        toolEvent({ status: 'error', error: 'Build failed' }),
+        toolEvent({ status: 'unknown' }),
+        toolEvent(null),
+      ]
+      const repeatedRunningEvent = toolEvent({ status: 'running', output: 'progress' })
+
+      try
+      {
+        const loggers = yield* makeProviderEventNdjsonLoggers(basePath, { batchWindowMs: 0 })
+        assert.exists(loggers)
+        if (!loggers)
+        {
+          return
+        }
+
+        yield* loggers.native.write(repeatedRunningEvent, threadId)
+        for (const event of retainedNativeEvents)
+        {
+          yield* loggers.native.write(event, threadId)
+        }
+        yield* loggers.canonical.write(repeatedRunningEvent, threadId)
+        yield* loggers.close()
+
+        const lines = NodeFS.readFileSync(
+          NodePath.join(tempDir, 'thread-tool-lifecycle.log'),
+          'utf8',
+        )
+          .trim()
+          .split('\n')
+          .map((line) => parseLogLine(line))
+        assert.deepEqual(
+          lines.map(({ stream, payload }) => ({ stream, payload })),
+          [
+            ...retainedNativeEvents.map((event) => ({
+              stream: 'NTIVE',
+              payload: encodeUnknownJson(event),
+            })),
+            { stream: 'CANON', payload: encodeUnknownJson(repeatedRunningEvent) },
+          ],
+        )
+      }
+      finally
+      {
+        NodeFS.rmSync(tempDir, { recursive: true, force: true })
+      }
+    }),
+  )
+
   it.effect(
     'falls back to a global segment when orchestration thread id is missing or invalid',
     () =>

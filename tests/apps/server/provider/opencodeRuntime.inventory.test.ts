@@ -6,13 +6,14 @@ import * as NodeAssert from 'node:assert/strict'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
-import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
+import * as Queue from 'effect/Queue'
+import { vi } from 'vite-plus/test'
 import {
   HostProcessEnvironment,
   HostProcessExecutablePath,
@@ -73,34 +74,49 @@ it.layer(testLayer)('loadOpenCodeInventory', (it) =>
     }),
   )
 
-  it.effect('aborts every in-flight SDK inventory request when its borrower is interrupted', () =>
+  it.effect('aborts pending SDK requests when inventory loading is interrupted', () =>
     Effect.gen(function* ()
     {
       const runtime = yield* OpenCodeRuntime
-      const entered = yield* Deferred.make<void>()
-      const signals: AbortSignal[] = []
-      const pending = (_parameters?: unknown, options?: { signal?: AbortSignal }) =>
-      {
-        if (options?.signal) signals.push(options.signal)
-        if (signals.length === 3) Deferred.doneUnsafe(entered, Effect.void)
-        return new Promise(() => undefined)
-      }
-      const client = {
-        provider: { list: pending },
-        app: { agents: pending, skills: pending },
-      } as unknown as Parameters<OpenCodeRuntimeShape['loadOpenCodeInventory']>[0]
+      const started = yield* Queue.make<void>()
+      const aborted = yield* Queue.make<string>()
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vi.spyOn(globalThis, 'fetch').mockImplementation((request) =>
+          {
+            const sdkRequest = request as Request
+            const pathname = new URL(sdkRequest.url).pathname
+            sdkRequest.signal.addEventListener(
+              'abort',
+              () => Queue.offerUnsafe(aborted, pathname),
+              { once: true },
+            )
+            Queue.offerUnsafe(started, undefined)
+            return new Promise<Response>(() => undefined)
+          }),
+        ),
+        (spy) => Effect.sync(() => spy.mockRestore()),
+      )
+      const client = runtime.createOpenCodeSdkClient({
+        baseUrl: 'http://opencode-fixture.invalid',
+        directory: '/fixture',
+      })
+
       const fiber = yield* runtime.loadOpenCodeInventory(client).pipe(Effect.forkChild)
-      yield* Deferred.await(entered)
-      yield* Effect.yieldNow
+      yield* Queue.take(started)
+      yield* Queue.take(started)
+      yield* Queue.take(started)
       yield* Fiber.interrupt(fiber)
       const result = yield* Fiber.await(fiber)
+      const abortedPaths = [
+        yield* Queue.take(aborted),
+        yield* Queue.take(aborted),
+        yield* Queue.take(aborted),
+      ]
+
       NodeAssert.equal(Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause), true)
-      NodeAssert.equal(signals.length, 3)
-      NodeAssert.equal(
-        signals.every((signal) => signal.aborted),
-        true,
-      )
-    }),
+      NodeAssert.deepEqual(abortedPaths.toSorted(), ['/agent', '/provider', '/skill'])
+    }).pipe(Effect.scoped),
   )
 
   it.effect('retains only SDK skill metadata', () =>

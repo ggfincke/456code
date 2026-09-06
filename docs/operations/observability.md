@@ -47,7 +47,7 @@ If OTLP is not configured, metrics still exist in-process, but you will not have
 
 ### Related Artifacts
 
-Provider event NDJSON files still exist for provider runtime streams. Those are separate from the main server trace file.
+Provider event NDJSON files still exist for provider runtime streams. Those are separate from the main server trace file. Native OpenCode logs omit repeated running-tool snapshots but retain pending, completed, failed, malformed, and unknown tool states.
 
 ## Run The Server In Instrumented Mode
 
