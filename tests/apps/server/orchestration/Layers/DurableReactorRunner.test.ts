@@ -545,7 +545,7 @@ describe('DurableReactorRunner', () =>
     ),
   )
 
-  it.effect('keeps sparse ahead controls hidden from ordinary claims', () =>
+  it.effect('bounds ordinary claims below sparse ahead controls', () =>
     Effect.gen(function* ()
     {
       const delivery = yield* OrchestrationReactorDelivery
@@ -601,6 +601,7 @@ describe('DurableReactorRunner', () =>
             ownerId: 'prestart-owner',
             leaseDurationMs: 30_000,
             now: NOW,
+            maxSourceSequence: 1,
           }),
         ),
         true,
@@ -621,6 +622,7 @@ describe('DurableReactorRunner', () =>
             ownerId: 'prestart-owner',
             leaseDurationMs: 30_000,
             now: NOW,
+            maxSourceSequence: 2,
           }),
         ),
         true,

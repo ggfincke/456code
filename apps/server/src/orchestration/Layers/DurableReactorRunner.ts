@@ -186,6 +186,7 @@ const make = Effect.gen(function* ()
 
   const claimAvailable = Effect.fn('DurableReactorRunner.claimAvailable')(function* (
     lane: ReactorLane,
+    maxSourceSequence: number,
     onClaim?: Effect.Effect<unknown>,
   )
   {
@@ -196,6 +197,7 @@ const make = Effect.gen(function* ()
         ownerId: lane.ownerId,
         leaseDurationMs: LEASE_DURATION_MS,
         now: yield* nowIso,
+        maxSourceSequence,
       })
       if (Option.isNone(action))
       {
@@ -294,7 +296,7 @@ const make = Effect.gen(function* ()
       {
         if (progress.mode === 'durable')
         {
-          yield* claimAvailable(lane, onClaim)
+          yield* claimAvailable(lane, cursor, onClaim)
         }
         return
       }
@@ -336,7 +338,7 @@ const make = Effect.gen(function* ()
           continue
         }
 
-        yield* claimAvailable(lane, onClaim)
+        yield* claimAvailable(lane, event.sequence, onClaim)
         const advanced = yield* delivery.advanceCursor({
           reactorId: lane.definition.reactorId,
           sourceSequence: event.sequence,

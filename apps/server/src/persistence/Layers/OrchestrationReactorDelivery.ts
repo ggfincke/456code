@@ -228,9 +228,10 @@ const make = Effect.gen(function* ()
       ownerId: Schema.String,
       now: Schema.String,
       leaseExpiresAt: Schema.String,
+      maxSourceSequence: Schema.NullOr(Schema.Number),
     }),
     Result: ReactorActionRecord,
-    execute: ({ reactorId, ownerId, now, leaseExpiresAt }) => sql`
+    execute: ({ reactorId, ownerId, now, leaseExpiresAt, maxSourceSequence }) => sql`
       UPDATE orchestration_reactor_actions
       SET
         status = 'leased',
@@ -247,7 +248,11 @@ const make = Effect.gen(function* ()
         WHERE candidate.reactor_id = ${reactorId}
           AND progress.mode = 'durable'
           AND progress.active_owner_id = ${ownerId}
-          AND candidate.source_sequence = progress.cursor_sequence + 1
+          AND candidate.source_sequence > progress.cursor_sequence
+          AND (
+            ${maxSourceSequence} IS NULL
+            OR candidate.source_sequence <= ${maxSourceSequence}
+          )
           AND (
             progress.high_water_sequence IS NULL
             OR candidate.source_sequence <= progress.high_water_sequence
@@ -309,6 +314,7 @@ const make = Effect.gen(function* ()
           ownerId: input.ownerId,
           now: input.now,
           leaseExpiresAt: addMilliseconds(input.now, input.leaseDurationMs),
+          maxSourceSequence: input.maxSourceSequence ?? null,
         }),
       )
       .pipe(

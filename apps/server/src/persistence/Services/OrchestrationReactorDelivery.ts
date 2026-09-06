@@ -159,6 +159,7 @@ export interface OrchestrationReactorDeliveryShape
     readonly ownerId: string
     readonly leaseDurationMs: number
     readonly now: string
+    readonly maxSourceSequence?: number
   }) => Effect.Effect<Option.Option<ReactorActionRecord>, ReactorDeliveryError>
   readonly claimNextAhead: (input: {
     readonly reactorId: ReactorId
