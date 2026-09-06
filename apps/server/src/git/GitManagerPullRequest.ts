@@ -27,6 +27,7 @@ export interface PullRequestInfo extends OpenPrInfo, PullRequestHeadRemoteInfo
 {
   state: 'open' | 'closed' | 'merged'
   updatedAt: Option.Option<DateTime.Utc>
+  terminalAt?: string | null
 }
 
 export const pullRequestUpdatedAtDescOrder: Order.Order<PullRequestInfo> = Order.mapInput(
@@ -277,6 +278,7 @@ export function toPullRequestInfo(summary: ChangeRequest): PullRequestInfo
     headRefName: summary.headRefName,
     state: summary.state ?? 'open',
     updatedAt: summary.updatedAt,
+    ...(summary.terminalAt !== undefined ? { terminalAt: summary.terminalAt } : {}),
     ...(summary.isCrossRepository !== undefined
       ? { isCrossRepository: summary.isCrossRepository }
       : {}),

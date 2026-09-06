@@ -18,6 +18,7 @@ export interface NormalizedGitLabMergeRequestRecord
   readonly headRefName: string
   readonly state: 'open' | 'closed' | 'merged'
   readonly updatedAt: Option.Option<DateTime.Utc>
+  readonly terminalAt?: string
   readonly isCrossRepository?: boolean
   readonly headRepositoryNameWithOwner?: string | null
   readonly headRepositoryOwnerLogin?: string | null
@@ -45,6 +46,8 @@ const GitLabMergeRequestSchema = Schema.Struct({
   target_branch: TrimmedNonEmptyString,
   state: Schema.optional(Schema.NullOr(Schema.String)),
   updated_at: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
+  merged_at: Schema.optional(Schema.NullOr(Schema.String)),
+  closed_at: Schema.optional(Schema.NullOr(Schema.String)),
   source_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
   target_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
   source_project: Schema.optional(Schema.NullOr(GitLabProjectReferenceSchema)),
@@ -111,6 +114,8 @@ function normalizeGitLabMergeRequestRecord(
         ? sourceProjectPath.toLowerCase() !== targetProjectPath.toLowerCase()
         : undefined
   const headRepositoryOwnerLogin = ownerLoginFromPathWithNamespace(sourceProjectPath)
+  const state = normalizeGitLabMergeRequestState(raw.state)
+  const terminalAt = state === 'merged' ? raw.merged_at : state === 'closed' ? raw.closed_at : null
 
   return {
     number: raw.iid,
@@ -118,8 +123,9 @@ function normalizeGitLabMergeRequestRecord(
     url: raw.web_url,
     baseRefName: raw.target_branch,
     headRefName: raw.source_branch,
-    state: normalizeGitLabMergeRequestState(raw.state),
+    state,
     updatedAt: raw.updated_at ?? Option.none(),
+    ...(terminalAt != null && Number.isFinite(Date.parse(terminalAt)) ? { terminalAt } : {}),
     ...(typeof isCrossRepository === 'boolean' ? { isCrossRepository } : {}),
     ...(sourceProjectPath ? { headRepositoryNameWithOwner: sourceProjectPath } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),

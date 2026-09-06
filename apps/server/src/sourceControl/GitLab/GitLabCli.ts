@@ -264,6 +264,7 @@ export const isGitLabCliError = Schema.is(GitLabCliError)
 
 export interface GitLabMergeRequestSummary
 {
+  readonly terminalAt?: string
   readonly number: number
   readonly title: string
   readonly url: string

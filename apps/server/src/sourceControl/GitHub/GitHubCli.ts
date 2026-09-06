@@ -213,6 +213,7 @@ export function fromVcsError(
 
 export interface GitHubPullRequestSummary
 {
+  readonly terminalAt?: string
   readonly number: number
   readonly title: string
   readonly url: string
@@ -372,7 +373,7 @@ export const make = Effect.gen(function* ()
           '--limit',
           String(input.limit ?? 1),
           '--json',
-          'number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner',
+          'number,title,url,baseRefName,headRefName,state,mergedAt,closedAt,isCrossRepository,headRepository,headRepositoryOwner',
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -408,7 +409,7 @@ export const make = Effect.gen(function* ()
           'view',
           input.reference,
           '--json',
-          'number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner',
+          'number,title,url,baseRefName,headRefName,state,mergedAt,closedAt,isCrossRepository,headRepository,headRepositoryOwner',
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),

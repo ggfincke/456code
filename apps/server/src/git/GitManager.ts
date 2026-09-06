@@ -1835,7 +1835,7 @@ export const make = Effect.gen(function* ()
       return null
     }
     const statusPr = toStatusPr(cached.latest)
-    return { state: statusPr.state, terminalAt: null }
+    return { state: statusPr.state, terminalAt: cached.latest.terminalAt ?? null }
   })
   const invalidateLocalStatus: GitManager['Service']['invalidateLocalStatus'] = Effect.fn(
     'invalidateLocalStatus',
