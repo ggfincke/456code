@@ -1,34 +1,12 @@
 /**
  * libSQL migration support for Effect SQL applications.
  *
- * This module adapts the shared SQL migrator to libSQL and Turso databases. It
- * re-exports the common migration loaders and errors, then provides {@link run}
- * and {@link layer} helpers that apply pending migrations with the current
- * libSQL-backed `SqlClient`.
- *
- * **Mental model**
- *
- * Migrations are numbered operations loaded from files, records, or bundler
- * glob results. The runner ensures the migrations table exists, reads the
- * latest recorded id, and runs only migrations with a greater id through the
- * configured libSQL client.
- *
- * **Common tasks**
- *
- * Use {@link run} during application startup, deployment, or setup scripts when
- * migrations should be executed explicitly. Use {@link layer} in a layer graph
- * when dependent services should be acquired only after the schema is prepared.
- * Reuse the shared loaders from this module for file-based or in-memory
- * migration definitions.
- *
- * **Gotchas**
- *
- * libSQL uses SQLite-compatible SQL, so avoid dialect features unsupported by
- * libSQL or the configured Turso deployment. Remote Turso databases, local
- * `file:` databases, and embedded replicas can observe different state until
- * replication catches up. Run schema-changing migrations against the intended
- * writer, coordinate concurrent migrators, and do not rely on
- * `schemaDirectory` for libSQL schema dumps.
+ * This module adapts the shared SQL migrator to libSQL. It re-exports the
+ * common migration loaders and errors, then provides {@link run} and
+ * {@link layer} helpers that apply pending migrations with the current
+ * libSQL-backed `SqlClient`. `run` returns the applied migration IDs and names,
+ * while `layer` runs migrations during layer construction and provides no
+ * services.
  *
  * @since 4.0.0
  */
@@ -46,7 +24,7 @@ export * from "effect/unstable/sql/Migrator"
 /**
  * Runs SQL migrations using the configured `SqlClient`, returning the migrations that were applied.
  *
- * @category constructors
+ * @category running
  * @since 4.0.0
  */
 export const run: <R2 = never>(
@@ -60,7 +38,7 @@ export const run: <R2 = never>(
 /**
  * Creates a layer that runs the configured SQL migrations during layer construction.
  *
- * @category constructors
+ * @category layers
  * @since 4.0.0
  */
 export const layer = <R>(

@@ -292,6 +292,11 @@ Use this first to validate the release pipeline.
 
 ## 2) Apple signing + notarization setup (macOS)
 
+The desktop app requires macOS 13 (Ventura) or later. Test macOS notification delivery with a
+code-signed app: Electron uses Apple's `UNNotification` API, and unsigned apps emit notification
+failures. An unsigned packaging smoke check does not verify notification delivery. See
+[Electron notification requirements](https://www.electronjs.org/docs/latest/tutorial/notifications#macos).
+
 Required secrets used by the workflow:
 
 - `CSC_LINK`

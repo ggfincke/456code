@@ -1,32 +1,13 @@
 /**
- * Service contract for process standard input, output, error output, and
- * command-line arguments.
- *
- * `Stdio` lets command-line programs depend on standard I/O through the Effect
+ * Service contract for command-line arguments and standard input, output, and
+ * error output. It lets programs depend on standard I/O through the Effect
  * environment instead of reading from or writing to global process handles
- * directly. The service exposes arguments as an `Effect`, stdout and stderr as
- * `Sink`s that accept strings or bytes, and stdin as a byte `Stream`.
+ * directly.
  *
- * **Mental model**
- *
- * Application code describes what it needs from standard I/O, and a runtime
- * layer supplies the concrete streams. Platform packages provide real process
- * implementations, while tests can use `Stdio.layerTest` to replace only the
- * fields that matter for a scenario and keep the rest inert.
- *
- * **Common tasks**
- *
- * - Read command-line arguments from the service's `args` effect.
- * - Write text or bytes by running values into the service's `stdout()` or
- *   `stderr()` sinks.
- * - Consume `stdin` as a stream of `Uint8Array` chunks.
- * - Build deterministic tests with `Stdio.layerTest`.
- *
- * **Gotchas**
- *
- * Standard I/O is a platform capability. Reads and writes can fail with
- * `PlatformError`, so handle failures in the Effect error channel instead of
- * assuming the process streams are always available.
+ * The service exposes arguments as an `Effect`, stdout and stderr as `Sink`s
+ * that accept strings or bytes, and stdin as a byte `Stream`. This module also
+ * provides a constructor for service values and a small test layer with
+ * overridable defaults.
  *
  * @since 4.0.0
  */
@@ -76,12 +57,24 @@ export const TypeId: TypeId = "~effect/Stdio"
  * standard error, and a stream of standard input bytes. I/O operations can fail
  * with `PlatformError`.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface Stdio {
   readonly [TypeId]: TypeId
   readonly args: Effect.Effect<ReadonlyArray<string>>
+  /**
+   * Whether standard input is attached to a terminal.
+   *
+   * @since 4.0.0
+   */
+  readonly stdinIsTerminal: Effect.Effect<boolean>
+  /**
+   * Whether standard output is attached to a terminal.
+   *
+   * @since 4.0.0
+   */
+  readonly stdoutIsTerminal: Effect.Effect<boolean>
   stdout(options?: {
     readonly endOnDone?: boolean | undefined
   }): Sink.Sink<void, string | Uint8Array, never, PlatformError>
@@ -95,8 +88,8 @@ export interface Stdio {
  *
  * **When to use**
  *
- * Use when an effect needs command-line arguments or standard I/O streams
- * supplied by its environment.
+ * Use when you need command-line arguments or standard I/O streams supplied by
+ * an effect's environment.
  *
  * @see {@link make} for constructing a `Stdio` service directly
  * @see {@link layerTest} for a test layer with defaults and overrides
@@ -112,22 +105,28 @@ export const Stdio: Context.Service<Stdio, Stdio> = Context.Service<Stdio>(TypeI
  *
  * **When to use**
  *
- * Use to assemble a concrete `Stdio` service when you already have
- * implementations for command-line arguments, standard output, standard error,
- * and standard input.
+ * Use when you need to assemble a concrete `Stdio` service from command-line
+ * arguments and standard I/O implementations.
  *
  * **Details**
  *
- * The returned service reuses the supplied fields unchanged and only adds the
- * `Stdio` type identifier; it does not create a `Layer` or provide defaults.
+ * The returned service reuses the supplied fields unchanged and adds the
+ * `Stdio` type identifier. Omitted terminal-detection fields default to
+ * effects that succeed with `false`.
  *
  * @see {@link layerTest} for a test layer with default fields that can be overridden
  *
  * @category constructors
  * @since 4.0.0
  */
-export const make = (options: Omit<Stdio, TypeId>): Stdio => ({
+export const make = (
+  options:
+    & Omit<Stdio, TypeId | "stdinIsTerminal" | "stdoutIsTerminal">
+    & Partial<Pick<Stdio, "stdinIsTerminal" | "stdoutIsTerminal">>
+): Stdio => ({
   [TypeId]: TypeId,
+  stdinIsTerminal: Effect.succeed(false),
+  stdoutIsTerminal: Effect.succeed(false),
   ...options
 })
 
@@ -143,7 +142,7 @@ export const make = (options: Omit<Stdio, TypeId>): Stdio => ({
  *
  * Any provided fields override defaults. By default, arguments are empty,
  * standard output and error are draining sinks, and standard input is an empty
- * stream.
+ * stream, and terminal-detection effects succeed with `false`.
  *
  * @see {@link make} for constructing a `Stdio` service directly without a `Layer` or defaults
  *

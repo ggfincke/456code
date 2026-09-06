@@ -1,20 +1,12 @@
 /**
  * Builds SQL repositories and request resolvers from Effect schema models.
  *
- * Use this module when a `Model` describes rows in a concrete SQL table and
- * you want the common insert, update, find-by-id, and delete operations without
- * hand-writing the schema encoding, row decoding, and resolver batching each
- * time. The helpers are intended for model-backed tables where the model field
- * names line up with the encoded table columns and the chosen `idColumn` is
- * present in both the model fields and update schema.
- *
- * Returned rows are decoded with the full model schema, while insert and update
- * requests are encoded with the model's dedicated input schemas. Soft deletes
- * are opt-in via `softDeleteColumn`: reads and updates only see rows where that
- * column is `null`, and deletes set it to `CURRENT_TIMESTAMP` instead of
- * removing the row. Dialects with `returning` support return changed rows
- * directly; MySQL performs a follow-up `select`, so generated ids, defaults,
- * and trigger-updated values must be observable from that query.
+ * Use this module when a schema `Model` represents rows in a SQL table and the
+ * usual insert, update, find-by-id, delete, and batching behavior should be
+ * derived from that model. The helpers encode insert and update input with the
+ * model's input schemas and decode returned rows with the full model schema.
+ * Soft deletes are optional, and SQL dialect differences such as `returning`
+ * support are handled by the repository implementation.
  *
  * @since 4.0.0
  */
@@ -35,7 +27,7 @@ import * as SqlSchema from "./SqlSchema.ts"
  * supplied, reads ignore soft-deleted rows and delete updates that column
  * instead of removing the row.
  *
- * @category repository
+ * @category constructors
  * @since 4.0.0
  */
 export const makeRepository = <
@@ -85,7 +77,7 @@ export const makeRepository = <
 > =>
   Effect.gen(function*() {
     const sql = yield* SqlClient
-    const idSchema = Model.fields[options.idColumn] as Schema.Top
+    const idSchema = Model.fields[options.idColumn]
     const idColumn = options.idColumn as string
     const softDeleteColumn = options.softDeleteColumn as string | undefined
     const withSoftDeleteFilter = (where: any) =>
@@ -232,7 +224,7 @@ select * from ${sql(options.tableName)} where ${withSoftDeleteFilter(sql`${sql(i
  * Creates batched request resolvers for a schema model's insert, insert-void,
  * find-by-id, and delete operations, honoring the optional soft-delete column.
  *
- * @category repository
+ * @category constructors
  * @since 4.0.0
  */
 export const makeResolvers = <
@@ -282,7 +274,7 @@ export const makeResolvers = <
 > =>
   Effect.gen(function*() {
     const sql = yield* SqlClient
-    const idSchema = Model.fields[options.idColumn] as Schema.Top
+    const idSchema = Model.fields[options.idColumn]
     const idColumn = options.idColumn as string
     const softDeleteColumn = options.softDeleteColumn as string | undefined
     const withSoftDeleteFilter = (where: any) =>

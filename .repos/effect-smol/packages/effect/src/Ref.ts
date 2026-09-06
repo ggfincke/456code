@@ -1,53 +1,12 @@
 /**
- * The `Ref` module provides fiber-safe mutable references for state inside
- * Effect programs. A `Ref<A>` holds one value of type `A` and exposes reads,
- * writes, and atomic transformations as effects, so state changes compose with
- * Effect's concurrency model.
+ * Stores fiber-safe mutable state inside Effect programs.
  *
- * **Mental model**
- *
- * - {@link make} creates a reference with an initial value
- * - {@link get} reads the current value, and {@link set} replaces it
- * - {@link update}, {@link updateAndGet}, and {@link getAndUpdate} transform
- *   the current value atomically
- * - {@link modify} updates the value and returns a separate result computed
- *   from the previous value
- * - The `Some` variants use `Option` to leave the value unchanged when a
- *   partial update does not apply
- *
- * **Common tasks**
- *
- * - Create refs: {@link make}, {@link makeUnsafe}
- * - Read and write: {@link get}, {@link set}, {@link getAndSet},
- *   {@link setAndGet}
- * - Update state: {@link update}, {@link updateAndGet}, {@link getAndUpdate}
- * - Update conditionally: {@link updateSome}, {@link updateSomeAndGet},
- *   {@link getAndUpdateSome}, {@link modifySome}
- * - Compute while updating: {@link modify}
- *
- * **Example** (Updating shared state)
- *
- * ```ts
- * import { Effect, Ref } from "effect"
- *
- * const program = Effect.gen(function*() {
- *   const counter = yield* Ref.make(0)
- *
- *   const next = yield* Ref.updateAndGet(counter, (n) => n + 1)
- *   const label = yield* Ref.modify(counter, (n) => [`count=${n}`, n + 1])
- *
- *   return { label, next }
- * })
- * ```
- *
- * **Gotchas**
- *
- * - Each `Ref` operation is atomic for that reference, but multiple refs are
- *   not updated transactionally as a group
- * - If the new value depends on the old value, prefer {@link update} or
- *   {@link modify} over a separate {@link get} followed by {@link set}
- * - Unsafe operations are synchronous low-level accessors; prefer effectful
- *   operations in application code
+ * A `Ref<A>` holds one value and exposes reads, writes, and atomic
+ * transformations as effects, so state changes compose with Effect's
+ * concurrency model. This module includes constructors, safe and unsafe reads,
+ * set and get-and-set helpers, update and modify helpers, and conditional
+ * update variants that leave the value unchanged when an `Option.none` result
+ * is returned.
  *
  * @since 2.0.0
  */
@@ -76,24 +35,18 @@ const TypeId = "~effect/Ref"
  *
  * **Example** (Reading and updating a ref)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
- *   // Create a ref with initial value
  *   const counter = yield* Ref.make(0)
- *
- *   // Read the current value
  *   const value = yield* Ref.get(counter)
- *   console.log(value) // 0
- *
- *   // Update the value atomically
  *   yield* Ref.update(counter, (n) => n + 1)
- *
- *   // Read the updated value
  *   const newValue = yield* Ref.get(counter)
- *   console.log(newValue) // 1
+ *   return [value, newValue]
  * })
+ *
+ * await Effect.runPromise(program) // => [0, 1]
  * ```
  *
  * @see {@link make} for creating a `Ref`
@@ -126,18 +79,17 @@ export declare namespace Ref {
    *
    * **Example** (Using invariant refs)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Effect, Ref } from "effect"
    *
-   * // This interface defines the invariant nature of Ref's type parameter
-   * // A Ref<A> is both a producer and consumer of A
    * const program = Effect.gen(function*() {
    *   const ref = yield* Ref.make(42)
-   *
-   *   // Ref is invariant - it can both produce and consume numbers
-   *   const value = yield* Ref.get(ref) // produces number
-   *   yield* Ref.set(ref, value + 1) // consumes number
+   *   const value = yield* Ref.get(ref)
+   *   yield* Ref.set(ref, value + 1)
+   *   return yield* Ref.get(ref)
    * })
+   *
+   * await Effect.runPromise(program) // => 43
    * ```
    *
    * @category models
@@ -177,18 +129,11 @@ const RefProto = {
  *
  * **Example** (Creating a ref unsafely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Ref } from "effect"
  *
- * // Create a ref directly without Effect
  * const counter = Ref.makeUnsafe(0)
- *
- * // Get the current value
- * const value = Ref.getUnsafe(counter)
- * console.log(value) // 0
- *
- * // Note: This is unsafe and should be used carefully
- * // Prefer Ref.make for Effect-wrapped creation
+ * Ref.getUnsafe(counter) // => 0
  * ```
  *
  * @category constructors
@@ -205,18 +150,19 @@ export const makeUnsafe = <A>(value: A): Ref<A> => {
  *
  * **When to use**
  *
- * Use to create shared mutable state inside an Effect program.
+ * Use to create a `Ref` for shared mutable state inside an Effect program.
  *
  * **Example** (Creating a ref)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* Ref.make(42)
- *   const value = yield* Ref.get(ref)
- *   console.log(value) // 42
+ *   return yield* Ref.get(ref)
  * })
+ *
+ * await Effect.runPromise(program) // => 42
  * ```
  *
  * @see {@link makeUnsafe} for synchronous construction outside Effect code
@@ -231,18 +177,19 @@ export const make = <A>(value: A): Effect.Effect<Ref<A>> => Effect.sync(() => ma
  *
  * **When to use**
  *
- * Use to read the current value without changing it.
+ * Use to read the current `Ref` value without changing it.
  *
  * **Example** (Getting the current value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* Ref.make(42)
- *   const value = yield* Ref.get(ref)
- *   console.log(value) // 42
+ *   return yield* Ref.get(ref)
  * })
+ *
+ * await Effect.runPromise(program) // => 42
  * ```
  *
  * @see {@link set} for replacing the current value
@@ -257,33 +204,33 @@ export const get = <A>(self: Ref<A>) => Effect.sync(() => self.ref.current)
  *
  * **When to use**
  *
- * Use to replace the current value with a known value.
+ * Use to replace the current `Ref` value with a known value.
  *
  * **Example** (Setting a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* Ref.make(0)
  *   yield* Ref.set(ref, 42)
- *   const value = yield* Ref.get(ref)
- *   console.log(value) // 42
+ *   return yield* Ref.get(ref)
  * })
  *
- * // Using multiple operations
  * const program2 = Effect.gen(function*() {
  *   const ref = yield* Ref.make(0)
  *   yield* Ref.set(ref, 100)
- *   const value = yield* Ref.get(ref)
- *   console.log(value) // 100
+ *   return yield* Ref.get(ref)
  * })
+ *
+ * await Effect.runPromise(program) // => 42
+ * await Effect.runPromise(program2) // => 100
  * ```
  *
  * @see {@link getAndSet} for setting while returning the previous value
  * @see {@link setAndGet} for setting while returning the new value
  *
- * @category setters
+ * @category mutations
  * @since 2.0.0
  */
 export const set = dual<
@@ -296,29 +243,28 @@ export const set = dual<
  *
  * **When to use**
  *
- * Use to replace the value while returning the previous value.
+ * Use to replace a plain `Ref` value while returning the previous value.
  *
  * **Example** (Replacing a value atomically)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* Ref.make("initial")
  *
- *   // Get current value and set new value atomically
  *   const previous = yield* Ref.getAndSet(ref, "updated")
- *   console.log(previous) // "initial"
- *
  *   const current = yield* Ref.get(ref)
- *   console.log(current) // "updated"
+ *   return [previous, current]
  * })
+ *
+ * await Effect.runPromise(program) // => ["initial", "updated"]
  * ```
  *
  * @see {@link set} for setting without returning the previous value
  * @see {@link getAndUpdate} for deriving the new value from the previous value
  *
- * @category utils
+ * @category mutations
  * @since 2.0.0
  */
 export const getAndSet = dual<
@@ -336,29 +282,28 @@ export const getAndSet = dual<
  *
  * **When to use**
  *
- * Use to derive a new value while returning the previous value.
+ * Use to derive a new `Ref` value while returning the previous value.
  *
  * **Example** (Updating and returning the previous value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(10)
  *
- *   // Get current value and update it atomically
  *   const previous = yield* Ref.getAndUpdate(counter, (n) => n * 2)
- *   console.log(previous) // 10
- *
  *   const current = yield* Ref.get(counter)
- *   console.log(current) // 20
+ *   return [previous, current]
  * })
+ *
+ * await Effect.runPromise(program) // => [10, 20]
  * ```
  *
  * @see {@link update} for updating without returning the previous value
  * @see {@link updateAndGet} for returning the new value instead
  *
- * @category utils
+ * @category mutations
  * @since 2.0.0
  */
 export const getAndUpdate = dual<
@@ -376,7 +321,7 @@ export const getAndUpdate = dual<
  *
  * **When to use**
  *
- * Use to return the previous value while applying a conditional update.
+ * Use to return the previous `Ref` value while applying a conditional update.
  *
  * **Details**
  *
@@ -386,38 +331,32 @@ export const getAndUpdate = dual<
  *
  * **Example** (Conditionally updating and returning the previous value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Option, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(5)
  *
- *   // Only update if value is greater than 3
  *   const previous1 = yield* Ref.getAndUpdateSome(
  *     counter,
  *     (n) => n > 3 ? Option.some(n * 2) : Option.none()
  *   )
- *   console.log(previous1) // 5
- *
  *   const current1 = yield* Ref.get(counter)
- *   console.log(current1) // 10
- *
- *   // Try to update again (won't update since 10 > 3 is true but let's say condition is n < 3)
  *   const previous2 = yield* Ref.getAndUpdateSome(
  *     counter,
  *     (n) => n < 3 ? Option.some(n * 2) : Option.none()
  *   )
- *   console.log(previous2) // 10
- *
  *   const current2 = yield* Ref.get(counter)
- *   console.log(current2) // 10 (unchanged)
+ *   return [previous1, current1, previous2, current2]
  * })
+ *
+ * await Effect.runPromise(program) // => [5, 10, 10, 10]
  * ```
  *
  * @see {@link getAndUpdate} for always applying an update
  * @see {@link updateSome} for conditional updates without returning the previous value
  *
- * @category utils
+ * @category mutations
  * @since 2.0.0
  */
 export const getAndUpdateSome = dual<
@@ -438,36 +377,32 @@ export const getAndUpdateSome = dual<
  *
  * **When to use**
  *
- * Use when you want to set a value and immediately get it back in one
+ * Use when you want to set a `Ref` value and immediately get it back in one
  * atomic operation.
  *
  * **Example** (Setting and returning the new value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* Ref.make(10)
  *
- *   // Set new value and get it back in one operation
  *   const newValue = yield* Ref.setAndGet(ref, 42)
- *   console.log(newValue) // 42
- *
- *   // Verify the ref contains the new value
  *   const current = yield* Ref.get(ref)
- *   console.log(current) // 42
+ *   return [newValue, current]
  * })
  *
- * // Useful for sequential operations
  * const program2 = Effect.gen(function*() {
  *   const counter = yield* Ref.make(0)
- *
- *   const newValue = yield* Ref.setAndGet(counter, 20)
- *   console.log(newValue) // 20
+ *   return yield* Ref.setAndGet(counter, 20)
  * })
+ *
+ * await Effect.runPromise(program) // => [42, 42]
+ * await Effect.runPromise(program2) // => 20
  * ```
  *
- * @category utils
+ * @category mutations
  * @since 2.0.0
  */
 export const setAndGet = dual<
@@ -480,8 +415,8 @@ export const setAndGet = dual<
  *
  * **When to use**
  *
- * Use to compute both a separate return value and the next stored value in one
- * atomic update.
+ * Use to compute both a separate return value and the next stored `Ref` value
+ * in one atomic update.
  *
  * **Details**
  *
@@ -491,41 +426,36 @@ export const setAndGet = dual<
  *
  * **Example** (Modifying a value atomically)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(10)
  *
- *   // Modify the ref and return some computation result
  *   const result = yield* Ref.modify(counter, (n) => [
- *     `Previous value was ${n}`, // Return value
- *     n * 2 // New ref value
+ *     `Previous value was ${n}`,
+ *     n * 2
  *   ])
- *
- *   console.log(result) // "Previous value was 10"
- *
  *   const current = yield* Ref.get(counter)
- *   console.log(current) // 20
+ *   return [result, current]
  * })
  *
- * // Example with more complex computation
  * const program2 = Effect.gen(function*() {
  *   const state = yield* Ref.make({ count: 0, total: 0 })
- *
- *   const incremented = yield* Ref.modify(state, (s) => [
- *     s.count, // Return previous count
- *     { count: s.count + 1, total: s.total + s.count + 1 } // New state
+ *   return yield* Ref.modify(state, (s) => [
+ *     s.count,
+ *     { count: s.count + 1, total: s.total + s.count + 1 }
  *   ])
- *
- *   console.log(incremented) // 0
  * })
+ *
+ * await Effect.runPromise(program) // => ["Previous value was 10", 20]
+ * await Effect.runPromise(program2) // => 0
  * ```
  *
  * @see {@link updateAndGet} for returning the new stored value
  * @see {@link modifySome} for optionally updating while returning a separate result
  *
- * @category setters
+ * @category mutations
  * @since 2.0.0
  */
 export const modify = dual<
@@ -543,7 +473,7 @@ export const modify = dual<
  *
  * **When to use**
  *
- * Use to compute a return value while optionally updating the stored value.
+ * Use to compute a return value while optionally updating a plain `Ref`.
  *
  * **Details**
  *
@@ -554,13 +484,12 @@ export const modify = dual<
  *
  * **Example** (Conditionally modifying a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Option, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(5)
  *
- *   // Only modify if value is greater than 3
  *   const result1 = yield* Ref.modifySome(
  *     counter,
  *     (n) =>
@@ -568,13 +497,7 @@ export const modify = dual<
  *         ? [`incremented ${n}`, Option.some(n + 10)]
  *         : ["no change", Option.none()]
  *   )
- *
- *   console.log(result1) // "incremented 5"
- *
  *   const current1 = yield* Ref.get(counter)
- *   console.log(current1) // 15
- *
- *   // Try to modify with a condition that fails
  *   const result2 = yield* Ref.modifySome(
  *     counter,
  *     (n) =>
@@ -582,18 +505,17 @@ export const modify = dual<
  *         ? [`decremented ${n}`, Option.some(n - 5)]
  *         : ["no change", Option.none()]
  *   )
- *
- *   console.log(result2) // "no change"
- *
  *   const current2 = yield* Ref.get(counter)
- *   console.log(current2) // 15 (unchanged)
+ *   return [result1, current1, result2, current2]
  * })
+ *
+ * await Effect.runPromise(program) // => ["incremented 5", 15, "no change", 15]
  * ```
  *
  * @see {@link modify} for always storing a new value
  * @see {@link updateSome} for optional updates without a separate return value
  *
- * @category setters
+ * @category mutations
  * @since 2.0.0
  */
 export const modifySome: {
@@ -618,36 +540,34 @@ export const modifySome: {
  *
  * **When to use**
  *
- * Use to apply a state transition without returning a value.
+ * Use to apply a `Ref` state transition without returning a value.
  *
  * **Example** (Updating a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(5)
  *
- *   // Update the value
  *   yield* Ref.update(counter, (n) => n * 2)
- *
- *   const value = yield* Ref.get(counter)
- *   console.log(value) // 10
+ *   return yield* Ref.get(counter)
  * })
  *
- * // Using multiple operations
  * const program2 = Effect.gen(function*() {
  *   const counter = yield* Ref.make(5)
  *   yield* Ref.update(counter, (n: number) => n + 10)
- *   const value = yield* Ref.get(counter)
- *   console.log(value) // 15
+ *   return yield* Ref.get(counter)
  * })
+ *
+ * await Effect.runPromise(program) // => 10
+ * await Effect.runPromise(program2) // => 15
  * ```
  *
  * @see {@link updateAndGet} for returning the new value
  * @see {@link getAndUpdate} for returning the previous value
  *
- * @category setters
+ * @category mutations
  * @since 2.0.0
  */
 export const update = dual<
@@ -663,30 +583,28 @@ export const update = dual<
  *
  * **When to use**
  *
- * Use to apply a state transition and return the new stored value.
+ * Use to apply a `Ref` state transition and return the new stored value.
  *
  * **Example** (Updating and returning the new value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(5)
  *
- *   // Update and get the new value in one operation
  *   const newValue = yield* Ref.updateAndGet(counter, (n) => n * 3)
- *   console.log(newValue) // 15
- *
- *   // Verify the ref contains the new value
  *   const current = yield* Ref.get(counter)
- *   console.log(current) // 15
+ *   return [newValue, current]
  * })
+ *
+ * await Effect.runPromise(program) // => [15, 15]
  * ```
  *
  * @see {@link update} for updating without returning the new value
  * @see {@link getAndUpdate} for returning the previous value instead
  *
- * @category utils
+ * @category mutations
  * @since 2.0.0
  */
 export const updateAndGet = dual<
@@ -699,7 +617,7 @@ export const updateAndGet = dual<
  *
  * **When to use**
  *
- * Use to apply a conditional update without returning a value.
+ * Use to apply a conditional `Ref` update without returning a value.
  *
  * **Details**
  *
@@ -708,37 +626,33 @@ export const updateAndGet = dual<
  *
  * **Example** (Conditionally updating a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Option, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(5)
  *
- *   // Only update if value is even
  *   yield* Ref.updateSome(
  *     counter,
  *     (n) => n % 2 === 0 ? Option.some(n * 2) : Option.none()
  *   )
- *
- *   let current = yield* Ref.get(counter)
- *   console.log(current) // 5 (unchanged because 5 is odd)
- *
- *   // Set to even number and try again
+ *   const before = yield* Ref.get(counter)
  *   yield* Ref.set(counter, 6)
  *   yield* Ref.updateSome(
  *     counter,
  *     (n) => n % 2 === 0 ? Option.some(n * 2) : Option.none()
  *   )
- *
- *   current = yield* Ref.get(counter)
- *   console.log(current) // 12 (updated because 6 is even)
+ *   const after = yield* Ref.get(counter)
+ *   return [before, after]
  * })
+ *
+ * await Effect.runPromise(program) // => [5, 12]
  * ```
  *
  * @see {@link update} for always applying an update
  * @see {@link updateSomeAndGet} for returning the resulting current value
  *
- * @category setters
+ * @category mutations
  * @since 2.0.0
  */
 export const updateSome = dual<
@@ -757,7 +671,8 @@ export const updateSome = dual<
  *
  * **When to use**
  *
- * Use to apply a conditional update and return the resulting current value.
+ * Use to apply a conditional `Ref` update and return the resulting current
+ * value.
  *
  * **Details**
  *
@@ -767,32 +682,30 @@ export const updateSome = dual<
  *
  * **Example** (Conditionally updating and returning the current value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Option, Ref } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const counter = yield* Ref.make(10)
  *
- *   // Only update if value is greater than 5
  *   const result1 = yield* Ref.updateSomeAndGet(
  *     counter,
  *     (n) => n > 5 ? Option.some(n / 2) : Option.none()
  *   )
- *   console.log(result1) // 5 (updated and returned)
- *
- *   // Try to update again with same condition
  *   const result2 = yield* Ref.updateSomeAndGet(
  *     counter,
  *     (n) => n > 5 ? Option.some(n / 2) : Option.none()
  *   )
- *   console.log(result2) // 5 (unchanged because 5 is not > 5)
+ *   return [result1, result2]
  * })
+ *
+ * await Effect.runPromise(program) // => [5, 5]
  * ```
  *
  * @see {@link updateSome} for conditional updates without returning a value
  * @see {@link updateAndGet} for always updating and returning the new value
  *
- * @category utils
+ * @category mutations
  * @since 2.0.0
  */
 export const updateSomeAndGet = dual<
@@ -821,18 +734,11 @@ export const updateSomeAndGet = dual<
  *
  * **Example** (Reading a ref unsafely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Ref } from "effect"
  *
- * // Create a ref directly
  * const counter = Ref.makeUnsafe(42)
- *
- * // Get the value synchronously
- * const value = Ref.getUnsafe(counter)
- * console.log(value) // 42
- *
- * // Note: This is unsafe and should be used carefully
- * // Prefer Ref.get for Effect-wrapped access
+ * Ref.getUnsafe(counter) // => 42
  * ```
  *
  * @category getters

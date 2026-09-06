@@ -1,22 +1,11 @@
 /**
- * The `Scheduler` module defines the runtime scheduling services used by
- * Effect fibers. A scheduler decides how runnable tasks are enqueued, when they
- * are dispatched, and whether a fiber should yield after consuming its
- * operation budget.
+ * Controls how runnable Effect fiber tasks are dispatched.
  *
- * **Common tasks**
- *
- * - Use {@link Scheduler} to provide a custom runtime scheduler
- * - Use {@link MixedScheduler} for the default priority-aware scheduler
- * - Use {@link MaxOpsBeforeYield} to tune fairness for CPU-bound fibers
- * - Use {@link PreventSchedulerYield} only when a runtime should bypass yield checks
- *
- * **Gotchas**
- *
- * - Scheduler priorities affect the order of queued runtime tasks, not the
- *   semantic result of an `Effect`
- * - Disabling scheduler yields can improve throughput for controlled workloads,
- *   but it can also let long-running fibers monopolize the JavaScript thread
+ * A scheduler decides how tasks are queued, when queued tasks run, and when a
+ * fiber should pause so other work can continue. This module includes the
+ * scheduler service reference, the default `MixedScheduler`, dispatcher types
+ * for queued tasks, and references for tuning or disabling automatic scheduler
+ * yields.
  *
  * @since 2.0.0
  */
@@ -37,7 +26,7 @@ import type * as Fiber from "./Fiber.ts"
  * priorities, and decides when fibers should yield control after consuming
  * their operation budget.
  *
- * @category models
+ * @category services
  * @since 2.0.0
  */
 export interface Scheduler {
@@ -75,17 +64,19 @@ export interface SchedulerDispatcher {
  *
  * **When to use**
  *
- * Use to provide or override the scheduler used by the Effect runtime.
+ * Use when you need to replace scheduling behavior globally in tests or runtime
+ * setup, such as forcing deterministic task dispatch.
  *
  * **Details**
  *
  * The default value creates a `MixedScheduler`. Provide this service to
  * customize execution mode, task dispatching, or yield behavior.
  *
- * @category references
+ * @category services
  * @since 2.0.0
  */
 export const Scheduler: Context.Reference<Scheduler> = Context.Reference<Scheduler>("effect/Scheduler", {
+  fiberCached: true,
   defaultValue: () => new MixedScheduler()
 })
 
@@ -100,6 +91,16 @@ const setImmediate = "setImmediate" in globalThis
     const timer = setTimeout(f, 0)
     return (): void => clearTimeout(timer)
   }
+
+const setMicrotask = (f: () => void) => {
+  let cancelled = false
+  queueMicrotask(() => {
+    if (!cancelled) f()
+  })
+  return (): void => {
+    cancelled = true
+  }
+}
 
 class PriorityBuckets {
   buckets: Array<[priority: number, tasks: Array<() => void>]> = []
@@ -145,7 +146,7 @@ class PriorityBuckets {
  * operation counts to decide when fibers should yield, and is the default
  * scheduler implementation.
  *
- * @category schedulers
+ * @category models
  * @since 2.0.0
  */
 export class MixedScheduler implements Scheduler {
@@ -154,10 +155,10 @@ export class MixedScheduler implements Scheduler {
 
   constructor(
     executionMode: "sync" | "async" = "async",
-    setImmediateFn: (f: () => void) => () => void = setImmediate
+    setImmediateFn?: (f: () => void) => () => void
   ) {
     this.executionMode = executionMode
-    this.setImmediate = setImmediateFn
+    this.setImmediate = setImmediateFn ?? (executionMode === "sync" ? setMicrotask : setImmediate)
   }
 
   /**
@@ -179,7 +180,8 @@ export class MixedScheduler implements Scheduler {
    *
    * **When to use**
    *
-   * Use to create a dispatcher for enqueuing work through this scheduler.
+   * Use when you need a standalone dispatcher from a scheduler instance, for
+   * example in tests that enqueue tasks and then flush them deterministically.
    *
    * @since 4.0.0
    */
@@ -250,8 +252,8 @@ class MixedSchedulerDispatcher implements SchedulerDispatcher {
  *
  * **When to use**
  *
- * Use to tune scheduler fairness for CPU-bound fibers by changing the operation
- * budget that triggers a scheduler yield.
+ * Use to tune scheduler fairness for CPU-bound fibers by changing the scheduler
+ * operation budget that triggers a yield.
  *
  * **Details**
  *
@@ -261,10 +263,11 @@ class MixedSchedulerDispatcher implements SchedulerDispatcher {
  *
  * @see {@link PreventSchedulerYield} for bypassing scheduler yield checks entirely rather than tuning the operation budget
  *
- * @category references
+ * @category services
  * @since 4.0.0
  */
 export const MaxOpsBeforeYield = Context.Reference<number>("effect/Scheduler/MaxOpsBeforeYield", {
+  fiberCached: true,
   defaultValue: () => 2048
 })
 
@@ -286,9 +289,10 @@ export const MaxOpsBeforeYield = Context.Reference<number>("effect/Scheduler/Max
  * @see {@link MaxOpsBeforeYield} for tuning yield frequency without disabling yield checks
  * @see {@link Scheduler} for providing custom scheduler yield behavior
  *
- * @category references
+ * @category services
  * @since 4.0.0
  */
 export const PreventSchedulerYield = Context.Reference<boolean>("effect/Scheduler/PreventSchedulerYield", {
+  fiberCached: true,
   defaultValue: () => false
 })

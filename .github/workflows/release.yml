@@ -95,6 +95,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -242,6 +246,10 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -322,6 +330,10 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
           fetch-depth: 0
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -577,6 +589,10 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -617,6 +633,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -738,6 +758,10 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -843,6 +867,10 @@ jobs:
           echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
           echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -902,6 +930,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1

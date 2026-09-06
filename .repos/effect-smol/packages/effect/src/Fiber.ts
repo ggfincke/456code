@@ -1,56 +1,9 @@
 /**
- * The `Fiber` module provides operations for handles returned by forking
- * effects. A `Fiber<A, E>` is a lightweight runtime execution of an `Effect`
- * that may still be running, may already have completed, and can be observed or
- * interrupted by other fibers.
- *
- * Applications create fibers with operations such as `Effect.forkChild`,
- * `Effect.forkScoped`, `Effect.forkIn`, or `Effect.forkDetach`, then use this
- * module to wait for results, inspect exits, or cancel work that is no longer
- * needed.
- *
- * **Mental model**
- *
- * - A fiber is a handle to a running or completed effect, not the effect itself
- * - {@link await_ await} observes completion as an `Exit` without failing the current
- *   effect
- * - {@link join} waits for success and propagates the fiber's failure into the
- *   current effect
- * - {@link interrupt} requests cancellation and waits until the target fiber
- *   finishes running finalizers
- * - Group operations such as {@link awaitAll}, {@link joinAll}, and
- *   {@link interruptAll} apply the same ideas to collections of fibers
- *
- * **Common tasks**
- *
- * - Wait for one fiber with {@link await_ await} or {@link join}
- * - Wait for many fibers with {@link awaitAll} or {@link joinAll}
- * - Stop work with {@link interrupt}, {@link interruptAs},
- *   {@link interruptAll}, or {@link interruptAllAs}
- * - Recognize fiber handles with {@link isFiber}
- * - Link a manually managed fiber to a `Scope` with {@link runIn}
- *
- * **Gotchas**
- *
- * - `await` gives you an `Exit`; use `join` when the current effect should fail
- *   if the fiber failed
- * - Interruption is cooperative, so a fiber can continue through
- *   uninterruptible regions and finalizers before it finishes
- * - `joinAll` stops waiting on the first failure, but it does not interrupt the
- *   remaining fibers for you
- *
- * **Example** (Joining a forked effect)
- *
- * ```ts
- * import { Effect, Fiber } from "effect"
- *
- * const program = Effect.gen(function*() {
- *   const fiber = yield* Effect.forkChild(Effect.succeed(42))
- *   const value = yield* Fiber.join(fiber)
- *
- *   return value
- * })
- * ```
+ * Operations for handles returned by forking effects. A `Fiber<A, E>` is a
+ * lightweight execution of an `Effect` that may still be running or may already
+ * have completed. This module lets callers await or join fiber results,
+ * interrupt one or many fibers, check unknown values, access the current fiber,
+ * and attach manually managed fibers to a `Scope` for cleanup.
  *
  * @since 2.0.0
  */
@@ -59,7 +12,6 @@ import type * as Context from "./Context.ts"
 import type { Effect } from "./Effect.ts"
 import type { Exit } from "./Exit.ts"
 import * as effect from "./internal/effect.ts"
-import { version } from "./internal/version.ts"
 import type { LogLevel } from "./LogLevel.ts"
 import type { Pipeable } from "./Pipeable.ts"
 import { hasProperty } from "./Predicate.ts"
@@ -69,7 +21,7 @@ import type { Scope } from "./Scope.ts"
 import type { AnySpan } from "./Tracer.ts"
 import type { Covariant } from "./Types.ts"
 
-const TypeId = `~effect/Fiber/${version}`
+const TypeId = "~effect/Fiber"
 
 /**
  * A runtime fiber is a lightweight thread that executes Effects. Fibers are
@@ -96,8 +48,8 @@ const TypeId = `~effect/Fiber/${version}`
  *
  * **Example** (Awaiting a forked fiber)
  *
- * ```ts
- * import { Effect, Fiber } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Exit, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Fork an effect to run in a new fiber
@@ -105,10 +57,11 @@ const TypeId = `~effect/Fiber/${version}`
  *
  *   // Wait for the fiber to complete and get its result
  *   const result = yield* Fiber.await(fiber)
- *   console.log(result) // Exit.succeed(42)
- *
  *   return result
  * })
+ *
+ * const actual = await Effect.runPromise(program)
+ * actual // => Exit.succeed(42)
  * ```
  *
  * @category models
@@ -153,7 +106,7 @@ export interface Fiber<out A, out E = never> extends Pipeable {
  *
  * **Example** (Working with fiber types)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -163,13 +116,12 @@ export interface Fiber<out A, out E = never> extends Pipeable {
  *   // Use namespace types for variance
  *   const typedFiber: Fiber.Fiber<number, never> = fiber
  *
- *   // Access fiber properties
- *   console.log(`Fiber ID: ${fiber.id}`)
- *
  *   // Join the fiber
- *   const result = yield* Fiber.join(fiber)
- *   return result // 42
+ *   return yield* Fiber.join(fiber)
  * })
+ *
+ * const actual = await Effect.runPromise(program)
+ * actual // => 42
  * ```
  *
  * @since 2.0.0
@@ -186,12 +138,14 @@ export declare namespace Fiber {
    *
    * **Example** (Upcasting fibers safely)
    *
-   * ```ts
-   * import type { Fiber } from "effect"
+   * ```ts import.meta.vitest
+   * import { Effect, Fiber } from "effect"
    *
    * // Variance allows safe subtyping
-   * declare const fiber: Fiber.Fiber<number, Error>
+   * const fiber: Fiber.Fiber<number, never> = Effect.runFork(Effect.succeed(1))
    * const upcast: Fiber.Fiber<unknown, unknown> = fiber
+   * const actual = await Effect.runPromise(Fiber.join(upcast))
+   * actual // => 1
    * ```
    *
    * @category models
@@ -225,14 +179,16 @@ export {
    *
    * **Example** (Awaiting a fiber exit)
    *
-   * ```ts
-   * import { Effect, Fiber } from "effect"
+   * ```ts import.meta.vitest
+   * import { Effect, Exit, Fiber } from "effect"
    *
    * const program = Effect.gen(function*() {
    *   const fiber = yield* Effect.forkChild(Effect.succeed(42))
-   *   const exit = yield* Fiber.await(fiber)
-   *   console.log(exit) // Exit.succeed(42)
+   *   return yield* Fiber.await(fiber)
    * })
+   *
+   * const actual = await Effect.runPromise(program)
+   * actual // => Exit.succeed(42)
    * ```
    *
    * @category combinators
@@ -260,15 +216,17 @@ export {
  *
  * **Example** (Awaiting multiple fiber exits)
  *
- * ```ts
- * import { Effect, Fiber } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Exit, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const fiber1 = yield* Effect.forkChild(Effect.succeed(1))
  *   const fiber2 = yield* Effect.forkChild(Effect.succeed(2))
- *   const exits = yield* Fiber.awaitAll([fiber1, fiber2])
- *   console.log(exits) // [Exit.succeed(1), Exit.succeed(2)]
+ *   return yield* Fiber.awaitAll([fiber1, fiber2])
  * })
+ *
+ * const actual = await Effect.runPromise(program)
+ * actual // => [Exit.succeed(1), Exit.succeed(2)]
  * ```
  *
  * @category combinators
@@ -291,8 +249,8 @@ export const awaitAll: <A extends Fiber<any, any>>(
  *
  * **When to use**
  *
- * Use when the forked fiber is part of the current workflow and
- * its failure should fail the current Effect.
+ * Use when you need a forked fiber's failure to fail the current Effect because
+ * that fiber is part of the current workflow.
  *
  * **Gotchas**
  *
@@ -301,14 +259,16 @@ export const awaitAll: <A extends Fiber<any, any>>(
  *
  * **Example** (Joining a fiber)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const fiber = yield* Effect.forkChild(Effect.succeed(42))
- *   const result = yield* Fiber.join(fiber)
- *   console.log(result) // 42
+ *   return yield* Fiber.join(fiber)
  * })
+ *
+ * const actual = await Effect.runPromise(program)
+ * actual // => 42
  * ```
  *
  * @see {@link await_ await} for inspecting the fiber outcome as an Exit
@@ -323,8 +283,8 @@ export const join: <A, E>(self: Fiber<A, E>) => Effect<A, E> = effect.fiberJoin
  *
  * **When to use**
  *
- * Use when every fiber must succeed and you want the successful values rather
- * than the `Exit` values.
+ * Use when you need every fiber to succeed and want the successful values
+ * rather than the `Exit` values.
  *
  * **Details**
  *
@@ -349,7 +309,7 @@ export const joinAll: <A extends Iterable<Fiber<any, any>>>(
     A,
     A extends Iterable<Fiber<infer _A, infer _E>> ? _A : never
   >,
-  A extends Fiber<infer _A, infer _E> ? _E : never
+  A extends Iterable<Fiber<infer _A, infer _E>> ? _E : never
 > = effect.fiberJoinAll
 
 /**
@@ -358,7 +318,8 @@ export const joinAll: <A extends Iterable<Fiber<any, any>>>(
  *
  * **When to use**
  *
- * Use when a forked fiber is no longer needed and should be cancelled.
+ * Use when you need to cancel a forked fiber and wait for its cleanup to
+ * complete.
  *
  * **Details**
  *
@@ -371,7 +332,7 @@ export const joinAll: <A extends Iterable<Fiber<any, any>>>(
  *
  * **Example** (Interrupting a fiber)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -379,8 +340,9 @@ export const joinAll: <A extends Iterable<Fiber<any, any>>>(
  *     Effect.delay("1 second")(Effect.succeed(42))
  *   )
  *   yield* Fiber.interrupt(fiber)
- *   console.log("Fiber interrupted")
  * })
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @see {@link interruptAs} for specifying the interrupting fiber ID
@@ -411,7 +373,7 @@ export const interrupt: <A, E>(self: Fiber<A, E>) => Effect<void> = effect.fiber
  *
  * **Example** (Interrupting a fiber as another fiber)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -421,8 +383,9 @@ export const interrupt: <A, E>(self: Fiber<A, E>) => Effect<void> = effect.fiber
  *
  *   // Interrupt the fiber, specifying fiber ID 123 as the interruptor
  *   yield* Fiber.interruptAs(targetFiber, 123)
- *   console.log("Fiber interrupted by fiber #123")
  * })
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @see {@link interrupt} for using the current fiber as the interruptor
@@ -448,7 +411,8 @@ export const interruptAs: {
  *
  * **When to use**
  *
- * Use when a group of forked fibers is no longer needed.
+ * Use when you need to cancel several forked fibers and wait for their cleanup
+ * to complete.
  *
  * **Details**
  *
@@ -462,41 +426,17 @@ export const interruptAs: {
  *
  * **Example** (Interrupting multiple fibers)
  *
- * ```ts
- * import { Console, Effect, Fiber } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
- *   // Create multiple long-running fibers
- *   const fiber1 = yield* Effect.forkChild(
- *     Effect.gen(function*() {
- *       yield* Effect.sleep("5 seconds")
- *       yield* Console.log("Task 1 completed")
- *       return "result1"
- *     })
- *   )
- *
- *   const fiber2 = yield* Effect.forkChild(
- *     Effect.gen(function*() {
- *       yield* Effect.sleep("3 seconds")
- *       yield* Console.log("Task 2 completed")
- *       return "result2"
- *     })
- *   )
- *
- *   const fiber3 = yield* Effect.forkChild(
- *     Effect.gen(function*() {
- *       yield* Effect.sleep("4 seconds")
- *       yield* Console.log("Task 3 completed")
- *       return "result3"
- *     })
- *   )
- *
- *   // Wait a bit, then interrupt all fibers
- *   yield* Effect.sleep("1 second")
- *   yield* Console.log("Interrupting all fibers...")
+ *   const fiber1 = yield* Effect.forkChild(Effect.never)
+ *   const fiber2 = yield* Effect.forkChild(Effect.never)
+ *   const fiber3 = yield* Effect.forkChild(Effect.never)
  *   yield* Fiber.interruptAll([fiber1, fiber2, fiber3])
- *   yield* Console.log("All fibers have been interrupted")
  * })
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @see {@link interruptAllAs} for specifying the interrupting fiber ID
@@ -530,36 +470,20 @@ export const interruptAll: <A extends Iterable<Fiber<any, any>>>(
  *
  * **Example** (Interrupting multiple fibers as another fiber)
  *
- * ```ts
- * import { Console, Effect, Fiber } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create a controlling fiber
  *   const controllerFiber = yield* Effect.forkChild(Effect.succeed("controller"))
  *
- *   // Create multiple worker fibers
- *   const worker1 = yield* Effect.forkChild(
- *     Effect.gen(function*() {
- *       yield* Effect.sleep("5 seconds")
- *       yield* Console.log("Worker 1 completed")
- *       return "worker1"
- *     })
- *   )
+ *   const worker1 = yield* Effect.forkChild(Effect.never)
+ *   const worker2 = yield* Effect.forkChild(Effect.never)
  *
- *   const worker2 = yield* Effect.forkChild(
- *     Effect.gen(function*() {
- *       yield* Effect.sleep("3 seconds")
- *       yield* Console.log("Worker 2 completed")
- *       return "worker2"
- *     })
- *   )
- *
- *   // Interrupt all workers using the controller fiber's ID
- *   yield* Effect.sleep("1 second")
- *   yield* Console.log("Interrupting workers from controller...")
  *   yield* Fiber.interruptAllAs([worker1, worker2], controllerFiber.id)
- *   yield* Console.log("All workers interrupted by controller")
  * })
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @see {@link interruptAll} for using the current fiber as the interruptor
@@ -588,7 +512,7 @@ export const interruptAllAs: {
  *
  * **Example** (Checking for fibers)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -596,18 +520,11 @@ export const interruptAllAs: {
  *   const fiber = yield* Effect.forkChild(Effect.succeed(42))
  *
  *   // Test if values are fibers
- *   console.log(Fiber.isFiber(fiber)) // true
- *   console.log(Fiber.isFiber("hello")) // false
- *   console.log(Fiber.isFiber(42)) // false
- *   console.log(Fiber.isFiber(null)) // false
- *
- *   // Use as a type guard
- *   const maybeValue: unknown = fiber
- *   if (Fiber.isFiber(maybeValue)) {
- *     // TypeScript knows maybeValue is a Fiber here
- *     console.log(`Fiber ID: ${maybeValue.id}`)
- *   }
+ *   return [Fiber.isFiber(fiber), Fiber.isFiber("hello"), Fiber.isFiber(42), Fiber.isFiber(null)]
  * })
+ *
+ * const actual = await Effect.runPromise(program)
+ * actual // => [true, false, false, false]
  * ```
  *
  * @category guards
@@ -633,18 +550,19 @@ export const isFiber = (
  *
  * **Example** (Getting the current fiber)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Fiber } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const current = Fiber.getCurrent()
- *   if (current) {
- *     console.log(`Current fiber ID: ${current.id}`)
- *   }
+ *   return current !== undefined
  * })
+ *
+ * const actual = await Effect.runPromise(program)
+ * actual // => true
  * ```
  *
- * @category accessors
+ * @category getters
  * @since 4.0.0
  */
 export const getCurrent: () => Fiber<any, any> | undefined = effect.getCurrentFiber

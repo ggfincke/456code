@@ -1,20 +1,8 @@
 /**
- * The `ScopedAtom` module provides a small React integration for creating atom
- * instances that are scoped to a component subtree. A scoped atom bundles a
- * React provider, context, and `use` accessor so each mounted provider owns its
- * own atom instance instead of sharing a single module-level atom.
- *
- * Use `ScopedAtom` when an atom needs to be isolated per feature, route,
- * component instance, test harness, or provider input. The provider may receive
- * an initial `value` that is passed to the atom factory, making it useful for
- * state that should be seeded from React props while still being consumed by the
- * atom hooks in descendants.
- *
- * **Gotchas**
- *
- * - `use` must be called under the matching provider or it throws.
- * - The provider creates the atom once for its lifetime; changing the provider
- *   `value` prop after mount does not recreate the atom.
+ * React helpers for creating Atom instances that belong to one component
+ * subtree. `make` returns a scoped atom with a provider, context, and `use`
+ * accessor. Each provider creates its own Atom once, so different subtrees can
+ * use the same scoped atom definition without sharing state.
  *
  * @since 4.0.0
  */
@@ -54,10 +42,11 @@ export const TypeId: TypeId = "~@effect/atom-react/ScopedAtom"
  *
  * **Example** (Providing and reading a scoped atom)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { make, useAtomValue } from "@effect/atom-react"
  * import { Atom } from "effect/unstable/reactivity"
  * import * as React from "react"
+ * import { renderToStaticMarkup } from "react-dom/server"
  *
  * const Counter = make(() => Atom.make(0))
  *
@@ -70,6 +59,8 @@ export const TypeId: TypeId = "~@effect/atom-react/ScopedAtom"
  * export function App() {
  *   return React.createElement(Counter.Provider, null, React.createElement(View))
  * }
+ *
+ * renderToStaticMarkup(React.createElement(App)) // => "<div>0</div>"
  * ```
  *
  * @category models
@@ -104,10 +95,11 @@ export interface ScopedAtom<A extends Atom.Atom<any>, Input = never> {
  *
  * **Example** (Creating a scoped atom with input)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { make, useAtomValue } from "@effect/atom-react"
  * import { Atom } from "effect/unstable/reactivity"
  * import * as React from "react"
+ * import { renderToStaticMarkup } from "react-dom/server"
  *
  * const User = make((name: string) => Atom.make(name))
  *
@@ -124,6 +116,8 @@ export interface ScopedAtom<A extends Atom.Atom<any>, Input = never> {
  *     React.createElement(UserName)
  *   )
  * }
+ *
+ * renderToStaticMarkup(React.createElement(App)) // => "<span>Ada</span>"
  * ```
  *
  * @category constructors

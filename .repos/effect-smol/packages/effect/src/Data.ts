@@ -1,82 +1,16 @@
 /**
- * Immutable data constructors with discriminated-union support.
+ * Defines helpers for small immutable data models.
  *
- * The `Data` module provides base classes and factory functions for creating
- * immutable value types with a `_tag` field for discriminated unions.
- * It is the recommended way to define domain models, error types, and
- * lightweight ADTs in Effect applications.
- *
- * ## Mental model
- *
- * - **`Class`** — base class for plain immutable data. Extend it with a type
- *   parameter to declare the fields. Instances are `Pipeable`.
- * - **`TaggedClass`** — like `Class` but automatically adds a `readonly _tag`
- *   string literal field. Useful for single-variant types or ad-hoc tagged
- *   values.
- * - **`TaggedEnum`** (type) + **`taggedEnum`** (value) — define a multi-variant
- *   discriminated union from a simple record. `taggedEnum()` returns per-variant
- *   constructors plus `$is` / `$match` helpers.
- * - **`Error`** — like `Class` but extends `Cause.YieldableError`, so instances
- *   can be yielded inside `Effect.gen` to fail the effect.
- * - **`TaggedError`** — like `TaggedClass` but extends `Cause.YieldableError`.
- *   Works with `Effect.catchTag` for tag-based error recovery.
- *
- * ## Common tasks
- *
- * - Define a simple value class → {@link Class}
- * - Define a value class with a `_tag` → {@link TaggedClass}
- * - Define a discriminated union with constructors → {@link TaggedEnum} + {@link taggedEnum}
- * - Define a yieldable error → {@link Error}
- * - Define a yieldable tagged error → {@link TaggedError}
- * - Type-guard a tagged value → `$is` from {@link taggedEnum}
- * - Pattern-match on a tagged union → `$match` from {@link taggedEnum}
- *
- * ## Gotchas
- *
- * - Variant records passed to `TaggedEnum` must **not** contain a `_tag` key;
- *   the `_tag` is added automatically from the record key.
- * - When a class has no fields, the constructor argument is optional (`void`).
- * - `taggedEnum()` creates **plain objects**, not class instances. If you need
- *   class-based variants, use `TaggedClass` or `TaggedError` instead.
- * - `TaggedEnum.WithGenerics` supports up to 4 generic type parameters.
- * - `$is(tag)` only checks the `_tag` field, not the full structure. It is safe
- *   when the tag value is globally unique across your application and the value
- *   was produced by your constructors. For untrusted input, validate with
- *   the `Schema` module before using `$is`.
- *
- * ## Quickstart
- *
- * **Example** (tagged union with pattern matching)
- *
- * ```ts
- * import { Data } from "effect"
- *
- * type Shape = Data.TaggedEnum<{
- *   Circle: { readonly radius: number }
- *   Rect: { readonly width: number; readonly height: number }
- * }>
- * const { Circle, Rect, $match } = Data.taggedEnum<Shape>()
- *
- * const area = $match({
- *   Circle: ({ radius }) => Math.PI * radius ** 2,
- *   Rect: ({ width, height }) => width * height
- * })
- *
- * console.log(area(Circle({ radius: 5 })))
- * // 78.53981633974483
- * console.log(area(Rect({ width: 3, height: 4 })))
- * // 12
- * ```
- *
- * @see {@link Class} — plain immutable data class
- * @see {@link TaggedEnum} — discriminated union type
- * @see {@link taggedEnum} — discriminated union constructors
- * @see {@link TaggedError} — yieldable tagged error class
+ * This module helps create plain classes, tagged classes, tagged unions, and
+ * typed errors with readonly fields. Tagged values carry a `_tag` field, which
+ * makes them easy to narrow with pattern matching or simple checks. These
+ * helpers are commonly used for domain values and errors in Effect programs.
  *
  * @since 2.0.0
  */
 import type * as Cause from "./Cause.ts"
 import * as core from "./internal/core.ts"
+import * as InternalRecord from "./internal/record.ts"
 import * as Pipeable from "./Pipeable.ts"
 import * as Predicate from "./Predicate.ts"
 import type * as Types from "./Types.ts"
@@ -87,7 +21,7 @@ import type { Unify } from "./Unify.ts"
  *
  * **When to use**
  *
- * Use when you need a lightweight immutable value type with `.pipe()` support. If you also need a `_tag` discriminator, use {@link TaggedClass}; if you need a yieldable error, use {@link Error} or {@link TaggedError}.
+ * Use when you need a lightweight immutable value type with `.pipe()` support.
  *
  * **Details**
  *
@@ -97,16 +31,12 @@ import type { Unify } from "./Unify.ts"
  *
  * **Example** (Defining a value class)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Data, Equal } from "effect"
  *
  * class Person extends Data.Class<{ readonly name: string }> {}
  *
- * const mike1 = new Person({ name: "Mike" })
- * const mike2 = new Person({ name: "Mike" })
- *
- * console.log(Equal.equals(mike1, mike2))
- * // true
+ * Equal.equals(new Person({ name: "Mike" }), new Person({ name: "Mike" })) // => true
  * ```
  *
  * @see {@link TaggedClass} — adds a `_tag` field
@@ -118,10 +48,10 @@ import type { Unify } from "./Unify.ts"
 export const Class: new<A extends Record<string, any> = {}>(
   args: Types.VoidIfEmpty<{ readonly [P in keyof A]: A[P] }>
 ) => Readonly<A> & Pipeable.Pipeable = class extends Pipeable.Class {
-  constructor(props: any) {
+  constructor(props: object | undefined) {
     super()
     if (props) {
-      Object.assign(this, props)
+      InternalRecord.assignProperties(this, props)
     }
   }
 } as any
@@ -131,7 +61,7 @@ export const Class: new<A extends Record<string, any> = {}>(
  *
  * **When to use**
  *
- * Use when you need a single-variant tagged type or an ad-hoc discriminator. For multi-variant unions, prefer {@link TaggedEnum} with {@link taggedEnum}; for yieldable errors, use {@link TaggedError}.
+ * Use when you need a single-variant tagged type or an ad-hoc discriminator.
  *
  * **Details**
  *
@@ -141,16 +71,14 @@ export const Class: new<A extends Record<string, any> = {}>(
  *
  * **Example** (Defining a tagged class)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Data } from "effect"
  *
  * class Person extends Data.TaggedClass("Person")<{
  *   readonly name: string
  * }> {}
  *
- * const mike = new Person({ name: "Mike" })
- * console.log(mike._tag)
- * // "Person"
+ * new Person({ name: "Mike" })._tag // => "Person"
  * ```
  *
  * @see {@link Class} — without a `_tag`
@@ -174,7 +102,7 @@ export const TaggedClass = <Tag extends string>(
  *
  * **When to use**
  *
- * Use when you have two or more variants that share a common `_tag` discriminator. For generic tagged enums, see {@link TaggedEnum.WithGenerics}.
+ * Use when you have two or more variants that share a common `_tag` discriminator.
  *
  * **Details**
  *
@@ -187,7 +115,7 @@ export const TaggedClass = <Tag extends string>(
  *
  * **Example** (Defining a tagged enum)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Data } from "effect"
  *
  * type HttpError = Data.TaggedEnum<{
@@ -201,9 +129,7 @@ export const TaggedClass = <Tag extends string>(
  *
  * const { BadRequest, NotFound } = Data.taggedEnum<HttpError>()
  *
- * const err = BadRequest({ status: 400, message: "missing id" })
- * console.log(err._tag)
- * // "BadRequest"
+ * BadRequest({ status: 400, message: "missing id" })._tag // => "BadRequest"
  * ```
  *
  * @see {@link taggedEnum} — constructors and matchers for a `TaggedEnum`
@@ -254,7 +180,7 @@ export declare namespace TaggedEnum {
    *
    * **When to use**
    *
-   * Use when variant payloads need to be parameterized, such as `Result<E, A>`. Pass the interface, not the type alias, to {@link taggedEnum} to get generic-aware constructors and matchers.
+   * Use when variant payloads need to be parameterized, such as `Result<E, A>`.
    *
    * **Details**
    *
@@ -262,9 +188,9 @@ export declare namespace TaggedEnum {
    * `this["A"]`, `this["B"]`, etc. as placeholders for the generics. The
    * `Count` parameter declares how many generics are used (up to 4).
    *
-   * **Example** (Generic tagged enum)
+   * **Example** (Defining a generic tagged enum)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Data } from "effect"
    *
    * type MyResult<E, A> = Data.TaggedEnum<{
@@ -280,6 +206,7 @@ export declare namespace TaggedEnum {
    *
    * const ok = Success({ value: 42 })
    * // ok: { readonly _tag: "Success"; readonly value: number }
+   * ok // => { value: 42, _tag: "Success" }
    * ```
    *
    * @see {@link Kind} — apply concrete types to a `WithGenerics` definition
@@ -308,7 +235,7 @@ export declare namespace TaggedEnum {
    *
    * **Example** (Applying generics)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Data } from "effect"
    *
    * type Option<A> = Data.TaggedEnum<{
@@ -319,9 +246,9 @@ export declare namespace TaggedEnum {
    *   readonly taggedEnum: Option<this["A"]>
    * }
    *
-   * // Resolve to the concrete union for `string`
-   * type StringOption = Data.TaggedEnum.Kind<OptionDef, string>
+   * // Resolves to the concrete union for `string`:
    * // { _tag: "None" } | { _tag: "Some"; value: string }
+   * type StringOption = Data.TaggedEnum.Kind<OptionDef, string>
    * ```
    *
    * @see {@link WithGenerics} — define the generic shape
@@ -357,7 +284,7 @@ export declare namespace TaggedEnum {
    *
    * **Example** (Extracting variant args)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Data } from "effect"
    *
    * type Result =
@@ -392,9 +319,9 @@ export declare namespace TaggedEnum {
    *
    * Use to select one full tagged-union variant by its `_tag` value.
    *
-   * **Example** (extracting a variant type)
+   * **Example** (Extracting a variant type)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Data } from "effect"
    *
    * type Result =
@@ -420,7 +347,8 @@ export declare namespace TaggedEnum {
    *
    * **When to use**
    *
-   * Use to type the constructors-and-matchers object returned by `taggedEnum`.
+   * Use when you want to annotate an exported constructor bundle so downstream
+   * code keeps exact variant constructors and exhaustive matching.
    *
    * **Details**
    *
@@ -433,7 +361,7 @@ export declare namespace TaggedEnum {
    *
    * **Example** (Using the constructor object)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Data } from "effect"
    *
    * type Shape =
@@ -444,21 +372,19 @@ export declare namespace TaggedEnum {
    *
    * const shape = Circle({ radius: 10 })
    *
-   * // Type guard
    * if ($is("Circle")(shape)) {
-   *   console.log(shape.radius)
+   *   shape.radius // => 10
    * }
    *
-   * // Pattern matching
-   * const label = $match(shape, {
+   * $match(shape, {
    *   Circle: (s) => `circle r=${s.radius}`,
    *   Rect: (s) => `rect ${s.w}x${s.h}`
-   * })
+   * }) // => "circle r=10"
    * ```
    *
    * @see {@link taggedEnum} — creates constructors and matchers
    *
-   * @category types
+   * @category utility types
    * @since 3.1.0
    */
   export type Constructor<A extends { readonly _tag: string }> = Types.Simplify<
@@ -586,7 +512,8 @@ export declare namespace TaggedEnum {
  *
  * **When to use**
  *
- * Use when you have a `TaggedEnum` type and need constructors and matchers for its values. For generic enums, pass a {@link TaggedEnum.WithGenerics} interface.
+ * Use when you model a closed union with plain data objects and want
+ * construction, tag checks, and exhaustive matching from the same definition.
  *
  * **Details**
  *
@@ -602,9 +529,9 @@ export declare namespace TaggedEnum {
  *   on the tag being globally unique and the value being produced by your
  *   constructors. For untrusted input, validate with the `Schema` module first.
  *
- * **Example** (Basic usage)
+ * **Example** (Creating and matching tagged enum values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Data } from "effect"
  *
  * type HttpError = Data.TaggedEnum<{
@@ -616,20 +543,17 @@ export declare namespace TaggedEnum {
  *
  * const err = NotFound({ url: "/missing" })
  *
- * // Type guard
- * console.log($is("NotFound")(err)) // true
+ * $is("NotFound")(err) // => true
  *
- * // Pattern matching
- * const msg = $match(err, {
+ * $match(err, {
  *   BadRequest: (e) => e.message,
  *   NotFound: (e) => `${e.url} not found`
- * })
- * console.log(msg) // "/missing not found"
+ * }) // => "/missing not found"
  * ```
  *
- * **Example** (Generic tagged enum)
+ * **Example** (Defining a generic tagged enum)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Data } from "effect"
  *
  * type MyResult<E, A> = Data.TaggedEnum<{
@@ -643,6 +567,7 @@ export declare namespace TaggedEnum {
  *
  * const ok = Success({ value: 42 })
  * // ok: { readonly _tag: "Success"; readonly value: number }
+ * ok // => { value: 42, _tag: "Success" }
  * ```
  *
  * @see {@link TaggedEnum} — the type-level companion
@@ -751,8 +676,8 @@ function taggedMatch<
  *
  * **When to use**
  *
- * Use when defining yieldable errors that do **not** need tag-based
- * discrimination. If you need tag-based recovery, use {@link TaggedError}.
+ * Use when you need yieldable errors that do **not** need tag-based
+ * discrimination.
  *
  * **Details**
  *
@@ -763,8 +688,8 @@ function taggedMatch<
  *
  * **Example** (Defining a yieldable error)
  *
- * ```ts
- * import { Data, Effect } from "effect"
+ * ```ts import.meta.vitest
+ * import { Data, Effect, Exit } from "effect"
  *
  * class NetworkError extends Data.Error<{
  *   readonly code: number
@@ -775,8 +700,7 @@ function taggedMatch<
  *   return yield* new NetworkError({ code: 500, message: "timeout" })
  * })
  *
- * // The effect fails with a NetworkError
- * Effect.runSync(Effect.exit(program))
+ * Effect.runSync(Effect.exit(program)) // => Exit.fail(new NetworkError({ code: 500, message: "timeout" }))
  * ```
  *
  * @see {@link TaggedError} — adds a `_tag` for `Effect.catchTag`
@@ -794,8 +718,7 @@ export const Error: new<A extends Record<string, any> = {}>(
  *
  * **When to use**
  *
- * Use when modeling domain errors in Effect applications where you want
- * discriminated-union error handling.
+ * Use when you need domain errors with discriminated-union handling.
  *
  * **Details**
  *
@@ -804,9 +727,9 @@ export const Error: new<A extends Record<string, any> = {}>(
  * The `_tag` is excluded from the constructor argument. Yielding an instance
  * inside `Effect.gen` fails the effect with this error.
  *
- * **Example** (Tag-based error recovery)
+ * **Example** (Recovering by tag)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Data, Effect } from "effect"
  *
  * class NotFound extends Data.TaggedError("NotFound")<{
@@ -825,6 +748,8 @@ export const Error: new<A extends Record<string, any> = {}>(
  *   Effect.catchTag("NotFound", (e) =>
  *     Effect.succeed(`missing: ${e.resource}`))
  * )
+ *
+ * await Effect.runPromise(recovered) // => "missing: /users/42"
  * ```
  *
  * @see {@link Error} — without a `_tag`

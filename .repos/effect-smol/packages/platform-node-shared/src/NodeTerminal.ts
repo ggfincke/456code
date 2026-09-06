@@ -1,33 +1,11 @@
 /**
  * Shared Node.js implementation of Effect's `Terminal` service.
  *
- * `NodeTerminal` adapts Node's `readline` APIs plus the current process'
- * `stdin` and `stdout` streams into {@link Terminal.Terminal}. It is the shared
- * process-backed terminal used by Node platform packages for prompts, REPLs,
- * command-line tools, and interactive programs that need line input, key input,
- * terminal dimensions, or display output.
- *
- * **Mental model**
- *
- * {@link make} creates a scoped terminal around the global process streams, and
- * {@link layer} provides that terminal with the default quit behavior for key
- * input. While the scope is active, the module owns the Node `readline`
- * interface it created; it does not own the process streams themselves.
- *
- * **Common tasks**
- *
- * Use {@link make} when a custom `shouldQuit` predicate should decide when key
- * input ends. Use {@link layer} when Ctrl+C and Ctrl+D should end the key-input
- * stream. For plain byte-oriented stdin/stdout access, use the `Stdio` service
- * instead.
- *
- * **Gotchas**
- *
- * When stdin is a TTY, raw mode is enabled while the scoped terminal is active
- * and restored on release. Raw mode changes how keys are delivered and can
- * affect other code reading stdin. In non-TTY environments such as pipes,
- * redirected input, or CI, raw mode is unavailable, keypress behavior is
- * limited, and stdout dimensions may be reported as zero.
+ * `NodeTerminal` adapts Node's `readline` APIs plus the current process
+ * `stdin` and `stdout` streams into {@link Terminal.Terminal}. The service can
+ * display output, read a line, stream key input, and read terminal dimensions.
+ * `make` manages readline and TTY raw mode in a scope, while `layer` provides
+ * the default service that ends key input on Ctrl+C or Ctrl+D.
  *
  * @since 4.0.0
  */
@@ -57,34 +35,61 @@ export const make: (
   function*(shouldQuit: (input: Terminal.UserInput) => boolean = defaultShouldQuit) {
     const stdin = process.stdin
     const stdout = process.stdout
+    const lines = yield* Queue.make<string, Cause.Done>()
 
-    // Acquire readline interface with TTY setup/cleanup inside the scope
+    // stdin "end" fires once per process, so remember end-of-input for readers
+    // created after the event (Bun never sets `readableEnded`).
+    let inputEnded = stdin.readableEnded
+    let readlineActive = false
+    const onStdinEnd = () => {
+      inputEnded = true
+      if (!readlineActive) {
+        Queue.endUnsafe(lines)
+      }
+    }
+    stdin.once("end", onStdinEnd)
+    yield* Effect.addFinalizer(() => Effect.sync(() => stdin.off("end", onStdinEnd)))
+
     const rlRef = yield* RcRef.make({
       acquire: Effect.acquireRelease(
         Effect.sync(() => {
           const rl = readline.createInterface({ input: stdin, escapeCodeTimeout: 50 })
+          const onLine = (line: string) => Queue.offerUnsafe(lines, line)
+          const onClose = () => {
+            readlineActive = false
+            Queue.endUnsafe(lines)
+          }
+          readlineActive = true
           readline.emitKeypressEvents(stdin, rl)
+          rl.on("line", onLine)
+          rl.once("close", onClose)
 
           if (stdin.isTTY) {
             stdin.setRawMode(true)
           }
-          return rl
+          return { rl, onClose, onLine }
         }),
-        (rl) =>
+        ({ rl, onClose, onLine }) =>
           Effect.sync(() => {
+            readlineActive = false
+            rl.off("line", onLine)
+            rl.off("close", onClose)
             if (stdin.isTTY) {
               stdin.setRawMode(false)
             }
             rl.close()
+            if (inputEnded) {
+              Queue.endUnsafe(lines)
+            }
           })
-      )
+      ),
+      idleTimeToLive: "10 millis"
     })
 
     const columns = Effect.sync(() => stdout.columns ?? 0)
     const rows = Effect.sync(() => stdout.rows ?? 0)
 
     const readInput = Effect.gen(function*() {
-      yield* RcRef.get(rlRef)
       const queue = yield* Queue.make<Terminal.UserInput, Cause.Done>()
       const handleKeypress = (s: string | undefined, k: readline.Key) => {
         const userInput = {
@@ -96,18 +101,40 @@ export const make: (
           Queue.endUnsafe(queue)
         }
       }
-      yield* Effect.addFinalizer(() => Effect.sync(() => stdin.off("keypress", handleKeypress)))
+      // Deno's `process.stdin` shim does not keep the event loop alive, so a
+      // program blocked on input can exit before `end` is ever delivered. A
+      // timer holds the loop open for as long as this reader is active.
+      const keepAlive = setInterval(() => {}, 2147483647)
+      // Without this, consumers (e.g. `Prompt.run`) hang forever on closed stdin.
+      const handleEnd = () => {
+        clearInterval(keepAlive)
+        Queue.endUnsafe(queue)
+      }
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          clearInterval(keepAlive)
+          stdin.off("keypress", handleKeypress)
+          stdin.off("end", handleEnd)
+        })
+      )
       stdin.on("keypress", handleKeypress)
+      if (inputEnded) {
+        handleEnd()
+      } else {
+        yield* RcRef.get(rlRef)
+        stdin.once("end", handleEnd)
+      }
       return queue as Queue.Dequeue<Terminal.UserInput, Cause.Done>
     })
 
-    const readLine = Effect.scoped(
-      Effect.flatMap(RcRef.get(rlRef), (readlineInterface) =>
-        Effect.callback<string, Terminal.QuitError>((resume) => {
-          const onLine = (line: string) => resume(Effect.succeed(line))
-          readlineInterface.once("line", onLine)
-          return Effect.sync(() => readlineInterface.off("line", onLine))
-        }))
+    const readLine = Effect.suspend(() =>
+      Queue.poll(lines).pipe(
+        Effect.flatMap(Option.match({
+          onNone: () => Effect.scoped(Effect.andThen(RcRef.get(rlRef), Queue.take(lines))),
+          onSome: Effect.succeed
+        })),
+        Effect.mapError(() => new Terminal.QuitError({}))
+      )
     )
 
     const display = (prompt: string) =>

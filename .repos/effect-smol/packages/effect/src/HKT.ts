@@ -1,53 +1,11 @@
 /**
- * Type-level encoding for higher-kinded types in Effect.
+ * Provides type-level helpers for generic code over container-like types.
  *
- * TypeScript cannot abstract directly over type constructors such as
- * `Option<_>`, `ReadonlyArray<_>`, or `Effect<_, _, _>`. This module encodes
- * those constructors with {@link TypeLambda} and applies them with
- * {@link Kind}, so libraries can define generic APIs that work across many
- * Effect data types.
- *
- * **Mental model**
- *
- * - A {@link TypeLambda} is a type-level function with four slots: `In`,
- *   `Out2`, `Out1`, and `Target`
- * - A concrete type lambda defines `readonly type` in terms of those slots
- * - {@link Kind} fills the slots and reads the lambda's resulting concrete type
- * - {@link TypeClass} lets an interface carry the lambda it implements through
- *   {@link URI}
- * - Effect modules expose their own type lambdas when they support generic
- *   higher-kinded programming
- *
- * **Common tasks**
- *
- * - Define a type lambda for a data type by extending {@link TypeLambda}
- * - Apply a lambda to type arguments with {@link Kind}
- * - Write type class interfaces that are parameterized by a lambda
- *
- * **Gotchas**
- *
- * - The slot names are positional; check the concrete lambda to see how `In`,
- *   `Out2`, `Out1`, and `Target` map to that data type's parameters
- * - Use `never` for slots that a lambda does not read
- * - HKT values are type-level encodings; they do not create runtime wrappers
- *
- * **Example** (Defining a simple type lambda)
- *
- * ```ts
- * import type { HKT } from "effect"
- *
- * interface ReadonlyArrayTypeLambda extends HKT.TypeLambda {
- *   readonly type: ReadonlyArray<this["Target"]>
- * }
- *
- * type StringArray = HKT.Kind<
- *   ReadonlyArrayTypeLambda,
- *   never,
- *   never,
- *   never,
- *   string
- * >
- * ```
+ * TypeScript cannot directly abstract over shapes such as `Option<A>`,
+ * `ReadonlyArray<A>`, or `Effect<A, E, R>`. This module represents those shapes
+ * with `TypeLambda` and applies concrete type arguments with `Kind`. It is
+ * mostly useful when defining generic helpers or type classes that should work
+ * across several data types.
  *
  * @since 2.0.0
  */
@@ -58,8 +16,8 @@ import type * as Types from "./Types.ts"
  *
  * **When to use**
  *
- * Use when defining a custom type class that needs to expose the `TypeLambda` it
- * operates on.
+ * Use when you need to define a custom type class that exposes the `TypeLambda`
+ * it operates on.
  *
  * **Details**
  *
@@ -68,7 +26,7 @@ import type * as Types from "./Types.ts"
  *
  * **Example** (Linking a type class to a type lambda)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { HKT } from "effect"
  *
  * interface IdentityTypeLambda extends HKT.TypeLambda {
@@ -87,7 +45,6 @@ import type * as Types from "./Types.ts"
  * type LinkedTypeLambda = typeof identity[typeof HKT.URI]
  *
  * const value: HKT.Kind<NonNullable<LinkedTypeLambda>, never, never, never, string> = identity.of("ok")
- * console.log(value) // "ok"
  * ```
  *
  * @category symbols
@@ -110,7 +67,7 @@ export declare const URI: unique symbol
  *
  * **Example** (Defining higher-kinded type classes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { HKT } from "effect"
  *
  * // Define a Functor type class
@@ -128,6 +85,8 @@ export declare const URI: unique symbol
  *     f: (a: A) => HKT.Kind<F, never, never, never, B>
  *   ): HKT.Kind<F, never, never, never, B>
  * }
+ *
+ * const witness: keyof Monad<HKT.TypeLambda> = "flatMap"
  * ```
  *
  * @category models
@@ -154,7 +113,7 @@ export interface TypeClass<F extends TypeLambda> {
  *
  * **Example** (Defining type lambdas)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Effect, HKT } from "effect"
  *
  * // TypeLambda for Array<A>
@@ -171,6 +130,8 @@ export interface TypeClass<F extends TypeLambda> {
  * interface FunctionTypeLambda extends HKT.TypeLambda {
  *   readonly type: (a: this["In"]) => this["Target"]
  * }
+ *
+ * const witness: HKT.Kind<ArrayTypeLambda, never, never, never, string> = ["ok"]
  * ```
  *
  * @category models
@@ -200,8 +161,9 @@ export interface TypeLambda {
  *
  * **Example** (Applying type lambdas)
  *
- * ```ts
- * import type { Effect, HKT, Option } from "effect"
+ * ```ts import.meta.vitest
+ * import { Option } from "effect"
+ * import type { Effect, HKT } from "effect"
  *
  * // Define TypeLambdas
  * interface OptionTypeLambda extends HKT.TypeLambda {
@@ -233,9 +195,11 @@ export interface TypeLambda {
  *   never,
  *   string
  * >
+ *
+ * const witness: OptionString = Option.some("ok")
  * ```
  *
- * @category type utils
+ * @category utility types
  * @since 2.0.0
  */
 export type Kind<F extends TypeLambda, In, Out2, Out1, Target> = F extends {

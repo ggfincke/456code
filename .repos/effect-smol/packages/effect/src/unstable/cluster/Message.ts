@@ -1,27 +1,11 @@
 /**
- * The cluster `Message` module defines the in-memory shapes used while moving
- * requests and control envelopes between callers, durable storage, transports,
- * and entity runners.
+ * Defines the message shapes moved through Effect Cluster.
  *
- * **Common use cases**
- *
- * - Representing outgoing entity requests before they are stored or sent
- * - Reconstructing incoming requests that runners read from storage or transport
- * - Converting outgoing messages into local, in-process deliveries
- * - Serializing request payloads with the associated RPC schema and context
- * - Passing control envelopes such as acknowledgements and interrupts through
- *   without payload decoding
- *
- * **Gotchas**
- *
- * - Requests can exist in decoded local form or encoded persisted form; choose
- *   `IncomingLocal` / `OutgoingRequest` for local delivery and `IncomingRequest`
- *   / `Envelope.PartialRequest` for storage or transport boundaries.
- * - Request payloads must be encoded and decoded with the matching RPC payload
- *   schema and service context, otherwise failures are surfaced as
- *   `MalformedMessage`.
- * - Delivery state such as the last sent or received reply is carried alongside
- *   messages so retries and persisted replies can preserve cluster semantics.
+ * Messages carry entity requests and control envelopes between callers, durable
+ * storage, transports, and runner handlers. This module includes incoming and
+ * outgoing variants for encoded stored requests, decoded local requests,
+ * acknowledgements, and interrupts. It also provides helpers for local delivery
+ * and for encoding or decoding request payloads with matching RPC schemas.
  *
  * @since 4.0.0
  */
@@ -47,7 +31,7 @@ import type { Snowflake } from "./Snowflake.ts"
  * An incoming message is either a persisted request with an encoded payload or an
  * incoming control envelope.
  *
- * @category incoming
+ * @category models
  * @since 4.0.0
  */
 export type Incoming<R extends Rpc.Any> = IncomingRequest<R> | IncomingEnvelope
@@ -59,7 +43,7 @@ export type Incoming<R extends Rpc.Any> = IncomingRequest<R> | IncomingEnvelope
  *
  * It is either a request with a decoded payload or an incoming control envelope.
  *
- * @category incoming
+ * @category models
  * @since 4.0.0
  */
 export type IncomingLocal<R extends Rpc.Any> = IncomingRequestLocal<R> | IncomingEnvelope
@@ -72,7 +56,7 @@ export type IncomingLocal<R extends Rpc.Any> = IncomingRequestLocal<R> | Incomin
  * Request messages keep their decoded payload and response callback, while
  * control envelopes are wrapped as incoming envelopes.
  *
- * @category incoming
+ * @category converting
  * @since 4.0.0
  */
 export const incomingLocalFromOutgoing = <R extends Rpc.Any>(self: Outgoing<R>): IncomingLocal<R> => {
@@ -99,7 +83,7 @@ export const incomingLocalFromOutgoing = <R extends Rpc.Any>(self: Outgoing<R>):
  * It carries the last reply that was sent and a callback for persisting encoded
  * replies.
  *
- * @category incoming
+ * @category models
  * @since 4.0.0
  */
 export class IncomingRequest<R extends Rpc.Any> extends Data.TaggedClass("IncomingRequest")<{
@@ -116,7 +100,7 @@ export class IncomingRequest<R extends Rpc.Any> extends Data.TaggedClass("Incomi
  * It includes dynamic annotations, the last sent reply, and a callback for
  * replying with decoded replies.
  *
- * @category incoming
+ * @category models
  * @since 4.0.0
  */
 export class IncomingRequestLocal<R extends Rpc.Any> extends Data.TaggedClass("IncomingRequestLocal")<{
@@ -129,7 +113,7 @@ export class IncomingRequestLocal<R extends Rpc.Any> extends Data.TaggedClass("I
 /**
  * Represents an incoming control envelope carrying an `AckChunk` or `Interrupt`.
  *
- * @category incoming
+ * @category models
  * @since 4.0.0
  */
 export class IncomingEnvelope extends Data.TaggedClass("IncomingEnvelope")<{
@@ -144,7 +128,7 @@ export class IncomingEnvelope extends Data.TaggedClass("IncomingEnvelope")<{
  *
  * An outgoing message is either an entity request or a control envelope.
  *
- * @category outgoing
+ * @category models
  * @since 4.0.0
  */
 export type Outgoing<R extends Rpc.Any> = OutgoingRequest<R> | OutgoingEnvelope
@@ -157,7 +141,7 @@ export type Outgoing<R extends Rpc.Any> = OutgoingRequest<R> | OutgoingEnvelope
  * It carries the service context used for serialization, the last received reply,
  * the reply callback, dynamic annotations, and an optional encoded request cache.
  *
- * @category outgoing
+ * @category models
  * @since 4.0.0
  */
 export class OutgoingRequest<R extends Rpc.Any> extends Data.TaggedClass("OutgoingRequest")<{
@@ -184,7 +168,7 @@ export class OutgoingRequest<R extends Rpc.Any> extends Data.TaggedClass("Outgoi
  * Use to construct an interrupt envelope for an
  * in-flight request.
  *
- * @category outgoing
+ * @category models
  * @since 4.0.0
  */
 export class OutgoingEnvelope extends Data.TaggedClass("OutgoingEnvelope")<{

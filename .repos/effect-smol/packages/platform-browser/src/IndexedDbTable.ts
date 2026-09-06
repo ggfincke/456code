@@ -4,33 +4,8 @@
  * An {@link IndexedDbTable} is the schema-backed description of one IndexedDB
  * object store. It carries the store name, row schema, key path, index key
  * paths, auto-increment mode, and transaction durability used by database
- * versions, migrations, and typed queries.
- *
- * **Mental model**
- *
- * A table value is metadata. `make` does not create an object store; it gives
- * database versions, migration helpers, and the query builder the information
- * they need to type table names, validate rows, and choose schemas for reads
- * and writes. The stored values are the encoded schema values accepted by
- * IndexedDB, with derived schemas for out-of-line keys and generated
- * auto-increment keys.
- *
- * **Common tasks**
- *
- * - Define object stores for browser caches, offline state, drafts, and
- *   background queues.
- * - Reuse the same table descriptor in database versions, migrations, and
- *   typed queries.
- * - Declare index key paths so query builders can restrict index names and key
- *   values.
- *
- * **Gotchas**
- *
- * Key paths and index paths point at encoded schema fields whose values must be
- * valid IndexedDB keys. Tables without an inline key path use an out-of-line
- * `key`, so the row schema cannot define a `key` field. Auto-increment tables
- * require a numeric key path, and declared indexes still have to be created in
- * migrations.
+ * versions, migrations, and typed queries. The `make` constructor also derives
+ * the read, array, and auto-increment write schemas used by the query builder.
  *
  * @see {@link make} for constructing table descriptors.
  *
@@ -48,7 +23,7 @@ const TypeId = "~@effect/platform-browser/IndexedDbTable"
 /**
  * Typed IndexedDB table definition containing its name, schema, key path, indexes, auto-increment setting, and transaction durability.
  *
- * @category interface
+ * @category models
  * @since 4.0.0
  */
 export interface IndexedDbTable<
@@ -119,14 +94,14 @@ export type AnyWithProps = IndexedDbTable<
 /**
  * Extracts the table name type from an `IndexedDbTable`.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type TableName<Table extends Any> = Table["tableName"]
 /**
  * Extracts the key-path type from an `IndexedDbTable`.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type KeyPath<Table extends Any> = Table["keyPath"]
@@ -134,7 +109,7 @@ export type KeyPath<Table extends Any> = Table["keyPath"]
 /**
  * Extracts the auto-increment flag type from an `IndexedDbTable`.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type AutoIncrement<Table extends Any> = Table["autoIncrement"]
@@ -142,14 +117,14 @@ export type AutoIncrement<Table extends Any> = Table["autoIncrement"]
 /**
  * Extracts the schema type from an `IndexedDbTable`.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type TableSchema<Table extends Any> = Table["tableSchema"]
 /**
  * Extracts the decoding or encoding service requirements needed by an `IndexedDbTable` schema.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type Context<Table extends Any> =
@@ -159,7 +134,7 @@ export type Context<Table extends Any> =
 /**
  * Extracts the encoded row type from an `IndexedDbTable` schema.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type Encoded<Table extends Any> = Table["tableSchema"]["Encoded"]
@@ -167,7 +142,7 @@ export type Encoded<Table extends Any> = Table["tableSchema"]["Encoded"]
 /**
  * Extracts the index definition map from an `IndexedDbTable`.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type Indexes<Table extends Any> = Table["indexes"]
@@ -175,7 +150,7 @@ export type Indexes<Table extends Any> = Table["indexes"]
 /**
  * Selects the table with the given name from a union of `IndexedDbTable` types.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type WithName<Table extends Any, TableName extends string> = Extract<

@@ -44,6 +44,10 @@ jobs:
             exit 1
           }
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -96,6 +100,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -127,6 +135,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -168,6 +180,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -273,6 +289,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -294,6 +314,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -304,7 +328,7 @@ jobs:
       - name: Expose pnpm
         run: |
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          vp_pnpm_bin="$VP_HOME/package_manager/pnpm/$pnpm_version/pnpm/bin"
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
 
@@ -318,6 +342,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -335,7 +363,7 @@ jobs:
         shell: pwsh
         run: |
           $pnpmVersion = node --print "require('./package.json').packageManager.split('@').pop()"
-          $vpPnpmBin = Join-Path $env:USERPROFILE ".vite-plus/package_manager/pnpm/$pnpmVersion/pnpm/bin"
+          $vpPnpmBin = Join-Path $env:VP_HOME "package_manager/pnpm/$pnpmVersion/pnpm/bin"
           $vpPnpmBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & (Join-Path $vpPnpmBin "pnpm.cmd") --version
 
@@ -352,6 +380,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -389,6 +421,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -465,6 +501,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1

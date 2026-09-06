@@ -14,7 +14,7 @@ import * as Schema from 'effect/Schema'
 import { Argument, Command, Flag } from 'effect/unstable/cli'
 import { fromJsonStringPretty } from '@t3tools/shared/schemaJson'
 
-export class ReleasePackageManifestError extends Schema.TaggedErrorClass<ReleasePackageManifestError>()(
+export class ReleasePackageManifestError extends Schema.TaggedError<ReleasePackageManifestError>()(
   'ReleasePackageManifestError',
   {
     operation: Schema.Literals(['read', 'decode', 'encode', 'write']),
@@ -29,7 +29,7 @@ export class ReleasePackageManifestError extends Schema.TaggedErrorClass<Release
   }
 }
 
-export class ReleaseGitHubOutputConfigurationError extends Schema.TaggedErrorClass<ReleaseGitHubOutputConfigurationError>()(
+export class ReleaseGitHubOutputConfigurationError extends Schema.TaggedError<ReleaseGitHubOutputConfigurationError>()(
   'ReleaseGitHubOutputConfigurationError',
   { cause: Schema.Defect() },
 )
@@ -40,7 +40,7 @@ export class ReleaseGitHubOutputConfigurationError extends Schema.TaggedErrorCla
   }
 }
 
-export class ReleaseGitHubOutputWriteError extends Schema.TaggedErrorClass<ReleaseGitHubOutputWriteError>()(
+export class ReleaseGitHubOutputWriteError extends Schema.TaggedError<ReleaseGitHubOutputWriteError>()(
   'ReleaseGitHubOutputWriteError',
   {
     filePath: Schema.String,

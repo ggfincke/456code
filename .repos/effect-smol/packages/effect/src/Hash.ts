@@ -1,53 +1,11 @@
 /**
- * The `Hash` module computes Effect hash values and defines the interface for
- * objects that want to provide their own hash implementation. Hashes are small
- * numeric fingerprints used by Effect data structures to bucket values quickly;
- * they are not cryptographic digests and they are not proof that two values are
- * equal.
- *
- * **Mental model**
- *
- * - {@link hash} dispatches by JavaScript type and handles primitives,
- *   arrays, typed arrays, maps, sets, plain objects, dates, regular
- *   expressions, and custom hashable objects
- * - Objects can implement {@link Hash} by defining a method at {@link symbol}
- * - Structural object hashes are cached, so repeated hashing of the same object
- *   is cheap after the first computation
- * - {@link random} gives reference-stable hash values for values that should
- *   be hashed by identity
- * - Lower-level helpers such as {@link combine}, {@link string},
- *   {@link number}, {@link structure}, {@link structureKeys}, and
- *   {@link array} are useful when implementing custom hashes
- *
- * **Quickstart**
- *
- * **Example** (Implementing a custom hash)
- *
- * ```ts
- * import { Hash } from "effect"
- *
- * class UserKey implements Hash.Hash {
- *   constructor(
- *     readonly id: string,
- *     readonly region: string
- *   ) {}
- *
- *   [Hash.symbol](): number {
- *     return Hash.combine(Hash.string(this.region))(Hash.string(this.id))
- *   }
- * }
- *
- * const value = Hash.hash(new UserKey("user-1", "eu"))
- * ```
- *
- * **Gotchas**
- *
- * - Hash collisions are possible; hash-based collections also need equality
- *   semantics to decide whether two values are actually the same
- * - Do not mutate an object after hashing it structurally, because the cached
- *   hash can become stale
- * - Use {@link random} or a custom {@link Hash} implementation for mutable
- *   objects that should be compared by reference identity
+ * Computes Effect hash values and defines the interface for objects that want
+ * to provide their own hash implementation. Hashes are small numeric
+ * fingerprints used by Effect data structures to bucket values quickly; they
+ * are not cryptographic digests and they are not proof that two values are
+ * equal. The module also includes helpers for primitive, structure, array, and
+ * reference-based hashes, plus functions for combining and optimizing numeric
+ * hash values.
  *
  * @since 2.0.0
  */
@@ -86,7 +44,7 @@ export const symbol = "~effect/interfaces/Hash"
  *
  * **Example** (Implementing Hash)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
  * class MyClass implements Hash.Hash {
@@ -97,8 +55,7 @@ export const symbol = "~effect/interfaces/Hash"
  *   }
  * }
  *
- * const instance = new MyClass(42)
- * console.log(instance[Hash.symbol]()) // hash value of 42
+ * new MyClass(42)[Hash.symbol]() // => 42
  * ```
  *
  * @category models
@@ -132,18 +89,12 @@ export interface Hash {
  *
  * **Example** (Hashing different values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
- * // Hash primitive values
- * console.log(Hash.hash(42)) // numeric hash
- * console.log(Hash.hash("hello")) // string hash
- * console.log(Hash.hash(true)) // boolean hash
- *
- * // Hash objects and arrays
- * console.log(Hash.hash({ name: "John", age: 30 }))
- * console.log(Hash.hash([1, 2, 3]))
- * console.log(Hash.hash({ id: "user-1", roles: ["admin", "editor"] }))
+ * Hash.hash(42) === Hash.hash(42) // => true
+ * Hash.hash("hello") === Hash.hash("hello") // => true
+ * Hash.hash([1, 2, 3]) === Hash.hash([1, 2, 3]) // => true
  * ```
  *
  * @category hashing
@@ -168,6 +119,9 @@ export const hash: <A>(self: A) => number = <A>(self: A) => {
       if (self === null) {
         return string("null")
       } else if (self instanceof Date) {
+        if (Number.isNaN(self.getTime())) {
+          return string("Invalid Date")
+        }
         return string(self.toISOString())
       } else if (self instanceof RegExp) {
         return string(self.toString())
@@ -183,6 +137,8 @@ export const hash: <A>(self: A) => number = <A>(self: A) => {
             return self[symbol]()
           } else if (typeof self === "function") {
             return random(self)
+          } else if (self instanceof DataView) {
+            return array(new Uint8Array(self.buffer, self.byteOffset, self.byteLength))
           } else if (Array.isArray(self) || ArrayBuffer.isView(self)) {
             return array(self as any)
           } else if (self instanceof Map) {
@@ -218,17 +174,15 @@ export const hash: <A>(self: A) => number = <A>(self: A) => {
  *
  * **Example** (Hashing objects by reference)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
  * const obj1 = { a: 1 }
  * const obj2 = { a: 1 }
  *
- * // Same object always returns the same hash
- * console.log(Hash.random(obj1) === Hash.random(obj1)) // true
+ * Hash.random(obj1) === Hash.random(obj1) // => true
  *
- * // Different objects get different hashes
- * console.log(Hash.random(obj1) === Hash.random(obj2)) // false
+ * typeof Hash.random(obj2) // => "number"
  * ```
  *
  * @category hashing
@@ -256,18 +210,14 @@ export const random: <A extends object>(self: A) => number = (self) => {
  *
  * **Example** (Combining hash values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash, pipe } from "effect"
- *
- * // Can also be used with pipe
  *
  * const hash1 = Hash.hash("hello")
  * const hash2 = Hash.hash("world")
  *
- * // Combine two hash values
  * const combined = Hash.combine(hash2)(hash1)
- * console.log(combined)
- * const result = pipe(hash1, Hash.combine(hash2))
+ * combined === pipe(hash1, Hash.combine(hash2)) // => true
  * ```
  *
  * @see {@link hash} for computing hash values from arbitrary inputs
@@ -295,15 +245,10 @@ export const combine: {
  *
  * **Example** (Optimizing a hash value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
- * const rawHash = 1234567890
- * const optimizedHash = Hash.optimize(rawHash)
- * console.log(optimizedHash) // optimized hash value
- *
- * // Often used internally by other hash functions
- * const stringHash = Hash.optimize(Hash.string("hello"))
+ * Hash.optimize(1234567890) // => 160826066
  * ```
  *
  * @category hashing
@@ -325,7 +270,7 @@ export const optimize = (n: number): number => (n & 0xbfffffff) | ((n >>> 1) & 0
  *
  * **Example** (Checking for Hash support)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
  * class MyHashable implements Hash.Hash {
@@ -334,10 +279,9 @@ export const optimize = (n: number): number => (n & 0xbfffffff) | ((n >>> 1) & 0
  *   }
  * }
  *
- * const obj = new MyHashable()
- * console.log(Hash.isHash(obj)) // true
- * console.log(Hash.isHash({})) // false
- * console.log(Hash.isHash("string")) // false
+ * Hash.isHash(new MyHashable()) // => true
+ * Hash.isHash({}) // => false
+ * Hash.isHash("string") // => false
  * ```
  *
  * @category guards
@@ -360,16 +304,14 @@ export const isHash = (u: unknown): u is Hash => hasProperty(u, symbol)
  *
  * **Example** (Hashing numbers)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
- * console.log(Hash.number(42)) // hash of 42
- * console.log(Hash.number(3.14)) // hash of 3.14
- * console.log(Hash.number(NaN)) // hash of "NaN"
- * console.log(Hash.number(Infinity)) // 0 (special case)
- *
- * // Same numbers produce the same hash
- * console.log(Hash.number(100) === Hash.number(100)) // true
+ * Number.isInteger(Hash.number(42)) // => true
+ * Number.isInteger(Hash.number(3.14)) // => true
+ * Hash.number(NaN) === Hash.number(NaN) // => true
+ * Hash.number(Infinity) === Hash.number(Infinity) // => true
+ * Hash.number(100) === Hash.number(100) // => true
  * ```
  *
  * @category hashing
@@ -400,7 +342,8 @@ export const number = (n: number) => {
  *
  * **When to use**
  *
- * Use to hash a string directly.
+ * Use when you need a string field to contribute to a custom structural hash
+ * implementation.
  *
  * **Details**
  *
@@ -410,15 +353,13 @@ export const number = (n: number) => {
  *
  * **Example** (Hashing strings)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
- * console.log(Hash.string("hello")) // hash of "hello"
- * console.log(Hash.string("world")) // hash of "world"
- * console.log(Hash.string("")) // hash of empty string
- *
- * // Same strings produce the same hash
- * console.log(Hash.string("test") === Hash.string("test")) // true
+ * Hash.string("hello") // => 181380007
+ * Hash.string("world") // => 164394279
+ * Hash.string("") // => 5381
+ * Hash.string("test") === Hash.string("test") // => true
  * ```
  *
  * @category hashing
@@ -447,22 +388,20 @@ export const string = (str: string) => {
  *
  * **Example** (Hashing selected object keys)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
  * const person = { name: "John", age: 30, city: "New York" }
  *
- * // Hash only specific keys
  * const hash1 = Hash.structureKeys(person, ["name", "age"])
  * const hash2 = Hash.structureKeys(person, ["name", "city"])
  *
- * console.log(hash1) // hash based on name and age
- * console.log(hash2) // hash based on name and city
+ * hash1 // => -590673747
+ * hash2 // => 284850673
  *
- * // Same keys produce the same hash
  * const person2 = { name: "John", age: 30, city: "Boston" }
  * const hash3 = Hash.structureKeys(person2, ["name", "age"])
- * console.log(hash1 === hash3) // true
+ * hash1 === hash3 // => true
  * ```
  *
  * @category hashing
@@ -490,19 +429,17 @@ export const structureKeys = (o: object, keys: Iterable<PropertyKey>) => {
  *
  * **Example** (Hashing object structures)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
  * const obj1 = { name: "John", age: 30 }
  * const obj2 = { name: "Jane", age: 25 }
  * const obj3 = { name: "John", age: 30 }
  *
- * console.log(Hash.structure(obj1)) // hash of obj1
- * console.log(Hash.structure(obj2)) // different hash
- * console.log(Hash.structure(obj3)) // same as obj1
- *
- * // Objects with same properties produce same hash
- * console.log(Hash.structure(obj1) === Hash.structure(obj3)) // true
+ * Hash.structure(obj1) // => -590673747
+ * Hash.structure(obj2) // => -590160631
+ * Hash.structure(obj3) // => -590673747
+ * Hash.structure(obj1) === Hash.structure(obj3) // => true
  * ```
  *
  * @category hashing
@@ -537,19 +474,18 @@ const iterableWith = (seed: number, f: (el: any) => number) => (iter: Iterable<a
  *
  * **Example** (Hashing arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Hash } from "effect"
  *
  * const arr1 = [1, 2, 3]
  * const arr2 = [1, 2, 3]
  * const arr3 = [3, 2, 1]
  *
- * console.log(Hash.array(arr1)) // hash of [1, 2, 3]
- * console.log(Hash.array(arr2)) // same hash as arr1
- * console.log(Hash.array(arr3)) // may match reordered inputs
- *
- * console.log(Hash.array(arr1) === Hash.array(arr2)) // true
- * console.log(Hash.array(arr1) === Hash.array(arr3)) // true
+ * Hash.array(arr1) // => 6151
+ * Hash.array(arr2) // => 6151
+ * Hash.array(arr3) // => 6151
+ * Hash.array(arr1) === Hash.array(arr2) // => true
+ * Hash.array(arr1) === Hash.array(arr3) // => true
  * ```
  *
  * @see {@link hash} for the general-purpose hash dispatcher

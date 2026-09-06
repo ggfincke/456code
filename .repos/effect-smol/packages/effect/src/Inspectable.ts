@@ -1,65 +1,11 @@
 /**
- * Inspection protocol for stable string, JSON, and Node.js representations.
+ * Controls how values appear in logs and debugging output.
  *
- * This module is the small bridge used by Effect data types to explain
- * themselves in logs, REPLs, test failures, and JSON-like diagnostics. Implement
- * `Inspectable` or extend {@link Class} when a value should expose one
- * representation to `toString`, `toJSON`, and Node's `util.inspect`; use
- * {@link toJson} and {@link toStringUnknown} when formatting values supplied by
- * user code.
- *
- * ## Mental model
- *
- * Inspectable values choose their own JSON representation. {@link BaseProto}
- * and {@link Class} derive `toString()` from that representation with the
- * formatter and expose the same value through {@link NodeInspectSymbol}.
- * {@link toJson} is defensive: it calls zero-argument `toJSON` methods,
- * recurses through arrays, returns `"[toJSON threw]"` if a custom serializer
- * fails, and applies redaction to other values.
- *
- * ## Common tasks
- *
- * - Extend {@link Class} for classes that only need to define `toJSON`.
- * - Reuse {@link BaseProto} for object prototypes that should share standard
- *   inspection behavior.
- * - Format unknown diagnostic values with {@link toStringUnknown}.
- * - Implement {@link NodeInspectSymbol} when integrating directly with
- *   Node.js inspection.
- *
- * ## Gotchas
- *
- * `toJson` is meant for inspection, not canonical persistence. It catches
- * `toJSON` failures, does not deeply traverse arbitrary objects, and may
- * replace redactable values according to current redaction behavior. Keep
- * custom `toJSON` implementations side-effect free so logging and debugging do
- * not change program state.
- *
- * **Example** (Creating inspectable values)
- *
- * ```ts
- * import { Inspectable } from "effect"
- *
- * class User extends Inspectable.Class {
- *   constructor(
- *     readonly id: number,
- *     readonly name: string
- *   ) {
- *     super()
- *   }
- *
- *   toJSON() {
- *     return {
- *       _tag: "User",
- *       id: this.id,
- *       name: this.name,
- *     }
- *   }
- * }
- *
- * const user = new User(1, "Alice")
- * console.log(user.toString())
- * console.log(user[Inspectable.NodeInspectSymbol]())
- * ```
+ * Effect data types use `Inspectable` to provide stable string, JSON, and
+ * Node.js inspection output. This keeps custom values readable in logs, REPLs,
+ * test failures, and diagnostics. This module defines the Node inspect symbol,
+ * the `Inspectable` interface, safe conversion helpers, and shared prototype or
+ * class implementations for custom values.
  *
  * @since 2.0.0
  */
@@ -82,7 +28,7 @@ import { redact } from "./Redactable.ts"
  *
  * **Example** (Defining custom Node inspection)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Inspectable } from "effect"
  *
  * class CustomObject {
@@ -94,7 +40,7 @@ import { redact } from "./Redactable.ts"
  * }
  *
  * const obj = new CustomObject("hello")
- * console.log(obj) // Displays: CustomObject(hello)
+ * obj[Inspectable.NodeInspectSymbol]() // => "CustomObject(hello)"
  * ```
  *
  * @category symbols
@@ -113,7 +59,7 @@ export const NodeInspectSymbol = Symbol.for("nodejs.util.inspect.custom")
  *
  * **Example** (Typing custom Node inspection)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Inspectable } from "effect"
  *
  * class CustomObject {
@@ -125,7 +71,7 @@ export const NodeInspectSymbol = Symbol.for("nodejs.util.inspect.custom")
  * }
  *
  * const obj = new CustomObject("test")
- * console.log(obj) // CustomObject(test)
+ * obj[Inspectable.NodeInspectSymbol]() // => "CustomObject(test)"
  * ```
  *
  * @category symbols
@@ -148,7 +94,7 @@ export type NodeInspectSymbol = typeof NodeInspectSymbol
  *
  * **Example** (Implementing inspectable objects)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Formatter, Inspectable } from "effect"
  *
  * class Result implements Inspectable.Inspectable {
@@ -171,7 +117,7 @@ export type NodeInspectSymbol = typeof NodeInspectSymbol
  * }
  *
  * const success = new Result("Success", 42)
- * console.log(success.toString()) // Pretty formatted JSON
+ * success.toString() // => "{\"_tag\":\"Success\",\"value\":42}"
  * ```
  *
  * @category models
@@ -262,7 +208,7 @@ export const toStringUnknown = (u: unknown, whitespace: number | string | undefi
  *
  * **Example** (Using the base inspectable prototype)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Inspectable } from "effect"
  *
  * // Use as prototype
@@ -270,7 +216,7 @@ export const toStringUnknown = (u: unknown, whitespace: number | string | undefi
  * myObject.name = "example"
  * myObject.value = 42
  *
- * console.log(myObject.toString()) // Pretty printed representation
+ * myObject.toString() // => "\"[toJSON threw]\""
  *
  * // Or extend in a constructor
  * function MyClass(this: any, name: string) {
@@ -310,7 +256,7 @@ export const BaseProto: Inspectable = {
  *
  * **Example** (Extending the inspectable base class)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Inspectable } from "effect"
  *
  * class User extends Inspectable.Class {
@@ -333,11 +279,11 @@ export const BaseProto: Inspectable = {
  * }
  *
  * const user = new User(1, "Alice", "alice@example.com")
- * console.log(user.toString()) // Pretty printed JSON with _tag, id, name, email
- * console.log(user) // In Node.js, shows the same formatted output
+ * user.toString() // => "{\"_tag\":\"User\",\"id\":1,\"name\":\"Alice\",\"email\":\"alice@example.com\"}"
+ * user[Inspectable.NodeInspectSymbol]() // => { _tag: "User", id: 1, name: "Alice", email: "alice@example.com" }
  * ```
  *
- * @category classes
+ * @category models
  * @since 2.0.0
  */
 export abstract class Class {

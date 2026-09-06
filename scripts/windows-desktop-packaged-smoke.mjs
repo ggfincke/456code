@@ -241,7 +241,7 @@ if (!ptyOutput.includes('456code-pty-ok'))
 
 const { FileFinder } = await import(
   NodeURL.pathToFileURL(
-    NodePath.join(serverAsarPath, 'node_modules/@ff-labs/fff-node/dist/src/index.js'),
+    NodePath.join(serverAsarPath, 'node_modules/@ff-labs/fff-node/dist/index.js'),
   ).href
 )
 const probeRoot = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-fff-smoke-'))

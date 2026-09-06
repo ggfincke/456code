@@ -1,26 +1,10 @@
 /**
- * Defines the remote event-log protocol messages and RPC group.
+ * Defines protocol messages for event-log remote clients and servers.
  *
  * This module is the shared boundary between `EventLogRemote` clients and
- * event-log servers. It provides branded store ids, structured protocol errors,
- * the hello/authenticate session handshake, authenticated write and changes
- * RPCs, and msgpack payloads for encrypted or plaintext journal entries.
- *
- * **Mental model**
- *
- * A remote session starts with `HelloRpc`, then proves control of the client's
- * signing key with `AuthenticateRpc`. After authentication, writes flow from the
- * client to the server as encoded entry batches, and `ChangesRpc` streams
- * encoded remote entries back to replicas from a requested sequence number. The
- * `EventLogAuthentication` middleware marks the RPCs that require an
- * authenticated event-log identity.
- *
- * **Gotchas**
- *
- * Entry batches are binary payloads. Small payloads travel as `SingleMessage`,
- * while larger payloads are split into `ChunkedMessage` parts and reassembled by
- * message id after every part arrives. Transports must preserve `Uint8Array`
- * bytes exactly; do not treat msgpack payloads as text or JSON.
+ * event-log servers. It defines store ids, protocol errors, the
+ * hello/authenticate session handshake, remote calls for writes and changes,
+ * and message formats for encrypted or plaintext journal entries.
  *
  * @since 4.0.0
  */
@@ -55,7 +39,7 @@ export const StoreIdTypeId: StoreIdTypeId = "effect/eventlog/EventLog/StoreId"
 /**
  * Branded string identifying a logical event-log store.
  *
- * @category StoreId
+ * @category models
  * @since 4.0.0
  */
 export type StoreId = string & Brand<StoreIdTypeId>
@@ -63,7 +47,7 @@ export type StoreId = string & Brand<StoreIdTypeId>
 /**
  * Schema for branded event-log store ids.
  *
- * @category StoreId
+ * @category schemas
  * @since 4.0.0
  */
 export const StoreId = Schema.String.pipe(Schema.brand(StoreIdTypeId))
@@ -79,7 +63,7 @@ export const StoreId = Schema.String.pipe(Schema.brand(StoreIdTypeId))
  * @category protocols
  * @since 4.0.0
  */
-export class EventLogProtocolError extends Schema.TaggedErrorClass<EventLogProtocolError>(
+export class EventLogProtocolError extends Schema.TaggedError<EventLogProtocolError>(
   "effect/eventlog/EventLogRemote/ProtocolError"
 )("EventLogProtocolError", {
   requestTag: Schema.String,
@@ -179,8 +163,12 @@ export class SingleMessage
  */
 export class ChunkedMessage
   extends Schema.TaggedClass<ChunkedMessage>("effect/eventlog/EventLogRemote/ChunkedMessage")("Chunked", {
-    id: Schema.Number,
-    part: Schema.Tuple([Schema.Number, Schema.Number]),
+    id: Schema.Int,
+    part: Schema.Tuple([Schema.Natural, Schema.Natural]).check(
+      Schema.makeFilter(([index, total]) => index < total, {
+        expected: "a chunk part with an index less than its total"
+      })
+    ),
     data: Transferable.Uint8Array
   })
 {
@@ -237,6 +225,9 @@ export class ChunkedMessage
       }
       map.set(part.id, entry)
     }
+    if (entry.parts[index] !== undefined) {
+      return
+    }
     entry.parts[index] = part.data
     entry.count++
     entry.bytes += part.data.byteLength
@@ -270,8 +261,8 @@ export class WriteChunkedRpc extends Rpc.make("EventLog.WriteChunked", {
  *
  * **Details**
  *
- * It includes the client public key, target store id, AES-GCM initialization
- * vector, and encrypted entries.
+ * It includes the client public key, target store id, and encrypted entries
+ * with their AES-GCM initialization vectors.
  *
  * @category protocols
  * @since 4.0.0
@@ -279,7 +270,6 @@ export class WriteChunkedRpc extends Rpc.make("EventLog.WriteChunked", {
 export class WriteEntries extends Schema.Class<WriteEntries>("effect/eventlog/EventLogRemote/WriteEntries")({
   publicKey: Schema.String,
   storeId: StoreId,
-  iv: Transferable.Uint8Array,
   encryptedEntries: Schema.Array(EncryptedEntry)
 }) {
   static FromMsgpack = Msgpack.schema(WriteEntries)
@@ -340,7 +330,7 @@ export class ChangesRpc extends Rpc.make("EventLog.Changes", {
   payload: {
     publicKey: Schema.String,
     storeId: StoreId,
-    startSequence: Schema.Number
+    startSequence: Schema.Natural
   },
   success: Schema.Union([SingleMessage, ChunkedMessage]),
   error: EventLogProtocolError,

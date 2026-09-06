@@ -7,8 +7,8 @@ import { NodeServices } from "@effect/platform-node"
 import { Console, Context, Effect, Layer, Schema, Stream, String } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
-export class DevToolsError extends Schema.TaggedErrorClass<DevToolsError>()("DevToolsError", {
-  cause: Schema.Defect
+export class DevToolsError extends Schema.TaggedError<DevToolsError>()("DevToolsError", {
+  cause: Schema.Defect()
 }) {}
 
 export class DevTools extends Context.Service<DevTools, {

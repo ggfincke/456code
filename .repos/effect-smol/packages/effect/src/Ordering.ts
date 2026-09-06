@@ -1,35 +1,9 @@
 /**
- * The `Ordering` module provides the standard representation for the result of
- * comparing two values. An `Ordering` is one of three numeric literals: `-1`
- * when the first value is less than the second, `0` when both values compare as
- * equal, and `1` when the first value is greater than the second.
- *
- * **Mental model**
- *
- * - `Ordering` describes the relationship between two compared values, not the
- *   values themselves
- * - Negative means "less than", zero means "equal", and positive means "greater
- *   than"
- * - Unlike JavaScript comparators, this type is normalized to exactly `-1`, `0`,
- *   or `1`
- * - `0` is neutral when combining comparisons; the first non-zero ordering
- *   determines the result
- *
- * **Common tasks**
- *
- * - Interpret a comparison result with {@link match}
- * - Reverse ascending and descending order with {@link reverse}
- * - Combine multiple comparison criteria with {@link Reducer}
- * - Build custom comparison functions for sorting, ordered collections, and
- *   domain-specific ordering rules
- *
- * **Gotchas**
- *
- * - Do not cast arbitrary comparator results such as `a.localeCompare(b)`
- *   directly unless they have been normalized to `-1`, `0`, or `1`
- * - In comparator-style APIs, `-1` means the left value should come before the
- *   right value, while `1` means it should come after
- * - Reversing an `Ordering` swaps `-1` and `1`, but leaves `0` unchanged
+ * The standard result of comparing two values. An `Ordering` is `-1` when the
+ * first value is less than the second, `0` when both values compare as equal,
+ * and `1` when the first value is greater than the second. This module also
+ * provides helpers for reversing an ordering, matching on the three cases, and
+ * combining ordered comparison results with a reducer.
  *
  * @since 2.0.0
  */
@@ -53,7 +27,7 @@ import * as Reducer_ from "./Reducer.ts"
  *
  * **Example** (Defining comparison results)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Ordering } from "effect"
  *
  * // Custom comparison function
@@ -63,9 +37,9 @@ import * as Reducer_ from "./Reducer.ts"
  *   return 0
  * }
  *
- * console.log(compareNumbers(5, 10)) // -1 (5 < 10)
- * console.log(compareNumbers(10, 5)) // 1 (10 > 5)
- * console.log(compareNumbers(5, 5)) // 0 (5 == 5)
+ * compareNumbers(5, 10) // => -1
+ * compareNumbers(10, 5) // => 1
+ * compareNumbers(5, 5) // => 0
  *
  * // Using with string comparison
  * const compareStrings = (a: string, b: string): Ordering.Ordering => {
@@ -89,13 +63,13 @@ export type Ordering = -1 | 0 | 1
  *
  * **Example** (Reversing comparison order)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Ordering } from "effect"
  *
  * // Basic reversal
- * console.log(Ordering.reverse(1)) // -1 (greater becomes less)
- * console.log(Ordering.reverse(-1)) // 1 (less becomes greater)
- * console.log(Ordering.reverse(0)) // 0 (equal stays equal)
+ * Ordering.reverse(1) // => -1
+ * Ordering.reverse(-1) // => 1
+ * Ordering.reverse(0) // => 0
  *
  * // Creating descending sort from ascending comparison
  * const compareNumbers = (a: number, b: number): Ordering.Ordering =>
@@ -129,9 +103,8 @@ export const reverse = (o: Ordering): Ordering => (o === -1 ? 1 : o === 1 ? -1 :
  *
  * **Example** (Pattern matching on orderings)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function, Ordering } from "effect"
- * import * as assert from "node:assert"
  *
  * const toMessage = Ordering.match({
  *   onLessThan: Function.constant("less than"),
@@ -139,9 +112,9 @@ export const reverse = (o: Ordering): Ordering => (o === -1 ? 1 : o === 1 ? -1 :
  *   onGreaterThan: Function.constant("greater than")
  * })
  *
- * assert.deepStrictEqual(toMessage(-1), "less than")
- * assert.deepStrictEqual(toMessage(0), "equal")
- * assert.deepStrictEqual(toMessage(1), "greater than")
+ * toMessage(-1) // => "less than"
+ * toMessage(0) // => "equal"
+ * toMessage(1) // => "greater than"
  * ```
  *
  * @category pattern matching

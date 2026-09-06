@@ -6,29 +6,6 @@
  * runtimes, and Node.js environments where `globalThis.fetch` is available, or
  * anywhere a compatible fetch function can be supplied.
  *
- * **Mental model**
- *
- * `layer` installs an `HttpClient` whose runtime boundary is a call to `fetch`.
- * The `Fetch` reference chooses the fetch function and defaults to
- * `globalThis.fetch`. The `RequestInit` service supplies default fetch options
- * such as credentials, redirects, cache behavior, or other platform-specific
- * settings. Request-specific method, headers, body, and abort signal are written
- * by the client for each call.
- *
- * **Common tasks**
- *
- * Provide `layer` when an Effect program should run outbound HTTP through the
- * current platform. Override `Fetch` in tests or custom runtimes to capture
- * requests or route them to a different implementation. Provide `RequestInit`
- * when all requests made by this client should share fetch defaults.
- *
- * **Gotchas**
- *
- * Fetch behavior is platform behavior: CORS, cookies, redirect handling, aborts,
- * and streaming support can differ across runtimes. Stream request bodies are
- * sent as Web streams with `duplex: "half"` for runtimes that require it, and
- * `content-length` is removed so fetch can manage body framing.
- *
  * @since 4.0.0
  */
 import * as Context from "../../Context.ts"
@@ -47,7 +24,7 @@ import * as HttpClientResponse from "./HttpClientResponse.ts"
  *
  * Defaults to `globalThis.fetch`.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const Fetch = Context.Reference<typeof globalThis.fetch>("effect/http/FetchHttpClient/Fetch", {
@@ -66,7 +43,7 @@ export const Fetch = Context.Reference<typeof globalThis.fetch>("effect/http/Fet
  *
  * Request-specific method, headers, body, and abort signal are supplied by the client when a request is executed.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export class RequestInit extends Context.Service<RequestInit, globalThis.RequestInit>()(
@@ -76,7 +53,9 @@ export class RequestInit extends Context.Service<RequestInit, globalThis.Request
 const fetch: HttpClient.HttpClient = HttpClient.make((request, url, signal, fiber) => {
   const fetch = fiber.getRef(Fetch)
   const options: globalThis.RequestInit = fiber.context.mapUnsafe.get(RequestInit.key) ?? {}
-  let headers = options.headers ? Headers.merge(Headers.fromInput(options.headers), request.headers) : request.headers
+  let headers = options.headers
+    ? Headers.merge(Headers.fromInput(options.headers as Headers.Input), request.headers)
+    : request.headers
   if (headers["content-length"]) {
     headers = Headers.remove(headers, "content-length")
   }

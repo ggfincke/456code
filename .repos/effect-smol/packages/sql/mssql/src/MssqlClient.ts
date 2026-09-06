@@ -3,36 +3,12 @@
  * `tedious` driver.
  *
  * This module provides the `MssqlClient` service, constructors, layers, and SQL
- * Server statement compiler. The layers provide both `MssqlClient` and the
- * generic `SqlClient` service, so code written against Effect SQL can run
- * regular queries while SQL Server-specific code can add typed Tedious
- * parameters with `param` and execute stored procedures with `call`.
- *
- * **Mental model**
- *
- * A client owns a scoped pool of Tedious connections and validates startup with
- * `SELECT 1`. Ordinary queries borrow a pooled connection for one operation.
- * Transactions keep one connection for their lifetime, and nested transactions
- * are represented with SQL Server savepoints. Long-running transactions
- * therefore reduce available pool capacity.
- *
- * **Common tasks**
- *
- * Use {@link layer} for a concrete `MssqlClientConfig`, {@link layerConfig} when
- * configuration should come from Effect `Config`, and {@link make} when a scoped
- * client value is needed directly. Use `param` to override the default mapping
- * from Effect SQL primitive values to Tedious `DataType`s, and use the
- * `Procedure` and `Parameter` helpers when a stored procedure needs typed input
- * parameters, output parameters, or result rows.
- *
- * **Gotchas**
- *
- * Tedious permits one active request per connection, and this client does not
- * implement streaming queries. Statements compile to SQL Server-style `@1`
- * parameters and bracket-escaped identifiers. Be explicit about connection pool
- * and timeout settings for workloads with transactions. Review TLS settings:
- * `encrypt` defaults to `false`, and `trustServer` defaults to `true` for the
- * Tedious `trustServerCertificate` option unless overridden.
+ * Server statement compiler. `make` creates a pooled Tedious client, checks the
+ * connection with `SELECT 1`, maps SQL Server failures to `SqlError`, and
+ * supports transactions with savepoints. The SQL Server-specific service adds
+ * typed Tedious parameters with `param`, stored procedure calls with `call`,
+ * direct or config-backed layers, and default parameter type mappings.
+ * Streaming queries are not implemented by this driver.
  *
  * @since 4.0.0
  */
@@ -43,6 +19,7 @@ import * as Effect from "effect/Effect"
 import { identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Pool from "effect/Pool"
+import * as Rec from "effect/Record"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -183,7 +160,7 @@ export type TypeId = typeof TypeId
 /**
  * Microsoft SQL Server client service, extending `SqlClient` with typed parameter fragments and stored procedure calls.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface MssqlClient extends Client.SqlClient {
@@ -214,7 +191,7 @@ export interface MssqlClient extends Client.SqlClient {
  * Use to access or provide a Microsoft SQL Server client through the Effect
  * context.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const MssqlClient = Context.Service<MssqlClient>("@effect/sql-mssql/MssqlClient")
@@ -229,7 +206,13 @@ export interface MssqlClientConfig {
   readonly domain?: string | undefined
   readonly server: string
   readonly instanceName?: string | undefined
+  /**
+   * Whether to encrypt traffic between the client and server. Defaults to `true`. Setting this to `false` disables transport encryption and transmits credentials in cleartext.
+   */
   readonly encrypt?: boolean | undefined
+  /**
+   * Whether to trust the server certificate without validating it. Defaults to `false`. Setting this to `true` disables TLS certificate validation.
+   */
   readonly trustServer?: boolean | undefined
   readonly port?: number | undefined
   readonly authType?: string | undefined
@@ -237,6 +220,10 @@ export interface MssqlClientConfig {
   readonly username?: string | undefined
   readonly password?: Redacted.Redacted | undefined
   readonly connectTimeout?: Duration.Input | undefined
+  readonly cancelTimeout?: Duration.Input | undefined
+  readonly connectionRetryInterval?: Duration.Input | undefined
+  readonly multiSubnetFailover?: boolean | undefined
+  readonly maxRetriesOnTransientErrors?: number | undefined
 
   readonly minConnections?: number | undefined
   readonly maxConnections?: number | undefined
@@ -303,14 +290,22 @@ export const make = (
         options: {
           port: options.port,
           database: options.database,
-          trustServerCertificate: options.trustServer ?? true,
+          trustServerCertificate: options.trustServer ?? false,
+          multiSubnetFailover: options.multiSubnetFailover,
           connectTimeout: options.connectTimeout
             ? Duration.toMillis(Duration.fromInputUnsafe(options.connectTimeout))
             : undefined,
           rowCollectionOnRequestCompletion: true,
           useColumnNames: false,
           instanceName: options.instanceName,
-          encrypt: options.encrypt ?? false
+          encrypt: options.encrypt ?? true,
+          cancelTimeout: options.cancelTimeout
+            ? Duration.toMillis(Duration.fromInputUnsafe(options.cancelTimeout))
+            : undefined,
+          connectionRetryInterval: options.connectionRetryInterval
+            ? Duration.toMillis(Duration.fromInputUnsafe(options.connectionRetryInterval))
+            : undefined,
+          maxRetriesOnTransientErrors: options.maxRetriesOnTransientErrors
         } as ConnectionOptions,
         server: options.server,
         authentication: {
@@ -378,6 +373,7 @@ export const make = (
 
           conn.cancel()
           conn.execSql(req)
+          return Effect.sync(() => conn.cancel())
         })
 
       const runProcedure = (
@@ -401,7 +397,7 @@ export const make = (
                 }
                 resume(
                   Effect.succeed({
-                    params: result,
+                    output: result,
                     rows
                   })
                 )
@@ -421,11 +417,12 @@ export const make = (
           }
 
           req.on("returnValue", (name, value) => {
-            result[name] = value
+            Rec.assignProperty(result, name, value)
           })
 
           conn.cancel()
           conn.callProcedure(req)
+          return Effect.sync(() => conn.cancel())
         })
 
       const connection = identity<MssqlConnection>({
@@ -438,6 +435,9 @@ export const make = (
           return run(sql, params)
         },
         executeValues(sql, params) {
+          return run(sql, params, true)
+        },
+        executeValuesUnprepared(sql, params) {
           return run(sql, params, true)
         },
         executeUnprepared(sql, params, transformRows) {
@@ -657,7 +657,7 @@ export const layer = (
 /**
  * Creates the SQL Server statement compiler, using `@1`-style placeholders, bracket-escaped identifiers, and SQL Server `OUTPUT INSERTED` returning clauses.
  *
- * @category compiler
+ * @category constructors
  * @since 4.0.0
  */
 export const makeCompiler = (transform?: (_: string) => string) =>
@@ -709,12 +709,12 @@ function numberToParamName(n: number) {
 /**
  * Default mapping from Effect SQL primitive value kinds to Tedious SQL Server parameter data types.
  *
- * @category configuration
+ * @category constants
  * @since 4.0.0
  */
 export const defaultParameterTypes: Record<Statement.PrimitiveKind, DataType> = {
-  string: Tedious.TYPES.VarChar,
-  number: Tedious.TYPES.Int,
+  string: Tedious.TYPES.NVarChar,
+  number: Tedious.TYPES.Float,
   bigint: Tedious.TYPES.BigInt,
   boolean: Tedious.TYPES.Bit,
   Date: Tedious.TYPES.DateTime,
@@ -747,7 +747,7 @@ function rowsToObjects(rows: ReadonlyArray<any>) {
     const newRow: any = {}
     for (let j = 0, columnLen = row.length; j < columnLen; j++) {
       const column = row[j]
-      newRow[column.metadata.colName] = column.value
+      Rec.assignProperty(newRow, column.metadata.colName, column.value)
     }
     newRows[i] = newRow
   }

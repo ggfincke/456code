@@ -1,89 +1,18 @@
 /**
- * Defines finite fallback plans for effects and streams that should retry the
- * same work with different services. An `ExecutionPlan` is a non-empty
- * sequence of steps. Each step provides a `Context` or `Layer`, and can limit
- * or shape retries with `attempts`, `schedule`, and `while`.
+ * Describes ordered fallback steps for running effects or streams.
  *
- * Use a plan with `Effect.withExecutionPlan` or `Stream.withExecutionPlan`.
- * Those APIs run the wrapped work with the first step, retry within that step
- * as directed, then move to later steps until the work succeeds or the plan is
- * exhausted.
- *
- * **Mental model**
- *
- * - A step is a resource profile for one part of a fallback strategy
- * - The active step supplies the services visible to the wrapped effect or
- *   stream
- * - `attempts` caps the number of tries for a step
- * - `schedule` controls retry timing and receives the wrapped work's failure
- *   value
- * - `while` can stop the current step early by inspecting the same failure
- *   value
- * - `CurrentMetadata` exposes the 1-based attempt number and 0-based step
- *   index to code running under the active step
- *
- * **Common tasks**
- *
- * - Build a plan with {@link make}
- * - Append fallback plans with {@link merge}
- * - Apply a plan with `Effect.withExecutionPlan` or `Stream.withExecutionPlan`
- * - Read active step and attempt information with {@link CurrentMetadata}
- * - Carry the current environment into a plan with `captureRequirements`
- *
- * **Quickstart**
- *
- * **Example** (Retry with one layer, then fall back)
- *
- * ```ts
- * import { Context, Effect, ExecutionPlan, Layer, Schedule } from "effect"
- *
- * class Endpoint extends Context.Service<Endpoint>()("Endpoint", {
- *   make: Effect.succeed({ url: "primary" })
- * }) {}
- *
- * const primary = Layer.succeed(Endpoint, Endpoint.of({ url: "primary" }))
- * const fallback = Layer.succeed(Endpoint, Endpoint.of({ url: "fallback" }))
- *
- * const plan = ExecutionPlan.make(
- *   {
- *     provide: primary,
- *     attempts: 2,
- *     schedule: Schedule.recurs(1)
- *   },
- *   {
- *     provide: fallback
- *   }
- * )
- *
- * const program = Effect.gen(function*() {
- *   const endpoint = yield* Endpoint
- *   if (endpoint.url === "primary") {
- *     return yield* Effect.fail("unavailable")
- *   }
- *   return endpoint.url
- * }).pipe(Effect.withExecutionPlan(plan))
- * ```
- *
- * **Gotchas**
- *
- * - Plans must contain at least one step
- * - `attempts` must be greater than zero when provided
- * - Without `attempts` or `schedule`, a step is tried once
- * - A `schedule` can keep a step active until bounded by `attempts` or
- *   stopped by `while`
- * - Layer, schedule, and predicate requirements stay in the plan type until
- *   they are provided or captured
- *
- * **See also**
- *
- * - {@link make} for constructing plans
- * - {@link merge} for combining plans in order
- * - {@link CurrentMetadata} for inspecting the active attempt
+ * An `ExecutionPlan` contains one or more steps. Each step provides a `Context`
+ * or `Layer`, and may also define attempt limits, retry schedules, or
+ * predicates that decide whether to keep trying. The runtime tries steps in
+ * order until the workflow succeeds or the plan is exhausted. This module also
+ * supports merging plans and reading metadata for the active step and attempt.
  *
  * @since 3.16.0
  */
 import type { NonEmptyReadonlyArray } from "./Array.ts"
+import type * as Cause from "./Cause.ts"
 import * as Context from "./Context.ts"
+import type * as Duration from "./Duration.ts"
 import type * as Effect from "./Effect.ts"
 import { constant } from "./Function.ts"
 import * as effect from "./internal/effect.ts"
@@ -139,41 +68,20 @@ export const isExecutionPlan = (u: unknown): u is ExecutionPlan<any> => Predicat
  *
  * **Example** (Defining fallback execution steps)
  *
- * ```ts
- * import { Effect, ExecutionPlan, Schedule } from "effect"
- * import type { Layer } from "effect"
- * import type { LanguageModel } from "effect/unstable/ai"
- *
- * declare const layerBad: Layer.Layer<LanguageModel.LanguageModel>
- * declare const layerGood: Layer.Layer<LanguageModel.LanguageModel>
+ * ```ts import.meta.vitest
+ * import { Context, ExecutionPlan } from "effect"
  *
  * const ThePlan = ExecutionPlan.make(
  *   {
- *     // First try with the bad layer 2 times with a 3 second delay between attempts
- *     provide: layerBad,
- *     attempts: 2,
- *     schedule: Schedule.spaced(3000)
+ *     provide: Context.empty(),
+ *     attempts: 2
  *   },
- *   // Then try with the bad layer 3 times with a 1 second delay between attempts
  *   {
- *     provide: layerBad,
- *     attempts: 3,
- *     schedule: Schedule.spaced(1000)
- *   },
- *   // Finally try with the good layer.
- *   //
- *   // If `attempts` is omitted, the plan will only attempt once, unless a schedule is provided.
- *   {
- *     provide: layerGood
+ *     provide: Context.empty()
  *   }
  * )
  *
- * declare const effect: Effect.Effect<
- *   void,
- *   never,
- *   LanguageModel.LanguageModel
- * >
- * const withPlan: Effect.Effect<void> = Effect.withExecutionPlan(effect, ThePlan)
+ * ThePlan.steps.map((step) => step.attempts ?? 1) // => [2, 1]
  * ```
  *
  * @category models
@@ -239,41 +147,20 @@ export type ConfigBase = {
  *
  * **Example** (Creating an execution plan)
  *
- * ```ts
- * import { Effect, ExecutionPlan, Schedule } from "effect"
- * import type { Layer } from "effect"
- * import type { LanguageModel } from "effect/unstable/ai"
- *
- * declare const layerBad: Layer.Layer<LanguageModel.LanguageModel>
- * declare const layerGood: Layer.Layer<LanguageModel.LanguageModel>
+ * ```ts import.meta.vitest
+ * import { Context, ExecutionPlan } from "effect"
  *
  * const ThePlan = ExecutionPlan.make(
  *   {
- *     // First try with the bad layer 2 times with a 3 second delay between attempts
- *     provide: layerBad,
- *     attempts: 2,
- *     schedule: Schedule.spaced(3000)
+ *     provide: Context.empty(),
+ *     attempts: 2
  *   },
- *   // Then try with the bad layer 3 times with a 1 second delay between attempts
  *   {
- *     provide: layerBad,
- *     attempts: 3,
- *     schedule: Schedule.spaced(1000)
- *   },
- *   // Finally try with the good layer.
- *   //
- *   // If `attempts` is omitted, the plan will only attempt once, unless a schedule is provided.
- *   {
- *     provide: layerGood
+ *     provide: Context.empty()
  *   }
  * )
  *
- * declare const effect: Effect.Effect<
- *   void,
- *   never,
- *   LanguageModel.LanguageModel
- * >
- * const withPlan: Effect.Effect<void> = Effect.withExecutionPlan(effect, ThePlan)
+ * ThePlan.steps.length // => 2
  * ```
  *
  * @category constructors
@@ -294,7 +181,7 @@ export const make = <const Steps extends NonEmptyReadonlyArray<make.Step>>(
     | (Steps[number]["schedule"] extends Schedule.Schedule<infer _O, infer _I, infer R> ? R : never)
 }> =>
   makeProto(steps.map((options, i) => {
-    if (options.attempts && options.attempts < 1) {
+    if (options.attempts !== undefined && options.attempts < 1) {
       throw new Error(`ExecutionPlan.make: step[${i}].attempts must be greater than 0`)
     }
     return {
@@ -441,7 +328,7 @@ const makeProto = <Provides, In, PlanE, PlanR>(
  *
  * @see {@link make} for building a plan from individual steps instead of combining existing plans
  *
- * @category Combining
+ * @category combining
  * @since 3.16.0
  */
 export const merge = <const Plans extends NonEmptyReadonlyArray<ExecutionPlan<any>>>(
@@ -461,7 +348,7 @@ export const merge = <const Plans extends NonEmptyReadonlyArray<ExecutionPlan<an
  * `attempt` is the current 1-based attempt number, and `stepIndex` is the
  * 0-based index of the plan step currently being evaluated.
  *
- * @category Metadata
+ * @category metadata
  * @since 4.0.0
  */
 export interface Metadata {
@@ -478,7 +365,7 @@ export interface Metadata {
  * Use to read the active plan step and attempt while code is running under an
  * execution plan.
  *
- * @category metadata
+ * @category services
  * @since 4.0.0
  */
 export const CurrentMetadata = Context.Reference<Metadata>("effect/ExecutionPlan/CurrentMetadata", {
@@ -487,3 +374,78 @@ export const CurrentMetadata = Context.Reference<Metadata>("effect/ExecutionPlan
     stepIndex: 0
   })
 })
+
+/**
+ * Lifecycle event emitted before an execution-plan attempt runs.
+ *
+ * **Details**
+ *
+ * `attempt` is the cumulative 1-based attempt number across all steps and
+ * matches `CurrentMetadata.attempt` for the same attempt. `stepAttempt` is the
+ * 1-based attempt number within the current step, and `stepIndex` is the
+ * 0-based index of the step being attempted.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface AttemptStart {
+  readonly _tag: "AttemptStart"
+  readonly attempt: number
+  readonly stepAttempt: number
+  readonly stepIndex: number
+}
+
+/**
+ * Lifecycle event emitted when an execution-plan attempt succeeds.
+ *
+ * **Details**
+ *
+ * A successful attempt completes the plan, so this is always the final event.
+ * `duration` is the elapsed time of the attempt.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface AttemptSuccess {
+  readonly _tag: "AttemptSuccess"
+  readonly attempt: number
+  readonly stepAttempt: number
+  readonly stepIndex: number
+  readonly duration: Duration.Duration
+}
+
+/**
+ * Lifecycle event emitted when an execution-plan attempt fails.
+ *
+ * **Details**
+ *
+ * `cause` holds the full failure cause, so defects and interruption are
+ * reported as well as expected errors. Whether the plan retries or fails over
+ * afterwards is decided by the step's `attempts`, `while`, and `schedule`; a
+ * following `AttemptStart` indicates another attempt was made.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface AttemptFailure<E> {
+  readonly _tag: "AttemptFailure"
+  readonly attempt: number
+  readonly stepAttempt: number
+  readonly stepIndex: number
+  readonly duration: Duration.Duration
+  readonly cause: Cause.Cause<E>
+}
+
+/**
+ * Union of the lifecycle events emitted while an execution plan runs.
+ *
+ * **Details**
+ *
+ * Every `AttemptStart` is followed by exactly one terminal event, either
+ * `AttemptSuccess` or `AttemptFailure`. An interrupted attempt emits
+ * `AttemptFailure` with the interruption cause.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type Event<E> = AttemptStart | AttemptSuccess | AttemptFailure<E>

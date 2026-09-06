@@ -1,85 +1,12 @@
 /**
- * The `Metric` module provides tools for defining, updating, tagging, and
- * reading application metrics from Effect programs. A `Metric<Input, State>`
- * accepts typed input values and aggregates them into a typed state that can be
- * read directly or exported from a snapshot.
+ * Records and reads measurements from Effect programs.
  *
- * **Mental model**
- *
- * - A metric has an identifier, a type, an optional description, optional attributes, and mutable aggregate state
- * - Use counters for cumulative values such as requests, errors, retries, or bytes processed
- * - Use gauges for point-in-time values that can rise or fall, such as active connections or queue size
- * - Use frequencies to count occurrences of discrete string values, such as status codes or action names
- * - Use histograms to bucket numeric observations and inspect count, min, max, and sum
- * - Use summaries to calculate quantiles over a bounded, time-based observation window
- * - Metrics are updated from effects with {@link update} and {@link modify}, and read with {@link value}
- * - Attributes tag metrics with key-value dimensions so the same logical metric can be grouped by service, endpoint, method, or other labels
- * - Snapshots capture the currently registered metrics and their aggregate states for reporting or export
- *
- * **Common tasks**
- *
- * - Create counters: {@link counter}
- * - Create gauges: {@link gauge}
- * - Create frequencies: {@link frequency}
- * - Create histograms: {@link histogram}, {@link linearBoundaries}, {@link exponentialBoundaries}
- * - Create summaries: {@link summary}, {@link summaryWithTimestamp}
- * - Measure effect duration: {@link timer}
- * - Update a metric: {@link update}
- * - Apply relative updates where supported: {@link modify}
- * - Read one metric: {@link value}
- * - Tag a metric: {@link withAttributes}
- * - Transform accepted input values: {@link mapInput}
- * - Record a constant input for repeated events: {@link withConstantInput}
- * - Inspect all registered metrics: {@link snapshot}, {@link dump}
- * - Enable fiber runtime metrics: {@link enableRuntimeMetrics}
- *
- * **Gotchas**
- *
- * - Counter and gauge metrics can use `number` inputs by default or `bigint` inputs with the `bigint` option
- * - Incremental counters ignore negative updates; use non-incremental counters only when decreases are meaningful
- * - {@link update} sets a gauge to an absolute value, while {@link modify} changes it relative to its current value
- * - Histogram buckets are cumulative and depend on the boundaries supplied when the metric is created
- * - Summary quantiles are calculated from the configured sliding window, so old observations expire
- * - Prefer low-cardinality attributes; using unbounded values such as request IDs can create too many metric series
- *
- * **Quickstart**
- *
- * **Example** (Creating and updating metrics)
- *
- * ```ts
- * import { Effect, Metric } from "effect"
- *
- * const requestCount = Metric.counter("http_requests_total", {
- *   description: "Total number of HTTP requests"
- * })
- *
- * const responseTime = Metric.histogram("http_response_time", {
- *   description: "HTTP response time in milliseconds",
- *   boundaries: Metric.linearBoundaries({ start: 0, width: 50, count: 20 })
- * })
- *
- * const handleRequest = Effect.gen(function*() {
- *   yield* Metric.update(
- *     Metric.withAttributes(requestCount, {
- *       endpoint: "/api/users",
- *       method: "GET"
- *     }),
- *     1
- *   )
- *
- *   yield* Metric.update(responseTime, 125)
- *
- *   return yield* Metric.value(requestCount)
- * })
- * ```
- *
- * **See also**
- *
- * - {@link counter} / {@link gauge} / {@link frequency} for common metric types
- * - {@link histogram} / {@link summary} for distribution metrics
- * - {@link update} / {@link modify} / {@link value} for working with metric state
- * - {@link withAttributes} for adding dimensions
- * - {@link snapshot} for exporting all registered metric values
+ * A `Metric<Input, State>` accepts typed update values and stores an aggregated
+ * state that can be read directly or included in a snapshot. Metrics are used
+ * for counters, gauges, frequencies, histograms, summaries, and timers. This
+ * module includes metric constructors, update and read helpers, attributes,
+ * histogram boundaries, registry snapshots, text dumps, and controls for
+ * enabling runtime metrics.
  *
  * @since 2.0.0
  */
@@ -92,6 +19,7 @@ import type { Exit } from "./Exit.ts"
 import { constUndefined, dual } from "./Function.ts"
 import * as InternalEffect from "./internal/effect.ts"
 import * as InternalMetric from "./internal/metric.ts"
+import * as InternalRecord from "./internal/record.ts"
 import * as Layer from "./Layer.ts"
 import * as Order from "./Order.ts"
 import type { Pipeable } from "./Pipeable.ts"
@@ -121,12 +49,8 @@ import type { Contravariant, Covariant } from "./Types.ts"
  *
  * **Example** (Using multiple metric types)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class MetricExample extends Data.TaggedError("MetricExample")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create different types of metrics
@@ -172,6 +96,13 @@ import type { Contravariant, Covariant } from "./Types.ts"
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [
+ *   result.counter.state.count,
+ *   result.gauge.state.value,
+ *   result.frequency.state.occurrences.get("200")
+ * ] // => [1, 128, 1]
  * ```
  *
  * @category models
@@ -200,12 +131,8 @@ export interface Metric<in Input, out State> extends Pipeable {
  *
  * **Example** (Using counter metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class CounterInterfaceError extends Data.TaggedError("CounterInterfaceError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create different types of counters
@@ -251,9 +178,12 @@ export interface Metric<in Input, out State> extends Pipeable {
  *     bytes: { count: bytesState.count, incremental: bytesState.incremental }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const counts = [result.requests.count, result.bytes.count] // => [6, 1024n]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 2.0.0
  */
 export interface Counter<in Input extends number | bigint> extends Metric<Input, CounterState<Input>> {}
@@ -263,12 +193,8 @@ export interface Counter<in Input extends number | bigint> extends Metric<Input,
  *
  * **Example** (Reading counter state)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class CounterStateError extends Data.TaggedError("CounterStateError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create different types of counters
@@ -293,7 +219,6 @@ export interface Counter<in Input extends number | bigint> extends Metric<Input,
  *   const byteState: Metric.CounterState<bigint> = yield* Metric.value(
  *     byteCounter
  *   )
- *
  *   // CounterState contains:
  *   // - count: current count value (number or bigint based on counter type)
  *   // - incremental: whether counter only allows increases
@@ -313,9 +238,12 @@ export interface Counter<in Input extends number | bigint> extends Metric<Input,
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const counts = [result.requests.total, result.errors.total, result.bytes.total] // => [3, 3, 1024000n]
  * ```
  *
- * @category Counter
+ * @category models
  * @since 4.0.0
  */
 export interface CounterState<in Input extends number | bigint> {
@@ -334,32 +262,16 @@ export interface CounterState<in Input extends number | bigint> {
  *
  * **Example** (Using frequency metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class FrequencyInterfaceError
- *   extends Data.TaggedError("FrequencyInterfaceError")<{
- *     readonly operation: string
- *   }>
- * {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * // Function that accepts any Frequency metric
- * const logFrequencyMetric = (freq: Metric.Frequency) =>
+ * const analyzeFrequencyMetric = (freq: Metric.Frequency) =>
  *   Effect.gen(function*() {
  *     const state = yield* Metric.value(freq)
  *
- *     yield* Effect.log(`Frequency Metric: ${freq.id}`)
- *     yield* Effect.log(`Description: ${freq.description ?? "No description"}`)
- *     yield* Effect.log(`Type: ${freq.type}`) // "Frequency"
- *
  *     // Access the frequency state
  *     const occurrences: ReadonlyMap<string, number> = state.occurrences
- *     yield* Effect.log(`Total unique values: ${occurrences.size}`)
- *
- *     // Iterate through all occurrences
- *     for (const [value, count] of occurrences) {
- *       yield* Effect.log(`  "${value}": ${count} occurrences`)
- *     }
  *
  *     // Find most frequent value
  *     let maxCount = 0
@@ -396,14 +308,16 @@ export interface CounterState<in Input extends number | bigint> {
  *   yield* Metric.update(userActions, "login")
  *
  *   // Use the function with different frequency metrics
- *   const statusAnalysis = yield* logFrequencyMetric(statusCodes)
- *   const actionAnalysis = yield* logFrequencyMetric(userActions)
- *
+ *   const statusAnalysis = yield* analyzeFrequencyMetric(statusCodes)
+ *   const actionAnalysis = yield* analyzeFrequencyMetric(userActions)
  *   return { statusAnalysis, actionAnalysis }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.statusAnalysis.mostFrequent, result.actionAnalysis.mostFrequent] // => ["200", "login"]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 2.0.0
  */
 export interface Frequency extends Metric<string, FrequencyState> {}
@@ -413,12 +327,8 @@ export interface Frequency extends Metric<string, FrequencyState> {}
  *
  * **Example** (Reading frequency state)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class FrequencyStateError extends Data.TaggedError("FrequencyStateError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create frequency metrics for different categories
@@ -466,7 +376,6 @@ export interface Frequency extends Metric<string, FrequencyState> {}
  *
  *   const topStatus = getMostFrequent(statusState.occurrences)
  *   const topAction = getMostFrequent(actionState.occurrences)
- *
  *   return {
  *     statusCodes: {
  *       totalResponses: Array.from(statusState.occurrences.values()).reduce(
@@ -486,9 +395,13 @@ export interface Frequency extends Metric<string, FrequencyState> {}
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const mostCommon = [result.statusCodes.mostCommon, result.userActions.mostCommon]
+ * mostCommon.map(({ key, count }) => [key, count]) // => [["200", 3], ["click", 3]]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 4.0.0
  */
 export interface FrequencyState {
@@ -505,12 +418,8 @@ export interface FrequencyState {
  *
  * **Example** (Using gauge metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class GaugeInterfaceError extends Data.TaggedError("GaugeInterfaceError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create different types of gauges
@@ -540,7 +449,6 @@ export interface FrequencyState {
  *   const diskState: Metric.GaugeState<bigint> = yield* Metric.value(
  *     diskSpaceGauge
  *   )
- *
  *   // Gauge state contains:
  *   // - value: current instantaneous value
  *
@@ -549,9 +457,12 @@ export interface FrequencyState {
  *     disk: { currentValue: diskState.value } // 5000000000n
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.memory.currentValue, result.disk.currentValue] // => [704, 5000000000n]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 2.0.0
  */
 export interface Gauge<in Input extends number | bigint> extends Metric<Input, GaugeState<Input>> {}
@@ -561,12 +472,8 @@ export interface Gauge<in Input extends number | bigint> extends Metric<Input, G
  *
  * **Example** (Reading gauge state)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class GaugeStateError extends Data.TaggedError("GaugeStateError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create different types of gauges
@@ -602,7 +509,6 @@ export interface Gauge<in Input extends number | bigint> extends Metric<Input, G
  *   const queueState: Metric.GaugeState<number> = yield* Metric.value(
  *     queueSizeGauge
  *   )
- *
  *   // GaugeState contains:
  *   // - value: current instantaneous value (number or bigint based on gauge type)
  *
@@ -618,9 +524,13 @@ export interface Gauge<in Input extends number | bigint> extends Metric<Input, G
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.environment.temperature, result.system.diskUsage, result.system.queueSize]
+ * values // => [23.1, 5000000000n, 15]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 4.0.0
  */
 export interface GaugeState<in Input extends number | bigint> {
@@ -637,14 +547,8 @@ export interface GaugeState<in Input extends number | bigint> {
  *
  * **Example** (Using histogram metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class HistogramInterfaceError
- *   extends Data.TaggedError("HistogramInterfaceError")<{
- *     readonly operation: string
- *   }>
- * {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create histograms with different boundary strategies
@@ -652,7 +556,7 @@ export interface GaugeState<in Input extends number | bigint> {
  *     "http_response_time_ms",
  *     {
  *       description: "HTTP response time distribution in milliseconds",
- *       boundaries: Metric.linearBoundaries({ start: 0, width: 50, count: 20 }) // 0, 50, 100, ..., 950
+ *       boundaries: Metric.linearBoundaries({ start: 0, width: 50, count: 20 }) // 50, 100, ..., 900, Infinity
  *     }
  *   )
  *
@@ -685,7 +589,6 @@ export interface GaugeState<in Input extends number | bigint> {
  *   const fileSizeState: Metric.HistogramState = yield* Metric.value(
  *     fileSizeHistogram
  *   )
- *
  *   // Histogram state contains:
  *   // - buckets: Array of [boundary, cumulativeCount] pairs
  *   // - count: total number of observations
@@ -709,9 +612,13 @@ export interface GaugeState<in Input extends number | bigint> {
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.responseTime.totalRequests, result.responseTime.totalTime, result.fileSize.totalBytes]
+ * values // => [4, 445, 118]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 2.0.0
  */
 export interface Histogram<Input> extends Metric<Input, HistogramState> {}
@@ -721,18 +628,14 @@ export interface Histogram<Input> extends Metric<Input, HistogramState> {}
  *
  * **Example** (Reading histogram state)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class HistogramStateError extends Data.TaggedError("HistogramStateError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create histogram with linear boundaries
  *   const responseTimeHistogram = Metric.histogram("api_response_time_ms", {
  *     description: "API response time distribution",
- *     boundaries: Metric.linearBoundaries({ start: 0, width: 100, count: 10 }) // 0, 100, 200, ..., 900
+ *     boundaries: Metric.linearBoundaries({ start: 0, width: 100, count: 10 }) // 100, 200, ..., 800, Infinity
  *   })
  *
  *   // Record observations
@@ -779,7 +682,6 @@ export interface Histogram<Input> extends Metric<Input, HistogramState> {}
  *   }
  *
  *   const bucketAnalysis = analyzeBuckets(state.buckets)
- *
  *   return {
  *     responseTime: {
  *       totalRequests: state.count, // 5
@@ -796,9 +698,14 @@ export interface Histogram<Input> extends Metric<Input, HistogramState> {}
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const stats = result.responseTime
+ * const values = [stats.totalRequests, stats.fastestResponse, stats.slowestResponse, stats.totalTime]
+ * values // => [5, 50, 750, 1295]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 4.0.0
  */
 export interface HistogramState {
@@ -820,12 +727,8 @@ export interface HistogramState {
  *
  * **Example** (Using summary metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class SummaryInterfaceError extends Data.TaggedError("SummaryInterfaceError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create summaries with different quantile configurations
@@ -884,7 +787,6 @@ export interface HistogramState {
  *   const median = getQuantileValue(responseTimeState.quantiles, 0.5)
  *   const p95 = getQuantileValue(responseTimeState.quantiles, 0.95)
  *   const p99 = getQuantileValue(responseTimeState.quantiles, 0.99)
- *
  *   return {
  *     responseTime: {
  *       totalRequests: responseTimeState.count, // 5
@@ -902,9 +804,13 @@ export interface HistogramState {
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const counts = [result.responseTime.totalRequests, result.responseTime.totalTime, result.requestSize.totalRequests]
+ * counts // => [5, 1461, 3]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 2.0.0
  */
 export interface Summary<Input> extends Metric<Input, SummaryState> {}
@@ -914,12 +820,8 @@ export interface Summary<Input> extends Metric<Input, SummaryState> {}
  *
  * **Example** (Reading summary state)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class SummaryStateError extends Data.TaggedError("SummaryStateError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create summary with specific quantiles
@@ -962,7 +864,6 @@ export interface Summary<Input> extends Metric<Input, SummaryState> {}
  *   }
  *
  *   const quantileValues = extractQuantiles(state.quantiles)
- *
  *   return {
  *     latencyAnalysis: {
  *       totalRequests: state.count, // 7
@@ -984,9 +885,14 @@ export interface Summary<Input> extends Metric<Input, SummaryState> {}
  *     }
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const analysis = result.latencyAnalysis
+ * const values = [analysis.totalRequests, analysis.fastestResponse, analysis.slowestResponse, analysis.totalLatency]
+ * values // => [7, 45, 890, 1879]
  * ```
  *
- * @category Metrics
+ * @category models
  * @since 4.0.0
  */
 export interface SummaryState {
@@ -1003,12 +909,8 @@ export interface SummaryState {
  *
  * **Example** (Collecting application metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class MetricsError extends Data.TaggedError("MetricsError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create different types of metrics
@@ -1038,6 +940,9 @@ export interface SummaryState {
  *     frequency: frequencyValue
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.counter.count, result.gauge.value] // => [1, 12]
  * ```
  *
  * @since 2.0.0
@@ -1048,78 +953,28 @@ export declare namespace Metric {
    *
    * **Example** (Inspecting metric types)
    *
-   * ```ts
-   * import { Data, Effect, Metric } from "effect"
+   * ```ts import.meta.vitest
+   * import { Metric } from "effect"
    *
-   * class MetricTypeError extends Data.TaggedError("MetricTypeError")<{
-   *   readonly operation: string
-   * }> {}
-   *
-   * const program = Effect.gen(function*() {
-   *   // Create different metric types
-   *   const counter = Metric.counter("requests_total")
-   *   const gauge = Metric.gauge("cpu_usage")
-   *   const frequency = Metric.frequency("status_codes")
-   *   const histogram = Metric.histogram("response_time", {
+   * const metrics: ReadonlyArray<Metric.Metric<any, any>> = [
+   *   Metric.counter("requests_total"),
+   *   Metric.gauge("cpu_usage"),
+   *   Metric.frequency("status_codes"),
+   *   Metric.histogram("response_time", {
    *     boundaries: Metric.linearBoundaries({ start: 0, width: 50, count: 10 })
-   *   })
-   *   const summary = Metric.summary("latency", {
+   *   }),
+   *   Metric.summary("latency", {
    *     maxAge: "5 minutes",
    *     maxSize: 1000,
    *     quantiles: [0.5, 0.95, 0.99]
    *   })
+   * ]
    *
-   *   // Function that checks metric type
-   *   const getMetricInfo = (metric: Metric.Metric<any, any>) => ({
-   *     name: metric.id,
-   *     type: metric.type
-   *   })
-   *
-   *   // Get type information for each metric
-   *   const counterInfo = getMetricInfo(counter) // { name: "requests_total", type: "Counter" }
-   *   const gaugeInfo = getMetricInfo(gauge) // { name: "cpu_usage", type: "Gauge" }
-   *   const frequencyInfo = getMetricInfo(frequency) // { name: "status_codes", type: "Frequency" }
-   *   const histogramInfo = getMetricInfo(histogram) // { name: "response_time", type: "Histogram" }
-   *   const summaryInfo = getMetricInfo(summary) // { name: "latency", type: "Summary" }
-   *
-   *   // Pattern match on metric type
-   *   const describeMetric = (type: string): string => {
-   *     switch (type) {
-   *       case "Counter":
-   *         return "Cumulative values that increase over time"
-   *       case "Gauge":
-   *         return "Instantaneous values that can go up or down"
-   *       case "Frequency":
-   *         return "Counts of discrete string occurrences"
-   *       case "Histogram":
-   *         return "Distribution of values across buckets"
-   *       case "Summary":
-   *         return "Quantile calculations over time windows"
-   *       default:
-   *         return "Unknown metric type"
-   *     }
-   *   }
-   *
-   *   return {
-   *     metrics: [
-   *       counterInfo,
-   *       gaugeInfo,
-   *       frequencyInfo,
-   *       histogramInfo,
-   *       summaryInfo
-   *     ],
-   *     descriptions: {
-   *       Counter: describeMetric("Counter"),
-   *       Gauge: describeMetric("Gauge"),
-   *       Frequency: describeMetric("Frequency"),
-   *       Histogram: describeMetric("Histogram"),
-   *       Summary: describeMetric("Summary")
-   *     }
-   *   }
-   * })
+   * const types: ReadonlyArray<Metric.Metric.Type> = metrics.map((metric) => metric.type)
+   * const actual = types // => ["Counter", "Gauge", "Frequency", "Histogram", "Summary"]
    * ```
    *
-   * @category types
+   * @category models
    * @since 4.0.0
    */
   export type Type = "Counter" | "Frequency" | "Gauge" | "Histogram" | "Summary"
@@ -1129,12 +984,8 @@ export declare namespace Metric {
    *
    * **Example** (Providing attributes in different formats)
    *
-   * ```ts
-   * import { Data, Effect, Metric } from "effect"
-   *
-   * class AttributesError extends Data.TaggedError("AttributesError")<{
-   *   readonly operation: string
-   * }> {}
+   * ```ts import.meta.vitest
+   * import { Effect, Metric } from "effect"
    *
    * const program = Effect.gen(function*() {
    *   // Different ways to specify attributes
@@ -1183,19 +1034,22 @@ export declare namespace Metric {
    *   // Both formats result in the same internal representation
    *   const normalizedObject = normalizeAttributes(attributesAsObject)
    *   const normalizedArray = normalizeAttributes(attributesAsArray)
-   *
    *   return {
    *     attributeFormats: {
    *       object: normalizedObject, // { service: "api", environment: "production", version: "1.2.3" }
-   *       array: normalizedArray, // { service: "api", environment: "production", version: "1.2.3" }
-   *       areEqual:
-   *         JSON.stringify(normalizedObject) === JSON.stringify(normalizedArray) // true
+   *       array: normalizedArray // { service: "api", environment: "production", version: "1.2.3" }
    *     }
    *   }
    * })
+   *
+   * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+   * const objectAttributes = result.attributeFormats.object
+   * const arrayAttributes = result.attributeFormats.array
+   * const sameAttributes = [objectAttributes, arrayAttributes]
+   * sameAttributes // => [{ service: "api", environment: "production", version: "1.2.3" }, { service: "api", environment: "production", version: "1.2.3" }]
    * ```
    *
-   * @category types
+   * @category models
    * @since 4.0.0
    */
   export type Attributes = AttributeSet | ReadonlyArray<[string, string]>
@@ -1205,12 +1059,8 @@ export declare namespace Metric {
    *
    * **Example** (Combining metric attribute sets)
    *
-   * ```ts
-   * import { Data, Effect, Metric } from "effect"
-   *
-   * class AttributeSetError extends Data.TaggedError("AttributeSetError")<{
-   *   readonly operation: string
-   * }> {}
+   * ```ts import.meta.vitest
+   * import { Effect, Metric } from "effect"
    *
    * const program = Effect.gen(function*() {
    *   // Define attribute sets for different contexts
@@ -1271,9 +1121,12 @@ export declare namespace Metric {
    *     }
    *   }
    * })
+   *
+   * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+   * const validation = [result.attributes.isValid, result.attributes.totalKeys] // => [true, 9]
    * ```
    *
-   * @category types
+   * @category models
    * @since 4.0.0
    */
   export type AttributeSet = Readonly<Record<string, string>>
@@ -1283,7 +1136,7 @@ export declare namespace Metric {
    *
    * **Example** (Extracting metric input types)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Metric } from "effect"
    *
    * // Create various metric types
@@ -1321,9 +1174,11 @@ export declare namespace Metric {
    * // Metric.update(numberCounter, "abc")   // ✗ Type error
    * // Metric.update(stringFrequency, "ok")  // ✓ Valid (string)
    * // Metric.update(stringFrequency, 404)   // ✗ Type error
+   * const metricIds = metrics.map(({ id, type }) => `${id}:${type}`)
+   * metricIds // => ["requests:Counter", "bytes:Counter", "status_codes:Frequency", "cpu_usage:Gauge", "response_time:Histogram"]
    * ```
    *
-   * @category types
+   * @category utility types
    * @since 4.0.0
    */
   export type Input<A> = A extends Metric<infer _Input, infer _State> ? _Input
@@ -1334,7 +1189,7 @@ export declare namespace Metric {
    *
    * **Example** (Extracting metric state types)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Effect, Metric } from "effect"
    *
    * // Create various metric types
@@ -1372,7 +1227,6 @@ export declare namespace Metric {
    *   const frequencyState = yield* Metric.value(statusFrequency)
    *   const histogramState = yield* Metric.value(responseHistogram)
    *   const summaryState = yield* Metric.value(latencySummary)
-   *
    *   return {
    *     counter: { count: counterState.count }, // { count: 10 }
    *     gauge: { value: gaugeState.value }, // { value: 85.5 }
@@ -1381,9 +1235,13 @@ export declare namespace Metric {
    *     summary: { observations: summaryState.count } // { observations: 1 }
    *   }
    * })
+   *
+   * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+   * const values = [result.counter.count, result.gauge.value, result.frequency.uniqueValues]
+   * values // => [10, 85.5, 1]
    * ```
    *
-   * @category types
+   * @category utility types
    * @since 4.0.0
    */
   export type State<A> = A extends Metric<infer _Input, infer _State> ? _State
@@ -1394,12 +1252,8 @@ export declare namespace Metric {
    *
    * **Example** (Using metric hooks)
    *
-   * ```ts
-   * import { Data, Effect, Metric } from "effect"
-   *
-   * class HooksError extends Data.TaggedError("HooksError")<{
-   *   readonly operation: string
-   * }> {}
+   * ```ts import.meta.vitest
+   * import { Effect, Metric } from "effect"
    *
    * const program = Effect.gen(function*() {
    *   // Create a counter metric
@@ -1427,9 +1281,12 @@ export declare namespace Metric {
    *     isIncremental: state.incremental // false
    *   }
    * })
+   *
+   * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+   * const state = result // => { currentCount: 6, isIncremental: false }
    * ```
    *
-   * @category interfaces
+   * @category models
    * @since 4.0.0
    */
   export interface Hooks<in Input, out State> {
@@ -1443,12 +1300,8 @@ export declare namespace Metric {
    *
    * **Example** (Inspecting metric metadata)
    *
-   * ```ts
-   * import { Data, Effect, Metric } from "effect"
-   *
-   * class MetadataError extends Data.TaggedError("MetadataError")<{
-   *   readonly operation: string
-   * }> {}
+   * ```ts import.meta.vitest
+   * import { Effect, Metric } from "effect"
    *
    * const program = Effect.gen(function*() {
    *   // Create metrics with different configurations
@@ -1493,9 +1346,12 @@ export declare namespace Metric {
    *     }
    *   }
    * })
+   *
+   * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+   * const types = [result.counter.type, result.gauge.type, result.frequency.type] // => ["Counter", "Gauge", "Frequency"]
    * ```
    *
-   * @category interfaces
+   * @category models
    * @since 4.0.0
    */
   export interface Metadata<in Input, out State> {
@@ -1511,12 +1367,8 @@ export declare namespace Metric {
    *
    * **Example** (Inspecting metric snapshot protocols)
    *
-   * ```ts
-   * import { Data, Effect, Metric } from "effect"
-   *
-   * class SnapshotProtoError extends Data.TaggedError("SnapshotProtoError")<{
-   *   readonly operation: string
-   * }> {}
+   * ```ts import.meta.vitest
+   * import { Effect, Metric } from "effect"
    *
    * const program = Effect.gen(function*() {
    *   // Create and update metrics
@@ -1566,9 +1418,12 @@ export declare namespace Metric {
    *       null
    *   }
    * })
+   *
+   * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+   * const counts = [result.counter?.count, result.histogram?.observations] // => [25, 2]
    * ```
    *
-   * @category interfaces
+   * @category models
    * @since 4.0.0
    */
   export interface SnapshotProto<T extends Type, State> {
@@ -1584,12 +1439,8 @@ export declare namespace Metric {
    *
    * **Example** (Analyzing metric snapshots)
    *
-   * ```ts
-   * import { Data, Effect, Metric } from "effect"
-   *
-   * class SnapshotError extends Data.TaggedError("SnapshotError")<{
-   *   readonly operation: string
-   * }> {}
+   * ```ts import.meta.vitest
+   * import { Effect, Metric } from "effect"
    *
    * const program = Effect.gen(function*() {
    *   // Create different types of metrics
@@ -1643,9 +1494,12 @@ export declare namespace Metric {
    *     analysis
    *   }
    * })
+   *
+   * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+   * const types = result.metricTypes // => ["Counter", "Gauge", "Frequency", "Histogram", "Summary"]
    * ```
    *
-   * @category types
+   * @category models
    * @since 4.0.0
    */
   export type Snapshot =
@@ -1659,14 +1513,10 @@ export declare namespace Metric {
 /**
  * Service key for the current metric attributes context.
  *
- * **Example** (Using the current attributes key)
+ * **Example** (Accessing the current metric attributes key)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class AttributesKeyError extends Data.TaggedError("AttributesKeyError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // The key is used internally by the Effect runtime to manage metric attributes
@@ -1700,9 +1550,12 @@ export declare namespace Metric {
  *     isConstant: key === "effect/Metric/CurrentMetricAttributes" // true
  *   }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const key = result // => { keyValue: "effect/Metric/CurrentMetricAttributes", keyType: "string", isConstant: true }
  * ```
  *
- * @category references
+ * @category constants
  * @since 4.0.0
  */
 export const CurrentMetricAttributesKey = "effect/Metric/CurrentMetricAttributes" as const
@@ -1724,17 +1577,12 @@ export const CurrentMetricAttributesKey = "effect/Metric/CurrentMetricAttributes
  *
  * **Example** (Providing current metric attributes)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class AttributesError extends Data.TaggedError("AttributesError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Access current metric attributes
- *   const attributes = yield* Metric.CurrentMetricAttributes
- *   console.log("Current attributes:", attributes)
+ *   yield* Metric.CurrentMetricAttributes
  *
  *   // Set new attributes context
  *   const newAttributes = { service: "api", version: "1.0" }
@@ -1749,9 +1597,12 @@ export const CurrentMetricAttributesKey = "effect/Metric/CurrentMetricAttributes
  *
  *   return result
  * })
+ *
+ * const attributes = await Effect.runPromise(program)
+ * const actual = attributes // => { service: "api", version: "1.0" }
  * ```
  *
- * @category references
+ * @category services
  * @since 4.0.0
  */
 export const CurrentMetricAttributes = Context.Reference<Metric.AttributeSet>(CurrentMetricAttributesKey, {
@@ -1765,8 +1616,8 @@ const MetricRegistryKey = "~effect/observability/Metric/MetricRegistryKey"
  *
  * **When to use**
  *
- * Use to provide a custom metric registry when a program or test needs metrics
- * isolated from the default registry.
+ * Use when you need a custom metric registry for an isolated program or test
+ * instead of the default registry.
  *
  * **Details**
  *
@@ -1783,7 +1634,7 @@ const MetricRegistryKey = "~effect/observability/Metric/MetricRegistryKey"
  * @see {@link snapshot} for reading all registered metrics from the current `Effect` context
  * @see {@link snapshotUnsafe} for reading all registered metrics from an explicit `Context`
  *
- * @category references
+ * @category services
  * @since 4.0.0
  */
 export const MetricRegistry = Context.Reference<Map<string, Metric.Metadata<any, any>>>(
@@ -1985,7 +1836,7 @@ class HistogramMetric extends Metric$<number, HistogramState> {
     let count = 0
     let sum = 0
     let min = Number.MAX_VALUE
-    let max = Number.MIN_VALUE
+    let max = -Number.MAX_VALUE
 
     Arr.map(Arr.sort(bounds, Order.Number), (n, i) => {
       boundaries[i] = n
@@ -2072,7 +1923,7 @@ class SummaryMetric extends Metric$<readonly [value: number, timestamp: number],
     let count = 0
     let sum = 0
     let min = Number.MAX_VALUE
-    let max = Number.MIN_VALUE
+    let max = -Number.MAX_VALUE
 
     const snapshot = (now: number): ReadonlyArray<[number, number | undefined]> => {
       const builder: Array<number> = []
@@ -2094,8 +1945,8 @@ class SummaryMetric extends Metric$<readonly [value: number, timestamp: number],
         return sortedQuantiles.map((q) => [q, undefined])
       }
       // Compute the value of the quantile in terms of rank:
-      // > For a given quantile `q`, return the maximum value `v` such that at
-      // > most `q * n` values are less than or equal to `v`.
+      // For a given quantile `q`, return the maximum value `v` such that at
+      // most `q * n` values are less than or equal to `v`.
       return sortedQuantiles.map((q) => {
         if (q <= 0) return [q, samples[0]]
         if (q >= 1) return [q, samples[sampleSize - 1]]
@@ -2167,24 +2018,18 @@ class MetricTransform<in Input, out State, in Input2> extends Metric$<Input2, St
  *
  * **Example** (Checking metric values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Metric } from "effect"
  *
- * const counter = Metric.counter("requests")
- * const gauge = Metric.gauge("temperature")
- * const notAMetric = { name: "fake-metric" }
- *
- * console.log(Metric.isMetric(counter)) // true
- * console.log(Metric.isMetric(gauge)) // true
- * console.log(Metric.isMetric(notAMetric)) // false
- * console.log(Metric.isMetric(null)) // false
+ * Metric.isMetric(Metric.counter("requests")) // => true
+ * Metric.isMetric({ name: "requests" }) // => false
  * ```
  *
  * @category guards
  * @since 4.0.0
  */
-export const isMetric = (u: unknown): u is Metric<unknown, never> =>
-  Predicate.hasProperty(u, "~effect/Metric") && u["~effect/Metric"] === "~effect/Metric"
+export const isMetric = (u: unknown): u is Metric<never, unknown> =>
+  Predicate.hasProperty(u, TypeId) && u[TypeId] === TypeId
 
 /**
  * Represents a Counter metric that tracks cumulative numerical values over
@@ -2193,20 +2038,15 @@ export const isMetric = (u: unknown): u is Metric<unknown, never> =>
  *
  * **Details**
  *
- * - `description` - A description of the `Counter`.
- * - `attributes`  - The attributes to associate with the `Counter`.
- * - `bigint`      - Indicates if the `Counter` should use the `bigint` type.
- * - `incremental` - Set to `true` to create a `Counter` that can only ever be
- *                   incremented.
+ * The optional `description` describes the counter, and `attributes` attach
+ * dimensions to it. Set `bigint` to create a counter that accepts `bigint`
+ * inputs. Set `incremental` to `true` to create a counter that can only ever be
+ * incremented.
  *
  * **Example** (Creating counter metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class CounterError extends Data.TaggedError("CounterError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create a basic counter for tracking requests
@@ -2240,6 +2080,9 @@ export const isMetric = (u: unknown): u is Metric<unknown, never> =>
  *
  *   return { requestValue, eventValue, bytesValue }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const counts = [result.requestValue.count, result.eventValue.count, result.bytesValue.count] // => [6, 1, 1024n]
  * ```
  *
  * @category constructors
@@ -2272,23 +2115,19 @@ export const counter: {
  *
  * **When to use**
  *
- * Use when gauges are most suitable for metrics that represent instantaneous values,
- * such as memory usage or CPU load.
+ * Use when you need a metric for instantaneous values, such as memory usage or
+ * CPU load.
  *
  * **Details**
  *
- * - `description` - A description of the `Gauge`.
- * - `attributes`  - The attributes to associate with the `Gauge`.
- * - `bigint`      - Indicates if the `Gauge` should use the `bigint` type.
+ * The optional `description` describes the gauge, and `attributes` attach
+ * dimensions to it. Set `bigint` to create a gauge that accepts `bigint`
+ * inputs.
  *
  * **Example** (Creating gauge metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class GaugeError extends Data.TaggedError("GaugeError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create a gauge for tracking memory usage
@@ -2327,6 +2166,9 @@ export const counter: {
  *
  *   return { memoryValue, cpuValue, diskValue }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.memoryValue.value, result.cpuValue.value, result.diskValue.value] // => [800, 75, 1024000000n]
  * ```
  *
  * @category constructors
@@ -2351,24 +2193,19 @@ export const gauge: {
  *
  * **When to use**
  *
- * Use when frequency metrics are most suitable for counting the number of times a
- * specific event or incident occurs.
+ * Use when you need a metric for counting how often a specific event or
+ * incident occurs.
  *
  * **Details**
  *
- * - `description` - A description of the `Frequency`.
- * - `attributes`  - The attributes to associate with the `Frequency`.
- * - `preregisteredWords` - Occurrences which are pre-registered with the
- *                          `Frequency` metric occurrences.
+ * The optional `description` describes the frequency, and `attributes` attach
+ * dimensions to it. Use `preregisteredWords` to initialize occurrence counts
+ * for known string values before updates arrive.
  *
  * **Example** (Creating frequency metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class FrequencyError extends Data.TaggedError("FrequencyError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create a frequency metric for HTTP status codes
@@ -2418,6 +2255,14 @@ export const gauge: {
  *
  *   return { statusCounts, actionCounts, errorCounts }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const counts = [
+ *   result.statusCounts.occurrences.get("200"),
+ *   result.actionCounts.occurrences.get("login"),
+ *   result.errorCounts.occurrences.get("ValidationError")
+ * ]
+ * counts // => [3, 2, 2]
  * ```
  *
  * @category constructors
@@ -2434,30 +2279,26 @@ export const frequency = (name: string, options?: {
  *
  * **When to use**
  *
- * Use when histogram metrics are most suitable for measuring the distribution of values
- * within a range.
+ * Use when you need a metric for measuring the distribution of values within a
+ * range.
  *
  * **Details**
  *
- * - `description` - A description of the `Histogram`.
- * - `attributes`  - The attributes to associate with the `Histogram`.
- * - `boundaries`  - The bucket boundaries of the `Histogram`
+ * The optional `description` describes the histogram, and `attributes` attach
+ * dimensions to it. The required `boundaries` option defines the histogram
+ * bucket boundaries.
  *
  * **Example** (Creating histogram metrics)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class HistogramError extends Data.TaggedError("HistogramError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create a histogram for API response times
  *   const responseTimeHistogram = Metric.histogram("api_response_time", {
  *     description: "Distribution of API response times in milliseconds",
  *     boundaries: Metric.linearBoundaries({ start: 0, width: 50, count: 10 })
- *     // Creates buckets: 0-50ms, 50-100ms, 100-150ms, ..., 400-450ms, 450ms+
+ *     // Creates buckets: 0-50ms, 50-100ms, 100-150ms, ..., 350-400ms, 400ms+
  *   })
  *
  *   // Create a histogram for request payload sizes
@@ -2497,6 +2338,10 @@ export const frequency = (name: string, options?: {
  *
  *   return { responseTimeState, payloadSizeState }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.responseTimeState.count, result.responseTimeState.sum, result.payloadSizeState.count]
+ * values // => [5, 500, 3]
  * ```
  *
  * @category constructors
@@ -2514,25 +2359,20 @@ export const histogram = (name: string, options: {
  *
  * **When to use**
  *
- * Use when summary metrics are most suitable for providing statistical information about
- * a set of values, including quantiles.
+ * Use when you need a metric that records statistical information about a set
+ * of values, including quantiles.
  *
  * **Details**
  *
- * - `description` - An description of the `Summary`.
- * - `attributes`  - The attributes to associate with the `Summary`.
- * - `maxAge`      - The maximum age of observations to retain.
- * - `maxSize`     - The maximum number of observations to keep.
- * - `quantiles`   - An array of quantiles to calculate (e.g., [0.5, 0.9]).
+ * The optional `description` describes the summary, and `attributes` attach
+ * dimensions to it. `maxAge` controls how long observations are retained,
+ * `maxSize` controls how many observations are kept, and `quantiles` lists the
+ * quantiles to calculate, such as `[0.5, 0.9]`.
  *
  * **Example** (Creating summary metrics)
  *
- * ```ts
- * import { Data, Duration, Effect, Metric } from "effect"
- *
- * class SummaryError extends Data.TaggedError("SummaryError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Duration, Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create a summary for API response times
@@ -2568,24 +2408,16 @@ export const histogram = (name: string, options: {
  *   const responseStats = yield* Metric.value(responseTimeSummary)
  *   const payloadStats = yield* Metric.value(payloadSizeSummary)
  *
- *   console.log({
- *     count: responseStats.count,
- *     min: responseStats.min,
- *     max: responseStats.max,
- *     sum: responseStats.sum
- *   }) // { count: 8, min: 82, max: 240, sum: 1155 }
- *
- *   console.log({
- *     count: payloadStats.count,
- *     min: payloadStats.min,
- *     max: payloadStats.max,
- *     sum: payloadStats.sum
- *   }) // { count: 4, min: 1.2, max: 15.6, sum: 26 }
- *
  *   // Both summaries include quantile information for their configured windows.
  *
  *   return { responseStats, payloadStats }
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const response = result.responseStats
+ * const payload = result.payloadStats
+ * const responseValues = [response.count, response.min, response.max, response.sum] // => [8, 82, 240, 1155]
+ * const payloadValues = [payload.count, payload.min, payload.max, payload.sum] // => [4, 1.2, 15.6, 26]
  * ```
  *
  * @category constructors
@@ -2610,23 +2442,22 @@ export const summary = (name: string, options: {
  *
  * **When to use**
  *
- * Use when summary metrics are most suitable for statistical information about a set of
- * values.
+ * Use when you need a metric that records statistical information about a set
+ * of values together with timestamps.
  *
  * **Details**
  *
  * Inputs to this metric are `[value, timestamp]` pairs; the current clock is
  * used when reading quantiles against the configured `maxAge`.
  *
- * - `description` - An description of the `Summary`.
- * - `attributes`  - The attributes to associate with the `Summary`.
- * - `maxAge`      - The maximum age of observations to retain.
- * - `maxSize`     - The maximum number of observations to keep.
- * - `quantiles`   - An array of quantiles to calculate (e.g., [0.5, 0.9]).
+ * The optional `description` describes the summary, and `attributes` attach
+ * dimensions to it. `maxAge` controls how long observations are retained,
+ * `maxSize` controls how many observations are kept, and `quantiles` lists the
+ * quantiles to calculate, such as `[0.5, 0.9]`.
  *
  * **Example** (Creating summaries with explicit timestamps)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Metric } from "effect"
  *
  * const responseTimesSummary = Metric.summaryWithTimestamp(
@@ -2638,6 +2469,7 @@ export const summary = (name: string, options: {
  *     quantiles: [0.5, 0.9, 0.99] // Calculate 50th, 90th, and 99th quantiles.
  *   }
  * )
+ * const metadata = [responseTimesSummary.id, responseTimesSummary.type] // => ["response_times_summary", "Summary"]
  * ```
  *
  * @category constructors
@@ -2665,12 +2497,8 @@ export const summaryWithTimestamp = (name: string, options: {
  *
  * **Example** (Recording durations with a timer)
  *
- * ```ts
- * import { Data, Duration, Effect, Metric } from "effect"
- *
- * class TimerError extends Data.TaggedError("TimerError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Duration, Effect, Metric } from "effect"
  *
  * // Create a timer metric to track API request durations
  * const apiRequestTimer = Metric.timer("api_request_duration", {
@@ -2684,13 +2512,17 @@ export const summaryWithTimestamp = (name: string, options: {
  *   yield* Metric.update(apiRequestTimer, duration)
  *
  *   const state = yield* Metric.value(apiRequestTimer)
- *   console.log({
+ *   return {
  *     count: state.count,
  *     min: state.min,
  *     max: state.max,
  *     sum: state.sum
- *   }) // { count: 1, min: 120, max: 120, sum: 120 }
+ *   }
  * })
+ *
+ * await Effect.runPromise(
+ *   Effect.provideService(apiOperation, Metric.MetricRegistry, new Map())
+ * ) // => { count: 1, min: 120, max: 120, sum: 120 }
  * ```
  *
  * @category constructors
@@ -2714,20 +2546,19 @@ export const timer = (name: string, options?: {
  *
  * **Details**
  *
- * The returned state depends on the metric type:
- *
- * - Counter: `CounterState<number | bigint>` with `count` and `incremental`
- * - Gauge: `GaugeState<number | bigint>` with `value`
- * - Frequency: `FrequencyState` with `occurrences`
- * - Histogram: `HistogramState` with buckets, count, min, max, and sum
- * - Summary: `SummaryState` with quantiles, count, min, max, and sum
+ * The returned state depends on the metric type. Counters return
+ * `CounterState<number | bigint>` with `count` and `incremental`, gauges return
+ * `GaugeState<number | bigint>` with `value`, frequencies return
+ * `FrequencyState` with `occurrences`, histograms return `HistogramState` with
+ * buckets, count, min, max, and sum, and summaries return `SummaryState` with
+ * quantiles, count, min, max, and sum.
  *
  * **Example** (Reading metric state)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Metric } from "effect"
  *
- * const requestCounter = Metric.counter("requests")
+ * const requestCounter = Metric.counter("modify_requests")
  * const responseTime = Metric.histogram("response_time", {
  *   boundaries: [100, 500, 1000, 2000]
  * })
@@ -2739,19 +2570,22 @@ export const timer = (name: string, options?: {
  *
  *   // Get current values
  *   const counterState = yield* Metric.value(requestCounter)
- *   console.log(`Request count: ${counterState.count}`)
- *
  *   const histogramState = yield* Metric.value(responseTime)
- *   console.log(`Response time stats:`, {
+ *   return {
+ *     requestCount: counterState.count,
  *     count: histogramState.count,
  *     min: histogramState.min,
  *     max: histogramState.max,
  *     average: histogramState.sum / histogramState.count
- *   })
+ *   }
  * })
+ *
+ * await Effect.runPromise(
+ *   Effect.provideService(program, Metric.MetricRegistry, new Map())
+ * ) // => { requestCount: 1, count: 1, min: 750, max: 750, average: 750 }
  * ```
  *
- * @category utils
+ * @category getters
  * @since 2.0.0
  */
 export const value = <Input, State>(
@@ -2767,17 +2601,15 @@ export const value = <Input, State>(
  *
  * **Details**
  *
- * The behavior of `modify` depends on the metric type:
- *
- * - **Counter**: Adds the input value to the current count
- * - **Gauge**: Adds the input value to the current gauge value
- * - **Frequency**: Same as `update` - increments the occurrence count for the input string
- * - **Histogram**: Same as `update` - records the input value in the appropriate bucket
- * - **Summary**: Same as `update` - records the input observation
+ * The behavior of `modify` depends on the metric type. Counters add the input
+ * value to the current count, gauges add the input value to the current gauge
+ * value, frequencies increment the occurrence count for the input string,
+ * histograms record the input value in the appropriate bucket, and summaries
+ * record the input observation.
  *
  * **Example** (Modifying metric values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Metric } from "effect"
  *
  * const temperatureGauge = Metric.gauge("temperature")
@@ -2797,13 +2629,13 @@ export const value = <Input, State>(
  *
  *   const temp = yield* Metric.value(temperatureGauge)
  *   const requests = yield* Metric.value(requestCounter)
- *
- *   console.log(`Temperature: ${temp.value}°C`) // 22°C
- *   console.log(`Requests: ${requests.count}`) // 15
+ *   return [temp.value, requests.count] as const
  * })
+ *
+ * await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map())) // => [22, 15]
  * ```
  *
- * @category utils
+ * @category mutations
  * @since 3.6.5
  */
 export const modify: {
@@ -2823,17 +2655,15 @@ export const modify: {
  *
  * **Details**
  *
- * The behavior of `update` depends on the metric type:
- *
- * - **Counter**: Adds the input value to the current count (same as `modify`)
- * - **Gauge**: Sets the gauge to the specified value (replaces current value)
- * - **Frequency**: Increments the occurrence count for the input string by 1
- * - **Histogram**: Records the input value in the appropriate bucket
- * - **Summary**: Records the input value as a new observation
+ * The behavior of `update` depends on the metric type. Counters add the input
+ * value to the current count, gauges replace the current value with the input
+ * value, frequencies increment the occurrence count for the input string,
+ * histograms record the input value in the appropriate bucket, and summaries
+ * record the input value as a new observation.
  *
  * **Example** (Updating metric values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Metric } from "effect"
  *
  * const cpuUsage = Metric.gauge("cpu_usage_percent")
@@ -2861,14 +2691,13 @@ export const modify: {
  *   const cpu = yield* Metric.value(cpuUsage)
  *   const statuses = yield* Metric.value(httpStatus)
  *   const times = yield* Metric.value(responseTime)
- *
- *   console.log(`CPU Usage: ${cpu.value}%`)
- *   console.log(`Status 200 count: ${statuses.occurrences.get("200")}`) // 2
- *   console.log(`Response time samples: ${times.count}`) // 3
+ *   return [cpu.value, statuses.occurrences.get("200"), times.count] as const
  * })
+ *
+ * await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map())) // => [67.8, 2, 3]
  * ```
  *
- * @category utils
+ * @category mutations
  * @since 2.0.0
  */
 export const update: {
@@ -2890,36 +2719,30 @@ export const update: {
  *
  * **Example** (Mapping metric inputs)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
- * class MetricError extends Data.TaggedError("MetricError")<{
- *   readonly operation: string
- * }> {}
- *
- * // Create a histogram that expects Duration values
  * const durationHistogram = Metric.histogram("request_duration_ms", {
  *   description: "Request duration in milliseconds",
  *   boundaries: Metric.linearBoundaries({ start: 0, width: 100, count: 10 })
  * })
  *
- * // Transform to accept number values representing milliseconds
- * const numberHistogram = Metric.mapInput(
+ * // Accept duration strings while recording numeric milliseconds
+ * const durationStringHistogram = Metric.mapInput(
  *   durationHistogram,
- *   (ms: number) => ms // Direct mapping from number to expected input
+ *   (input: string) => Number(input)
  * )
  *
  * const program = Effect.gen(function*() {
- *   // Now we can update with a plain number
- *   yield* Metric.update(numberHistogram, 250)
- *
- *   // Get metric value to see the recorded state
- *   const value = yield* Metric.value(numberHistogram)
- *   return value
+ *   yield* Metric.update(durationStringHistogram, "250")
+ *   return yield* Metric.value(durationStringHistogram)
  * })
+ *
+ * const value = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [value.count, value.sum] // => [1, 250]
  * ```
  *
- * @category mapping
+ * @category annotations
  * @since 2.0.0
  */
 export const mapInput: {
@@ -2956,12 +2779,8 @@ export const mapInput: {
  *
  * **Example** (Ignoring inputs with a constant value)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class MetricError extends Data.TaggedError("MetricError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * // Create a counter that normally expects a number increment
  * const requestCounter = Metric.counter("total_requests", {
@@ -2980,9 +2799,12 @@ export const mapInput: {
  *   const value = yield* Metric.value(simpleRequestCounter)
  *   return value // Counter state will show count: 3
  * })
+ *
+ * const value = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const count = value.count // => 3
  * ```
  *
- * @category Input
+ * @category mapping
  * @since 2.0.0
  */
 export const withConstantInput: {
@@ -3004,7 +2826,7 @@ export const withConstantInput: {
  *
  * **Example** (Applying metric attributes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Metric } from "effect"
  *
  * const requestCounter = Metric.counter("http_requests_total", {
@@ -3037,18 +2859,17 @@ export const withConstantInput: {
  *   yield* Metric.update(taggedMetric, 1) // http_requests_total{service="user-api", version="v1"}
  * })
  *
- * // When taking snapshots, each attribute combination appears as a separate metric
- * const viewMetrics = Effect.gen(function*() {
- *   const snapshots = yield* Metric.snapshot
- *   for (const metric of snapshots) {
- *     if (metric.id === "http_requests_total") {
- *       console.log(`${metric.id}`, metric.attributes, metric.state)
- *     }
- *   }
+ * const result = Effect.gen(function*() {
+ *   yield* program
+ *   const get = yield* Metric.value(getRequests)
+ *   const post = yield* Metric.value(postRequests)
+ *   return [get.count, post.count] as const
  * })
+ *
+ * await Effect.runPromise(Effect.provideService(result, Metric.MetricRegistry, new Map())) // => [2, 1]
  * ```
  *
- * @category Attributes
+ * @category mapping
  * @since 4.0.0
  */
 export const withAttributes: {
@@ -3080,12 +2901,8 @@ export const withAttributes: {
  *
  * **Example** (Capturing metric snapshots)
  *
- * ```ts
- * import { Console, Data, Effect, Metric } from "effect"
- *
- * class SnapshotError extends Data.TaggedError("SnapshotError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create and update some metrics
@@ -3106,19 +2923,16 @@ export const withAttributes: {
  *   // Take a snapshot of all metrics
  *   const snapshots = yield* Metric.snapshot
  *
- *   // Examine the snapshots
- *   for (const snapshot of snapshots) {
- *     yield* Console.log(`Metric: ${snapshot.id}`)
- *     yield* Console.log(`Description: ${snapshot.description}`)
- *     yield* Console.log(`Type: ${snapshot.type}`)
- *     yield* Console.log(`State:`, snapshot.state)
- *   }
- *
  *   return snapshots
  * })
+ *
+ * const snapshots = await Effect.runPromise(
+ *   Effect.provideService(program, Metric.MetricRegistry, new Map())
+ * )
+ * const ids = snapshots.map((snapshot) => snapshot.id).sort() // => ["http_requests", "response_time_ms"]
  * ```
  *
- * @category Snapshotting
+ * @category snapshotting
  * @since 2.0.0
  */
 export const snapshot: Effect<ReadonlyArray<Metric.Snapshot>> = InternalEffect.map(
@@ -3138,12 +2952,8 @@ export const snapshot: Effect<ReadonlyArray<Metric.Snapshot>> = InternalEffect.m
  *
  * **Example** (Dumping metrics as text)
  *
- * ```ts
- * import { Console, Data, Effect, Metric } from "effect"
- *
- * class DumpError extends Data.TaggedError("DumpError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Create and update some metrics for demonstration
@@ -3167,20 +2977,21 @@ export const snapshot: Effect<ReadonlyArray<Metric.Snapshot>> = InternalEffect.m
  *
  *   // Get formatted dump of all metrics
  *   const metricsReport = yield* Metric.dump
- *   yield* Console.log("Current Metrics:")
- *   yield* Console.log(metricsReport)
- *
- *   // Output will look like a formatted table:
- *   // Name                  Description                           Type       State
- *   // http_requests_total   Total HTTP requests                   Counter    [count: 2]
- *   // response_time_ms      Current response time in milliseconds Gauge      [value: 125]
- *   // http_status_codes     Frequency of HTTP status codes       Frequency  [occurrences: 200 -> 2, 404 -> 1]
- *
  *   return metricsReport
  * })
+ *
+ * const report = await Effect.runPromise(
+ *   Effect.provideService(program, Metric.MetricRegistry, new Map())
+ * )
+ * const included = [
+ *   report.includes("http_requests_total"),
+ *   report.includes("response_time_ms"),
+ *   report.includes("http_status_codes")
+ * ]
+ * included // => [true, true, true]
  * ```
  *
- * @category Debugging
+ * @category formatting
  * @since 4.0.0
  */
 export const dump: Effect<string> = InternalEffect.flatMap(InternalEffect.context(), (context) => {
@@ -3235,56 +3046,20 @@ export const dump: Effect<string> = InternalEffect.flatMap(InternalEffect.contex
  *
  * **Example** (Capturing snapshots from a context)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
- * class UnsafeSnapshotError extends Data.TaggedError("UnsafeSnapshotError")<{
- *   readonly operation: string
- * }> {}
- *
- * // Use unsafeSnapshot in performance-critical scenarios or internal implementations
- * const performanceMetricsExporter = Effect.gen(function*() {
- *   // Create some metrics first
- *   const requestCounter = Metric.counter("http_requests", {
- *     description: "Total HTTP requests"
- *   })
- *   const responseTime = Metric.gauge("response_time_ms", {
- *     description: "Current response time"
- *   })
- *
- *   // Update metrics
+ * const requestCounter = Metric.counter("http_requests")
+ * const program = Effect.gen(function*() {
  *   yield* Metric.update(requestCounter, 1)
- *   yield* Metric.update(responseTime, 150)
- *
- *   // Get services context for unsafe operations
- *   const services = yield* Effect.context()
- *
- *   // Use snapshotUnsafe for direct, synchronous access
- *   const snapshots = Metric.snapshotUnsafe(services)
- *   const exportBatchCreatedAt = 1_700_000_000_000
- *
- *   // Process snapshots immediately (useful for exporters, debugging tools)
- *   const exportData = snapshots.map((snapshot) => ({
- *     name: snapshot.id,
- *     type: snapshot.type,
- *     value: snapshot.state,
- *     timestamp: exportBatchCreatedAt
- *   }))
- *
- *   // This is synchronous and doesn't involve Effect overhead
- *   // Useful for performance-critical metric export operations
- *   return exportData
+ *   const context = yield* Effect.context()
+ *   return Metric.snapshotUnsafe(context).map((snapshot) => snapshot.id)
  * })
  *
- * // For normal application use, prefer the safe snapshot function:
- * const safeSnapshotExample = Effect.gen(function*() {
- *   // This automatically handles the services context
- *   const snapshots = yield* Metric.snapshot
- *   return snapshots
- * })
+ * await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map())) // => ["http_requests"]
  * ```
  *
- * @category Snapshotting
+ * @category snapshotting
  * @since 4.0.0
  */
 export const snapshotUnsafe = (context: Context.Context<never>): ReadonlyArray<Metric.Snapshot> => {
@@ -3367,60 +3142,13 @@ const attributesToString = (attributes: Metric.AttributeSet): string => {
  *
  * **Example** (Creating boundaries from values)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Metric } from "effect"
  *
- * class BoundaryError extends Data.TaggedError("BoundaryError")<{
- *   readonly operation: string
- * }> {}
- *
- * // Create boundaries from an array of custom values
- * const customBoundaries = Metric.boundariesFromIterable([
- *   10,
- *   25,
- *   50,
- *   100,
- *   250,
- *   500,
- *   1000
- * ])
- * console.log(customBoundaries) // [10, 25, 50, 100, 250, 500, 1000, Infinity]
- *
- * // Automatically removes duplicates and negative values
- * const messyBoundaries = Metric.boundariesFromIterable([
- *   -5,
- *   0,
- *   10,
- *   10,
- *   25,
- *   25,
- *   50,
- *   -1
- * ])
- * console.log(messyBoundaries) // [10, 25, 50, Infinity]
- *
- * // Works with any iterable (Set, generator functions, etc.)
- * const setBoundaries = Metric.boundariesFromIterable(
- *   new Set([100, 200, 300, 200, 100])
- * )
- * console.log(setBoundaries) // [100, 200, 300, Infinity]
- *
- * // Use with histogram metric
- * const responseTimeHistogram = Metric.histogram("response_times", {
- *   description: "API response time distribution",
- *   boundaries: customBoundaries
- * })
- *
- * const program = Effect.gen(function*() {
- *   yield* Metric.update(responseTimeHistogram, 75) // Goes in 50-100ms bucket
- *   yield* Metric.update(responseTimeHistogram, 150) // Goes in 100-250ms bucket
- *
- *   const value = yield* Metric.value(responseTimeHistogram)
- *   return value
- * })
+ * Metric.boundariesFromIterable([-5, 0, 10, 10, 25, 50]) // => [10, 25, 50, Infinity]
  * ```
  *
- * @category boundaries
+ * @category constructors
  * @since 4.0.0
  */
 export const boundariesFromIterable = (iterable: Iterable<number>): ReadonlyArray<number> =>
@@ -3432,46 +3160,20 @@ export const boundariesFromIterable = (iterable: Iterable<number>): ReadonlyArra
  *
  * **Details**
  *
- * Generates `count - 1` finite boundaries using `start + width + index` for
+ * Generates `count - 1` candidate boundaries using `start + index * width` for
  * each zero-based index, then applies the same normalization as
  * `boundariesFromIterable`: non-positive values are removed, duplicates are
  * collapsed, and `Infinity` is appended.
  *
  * **Example** (Creating linear boundaries)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Metric } from "effect"
  *
- * class BoundaryError extends Data.TaggedError("BoundaryError")<{
- *   readonly operation: string
- * }> {}
- *
- * // Create boundaries for response time histogram
- * const responseBoundaries = Metric.linearBoundaries({
- *   start: 0, // Starting point
- *   width: 100, // Offset used for the first boundary
- *   count: 5 // Creates 4 boundaries + infinity
- * })
- * console.log(responseBoundaries) // [100, 101, 102, 103, Infinity]
- *
- * // Create a histogram using these boundaries
- * const responseTimeHistogram = Metric.histogram("api_response_time", {
- *   description: "API response time distribution",
- *   boundaries: responseBoundaries
- * })
- *
- * const program = Effect.gen(function*() {
- *   // Record some response times
- *   yield* Metric.update(responseTimeHistogram, 85)
- *   yield* Metric.update(responseTimeHistogram, 101)
- *   yield* Metric.update(responseTimeHistogram, 450)
- *
- *   const value = yield* Metric.value(responseTimeHistogram)
- *   return value
- * })
+ * Metric.linearBoundaries({ start: 10, width: 20, count: 5 }) // => [10, 30, 50, 70, Infinity]
  * ```
  *
- * @category boundaries
+ * @category constructors
  * @since 4.0.0
  */
 export const linearBoundaries = (options: {
@@ -3479,7 +3181,7 @@ export const linearBoundaries = (options: {
   readonly width: number
   readonly count: number
 }): ReadonlyArray<number> =>
-  boundariesFromIterable(Arr.makeBy(options.count - 1, (n) => options.start + n + options.width))
+  boundariesFromIterable(Arr.makeBy(options.count - 1, (n) => options.start + n * options.width))
 
 /**
  * Creates histogram bucket boundaries with exponentially increasing values.
@@ -3491,47 +3193,13 @@ export const linearBoundaries = (options: {
  *
  * **Example** (Creating exponential boundaries)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Metric } from "effect"
  *
- * class BoundaryError extends Data.TaggedError("BoundaryError")<{
- *   readonly operation: string
- * }> {}
- *
- * // Create exponential boundaries for request size histogram
- * // Buckets: 0-1KB, 1-2KB, 2-4KB, 4-8KB, 8KB+
- * const sizeBoundaries = Metric.exponentialBoundaries({
- *   start: 1, // Starting at 1KB
- *   factor: 2, // Each boundary doubles the previous
- *   count: 5 // Creates 4 boundaries + infinity
- * })
- * console.log(sizeBoundaries) // [1, 2, 4, 8, Infinity]
- *
- * // Create a histogram for tracking request payload sizes
- * const requestSizeHistogram = Metric.histogram("request_size_kb", {
- *   description: "Request payload size distribution in KB",
- *   boundaries: sizeBoundaries
- * })
- *
- * // For very wide ranges, use larger factors
- * const latencyBoundaries = Metric.exponentialBoundaries({
- *   start: 0.1, // Start at 0.1ms
- *   factor: 10, // Each boundary is 10x larger
- *   count: 6 // Creates ranges: 0.1ms, 1ms, 10ms, 100ms, 1000ms+
- * })
- *
- * const program = Effect.gen(function*() {
- *   // Record different request sizes
- *   yield* Metric.update(requestSizeHistogram, 1.5) // Goes in 1-2KB bucket
- *   yield* Metric.update(requestSizeHistogram, 3.2) // Goes in 2-4KB bucket
- *   yield* Metric.update(requestSizeHistogram, 12) // Goes in 8KB+ bucket
- *
- *   const value = yield* Metric.value(requestSizeHistogram)
- *   return value
- * })
+ * Metric.exponentialBoundaries({ start: 1, factor: 2, count: 5 }) // => [1, 2, 4, 8, Infinity]
  * ```
  *
- * @category boundaries
+ * @category constructors
  * @since 4.0.0
  */
 export const exponentialBoundaries = (options: {
@@ -3562,38 +3230,15 @@ const fiberFailures = counter("child_fiber_failures", {
 /**
  * Service key for the fiber runtime metrics service.
  *
- * **Example** (Using the fiber runtime metrics key)
+ * **Example** (Accessing the fiber runtime metrics key)
  *
- * ```ts
- * import { Data, Effect, Layer, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Metric } from "effect"
  *
- * class MetricsError extends Data.TaggedError("MetricsError")<{
- *   readonly operation: string
- * }> {}
- *
- * const program = Effect.gen(function*() {
- *   // The key is used internally by the Effect runtime to manage fiber metrics
- *   const key = Metric.FiberRuntimeMetricsKey
- *   console.log("Fiber metrics key:", key)
- *
- *   // Enable runtime metrics using the key
- *   const layer = Layer.succeed(Metric.FiberRuntimeMetrics)(
- *     Metric.FiberRuntimeMetricsImpl
- *   )
- *
- *   return yield* Effect.gen(function*() {
- *     // This Effect will have fiber metrics automatically collected
- *     yield* Effect.sleep("100 millis")
- *
- *     // Create a test counter to demonstrate the key usage
- *     const testCounter = Metric.counter("test_counter")
- *     yield* Metric.update(testCounter, 1)
- *     return yield* Metric.value(testCounter)
- *   }).pipe(Effect.provide(layer))
- * })
+ * Metric.FiberRuntimeMetricsKey // => "effect/observability/Metric/FiberRuntimeMetricsKey"
  * ```
  *
- * @category metrics
+ * @category constants
  * @since 4.0.0
  */
 export const FiberRuntimeMetricsKey: "effect/observability/Metric/FiberRuntimeMetricsKey" =
@@ -3604,38 +3249,25 @@ export const FiberRuntimeMetricsKey: "effect/observability/Metric/FiberRuntimeMe
  *
  * **Example** (Providing a custom fiber metrics service)
  *
- * ```ts
- * import { Data, Effect, Layer, Metric } from "effect"
- * import type { Context, Exit } from "effect"
+ * ```ts import.meta.vitest
+ * import { Context, Exit, Metric } from "effect"
  *
- * class MetricsError extends Data.TaggedError("MetricsError")<{
- *   readonly operation: string
- * }> {}
- *
- * // Custom implementation of the metrics service
+ * const events: Array<string> = []
  * const customMetricsService: Metric.FiberRuntimeMetricsService = {
- *   recordFiberStart: (context: Context.Context<never>) => {
- *     console.log("Fiber started")
- *     // Custom logic for tracking fiber starts
+ *   recordFiberStart: () => {
+ *     events.push("start")
  *   },
- *   recordFiberEnd: (
- *     context: Context.Context<never>,
- *     exit: Exit.Exit<unknown, unknown>
- *   ) => {
- *     console.log("Fiber completed with exit:", exit)
- *     // Custom logic for tracking fiber completion based on exit status
+ *   recordFiberEnd: (_context, exit) => {
+ *     events.push(Exit.isSuccess(exit) ? "success" : "failure")
  *   }
  * }
  *
- * const program = Effect.gen(function*() {
- *   // Use the custom metrics service
- *   const layer = Layer.succeed(Metric.FiberRuntimeMetrics)(customMetricsService)
- *
- *   return yield* Effect.sleep("100 millis").pipe(Effect.provide(layer))
- * })
+ * customMetricsService.recordFiberStart(Context.empty())
+ * customMetricsService.recordFiberEnd(Context.empty(), Exit.succeed("ok"))
+ * events // => ["start", "success"]
  * ```
  *
- * @category metrics
+ * @category services
  * @since 4.0.0
  */
 export interface FiberRuntimeMetricsService {
@@ -3660,95 +3292,43 @@ export interface FiberRuntimeMetricsService {
  *
  * **Example** (Accessing the fiber runtime metrics service)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class MetricsError extends Data.TaggedError("MetricsError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
- *   // Access the fiber runtime metrics service
  *   const metricsService = yield* Metric.FiberRuntimeMetrics
- *
- *   if (metricsService) {
- *     console.log("Runtime metrics are enabled")
- *   } else {
- *     console.log("Runtime metrics are disabled")
- *   }
- *
- *   // Enable runtime metrics for the application
- *   const enabledLayer = Metric.enableRuntimeMetricsLayer
- *
- *   return yield* Effect.gen(function*() {
- *     // Create some concurrent fibers to see metrics in action
- *     yield* Effect.all([
- *       Effect.sleep("100 millis"),
- *       Effect.sleep("200 millis"),
- *       Effect.sleep("300 millis")
- *     ], { concurrency: "unbounded" })
- *
- *     // Create test metrics to demonstrate the service
- *     const testCounter = Metric.counter("test_counter")
- *     yield* Metric.update(testCounter, 5)
- *     const counterValue = yield* Metric.value(testCounter)
- *
- *     return { counterValue, metricsEnabled: true }
- *   }).pipe(Effect.provide(enabledLayer))
+ *   return metricsService === Metric.FiberRuntimeMetricsImpl
  * })
+ *
+ * const result = await Effect.runPromise(
+ *   Effect.provideService(program, Metric.FiberRuntimeMetrics, Metric.FiberRuntimeMetricsImpl)
+ * )
+ * const isDefault = result // => true
  * ```
  *
- * @category runtime metrics
+ * @category services
  * @since 4.0.0
  */
 export const FiberRuntimeMetrics = Context.Reference<FiberRuntimeMetricsService | undefined>(
   InternalMetric.FiberRuntimeMetricsKey,
-  { defaultValue: constUndefined }
+  { fiberCached: true, defaultValue: constUndefined }
 )
 
 /**
  * Default implementation of the fiber runtime metrics service.
  *
- * **Example** (Using the default fiber metrics implementation)
+ * **Example** (Accessing the default fiber metrics implementation)
  *
- * ```ts
- * import { Data, Effect, Layer, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Metric } from "effect"
  *
- * class MetricsError extends Data.TaggedError("MetricsError")<{
- *   readonly operation: string
- * }> {}
- *
- * const program = Effect.gen(function*() {
- *   // Use the default metrics implementation
- *   const metrics = Metric.FiberRuntimeMetricsImpl
- *   console.log("Metrics implementation:", metrics)
- *
- *   // Enable runtime metrics using the default implementation
- *   const layer = Layer.succeed(Metric.FiberRuntimeMetrics)(metrics)
- *
- *   return yield* Effect.gen(function*() {
- *     // Run some Effects to trigger metric collection
- *     yield* Effect.forkChild(Effect.sleep("50 millis"))
- *     yield* Effect.forkChild(Effect.sleep("100 millis"))
- *
- *     // Wait a bit and check the metrics
- *     yield* Effect.sleep("200 millis")
- *
- *     // Create test metrics to demonstrate the implementation
- *     const testCounter = Metric.counter("test_counter")
- *     const testGauge = Metric.gauge("test_gauge")
- *     yield* Metric.update(testCounter, 3)
- *     yield* Metric.update(testGauge, 42)
- *
- *     const counterValue = yield* Metric.value(testCounter)
- *     const gaugeValue = yield* Metric.value(testGauge)
- *
- *     return { counter: counterValue, gauge: gaugeValue }
- *   }).pipe(Effect.provide(layer))
- * })
+ * [
+ *   typeof Metric.FiberRuntimeMetricsImpl.recordFiberStart,
+ *   typeof Metric.FiberRuntimeMetricsImpl.recordFiberEnd
+ * ] // => ["function", "function"]
  * ```
  *
- * @category metrics
+ * @category services
  * @since 4.0.0
  */
 export const FiberRuntimeMetricsImpl: FiberRuntimeMetricsService = {
@@ -3777,91 +3357,18 @@ export const FiberRuntimeMetricsImpl: FiberRuntimeMetricsService = {
  *
  * **Example** (Enabling runtime metrics with a layer)
  *
- * ```ts
- * import { Console, Data, Effect, Layer, Metric } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
- * class AppError extends Data.TaggedError("AppError")<{
- *   readonly operation: string
- * }> {}
- *
- * // Define your application logic
- * const userService = Effect.gen(function*() {
- *   // Simulate user operations with concurrent processing
- *   const fetchUser = (id: number) =>
- *     Effect.gen(function*() {
- *       yield* Effect.sleep(`${50 + id * 10} millis`)
- *       if (id % 7 === 0) {
- *         return yield* new AppError({ operation: `fetch-user-${id}` })
- *       }
- *       return { id, name: `User ${id}`, email: `user${id}@example.com` }
- *     })
- *
- *   // Process multiple users concurrently (ignoring failures for demo)
- *   const userIds = Array.from({ length: 10 }, (_, i) => i + 1)
- *   const userTasks = userIds.map((id) =>
- *     fetchUser(id).pipe(Effect.catchTag("AppError", () => Effect.succeed(null)))
- *   )
- *   const allUsers = yield* Effect.all(userTasks, { concurrency: 4 })
- *   const successfulUsers = allUsers.filter((user) => user !== null)
- *   return successfulUsers
+ * const program = Effect.gen(function*() {
+ *   const service = yield* Metric.FiberRuntimeMetrics
+ *   return service === Metric.FiberRuntimeMetricsImpl
  * })
  *
- * const analyticsService = Effect.gen(function*() {
- *   // Simulate analytics processing
- *   const tasks = Array.from({ length: 8 }, (_, i) =>
- *     Effect.gen(function*() {
- *       yield* Effect.sleep(`${100 + i * 25} millis`)
- *       return `Analytics task ${i} completed`
- *     }))
- *   return yield* Effect.all(tasks, { concurrency: 3 })
- * })
- *
- * // Main application that uses multiple services
- * const application = Effect.gen(function*() {
- *   yield* Console.log("Starting application with runtime metrics...")
- *
- *   // Run services concurrently
- *   const [users, analytics] = yield* Effect.all([
- *     userService,
- *     analyticsService
- *   ], { concurrency: 2 })
- *
- *   yield* Console.log(
- *     `Processed ${users.length} users and ${analytics.length} analytics tasks`
- *   )
- *
- *   // Inspect the automatically collected runtime metrics
- *   const metrics = yield* Metric.snapshot
- *   const runtimeMetrics = metrics.filter((m) => m.id.startsWith("child_fiber"))
- *
- *   yield* Console.log("Runtime Metrics Collected:")
- *   for (const metric of runtimeMetrics) {
- *     yield* Console.log(`  ${metric.id}: ${JSON.stringify(metric.state)}`)
- *   }
- *
- *   return { users, analytics, metricsCount: runtimeMetrics.length }
- * })
- *
- * // Create the base application layer
- * const AppLayer = Layer.empty // Add your application layers here (database, HTTP, etc.)
- *
- * // Add runtime metrics layer at the end
- * const AppLayerWithMetrics = AppLayer.pipe(
- *   Layer.provide(Metric.enableRuntimeMetricsLayer)
- * )
- *
- * // Run the application with runtime metrics enabled
- * const program = application.pipe(
- *   Effect.provide(AppLayerWithMetrics)
- * )
- *
- * // Alternative: Provide runtime metrics directly to the application
- * const programWithDirectMetrics = application.pipe(
- *   Effect.provide(Metric.enableRuntimeMetricsLayer)
- * )
+ * await Effect.runPromise(Effect.provide(program, Metric.enableRuntimeMetricsLayer)) // => true
  * ```
  *
- * @category metrics
+ * @category layers
  * @since 4.0.0
  */
 export const enableRuntimeMetricsLayer = Layer.succeed(FiberRuntimeMetrics)(FiberRuntimeMetricsImpl)
@@ -3871,12 +3378,8 @@ export const enableRuntimeMetricsLayer = Layer.succeed(FiberRuntimeMetrics)(Fibe
  *
  * **Example** (Disabling runtime metrics with a layer)
  *
- * ```ts
- * import { Data, Effect, Metric } from "effect"
- *
- * class MetricsError extends Data.TaggedError("MetricsError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   // Disable runtime metrics collection
@@ -3885,7 +3388,6 @@ export const enableRuntimeMetricsLayer = Layer.succeed(FiberRuntimeMetrics)(Fibe
  *   return yield* Effect.gen(function*() {
  *     // Check that metrics service is disabled
  *     const metricsService = yield* Metric.FiberRuntimeMetrics
- *     console.log("Metrics enabled:", metricsService !== undefined) // false
  *
  *     // Run some Effects - no metrics will be collected
  *     yield* Effect.forkChild(Effect.sleep("50 millis"))
@@ -3900,9 +3402,12 @@ export const enableRuntimeMetricsLayer = Layer.succeed(FiberRuntimeMetrics)(Fibe
  *     return { counterValue, metricsEnabled: metricsService !== undefined }
  *   }).pipe(Effect.provide(disabledLayer))
  * })
+ *
+ * const result = await Effect.runPromise(Effect.provideService(program, Metric.MetricRegistry, new Map()))
+ * const values = [result.counterValue.count, result.metricsEnabled] // => [1, false]
  * ```
  *
- * @category metrics
+ * @category layers
  * @since 4.0.0
  */
 export const disableRuntimeMetricsLayer = Layer.succeed(FiberRuntimeMetrics)(undefined)
@@ -3918,75 +3423,18 @@ export const disableRuntimeMetricsLayer = Layer.succeed(FiberRuntimeMetrics)(und
  *
  * **Example** (Enabling runtime metrics for an effect)
  *
- * ```ts
- * import { Console, Data, Effect, Layer, Metric } from "effect"
- *
- * class RuntimeMetricsError extends Data.TaggedError("RuntimeMetricsError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
- *   // Create a concurrent workload to demonstrate fiber metrics
- *   const heavyWorkload = Effect.gen(function*() {
- *     // Simulate concurrent operations
- *     const tasks = Array.from({ length: 10 }, (_, i) =>
- *       Effect.gen(function*() {
- *         yield* Effect.sleep(`${100 + i * 50} millis`)
- *         if (i % 4 === 0) {
- *           // Simulate some failures
- *           return yield* new RuntimeMetricsError({ operation: `task-${i}` })
- *         }
- *         return `Task ${i} completed`
- *       }).pipe(
- *         Effect.catchTag("RuntimeMetricsError", () =>
- *           Effect.succeed(`Task ${i} failed`))
- *       ))
- *
- *     // Run tasks concurrently
- *     const results = yield* Effect.all(tasks, { concurrency: 5 })
- *     return results
- *   })
- *
- *   // Enable runtime metrics collection for our workload
- *   const workloadWithMetrics = Metric.enableRuntimeMetrics(heavyWorkload)
- *
- *   // Execute the workload
- *   const results = yield* workloadWithMetrics
- *
- *   // After execution, we can inspect the runtime metrics
- *   // The following metrics are automatically collected:
- *   // - child_fibers_active: Current number of active child fibers (Gauge)
- *   // - child_fibers_started: Total child fibers started (Counter, incremental)
- *   // - child_fiber_successes: Total successful child fibers (Counter, incremental)
- *   // - child_fiber_failures: Total failed child fibers (Counter, incremental)
- *
- *   yield* Console.log(`Workload completed with ${results.length} results`)
- *
- *   // Get all metrics including the runtime metrics
- *   const allMetrics = yield* Metric.snapshot
- *   const runtimeMetrics = allMetrics.filter((m) =>
- *     m.id.startsWith("child_fiber") || m.id.includes("fiber")
- *   )
- *
- *   yield* Console.log("Runtime Metrics:")
- *   for (const metric of runtimeMetrics) {
- *     yield* Console.log(`  ${metric.id}: ${JSON.stringify(metric.state)}`)
- *   }
- *
- *   return results
+ *   const service = yield* Metric.FiberRuntimeMetrics
+ *   return service === Metric.FiberRuntimeMetricsImpl
  * })
  *
- * // Alternative: Use the layer version for broader application coverage
- * const BaseAppLayer = Layer.empty // Your base application layers
- * const AppLayerWithMetrics = BaseAppLayer.pipe(
- *   Layer.provide(Metric.enableRuntimeMetricsLayer)
- * )
- * const programWithLayer = program.pipe(
- *   Effect.provide(AppLayerWithMetrics)
- * )
+ * await Effect.runPromise(Metric.enableRuntimeMetrics(program)) // => true
  * ```
  *
- * @category metrics
+ * @category providing services
  * @since 4.0.0
  */
 export const enableRuntimeMetrics: <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, R> = InternalEffect.provideService(
@@ -3999,82 +3447,23 @@ export const enableRuntimeMetrics: <A, E, R>(self: Effect<A, E, R>) => Effect<A,
  *
  * **When to use**
  *
- * Use when this is useful when you want to selectively disable runtime metrics for specific
- * parts of your application while keeping them enabled elsewhere, or when you need
- * to avoid the overhead of metrics collection in performance-critical sections.
+ * Use when you need to disable runtime metrics for a specific effect while
+ * keeping them enabled elsewhere.
  *
  * **Example** (Disabling runtime metrics for an effect)
  *
- * ```ts
- * import { Console, Data, Effect, Layer, Metric } from "effect"
- *
- * class DisableMetricsError extends Data.TaggedError("DisableMetricsError")<{
- *   readonly operation: string
- * }> {}
+ * ```ts import.meta.vitest
+ * import { Effect, Metric } from "effect"
  *
  * const program = Effect.gen(function*() {
- *   // This section will have runtime metrics enabled
- *   const normalOperation = Effect.gen(function*() {
- *     const tasks = Array.from({ length: 5 }, (_, i) =>
- *       Effect.gen(function*() {
- *         yield* Effect.sleep(`${100 + i * 20} millis`)
- *         return `Normal task ${i} completed`
- *       }))
- *     return yield* Effect.all(tasks, { concurrency: 3 })
- *   })
- *
- *   // This section will have runtime metrics disabled for performance
- *   const highPerformanceOperation = Metric.disableRuntimeMetrics(
- *     Effect.gen(function*() {
- *       // Performance-critical code where metrics overhead should be avoided
- *       const hotPath = Array.from(
- *         { length: 1000 },
- *         (_, i) =>
- *           Effect.gen(function*() {
- *             // Simulate intensive computation
- *             const result = i * i + (i % 10) / 10
- *             return result
- *           })
- *       )
- *       return yield* Effect.all(hotPath, { concurrency: 100 })
- *     })
- *   )
- *
- *   yield* Console.log("Running operations with selective metrics...")
- *
- *   // Run both operations
- *   const [normalResults, performanceResults] = yield* Effect.all([
- *     normalOperation, // Will generate fiber metrics
- *     highPerformanceOperation // Will NOT generate fiber metrics
- *   ])
- *
- *   // Check collected metrics - should only see metrics from normalOperation
- *   const metrics = yield* Metric.snapshot
- *   const runtimeMetrics = metrics.filter((m) => m.id.startsWith("child_fiber"))
- *
- *   yield* Console.log(`Normal operation results: ${normalResults.length}`)
- *   yield* Console.log(
- *     `Performance operation results: ${performanceResults.length}`
- *   )
- *   yield* Console.log(`Runtime metrics collected: ${runtimeMetrics.length}`)
- *
- *   // The runtime metrics will only reflect the fibers from normalOperation
- *   // The highPerformanceOperation fibers were not tracked due to disableRuntimeMetrics
- *
- *   return { normalResults, performanceResults, runtimeMetrics }
+ *   const service = yield* Metric.FiberRuntimeMetrics
+ *   return service === undefined
  * })
  *
- * // Enable runtime metrics globally, then selectively disable where needed
- * const BaseAppLayer = Layer.empty // Your base application layers
- * const AppLayerWithMetrics = BaseAppLayer.pipe(
- *   Layer.provide(Metric.enableRuntimeMetricsLayer)
- * )
- * const finalProgram = program.pipe(
- *   Effect.provide(AppLayerWithMetrics)
- * )
+ * await Effect.runPromise(Metric.disableRuntimeMetrics(program)) // => true
  * ```
  *
- * @category metrics
+ * @category providing services
  * @since 4.0.0
  */
 export const disableRuntimeMetrics: <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, R> = InternalEffect.provideService(
@@ -4107,11 +3496,7 @@ function makeHooks<Input, State>(
 }
 
 function serializeAttributes(attributes: Metric.Attributes): string {
-  return serializeEntries(Array.isArray(attributes) ? attributes : Object.entries(attributes))
-}
-
-function serializeEntries(entries: ReadonlyArray<[string, string]>): string {
-  return entries.map(([key, value]) => `${key}=${value}`).join(",")
+  return JSON.stringify(Array.isArray(attributes) ? attributes : Object.entries(attributes))
 }
 
 function mergeAttributes(
@@ -4124,7 +3509,7 @@ function mergeAttributes(
 function attributesToRecord(attributes?: Metric.Attributes): Metric.AttributeSet | undefined {
   if (Predicate.isNotUndefined(attributes) && Array.isArray(attributes)) {
     return attributes.reduce((acc, [key, value]) => {
-      acc[key] = value
+      InternalRecord.assignProperty(acc, key, value)
       return acc
     }, {} as Metric.AttributeSet)
   }

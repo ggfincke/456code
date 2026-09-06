@@ -18,7 +18,7 @@ import type { SpecSource } from "./Config.ts"
  *
  * **Example** (Creating a spec fetch error)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import * as SpecFetcher from "@effect/ai-codegen/SpecFetcher"
  *
  * const error = new SpecFetcher.SpecFetchError({
@@ -26,6 +26,9 @@ import type { SpecSource } from "./Config.ts"
  *   source: "https://example.com/openapi.json",
  *   cause: new Error("Network error")
  * })
+ *
+ * error._tag // => "SpecFetchError"
+ * error.provider // => "openai"
  * ```
  *
  * @category errors
@@ -40,7 +43,7 @@ export class SpecFetchError extends Data.TaggedError("SpecFetchError")<{
 /**
  * Service for fetching OpenAPI specifications.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface SpecFetcher {
@@ -53,7 +56,7 @@ export interface SpecFetcher {
 /**
  * Service tag for fetching OpenAPI specifications from configured sources.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const SpecFetcher: Context.Service<SpecFetcher, SpecFetcher> = Context.Service(

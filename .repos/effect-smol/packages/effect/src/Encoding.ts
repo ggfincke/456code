@@ -1,50 +1,9 @@
 /**
- * Encode and decode text and bytes as Base64, Base64Url, and hexadecimal.
- *
- * This module covers small, synchronous format conversions where invalid input
- * should be reported as data instead of thrown exceptions. Encode functions
- * return strings directly; decode functions return `Result.Result` so callers
- * can branch on success or inspect an {@link EncodingError}.
- *
- * **Mental model**
- *
- * String inputs are first converted to UTF-8 bytes with `TextEncoder`.
- * `Uint8Array` inputs are encoded directly. Byte decoders return raw
- * `Uint8Array` values, while `*String` decoders decode the resulting bytes as
- * UTF-8 text with `TextDecoder`.
- *
- * **Common tasks**
- *
- * - Use {@link encodeBase64} and {@link decodeBase64} for standard padded RFC
- *   4648 Base64
- * - Use {@link encodeBase64Url} and {@link decodeBase64Url} for unpadded
- *   URL-safe Base64
- * - Use {@link encodeHex} and {@link decodeHex} for lowercase hexadecimal
- * - Use the `*String` decoders when the encoded data represents UTF-8 text
- * - Use {@link isEncodingError} to recognize failures returned by decode
- *   operations
- *
- * **Gotchas**
- *
- * - Decode functions do not throw for malformed input; they return
- *   `Result.fail` with an `EncodingError`.
- * - Base64 decoders ignore carriage returns and line feeds before validation.
- * - {@link decodeBase64Url} accepts padded and unpadded URL-safe input, but
- *   {@link encodeBase64Url} emits unpadded output.
- * - Hex encoding emits lowercase letters, and hex decoding requires an even
- *   number of hexadecimal characters.
- *
- * **Example** (Decode Base64 without throwing)
- *
- * ```ts
- * import { Encoding, Result } from "effect"
- *
- * const decoded = Encoding.decodeBase64String("aGVsbG8=")
- *
- * if (Result.isSuccess(decoded)) {
- *   console.log(decoded.success)
- * }
- * ```
+ * Encoding and decoding helpers for Base64, Base64Url, and hexadecimal text.
+ * The functions convert between strings, UTF-8 text, and `Uint8Array` bytes.
+ * Encode functions return strings directly, while decode functions return
+ * `Result.Result` so invalid input is reported as an `EncodingError` instead of
+ * being thrown.
  *
  * @since 4.0.0
  */
@@ -59,6 +18,11 @@ import * as Result from "./Result.ts"
 /**
  * Type identifier stored on `EncodingError` values and used by
  * `isEncodingError`.
+ *
+ * **When to use**
+ *
+ * Use when implementing low-level `EncodingError`-compatible values that need
+ * to carry the runtime marker.
  *
  * **Details**
  *
@@ -100,7 +64,7 @@ export type EncodingErrorTypeId = typeof EncodingErrorTypeId
  * message.
  *
  * @see {@link isEncodingError} for checking whether a value is an EncodingError
- * @category constructors
+ * @category errors
  * @since 4.0.0
  */
 export class EncodingError extends Data.TaggedError("EncodingError")<{
@@ -162,15 +126,15 @@ export const isEncodingError = (u: unknown): u is EncodingError => hasProperty(u
  *
  * **Example** (Encoding Base64 strings and bytes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding } from "effect"
  *
  * // Encode a string
- * console.log(Encoding.encodeBase64("hello")) // "aGVsbG8="
+ * Encoding.encodeBase64("hello") // => "aGVsbG8="
  *
  * // Encode binary data
  * const bytes = new Uint8Array([72, 101, 108, 108, 111])
- * console.log(Encoding.encodeBase64(bytes)) // "SGVsbG8="
+ * Encoding.encodeBase64(bytes) // => "SGVsbG8="
  * ```
  *
  * @see {@link decodeBase64} for decoding standard Base64 to bytes
@@ -198,13 +162,10 @@ export const encodeBase64: (input: Uint8Array | string) => string = (input) =>
  *
  * **Example** (Decoding Base64 bytes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding, Result } from "effect"
  *
- * const result = Encoding.decodeBase64("SGVsbG8=")
- * if (Result.isSuccess(result)) {
- *   console.log(Array.from(result.success)) // [72, 101, 108, 108, 111]
- * }
+ * Encoding.decodeBase64("SGVsbG8=") // => Result.succeed(new Uint8Array([72, 101, 108, 108, 111]))
  * ```
  *
  * @category decoding
@@ -278,13 +239,10 @@ export const decodeBase64 = (str: string): Result.Result<Uint8Array, EncodingErr
  *
  * **Example** (Decoding Base64 strings)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding, Result } from "effect"
  *
- * const result = Encoding.decodeBase64String("aGVsbG8=")
- * if (Result.isSuccess(result)) {
- *   console.log(result.success) // "hello"
- * }
+ * Encoding.decodeBase64String("aGVsbG8=") // => Result.succeed("hello")
  * ```
  *
  * @category decoding
@@ -312,14 +270,14 @@ export const decodeBase64String = (str: string) => Result.map(decodeBase64(str),
  *
  * **Example** (Encoding URL-safe Base64)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding } from "effect"
  *
  * // URL-safe base64 encoding (uses - and _ instead of + and /)
- * console.log(Encoding.encodeBase64Url("hello?")) // "aGVsbG8_"
+ * Encoding.encodeBase64Url("hello?") // => "aGVsbG8_"
  *
  * const bytes = new Uint8Array([72, 101, 108, 108, 111, 63])
- * console.log(Encoding.encodeBase64Url(bytes)) // "SGVsbG8_"
+ * Encoding.encodeBase64Url(bytes) // => "SGVsbG8_"
  * ```
  *
  * @see {@link decodeBase64Url} for decoding URL-safe Base64 to bytes
@@ -349,13 +307,10 @@ export const encodeBase64Url: (input: Uint8Array | string) => string = (input) =
  *
  * **Example** (Decoding URL-safe Base64 bytes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding, Result } from "effect"
  *
- * const result = Encoding.decodeBase64Url("SGVsbG8_")
- * if (Result.isSuccess(result)) {
- *   console.log(Array.from(result.success)) // [72, 101, 108, 108, 111, 63]
- * }
+ * Encoding.decodeBase64Url("SGVsbG8_") // => Result.succeed(new Uint8Array([72, 101, 108, 108, 111, 63]))
  * ```
  *
  * @category decoding
@@ -409,13 +364,10 @@ export const decodeBase64Url = (str: string): Result.Result<Uint8Array, Encoding
  *
  * **Example** (Decoding URL-safe Base64 strings)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding, Result } from "effect"
  *
- * const result = Encoding.decodeBase64UrlString("aGVsbG8_")
- * if (Result.isSuccess(result)) {
- *   console.log(result.success) // "hello?"
- * }
+ * Encoding.decodeBase64UrlString("aGVsbG8_") // => Result.succeed("hello?")
  * ```
  *
  * @category decoding
@@ -436,15 +388,15 @@ export const decodeBase64UrlString = (str: string) => Result.map(decodeBase64Url
  *
  * **Example** (Encoding hex strings and bytes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding } from "effect"
  *
  * // Encode a string to hex
- * console.log(Encoding.encodeHex("hello")) // "68656c6c6f"
+ * Encoding.encodeHex("hello") // => "68656c6c6f"
  *
  * // Encode binary data to hex
  * const bytes = new Uint8Array([72, 101, 108, 108, 111])
- * console.log(Encoding.encodeHex(bytes)) // "48656c6c6f"
+ * Encoding.encodeHex(bytes) // => "48656c6c6f"
  * ```
  *
  * @category encoding
@@ -468,13 +420,10 @@ export const encodeHex: (input: Uint8Array | string) => string = (input) =>
  *
  * **Example** (Decoding hex bytes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding, Result } from "effect"
  *
- * const result = Encoding.decodeHex("48656c6c6f")
- * if (Result.isSuccess(result)) {
- *   console.log(Array.from(result.success)) // [72, 101, 108, 108, 111]
- * }
+ * Encoding.decodeHex("48656c6c6f") // => Result.succeed(new Uint8Array([72, 101, 108, 108, 111]))
  * ```
  *
  * @category decoding
@@ -530,13 +479,10 @@ export const decodeHex = (str: string): Result.Result<Uint8Array, EncodingError>
  *
  * **Example** (Decoding hex strings)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Encoding, Result } from "effect"
  *
- * const result = Encoding.decodeHexString("68656c6c6f")
- * if (Result.isSuccess(result)) {
- *   console.log(result.success) // "hello"
- * }
+ * Encoding.decodeHexString("68656c6c6f") // => Result.succeed("hello")
  * ```
  *
  * @category decoding

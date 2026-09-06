@@ -35,6 +35,8 @@ Tip: add `--help` for the full CLI reference. The CLI is named `456code` once li
 
 ### Desktop app
 
+On macOS, the desktop app requires macOS 13 (Ventura) or later.
+
 Build a desktop artifact for your platform:
 
 ```bash

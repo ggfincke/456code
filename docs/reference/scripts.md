@@ -23,6 +23,10 @@
 ## Desktop `.dmg` packaging notes
 
 - Default build is unsigned/not notarized for local sharing.
+- The macOS desktop app requires macOS 13 (Ventura) or later.
+- macOS notifications require a code-signed app. Unsigned local builds cannot validate notification
+  delivery; use a configured `--signed` build for that check. See
+  [Electron notification requirements](https://www.electronjs.org/docs/latest/tutorial/notifications#macos).
 - The DMG build uses `assets/prod/456-black-macos-1024.png` as the production app icon source.
 - Desktop production windows load the bundled UI from `code456://app/index.html` (not a `127.0.0.1` document URL).
 - Desktop packaging includes `apps/server/dist` (the `t3` backend) and starts it on loopback with an auth token for WebSocket/API traffic.

@@ -1,40 +1,12 @@
 /**
  * Client-side worker primitives shared by browser, Node, and Bun adapters.
  *
- * This module defines the platform-neutral {@link Worker} client and the
- * {@link WorkerPlatform} service that creates one for a numeric worker id.
- * Platform packages provide the runtime-specific spawn, setup, listen, and
- * cleanup logic; higher-level code uses the resulting worker to send messages
- * and run an Effect handler for messages coming back from the worker.
- *
- * **Mental model**
- *
- * A {@link Spawner} locates or creates the native worker value, and
- * {@link makePlatform} turns platform hooks into a scoped {@link Worker}.
- * Sending and receiving are separate: `send` queues outbound values until
- * `run` observes the platform ready signal, then `run` keeps the message loop
- * alive and owns the cleanup scope for the active port.
- *
- * **Common tasks**
- *
- * Use {@link layerSpawner} to provide the runtime's worker lookup function,
- * {@link makePlatform} to build browser, Node, Bun, or custom adapters, and
- * {@link makeUnsafe} when an adapter already exposes the low-level platform
- * protocol. Worker-backed RPC clients use these primitives to communicate with
- * dedicated workers, shared workers, `MessagePort`s, worker threads, or child
- * processes.
- *
- * **Gotchas**
- *
- * - Messages sent before readiness are buffered, so the returned worker must be
- *   run or those messages never leave the client
- * - Values pass through `postMessage`; callers must use values supported by
- *   the selected runtime's structured clone implementation
- * - Transfer lists can avoid copies, but ownership moves to the worker and
- *   invalid transfer lists fail with `WorkerSendError`
- * - Incoming messages are handled concurrently in the run fiber set; add a
- *   queue, semaphore, or protocol acknowledgement when ordering or back
- *   pressure matters
+ * This module defines the platform-neutral `Worker` client, the `WorkerPlatform`
+ * service that creates workers by numeric id, and the `Spawner` service used to
+ * find platform-specific worker instances. `makePlatform` wraps platform setup
+ * and listen hooks into a `WorkerPlatform`, buffers outgoing messages until the
+ * worker is ready, runs incoming messages with Effect handlers, and ties worker
+ * cleanup to scope lifetime.
  *
  * @since 4.0.0
  */
@@ -51,7 +23,7 @@ import { WorkerError, WorkerSendError } from "./WorkerError.ts"
  * Service that spawns effect `Worker` instances for numeric worker ids using
  * the configured `Spawner`.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export class WorkerPlatform extends Context.Service<WorkerPlatform, {
@@ -88,7 +60,7 @@ export interface Worker<O = unknown, I = unknown> {
  * platform ready/data messages and running the optional `onSpawn` effect when
  * the worker reports readiness.
  *
- * @category models
+ * @category constructors
  * @since 4.0.0
  */
 export const makeUnsafe = (options: {
@@ -133,7 +105,7 @@ export interface Spawner {
 /**
  * Service tag for the worker `SpawnerFn`.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const Spawner: Context.Service<
@@ -193,6 +165,17 @@ export const makePlatform = <W>() =>
         const spawn = (yield* Spawner) as SpawnerFn<W>
         let currentPort: P | undefined
         const buffer: Array<[unknown, ReadonlyArray<unknown> | undefined]> = []
+        const sendToPort = (port: P, message: unknown, transfers?: ReadonlyArray<unknown>) =>
+          Effect.try({
+            try: () => port.postMessage([0, message], transfers as any),
+            catch: (cause) =>
+              new WorkerError({
+                reason: new WorkerSendError({
+                  message: "Failed to send message to worker",
+                  cause
+                })
+              })
+          })
 
         const run = <A, E, R>(
           handler: (_: O) => Effect.Effect<A, E, R>,
@@ -237,7 +220,7 @@ export const makePlatform = <W>() =>
                 currentPort = port
                 if (buffer.length > 0) {
                   for (const [message, transfers] of buffer) {
-                    port.postMessage([0, message], transfers as any)
+                    yield* sendToPort(port, message, transfers)
                   }
                   buffer.length = 0
                 }
@@ -252,19 +235,7 @@ export const makePlatform = <W>() =>
               buffer.push([message, transfers])
               return Effect.void
             }
-            try {
-              currentPort.postMessage([0, message], transfers as any)
-              return Effect.void
-            } catch (cause) {
-              return Effect.fail(
-                new WorkerError({
-                  reason: new WorkerSendError({
-                    message: "Failed to send message to worker",
-                    cause
-                  })
-                })
-              )
-            }
+            return sendToPort(currentPort, message, transfers)
           })
 
         return { run, send }

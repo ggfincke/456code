@@ -1,21 +1,13 @@
 /**
- * The `RcMap` module provides a scoped, reference-counted map for sharing
- * resources by key. It is useful when many fibers may request the same
- * resource, such as a connection, client, session, or cached handle, and the
- * resource should be acquired once, reused while it has active references, and
- * released automatically when it is no longer needed.
+ * Shares scoped resources by key and releases them when no one is using them.
  *
- * Each key is resolved with a user-provided lookup effect on first access via
- * {@link get}. Further accesses to the same key share the in-flight or acquired
- * resource and increment its reference count for the caller's current
- * `Scope`. When those scopes close, references are released; resources can be
- * closed immediately, kept alive for an idle time-to-live, invalidated
- * explicitly, or bounded by a maximum capacity.
- *
- * `RcMap` is designed for Effect resource lifecycles rather than general
- * mutable caching. The map itself is scoped, lookups require a `Scope`, and
- * complex keys should provide `Equal` / `Hash` behavior when they need
- * value-based lookup semantics.
+ * An `RcMap` runs a lookup effect the first time a key is requested, shares the
+ * in-progress or acquired resource with other callers for the same key, and
+ * tracks each caller through its current `Scope`. When the last scope for a key
+ * closes, the resource can be released, kept alive for an idle time, or removed
+ * by capacity limits or explicit invalidation. It is meant for resource
+ * lifecycles such as clients, sessions, and connections, not as a general
+ * mutable cache.
  *
  * @since 3.5.0
  */
@@ -47,17 +39,14 @@ const TypeId = "~effect/RcMap"
  *
  * **Example** (Inspecting a reference-counted map)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, RcMap } from "effect"
  *
- * Effect.gen(function*() {
+ * const program = Effect.gen(function*() {
  *   // Create an RcMap that manages database connections
  *   const dbConnectionMap = yield* RcMap.make({
  *     lookup: (dbName: string) =>
- *       Effect.acquireRelease(
- *         Effect.succeed(`Connection to ${dbName}`),
- *         (conn) => Effect.log(`Closing ${conn}`)
- *       ),
+ *       Effect.acquireRelease(Effect.succeed(`Connection to ${dbName}`), () => Effect.void),
  *     capacity: 10,
  *     idleTimeToLive: "5 minutes"
  *   })
@@ -68,8 +57,10 @@ const TypeId = "~effect/RcMap"
  *   // - idleTimeToLive: Time before idle resources are released
  *   // - state: Current state of the map
  *
- *   console.log(`Capacity: ${dbConnectionMap.capacity}`)
- * }).pipe(Effect.scoped)
+ *   return dbConnectionMap.capacity
+ * })
+ *
+ * await Effect.runPromise(Effect.scoped(program)) // => 10
  * ```
  *
  * @see {@link make} for creating an `RcMap`
@@ -213,15 +204,17 @@ const makeUnsafe = <K, A, E>(options: {
  *
  * **Example** (Creating a reference-counted map)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, RcMap } from "effect"
  *
- * Effect.gen(function*() {
+ * const events: Array<string> = []
+ *
+ * const program = Effect.gen(function*() {
  *   const map = yield* RcMap.make({
  *     lookup: (key: string) =>
  *       Effect.acquireRelease(
  *         Effect.succeed(`acquired ${key}`),
- *         () => Effect.log(`releasing ${key}`)
+ *         () => Effect.sync(() => events.push(`released ${key}`))
  *       )
  *   })
  *
@@ -232,12 +225,15 @@ const makeUnsafe = <K, A, E>(options: {
  *     Effect.scoped
  *   )
  * })
+ *
+ * await Effect.runPromise(Effect.scoped(program))
+ * events // => ["released foo"]
  * ```
  *
  * @see {@link get} for acquiring or retaining a resource by key
  * @see {@link invalidate} for removing a resource from the map
  *
- * @category models
+ * @category constructors
  * @since 3.5.0
  */
 export const make: {
@@ -307,22 +303,26 @@ export const make: {
  *
  * **Example** (Acquiring a resource)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, RcMap } from "effect"
  *
- * Effect.gen(function*() {
+ * const events: Array<string> = []
+ *
+ * const program = Effect.gen(function*() {
  *   const map = yield* RcMap.make({
  *     lookup: (key: string) =>
  *       Effect.acquireRelease(
  *         Effect.succeed(`Resource: ${key}`),
- *         () => Effect.log(`Released ${key}`)
+ *         () => Effect.sync(() => events.push(`released ${key}`))
  *       )
  *   })
  *
  *   // Get a resource - it will be acquired on first access
  *   const resource = yield* RcMap.get(map, "database")
- *   console.log(resource) // "Resource: database"
- * }).pipe(Effect.scoped)
+ *   return [resource, events] as const
+ * })
+ *
+ * await Effect.runPromise(Effect.scoped(program)) // => ["Resource: database", ["released database"]]
  * ```
  *
  * @see {@link make} for creating the reference-counted map
@@ -435,10 +435,10 @@ const release = <K, A, E>(self: RcMap<K, A, E>, key: K, entry: State.Entry<A, E>
  *
  * **Example** (Listing keys)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, RcMap } from "effect"
  *
- * Effect.gen(function*() {
+ * const program = Effect.gen(function*() {
  *   const map = yield* RcMap.make({
  *     lookup: (key: string) => Effect.succeed(`value-${key}`)
  *   })
@@ -450,8 +450,10 @@ const release = <K, A, E>(self: RcMap<K, A, E>, key: K, entry: State.Entry<A, E>
  *
  *   // Get all keys currently in the map
  *   const allKeys = yield* RcMap.keys(map)
- *   console.log(allKeys) // ["foo", "bar", "baz"]
- * }).pipe(Effect.scoped)
+ *   return Array.from(allKeys)
+ * })
+ *
+ * await Effect.runPromise(Effect.scoped(program)) // => ["foo", "bar", "baz"]
  * ```
  *
  * @see {@link has} for checking one key without enumerating all keys
@@ -475,15 +477,17 @@ export const keys = <K, A, E>(self: RcMap<K, A, E>): Effect.Effect<Iterable<K>> 
  *
  * **Example** (Invalidating a resource)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, RcMap } from "effect"
  *
- * Effect.gen(function*() {
+ * const events: Array<string> = []
+ *
+ * const program = Effect.gen(function*() {
  *   const map = yield* RcMap.make({
  *     lookup: (key: string) =>
  *       Effect.acquireRelease(
  *         Effect.succeed(`Resource: ${key}`),
- *         () => Effect.log(`Released ${key}`)
+ *         () => Effect.sync(() => events.push(`released ${key}`))
  *       )
  *   })
  *
@@ -496,7 +500,10 @@ export const keys = <K, A, E>(self: RcMap<K, A, E>): Effect.Effect<Iterable<K>> 
  *
  *   // Next access will create a new resource
  *   yield* RcMap.get(map, "cache")
- * }).pipe(Effect.scoped)
+ * })
+ *
+ * await Effect.runPromise(Effect.scoped(program))
+ * events // => ["released cache", "released cache"]
  * ```
  *
  * @see {@link get} for acquiring or retaining the resource for a key
@@ -569,15 +576,17 @@ export const has: {
  *
  * **Example** (Extending resource idle time)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, RcMap } from "effect"
  *
- * Effect.gen(function*() {
+ * const events: Array<string> = []
+ *
+ * const program = Effect.gen(function*() {
  *   const map = yield* RcMap.make({
  *     lookup: (key: string) =>
  *       Effect.acquireRelease(
  *         Effect.succeed(`Resource: ${key}`),
- *         () => Effect.log(`Released ${key}`)
+ *         () => Effect.sync(() => events.push(`released ${key}`))
  *       ),
  *     idleTimeToLive: "10 seconds"
  *   })
@@ -591,7 +600,10 @@ export const has: {
  *
  *   // The resource will now live for another 10 seconds
  *   // from the time it was touched
- * }).pipe(Effect.scoped)
+ * })
+ *
+ * await Effect.runPromise(Effect.scoped(program))
+ * events // => ["released session"]
  * ```
  *
  * @see {@link invalidate} for removing the resource instead of extending it

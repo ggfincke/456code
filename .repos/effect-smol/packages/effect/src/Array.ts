@@ -1,86 +1,11 @@
 /**
- * The `Array` module provides functional operations for JavaScript arrays,
- * readonly arrays, and arrays that are known to contain at least one element.
- * Operations that transform, reorder, or update collections allocate new arrays
- * instead of mutating their inputs, while preserving useful type information
- * such as non-emptiness when the operation can prove it.
+ * Works with JavaScript arrays, readonly arrays, and non-empty arrays.
  *
- * **Mental model**
- *
- * - A regular `Array<A>` is still the built-in JavaScript array type; this
- *   module supplies functional constructors, combinators, searches, folds,
- *   grouping, sorting, and set-like operations around it.
- * - {@link NonEmptyReadonlyArray} and {@link NonEmptyArray} encode
- *   non-emptiness at the type level. APIs with `NonEmpty` in the name can avoid
- *   `Option` because an element is guaranteed to exist.
- * - Most functions are dual. You can call them data-first, such as
- *   `Array.map(values, f)`, or data-last in a pipeline, such as
- *   `pipe(values, Array.map(f))`.
- * - Safe element access returns {@link Option}; unsafe or `NonEmpty` variants
- *   are for code that already has a proof an index or element exists.
- * - Set-like operations such as {@link union}, {@link intersection}, and
- *   {@link difference} use the {@link Equal} protocol by default. Use the
- *   `*With` variants when equality is domain-specific.
- *
- * **Common tasks**
- *
- * - Create arrays with {@link make}, {@link of}, {@link empty},
- *   {@link fromIterable}, {@link range}, {@link makeBy}, {@link replicate}, and
- *   {@link unfold}.
- * - Access edges or indexes with {@link head}, {@link last}, {@link get},
- *   {@link tail}, and {@link init}.
- * - Transform and flatten with {@link map}, {@link flatMap}, and
- *   {@link flatten}.
- * - Keep, split, or deduplicate values with {@link filter}, {@link partition},
- *   {@link dedupe}, and {@link dedupeAdjacent}.
- * - Combine collections with {@link append}, {@link prepend}, {@link appendAll},
- *   {@link prependAll}, {@link zip}, and {@link cartesian}.
- * - Chunk, window, and slice with {@link splitAt}, {@link chunksOf},
- *   {@link span}, and {@link window}.
- * - Sort with {@link sort}, {@link sortWith}, and {@link sortBy}.
- * - Fold or aggregate with {@link reduce}, {@link scan}, {@link join}, and
- *   {@link countBy}.
- * - Match empty and non-empty cases with {@link match}, {@link matchLeft}, and
- *   {@link matchRight}.
- *
- * **Gotchas**
- *
- * - {@link fromIterable} returns the original array reference when the input is
- *   already an array. Use {@link copy} when you need a fresh shallow copy.
- * - {@link makeBy}, {@link range}, and {@link replicate} always return
- *   non-empty arrays. `range(start, end)` is inclusive and returns `[start]`
- *   when `start > end`.
- * - Functions returning {@link Option}, such as {@link head} and
- *   {@link findFirst}, return `Option.none()` for empty inputs instead of
- *   throwing.
- * - `NonEmpty` return types describe what the function can prove, not what may
- *   happen for a particular runtime value after filtering.
- *
- * **Example** (Filtering and transforming)
- *
- * ```ts
- * import { Array, Option, pipe } from "effect"
- *
- * const numbers = [1, 2, 3, 4, 5]
- *
- * const doubledEvens = pipe(
- *   numbers,
- *   Array.filter((n) => n % 2 === 0),
- *   Array.map((n) => n * 2)
- * )
- *
- * console.log(doubledEvens)
- * // [4, 8]
- *
- * const first = Array.head(doubledEvens)
- * console.log(Option.getOrElse(first, () => 0))
- * // 4
- * ```
- *
- * @see {@link make} — create a non-empty array from elements
- * @see {@link map} — transform each element
- * @see {@link filter} — keep elements matching a predicate
- * @see {@link reduce} — fold an array to a single value
+ * The helpers cover common collection work such as creating arrays, reading
+ * elements, transforming values, sorting, grouping, splitting, combining, and
+ * reducing many values to one result. Helpers that change contents return new
+ * arrays and preserve non-empty array types when the result is guaranteed to
+ * contain values.
  *
  * @since 2.0.0
  */
@@ -88,9 +13,11 @@ import * as Equal from "./Equal.ts"
 import * as Equivalence from "./Equivalence.ts"
 import type { LazyArg } from "./Function.ts"
 import { dual, identity } from "./Function.ts"
+import * as Hash from "./Hash.ts"
 import type { TypeLambda } from "./HKT.ts"
 import * as internalArray from "./internal/array.ts"
 import * as internalDoNotation from "./internal/doNotation.ts"
+import * as InternalRecord from "./internal/record.ts"
 import * as moduleIterable from "./Iterable.ts"
 import * as Option from "./Option.ts"
 import * as Order from "./Order.ts"
@@ -109,13 +36,12 @@ import type { NoInfer, TupleOf } from "./Types.ts"
  * Use to access native JavaScript array constructor methods such as `isArray`
  * or `from` from the Effect module namespace.
  *
- * **Example** (Using the Array constructor)
+ * **Example** (Accessing the Array constructor)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const arr = new Array.Array(3)
- * console.log(arr) // [undefined, undefined, undefined]
+ * Array.Array === globalThis.Array // => true
  * ```
  *
  * @category constructors
@@ -126,7 +52,7 @@ export const Array = globalThis.Array
 /**
  * Type lambda for `ReadonlyArray`, used for higher-kinded type operations.
  *
- * @category type lambdas
+ * @category utility types
  * @since 2.0.0
  */
 export interface ReadonlyArrayTypeLambda extends TypeLambda {
@@ -138,16 +64,18 @@ export interface ReadonlyArrayTypeLambda extends TypeLambda {
  *
  * **When to use**
  *
- * Use when you use this type when you need to ensure non-emptiness at the type level while
- * preventing mutation. Many Array module functions accept or return this type.
+ * Use when non-emptiness must be tracked at the type level while preventing mutation.
+ * Many Array module functions accept or return this type.
  *
  * **Example** (Typing a non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Array } from "effect"
  *
  * const nonEmpty: Array.NonEmptyReadonlyArray<number> = [1, 2, 3]
  * const head: number = nonEmpty[0] // guaranteed to exist
+ *
+ * head // => 1
  * ```
  *
  * @see {@link NonEmptyArray} — mutable counterpart
@@ -174,11 +102,13 @@ export type NonEmptyReadonlyArray<A> = readonly [A, ...Array<A>]
  *
  * **Example** (Typing a mutable non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Array } from "effect"
  *
  * const nonEmpty: Array.NonEmptyArray<number> = [1, 2, 3]
  * nonEmpty.push(4)
+ *
+ * nonEmpty // => [1, 2, 3, 4]
  * ```
  *
  * @see {@link NonEmptyReadonlyArray} — readonly counterpart
@@ -194,17 +124,19 @@ export type NonEmptyArray<A> = [A, ...Array<A>]
  *
  * **When to use**
  *
- * Use when you have literal values and want a typed non-empty array.
- * - The element type is inferred as the union of all arguments.
- * - Always returns a `NonEmptyArray` since at least one argument is required.
+ * Use when you need to create a typed non-empty array from literal values.
+ *
+ * **Details**
+ *
+ * The element type is inferred as the union of all arguments. Because at least
+ * one argument is required, this always returns a `NonEmptyArray`.
  *
  * **Example** (Creating an array from values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.make(1, 2, 3)
- * console.log(result) // [1, 2, 3]
+ * Array.make(1, 2, 3) // => [1, 2, 3]
  * ```
  *
  * @see {@link of} — create a single-element array
@@ -222,17 +154,18 @@ export const make = <Elements extends NonEmptyArray<unknown>>(
  *
  * **When to use**
  *
- * Use when you need a pre-sized array and will fill it imperatively.
- * - Elements are typed as `A | undefined` since slots are empty.
- * - Prefer {@link makeBy} when you can compute each element from its index.
+ * Use when you need a pre-sized array that will be filled imperatively.
+ *
+ * **Details**
+ *
+ * Elements are typed as `A | undefined` because the slots are empty.
  *
  * **Example** (Allocating a fixed-size array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.allocate<number>(3)
- * console.log(result.length) // 3
+ * Array.allocate<number>(3).length // => 3
  * ```
  *
  * @see {@link makeBy} — create an array by computing each element
@@ -247,17 +180,20 @@ export const allocate = <A = never>(n: number): Array<A | undefined> => new Arra
  *
  * **When to use**
  *
- * Use when you need an array whose values depend on the index.
- * - `n` is normalized to an integer >= 1 — always returns at least one element.
- * - Dual: `Array.makeBy(5, f)` or `pipe(5, Array.makeBy(f))`.
+ * Use when you need to compute each array element from its index.
+ *
+ * **Details**
+ *
+ * `n` is normalized to an integer greater than or equal to 1, so this function
+ * always returns at least one element. Supports both data-first and data-last
+ * usage.
  *
  * **Example** (Generating values from indices)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.makeBy(5, (n) => n * 2)
- * console.log(result) // [0, 2, 4, 6, 8]
+ * Array.makeBy(5, (n) => n * 2) // => [0, 2, 4, 6, 8]
  * ```
  *
  * @see {@link range} — create a range of integers
@@ -284,17 +220,18 @@ export const makeBy: {
  *
  * **When to use**
  *
- * Use when you need a sequence of consecutive integers.
- * - If `start > end`, returns `[start]`.
- * - Always returns a `NonEmptyArray`.
+ * Use when you need a non-empty sequence of consecutive integers.
+ *
+ * **Details**
+ *
+ * If `start > end`, returns `[start]`.
  *
  * **Example** (Creating a range)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.range(1, 3)
- * console.log(result) // [1, 2, 3]
+ * Array.range(1, 3) // => [1, 2, 3]
  * ```
  *
  * @see {@link makeBy} — generate values from a function
@@ -310,17 +247,20 @@ export const range = (start: number, end: number): NonEmptyArray<number> =>
  *
  * **When to use**
  *
- * Use when you need multiple copies of the same value.
- * - `n` is normalized to an integer >= 1 — always returns at least one element.
- * - Dual: `Array.replicate("a", 3)` or `pipe("a", Array.replicate(3))`.
+ * Use when you need a non-empty array containing repeated copies of one value.
+ *
+ * **Details**
+ *
+ * `n` is normalized to an integer greater than or equal to 1, so this function
+ * always returns at least one element. Supports both data-first and data-last
+ * usage.
  *
  * **Example** (Repeating a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.replicate("a", 3)
- * console.log(result) // ["a", "a", "a"]
+ * Array.replicate("a", 3) // => ["a", "a", "a"]
  * ```
  *
  * @see {@link makeBy} — vary values based on index
@@ -342,18 +282,16 @@ export const replicate: {
  *
  * **Details**
  *
- * - If the input is already an array, returns it **by reference** (no copy).
- * - Otherwise, creates a new array from the iterable.
- * - Use {@link copy} if you need a fresh array even when the input is already
- *   an array.
+ * If the input is already an array, this returns it by reference without
+ * copying. Otherwise, it creates a new array from the iterable. Use `copy` if
+ * you need a fresh array even when the input is already an array.
  *
  * **Example** (Converting a Set to an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.fromIterable(new Set([1, 2, 3]))
- * console.log(result) // [1, 2, 3]
+ * Array.fromIterable(new Set([1, 2, 3])) // => [1, 2, 3]
  * ```
  *
  * @see {@link ensure} — wrap a single value or return an existing array
@@ -375,17 +313,17 @@ export const fromIterable = <A>(collection: Iterable<A>): Array<A> =>
  *
  * **Details**
  *
- * - If the input is already an array, returns it by reference.
- * - If the input is a single value, wraps it in a one-element array.
- * - Useful for APIs that accept `A | Array<A>`.
+ * If the input is already an array, this returns it by reference. If the input
+ * is a single value, this wraps it in a one-element array. This is useful for
+ * APIs that accept `A | Array<A>`.
  *
  * **Example** (Normalizing input)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.ensure("a")) // ["a"]
- * console.log(Array.ensure(["a", "b", "c"])) // ["a", "b", "c"]
+ * Array.ensure("a") // => ["a"]
+ * Array.ensure(["a", "b", "c"]) // => ["a", "b", "c"]
  * ```
  *
  * @see {@link of} — always wrap in a single-element array
@@ -406,16 +344,15 @@ export const ensure = <A>(self: ReadonlyArray<A> | A): Array<A> => Array.isArray
  *
  * **Details**
  *
- * - Key order follows `Object.entries` semantics.
- * - Returns an empty array for an empty record.
+ * Key order follows `Object.entries` semantics. Empty records produce an empty
+ * array.
  *
- * **Example** (Record to entries)
+ * **Example** (Converting a record to entries)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.fromRecord({ a: 1, b: 2, c: 3 })
- * console.log(result) // [["a", 1], ["b", 2], ["c", 3]]
+ * Array.fromRecord({ a: 1, b: 2, c: 3 }) // => [["a", 1], ["b", 2], ["c", 3]]
  * ```
  *
  * @see {@link Record.toEntries} the equivalent function from the Record module
@@ -433,13 +370,13 @@ export const fromRecord: <K extends string, A>(self: Readonly<Record<K, A>>) => 
  *
  * Use to convert a single `Option` into an array for downstream array operations.
  *
- * **Example** (Option to array)
+ * **Example** (Converting an Option to an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Option } from "effect"
  *
- * console.log(Array.fromOption(Option.some(1))) // [1]
- * console.log(Array.fromOption(Option.none())) // []
+ * Array.fromOption(Option.some(1)) // => [1]
+ * Array.fromOption(Option.none()) // => []
  * ```
  *
  * @see {@link getSomes} — extract `Some` values from an array of Options
@@ -454,21 +391,25 @@ export const fromOption: <A>(self: Option.Option<A>) => Array<A> = Option.toArra
  *
  * **When to use**
  *
- * Use when you need to branch on whether an array has elements.
- * - `onNonEmpty` receives a `NonEmptyReadonlyArray`.
- * - Dual: data-first or data-last.
+ * Use when you need to branch on whether an array is empty.
+ *
+ * **Details**
+ *
+ * `onNonEmpty` receives a `NonEmptyReadonlyArray`. Supports both data-first and
+ * data-last usage.
  *
  * **Example** (Branching on emptiness)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const describe = Array.match({
  *   onEmpty: () => "empty",
  *   onNonEmpty: ([head, ...tail]) => `head: ${head}, tail: ${tail.length}`
  * })
- * console.log(describe([])) // "empty"
- * console.log(describe([1, 2, 3])) // "head: 1, tail: 2"
+ *
+ * describe([]) // => "empty"
+ * describe([1, 2, 3]) // => "head: 1, tail: 2"
  * ```
  *
  * @see {@link matchLeft} — destructures into head + tail
@@ -505,24 +446,25 @@ export const match: {
  *
  * **When to use**
  *
- * Use to pattern-match when you need the first element and remaining elements as
- * separate values.
+ * Use when you need to branch on an array and handle the non-empty case as the
+ * first element plus the remaining elements.
  *
  * **Details**
  *
  * `onNonEmpty` receives `(head, tail)` where `tail` is the rest of the array.
  *
- * **Example** (Head and tail destructuring)
+ * **Example** (Destructuring head and tail)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const matchLeft = Array.matchLeft({
  *   onEmpty: () => "empty",
  *   onNonEmpty: (head, tail) => `head: ${head}, tail: ${tail.length}`
  * })
- * console.log(matchLeft([])) // "empty"
- * console.log(matchLeft([1, 2, 3])) // "head: 1, tail: 2"
+ *
+ * matchLeft([]) // => "empty"
+ * matchLeft([1, 2, 3]) // => "head: 1, tail: 2"
  * ```
  *
  * @see {@link match} — receives the full non-empty array
@@ -559,24 +501,25 @@ export const matchLeft: {
  *
  * **When to use**
  *
- * Use to pattern-match when you need all but the last element and the last element
- * as separate values.
+ * Use when you need to branch on an array and handle the non-empty case as the
+ * elements before the last plus the last element.
  *
  * **Details**
  *
  * `onNonEmpty` receives `(init, last)` where `init` is everything but the last element.
  *
- * **Example** (Init and last destructuring)
+ * **Example** (Destructuring init and last)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const matchRight = Array.matchRight({
  *   onEmpty: () => "empty",
  *   onNonEmpty: (init, last) => `init: ${init.length}, last: ${last}`
  * })
- * console.log(matchRight([])) // "empty"
- * console.log(matchRight([1, 2, 3])) // "init: 2, last: 3"
+ *
+ * matchRight([]) // => "empty"
+ * matchRight([1, 2, 3]) // => "init: 2, last: 3"
  * ```
  *
  * @see {@link match} — receives the full non-empty array
@@ -615,25 +558,21 @@ export const matchRight: {
  *
  * **When to use**
  *
- * Use to add a single element at the start of an iterable and get a `NonEmptyArray`.
- *
- * **Details**
- *
- * - Always returns a non-empty array.
+ * Use when you need to guarantee a non-empty result after adding a required
+ * leading value.
  *
  * **Example** (Prepending an element)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.prepend([2, 3, 4], 1)
- * console.log(result) // [1, 2, 3, 4]
+ * Array.prepend([2, 3, 4], 1) // => [1, 2, 3, 4]
  * ```
  *
  * @see {@link append} — add to the end
  * @see {@link prependAll} — prepend multiple elements
  *
- * @category concatenating
+ * @category combining
  * @since 2.0.0
  */
 export const prepend: {
@@ -650,21 +589,20 @@ export const prepend: {
  *
  * **Details**
  *
- * - If either input is non-empty, the result is a `NonEmptyArray`.
+ * If either input is non-empty, the result is a `NonEmptyArray`.
  *
  * **Example** (Prepending multiple elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.prependAll([2, 3], [0, 1])
- * console.log(result) // [0, 1, 2, 3]
+ * Array.prependAll([2, 3], [0, 1]) // => [0, 1, 2, 3]
  * ```
  *
  * @see {@link prepend} — add a single element to the front
  * @see {@link appendAll} — add elements to the end
  *
- * @category concatenating
+ * @category combining
  * @since 2.0.0
  */
 export const prependAll: {
@@ -684,26 +622,21 @@ export const prependAll: {
  *
  * **When to use**
  *
- * Use to add one element to the end of an iterable and get a new
- * `NonEmptyArray`.
- *
- * **Details**
- *
- * - Always returns a non-empty array.
+ * Use when you need to guarantee a non-empty result after adding a required
+ * trailing value.
  *
  * **Example** (Appending an element)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.append([1, 2, 3], 4)
- * console.log(result) // [1, 2, 3, 4]
+ * Array.append([1, 2, 3], 4) // => [1, 2, 3, 4]
  * ```
  *
  * @see {@link prepend} — add to the front
  * @see {@link appendAll} — append multiple elements
  *
- * @category concatenating
+ * @category combining
  * @since 2.0.0
  */
 export const append: {
@@ -721,21 +654,20 @@ export const append: {
  *
  * **Details**
  *
- * - If either input is non-empty, the result is a `NonEmptyArray`.
+ * If either input is non-empty, the result is a `NonEmptyArray`.
  *
  * **Example** (Concatenating arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.appendAll([1, 2], [3, 4])
- * console.log(result) // [1, 2, 3, 4]
+ * Array.appendAll([1, 2], [3, 4]) // => [1, 2, 3, 4]
  * ```
  *
  * @see {@link append} — add a single element to the end
  * @see {@link prependAll} — add elements to the front
  *
- * @category concatenating
+ * @category combining
  * @since 2.0.0
  */
 export const appendAll: {
@@ -759,17 +691,16 @@ export const appendAll: {
  *
  * **Details**
  *
- * - The output length is `input.length + 1` (starts with the initial value).
- * - Always returns a `NonEmptyArray` because the initial value is included.
- * - Use {@link reduce} if you only need the final accumulated value.
+ * The output length is `input.length + 1` because it starts with the initial
+ * value. The result is always a `NonEmptyArray`. Use `reduce` if you only need
+ * the final accumulated value.
  *
  * **Example** (Running totals)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.scan([1, 2, 3, 4], 0, (acc, value) => acc + value)
- * console.log(result) // [0, 1, 3, 6, 10]
+ * Array.scan([1, 2, 3, 4], 0, (acc, value) => acc + value) // => [0, 1, 3, 6, 10]
  * ```
  *
  * @see {@link scanRight} — right-to-left scan
@@ -801,16 +732,15 @@ export const scan: {
  *
  * **Details**
  *
- * - The output length is `input.length + 1` (ends with the initial value).
- * - Always returns a `NonEmptyArray`.
+ * The output length is `input.length + 1` because it ends with the initial
+ * value. The result is always a `NonEmptyArray`.
  *
- * **Example** (Reverse running totals)
+ * **Example** (Scanning running totals in reverse)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.scanRight([1, 2, 3, 4], 0, (acc, value) => acc + value)
- * console.log(result) // [10, 9, 7, 4, 0]
+ * Array.scanRight([1, 2, 3, 4], 0, (acc, value) => acc + value) // => [10, 9, 7, 4, 0]
  * ```
  *
  * @see {@link scan} — left-to-right scan
@@ -841,16 +771,16 @@ export const scanRight: {
  *
  * **Details**
  *
- * - Acts as a type guard narrowing the input to `Array<unknown>`.
- * - Delegates to `globalThis.Array.isArray`.
+ * Acts as a type guard narrowing the input to `Array<unknown>` and delegates to
+ * `globalThis.Array.isArray`.
  *
  * **Example** (Type-guarding an unknown value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.isArray(null)) // false
- * console.log(Array.isArray([1, 2, 3])) // true
+ * Array.isArray(null) // => false
+ * Array.isArray([1, 2, 3]) // => true
  * ```
  *
  * @see {@link isArrayEmpty} — check for an empty array
@@ -869,11 +799,11 @@ export const isArray: {
  *
  * **Example** (Checking for an empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.isArrayEmpty([])) // true
- * console.log(Array.isArrayEmpty([1, 2, 3])) // false
+ * Array.isArrayEmpty([]) // => true
+ * Array.isArrayEmpty([1, 2, 3]) // => false
  * ```
  *
  * @see {@link isReadonlyArrayEmpty} — readonly variant
@@ -889,11 +819,11 @@ export const isArrayEmpty = <A>(self: Array<A>): self is [] => self.length === 0
  *
  * **Example** (Checking for an empty readonly array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.isReadonlyArrayEmpty([])) // true
- * console.log(Array.isReadonlyArrayEmpty([1, 2, 3])) // false
+ * Array.isReadonlyArrayEmpty([]) // => true
+ * Array.isReadonlyArrayEmpty([1, 2, 3]) // => false
  * ```
  *
  * @see {@link isArrayEmpty} — mutable variant
@@ -908,13 +838,18 @@ export const isReadonlyArrayEmpty: <A>(self: ReadonlyArray<A>) => self is readon
  * Checks whether a mutable `Array` is non-empty, narrowing the type to
  * `NonEmptyArray`.
  *
+ * **When to use**
+ *
+ * Use when you need the narrowed value to remain a mutable `Array` after proving
+ * it has at least one element.
+ *
  * **Example** (Checking for a non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.isArrayNonEmpty([])) // false
- * console.log(Array.isArrayNonEmpty([1, 2, 3])) // true
+ * Array.isArrayNonEmpty([]) // => false
+ * Array.isArrayNonEmpty([1, 2, 3]) // => true
  * ```
  *
  * @see {@link isReadonlyArrayNonEmpty} — readonly variant
@@ -929,13 +864,18 @@ export const isArrayNonEmpty: <A>(self: Array<A>) => self is NonEmptyArray<A> = 
  * Checks whether a `ReadonlyArray` is non-empty, narrowing the type to
  * `NonEmptyReadonlyArray`.
  *
+ * **When to use**
+ *
+ * Use when you need to prove a readonly array has at least one element without
+ * requiring mutable array methods afterward.
+ *
  * **Example** (Checking for a non-empty readonly array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.isReadonlyArrayNonEmpty([])) // false
- * console.log(Array.isReadonlyArrayNonEmpty([1, 2, 3])) // true
+ * Array.isReadonlyArrayNonEmpty([]) // => false
+ * Array.isReadonlyArrayNonEmpty([1, 2, 3]) // => true
  * ```
  *
  * @see {@link isArrayNonEmpty} — mutable variant
@@ -956,10 +896,10 @@ export const isReadonlyArrayNonEmpty: <A>(self: ReadonlyArray<A>) => self is Non
  *
  * **Example** (Getting the length)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.length([1, 2, 3])) // 3
+ * Array.length([1, 2, 3]) // => 3
  * ```
  *
  * @category getters
@@ -969,7 +909,7 @@ export const length = <A>(self: ReadonlyArray<A>): number => self.length
 
 /** @internal */
 export function isOutOfBounds<A>(i: number, as: ReadonlyArray<A>): boolean {
-  return i < 0 || i >= as.length
+  return !Number.isFinite(i) || i < 0 || i >= as.length
 }
 
 const clamp = <A>(i: number, as: ReadonlyArray<A>): number => Math.floor(Math.min(Math.max(0, i), as.length))
@@ -985,16 +925,15 @@ const clamp = <A>(i: number, as: ReadonlyArray<A>): number => Math.floor(Math.mi
  *
  * **Details**
  *
- * - The index is floored to an integer.
- * - Never throws.
+ * The index is floored to an integer. This never throws.
  *
- * **Example** (Safe index access)
+ * **Example** (Accessing indexes safely)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.get([1, 2, 3], 1)) // Some(2)
- * console.log(Array.get([1, 2, 3], 10)) // None
+ * Array.get([1, 2, 3], 1) // => Option.some(2)
+ * Array.get([1, 2, 3], 10) // => Option.none()
  * ```
  *
  * @see {@link getUnsafe} for indexed access that throws when the index is out of bounds
@@ -1017,20 +956,20 @@ export const get: {
  *
  * **When to use**
  *
- * Use to read an element at a known valid index when out-of-bounds would be a
- * programming error.
+ * Use to read an array element at a known valid index when out-of-bounds would
+ * be a programming error.
  *
  * **Details**
  *
- * - Throws an `Error` with the message `"Index out of bounds: <i>"`.
- * - Prefer {@link get} for safe access.
+ * Throws an `Error` with the message `"Index out of bounds: <i>"`. Prefer
+ * `get` for safe access.
  *
- * **Example** (Unsafe index access)
+ * **Example** (Accessing indexes unsafely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.getUnsafe([1, 2, 3], 1)) // 2
+ * Array.getUnsafe([1, 2, 3], 1) // => 2
  * // Array.getUnsafe([1, 2, 3], 10) // throws Error
  * ```
  *
@@ -1060,16 +999,14 @@ export const getUnsafe: {
  *
  * **Details**
  *
- * - Returns a tuple `[head, tail]`.
- * - Requires a `NonEmptyReadonlyArray`.
+ * Returns a tuple `[head, tail]` and requires a `NonEmptyReadonlyArray`.
  *
  * **Example** (Destructuring head and tail)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.unprepend([1, 2, 3, 4])
- * console.log(result) // [1, [2, 3, 4]]
+ * Array.unprepend([1, 2, 3, 4]) // => [1, [2, 3, 4]]
  * ```
  *
  * @see {@link unappend} for splitting a non-empty array into init and last
@@ -1089,21 +1026,19 @@ export const unprepend = <A>(
  *
  * **When to use**
  *
- * Use to split a non-empty array from the end when you need both the elements
- * before the last element and the last element.
+ * Use when you need to split a non-empty array into the elements before the
+ * last element and the last element.
  *
  * **Details**
  *
- * - Returns a tuple `[init, last]`.
- * - Requires a `NonEmptyReadonlyArray`.
+ * Returns a tuple `[init, last]` and requires a `NonEmptyReadonlyArray`.
  *
  * **Example** (Destructuring init and last)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.unappend([1, 2, 3, 4])
- * console.log(result) // [[1, 2, 3], 4]
+ * Array.unappend([1, 2, 3, 4]) // => [[1, 2, 3], 4]
  * ```
  *
  * @see {@link unprepend} for splitting a non-empty array into head and tail
@@ -1127,11 +1062,11 @@ export const unappend = <A>(
  *
  * **Example** (Getting the first element)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.head([1, 2, 3])) // Some(1)
- * console.log(Array.head([])) // None
+ * Array.head([1, 2, 3]) // => Option.some(1)
+ * Array.head([]) // => Option.none()
  * ```
  *
  * @see {@link headNonEmpty} — direct access when array is known non-empty
@@ -1153,10 +1088,10 @@ export const head: <A>(self: ReadonlyArray<A>) => Option.Option<A> = get(0)
  *
  * **Example** (Getting the head of a non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.headNonEmpty([1, 2, 3, 4])) // 1
+ * Array.headNonEmpty([1, 2, 3, 4]) // => 1
  * ```
  *
  * @see {@link head} — safe version for possibly-empty arrays
@@ -1176,11 +1111,11 @@ export const headNonEmpty: <A>(self: NonEmptyReadonlyArray<A>) => A = getUnsafe(
  *
  * **Example** (Getting the last element)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.last([1, 2, 3])) // Some(3)
- * console.log(Array.last([])) // None
+ * Array.last([1, 2, 3]) // => Option.some(3)
+ * Array.last([]) // => Option.none()
  * ```
  *
  * @see {@link lastNonEmpty} — direct access when array is known non-empty
@@ -1203,10 +1138,10 @@ export const last = <A>(self: ReadonlyArray<A>): Option.Option<A> =>
  *
  * **Example** (Getting the last of a non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.lastNonEmpty([1, 2, 3, 4])) // 4
+ * Array.lastNonEmpty([1, 2, 3, 4]) // => 4
  * ```
  *
  * @see {@link last} — safe version for possibly-empty arrays
@@ -1225,16 +1160,15 @@ export const lastNonEmpty = <A>(self: NonEmptyReadonlyArray<A>): A => self[self.
  *
  * **Details**
  *
- * - Allocates a new array via `slice(1)`.
- * - Returns `Option.none()` for empty inputs.
+ * Allocates a new array via `slice(1)`. Empty inputs return `Option.none()`.
  *
  * **Example** (Getting the tail)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.tail([1, 2, 3, 4])) // Option.some([2, 3, 4])
- * console.log(Array.tail([])) // Option.none()
+ * Array.tail([1, 2, 3, 4]) // => Option.some([2, 3, 4])
+ * Array.tail([]) // => Option.none()
  * ```
  *
  * @see {@link tailNonEmpty} — when the array is known non-empty
@@ -1257,10 +1191,10 @@ export function tail<A>(self: Iterable<A>): Option.Option<Array<A>> {
  *
  * **Example** (Getting the tail of a non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.tailNonEmpty([1, 2, 3, 4])) // [2, 3, 4]
+ * Array.tailNonEmpty([1, 2, 3, 4]) // => [2, 3, 4]
  * ```
  *
  * @see {@link tail} — safe version for possibly-empty arrays
@@ -1280,16 +1214,16 @@ export const tailNonEmpty = <A>(self: NonEmptyReadonlyArray<A>): Array<A> => sel
  *
  * **Details**
  *
- * - Allocates a new array via `slice(0, -1)`.
- * - Returns `Option.none()` for empty inputs.
+ * Allocates a new array via `slice(0, -1)`. Empty inputs return
+ * `Option.none()`.
  *
  * **Example** (Getting init)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.init([1, 2, 3, 4])) // Option.some([1, 2, 3])
- * console.log(Array.init([])) // Option.none()
+ * Array.init([1, 2, 3, 4]) // => Option.some([1, 2, 3])
+ * Array.init([]) // => Option.none()
  * ```
  *
  * @see {@link initNonEmpty} — when the array is known non-empty
@@ -1312,10 +1246,10 @@ export function init<A>(self: Iterable<A>): Option.Option<Array<A>> {
  *
  * **Example** (Getting init of a non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.initNonEmpty([1, 2, 3, 4])) // [1, 2, 3]
+ * Array.initNonEmpty([1, 2, 3, 4]) // => [1, 2, 3]
  * ```
  *
  * @see {@link init} — safe version for possibly-empty arrays
@@ -1335,15 +1269,14 @@ export const initNonEmpty = <A>(self: NonEmptyReadonlyArray<A>): Array<A> => sel
  *
  * **Details**
  *
- * - `n` is clamped to `[0, length]`.
- * - Returns an empty array when `n <= 0`.
+ * `n` is clamped to `[0, length]`. Returns an empty array when `n <= 0`.
  *
  * **Example** (Taking from the start)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.take([1, 2, 3, 4, 5], 3)) // [1, 2, 3]
+ * Array.take([1, 2, 3, 4, 5], 3) // => [1, 2, 3]
  * ```
  *
  * @see {@link takeRight} for keeping elements from the end
@@ -1370,15 +1303,14 @@ export const take: {
  *
  * **Details**
  *
- * - `n` is clamped to `[0, length]`.
- * - Returns an empty array when `n <= 0`.
+ * `n` is clamped to `[0, length]`. Returns an empty array when `n <= 0`.
  *
  * **Example** (Taking from the end)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.takeRight([1, 2, 3, 4, 5], 3)) // [3, 4, 5]
+ * Array.takeRight([1, 2, 3, 4, 5], 3) // => [3, 4, 5]
  * ```
  *
  * @see {@link take} — keep from the start
@@ -1407,15 +1339,15 @@ export const takeRight: {
  *
  * **Details**
  *
- * - Supports refinements for type narrowing.
- * - The predicate receives `(element, index)`.
+ * Supports refinements for type narrowing. The predicate receives
+ * `(element, index)`.
  *
  * **Example** (Taking while condition holds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.takeWhile([1, 3, 2, 4, 1, 2], (x) => x < 4)) // [1, 3, 2]
+ * Array.takeWhile([1, 3, 2, 4, 1, 2], (x) => x < 4) // => [1, 3, 2]
  * ```
  *
  * @see {@link take} for keeping a fixed number of leading elements
@@ -1448,14 +1380,14 @@ export const takeWhile: {
  *
  * **When to use**
  *
- * Use when you need to take a prefix of elements while a function can
- * successfully extract or transform them, stopping at the first element
+ * Use when you need to take a prefix from an iterable while a function can
+ * successfully extract or transform elements, stopping at the first element
  * that produces a failure result.
  *
  * **Details**
  *
- * - The filter receives `(element, index)`.
- * - Stops at the first filter failure.
+ * The filter receives `(element, index)` and processing stops at the first
+ * filter failure.
  *
  * @see {@link takeWhile} for taking a prefix based on a boolean predicate
  *
@@ -1496,21 +1428,21 @@ const spanIndex = <A>(self: Iterable<A>, predicate: (a: A, i: number) => boolean
  *
  * **When to use**
  *
- * Use to split an iterable into the longest prefix that satisfies a predicate
- * and the elements after that prefix when you need both parts.
+ * Use when you need both the longest predicate-matching prefix and the
+ * remaining elements.
  *
  * **Details**
  *
- * - Equivalent to `[takeWhile(pred), dropWhile(pred)]` but more efficient
- *   (single pass).
- * - Supports refinements for type narrowing of the prefix.
+ * Equivalent to `[takeWhile(pred), dropWhile(pred)]`, but more efficient
+ * because it runs in a single pass. Supports refinements for type narrowing of
+ * the prefix.
  *
  * **Example** (Splitting at predicate boundary)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.span([1, 3, 2, 4, 5], (x) => x % 2 === 1)) // [[1, 3], [2, 4, 5]]
+ * Array.span([1, 3, 2, 4, 5], (x) => x % 2 === 1) // => [[1, 3], [2, 4, 5]]
  * ```
  *
  * @see {@link takeWhile} for keeping only the matching prefix
@@ -1548,15 +1480,15 @@ export const span: {
  *
  * **Details**
  *
- * - `n` is clamped to `[0, length]`.
- * - Returns a copy of the full array when `n <= 0`.
+ * `n` is clamped to `[0, length]`. When `n <= 0`, this returns a copy of the
+ * full array.
  *
  * **Example** (Dropping from the start)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.drop([1, 2, 3, 4, 5], 2)) // [3, 4, 5]
+ * Array.drop([1, 2, 3, 4, 5], 2) // => [3, 4, 5]
  * ```
  *
  * @see {@link dropRight} for removing a fixed number of elements from the end
@@ -1587,10 +1519,10 @@ export const drop: {
  *
  * **Example** (Dropping from the end)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.dropRight([1, 2, 3, 4, 5], 2)) // [1, 2, 3]
+ * Array.dropRight([1, 2, 3, 4, 5], 2) // => [1, 2, 3]
  * ```
  *
  * @see {@link drop} — remove from the start
@@ -1620,10 +1552,10 @@ export const dropRight: {
  *
  * **Example** (Dropping while condition holds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.dropWhile([1, 2, 3, 4, 5], (x) => x < 4)) // [4, 5]
+ * Array.dropWhile([1, 2, 3, 4, 5], (x) => x < 4) // => [4, 5]
  * ```
  *
  * @see {@link takeWhile} — keep the matching prefix instead
@@ -1652,13 +1584,13 @@ export const dropWhile: {
  *
  * **When to use**
  *
- * Use when dropping a prefix requires computing a `Result` per element instead
- * of a simple boolean predicate.
+ * Use when you need to drop a prefix from an iterable by computing a `Result`
+ * per element instead of using a simple boolean predicate.
  *
  * **Details**
  *
- * - The filter receives `(element, index)`.
- * - Returns the remaining original elements after the first filter failure.
+ * The filter receives `(element, index)`. The result contains the remaining
+ * original elements after the first filter failure.
  *
  * @see {@link dropWhile} for dropping a prefix with a simple boolean predicate
  * @see {@link takeWhileFilter} for keeping only the matching prefix
@@ -1695,16 +1627,16 @@ export const dropWhileFilter: {
  *
  * **Example** (Finding an index)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.findFirstIndex([5, 3, 8, 9], (x) => x > 5)) // Option.some(2)
+ * Array.findFirstIndex([5, 3, 8, 9], (x) => x > 5) // => Option.some(2)
  * ```
  *
  * @see {@link findLastIndex} — search from the end
  * @see {@link findFirst} — get the element itself
  *
- * @category elements
+ * @category searching
  * @since 2.0.0
  */
 export const findFirstIndex: {
@@ -1731,16 +1663,16 @@ export const findFirstIndex: {
  *
  * **Example** (Finding the last matching index)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.findLastIndex([1, 3, 8, 9], (x) => x < 5)) // Option.some(1)
+ * Array.findLastIndex([1, 3, 8, 9], (x) => x < 5) // => Option.some(1)
  * ```
  *
  * @see {@link findFirstIndex} — search from the start
  * @see {@link findLast} — get the element itself
  *
- * @category elements
+ * @category searching
  * @since 2.0.0
  */
 export const findLastIndex: {
@@ -1767,23 +1699,23 @@ export const findLastIndex: {
  *
  * **Details**
  *
- * - Accepts a predicate `(a, i) => boolean`, a refinement, or a function
- *   `(a, i) => Option<B>` for simultaneous find-and-transform.
- * - Returns `Option.none()` if no element matches.
+ * Accepts a predicate `(a, i) => boolean`, a refinement, or a function
+ * `(a, i) => Option<B>` for simultaneous find-and-transform. If no element
+ * matches, this returns `Option.none()`.
  *
  * **Example** (Finding the first match)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.findFirst([1, 2, 3, 4, 5], (x) => x > 3)) // Option.some(4)
+ * Array.findFirst([1, 2, 3, 4, 5], (x) => x > 3) // => Option.some(4)
  * ```
  *
  * @see {@link findLast} — search from the end
  * @see {@link findFirstIndex} — get the index instead
  * @see {@link findFirstWithIndex} — get both element and index
  *
- * @category elements
+ * @category searching
  * @since 2.0.0
  */
 export const findFirst: {
@@ -1811,16 +1743,16 @@ export const findFirst: {
  *
  * **Example** (Finding element with its index)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.findFirstWithIndex([1, 2, 3, 4, 5], (x) => x > 3)) // Option.some([4, 3])
+ * Array.findFirstWithIndex([1, 2, 3, 4, 5], (x) => x > 3) // => Option.some([4, 3])
  * ```
  *
  * @see {@link findFirst} — get only the element
  * @see {@link findFirstIndex} — get only the index
  *
- * @category elements
+ * @category searching
  * @since 3.17.0
  */
 export const findFirstWithIndex: {
@@ -1864,21 +1796,21 @@ export const findFirstWithIndex: {
  *
  * **Details**
  *
- * - Searches from the end of the array.
- * - Returns `Option.none()` if no element matches.
+ * Searches from the end of the array. If no element matches, this returns
+ * `Option.none()`.
  *
  * **Example** (Finding the last match)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.findLast([1, 2, 3, 4, 5], (n) => n % 2 === 0)) // Option.some(4)
+ * Array.findLast([1, 2, 3, 4, 5], (n) => n % 2 === 0) // => Option.some(4)
  * ```
  *
  * @see {@link findFirst} — search from the start
  * @see {@link findLastIndex} — get the index instead
  *
- * @category elements
+ * @category searching
  * @since 2.0.0
  */
 export const findLast: {
@@ -1922,20 +1854,20 @@ export const findLast: {
  *
  * **Details**
  *
- * - Valid indices: `0` to `length` (inclusive — inserting at `length` appends).
+ * Valid indices are `0` to `length`, inclusive. Inserting at `length` appends.
  *
  * **Example** (Inserting at an index)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.insertAt(["a", "b", "c", "e"], 3, "d")) // Option.some(["a", "b", "c", "d", "e"])
+ * Array.insertAt(["a", "b", "c", "e"], 3, "d") // => Option.some(["a", "b", "c", "d", "e"])
  * ```
  *
  * @see {@link replace} — replace an existing element
  * @see {@link modify} — transform an element at an index
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const insertAt: {
@@ -1943,10 +1875,11 @@ export const insertAt: {
   <A, B>(self: Iterable<A>, i: number, b: B): Option.Option<NonEmptyArray<A | B>>
 } = dual(3, <A, B>(self: Iterable<A>, i: number, b: B): Option.Option<NonEmptyArray<A | B>> => {
   const out: Array<A | B> = Array.from(self) // copy because `splice` mutates the array
-  if (i < 0 || i > out.length) {
+  const index = Math.floor(i)
+  if (index !== out.length && isOutOfBounds(index, out)) {
     return Option.none()
   }
-  out.splice(i, 0, b)
+  out.splice(index, 0, b)
   return Option.some(out as any)
 })
 
@@ -1960,20 +1893,20 @@ export const insertAt: {
  *
  * **Details**
  *
- * - Returns `Option.none()` when the index is out of bounds.
+ * Returns `Option.none()` when the index is out of bounds.
  *
  * **Example** (Replacing an element)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.replace([1, 2, 3], 1, 4)) // Option.some([1, 4, 3])
+ * Array.replace([1, 2, 3], 1, 4) // => Option.some([1, 4, 3])
  * ```
  *
  * @see {@link modify} — transform an element with a function
  * @see {@link insertAt} — insert without removing
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const replace: {
@@ -1996,27 +1929,30 @@ export const replace: {
  *
  * **When to use**
  *
- * Use to derive a replacement value from the current element at a specific
- * index while leaving the other elements unchanged.
+ * Use to derive a replacement value from an array element at a specific index
+ * while leaving the other elements unchanged.
  *
  * **Details**
  *
- * - Returns `Option.none()` when the index is out of bounds.
+ * Returns `Option.none()` when the index is out of bounds.
  *
  * **Example** (Modifying an element)
  *
- * ```ts
- * import { Array } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array, Option } from "effect"
  *
- * console.log(Array.modify([1, 2, 3, 4], 2, (n) => n * 2)) // Option.some([1, 2, 6, 4])
- * console.log(Array.modify([1, 2, 3, 4], 5, (n) => n * 2)) // Option.none()
+ * const values = [1, 2, 3, 4]
+ * const double = (n: number) => n * 2
+ *
+ * Array.modify(values, 2, double) // => Option.some([1, 2, 6, 4])
+ * Array.modify(values, 5, double) // => Option.none()
  * ```
  *
  * @see {@link replace} — set a fixed value at an index
  * @see {@link modifyHeadNonEmpty} — modify the first element
  * @see {@link modifyLastNonEmpty} — modify the last element
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const modify: {
@@ -2031,12 +1967,13 @@ export const modify: {
   ): Option.Option<ReadonlyArray.With<S, ReadonlyArray.Infer<S> | B>>
 } = dual(3, <A, B>(self: Iterable<A>, i: number, f: (a: A) => B): Option.Option<Array<A | B>> => {
   const arr = Array.from(self)
-  if (isOutOfBounds(i, arr)) {
+  const index = Math.floor(i)
+  if (isOutOfBounds(index, arr)) {
     return Option.none()
   }
   const out: Array<A | B> = arr
-  const b = f(arr[i])
-  out[i] = b
+  const b = f(arr[index])
+  out[index] = b
   return Option.some(out)
 })
 
@@ -2046,21 +1983,22 @@ export const modify: {
  *
  * **When to use**
  *
- * Use to remove a single element at a known index.
+ * Use when you want a missing index to be a no-op and need a fresh array result
+ * instead of an optional failure.
  *
  * **Example** (Removing an element)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.remove([1, 2, 3, 4], 2)) // [1, 2, 4]
- * console.log(Array.remove([1, 2, 3, 4], 5)) // [1, 2, 3, 4]
+ * Array.remove([1, 2, 3, 4], 2) // => [1, 2, 4]
+ * Array.remove([1, 2, 3, 4], 5) // => [1, 2, 3, 4]
  * ```
  *
  * @see {@link insertAt} — insert an element
  * @see {@link filter} — remove elements by predicate
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const remove: {
@@ -2068,10 +2006,11 @@ export const remove: {
   <A>(self: Iterable<A>, i: number): Array<A>
 } = dual(2, <A>(self: Iterable<A>, i: number): Array<A> => {
   const out = Array.from(self)
-  if (isOutOfBounds(i, out)) {
+  const index = Math.floor(i)
+  if (isOutOfBounds(index, out)) {
     return out
   }
-  out.splice(i, 1)
+  out.splice(index, 1)
   return out
 })
 
@@ -2080,21 +2019,22 @@ export const remove: {
  *
  * **When to use**
  *
- * Use to reverse the order of elements without mutating the original input.
+ * Use to reverse an iterable into a new array without mutating the original
+ * input.
  *
  * **Details**
  *
- * - Preserves `NonEmptyArray` in the return type.
+ * Preserves `NonEmptyArray` in the return type.
  *
  * **Example** (Reversing an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.reverse([1, 2, 3, 4])) // [4, 3, 2, 1]
+ * Array.reverse([1, 2, 3, 4]) // => [4, 3, 2, 1]
  * ```
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const reverse = <S extends Iterable<any>>(
@@ -2111,16 +2051,15 @@ export const reverse = <S extends Iterable<any>>(
  *
  * **Details**
  *
- * - Preserves `NonEmptyArray` in the return type.
- * - Use {@link sortWith} to sort by a derived key, or {@link sortBy} for
- *   multi-key sorting.
+ * Preserves `NonEmptyArray` in the return type. Use `sortWith` to sort by a
+ * derived key, or `sortBy` for multi-key sorting.
  *
  * **Example** (Sorting numbers)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Order } from "effect"
  *
- * console.log(Array.sort([3, 1, 4, 1, 5], Order.Number)) // [1, 1, 3, 4, 5]
+ * Array.sort([3, 1, 4, 1, 5], Order.Number) // => [1, 1, 3, 4, 5]
  * ```
  *
  * @see {@link sortWith} — sort by a mapping function
@@ -2147,26 +2086,25 @@ export const sort: {
  *
  * **When to use**
  *
- * Use when values need to be sorted by a derived key, such as a string length
- * or object field, while the output should keep the original values.
+ * Use when you need to sort values by a derived key, such as a string length or
+ * object field, while keeping the original values.
  *
  * **Details**
  *
- * - Equivalent to `sort(Order.mapInput(order, f))` but more convenient.
+ * Equivalent to `sort(Order.mapInput(order, f))`, but more convenient.
  *
  * **Example** (Sorting strings by length)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Order } from "effect"
  *
- * console.log(Array.sortWith(["aaa", "b", "cc"], (s) => s.length, Order.Number))
- * // ["b", "cc", "aaa"]
+ * Array.sortWith(["aaa", "b", "cc"], (s) => s.length, Order.Number) // => ["b", "cc", "aaa"]
  * ```
  *
  * @see {@link sort} for sorting with an `Order` that compares the elements directly
  * @see {@link sortBy} for sorting with multiple `Order`s applied in sequence
  *
- * @category elements
+ * @category sorting
  * @since 2.0.0
  */
 export const sortWith: {
@@ -2193,12 +2131,12 @@ export const sortWith: {
  *
  * **Details**
  *
- * - Data-last only (returns a function).
- * - Preserves `NonEmptyArray` in the return type.
+ * This is data-last only and returns a function. The return type preserves
+ * `NonEmptyArray`.
  *
- * **Example** (Multi-key sorting)
+ * **Example** (Sorting by multiple keys)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Order, pipe } from "effect"
  *
  * const users = [
@@ -2207,15 +2145,15 @@ export const sortWith: {
  *   { name: "Charlie", age: 30 }
  * ]
  *
- * const result = pipe(
+ * const sortedUsers = pipe(
  *   users,
  *   Array.sortBy(
  *     Order.mapInput(Order.Number, (user: (typeof users)[number]) => user.age),
  *     Order.mapInput(Order.String, (user: (typeof users)[number]) => user.name)
  *   )
  * )
- * console.log(result)
- * // [{ name: "Bob", age: 25 }, { name: "Alice", age: 30 }, { name: "Charlie", age: 30 }]
+ *
+ * sortedUsers.map((user) => user.name).join(",") // => "Bob,Alice,Charlie"
  * ```
  *
  * @see {@link sort} — sort by a single `Order`
@@ -2245,18 +2183,18 @@ export const sortBy = <S extends Iterable<any>>(
  *
  * **When to use**
  *
- * Use to pair corresponding elements from two iterables when you need simple pairs without a custom combiner.
+ * Use when you need simple pairs of corresponding elements from two iterables.
  *
  * **Details**
  *
- * - Returns `NonEmptyArray` when both inputs are non-empty.
+ * Returns `NonEmptyArray` when both inputs are non-empty.
  *
  * **Example** (Zipping two arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.zip([1, 2, 3], ["a", "b"])) // [[1, "a"], [2, "b"]]
+ * Array.zip([1, 2, 3], ["a", "b"]) // => [[1, "a"], [2, "b"]]
  * ```
  *
  * @see {@link zipWith} — zip with a combiner function
@@ -2279,12 +2217,17 @@ export const zip: {
  * Combines elements from two iterables pairwise using a function. If the
  * iterables differ in length, extra elements are discarded.
  *
+ * **When to use**
+ *
+ * Use when zipping two iterables in an array pipeline and each pair should
+ * become a computed array element instead of a tuple.
+ *
  * **Example** (Zipping with addition)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.zipWith([1, 2, 3], [4, 5, 6], (a, b) => a + b)) // [5, 7, 9]
+ * Array.zipWith([1, 2, 3], [4, 5, 6], (a, b) => a + b) // => [5, 7, 9]
  * ```
  *
  * @see {@link zip} — zip into tuples
@@ -2316,10 +2259,10 @@ export const zipWith: {
  *
  * **Example** (Unzipping pairs)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.unzip([[1, "a"], [2, "b"], [3, "c"]])) // [[1, 2, 3], ["a", "b", "c"]]
+ * Array.unzip([[1, "a"], [2, "b"], [3, "c"]]) // => [[1, 2, 3], ["a", "b", "c"]]
  * ```
  *
  * @see {@link zip} — combine two arrays into pairs
@@ -2354,20 +2297,20 @@ export const unzip: <S extends Iterable<readonly [any, any]>>(
  *
  * **Details**
  *
- * - Preserves `NonEmptyArray` in the return type.
- * - An empty input produces an empty result.
+ * The return type preserves `NonEmptyArray`. Empty inputs produce an empty
+ * result.
  *
  * **Example** (Interspersing a separator)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.intersperse([1, 2, 3], 0)) // [1, 0, 2, 0, 3]
+ * Array.intersperse([1, 2, 3], 0) // => [1, 0, 2, 0, 3]
  * ```
  *
  * @see {@link join} — intersperse and join into a string
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const intersperse: {
@@ -2402,16 +2345,16 @@ export const intersperse: {
  *
  * **Example** (Modifying the head)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.modifyHeadNonEmpty([1, 2, 3], (n) => n * 10)) // [10, 2, 3]
+ * Array.modifyHeadNonEmpty([1, 2, 3], (n) => n * 10) // => [10, 2, 3]
  * ```
  *
  * @see {@link setHeadNonEmpty} — replace with a fixed value
  * @see {@link modifyLastNonEmpty} — modify the last element
  *
- * @category elements
+ * @category transforming
  * @since 4.0.0
  */
 export const modifyHeadNonEmpty: {
@@ -2428,18 +2371,23 @@ export const modifyHeadNonEmpty: {
 /**
  * Replaces the first element of a non-empty array with a new value.
  *
+ * **When to use**
+ *
+ * Use when you already know the array is non-empty and the replacement value
+ * does not depend on the current first element.
+ *
  * **Example** (Setting the head)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.setHeadNonEmpty([1, 2, 3], 10)) // [10, 2, 3]
+ * Array.setHeadNonEmpty([1, 2, 3], 10) // => [10, 2, 3]
  * ```
  *
  * @see {@link modifyHeadNonEmpty} — transform the head with a function
  * @see {@link setLastNonEmpty} — replace the last element
  *
- * @category elements
+ * @category transforming
  * @since 4.0.0
  */
 export const setHeadNonEmpty: {
@@ -2454,18 +2402,23 @@ export const setHeadNonEmpty: {
  * Applies a function to the last element of a non-empty array, returning a
  * new array.
  *
+ * **When to use**
+ *
+ * Use when you already know the array is non-empty and the new last element
+ * depends on the current last element.
+ *
  * **Example** (Modifying the last element)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.modifyLastNonEmpty([1, 2, 3], (n) => n * 2)) // [1, 2, 6]
+ * Array.modifyLastNonEmpty([1, 2, 3], (n) => n * 2) // => [1, 2, 6]
  * ```
  *
  * @see {@link setLastNonEmpty} — replace with a fixed value
  * @see {@link modifyHeadNonEmpty} — modify the first element
  *
- * @category elements
+ * @category transforming
  * @since 4.0.0
  */
 export const modifyLastNonEmpty: {
@@ -2480,18 +2433,23 @@ export const modifyLastNonEmpty: {
 /**
  * Replaces the last element of a non-empty array with a new value.
  *
+ * **When to use**
+ *
+ * Use when you already know the array is non-empty and the replacement value
+ * does not depend on the current last element.
+ *
  * **Example** (Setting the last element)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.setLastNonEmpty([1, 2, 3], 4)) // [1, 2, 4]
+ * Array.setLastNonEmpty([1, 2, 3], 4) // => [1, 2, 4]
  * ```
  *
  * @see {@link modifyLastNonEmpty} — transform the last element with a function
  * @see {@link setHeadNonEmpty} — replace the first element
  *
- * @category elements
+ * @category transforming
  * @since 4.0.0
  */
 export const setLastNonEmpty: {
@@ -2513,22 +2471,22 @@ export const setLastNonEmpty: {
  *
  * **Details**
  *
- * - `n` is rounded to the nearest integer before rotating.
- * - Preserves `NonEmptyArray` in the return type.
- * - Returns a copy for empty arrays or when the normalized rotation is `0`.
+ * `n` is rounded to the nearest integer before rotating. The return type
+ * preserves `NonEmptyArray`. Empty arrays, or rotations normalized to `0`,
+ * return a copy.
  *
  * **Example** (Rotating elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.rotate(["a", "b", "c", "d"], 2)) // ["c", "d", "a", "b"]
+ * Array.rotate(["a", "b", "c", "d"], 2) // => ["c", "d", "a", "b"]
  * ```
  *
  * @see {@link take} for taking a fixed number of elements from the start
  * @see {@link drop} for dropping a fixed number of elements from the start
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const rotate: {
@@ -2547,7 +2505,7 @@ export const rotate: {
       const [f, s] = splitAtNonEmpty(input, -m)
       return appendAll(s, f)
     } else {
-      return rotate(self, m - len)
+      return rotate(input, m - len)
     }
   }
   return []
@@ -2561,18 +2519,19 @@ export const rotate: {
  * Use when checking membership with caller-provided equality instead of
  * `Equal.equivalence()`.
  *
- * **Example** (Custom equality check)
+ * **Example** (Checking with custom equality)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, pipe } from "effect"
  *
  * const containsNumber = Array.containsWith((a: number, b: number) => a === b)
- * console.log(pipe([1, 2, 3, 4], containsNumber(3))) // true
+ *
+ * pipe([1, 2, 3, 4], containsNumber(3)) // => true
  * ```
  *
  * @see {@link contains} for the `Equal.equivalence()` variant
  *
- * @category elements
+ * @category predicates
  * @since 2.0.0
  */
 export const containsWith = <A>(isEquivalent: (self: A, that: A) => boolean): {
@@ -2594,20 +2553,20 @@ export const containsWith = <A>(isEquivalent: (self: A, that: A) => boolean): {
  *
  * **When to use**
  *
- * Use to check membership with Effect's default equality instead of providing a
- * comparison function.
+ * Use to check whether an iterable contains a value using Effect's default
+ * equality instead of providing a comparison function.
  *
  * **Example** (Checking membership)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, pipe } from "effect"
  *
- * console.log(pipe(["a", "b", "c", "d"], Array.contains("c"))) // true
+ * pipe(["a", "b", "c", "d"], Array.contains("c")) // => true
  * ```
  *
  * @see {@link containsWith} — use custom equality
  *
- * @category elements
+ * @category predicates
  * @since 2.0.0
  */
 export const contains: {
@@ -2621,32 +2580,26 @@ export const contains: {
  *
  * **When to use**
  *
- * Use when the grouping logic is custom and each step needs to return both a
- * value and the remaining input.
+ * Use when you need custom grouping logic where each step returns both a value
+ * and the remaining input.
  *
  * **Details**
  *
- * - The function receives a `NonEmptyReadonlyArray` and returns
- *   `[value, rest]`.
- * - Continues until the remaining array is empty.
- * - Useful for custom splitting/grouping logic.
+ * The function receives a `NonEmptyReadonlyArray` and returns `[value, rest]`.
+ * Processing continues until the remaining array is empty.
  *
  * **Example** (Chopping an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.chop(
- *   [1, 2, 3, 4, 5],
- *   (as): [number, Array<number>] => [as[0] * 2, as.slice(1)]
- * )
- * console.log(result) // [2, 4, 6, 8, 10]
+ * Array.chop([1, 2, 3, 4, 5], (as): [number, Array<number>] => [as[0] * 2, as.slice(1)]) // => [2, 4, 6, 8, 10]
  * ```
  *
  * @see {@link chunksOf} — split into fixed-size chunks
  * @see {@link splitAt} — split at an index
  *
- * @category elements
+ * @category splitting
  * @since 2.0.0
  */
 export const chop: {
@@ -2689,15 +2642,15 @@ export const chop: {
  *
  * **Details**
  *
- * - `n` can be `0` (all elements in the second array).
- * - `n` is floored to an integer.
+ * `n` can be `0`, in which case all elements are placed in the second array.
+ * The index is floored to an integer.
  *
  * **Example** (Splitting at an index)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.splitAt([1, 2, 3, 4, 5], 3)) // [[1, 2, 3], [4, 5]]
+ * Array.splitAt([1, 2, 3, 4, 5], 3) // => [[1, 2, 3], [4, 5]]
  * ```
  *
  * @see {@link splitAtNonEmpty} — for non-empty arrays
@@ -2725,13 +2678,17 @@ export const splitAt: {
  * Splits a non-empty array into two parts at the given index. The first part
  * is guaranteed to be non-empty (`n` is clamped to >= 1).
  *
+ * **When to use**
+ *
+ * Use when downstream code requires the left side of the split to contain at
+ * least one element.
+ *
  * **Example** (Splitting a non-empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.splitAtNonEmpty(["a", "b", "c", "d", "e"], 3))
- * // [["a", "b", "c"], ["d", "e"]]
+ * Array.splitAtNonEmpty(["a", "b", "c", "d", "e"], 3) // => [["a", "b", "c"], ["d", "e"]]
  * ```
  *
  * @see {@link splitAt} — for possibly-empty arrays
@@ -2758,15 +2715,14 @@ export const splitAtNonEmpty: {
  *
  * **Details**
  *
- * - Uses `chunksOf(ceil(length / n))` internally.
- * - The last chunk may be shorter.
+ * Uses `chunksOf(ceil(length / n))` internally. The last chunk may be shorter.
  *
  * **Example** (Splitting into groups)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.split([1, 2, 3, 4, 5, 6, 7, 8], 3)) // [[1, 2, 3], [4, 5, 6], [7, 8]]
+ * Array.split([1, 2, 3, 4, 5, 6, 7, 8], 3) // => [[1, 2, 3], [4, 5, 6], [7, 8]]
  * ```
  *
  * @see {@link chunksOf} — split into fixed-size chunks
@@ -2788,14 +2744,15 @@ export const split: {
  *
  * **When to use**
  *
- * Use to split an array at a condition boundary when you know which element marks the transition point.
+ * Use when you need to split an array at the first element that marks a
+ * condition boundary.
  *
  * **Example** (Splitting at a condition)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.splitWhere([1, 2, 3, 4, 5], (n) => n > 3)) // [[1, 2, 3], [4, 5]]
+ * Array.splitWhere([1, 2, 3, 4, 5], (n) => n > 3) // => [[1, 2, 3], [4, 5]]
  * ```
  *
  * @see {@link span} — splits at the first element that fails the predicate
@@ -2825,23 +2782,24 @@ export const splitWhere: {
  *
  * **Details**
  *
- * - Preserves `NonEmptyArray` in the return type.
- * - Useful when you need a distinct reference (e.g. before mutating).
+ * The return type preserves `NonEmptyArray`. Use this when you need a distinct
+ * reference, for example before mutating the returned array.
  *
  * **Example** (Copying an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const original = [1, 2, 3]
  * const copied = Array.copy(original)
- * console.log(copied) // [1, 2, 3]
- * console.log(original === copied) // false
+ *
+ * copied // => [1, 2, 3]
+ * original === copied // => false
  * ```
  *
  * @see {@link fromIterable} — returns the same reference for arrays
  *
- * @category elements
+ * @category transforming
  * @since 2.0.0
  */
 export const copy: {
@@ -2859,20 +2817,20 @@ export const copy: {
  *
  * **Details**
  *
- * - Returns an empty array when `n <= 0`.
+ * Returns an empty array when `n <= 0`.
  *
  * **Example** (Padding an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.pad([1, 2, 3], 6, 0)) // [1, 2, 3, 0, 0, 0]
+ * Array.pad([1, 2, 3], 6, 0) // => [1, 2, 3, 0, 0, 0]
  * ```
  *
  * @see {@link take} — truncate without padding
  * @see {@link replicate} — create an array of a single repeated value
  *
- * @category elements
+ * @category transforming
  * @since 3.8.4
  */
 export const pad: {
@@ -2899,21 +2857,20 @@ export const pad: {
  *
  * **When to use**
  *
- * Use to divide an iterable into non-overlapping chunks with a maximum chunk
- * size.
+ * Use to divide an iterable into a new array of non-overlapping chunks with a
+ * maximum chunk size.
  *
  * **Details**
  *
- * - `chunksOf(n)([])` is `[]`, not `[[]]`.
- * - Each chunk is a `NonEmptyArray`.
- * - Preserves `NonEmptyArray` in the outer return type.
+ * `chunksOf(n)([])` is `[]`, not `[[]]`. Each chunk is a `NonEmptyArray`, and
+ * the outer return type preserves `NonEmptyArray`.
  *
  * **Example** (Chunking an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.chunksOf([1, 2, 3, 4, 5], 2)) // [[1, 2], [3, 4], [5]]
+ * Array.chunksOf([1, 2, 3, 4, 5], 2) // => [[1, 2], [3, 4], [5]]
  * ```
  *
  * @see {@link split} — split into a given number of groups
@@ -2947,16 +2904,18 @@ export const chunksOf: {
  *
  * **Details**
  *
- * - Returns an empty array if `n <= 0` or the array has fewer than `n` elements.
- * - Each window is a tuple of exactly `n` elements.
+ * Returns an empty array if `n <= 0` or the array has fewer than `n` elements.
+ * Each window is a tuple of exactly `n` elements.
  *
- * **Example** (Sliding windows)
+ * **Example** (Creating sliding windows)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.window([1, 2, 3, 4, 5], 3)) // [[1, 2, 3], [2, 3, 4], [3, 4, 5]]
- * console.log(Array.window([1, 2, 3, 4, 5], 6)) // []
+ * const values = [1, 2, 3, 4, 5]
+ *
+ * Array.window(values, 3) // => [[1, 2, 3], [2, 3, 4], [3, 4, 5]]
+ * Array.window(values, 6) // => []
  * ```
  *
  * @see {@link chunksOf} — non-overlapping chunks
@@ -2983,21 +2942,23 @@ export const window: {
  *
  * **When to use**
  *
- * Use when a non-empty array is already arranged so matching elements are
- * adjacent and you need a custom equivalence function.
+ * Use when you already have a non-empty array arranged so matching elements are
+ * adjacent and need a custom equivalence function.
  *
  * **Details**
  *
- * - Only groups **adjacent** elements — non-adjacent duplicates stay separate.
- * - Requires a `NonEmptyReadonlyArray`.
+ * Only adjacent elements are grouped. Non-adjacent duplicates stay separate.
+ * Requires a `NonEmptyReadonlyArray`.
  *
  * **Example** (Grouping consecutive equal elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.groupWith(["a", "a", "b", "b", "b", "c", "a"], (x, y) => x === y))
- * // [["a", "a"], ["b", "b", "b"], ["c"], ["a"]]
+ * Array.groupWith(
+ *   ["a", "a", "b", "b", "b", "c", "a"],
+ *   (x, y) => x === y
+ * ) // => [["a", "a"], ["b", "b", "b"], ["c"], ["a"]]
  * ```
  *
  * @see {@link group} for grouping adjacent elements with `Equal.equivalence()`
@@ -3033,19 +2994,19 @@ export const groupWith: {
  *
  * **When to use**
  *
- * Use when equal values are already adjacent and Effect's default equality is
- * the right comparison.
+ * Use when you already have adjacent equal values and Effect's default equality
+ * is the right comparison.
  *
  * **Details**
  *
- * - Only groups **adjacent** elements.
+ * Only adjacent elements are grouped.
  *
  * **Example** (Grouping adjacent equal elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.group([1, 1, 2, 2, 2, 3, 1])) // [[1, 1], [2, 2, 2], [3], [1]]
+ * Array.group([1, 1, 2, 2, 2, 3, 1]) // => [[1, 1], [2, 2, 2], [3], [1]]
  * ```
  *
  * @see {@link groupWith} — use custom equality
@@ -3068,13 +3029,12 @@ export const group: <A>(self: NonEmptyReadonlyArray<A>) => NonEmptyArray<NonEmpt
  *
  * **Details**
  *
- * - Unlike {@link group}/{@link groupWith}, elements do not need to be
- *   adjacent to be grouped together.
- * - Key function must return a `string` or `symbol`.
+ * Unlike `group` and `groupWith`, elements do not need to be adjacent to be
+ * grouped together. The key function must return a `string` or `symbol`.
  *
  * **Example** (Grouping by a property)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const people = [
@@ -3083,9 +3043,7 @@ export const group: <A>(self: NonEmptyReadonlyArray<A>) => NonEmptyArray<NonEmpt
  *   { name: "Charlie", group: "A" }
  * ]
  *
- * const result = Array.groupBy(people, (person) => person.group)
- * console.log(result)
- * // { A: [{ name: "Alice", group: "A" }, { name: "Charlie", group: "A" }], B: [{ name: "Bob", group: "B" }] }
+ * Object.keys(Array.groupBy(people, (person) => person.group)).join(",") // => "A,B"
  * ```
  *
  * @see {@link group} — group adjacent equal elements
@@ -3112,11 +3070,51 @@ export const groupBy: {
     if (Object.hasOwn(out, k)) {
       out[k].push(a)
     } else {
-      out[k] = [a]
+      InternalRecord.assignProperty(out, k, [a])
     }
   }
   return out
 })
+
+type HashBuckets = Map<number, Array<unknown>>
+
+const hashBucketsAdd = (buckets: HashBuckets, value: unknown): boolean => {
+  const hash = Hash.hash(value)
+  const bucket = buckets.get(hash)
+  if (bucket === undefined) {
+    buckets.set(hash, [value])
+    return true
+  }
+  // Hash collisions still require an Effect equality check.
+  for (const previous of bucket) {
+    if (Equal.equals(previous, value)) {
+      return false
+    }
+  }
+  bucket.push(value)
+  return true
+}
+
+const makeHashBuckets = (values: Iterable<unknown>): HashBuckets => {
+  const buckets: HashBuckets = new Map()
+  for (const value of values) {
+    hashBucketsAdd(buckets, value)
+  }
+  return buckets
+}
+
+const hashBucketsHas = (buckets: HashBuckets, value: unknown): boolean => {
+  const bucket = buckets.get(Hash.hash(value))
+  if (bucket === undefined) {
+    return false
+  }
+  for (const candidate of bucket) {
+    if (Equal.equals(candidate, value)) {
+      return true
+    }
+  }
+  return false
+}
 
 /**
  * Computes the union of two arrays using a custom equivalence, removing
@@ -3127,19 +3125,19 @@ export const groupBy: {
  * Use when you need the union of two arrays but duplicate detection must use a
  * custom equivalence instead of the default `Equal.equivalence()`.
  *
- * **Example** (Union with custom equality)
+ * **Example** (Computing unions with custom equality)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.unionWith([1, 2], [2, 3], (a, b) => a === b)) // [1, 2, 3]
+ * Array.unionWith([1, 2], [2, 3], (a, b) => a === b) // => [1, 2, 3]
  * ```
  *
  * @see {@link union} for the `Equal.equivalence()` variant
  * @see {@link intersectionWith} for keeping elements present in both arrays
  * @see {@link differenceWith} for keeping elements present only in the first array
  *
- * @category elements
+ * @category set operations
  * @since 2.0.0
  */
 export const unionWith: {
@@ -3175,19 +3173,19 @@ export const unionWith: {
  * Computes the union of two arrays, removing duplicates using
  * `Equal.equivalence()`.
  *
- * **Example** (Array union)
+ * **Example** (Computing array unions)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.union([1, 2], [2, 3])) // [1, 2, 3]
+ * Array.union([1, 2], [2, 3]) // => [1, 2, 3]
  * ```
  *
  * @see {@link unionWith} — use custom equality
  * @see {@link intersection} — elements in both arrays
  * @see {@link difference} — elements only in the first array
  *
- * @category elements
+ * @category set operations
  * @since 2.0.0
  */
 export const union: {
@@ -3201,7 +3199,14 @@ export const union: {
   <A, B>(self: Iterable<A>, that: Iterable<B>): Array<A | B>
 } = dual(
   2,
-  <A, B>(self: Iterable<A>, that: Iterable<B>): Array<A | B> => unionWith(self, that, Equal.asEquivalence<A | B>())
+  <A, B>(self: Iterable<A>, that: Iterable<B>): Array<A | B> => {
+    const a = fromIterable(self)
+    const b = fromIterable(that)
+    if (isReadonlyArrayNonEmpty(a)) {
+      return isReadonlyArrayNonEmpty(b) ? dedupe(appendAll(a, b)) : a
+    }
+    return b
+  }
 )
 
 /**
@@ -3210,25 +3215,26 @@ export const union: {
  *
  * **When to use**
  *
- * Use when keeping only values present in both arrays and equality must be
- * defined by a custom comparator, such as matching objects by id.
+ * Use when you need to keep only values present in both arrays and equality
+ * must be defined by a custom comparator, such as matching objects by id.
  *
- * **Example** (Intersection with custom equality)
+ * **Example** (Computing intersections with custom equality)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const array1 = [{ id: 1 }, { id: 2 }, { id: 3 }]
  * const array2 = [{ id: 3 }, { id: 4 }, { id: 1 }]
  * const isEquivalent = (a: { id: number }, b: { id: number }) => a.id === b.id
- * console.log(Array.intersectionWith(isEquivalent)(array2)(array1)) // [{ id: 1 }, { id: 3 }]
+ *
+ * Array.intersectionWith(isEquivalent)(array2)(array1) // => [{ id: 1 }, { id: 3 }]
  * ```
  *
  * @see {@link intersection} for the `Equal.equivalence()` variant
  * @see {@link unionWith} for keeping values from either array with custom equality
  * @see {@link differenceWith} for keeping values only from the first array with custom equality
  *
- * @category elements
+ * @category set operations
  * @since 2.0.0
  */
 export const intersectionWith = <A>(isEquivalent: (self: A, that: A) => boolean): {
@@ -3249,25 +3255,38 @@ export const intersectionWith = <A>(isEquivalent: (self: A, that: A) => boolean)
  * Computes the intersection of two arrays using `Equal.equivalence()`. Order is
  * determined by the first array.
  *
- * **Example** (Array intersection)
+ * **When to use**
  *
- * ```ts
+ * Use when Effect equality is the right membership test and you want to keep
+ * values present in both inputs while preserving the first input's order.
+ *
+ * **Example** (Computing array intersections)
+ *
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.intersection([1, 2, 3], [3, 4, 1])) // [1, 3]
+ * Array.intersection([1, 2, 3], [3, 4, 1]) // => [1, 3]
  * ```
  *
  * @see {@link intersectionWith} — use custom equality
  * @see {@link union} — elements in either array
  * @see {@link difference} — elements only in the first array
  *
- * @category elements
+ * @category set operations
  * @since 2.0.0
  */
 export const intersection: {
   <B>(that: Iterable<B>): <A>(self: Iterable<A>) => Array<A & B>
   <A, B>(self: Iterable<A>, that: Iterable<B>): Array<A & B>
-} = intersectionWith(Equal.asEquivalence())
+} = dual(2, <A, B>(self: Iterable<A>, that: Iterable<B>): Array<A & B> => {
+  const thatArray = fromIterable(that)
+  const selfArray = fromIterable(self)
+  if (selfArray.length === 0 || thatArray.length === 0) {
+    return []
+  }
+  const buckets = makeHashBuckets(thatArray)
+  return selfArray.filter((value): value is A & B => hashBucketsHas(buckets, value))
+})
 
 /**
  * Computes elements in the first array that are not in the second, using a
@@ -3275,23 +3294,22 @@ export const intersection: {
  *
  * **When to use**
  *
- * Use when keeping only values from the first array and equality must be
- * defined by a custom comparator, such as matching objects by id.
+ * Use when you need to keep only values from the first array and equality must
+ * be defined by a custom comparator, such as matching objects by id.
  *
- * **Example** (Difference with custom equality)
+ * **Example** (Computing differences with custom equality)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const diff = Array.differenceWith<number>((a, b) => a === b)([1, 2, 3], [2, 3, 4])
- * console.log(diff) // [1]
+ * Array.differenceWith<number>((a, b) => a === b)([1, 2, 3], [2, 3, 4]) // => [1]
  * ```
  *
  * @see {@link difference} for the `Equal.equivalence()` variant
  * @see {@link unionWith} for keeping values from either array with custom equality
  * @see {@link intersectionWith} for keeping values present in both arrays with custom equality
  *
- * @category elements
+ * @category set operations
  * @since 2.0.0
  */
 export const differenceWith = <A>(isEquivalent: (self: A, that: A) => boolean): {
@@ -3317,25 +3335,36 @@ export const differenceWith = <A>(isEquivalent: (self: A, that: A) => boolean): 
  * Use when you need to keep values from the first array that are absent from
  * the second and the default `Equal.equivalence()` comparison is appropriate.
  *
- * **Example** (Array difference)
+ * **Example** (Computing array differences)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.difference([1, 2, 3], [2, 3, 4])) // [1]
+ * Array.difference([1, 2, 3], [2, 3, 4]) // => [1]
  * ```
  *
  * @see {@link differenceWith} — use custom equality
  * @see {@link union} — elements in either array
  * @see {@link intersection} — elements in both arrays
  *
- * @category elements
+ * @category set operations
  * @since 2.0.0
  */
 export const difference: {
   <A>(that: Iterable<A>): (self: Iterable<A>) => Array<A>
   <A>(self: Iterable<A>, that: Iterable<A>): Array<A>
-} = differenceWith(Equal.asEquivalence())
+} = dual(2, <A>(self: Iterable<A>, that: Iterable<A>): Array<A> => {
+  const thatArray = fromIterable(that)
+  const selfArray = fromIterable(self)
+  if (selfArray.length === 0) {
+    return []
+  }
+  if (thatArray.length === 0) {
+    return selfArray.filter(() => true)
+  }
+  const buckets = makeHashBuckets(thatArray)
+  return selfArray.filter((value) => !hashBucketsHas(buckets, value))
+})
 
 /**
  * Creates an empty array.
@@ -3346,11 +3375,10 @@ export const difference: {
  *
  * **Example** (Creating an empty array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.empty<number>()
- * console.log(result) // []
+ * Array.empty<number>() // => []
  * ```
  *
  * @see {@link of} — create a single-element array
@@ -3366,10 +3394,10 @@ export const empty: <A = never>() => Array<A> = () => []
  *
  * **Example** (Creating a single-element array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.of(1)) // [1]
+ * Array.of(1) // => [1]
  * ```
  *
  * @see {@link make} — create from multiple values
@@ -3392,14 +3420,14 @@ export declare namespace ReadonlyArray {
    *
    * **Example** (Inferring an element type)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Array } from "effect"
    *
    * type StringArrayType = Array.ReadonlyArray.Infer<ReadonlyArray<string>>
    * // StringArrayType is string
    * ```
    *
-   * @category types
+   * @category utility types
    * @since 2.0.0
    */
   export type Infer<S extends Iterable<any>> = S extends ReadonlyArray<infer A> ? A
@@ -3411,14 +3439,14 @@ export declare namespace ReadonlyArray {
    *
    * **Example** (Preserving non-emptiness)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Array } from "effect"
    *
    * type Result = Array.ReadonlyArray.With<readonly [number], string>
    * // Result is NonEmptyArray<string>
    * ```
    *
-   * @category types
+   * @category utility types
    * @since 2.0.0
    */
   export type With<S extends Iterable<any>, A> = S extends NonEmptyReadonlyArray<any> ? NonEmptyArray<A>
@@ -3429,7 +3457,7 @@ export declare namespace ReadonlyArray {
    *
    * **Example** (Preserving non-emptiness from either input)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Array } from "effect"
    *
    * type Result = Array.ReadonlyArray.OrNonEmpty<
@@ -3440,7 +3468,7 @@ export declare namespace ReadonlyArray {
    * // Result is NonEmptyArray<number>
    * ```
    *
-   * @category types
+   * @category utility types
    * @since 2.0.0
    */
   export type OrNonEmpty<
@@ -3456,7 +3484,7 @@ export declare namespace ReadonlyArray {
    *
    * **Example** (Preserving non-emptiness from both inputs)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Array } from "effect"
    *
    * type Result = Array.ReadonlyArray.AndNonEmpty<
@@ -3467,7 +3495,7 @@ export declare namespace ReadonlyArray {
    * // Result is NonEmptyArray<boolean>
    * ```
    *
-   * @category types
+   * @category utility types
    * @since 2.0.0
    */
   export type AndNonEmpty<
@@ -3483,7 +3511,7 @@ export declare namespace ReadonlyArray {
    *
    * **Example** (Flattening nested array types)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import type { Array } from "effect"
    *
    * type Nested = ReadonlyArray<ReadonlyArray<number>>
@@ -3491,7 +3519,7 @@ export declare namespace ReadonlyArray {
    * // Flattened is Array<number>
    * ```
    *
-   * @category types
+   * @category utility types
    * @since 2.0.0
    */
   export type Flatten<T extends ReadonlyArray<ReadonlyArray<any>>> = T extends
@@ -3508,15 +3536,15 @@ export declare namespace ReadonlyArray {
  *
  * **Details**
  *
- * - The function receives `(element, index)`.
- * - Preserves `NonEmptyArray` in the return type.
+ * The function receives `(element, index)`. The return type preserves
+ * `NonEmptyArray`.
  *
  * **Example** (Doubling values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.map([1, 2, 3], (x) => x * 2)) // [2, 4, 6]
+ * Array.map([1, 2, 3], (x) => x * 2) // => [2, 4, 6]
  * ```
  *
  * @see {@link flatMap} — map and flatten
@@ -3536,20 +3564,20 @@ export const map: {
  *
  * **When to use**
  *
- * Use to map each element to zero or more values and concatenate the results in
- * one pass.
+ * Use to map each array element to zero or more values and concatenate the
+ * results in one pass.
  *
  * **Details**
  *
- * - The function receives `(element, index)`.
- * - Returns `NonEmptyArray` when both input and mapped arrays are non-empty.
+ * The function receives `(element, index)`. This returns `NonEmptyArray` when
+ * both the input and mapped arrays are non-empty.
  *
- * **Example** (FlatMapping an array)
+ * **Example** (Flat mapping an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.flatMap([1, 2, 3], (x) => [x, x * 2])) // [1, 2, 2, 4, 3, 6]
+ * Array.flatMap([1, 2, 3], (x) => [x, x * 2]) // => [1, 2, 2, 4, 3, 6]
  * ```
  *
  * @see {@link map} — transform without flattening
@@ -3591,10 +3619,10 @@ export const flatMap: {
  *
  * **Example** (Flattening nested arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.flatten([[1, 2], [], [3, 4], [], [5, 6]])) // [1, 2, 3, 4, 5, 6]
+ * Array.flatten([[1, 2], [], [3, 4], [], [5, 6]]) // => [1, 2, 3, 4, 5, 6]
  * ```
  *
  * @see {@link flatMap} — map then flatten in one step
@@ -3610,15 +3638,15 @@ export const flatten: <const S extends ReadonlyArray<ReadonlyArray<any>>>(self: 
  *
  * **When to use**
  *
- * Use to collect only present values from `Option` values while discarding
- * `None` values.
+ * Use to collect only present values from an iterable of `Option` values while
+ * discarding `None` values.
  *
  * **Example** (Extracting Some values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Option } from "effect"
  *
- * console.log(Array.getSomes([Option.some(1), Option.none(), Option.some(2)])) // [1, 2]
+ * Array.getSomes([Option.some(1), Option.none(), Option.some(2)]) // => [1, 2]
  * ```
  *
  * @see {@link fromOption} — convert a single Option
@@ -3646,16 +3674,15 @@ export const getSomes: <T extends Iterable<Option.Option<X>>, X = any>(
  *
  * **When to use**
  *
- * Use to collect only failure values from `Result` values while discarding
- * successes.
+ * Use when you can drop the success channel and only need the failure
+ * payloads, not the original result wrappers.
  *
  * **Example** (Extracting failures)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Result } from "effect"
  *
- * console.log(Array.getFailures([Result.succeed(1), Result.fail("err"), Result.succeed(2)]))
- * // ["err"]
+ * Array.getFailures([Result.succeed(1), Result.fail("err"), Result.succeed(2)]) // => ["err"]
  * ```
  *
  * @see {@link getSuccesses} — extract success values
@@ -3683,16 +3710,15 @@ export const getFailures = <T extends Iterable<Result.Result<any, any>>>(
  *
  * **When to use**
  *
- * Use to collect only success values from `Result` values while discarding
- * failures.
+ * Use when you can drop the failure channel and only need the success
+ * payloads, not the original result wrappers.
  *
  * **Example** (Extracting successes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Result } from "effect"
  *
- * console.log(Array.getSuccesses([Result.succeed(1), Result.fail("err"), Result.succeed(2)]))
- * // [1, 2]
+ * Array.getSuccesses([Result.succeed(1), Result.fail("err"), Result.succeed(2)]) // => [1, 2]
  * ```
  *
  * @see {@link getFailures} — extract failure values
@@ -3719,21 +3745,19 @@ export const getSuccesses = <T extends Iterable<Result.Result<any, any>>>(
  *
  * **When to use**
  *
- * Use to transform elements with a `Result`-returning filter while discarding
- * failures.
+ * Use to filter an iterable with a `Result`-returning transformation while
+ * discarding failures.
  *
  * **Details**
  *
- * - The filter receives `(element, index)`.
- * - Failures are discarded.
+ * The filter receives `(element, index)`. Failures are discarded.
  *
- * **Example** (Filter and transform)
+ * **Example** (Filtering and transforming)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Result } from "effect"
  *
- * console.log(Array.filterMap([1, 2, 3, 4], (n) => n % 2 === 0 ? Result.succeed(n * 10) : Result.failVoid))
- * // [20, 40]
+ * Array.filterMap([1, 2, 3, 4], (n) => n % 2 === 0 ? Result.succeed(n * 10) : Result.failVoid) // => [20, 40]
  * ```
  *
  * @see {@link filter} — keep original elements matching a predicate
@@ -3762,19 +3786,20 @@ export const filterMap: {
  *
  * **When to use**
  *
- * Use to keep original elements that satisfy a boolean predicate or refinement.
+ * Use to filter an iterable into a new array of original elements that satisfy
+ * a boolean predicate or refinement.
  *
  * **Details**
  *
- * - The predicate receives `(element, index)`.
- * - Supports refinements for type narrowing.
+ * The predicate receives `(element, index)`. Refinements are supported for type
+ * narrowing.
  *
  * **Example** (Filtering even numbers)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.filter([1, 2, 3, 4], (x) => x % 2 === 0)) // [2, 4]
+ * Array.filter([1, 2, 3, 4], (x) => x % 2 === 0) // => [2, 4]
  * ```
  *
  * @see {@link partition} — split into matching and non-matching
@@ -3807,23 +3832,21 @@ export const filter: {
  *
  * **When to use**
  *
- * Use to evaluate each element with a `Result`-returning filter and keep both
- * failure and success values.
+ * Use to partition an iterable by evaluating each element with a
+ * `Result`-returning filter and keeping both failure and success values.
  *
  * **Details**
  *
- * - Returns `[excluded, satisfying]`.
- * - The filter receives `(element, index)`.
+ * Returns `[excluded, satisfying]`. The filter receives `(element, index)`.
  *
  * **Example** (Partitioning with a filter)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Result } from "effect"
  *
- * console.log(Array.partition([1, -2, 3], (n, i) =>
+ * Array.partition([1, -2, 3], (n, i) =>
  *   n > 0 ? Result.succeed(n + i) : Result.fail(`negative:${n}`)
- * ))
- * // [["negative:-2"], [1, 5]]
+ * ) // => [["negative:-2"], [1, 5]]
  * ```
  *
  * @see {@link filter} — keep only matching elements
@@ -3867,23 +3890,19 @@ export const partition: {
  *
  * **When to use**
  *
- * Use to split existing `Result` values into failure and success arrays.
+ * Use to split an iterable of `Result` values into failure and success arrays.
  *
  * **Details**
  *
- * - Returns `[failures, successes]`.
- * - Equivalent to `partition(identity)`.
+ * Returns `[failures, successes]`. This is equivalent to
+ * `partition(identity)`.
  *
  * **Example** (Separating Results)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Result } from "effect"
  *
- * const [failures, successes] = Array.separate([
- *   Result.succeed(1), Result.fail("error"), Result.succeed(2)
- * ])
- * console.log(failures) // ["error"]
- * console.log(successes) // [1, 2]
+ * Array.separate([Result.succeed(1), Result.fail("error"), Result.succeed(2)]) // => [["error"], [1, 2]]
  * ```
  *
  * @see {@link getFailures} — extract only failures
@@ -3909,14 +3928,14 @@ export const separate: <T extends Iterable<Result.Result<any, any>>>(
  *
  * **Details**
  *
- * - The function receives `(accumulator, element, index)`.
+ * The function receives `(accumulator, element, index)`.
  *
  * **Example** (Summing an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.reduce([1, 2, 3], 0, (acc, n) => acc + n)) // 6
+ * Array.reduce([1, 2, 3], 0, (acc, n) => acc + n) // => 6
  * ```
  *
  * @see {@link reduceRight} — fold from right to left
@@ -3939,19 +3958,18 @@ export const reduce: {
  *
  * **When to use**
  *
- * Use when folding order matters and values must be combined from right to
- * left.
+ * Use when you need to fold values from right to left.
  *
  * **Details**
  *
- * - The function receives `(accumulator, element, index)`.
+ * The function receives `(accumulator, element, index)`.
  *
- * **Example** (Right-to-left fold)
+ * **Example** (Folding from right to left)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.reduceRight([1, 2, 3], 0, (acc, n) => acc + n)) // 6
+ * Array.reduceRight([1, 2, 3], 0, (acc, n) => acc + n) // => 6
  * ```
  *
  * @see {@link reduce} — fold from left to right
@@ -3973,15 +3991,15 @@ export const reduceRight: {
  * Lifts a predicate into an array: returns `[value]` if the predicate holds,
  * `[]` otherwise.
  *
- * **Example** (Conditional wrapping)
+ * **Example** (Wrapping values conditionally)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const isEven = (n: number) => n % 2 === 0
- * const to = Array.liftPredicate(isEven)
- * console.log(to(1)) // []
- * console.log(to(2)) // [2]
+ * const fromEven = Array.liftPredicate((n: number) => n % 2 === 0)
+ *
+ * fromEven(1) // => []
+ * fromEven(2) // => [2]
  * ```
  *
  * @see {@link liftOption} — lift an Option-returning function
@@ -3998,17 +4016,23 @@ export const liftPredicate: { // Note: I intentionally avoid using the NoInfer p
  * Lifts an `Option`-returning function into one that returns an array:
  * `Some(a)` becomes `[a]`, `None` becomes `[]`.
  *
+ * **When to use**
+ *
+ * Use when an optional parser or lookup should participate in array pipelines
+ * as zero-or-one results.
+ *
  * **Example** (Lifting an Option function)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Option } from "effect"
  *
  * const parseNumber = Array.liftOption((s: string) => {
  *   const n = Number(s)
  *   return isNaN(n) ? Option.none() : Option.some(n)
  * })
- * console.log(parseNumber("123")) // [123]
- * console.log(parseNumber("abc")) // []
+ *
+ * parseNumber("123") // => [123]
+ * parseNumber("abc") // => []
  * ```
  *
  * @see {@link liftPredicate} — lift a boolean predicate
@@ -4030,14 +4054,14 @@ export const liftOption = <A extends Array<unknown>, B>(
  *
  * Use to treat a nullable single value as zero or one array element.
  *
- * **Example** (Nullable to array)
+ * **Example** (Converting nullable values to an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.fromNullishOr(1)) // [1]
- * console.log(Array.fromNullishOr(null)) // []
- * console.log(Array.fromNullishOr(undefined)) // []
+ * Array.fromNullishOr(1) // => [1]
+ * Array.fromNullishOr(null) // => []
+ * Array.fromNullishOr(undefined) // => []
  * ```
  *
  * @see {@link liftNullishOr} — lift a nullable-returning function
@@ -4054,15 +4078,16 @@ export const fromNullishOr = <A>(a: A): Array<NonNullable<A>> => a == null ? emp
  *
  * **Example** (Lifting a nullable function)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const parseNumber = Array.liftNullishOr((s: string) => {
  *   const n = Number(s)
  *   return isNaN(n) ? null : n
  * })
- * console.log(parseNumber("123")) // [123]
- * console.log(parseNumber("abc")) // []
+ *
+ * parseNumber("123") // => [123]
+ * parseNumber("abc") // => []
  * ```
  *
  * @see {@link fromNullishOr} — convert a single nullable value
@@ -4082,16 +4107,15 @@ export const liftNullishOr = <A extends Array<unknown>, B>(
  *
  * **When to use**
  *
- * Use when mapping and filtering in one step, where the mapper can return
+ * Use when you need to map and filter in one step, where the mapper can return
  * `null` or `undefined` to skip elements.
  *
- * **Example** (FlatMapping with nullable)
+ * **Example** (Flat mapping with nullable values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.flatMapNullishOr([1, 2, 3], (n) => (n % 2 === 0 ? null : n)))
- * // [1, 3]
+ * Array.flatMapNullishOr([1, 2, 3], (n) => (n % 2 === 0 ? null : n)) // => [1, 3]
  * ```
  *
  * @see {@link flatMap} for mapping each element to an array and flattening
@@ -4112,9 +4136,14 @@ export const flatMapNullishOr: {
  * Lifts a `Result`-returning function into one that returns an array: failures
  * produce `[]`, successes produce `[value]`.
  *
+ * **When to use**
+ *
+ * Use when a fallible parser or lookup should participate in array pipelines as
+ * zero-or-one results and the failure value should be discarded.
+ *
  * **Example** (Lifting a Result function)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Result } from "effect"
  *
  * const parseNumber = (s: string): Result.Result<number, Error> =>
@@ -4123,8 +4152,9 @@ export const flatMapNullishOr: {
  *     : Result.succeed(Number(s))
  *
  * const liftedParseNumber = Array.liftResult(parseNumber)
- * console.log(liftedParseNumber("42")) // [42]
- * console.log(liftedParseNumber("not a number")) // []
+ *
+ * liftedParseNumber("42") // => [42]
+ * liftedParseNumber("not a number") // => []
  * ```
  *
  * @see {@link liftOption} — lift an Option-returning function
@@ -4147,21 +4177,21 @@ export const liftResult = <A extends Array<unknown>, E, B>(
  *
  * **When to use**
  *
- * Use to check that all elements satisfy a predicate, including
+ * Use to check whether every array element satisfies a predicate, including
  * refinement-based type narrowing.
  *
  * **Example** (Testing all elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.every([2, 4, 6], (x) => x % 2 === 0)) // true
- * console.log(Array.every([2, 3, 6], (x) => x % 2 === 0)) // false
+ * Array.every([2, 4, 6], (x) => x % 2 === 0) // => true
+ * Array.every([2, 3, 6], (x) => x % 2 === 0) // => false
  * ```
  *
  * @see {@link some} — test if any element matches
  *
- * @category elements
+ * @category guards
  * @since 2.0.0
  */
 export const every: {
@@ -4183,17 +4213,17 @@ export const every: {
  *
  * **Example** (Testing for any match)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.some([1, 3, 4], (x) => x % 2 === 0)) // true
- * console.log(Array.some([1, 3, 5], (x) => x % 2 === 0)) // false
+ * Array.some([1, 3, 4], (x) => x % 2 === 0) // => true
+ * Array.some([1, 3, 5], (x) => x % 2 === 0) // => false
  * ```
  *
  * @see {@link every} — test if all elements match
  * @see {@link contains} — test for a specific value
  *
- * @category elements
+ * @category guards
  * @since 2.0.0
  */
 export const some: {
@@ -4213,19 +4243,19 @@ export const some: {
  *
  * **When to use**
  *
- * Use when a computation depends on every suffix of an array, such as
+ * Use when you need to compute a result from every suffix of an array, such as
  * cumulative aggregations from each position.
  *
  * **Details**
  *
- * - For index `i`, the function receives `self.slice(i)`.
+ * For index `i`, the function receives `self.slice(i)`.
  *
- * **Example** (Suffix lengths)
+ * **Example** (Computing suffix lengths)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.extend([1, 2, 3], (as) => as.length)) // [3, 2, 1]
+ * Array.extend([1, 2, 3], (as) => as.length) // => [3, 2, 1]
  * ```
  *
  * @see {@link scan} for keeping intermediate accumulator values during a fold
@@ -4247,16 +4277,16 @@ export const extend: {
  *
  * **Example** (Finding the minimum)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Order } from "effect"
  *
- * console.log(Array.min([3, 1, 2], Order.Number)) // 1
+ * Array.min([3, 1, 2], Order.Number) // => 1
  * ```
  *
  * @see {@link max} — find the maximum
  * @see {@link sort} — sort the entire array
  *
- * @category elements
+ * @category getters
  * @since 2.0.0
  */
 export const min: {
@@ -4270,16 +4300,16 @@ export const min: {
  *
  * **Example** (Finding the maximum)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Order } from "effect"
  *
- * console.log(Array.max([3, 1, 2], Order.Number)) // 3
+ * Array.max([3, 1, 2], Order.Number) // => 3
  * ```
  *
  * @see {@link min} — find the minimum
  * @see {@link sort} — sort the entire array
  *
- * @category elements
+ * @category getters
  * @since 2.0.0
  */
 export const max: {
@@ -4294,11 +4324,10 @@ export const max: {
  *
  * **Example** (Generating a sequence)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Option } from "effect"
  *
- * console.log(Array.unfold(1, (n) => n <= 5 ? Option.some([n, n + 1]) : Option.none()))
- * // [1, 2, 3, 4, 5]
+ * Array.unfold(1, (n) => n <= 5 ? Option.some([n, n + 1]) : Option.none()) // => [1, 2, 3, 4, 5]
  * ```
  *
  * @see {@link makeBy} — generate from index
@@ -4329,11 +4358,12 @@ export const unfold = <B, A>(b: B, f: (b: B) => Option.Option<readonly [A, B]>):
  *
  * **Example** (Comparing arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, Order } from "effect"
  *
  * const arrayOrder = Array.makeOrder(Order.Number)
- * console.log(arrayOrder([1, 2], [1, 3])) // -1
+ *
+ * arrayOrder([1, 2], [1, 3]) // => -1
  * ```
  *
  * @see {@link makeEquivalence} — create an equivalence for arrays
@@ -4350,11 +4380,12 @@ export const makeOrder: <A>(O: Order.Order<A>) => Order.Order<ReadonlyArray<A>> 
  *
  * **Example** (Comparing arrays for equality)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
  * const eq = Array.makeEquivalence<number>((a, b) => a === b)
- * console.log(eq([1, 2, 3], [1, 2, 3])) // true
+ *
+ * eq([1, 2, 3], [1, 2, 3]) // => true
  * ```
  *
  * @see {@link makeOrder} — create an ordering for arrays
@@ -4376,15 +4407,18 @@ export const makeEquivalence: <A>(
  *
  * **Example** (Iterating with side-effects)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * Array.forEach([1, 2, 3], (n) => console.log(n)) // 1, 2, 3
+ * const visited: Array<number> = []
+ * Array.forEach([1, 2, 3], (n) => visited.push(n))
+ *
+ * visited // => [1, 2, 3]
  * ```
  *
  * @see {@link map} for transforming each element into a new array
  *
- * @category elements
+ * @category traversing
  * @since 2.0.0
  */
 export const forEach: {
@@ -4403,16 +4437,16 @@ export const forEach: {
  *
  * **Example** (Deduplicating with custom equality)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.dedupeWith([1, 2, 2, 3, 3, 3], (a, b) => a === b)) // [1, 2, 3]
+ * Array.dedupeWith([1, 2, 2, 3, 3, 3], (a, b) => a === b) // => [1, 2, 3]
  * ```
  *
  * @see {@link dedupe} — uses default equality
  * @see {@link dedupeAdjacentWith} — only dedupes consecutive elements
  *
- * @category elements
+ * @category deduplication
  * @since 2.0.0
  */
 export const dedupeWith: {
@@ -4450,22 +4484,34 @@ export const dedupeWith: {
  *
  * **Example** (Removing duplicates)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.dedupe([1, 2, 1, 3, 2, 4])) // [1, 2, 3, 4]
+ * Array.dedupe([1, 2, 1, 3, 2, 4]) // => [1, 2, 3, 4]
  * ```
  *
  * @see {@link dedupeWith} — use custom equality
  * @see {@link dedupeAdjacent} — only dedupes consecutive elements
  *
- * @category elements
+ * @category deduplication
  * @since 2.0.0
  */
 export const dedupe = <S extends Iterable<any>>(
   self: S
-): S extends NonEmptyReadonlyArray<infer A> ? NonEmptyArray<A> : S extends Iterable<infer A> ? Array<A> : never =>
-  dedupeWith(self, Equal.asEquivalence()) as any
+): S extends NonEmptyReadonlyArray<infer A> ? NonEmptyArray<A> : S extends Iterable<infer A> ? Array<A> : never => {
+  const input = fromIterable(self)
+  if (input.length < 2) {
+    return [...input] as any
+  }
+  const buckets: HashBuckets = new Map()
+  const out: Array<unknown> = []
+  for (const value of input) {
+    if (hashBucketsAdd(buckets, value)) {
+      out.push(value)
+    }
+  }
+  return out as any
+}
 
 /**
  * Removes consecutive duplicate elements using a custom equivalence.
@@ -4478,21 +4524,20 @@ export const dedupe = <S extends Iterable<any>>(
  *
  * **Details**
  *
- * - Non-adjacent duplicates are preserved.
+ * Non-adjacent duplicates are preserved.
  *
  * **Example** (Deduplicating adjacent elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.dedupeAdjacentWith([1, 1, 2, 2, 3, 3], (a, b) => a === b))
- * // [1, 2, 3]
+ * Array.dedupeAdjacentWith([1, 1, 2, 2, 3, 3], (a, b) => a === b) // => [1, 2, 3]
  * ```
  *
  * @see {@link dedupeAdjacent} — uses default equality
  * @see {@link dedupeWith} — dedupes all duplicates, not just adjacent
  *
- * @category elements
+ * @category deduplication
  * @since 2.0.0
  */
 export const dedupeAdjacentWith: {
@@ -4520,16 +4565,16 @@ export const dedupeAdjacentWith: {
  *
  * **Example** (Removing adjacent duplicates)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.dedupeAdjacent([1, 1, 2, 2, 3, 3])) // [1, 2, 3]
+ * Array.dedupeAdjacent([1, 1, 2, 2, 3, 3]) // => [1, 2, 3]
  * ```
  *
  * @see {@link dedupeAdjacentWith} — use custom equality
  * @see {@link dedupe} — remove all duplicates
  *
- * @category elements
+ * @category deduplication
  * @since 2.0.0
  */
 export const dedupeAdjacent: <A>(self: Iterable<A>) => Array<A> = dedupeAdjacentWith(Equal.asEquivalence())
@@ -4539,10 +4584,10 @@ export const dedupeAdjacent: <A>(self: Iterable<A>) => Array<A> = dedupeAdjacent
  *
  * **Example** (Joining strings)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * console.log(Array.join(["a", "b", "c"], "-")) // "a-b-c"
+ * Array.join(["a", "b", "c"], "-") // => "a-b-c"
  * ```
  *
  * @see {@link intersperse} — insert separator elements without joining
@@ -4560,23 +4605,22 @@ export const join: {
  *
  * **When to use**
  *
- * Use when mapping needs state threaded through each element and the final state
- * is also needed.
+ * Use when you need to map while threading state through each element and keep
+ * the final state.
  *
  * **Details**
  *
- * - Combines `map` and `reduce` in a single pass.
- * - The callback receives the current state, element, and index, and returns `[nextState, mappedValue]`.
- * - Returns `[finalState, mappedArray]`.
- * - Dual: can be used in both data-first and data-last style.
+ * Combines `map` and `reduce` in a single pass. The callback receives the
+ * current state, element, and index, and returns `[nextState, mappedValue]`.
+ * The result is `[finalState, mappedArray]`. This can be used in both
+ * data-first and data-last style.
  *
  * **Example** (Running sum alongside mapped values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.mapAccum([1, 2, 3], 0, (acc, n) => [acc + n, acc + n])
- * console.log(result) // [6, [1, 3, 6]]
+ * Array.mapAccum([1, 2, 3], 0, (acc, n) => [acc + n, acc + n]) // => [6, [1, 3, 6]]
  * ```
  *
  * @see {@link scan} — when you only need the accumulated results (not the final state)
@@ -4621,22 +4665,21 @@ export const mapAccum: {
  *
  * **Details**
  *
- * - Produces every combination of an element from `self` with an element from `that`.
- * - Result length is `self.length * that.length`.
- * - Order: iterates `that` for each element of `self`.
+ * Produces every combination of an element from `self` with an element from
+ * `that`, so the result length is `self.length * that.length`. Iteration visits
+ * every element of `that` for each element of `self`.
  *
  * **Example** (Combining numbers and letters)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.cartesianWith([1, 2], ["a", "b"], (a, b) => `${a}-${b}`)
- * console.log(result) // ["1-a", "1-b", "2-a", "2-b"]
+ * Array.cartesianWith([1, 2], ["a", "b"], (a, b) => `${a}-${b}`) // => ["1-a", "1-b", "2-a", "2-b"]
  * ```
  *
  * @see {@link cartesian} for returning tuples instead of applying a combiner
  *
- * @category elements
+ * @category combining
  * @since 2.0.0
  */
 export const cartesianWith: {
@@ -4657,21 +4700,20 @@ export const cartesianWith: {
  *
  * **Details**
  *
- * - Produces every `[a, b]` combination of an element from `self` with an element from `that`.
- * - Result length is `self.length * that.length`.
+ * Produces every `[a, b]` combination of an element from `self` with an element
+ * from `that`, so the result length is `self.length * that.length`.
  *
- * **Example** (All pairs of two arrays)
+ * **Example** (Generating all pairs from two arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.cartesian([1, 2], ["a", "b"])
- * console.log(result) // [[1, "a"], [1, "b"], [2, "a"], [2, "b"]]
+ * Array.cartesian([1, 2], ["a", "b"]) // => [[1, "a"], [1, "b"], [2, "a"], [2, "b"]]
  * ```
  *
  * @see {@link cartesianWith} — apply a combiner to each pair
  *
- * @category elements
+ * @category combining
  * @since 2.0.0
  */
 export const cartesian: {
@@ -4691,30 +4733,34 @@ export const cartesian: {
  *
  * **When to use**
  *
- * Use when begin a pipeline with `Do`, then use {@link bind} to introduce array variables and {@link let_ let} for plain values.
- * - Each `bind` produces the cartesian product of all bound variables (like nested loops).
- * - Use `filter` and `map` in the pipeline to add conditions and transformations.
+ * Use when you want array-comprehension style code with do notation.
  *
- * **Example** (Array comprehension with do notation)
+ * **Details**
  *
- * ```ts
+ * Use {@link bind} to introduce array variables and {@link let_ let} for plain
+ * values. Each `bind` produces the cartesian product of all bound variables,
+ * like nested loops. Use `filter` and `map` in the pipeline to add conditions
+ * and transformations.
+ *
+ * **Example** (Building array comprehensions with do notation)
+ *
+ * ```ts import.meta.vitest
  * import { Array, pipe } from "effect"
  *
- * const result = pipe(
+ * pipe(
  *   Array.Do,
  *   Array.bind("x", () => [1, 3, 5]),
  *   Array.bind("y", () => [2, 4, 6]),
  *   Array.filter(({ x, y }) => x < y),
  *   Array.map(({ x, y }) => [x, y] as const)
- * )
- * console.log(result) // [[1, 2], [1, 4], [1, 6], [3, 4], [3, 6], [5, 6]]
+ * ) // => [[1, 2], [1, 4], [1, 6], [3, 4], [3, 6], [5, 6]]
  * ```
  *
  * @see {@link bind} — introduce an array variable into the scope
  * @see {@link bindTo} — start a pipeline by naming the first array
  * @see {@link let_ let} — introduce a plain computed value
  *
- * @category do notation
+ * @category constructors
  * @since 3.2.0
  */
 export const Do: ReadonlyArray<{}> = of({})
@@ -4729,29 +4775,27 @@ export const Do: ReadonlyArray<{}> = of({})
  *
  * **Details**
  *
- * - Each `bind` call adds a named property to the accumulated object.
- * - The callback receives the current scope and must return an array.
- * - Equivalent to `flatMap` + merging the new value into the scope object.
+ * Each `bind` call adds a named property to the accumulated object. The
+ * callback receives the current scope and must return an array. This is
+ * equivalent to `flatMap` plus merging the new value into the scope object.
  *
  * **Example** (Binding two arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, pipe } from "effect"
  *
- * const result = pipe(
+ * pipe(
  *   Array.Do,
  *   Array.bind("x", () => [1, 2]),
  *   Array.bind("y", () => ["a", "b"])
- * )
- * console.log(result)
- * // [{ x: 1, y: "a" }, { x: 1, y: "b" }, { x: 2, y: "a" }, { x: 2, y: "b" }]
+ * ) // => [{ x: 1, y: "a" }, { x: 1, y: "b" }, { x: 2, y: "a" }, { x: 2, y: "b" }]
  * ```
  *
  * @see {@link Do} — start a do-notation pipeline
  * @see {@link bindTo} — name the first array in a pipeline
  * @see {@link let_ let} — add a plain computed value
  *
- * @category do notation
+ * @category sequencing
  * @since 3.2.0
  */
 export const bind: {
@@ -4778,25 +4822,21 @@ export const bind: {
  *
  * **Details**
  *
- * - Equivalent to `Array.map(self, (a) => ({ [tag]: a }))`.
- * - Alternative to starting with `Do` + `bind`; useful when you already have an array.
+ * Equivalent to `Array.map(self, (a) => ({ [tag]: a }))`. This is an
+ * alternative to starting with `Do` plus `bind` when you already have an array.
  *
  * **Example** (Naming an existing array)
  *
- * ```ts
- * import { Array, pipe } from "effect"
+ * ```ts import.meta.vitest
+ * import { Array } from "effect"
  *
- * const result = pipe(
- *   [1, 2, 3],
- *   Array.bindTo("x")
- * )
- * console.log(result) // [{ x: 1 }, { x: 2 }, { x: 3 }]
+ * Array.bindTo([1, 2, 3], "x") // => [{ x: 1 }, { x: 2 }, { x: 3 }]
  * ```
  *
  * @see {@link Do} — start with an empty scope
  * @see {@link bind} — add another array variable to the scope
  *
- * @category do notation
+ * @category mapping
  * @since 3.2.0
  */
 export const bindTo: {
@@ -4820,29 +4860,33 @@ export {
   /**
    * Adds a computed plain value to the do-notation scope without introducing a new array dimension.
    *
+   * **When to use**
+   *
+   * Use when each do-notation branch needs a derived field from the current
+   * bindings without multiplying the number of branches.
+   *
    * **Details**
    *
-   * - Unlike {@link bind}, the callback returns a single value (not an array), so no cartesian product occurs.
-   * - Useful for derived or intermediate values that depend on previously bound variables.
+   * Unlike `bind`, the callback returns a single value instead of an array, so
+   * no cartesian product occurs. Use this for derived or intermediate values
+   * that depend on previously bound variables.
    *
    * **Example** (Adding a computed value)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Array, pipe } from "effect"
    *
-   * const result = pipe(
+   * pipe(
    *   Array.Do,
    *   Array.bind("x", () => [1, 2, 3]),
    *   Array.let("doubled", ({ x }) => x * 2)
-   * )
-   * console.log(result)
-   * // [{ x: 1, doubled: 2 }, { x: 2, doubled: 4 }, { x: 3, doubled: 6 }]
+   * ) // => [{ x: 1, doubled: 2 }, { x: 2, doubled: 4 }, { x: 3, doubled: 6 }]
    * ```
    *
    * @see {@link Do} — start a do-notation pipeline
    * @see {@link bind} — introduce an array variable (produces cartesian product)
    *
-   * @category do notation
+   * @category mapping
    * @since 3.2.0
    */
   let_ as let
@@ -4879,21 +4923,20 @@ export function makeReducerConcat<A>(): Reducer.Reducer<Array<A>> {
  *
  * **When to use**
  *
- * Use to count how many elements satisfy a predicate when you only need the
- * number of matches instead of the matching elements.
+ * Use when you need to count how many elements of an iterable satisfy a
+ * predicate.
  *
  * **Details**
  *
- * - The predicate receives both the element and its index.
- * - Returns `0` for an empty iterable.
+ * The predicate receives both the element and its index. Empty iterables return
+ * `0`.
  *
  * **Example** (Counting even numbers)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array } from "effect"
  *
- * const result = Array.countBy([1, 2, 3, 4, 5], (n) => n % 2 === 0)
- * console.log(result) // 2
+ * Array.countBy([1, 2, 3, 4, 5], (n) => n % 2 === 0) // => 2
  * ```
  *
  * @see {@link filter} — when you need the matching elements, not just the count

@@ -43,9 +43,9 @@
     "sync:repos": "node scripts/sync-reference-repos.ts"
   },
   "devDependencies": {
-    "@babel/plugin-transform-react-jsx": "7.28.6",
+    "@babel/plugin-transform-react-jsx": "7.29.7",
     "@effect/tsgo": "catalog:",
-    "@oxlint/plugins": "^1.76.0",
+    "@oxlint/plugins": "^1.81.0",
     "@types/node": "catalog:",
     "@typescript/native": "catalog:",
     "prettier": "3.9.6",
@@ -54,9 +54,9 @@
     "vite-plus": "catalog:"
   },
   "engines": {
-    "node": "^24.13.1"
+    "node": "^24.20.0"
   },
-  "packageManager": "pnpm@11.10.0",
+  "packageManager": "pnpm@12.3.4",
   "msw": {
     "workerDirectory": [
       "apps/web/public"

@@ -1,26 +1,11 @@
 /**
- * The `RunnerStorage` module defines the persistence boundary used by clustered
- * runners to register themselves and coordinate shard ownership.
+ * Stores runner registration and shard-lock state for cluster sharding.
  *
- * Implementations keep track of runner metadata, health, machine ids, and shard
- * locks so a cluster can rebalance work as runners join, leave, or lose their
- * leases. Production adapters usually implement the string-encoded interface and
- * adapt it with {@link makeEncoded}; tests and local setups can use
- * {@link makeMemory}.
- *
- * **Common tasks**
- *
- * - Register and unregister runners in a shared store
- * - Read runner health for scheduling and rebalancing decisions
- * - Acquire, refresh, and release shard locks for distributed processing
- * - Bridge typed cluster values to string or numeric database representations
- *
- * **Gotchas**
- *
- * - Shard acquisition may be partial; callers must use the returned shard list
- * - Refreshing leases is part of keeping shard ownership during rebalancing
- * - The in-memory implementation is process-local and does not persist runner
- *   registrations or locks across restarts
+ * `RunnerStorage` records which runners are registered, whether they are
+ * healthy, which machine id a runner receives, and which shard locks are held
+ * by each runner. This module includes the typed storage service, a
+ * string-encoded backend interface, an adapter from encoded storage to the typed
+ * service, and an in-memory implementation for tests and local use.
  *
  * @since 4.0.0
  */
@@ -39,7 +24,7 @@ import * as ShardId from "./ShardId.ts"
  * Represents a generic interface to the persistent storage required by the
  * cluster.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export class RunnerStorage extends Context.Service<RunnerStorage, {
@@ -99,7 +84,7 @@ export class RunnerStorage extends Context.Service<RunnerStorage, {
  * String-encoded runner storage interface used by adapters that persist runner
  * addresses, runners, machine ids, and shard ids outside the in-memory model.
  *
- * @category Encoded
+ * @category services
  * @since 4.0.0
  */
 export interface Encoded {
@@ -210,32 +195,34 @@ export const makeEncoded = (encoded: Encoded) =>
  *
  * **Details**
  *
- * Registered runners are treated as healthy and shard acquisition is kept only in
- * process memory.
+ * Runner health and shard acquisition are kept only in process memory.
  *
  * @category constructors
  * @since 4.0.0
  */
 export const makeMemory = Effect.gen(function*() {
-  const runners = MutableHashMap.empty<RunnerAddress, Runner>()
+  const runners = MutableHashMap.empty<RunnerAddress, readonly [runner: Runner, healthy: boolean]>()
   let acquired: Array<ShardId.ShardId> = []
   let id = 0
 
   return RunnerStorage.of({
-    getRunners: Effect.sync(() => Array.from(MutableHashMap.values(runners), (runner) => [runner, true])),
-    register: (runner) =>
+    getRunners: Effect.sync(() => Array.from(MutableHashMap.values(runners))),
+    register: (runner, healthy) =>
       Effect.sync(() => {
-        MutableHashMap.set(runners, runner.address, runner)
+        MutableHashMap.set(runners, runner.address, [runner, healthy])
         return MachineId.make(id++)
       }),
     unregister: (address) =>
       Effect.sync(() => {
         MutableHashMap.remove(runners, address)
       }),
-    setRunnerHealth: () => Effect.void,
+    setRunnerHealth: (address, healthy) =>
+      Effect.sync(() => {
+        MutableHashMap.modify(runners, address, ([runner]) => [runner, healthy] as const)
+      }),
     acquire: (_address, shardIds) => {
       acquired = Array.from(shardIds)
-      return Effect.succeed(Array.from(shardIds))
+      return Effect.succeed(acquired)
     },
     refresh: () => Effect.sync(() => acquired),
     release: () => Effect.void,
