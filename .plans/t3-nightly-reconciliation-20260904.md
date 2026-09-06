@@ -1202,10 +1202,20 @@ Cleanup stopped the owned backend, web server, Metro, serve-sim, ACP mock, and a
 Final2 runtime state and credentials were moved recoverably to a private Trash directory, while the
 secret-free evidence files remain available for publication.
 
+The first exact-head CI run exposed a deterministic sparse-delivery regression in the fork-native
+ahead-control repair. `claimNext` had required `source_sequence = cursor_sequence + 1`, which stranded
+an action when intervening domain events produced no reactor action. Commit `7934702f0` restores the
+delivery store's established sparse FIFO contract and gives the ordinary runner an explicit upper
+source-sequence bound, so ahead-materialized controls remain hidden until their event is processed.
+The unchanged CI regression and the bounded-ahead test pass together; the expanded focused server
+gate passes 379 tests across 14 files, for 431 focused Group 09 tests including the unchanged 52-client
+gate. Server typechecking and changed-file formatting, lint, comment/header, and diff checks pass.
+
 The source-attributed local commits are `942f66fb3` (`108f295cc`), `2296fd932` (`7e4ce3bbb`),
 `93cfc2b0d` (the client slice of `c2283ce14`), `692a7aeed` (`355fbd96d`), and `fd2cea558`
-(`44dc8ae25`). Fork-native integration commits are `9d3e602c1`, `fd9b15fa5`, and `f36bf6402`.
-Original source authors, AuthorDates, subjects, bodies, and trailers are retained where applicable.
+(`44dc8ae25`). Fork-native integration commits are `9d3e602c1`, `fd9b15fa5`, `f36bf6402`, and
+`7934702f0`. Original source authors, AuthorDates, subjects, bodies, and trailers are retained where
+applicable.
 
 The checkpoint is verified and published in [PR #100](https://github.com/ggfincke/456code/pull/100).
 Exact-head checks and the merge receipt remain pending. Groups 10-27 remain queued and unchanged.
