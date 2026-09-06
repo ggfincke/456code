@@ -15,6 +15,23 @@ const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
+// null follows all environments, including environments discovered after selection.
+export function toggleUsageEnvironment(
+  selected: readonly EnvironmentId[] | null,
+  environments: readonly { readonly environmentId: EnvironmentId }[],
+  toggledId: EnvironmentId,
+): readonly EnvironmentId[] | null
+{
+  const ids = environments.map((environment) => environment.environmentId)
+  const next = new Set(selected ?? ids)
+  if (ids.includes(toggledId))
+  {
+    if (next.has(toggledId)) next.delete(toggledId)
+    else next.add(toggledId)
+  }
+  return next.size === ids.length && ids.every((id) => next.has(id)) ? null : [...next]
+}
+
 type AvailableAccountUsage = Extract<ServerProviderAccountUsage, { readonly status: 'available' }>
 type LimitWindowKind = NonNullable<ServerProviderAccountUsageWindow['kind']>
 
