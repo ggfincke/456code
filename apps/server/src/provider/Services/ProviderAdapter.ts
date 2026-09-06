@@ -26,6 +26,17 @@ import type * as Stream from 'effect/Stream'
 
 import type { McpProviderSessionConfig } from '../../mcp/McpProviderSession.ts'
 
+// how the provider performs a user-requested context compaction
+export type ProviderCompaction<TError> =
+  | {
+      readonly type: 'native'
+      readonly start: (
+        threadId: ThreadId,
+        modelSelection?: ProviderSendTurnInput['modelSelection'],
+      ) => Effect.Effect<void, TError>
+    }
+  | { readonly type: 'slash-command'; readonly command: `/${string}` }
+
 export interface ProviderEffectContext
 {
   readonly actionId: string
@@ -85,11 +96,8 @@ export interface ProviderAdapterShape<TError>
     context?: ProviderEffectContext,
   ) => Effect.Effect<ProviderTurnStartResult, TError>
 
-  // optional native context compaction; command fallback stays with the service
-  readonly compactThread?: (
-    threadId: ThreadId,
-    modelSelection?: ProviderSendTurnInput['modelSelection'],
-  ) => Effect.Effect<void, TError>
+  // omitted when this provider cannot compact context on demand.
+  readonly compaction?: ProviderCompaction<TError>
 
   // interrupt an active turn.
   readonly interruptTurn: (

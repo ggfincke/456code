@@ -1350,6 +1350,7 @@ export function makeCursorAdapter(
       capabilities: CURSOR_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
+      compaction: { type: 'slash-command', command: '/compress' },
       interruptTurn,
       readThread,
       rollbackThread,

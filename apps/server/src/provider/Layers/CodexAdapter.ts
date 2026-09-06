@@ -2144,7 +2144,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
     capabilities: CODEX_PROVIDER_CAPABILITIES,
     startSession,
     sendTurn,
-    compactThread,
+    compaction: { type: 'native', start: compactThread },
     interruptTurn,
     readThread,
     rollbackThread,

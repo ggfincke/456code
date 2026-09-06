@@ -4424,7 +4424,7 @@ export function makeOpenCodeAdapter(
       capabilities: OPENCODE_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
-      compactThread,
+      compaction: { type: 'native', start: compactThread },
       interruptTurn,
       respondToRequest,
       respondToUserInput,

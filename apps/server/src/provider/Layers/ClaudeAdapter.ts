@@ -4600,6 +4600,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     capabilities: CLAUDE_PROVIDER_CAPABILITIES,
     startSession,
     sendTurn,
+    compaction: { type: 'slash-command', command: '/compact' },
     interruptTurn,
     readThread,
     rollbackThread,

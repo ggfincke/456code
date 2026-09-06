@@ -1585,6 +1585,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       capabilities: GROK_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
+      compaction: { type: 'slash-command', command: '/compact' },
       interruptTurn,
       readThread,
       rollbackThread,

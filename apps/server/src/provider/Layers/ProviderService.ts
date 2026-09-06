@@ -195,6 +195,7 @@ interface PendingCompaction
   expectedTurnId: TurnId | undefined
 }
 
+const COMPACTION_COMPLETION_TIMEOUT = '10 minutes'
 
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
@@ -3284,15 +3285,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
             allowRecovery: true,
             ...(context === undefined ? {} : { context }),
           })
-          const nativeCompaction = routed.adapter.compactThread
-          const compaction = nativeCompaction !== undefined
-            ? { type: 'native' as const, start: nativeCompaction }
-            : routed.adapter.provider === 'claudeAgent' || routed.adapter.provider === 'grok' || routed.adapter.provider === 'cursor'
-              ? { type: 'slash-command' as const, command: routed.adapter.provider === 'cursor' ? '/compress' : '/compact' }
-              : undefined
-          const nativeCompletionTimeout: '10 minutes' | '30 seconds' = routed.adapter.provider === 'codex' || routed.adapter.provider === 'opencode'
-            ? '10 minutes'
-            : '30 seconds'
+          const compaction = routed.adapter.compaction
           if (compaction === undefined)
           {
             return yield* toValidationError(
@@ -3348,7 +3341,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                     routed,
                     compaction.start(threadId, modelSelection),
                   ).pipe(
-                    Effect.timeout(nativeCompletionTimeout),
+                    Effect.timeout(COMPACTION_COMPLETION_TIMEOUT),
                     Effect.catchTag('TimeoutError', (cause) =>
                       Effect.sync(() => timedOutNativeCompactions.set(threadId, pending)).pipe(
                         Effect.andThen(
@@ -3381,7 +3374,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
               }),
             ),
           )
-          return { routed, compaction, binding, pending, nativeCompletionTimeout }
+          return { routed, compaction, binding, pending }
         }),
       )
 
@@ -3399,7 +3392,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         if (pendingCompactions.get(threadId) === pending) pendingCompactions.delete(threadId)
       })
       const awaitNative = Deferred.await(completion).pipe(
-        Effect.timeout(prepared.nativeCompletionTimeout),
+        Effect.timeout(COMPACTION_COMPLETION_TIMEOUT),
         Effect.catchTag('TimeoutError', (cause) =>
           Effect.sync(() => timedOutNativeCompactions.set(threadId, pending)).pipe(
             Effect.andThen(
@@ -3407,7 +3400,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                 new ProviderAdapterRequestError({
                   provider: prepared.routed.adapter.provider,
                   method: 'thread/compact',
-                  detail: `Provider did not report completed context compaction within ${prepared.nativeCompletionTimeout}.`,
+                  detail: `Provider did not report completed context compaction within ${COMPACTION_COMPLETION_TIMEOUT}.`,
                   cause,
                 }),
               ),
@@ -3416,13 +3409,13 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         ),
       )
       const awaitSlashCommand = Deferred.await(completion).pipe(
-        Effect.timeout('10 minutes'),
+        Effect.timeout(COMPACTION_COMPLETION_TIMEOUT),
         Effect.mapError(
           (cause) =>
             new ProviderAdapterRequestError({
               provider: prepared.routed.adapter.provider,
               method: 'turn/start',
-              detail: `Provider did not finish context compaction within 10 minutes.`,
+              detail: `Provider did not finish context compaction within ${COMPACTION_COMPLETION_TIMEOUT}.`,
               cause,
             }),
         ),
@@ -3453,7 +3446,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                     ),
                   ),
                 ),
-                Effect.timeout('10 minutes'),
+                Effect.timeout(COMPACTION_COMPLETION_TIMEOUT),
                 Effect.mapError(
                   (cause) =>
                     new ProviderAdapterRequestError({
