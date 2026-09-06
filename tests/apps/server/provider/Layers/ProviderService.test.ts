@@ -2840,6 +2840,182 @@ routing.layer('ProviderServiceLive routing', (it) =>
     }),
   )
 
+  it.effect(
+    'delivers an approval response through the exact route while sendTurn is in flight',
+    () =>
+      Effect.gen(function* ()
+      {
+        const provider = yield* ProviderService.ProviderService
+        const threadId = asThreadId('thread-live-approval-control')
+        const cursorInstanceId = ProviderInstanceId.make('cursor')
+        const sendEntered = yield* Deferred.make<void>()
+        const releaseSend = yield* Deferred.make<void>()
+        const responseReachedAdapter = yield* Deferred.make<void>()
+
+        yield* provider.startSession(threadId, {
+          provider: CURSOR_DRIVER,
+          providerInstanceId: cursorInstanceId,
+          threadId,
+          runtimeMode: 'full-access',
+        })
+        routing.cursor.sendTurn.mockClear()
+        routing.cursor.respondToRequest.mockClear()
+        routing.codex.respondToRequest.mockClear()
+        routing.cursor.sendTurn.mockImplementationOnce((input) =>
+          Deferred.succeed(sendEntered, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseSend)),
+            Effect.as({
+              threadId: input.threadId,
+              turnId: asTurnId('turn-live-approval-control'),
+            }),
+          ),
+        )
+        routing.cursor.respondToRequest.mockImplementationOnce(() =>
+          Deferred.succeed(responseReachedAdapter, undefined).pipe(Effect.asVoid),
+        )
+
+        const send = yield* Effect.forkChild(
+          provider.sendTurn({ threadId, input: 'wait for approval', attachments: [] }),
+        )
+        yield* Deferred.await(sendEntered)
+        yield* provider.respondToRequest({
+          threadId,
+          requestId: asRequestId('request-live-approval-control'),
+          decision: 'accept',
+        })
+        yield* Deferred.await(responseReachedAdapter)
+
+        assert.isUndefined(send.pollUnsafe())
+        assert.deepEqual(routing.cursor.respondToRequest.mock.calls, [
+          [threadId, asRequestId('request-live-approval-control'), 'accept'],
+        ])
+        assert.equal(routing.codex.respondToRequest.mock.calls.length, 0)
+
+        yield* Deferred.succeed(releaseSend, undefined)
+        yield* Fiber.join(send)
+        yield* provider.stopSession({ threadId })
+      }),
+  )
+
+  it.effect('waits for an in-flight send route when approval races its publication', () =>
+    Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const threadId = asThreadId('thread-live-approval-before-route')
+      const cursorInstanceId = ProviderInstanceId.make('cursor')
+      const preflightEntered = yield* Deferred.make<void>()
+      const releasePreflight = yield* Deferred.make<void>()
+      const sendEntered = yield* Deferred.make<void>()
+      const releaseSend = yield* Deferred.make<void>()
+      const responseReachedAdapter = yield* Deferred.make<void>()
+
+      yield* provider.startSession(threadId, {
+        provider: CURSOR_DRIVER,
+        providerInstanceId: cursorInstanceId,
+        threadId,
+        runtimeMode: 'full-access',
+      })
+      const existingSessions = yield* routing.cursor.listSessions()
+      routing.cursor.listSessions.mockImplementationOnce(() =>
+        Deferred.succeed(preflightEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releasePreflight)),
+          Effect.as(existingSessions),
+        ),
+      )
+      routing.cursor.sendTurn.mockClear()
+      routing.cursor.respondToRequest.mockClear()
+      routing.codex.respondToRequest.mockClear()
+      routing.cursor.sendTurn.mockImplementationOnce((input) =>
+        Deferred.succeed(sendEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseSend)),
+          Effect.as({
+            threadId: input.threadId,
+            turnId: asTurnId('turn-live-approval-before-route'),
+          }),
+        ),
+      )
+      routing.cursor.respondToRequest.mockImplementationOnce(() =>
+        Deferred.succeed(responseReachedAdapter, undefined).pipe(Effect.asVoid),
+      )
+
+      const send = yield* Effect.forkChild(
+        provider.sendTurn({ threadId, input: 'wait before route publication', attachments: [] }),
+      )
+      yield* Deferred.await(preflightEntered)
+      const response = yield* Effect.forkChild(
+        provider.respondToRequest({
+          threadId,
+          requestId: asRequestId('request-live-approval-before-route'),
+          decision: 'accept',
+        }),
+      )
+      yield* Effect.yieldNow
+      assert.isUndefined(response.pollUnsafe())
+      assert.equal(routing.cursor.respondToRequest.mock.calls.length, 0)
+
+      yield* Deferred.succeed(releasePreflight, undefined)
+      yield* Deferred.await(sendEntered)
+      yield* Deferred.await(responseReachedAdapter)
+      yield* Fiber.join(response)
+
+      assert.isUndefined(send.pollUnsafe())
+      assert.deepEqual(routing.cursor.respondToRequest.mock.calls, [
+        [threadId, asRequestId('request-live-approval-before-route'), 'accept'],
+      ])
+      assert.equal(routing.codex.respondToRequest.mock.calls.length, 0)
+
+      yield* Deferred.succeed(releaseSend, undefined)
+      yield* Fiber.join(send)
+      yield* provider.stopSession({ threadId })
+    }),
+  )
+
+  it.effect('delivers an interrupt through the exact route while sendTurn is in flight', () =>
+    Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const threadId = asThreadId('thread-live-interrupt-control')
+      const sendEntered = yield* Deferred.make<void>()
+      const releaseSend = yield* Deferred.make<void>()
+      const interruptReachedAdapter = yield* Deferred.make<void>()
+      const turnId = asTurnId('turn-live-interrupt-control')
+
+      yield* provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: 'full-access',
+      })
+      routing.claude.sendTurn.mockClear()
+      routing.claude.interruptTurn.mockClear()
+      routing.codex.interruptTurn.mockClear()
+      routing.claude.sendTurn.mockImplementationOnce((input) =>
+        Deferred.succeed(sendEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseSend)),
+          Effect.as({ threadId: input.threadId, turnId }),
+        ),
+      )
+      routing.claude.interruptTurn.mockImplementationOnce(() =>
+        Deferred.succeed(interruptReachedAdapter, undefined).pipe(Effect.asVoid),
+      )
+
+      const send = yield* Effect.forkChild(
+        provider.sendTurn({ threadId, input: 'interrupt me', attachments: [] }),
+      )
+      yield* Deferred.await(sendEntered)
+      yield* provider.interruptTurn({ threadId, turnId })
+      yield* Deferred.await(interruptReachedAdapter)
+
+      assert.isUndefined(send.pollUnsafe())
+      assert.deepEqual(routing.claude.interruptTurn.mock.calls, [[threadId, turnId]])
+      assert.equal(routing.codex.interruptTurn.mock.calls.length, 0)
+
+      yield* Deferred.succeed(releaseSend, undefined)
+      yield* Fiber.join(send)
+      yield* provider.stopSession({ threadId })
+    }),
+  )
+
   it.effect('routes provider operations and rollback conversation', () =>
     Effect.gen(function* ()
     {

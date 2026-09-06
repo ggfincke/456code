@@ -145,9 +145,27 @@ export interface OrchestrationReactorDeliveryShape
     readonly actions: ReadonlyArray<ReactorActionDraft>
     readonly now: string
   }) => Effect.Effect<void, ReactorDeliveryError>
+  readonly materializeAhead: (input: {
+    readonly reactorId: ReactorId
+    readonly operationVersion: number
+    readonly ownerId: string
+    readonly sourceSequence: number
+    readonly sourceEventId: string
+    readonly actions: ReadonlyArray<ReactorActionDraft>
+    readonly now: string
+  }) => Effect.Effect<boolean, ReactorDeliveryError>
   readonly claimNext: (input: {
     readonly reactorId: ReactorId
     readonly ownerId: string
+    readonly leaseDurationMs: number
+    readonly now: string
+    readonly maxSourceSequence?: number
+  }) => Effect.Effect<Option.Option<ReactorActionRecord>, ReactorDeliveryError>
+  readonly claimNextAhead: (input: {
+    readonly reactorId: ReactorId
+    readonly ownerId: string
+    readonly blockerEffectKind: string
+    readonly effectKinds: readonly [string, ...Array<string>]
     readonly leaseDurationMs: number
     readonly now: string
   }) => Effect.Effect<Option.Option<ReactorActionRecord>, ReactorDeliveryError>

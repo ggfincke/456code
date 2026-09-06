@@ -19,6 +19,7 @@ import type * as AcpSchema from 'effect-acp/schema'
 const requestLogPath = process.env.T3_ACP_REQUEST_LOG_PATH
 const exitLogPath = process.env.T3_ACP_EXIT_LOG_PATH
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === '1'
+const emitParallelToolBurst = process.env.T3_ACP_EMIT_PARALLEL_TOOL_BURST === '1'
 const emitGrowingToolOutput = process.env.T3_ACP_EMIT_GROWING_TOOL_OUTPUT === '1'
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === '1'
@@ -876,6 +877,109 @@ const program = Effect.gen(function* ()
         })
 
         return { stopReason: 'end_turn' }
+      }
+
+      if (emitParallelToolBurst)
+      {
+        const firstToolCallId = 'parallel-tool-a'
+        const secondToolCallId = 'parallel-tool-b'
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Parallel tools are starting.' },
+          },
+        })
+        yield* Effect.forEach(
+          [firstToolCallId, secondToolCallId],
+          (toolCallId) =>
+            agent.client.sessionUpdate({
+              sessionId: requestedSessionId,
+              update: {
+                sessionUpdate: 'tool_call',
+                toolCallId,
+                title: toolCallId === firstToolCallId ? 'Parallel alpha' : 'Parallel beta',
+                kind: 'execute',
+                status: 'pending',
+                rawInput: { command: ['printf', toolCallId] },
+              },
+            }),
+          { discard: true },
+        )
+        for (let index = 1; index <= 12; index += 1)
+        {
+          yield* Effect.forEach(
+            [firstToolCallId, secondToolCallId],
+            (toolCallId) =>
+              agent.client.sessionUpdate({
+                sessionId: requestedSessionId,
+                update: {
+                  sessionUpdate: 'tool_call_update',
+                  toolCallId,
+                  status: 'in_progress',
+                  rawOutput: { stdout: `${toolCallId}:${index}` },
+                },
+              }),
+            { discard: true },
+          )
+        }
+
+        const permission = yield* agent.client.requestPermission({
+          sessionId: requestedSessionId,
+          toolCall: {
+            toolCallId: firstToolCallId,
+            title: 'Run parallel fixture tools',
+            kind: 'execute',
+            status: 'pending',
+            content: [
+              {
+                type: 'content',
+                content: {
+                  type: 'text',
+                  text: 'Allow the bounded parallel tool fixture to finish?',
+                },
+              },
+            ],
+          },
+          options: [
+            { optionId: permissionOptionIds.allowOnce, name: 'Allow once', kind: 'allow_once' },
+            {
+              optionId: permissionOptionIds.allowAlways,
+              name: 'Allow always',
+              kind: 'allow_always',
+            },
+            { optionId: permissionOptionIds.rejectOnce, name: 'Reject', kind: 'reject_once' },
+          ],
+        })
+        const cancelled =
+          cancelledSessions.delete(requestedSessionId) || permission.outcome.outcome === 'cancelled'
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: firstToolCallId,
+            status: 'failed',
+            rawOutput: { exitCode: 1, stderr: 'parallel alpha failed as expected' },
+          },
+        })
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: secondToolCallId,
+            status: 'completed',
+            rawOutput: { exitCode: 0, stdout: 'parallel beta completed' },
+          },
+        })
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Parallel tool burst complete.' },
+          },
+        })
+        return { stopReason: cancelled ? 'cancelled' : 'end_turn' }
       }
 
       if (emitGrowingToolOutput)

@@ -12,6 +12,7 @@
 import type { OrchestrationCommand, OrchestrationEvent, ThreadId } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
+import type * as Scope from 'effect/Scope'
 import type * as Stream from 'effect/Stream'
 
 import type { OrchestrationDispatchError } from '../Errors.ts'
@@ -35,6 +36,8 @@ export interface OrchestrationCausalSettlementAuthority
   readonly sourceKind: 'domain-event' | 'provider-runtime'
   readonly sourceSequence: number
 }
+
+export type OrchestrationDomainEventAdmission = (event: OrchestrationEvent) => boolean
 
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
@@ -92,6 +95,11 @@ export interface OrchestrationEngineShape
     aggregateKind: OrchestrationEvent['aggregateKind'],
     aggregateId: OrchestrationEvent['aggregateId'],
   ) => Stream.Stream<OrchestrationEvent>
+
+  // register one synchronous live-event sink before snapshot or replay work
+  readonly registerDomainEventAdmission: (
+    admission: OrchestrationDomainEventAdmission,
+  ) => Effect.Effect<void, never, Scope.Scope>
 
   // the latest sequence reflected in the engine's authoritative command read
   // model (0 if none). Used to gauge how far behind a resuming client is before

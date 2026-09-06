@@ -417,6 +417,7 @@ describe('ProviderRuntimeIngestion', () =>
             return engine.streamDomainEvents
           },
           streamDomainEventsForAggregate: engine.streamDomainEventsForAggregate,
+          registerDomainEventAdmission: engine.registerDomainEventAdmission,
           latestSequence: engine.latestSequence,
         })
       }),

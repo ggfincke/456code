@@ -56,6 +56,7 @@ import { ProjectionSnapshotQuery } from '../Services/ProjectionSnapshotQuery.ts'
 import {
   OrchestrationEngineService,
   type OrchestrationCausalSettlementAuthority,
+  type OrchestrationDomainEventAdmission,
   type OrchestrationEngineShape,
 } from '../Services/OrchestrationEngine.ts'
 import { ThreadArchiveLifecyclePermit } from '../Services/ThreadArchiveLifecyclePermit.ts'
@@ -129,6 +130,28 @@ function aggregateEventKey(
   return JSON.stringify([aggregateKind, aggregateId])
 }
 
+function publishToAdmissions(
+  admissions: Set<OrchestrationDomainEventAdmission>,
+  event: OrchestrationEvent,
+): void
+{
+  for (const admission of admissions)
+  {
+    try
+    {
+      if (!admission(event))
+      {
+        admissions.delete(admission)
+      }
+    }
+    catch
+    {
+      // a failed client sink must not fail durable command dispatch
+      admissions.delete(admission)
+    }
+  }
+}
+
 const makeOrchestrationEngine = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
@@ -149,11 +172,13 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>()
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>()
   const aggregateEventSubscribers = new Map<string, Set<Queue.Queue<OrchestrationEvent>>>()
+  const domainEventAdmissions = new Set<OrchestrationDomainEventAdmission>()
 
   const publishEvent = Effect.fn('OrchestrationEngine.publishEvent')(function* (
     event: OrchestrationEvent,
   )
   {
+    publishToAdmissions(domainEventAdmissions, event)
     yield* PubSub.publish(eventPubSub, event)
     const subscribers = aggregateEventSubscribers.get(
       aggregateEventKey(event.aggregateKind, event.aggregateId),
@@ -593,6 +618,21 @@ const makeOrchestrationEngine = Effect.gen(function* ()
       )
     }
 
+  const registerDomainEventAdmission: OrchestrationEngineShape['registerDomainEventAdmission'] = (
+    admission,
+  ) =>
+    Effect.acquireRelease(
+      Effect.sync(() =>
+      {
+        domainEventAdmissions.add(admission)
+      }),
+      () =>
+        Effect.sync(() =>
+        {
+          domainEventAdmissions.delete(admission)
+        }),
+    )
+
   return {
     readEvents,
     readThreadEvents,
@@ -607,6 +647,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
       return Stream.fromPubSub(eventPubSub)
     },
     streamDomainEventsForAggregate,
+    registerDomainEventAdmission,
     // the command read model's snapshotSequence tracks the latest committed
     // event sequence (updated on the worker fiber). A plain property read is a
     // consistent, committed value — reassignment of `commandReadModel` is

@@ -915,6 +915,81 @@ describe('OrchestrationEngine', () =>
     await system.dispose()
   })
 
+  it('detaches failed admission sinks without failing dispatch or other subscribers', async () =>
+  {
+    const system = await createOrchestrationSystem()
+    const { engine } = system
+    const createdAt = now()
+    await system.run(
+      engine.dispatch({
+        type: 'project.create',
+        commandId: CommandId.make('cmd-admission-project-create'),
+        projectId: asProjectId('project-admission'),
+        title: 'Admission Project',
+        workspaceRoot: '/tmp/project-admission',
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5-codex',
+        },
+        createdAt,
+      }),
+    )
+
+    let throwingCalls = 0
+    let rejectingCalls = 0
+    const received: string[] = []
+    await system.run(
+      Effect.scoped(
+        Effect.gen(function* ()
+        {
+          yield* engine.registerDomainEventAdmission(() =>
+          {
+            throwingCalls += 1
+            throw new Error('client sink failed')
+          })
+          yield* engine.registerDomainEventAdmission(() =>
+          {
+            rejectingCalls += 1
+            return false
+          })
+          yield* engine.registerDomainEventAdmission((event) =>
+          {
+            received.push(event.type)
+            return true
+          })
+
+          yield* engine.dispatch({
+            type: 'thread.create',
+            commandId: CommandId.make('cmd-admission-thread-create'),
+            threadId: ThreadId.make('thread-admission'),
+            projectId: asProjectId('project-admission'),
+            title: 'admission',
+            modelSelection: {
+              instanceId: ProviderInstanceId.make('codex'),
+              model: 'gpt-5-codex',
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: 'approval-required',
+            branch: null,
+            worktreePath: null,
+            createdAt,
+          })
+          yield* engine.dispatch({
+            type: 'thread.meta.update',
+            commandId: CommandId.make('cmd-admission-thread-update'),
+            threadId: ThreadId.make('thread-admission'),
+            title: 'admission updated',
+          })
+        }),
+      ),
+    )
+
+    expect(throwingCalls).toBe(1)
+    expect(rejectingCalls).toBe(1)
+    expect(received).toEqual(['thread.created', 'thread.meta-updated'])
+    await system.dispose()
+  })
+
   it('does not regress a generated branch to a stale temporary worktree branch', async () =>
   {
     const system = await createOrchestrationSystem()

@@ -29,6 +29,8 @@ import {
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
+  type OrchestrationShellStreamItem,
+  type OrchestrationThreadStreamItem,
   OrchestratePlanRunId,
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
@@ -685,6 +687,15 @@ const buildAppUnderTest = (options?: {
           ...options.layers.vcsStatusBroadcaster,
         })
       : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitStatusReaderLayer))
+    const orchestrationEventStream =
+      options?.layers?.orchestrationEngine?.streamDomainEvents ?? Stream.empty
+    const registerDomainEventAdmission =
+      options?.layers?.orchestrationEngine?.registerDomainEventAdmission ??
+      ((admission: OrchestrationEngine.OrchestrationDomainEventAdmission) =>
+        Effect.forkScoped(
+          orchestrationEventStream.pipe(Stream.takeWhile(admission), Stream.runDrain),
+          { startImmediately: true },
+        ).pipe(Effect.asVoid))
 
     const servedRoutesLayer = HttpRouter.serve(
       makeRoutesLayer.pipe(Layer.provide(McpSessionRegistry.enabledLayer)),
@@ -997,7 +1008,8 @@ const buildAppUnderTest = (options?: {
                 hasCreateEvent: false,
               }),
             dispatch: () => Effect.succeed({ sequence: 0 }),
-            streamDomainEvents: Stream.empty,
+            streamDomainEvents: orchestrationEventStream,
+            registerDomainEventAdmission,
             latestSequence: Effect.succeed(0),
             ...options?.layers?.orchestrationEngine,
           }),
@@ -1207,6 +1219,65 @@ const withWsRpcClient = <A, E, R>(
     Effect.flatMap(f),
     Effect.provide(wsRpcProtocolLayer(wsUrl, origin, onMessage)),
   )
+
+const withFirstWsAckHeld = (
+  wsUrl: string,
+  held: Deferred.Deferred<void>,
+  release: Deferred.Deferred<void>,
+) =>
+{
+  let holdNextAck = true
+  return Layer.effect(RpcClient.Protocol)(
+    Effect.map(RpcClient.Protocol, (protocol) =>
+      RpcClient.Protocol.of({
+        ...protocol,
+        send: (clientId, request, transferables) =>
+        {
+          const send = protocol.send(clientId, request, transferables)
+          if (request._tag !== 'Ack' || !holdNextAck)
+          {
+            return send
+          }
+          holdNextAck = false
+          return Deferred.succeed(held, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(send),
+          )
+        },
+      }),
+    ),
+  ).pipe(Layer.provide(wsRpcProtocolLayer(wsUrl)))
+}
+
+function makeDomainEventAdmissionHarness()
+{
+  const admissions = new Set<OrchestrationEngine.OrchestrationDomainEventAdmission>()
+  return {
+    register: (admission: OrchestrationEngine.OrchestrationDomainEventAdmission) =>
+      Effect.acquireRelease(
+        Effect.sync(() =>
+        {
+          admissions.add(admission)
+        }),
+        () =>
+          Effect.sync(() =>
+          {
+            admissions.delete(admission)
+          }),
+      ),
+    publish: (event: OrchestrationEvent) =>
+    {
+      for (const admission of admissions)
+      {
+        if (!admission(event))
+        {
+          admissions.delete(admission)
+        }
+      }
+    },
+    size: () => admissions.size,
+  }
+}
 
 const appendSessionCookieToWsUrl = (url: string, sessionCookieHeader: string) =>
 {
@@ -7086,6 +7157,267 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
       assert.equal(replayHead, 50)
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('bounds live thread events while a full fallback snapshot is blocked', () =>
+    Effect.gen(function* ()
+    {
+      const admissions = makeDomainEventAdmissionHarness()
+      const attached = yield* Deferred.make<void>()
+      const releaseSnapshot = yield* Deferred.make<void>()
+      const thread = makeDefaultOrchestrationReadModel().threads[0]!
+      const largeText = 's'.repeat(8 * 1024 * 1024 + 1)
+      const fullThread = {
+        ...thread,
+        messages: [
+          {
+            id: MessageId.make('large-snapshot-message'),
+            role: 'assistant' as const,
+            text: largeText,
+            turnId: null,
+            streaming: false,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      }
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            registerDomainEventAdmission: (admission) =>
+              admissions
+                .register(admission)
+                .pipe(Effect.tap(() => Deferred.succeed(attached, undefined))),
+          },
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: () =>
+              Deferred.await(releaseSnapshot).pipe(
+                Effect.as(Option.some({ snapshotSequence: 0, thread: fullThread })),
+              ),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const received: OrchestrationThreadStreamItem[] = []
+      const attempt = yield* withWsRpcClient(wsUrl, (client) =>
+        client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+          threadId: defaultThreadId,
+        }).pipe(
+          Stream.tap((item) => Effect.sync(() => received.push(item))),
+          Stream.runDrain,
+          Effect.result,
+        ),
+      ).pipe(Effect.forkScoped)
+
+      yield* Deferred.await(attached)
+      yield* Effect.sync(() =>
+      {
+        for (let sequence = 1; sequence <= 1_001; sequence += 1)
+        {
+          admissions.publish(makeThreadMessageEvent(sequence, `blocked-live-${sequence}`))
+        }
+      })
+      assert.equal(admissions.size(), 0)
+      yield* Deferred.succeed(releaseSnapshot, undefined)
+      const result = yield* Fiber.join(attempt).pipe(Effect.timeout('5 seconds'))
+
+      assertTrue(result._tag === 'Failure')
+      assert.equal(result.failure._tag, 'OrchestrationGetSnapshotError')
+      assert.equal(received.length, 1)
+      const snapshot = received[0]
+      assertTrue(snapshot?.kind === 'snapshot')
+      assert.equal(snapshot.snapshot.thread.messages[0]?.text.length, largeText.length)
+    }).pipe(Effect.scoped, Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
+  )
+
+  it.effect('bounds live shell events while its fallback snapshot is blocked', () =>
+    Effect.gen(function* ()
+    {
+      const admissions = makeDomainEventAdmissionHarness()
+      const attached = yield* Deferred.make<void>()
+      const releaseSnapshot = yield* Deferred.make<void>()
+      const snapshot = {
+        snapshotSequence: 0,
+        projects: makeDefaultOrchestrationReadModel().projects,
+        threads: [makeDefaultOrchestrationThreadShell()],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            registerDomainEventAdmission: (admission) =>
+              admissions
+                .register(admission)
+                .pipe(Effect.tap(() => Deferred.succeed(attached, undefined))),
+          },
+          projectionSnapshotQuery: {
+            getShellSnapshot: () => Deferred.await(releaseSnapshot).pipe(Effect.as(snapshot)),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const received: OrchestrationShellStreamItem[] = []
+      const attempt = yield* withWsRpcClient(wsUrl, (client) =>
+        client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(
+          Stream.tap((item) => Effect.sync(() => received.push(item))),
+          Stream.runDrain,
+          Effect.result,
+        ),
+      ).pipe(Effect.forkScoped)
+
+      yield* Deferred.await(attached)
+      yield* Effect.sync(() =>
+      {
+        for (let sequence = 1; sequence <= 1_001; sequence += 1)
+        {
+          admissions.publish(makeThreadMessageEvent(sequence, `blocked-shell-${sequence}`))
+        }
+      })
+      assert.equal(admissions.size(), 0)
+      yield* Deferred.succeed(releaseSnapshot, undefined)
+      const result = yield* Fiber.join(attempt).pipe(Effect.timeout('5 seconds'))
+
+      assertTrue(result._tag === 'Failure')
+      assert.equal(result.failure._tag, 'OrchestrationGetSnapshotError')
+      assert.equal(received.length, 1)
+      assert.equal(received[0]?.kind, 'snapshot')
+      assert.equal(
+        received[0]?.kind === 'snapshot' ? received[0].snapshot.snapshotSequence : null,
+        snapshot.snapshotSequence,
+      )
+      assert.equal(received[0]?.kind === 'snapshot' ? received[0].snapshot.threads.length : 0, 1)
+    }).pipe(Effect.scoped, Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
+  )
+
+  it.effect('keeps an unacknowledged live item charged and replays after overflow', () =>
+    Effect.gen(function* ()
+    {
+      const admissions = makeDomainEventAdmissionHarness()
+      const firstAttached = yield* Deferred.make<void>()
+      const ackHeld = yield* Deferred.make<void>()
+      const releaseAck = yield* Deferred.make<void>()
+      const persisted: OrchestrationEvent[] = []
+      let registrationCount = 0
+      let headSequence = 0
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.sync(() => headSequence),
+            registerDomainEventAdmission: (admission) =>
+              admissions.register(admission).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() =>
+                  {
+                    registrationCount += 1
+                  }),
+                ),
+                Effect.tap(() =>
+                  registrationCount === 1
+                    ? Deferred.succeed(firstAttached, undefined)
+                    : Effect.void,
+                ),
+              ),
+            getThreadReplayStats: ({ fromSequenceExclusive, toSequenceInclusive }) =>
+              Effect.sync(() =>
+              {
+                const replay = persisted.filter(
+                  (event) =>
+                    event.sequence > fromSequenceExclusive && event.sequence <= toSequenceInclusive,
+                )
+                return {
+                  eventCount: replay.length,
+                  payloadBytes: replay.reduce(
+                    (bytes, event) => bytes + Buffer.byteLength(JSON.stringify(event.payload)),
+                    0,
+                  ),
+                  hasCreateEvent: false,
+                }
+              }),
+            readThreadEvents: ({ fromSequenceExclusive, toSequenceInclusive }) =>
+              Stream.fromIterable(
+                persisted.filter(
+                  (event) =>
+                    event.sequence > fromSequenceExclusive && event.sequence <= toSequenceInclusive,
+                ),
+              ),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      yield* makeWsRpcClient.pipe(
+        Effect.flatMap((client) =>
+          Effect.gen(function* ()
+          {
+            let cursor = 0
+            const attempt = yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId: defaultThreadId,
+              afterSequence: 0,
+            }).pipe(
+              Stream.tap((item) =>
+              {
+                if (item.kind === 'event')
+                {
+                  cursor = item.event.sequence
+                }
+                return Effect.void
+              }),
+              Stream.runDrain,
+              Effect.result,
+              Effect.forkScoped,
+            )
+            yield* Deferred.await(firstAttached).pipe(Effect.timeout('2 seconds'))
+
+            const first = makeThreadMessageEvent(1, 'slow-live-1')
+            persisted.push(first)
+            headSequence = 1
+            admissions.publish(first)
+            yield* Deferred.await(ackHeld).pipe(Effect.timeout('2 seconds'))
+            yield* Effect.sync(() =>
+            {
+              for (let sequence = 2; sequence <= 1_001; sequence += 1)
+              {
+                const event = makeThreadMessageEvent(sequence, `slow-live-${sequence}`)
+                persisted.push(event)
+                headSequence = sequence
+                admissions.publish(event)
+              }
+            })
+
+            assert.equal(admissions.size(), 0)
+            yield* Deferred.succeed(releaseAck, undefined)
+            const result = yield* Fiber.join(attempt).pipe(Effect.timeout('2 seconds'))
+            assertTrue(result._tag === 'Failure')
+            assert.equal(result.failure._tag, 'OrchestrationGetSnapshotError')
+            assert.equal(cursor, 1)
+
+            const recovered = yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId: defaultThreadId,
+              afterSequence: cursor,
+              requestCompletionMarker: true,
+            }).pipe(
+              Stream.takeUntil((item) => item.kind === 'synchronized'),
+              Stream.runCollect,
+              Effect.timeout('5 seconds'),
+            )
+            assert.equal(recovered.length, 1_001)
+            assert.equal(recovered[0]?.kind === 'event' ? recovered[0].event.sequence : null, 2)
+            assert.equal(
+              recovered[999]?.kind === 'event' ? recovered[999].event.sequence : null,
+              1_001,
+            )
+            assert.deepEqual(recovered[1_000], { kind: 'synchronized' })
+          }),
+        ),
+        Effect.provide(withFirstWsAckHeld(wsUrl, ackHeld, releaseAck)),
+        Effect.ensuring(Deferred.succeed(releaseAck, undefined)),
+      )
+    }).pipe(Effect.scoped, Effect.provide(loopbackHttpServerTestLayer), TestClock.withLive),
   )
 
   it.effect('subscribeShell coalesces a per-thread burst without stalling other threads', () =>

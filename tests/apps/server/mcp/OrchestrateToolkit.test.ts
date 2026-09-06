@@ -147,6 +147,7 @@ function makeLayer(
     dispatchInternal: () => Effect.die(new Error('internal dispatch is not used by toolkit tests')),
     streamDomainEvents: Stream.empty,
     streamDomainEventsForAggregate: () => Stream.empty,
+    registerDomainEventAdmission: () => Effect.void,
     latestSequence: Effect.succeed(42),
   })
   const snapshots = {
@@ -284,6 +285,7 @@ function makeExecutionLayer(input: {
     dispatchInternal: () => Effect.die(new Error('internal dispatch is not used by toolkit tests')),
     streamDomainEvents: Stream.empty,
     streamDomainEventsForAggregate: () => Stream.empty,
+    registerDomainEventAdmission: () => Effect.void,
     latestSequence: Effect.succeed(81),
   })
   const snapshots = {

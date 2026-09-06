@@ -36,6 +36,11 @@ interface ReactorLane
   readonly ownerId: string
   readonly lock: Semaphore.Semaphore
   readonly wakeups: Queue.Queue<void>
+  readonly ahead?: {
+    cursorSequence: number
+    readonly lock: Semaphore.Semaphore
+    readonly wakeups: Queue.Queue<void>
+  }
 }
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
@@ -181,6 +186,8 @@ const make = Effect.gen(function* ()
 
   const claimAvailable = Effect.fn('DurableReactorRunner.claimAvailable')(function* (
     lane: ReactorLane,
+    maxSourceSequence: number,
+    onClaim?: Effect.Effect<unknown>,
   )
   {
     while (true)
@@ -188,6 +195,45 @@ const make = Effect.gen(function* ()
       const action = yield* delivery.claimNext({
         reactorId: lane.definition.reactorId,
         ownerId: lane.ownerId,
+        leaseDurationMs: LEASE_DURATION_MS,
+        now: yield* nowIso,
+        maxSourceSequence,
+      })
+      if (Option.isNone(action))
+      {
+        return
+      }
+      if (
+        lane.ahead !== undefined &&
+        action.value.effectKind === lane.definition.aheadOfCursor?.blockerEffectKind
+      )
+      {
+        yield* Queue.offer(lane.ahead.wakeups, undefined)
+        if (onClaim !== undefined)
+        {
+          yield* onClaim
+        }
+      }
+      yield* recordExecution(lane, action.value)
+    }
+  })
+
+  const claimAheadAvailable = Effect.fn('DurableReactorRunner.claimAheadAvailable')(function* (
+    lane: ReactorLane,
+  )
+  {
+    const aheadOfCursor = lane.definition.aheadOfCursor
+    if (aheadOfCursor === undefined)
+    {
+      return
+    }
+    while (true)
+    {
+      const action = yield* delivery.claimNextAhead({
+        reactorId: lane.definition.reactorId,
+        ownerId: lane.ownerId,
+        blockerEffectKind: aheadOfCursor.blockerEffectKind,
+        effectKinds: aheadOfCursor.effectKinds,
         leaseDurationMs: LEASE_DURATION_MS,
         now: yield* nowIso,
       })
@@ -214,6 +260,7 @@ const make = Effect.gen(function* ()
   const drainLaneUnlocked = Effect.fn('DurableReactorRunner.drainLaneUnlocked')(function* (
     lane: ReactorLane,
     throughSequence?: number,
+    onClaim?: Effect.Effect<unknown>,
   )
   {
     yield* delivery.recoverExpiredLeases({
@@ -249,7 +296,7 @@ const make = Effect.gen(function* ()
       {
         if (progress.mode === 'durable')
         {
-          yield* claimAvailable(lane)
+          yield* claimAvailable(lane, cursor, onClaim)
         }
         return
       }
@@ -291,7 +338,7 @@ const make = Effect.gen(function* ()
           continue
         }
 
-        yield* claimAvailable(lane)
+        yield* claimAvailable(lane, event.sequence, onClaim)
         const advanced = yield* delivery.advanceCursor({
           reactorId: lane.definition.reactorId,
           sourceSequence: event.sequence,
@@ -315,8 +362,97 @@ const make = Effect.gen(function* ()
     }
   })
 
-  const drainLane = (lane: ReactorLane, throughSequence?: number) =>
-    lane.lock.withPermits(1)(drainLaneUnlocked(lane, throughSequence))
+  const drainLane = (
+    lane: ReactorLane,
+    throughSequence?: number,
+    onClaim?: Effect.Effect<unknown>,
+  ) => lane.lock.withPermits(1)(drainLaneUnlocked(lane, throughSequence, onClaim))
+
+  const drainAheadUnlocked = Effect.fn('DurableReactorRunner.drainAheadUnlocked')(function* (
+    lane: ReactorLane,
+    executeActions = true,
+  )
+  {
+    const ahead = lane.ahead
+    const aheadOfCursor = lane.definition.aheadOfCursor
+    if (ahead === undefined || aheadOfCursor === undefined)
+    {
+      return
+    }
+
+    const progressOption = yield* delivery.getProgress(lane.definition.reactorId)
+    if (Option.isNone(progressOption))
+    {
+      return yield* new ReactorDeliveryError({
+        operation: 'DurableReactorRunner.drainAheadUnlocked:missingProgress',
+      })
+    }
+    const progress = progressOption.value
+    if (progress.mode !== 'durable')
+    {
+      return
+    }
+    ahead.cursorSequence = Math.max(ahead.cursorSequence, progress.cursorSequence)
+    if (executeActions)
+    {
+      yield* claimAheadAvailable(lane)
+    }
+
+    while (true)
+    {
+      const events = yield* readEventPage(ahead.cursorSequence)
+      if (events.length === 0)
+      {
+        return
+      }
+      for (const event of events)
+      {
+        // @effect-diagnostics-next-line anyUnknownInErrorContext:off - reactor plans expose heterogeneous failures that are wrapped below
+        const drafts = yield* aheadOfCursor.plan(event).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ReactorDeliveryError({
+                operation: `DurableReactorRunner.planAhead:${lane.definition.reactorId}`,
+                cause,
+              }),
+          ),
+        )
+        if (drafts.some((draft) => !aheadOfCursor.effectKinds.includes(draft.effectKind)))
+        {
+          return yield* new ReactorDeliveryError({
+            operation: `DurableReactorRunner.planAhead:unexpectedEffectKind:${lane.definition.reactorId}`,
+          })
+        }
+        const materialized = yield* delivery.materializeAhead({
+          reactorId: lane.definition.reactorId,
+          operationVersion: lane.definition.operationVersion,
+          ownerId: lane.ownerId,
+          sourceSequence: event.sequence,
+          sourceEventId: event.eventId,
+          actions: drafts,
+          now: yield* nowIso,
+        })
+        if (!materialized)
+        {
+          return
+        }
+        ahead.cursorSequence = event.sequence
+        if (executeActions)
+        {
+          yield* claimAheadAvailable(lane)
+        }
+      }
+      if (events.length < EVENT_PAGE_SIZE)
+      {
+        return
+      }
+    }
+  })
+
+  const drainAhead = (lane: ReactorLane, executeActions = true) =>
+    lane.ahead === undefined
+      ? Effect.void
+      : lane.ahead.lock.withPermits(1)(drainAheadUnlocked(lane, executeActions))
 
   const drainLaneThrough = (lane: ReactorLane, sourceSequence: number) =>
     lane.lock.withPermits(1)(
@@ -340,10 +476,16 @@ const make = Effect.gen(function* ()
     )
 
   const drain: DurableReactorRunnerShape['drain'] = (reactorId) =>
-    requireLane(reactorId).pipe(Effect.flatMap((lane) => drainLane(lane)))
+    requireLane(reactorId).pipe(
+      Effect.flatMap((lane) => drainAhead(lane).pipe(Effect.andThen(drainLane(lane)))),
+    )
 
   const drainThrough: DurableReactorRunnerShape['drainThrough'] = (reactorId, sourceSequence) =>
-    requireLane(reactorId).pipe(Effect.flatMap((lane) => drainLaneThrough(lane, sourceSequence)))
+    requireLane(reactorId).pipe(
+      Effect.flatMap((lane) =>
+        drainAhead(lane).pipe(Effect.andThen(drainLaneThrough(lane, sourceSequence))),
+      ),
+    )
 
   const start: DurableReactorRunnerShape['start'] = Effect.fn('DurableReactorRunner.start')(
     function* (definition)
@@ -381,6 +523,18 @@ const make = Effect.gen(function* ()
         ownerId,
         lock: yield* Semaphore.make(1),
         wakeups: yield* Queue.dropping<void>(1),
+        ...(definition.aheadOfCursor === undefined
+          ? {}
+          : {
+              ahead: {
+                cursorSequence:
+                  existing.mode === 'shadow'
+                    ? existing.shadowCursorSequence
+                    : existing.cursorSequence,
+                lock: yield* Semaphore.make(1),
+                wakeups: yield* Queue.dropping<void>(1),
+              },
+            }),
       }
       lanes.set(definition.reactorId, lane)
       yield* Effect.addFinalizer(() => Effect.sync(() => lanes.delete(definition.reactorId)))
@@ -391,6 +545,60 @@ const make = Effect.gen(function* ()
         policy: definition.onLeaseExpiry,
         now: yield* nowIso,
       })
+
+      if (lane.ahead !== undefined)
+      {
+        const ahead = lane.ahead
+        yield* Stream.runForEach(engine.streamDomainEvents, () =>
+          Effect.all(
+            [Queue.offer(lane.wakeups, undefined), Queue.offer(ahead.wakeups, undefined)],
+            { discard: true },
+          ),
+        ).pipe(Effect.forkScoped)
+        yield* Effect.yieldNow
+        yield* drainAhead(lane, false)
+        const firstPassReady = yield* Deferred.make<void, ReactorDeliveryError>()
+        yield* drainLane(lane, undefined, Deferred.succeed(firstPassReady, undefined)).pipe(
+          Effect.tap(() => Deferred.succeed(firstPassReady, undefined)),
+          Effect.tapError((cause) => Deferred.fail(firstPassReady, cause)),
+          Effect.catch((cause) =>
+            Effect.logError('durable reactor initial drain failed', {
+              reactorId: definition.reactorId,
+              cause: cause.message,
+            }),
+          ),
+          Effect.forkScoped,
+        )
+        yield* Effect.forever(
+          Effect.raceFirst(Queue.take(lane.wakeups), Effect.sleep(POLL_INTERVAL_MS)).pipe(
+            Effect.andThen(drainLane(lane)),
+            Effect.catch((cause) =>
+              Effect.logError('durable reactor drain failed', {
+                reactorId: definition.reactorId,
+                cause: cause.message,
+              }),
+            ),
+          ),
+        ).pipe(Effect.forkScoped)
+        yield* Effect.forever(
+          Effect.raceFirst(Queue.take(ahead.wakeups), Effect.sleep(POLL_INTERVAL_MS)).pipe(
+            Effect.andThen(drainAhead(lane)),
+            Effect.catch((cause) =>
+              Effect.logError('durable reactor ahead drain failed', {
+                reactorId: definition.reactorId,
+                cause: cause.message,
+              }),
+            ),
+          ),
+        ).pipe(Effect.forkScoped)
+        yield* Effect.all(
+          [Queue.offer(lane.wakeups, undefined), Queue.offer(ahead.wakeups, undefined)],
+          { discard: true },
+        )
+        yield* Deferred.await(firstPassReady)
+        return
+      }
+
       yield* drainLane(lane)
 
       yield* Stream.runForEach(engine.streamDomainEvents, () =>
@@ -432,7 +640,15 @@ const make = Effect.gen(function* ()
             Effect.flatMap((now) =>
               delivery.setMode({ reactorId, mode: 'durable', ownerId: lane.ownerId, now }),
             ),
-            Effect.andThen(Queue.offer(lane.wakeups, undefined)),
+            Effect.andThen(
+              Effect.all(
+                [
+                  Queue.offer(lane.wakeups, undefined),
+                  ...(lane.ahead === undefined ? [] : [Queue.offer(lane.ahead.wakeups, undefined)]),
+                ],
+                { discard: true },
+              ),
+            ),
           ),
         ),
       ),
@@ -466,7 +682,15 @@ const make = Effect.gen(function* ()
                   ),
               }),
             ),
-            Effect.andThen(Queue.offer(lane.wakeups, undefined)),
+            Effect.andThen(
+              Effect.all(
+                [
+                  Queue.offer(lane.wakeups, undefined),
+                  ...(lane.ahead === undefined ? [] : [Queue.offer(lane.ahead.wakeups, undefined)]),
+                ],
+                { discard: true },
+              ),
+            ),
           ),
         ),
       ),

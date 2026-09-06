@@ -16,7 +16,7 @@ only the plan's existing `sync/` branches; do not create `codex/` reconciliation
 
 Current state:
 
-- Published `main`: `9a797692a24ad2d2df2ff8e6691f6fb0ef883709`.
+- Published `main`: `acd0514e1edcbd87f9a4d1d89e74dadb709e1445`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -48,11 +48,15 @@ Current state:
   `9a797692a24ad2d2df2ff8e6691f6fb0ef883709`. Exact merged-main CI run
   [33973168375](https://github.com/ggfincke/456code/actions/runs/33973168375) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **08 — OpenCode lifecycle follow-ups**, implementation and integrated verification
-  accepted; cleanup and publication remain.
-- Active branch: `sync/t3-r08-20260904`, based on published `main`.
+- Published Group 08: [PR #99](https://github.com/ggfincke/456code/pull/99) merged through merge commit
+  `acd0514e1edcbd87f9a4d1d89e74dadb709e1445`. Exact merged-main CI run
+  [34007660096](https://github.com/ggfincke/456code/actions/runs/34007660096) passed with 15 successful
+  jobs and the intentional mobile-native-static skip.
+- Active group: **09 — Streaming correctness and memory bounds**. The client lane is locally
+  verified; the non-overlapping server lane and combined/integrated gates remain active.
+- Active branch: `sync/t3-r09-20260904`, based on published `main`.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 09-27 are approved as plan scope but remain planned, not implemented. Their branches are
+- Groups 10-27 are approved as plan scope but remain planned, not implemented. Their branches are
   `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
 - The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -1046,11 +1050,11 @@ intentional mobile-native-static skip. The clean original checkout was fast-forw
 and the exact run-owned Group 07 local, live-origin, and tracking refs were compare-deleted after PR,
 holder, ancestry, and live-ref guards.
 
-## Group 08 active checkpoint
+## Group 08 published checkpoint
 
 Group 08 started from exact green merged `main`
 `9a797692a24ad2d2df2ff8e6691f6fb0ef883709` on `sync/t3-r08-20260904`. The approved OpenCode server
-lifecycle lane is locally verified and awaiting publication. The non-overlapping client/logger lane adds durable mobile
+lifecycle lane was locally verified and published. The non-overlapping client/logger lane adds durable mobile
 approval locking and lifecycle copy for `responding` and `unknown` outcomes while preserving dynamic
 provider options, labels, and request identity. It deliberately does not duplicate approval lifecycle
 state in the thread-detail reducer: both clients already merge the authoritative shell outcome, and
@@ -1113,9 +1117,108 @@ fresh `13778` mobile environment and preserved the pre-existing `13774` connecti
 sidecar, web/backend, Metro, serve-sim, and app processes stopped; ports `4098`, `5738`, `13778`,
 `18095`, and `18096` have no listeners; and the simulator returned to shutdown while the compatible
 development client remained installed. Both disposable bases and projects were moved recoverably to
-Trash after their reproduction evidence was recorded. The two safe final screenshots remain in one
-run-owned temporary evidence directory for GitHub upload. Source attribution, publication, and exact
-merged-main CI remain required before Group 08 completes.
+Trash after their reproduction evidence was recorded. Reviewed evidence is published in
+[PR #99 comment 5556423497](https://github.com/ggfincke/456code/pull/99#issuecomment-5556423497).
+Five source-attributed commits plus the fork-specific lifecycle-race repair were published from exact
+PR head `6937c3d41d59ec9bac25f9488f72ec54a4cdafd3`; all expected PR checks passed. Merge commit
+`acd0514e1edcbd87f9a4d1d89e74dadb709e1445` passed exact merged-main CI run
+[34007660096](https://github.com/ggfincke/456code/actions/runs/34007660096) with 15 successes and the
+intentional mobile-native-static skip. The clean original checkout was fast-forwarded to that merge,
+and only the exact run-owned Group 08 local, live-origin, and tracking refs were compare-deleted after
+PR, holder, ancestry, and live-ref guards.
+
+## Group 09 verified checkpoint
+
+Group 09 started from exact green merged `main`
+`acd0514e1edcbd87f9a4d1d89e74dadb709e1445` on `sync/t3-r09-20260904`. It adapts
+`7e4ce3bbb`, the client portion of `c2283ce14`, `355fbd96d`, `44dc8ae25`, and `108f295cc`.
+The fork already implements `c2283ce14`'s server projection slice equivalently, so that slice is not
+duplicated.
+
+The streaming boundary now shares one serialized-payload budget across queued, coalesced, and
+acknowledgement-in-flight events. Tool updates coalesce in a 50 ms window with a 512-entry ceiling,
+while lifecycle boundaries, status changes, errors, terminal events, and synchronization markers
+flush immediately. Reducer-owned activity arrays carry a weak ID index for constant-time append
+eligibility checks; snapshot-loaded, duplicate, replacement, provider-switch, and out-of-order inputs
+retain the safe reconciliation path. Mobile feed rows are weakly cached against immutable owners and
+complete presentation inputs, and web memoizes only the parsed route thread reference used by citation
+rows.
+
+The first real provider gate exposed a pre-existing provider-control deadlock: a turn held the same
+lifecycle permits that approval and interrupt controls needed. The fork-specific repair keeps the
+existing durable reactor and action identities. Ahead-of-cursor provider controls are exact
+owner/thread/lease fenced, use action-local sequence and ambiguity context, and cannot overtake an
+unrelated blocker. `ProviderService` publishes an exact active-send route containing the adapter and
+durable session generation; admitted controls revalidate the active thread, persisted binding,
+route, adapter, session, and generation without reacquiring the long-held send permits. Route removal
+waits for admitted controls, and the original serialized recovery path remains authoritative when no
+send route is active.
+
+The final focused checkpoint passes **419 tests**: 52 client tests across the reducer, mobile feed,
+and mounted web timeline, plus 367 server tests across 12 focused files. Client-runtime, mobile, web,
+and server typechecks pass under the installed Node 24 runtime. The focused web production build and
+changed-file Prettier, lint, comment/header, directive-preservation, and `git diff --check` gates pass.
+The major server command was:
+
+```sh
+mise x node@24 -- pnpm exec vp test run \
+  tests/apps/server/orchestration/LiveStreamBudget.test.ts \
+  tests/apps/server/orchestration/ThreadLiveEventCoalescer.test.ts \
+  tests/apps/server/orchestration/Layers/OrchestrationEngine.test.ts \
+  tests/apps/server/orchestration/Layers/DurableReactorRunner.test.ts \
+  tests/apps/server/orchestration/Layers/ProviderCommandReactor.test.ts \
+  tests/apps/server/provider/Layers/ProviderService.test.ts \
+  tests/apps/server/server.test.ts \
+  tests/apps/server/mcp/OrchestrateToolkit.test.ts \
+  tests/apps/server/orchestration/Layers/ProviderRuntimeIngestion.test.ts \
+  tests/apps/server/orchestration/runExecutionAvailability.test.ts \
+  tests/apps/server/serverRuntimeStartup.reconcile.test.ts \
+  tests/apps/server/serverRuntimeStartup.test.ts
+```
+
+One isolated web/iPhone environment completed the real Cursor ACP flow. Web and the installed iPhone
+client both showed the initial assistant text, two distinct parallel tools, and the held permission.
+Approving once in web reached the still-running provider, produced one terminal response, unlocked the
+composer, and survived browser reload without duplicate rows. Durable SQLite evidence records exactly
+one `thread.approval-response-requested` at sequence 25; its provider-command action and the sequence 6
+turn-start both succeeded on their first attempts. The provider-command cursor advanced through
+sequence 36 with no blocked sequence or last error. The provider inbox contains exactly one
+`request.opened`, one `request.resolved`, two terminal tool completions, the final assistant start and
+delta, and `turn.completed`. The iPhone deep link then showed the same terminal thread, collapsed work
+log, enabled composer, and final response.
+
+Secret-free evidence is retained under the disposable run root as
+`g09-final2-web-held.png`, `g09-final2-web-terminal.png`, `g09-final2-iphone-held.png`, and
+`g09-final2-iphone-terminal.png`; the terminal iPhone capture has SHA-256
+`75e761ea0bb54849259cd2a0bd17887ca1255ac541cc01685ea0c6adb729f15a`. The optional raw ACP request
+log is unavailable because the run used `T3_ACP_REQUEST_LOG` while the fixture expects
+`T3_ACP_REQUEST_LOG_PATH`; authoritative database and provider-inbox evidence remains complete.
+XcodeBuildMCP semantic inspection was unavailable because the pinned Xcode-beta SimulatorKit private
+framework is missing, so the approved real-client serve-sim/CUA and simulator-screenshot path supplied
+the iPhone evidence.
+
+Cleanup stopped the owned backend, web server, Metro, serve-sim, ACP mock, and app processes; ports
+`13773`, `5733`, `8081`, and `3200` are clear. Only the simulator booted by this run was shut down.
+Final2 runtime state and credentials were moved recoverably to a private Trash directory, while the
+secret-free evidence files remain available for publication.
+
+The first exact-head CI run exposed a deterministic sparse-delivery regression in the fork-native
+ahead-control repair. `claimNext` had required `source_sequence = cursor_sequence + 1`, which stranded
+an action when intervening domain events produced no reactor action. Commit `7934702f0` restores the
+delivery store's established sparse FIFO contract and gives the ordinary runner an explicit upper
+source-sequence bound, so ahead-materialized controls remain hidden until their event is processed.
+The unchanged CI regression and the bounded-ahead test pass together; the expanded focused server
+gate passes 379 tests across 14 files, for 431 focused Group 09 tests including the unchanged 52-client
+gate. Server typechecking and changed-file formatting, lint, comment/header, and diff checks pass.
+
+The source-attributed local commits are `942f66fb3` (`108f295cc`), `2296fd932` (`7e4ce3bbb`),
+`93cfc2b0d` (the client slice of `c2283ce14`), `692a7aeed` (`355fbd96d`), and `fd2cea558`
+(`44dc8ae25`). Fork-native integration commits are `9d3e602c1`, `fd9b15fa5`, `f36bf6402`, and
+`7934702f0`. Original source authors, AuthorDates, subjects, bodies, and trailers are retained where
+applicable.
+
+The checkpoint is verified and published in [PR #100](https://github.com/ggfincke/456code/pull/100).
+Exact-head checks and the merge receipt remain pending. Groups 10-27 remain queued and unchanged.
 
 ## Verification policy for every group
 

@@ -11,7 +11,6 @@ import {
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
-import * as Queue from 'effect/Queue'
 import * as Stream from 'effect/Stream'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
@@ -19,6 +18,7 @@ import {
   projectActivityEvent,
   projectThreadDetailSnapshot,
 } from '../../orchestration/ActivityPayloadProjection.ts'
+import { makeThreadLiveEventCoalescer } from '../../orchestration/ThreadLiveEventCoalescer.ts'
 import type * as OrchestrationEngine from '../../orchestration/Services/OrchestrationEngine.ts'
 import type * as ProjectionSnapshotQuery from '../../orchestration/Services/ProjectionSnapshotQuery.ts'
 import type { makeRpcAuthorization } from '../rpcAuthorization.ts'
@@ -94,22 +94,13 @@ export function makeOrchestrationThreadStreamHandlers({
             event.aggregateId === input.threadId &&
             isThreadDetailEvent(event)
 
-          const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-            Stream.filter(isThisThreadDetailEvent),
-            Stream.map((event) => ({
-              kind: 'event' as const,
-              event: projectActivityEvent(event),
-            })),
-          )
-
           // attach live delivery before reading either replay or snapshot state.
-          // otherwise an event published while the snapshot is loading is lost.
-          const liveBuffer = yield* Queue.unbounded<OrchestrationThreadStreamItem>()
-          yield* Effect.forkScoped(
-            liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
-            { startImmediately: true },
+          // synchronous admission bounds events before any client queue.
+          const liveBuffer = yield* makeThreadLiveEventCoalescer()
+          yield* orchestrationEngine.registerDomainEventAdmission((event) =>
+            isThisThreadDetailEvent(event) ? liveBuffer.admit({ kind: 'event', event }) : true,
           )
-          const bufferedLiveStream = Stream.fromQueue(liveBuffer)
+          const bufferedLiveStream = liveBuffer.stream
           let replayOnMissingSnapshot:
             Stream.Stream<OrchestrationThreadStreamItem, OrchestrationGetSnapshotError> | undefined
           const loadSnapshot = projectionSnapshotQuery.getThreadDetailSnapshot(input.threadId).pipe(
@@ -123,11 +114,8 @@ export function makeOrchestrationThreadStreamHandlers({
           )
           const afterCatchUp =
             input.requestCompletionMarker === true
-              ? Stream.concat(
-                  Stream.fromEffect(
-                    Queue.offer(liveBuffer, { kind: 'synchronized' as const }),
-                  ).pipe(Stream.drain),
-                  bufferedLiveStream,
+              ? Stream.unwrap(
+                  liveBuffer.offer({ kind: 'synchronized' }).pipe(Effect.as(bufferedLiveStream)),
                 )
               : bufferedLiveStream
           const snapshotThenLive = (snapshot: OrchestrationThreadDetailSnapshot) =>

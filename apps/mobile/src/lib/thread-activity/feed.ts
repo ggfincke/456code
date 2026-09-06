@@ -76,6 +76,31 @@ export type ThreadFeedLatestTurn = Pick<
   'turnId' | 'state' | 'startedAt' | 'completedAt'
 >
 
+type ThreadFeedActivityGroup = Extract<ThreadFeedEntry, { readonly type: 'activity-group' }>
+type RawThreadFeedActivityEntry = Extract<RawThreadFeedEntry, { readonly type: 'activity' }>
+type RawThreadFeedMessageEntry = Extract<RawThreadFeedEntry, { readonly type: 'message' }>
+type DerivedWorkLogEntry = ReturnType<typeof deriveWorkLogEntries>[number]
+
+// weak caches retain only immutable source owners and the presentation inputs
+// that can change the corresponding row
+const activityEntriesCache = new WeakMap<
+  ReadonlyArray<OrchestrationThreadActivity>,
+  ReadonlyArray<RawThreadFeedActivityEntry>
+>()
+const messageEntriesCache = new WeakMap<
+  OrchestrationThread['messages'][number],
+  RawThreadFeedMessageEntry
+>()
+const activityGroupsCache = new WeakMap<ThreadFeedActivity, ThreadFeedActivityGroup>()
+const presentedActivityGroupsCache = new WeakMap<
+  ThreadFeedActivityGroup,
+  { readonly expanded: boolean; readonly rows: ReadonlyArray<ThreadFeedEntry> }
+>()
+const turnFoldRowsCache = new WeakMap<
+  ThreadFeedEntry,
+  Extract<ThreadFeedEntry, { readonly type: 'turn-fold' }>
+>()
+
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 
 function isEmptyMessage(entry: RawThreadFeedEntry): boolean
@@ -92,9 +117,38 @@ function isEmptyMessage(entry: RawThreadFeedEntry): boolean
 function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): ThreadFeedEntry[]
 {
   const grouped: ThreadFeedEntry[] = []
-  // mutate only the trailing group to keep long tool runs linear
-  let openGroupActivities: ThreadFeedActivity[] | null = null
-  let openGroupTurnId: TurnId | null = null
+  let firstActivityEntry: RawThreadFeedActivityEntry | null = null
+  let openGroupActivities: ThreadFeedActivity[] = []
+  const flushGroup = () =>
+  {
+    if (firstActivityEntry === null)
+    {
+      return
+    }
+    const cached = activityGroupsCache.get(firstActivityEntry.activity)
+    if (
+      cached &&
+      cached.activities.length === openGroupActivities.length &&
+      cached.activities.every((activity, index) => activity === openGroupActivities[index])
+    )
+    {
+      grouped.push(cached)
+    }
+    else
+    {
+      const group: ThreadFeedActivityGroup = {
+        type: 'activity-group',
+        id: firstActivityEntry.id,
+        createdAt: firstActivityEntry.createdAt,
+        turnId: firstActivityEntry.turnId,
+        activities: openGroupActivities,
+      }
+      activityGroupsCache.set(firstActivityEntry.activity, group)
+      grouped.push(group)
+    }
+    firstActivityEntry = null
+    openGroupActivities = []
+  }
 
   for (const entry of entries)
   {
@@ -106,28 +160,20 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
 
     if (entry.type !== 'activity')
     {
+      flushGroup()
       grouped.push(entry)
-      openGroupActivities = null
       continue
     }
 
-    if (openGroupActivities !== null && openGroupTurnId === entry.turnId)
+    if (firstActivityEntry !== null && firstActivityEntry.turnId !== entry.turnId)
     {
-      openGroupActivities.push(entry.activity)
-      continue
+      flushGroup()
     }
-
-    openGroupActivities = [entry.activity]
-    openGroupTurnId = entry.turnId
-    grouped.push({
-      type: 'activity-group',
-      id: entry.id,
-      createdAt: entry.createdAt,
-      turnId: entry.turnId,
-      activities: openGroupActivities,
-    })
+    firstActivityEntry ??= entry
+    openGroupActivities.push(entry.activity)
   }
 
+  flushGroup()
   return grouped
 }
 
@@ -330,14 +376,27 @@ export function deriveThreadFeedPresentation(
     const fold = foldsByAnchorId.get(entry.id)
     if (fold)
     {
-      result.push({
-        type: 'turn-fold',
-        id: `turn-fold:${fold.turnId}`,
-        createdAt: fold.createdAt,
-        turnId: fold.turnId,
-        label: fold.label,
-        expanded: expandedTurnIds.has(fold.turnId),
-      })
+      const expanded = expandedTurnIds.has(fold.turnId)
+      let row = turnFoldRowsCache.get(entry)
+      if (
+        !row ||
+        row.turnId !== fold.turnId ||
+        row.createdAt !== fold.createdAt ||
+        row.label !== fold.label ||
+        row.expanded !== expanded
+      )
+      {
+        row = {
+          type: 'turn-fold',
+          id: `turn-fold:${fold.turnId}`,
+          createdAt: fold.createdAt,
+          turnId: fold.turnId,
+          label: fold.label,
+          expanded,
+        }
+        turnFoldRowsCache.set(entry, row)
+      }
+      result.push(row)
     }
     if (!collapsedEntryIds.has(entry.id))
     {
@@ -367,12 +426,29 @@ function appendPresentedFeedEntry(
     return
   }
 
+  const expanded = expandedWorkGroupIds.has(entry.id)
+  let cached = presentedActivityGroupsCache.get(entry)
+  if (!cached || cached.expanded !== expanded)
+  {
+    cached = { expanded, rows: buildPresentedActivityGroupRows(entry, expanded) }
+    presentedActivityGroupsCache.set(entry, cached)
+  }
+  result.push(...cached.rows)
+}
+
+function buildPresentedActivityGroupRows(
+  entry: ThreadFeedActivityGroup,
+  expanded: boolean,
+): ReadonlyArray<ThreadFeedEntry>
+{
+  const result: ThreadFeedEntry[] = []
+
   const activities = entry.activities.filter(
     (activity) => !(activity.toolLike && activity.status === 'neutral'),
   )
   if (activities.length === 0)
   {
-    return
+    return result
   }
   if (activities.length <= MAX_VISIBLE_WORK_LOG_ENTRIES)
   {
@@ -380,11 +456,10 @@ function appendPresentedFeedEntry(
       ...entry,
       activities,
     })
-    return
+    return result
   }
 
   const groupId = entry.id
-  const expanded = expandedWorkGroupIds.has(groupId)
   const hiddenCount = activities.length - MAX_VISIBLE_WORK_LOG_ENTRIES
   const visibleActivities = expanded ? activities : activities.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
 
@@ -408,6 +483,7 @@ function appendPresentedFeedEntry(
     expanded,
     onlyToolActivities: activities.every((activity) => activity.toolLike),
   })
+  return result
 }
 
 // sort once for consumers that share lifecycle ordering
@@ -418,7 +494,7 @@ export function sortThreadActivities(
   return [...activities].sort(compareOrchestrationThreadActivities)
 }
 export function buildThreadFeed(
-  thread: OrchestrationThread,
+  thread: Pick<OrchestrationThread, 'messages' | 'activities'>,
   options?: {
     readonly loadedMessages?: ReadonlyArray<OrchestrationThread['messages'][number]>
   },
@@ -427,15 +503,24 @@ export function buildThreadFeed(
   const loadedMessages = options?.loadedMessages ?? thread.messages
   const oldestLoadedMessageCreatedAt =
     options?.loadedMessages !== undefined ? (loadedMessages[0]?.createdAt ?? null) : null
-  const workLogEntries = deriveWorkLogEntries(thread.activities)
+  const workLogEntries = getThreadFeedActivityEntries(thread.activities)
   const entries = Arr.sortWith(
     [
-      ...loadedMessages.map<RawThreadFeedEntry>((message) => ({
-        type: 'message',
-        id: message.id,
-        createdAt: message.createdAt,
-        message,
-      })),
+      ...loadedMessages.map<RawThreadFeedEntry>((message) =>
+      {
+        let entry = messageEntriesCache.get(message)
+        if (!entry)
+        {
+          entry = {
+            type: 'message',
+            id: message.id,
+            createdAt: message.createdAt,
+            message,
+          }
+          messageEntriesCache.set(message, entry)
+        }
+        return entry
+      }),
       ...workLogEntries
         .filter((entry) =>
         {
@@ -447,43 +532,59 @@ export function buildThreadFeed(
             oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt
           )
         })
-        .map<RawThreadFeedEntry>((entry) =>
-        {
-          const summary = workEntryHeading(entry)
-          const detail = workEntryPreview(entry)
-          const getFullDetail = memoizeValue(() => buildWorkEntryExpandedBody(entry))
-          const getCopyText = memoizeValue(() =>
-            [summary, detail, getFullDetail()]
-              .filter((value, index, values): value is string =>
-              {
-                return Boolean(value) && values.indexOf(value) === index
-              })
-              .join('\n'),
-          )
-          return {
-            type: 'activity',
-            id: entry.id,
-            createdAt: entry.createdAt,
-            turnId: entry.turnId,
-            activity: {
-              id: entry.id,
-              createdAt: entry.createdAt,
-              turnId: entry.turnId,
-              summary,
-              detail,
-              canExpand: workEntryHasExpandedBody(entry),
-              getFullDetail,
-              getCopyText,
-              icon: workEntryIcon(entry),
-              toolLike: workLogEntryIsToolLike(entry),
-              status: workEntryStatus(entry),
-            },
-          }
-        }),
+        .map<RawThreadFeedEntry>((entry) => entry),
     ],
     (s) => new Date(s.createdAt),
     Order.Date,
   )
 
   return groupAdjacentActivities(entries)
+}
+
+function getThreadFeedActivityEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<RawThreadFeedActivityEntry>
+{
+  const cached = activityEntriesCache.get(activities)
+  if (cached)
+  {
+    return cached
+  }
+  const entries = deriveWorkLogEntries(activities).map(toThreadFeedActivityEntry)
+  activityEntriesCache.set(activities, entries)
+  return entries
+}
+
+function toThreadFeedActivityEntry(entry: DerivedWorkLogEntry): RawThreadFeedActivityEntry
+{
+  const summary = workEntryHeading(entry)
+  const detail = workEntryPreview(entry)
+  const getFullDetail = memoizeValue(() => buildWorkEntryExpandedBody(entry))
+  const getCopyText = memoizeValue(() =>
+    [summary, detail, getFullDetail()]
+      .filter((value, index, values): value is string =>
+      {
+        return Boolean(value) && values.indexOf(value) === index
+      })
+      .join('\n'),
+  )
+  return {
+    type: 'activity',
+    id: entry.id,
+    createdAt: entry.createdAt,
+    turnId: entry.turnId,
+    activity: {
+      id: entry.id,
+      createdAt: entry.createdAt,
+      turnId: entry.turnId,
+      summary,
+      detail,
+      canExpand: workEntryHasExpandedBody(entry),
+      getFullDetail,
+      getCopyText,
+      icon: workEntryIcon(entry),
+      toolLike: workLogEntryIsToolLike(entry),
+      status: workEntryStatus(entry),
+    },
+  }
 }
