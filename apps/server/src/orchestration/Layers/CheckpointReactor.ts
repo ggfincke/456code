@@ -26,6 +26,7 @@ import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { collectToolMutationTargets } from '@t3tools/shared/toolMutationTargets'
+import { makeDrainableWorker } from '@t3tools/shared/DrainableWorker'
 
 import { parseTurnDiffFilesFromNumstat } from '../../checkpointing/Diffs.ts'
 import { CheckpointIdentityResolver } from '../../checkpointing/CheckpointIdentity.ts'
@@ -1393,6 +1394,9 @@ const make = Effect.gen(function* ()
     })
   })
 
+  // remote status work never holds the durable checkpoint lane.
+  const statusWorker = yield* makeDrainableWorker(refreshLocalGitStatusFromTurnCompletion)
+
   const ensurePreTurnBaselineFromDomainTurnStart = Effect.fn(
     'ensurePreTurnBaselineFromDomainTurnStart',
   )(function* (
@@ -2455,7 +2459,6 @@ const make = Effect.gen(function* ()
     if (event.type === 'turn.completed')
     {
       const turnId = toTurnId(event.turnId)
-      yield* refreshLocalGitStatusFromTurnCompletion(event)
       const outcome = yield* captureCheckpointFromTurnCompletion(event, actionId).pipe(
         Effect.catch((error) =>
           Effect.flatMap(nowIso, (createdAt) =>
@@ -2472,6 +2475,8 @@ const make = Effect.gen(function* ()
           ),
         ),
       )
+
+      yield* statusWorker.enqueue(event)
 
       // capture never ran, so the empty-diff branch inside
       // captureAndDispatchCheckpoint is unreachable for exactly the turns that
@@ -2963,7 +2968,7 @@ const make = Effect.gen(function* ()
     start,
     drain: runtimeInboxRunner
       .drain(PROVIDER_RUNTIME_CHECKPOINT_REACTOR_ID)
-      .pipe(Effect.andThen(durableRunner.drain(REACTOR_ID))),
+      .pipe(Effect.andThen(durableRunner.drain(REACTOR_ID)), Effect.andThen(statusWorker.drain)),
   } satisfies CheckpointReactorShape
 })
 

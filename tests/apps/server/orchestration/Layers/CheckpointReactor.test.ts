@@ -27,6 +27,7 @@ import {
 } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Clock from 'effect/Clock'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
@@ -557,6 +558,7 @@ describe('CheckpointReactor', () =>
     readonly rollbackFailure?: string
     readonly gitStatusRefreshCalls?: Array<string>
     readonly pullRequestRefreshCalls?: Array<string>
+    readonly beforePullRequestRefresh?: Effect.Effect<void>
     readonly threadBranch?: string
     readonly localStatusRefName?: string
     readonly threadOrigin?: ThreadOrigin
@@ -572,6 +574,7 @@ describe('CheckpointReactor', () =>
     }
     readonly startReactor?: boolean
     readonly advanceRuntimeIngestion?: boolean
+    readonly drainAfterAdmission?: boolean
   })
   {
     const cwd = createGitRepository()
@@ -630,7 +633,7 @@ describe('CheckpointReactor', () =>
         Effect.sync(() =>
         {
           options?.pullRequestRefreshCalls?.push(cwd)
-        }).pipe(Effect.as(null)),
+        }).pipe(Effect.andThen(options?.beforePullRequestRefresh ?? Effect.void), Effect.as(null)),
       streamStatus: () => Stream.empty,
     })
     const liveCheckpointStoreLayer = CheckpointStore.layer.pipe(
@@ -818,7 +821,11 @@ describe('CheckpointReactor', () =>
             (options?.advanceRuntimeIngestion ?? true)
               ? advanceRuntimeIngestionEffect.pipe(
                   Effect.andThen(
-                    Effect.suspend(() => (reactorStarted ? reactor.drain : Effect.void)),
+                    Effect.suspend(() =>
+                      reactorStarted && (options?.drainAfterAdmission ?? true)
+                        ? reactor.drain
+                        : Effect.void,
+                    ),
                   ),
                 )
               : Effect.void,
@@ -1169,6 +1176,70 @@ describe('CheckpointReactor', () =>
         'README.md',
       ),
     ).toBe('v2\n')
+  })
+
+  it('captures later turns while a pull request refresh is held, then drains the refresh', async () =>
+  {
+    const refreshStarted = Effect.runSync(Deferred.make<void>())
+    const releaseRefresh = Effect.runSync(Deferred.make<void>())
+    const pullRequestRefreshCalls: string[] = []
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: 'feature/checkpoints',
+      drainAfterAdmission: false,
+      localStatusRefName: 'feature/checkpoints',
+      pullRequestRefreshCalls,
+      beforePullRequestRefresh: Deferred.succeed(refreshStarted, undefined).pipe(
+        Effect.andThen(Deferred.await(releaseRefresh)),
+      ),
+    })
+
+    for (const turnNumber of [1, 2])
+    {
+      harness.provider.emit({
+        type: 'turn.started',
+        eventId: EventId.make(`held-refresh-start-${turnNumber}`),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: `2026-01-01T00:0${turnNumber}:00.000Z`,
+        threadId: ThreadId.make('thread-1'),
+        turnId: asTurnId(`turn-${turnNumber}`),
+        payload: {},
+      })
+      await waitForGitRefExists(
+        harness.cwd,
+        checkpointRefForThreadTurn(ThreadId.make('thread-1'), turnNumber - 1),
+      )
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, 'README.md'), `turn-${turnNumber}\n`, 'utf8')
+      harness.provider.emit({
+        type: 'turn.completed',
+        eventId: EventId.make(`held-refresh-complete-${turnNumber}`),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: `2026-01-01T00:0${turnNumber}:01.000Z`,
+        threadId: ThreadId.make('thread-1'),
+        turnId: asTurnId(`turn-${turnNumber}`),
+        payload: { state: 'completed' },
+      })
+      await waitForGitRefExists(
+        harness.cwd,
+        checkpointRefForThreadTurn(ThreadId.make('thread-1'), turnNumber),
+      )
+      if (turnNumber === 1)
+      {
+        await Effect.runPromise(Deferred.await(refreshStarted).pipe(Effect.timeout('5 seconds')))
+      }
+    }
+
+    expect(pullRequestRefreshCalls).toEqual([harness.cwd])
+    expect(
+      gitShowFileAtRef(
+        harness.cwd,
+        checkpointRefForThreadTurn(ThreadId.make('thread-1'), 2),
+        'README.md',
+      ),
+    ).toBe('turn-2\n')
+    await Effect.runPromise(Deferred.succeed(releaseRefresh, undefined))
+    await harness.drain()
+    expect(pullRequestRefreshCalls).toEqual([harness.cwd, harness.cwd])
   })
 
   it('binds implementation revision selection to the user request time', async () =>
