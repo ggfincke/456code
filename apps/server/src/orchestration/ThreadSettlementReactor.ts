@@ -31,6 +31,7 @@ export const makeThreadSettlementReactor = Effect.gen(function* ()
   const sweep = Effect.fn('ThreadSettlementReactor.sweep')(function* ()
   {
     const policy = yield* settingsService.getSettings
+    if (policy.sidebarAutoSettleAfterDays === null && !policy.sidebarAutoSettleOnMerge) return
     const snapshot = yield* snapshots.getShellSnapshot()
     const now = DateTime.formatIso(yield* DateTime.now)
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]))
