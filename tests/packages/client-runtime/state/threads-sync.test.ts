@@ -14,6 +14,8 @@ import {
   type OrchestrationThreadStreamItem,
 } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Queue from 'effect/Queue'
@@ -21,6 +23,7 @@ import * as Ref from 'effect/Ref'
 import * as Stream from 'effect/Stream'
 import * as SubscriptionRef from 'effect/SubscriptionRef'
 import * as TestClock from 'effect/testing/TestClock'
+import { RpcClientError } from 'effect/unstable/rpc'
 
 import type { WsRpcProtocolClient } from '../../../../packages/client-runtime/src/rpc/protocol.ts'
 import {
@@ -105,7 +108,10 @@ const ACTIVE_THREAD: OrchestrationThread = {
   },
 }
 
-type TestThreadInput = OrchestrationThreadStreamItem | Error
+type TestThreadInput =
+  | OrchestrationThreadStreamItem
+  | Error
+  | { readonly testFailureCause: Cause.Cause<Error | RpcClientError.RpcClientError> }
 
 function testSession(
   client: WsRpcProtocolClient,
@@ -148,6 +154,7 @@ const makeHarness = Effect.fn('TestEnvironmentThreads.makeHarness')(function* (o
   readonly cached?: OrchestrationThread
   readonly httpSnapshot?: Option.Option<OrchestrationThreadDetailSnapshot>
   readonly completionMarker?: boolean
+  readonly snapshotLoad?: Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>>
 })
 {
   const inputs = yield* Queue.unbounded<TestThreadInput>()
@@ -167,7 +174,11 @@ const makeHarness = Effect.fn('TestEnvironmentThreads.makeHarness')(function* (o
   const streamFrom = (queue: Queue.Queue<TestThreadInput>) =>
     Stream.fromQueue(queue).pipe(
       Stream.mapEffect((input) =>
-        input instanceof Error ? Effect.fail(input) : Effect.succeed(input),
+        input instanceof Error
+          ? Effect.fail(input)
+          : 'testFailureCause' in input
+            ? Effect.failCause(input.testFailureCause)
+            : Effect.succeed(input),
       ),
     )
   const client = {
@@ -197,10 +208,13 @@ const makeHarness = Effect.fn('TestEnvironmentThreads.makeHarness')(function* (o
   const snapshotLoader = ThreadSnapshotLoader.of({
     load: (_prepared, threadId) =>
       Ref.update(loaderCalls, (count) => count + 1).pipe(
-        Effect.as(
-          threadId === THREAD_ID
-            ? (options?.httpSnapshot ?? Option.none<OrchestrationThreadDetailSnapshot>())
-            : Option.none<OrchestrationThreadDetailSnapshot>(),
+        Effect.andThen(
+          options?.snapshotLoad ??
+            Effect.succeed(
+              threadId === THREAD_ID
+                ? (options?.httpSnapshot ?? Option.none<OrchestrationThreadDetailSnapshot>())
+                : Option.none<OrchestrationThreadDetailSnapshot>(),
+            ),
         ),
       ),
   })
@@ -542,6 +556,148 @@ describe('EnvironmentThreads', () =>
       expect(yield* Ref.get(harness.loaderCalls)).toBe(0)
       expect(latest.status).toBe('deleted')
       expect(Option.isNone(latest.data)).toBe(true)
+    }),
+  )
+
+  it.effect('reports a snapshot-loader defect before the RPC subscription starts', () =>
+    Effect.gen(function* ()
+    {
+      const completed = yield* Deferred.make<void>()
+      const harness = yield* makeHarness({
+        snapshotLoad: Effect.die(new Error('synthetic snapshot-loader defect')).pipe(
+          Effect.ensuring(Deferred.succeed(completed, undefined)),
+        ),
+      })
+      yield* Deferred.await(completed)
+      const failed = yield* awaitThreadState(harness.observed, (value) =>
+        Option.isSome(value.error),
+      )
+
+      expect(failed.status).toBe('empty')
+      expect(failed.error).toEqual(Option.some('Could not synchronize the thread.'))
+      expect(failed.data).toEqual(Option.none())
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(1)
+      expect(yield* Ref.get(harness.subscriptionCount)).toBe(0)
+    }),
+  )
+
+  it.effect.each(['protocol', 'fatal'] as const)(
+    'retains a terminated %s load across connection updates and replacement ordering',
+    (kind) =>
+      Effect.gen(function* ()
+      {
+        const harness = yield* makeHarness({ cached: BASE_THREAD })
+        const defect = new Error('synthetic subscription defect')
+        yield* Queue.offer(harness.inputs, {
+          testFailureCause:
+            kind === 'fatal'
+              ? Cause.die(defect)
+              : Cause.fail(
+                  new RpcClientError.RpcClientError({
+                    reason: new RpcClientError.RpcClientDefect({
+                      message: defect.message,
+                      cause: defect,
+                    }),
+                  }),
+                ),
+        })
+        const failed = yield* awaitThreadState(harness.observed, (value) =>
+          Option.isSome(value.error),
+        )
+
+        expect(failed.status).toBe('cached')
+        expect(failed.error).toEqual(Option.some('Could not synchronize the thread.'))
+        expect(failed.data).toEqual(Option.some(BASE_THREAD))
+        for (const connectionState of [
+          AVAILABLE_CONNECTION_STATE,
+          {
+            desired: true,
+            network: 'online' as const,
+            phase: 'connecting' as const,
+            stage: 'synchronizing' as const,
+            attempt: 1,
+            generation: 0,
+            lastFailure: null,
+            retryAt: null,
+          },
+          {
+            desired: true,
+            network: 'online' as const,
+            phase: 'connected' as const,
+            stage: null,
+            attempt: 1,
+            generation: 1,
+            lastFailure: null,
+            retryAt: null,
+          },
+        ])
+        {
+          yield* SubscriptionRef.set(harness.supervisorState, connectionState)
+          yield* Effect.yieldNow
+          expect(yield* Ref.get(harness.latest)).toEqual(failed)
+        }
+
+        yield* harness.replaceSession
+        if (kind === 'fatal')
+        {
+          for (let attempt = 0; attempt < 10; attempt += 1)
+          {
+            yield* Effect.yieldNow
+          }
+          expect(yield* Ref.get(harness.subscriptionCount)).toBe(1)
+          expect(yield* Ref.get(harness.latest)).toEqual(failed)
+          return
+        }
+
+        for (let attempt = 0; attempt < 100; attempt += 1)
+        {
+          if ((yield* Ref.get(harness.subscriptionCount)) >= 2) break
+          yield* Effect.yieldNow
+        }
+        expect((yield* Ref.get(harness.latest)).error).toEqual(Option.none())
+        yield* Queue.offer(harness.inputs, snapshot({ ...BASE_THREAD, title: 'Recovered thread' }))
+        const recovered = yield* awaitThreadState(
+          harness.observed,
+          (value) =>
+            value.status === 'live' &&
+            Option.isSome(value.data) &&
+            value.data.value.title === 'Recovered thread',
+        )
+        expect(recovered.error).toEqual(Option.none())
+      }),
+  )
+
+  it.effect('keeps buffered failed-attempt values from clearing its defect diagnostic', () =>
+    Effect.gen(function* ()
+    {
+      const harness = yield* makeHarness({ cached: BASE_THREAD })
+      yield* Queue.offer(harness.inputs, snapshot(BASE_THREAD))
+      yield* Queue.offer(harness.inputs, synchronized())
+      yield* Queue.offer(
+        harness.inputs,
+        titleUpdated('Buffered after failure', CACHED_SNAPSHOT_SEQUENCE + 1),
+      )
+      const defect = new Error('synthetic buffered defect')
+      yield* Queue.offer(harness.inputs, {
+        testFailureCause: Cause.fail(
+          new RpcClientError.RpcClientError({
+            reason: new RpcClientError.RpcClientDefect({
+              message: defect.message,
+              cause: defect,
+            }),
+          }),
+        ),
+      })
+
+      const failed = yield* awaitThreadState(
+        harness.observed,
+        (value) =>
+          Option.isSome(value.error) &&
+          Option.isSome(value.data) &&
+          value.data.value.title === 'Buffered after failure',
+      )
+      expect(failed.status).toBe('cached')
+      expect(failed.error).toEqual(Option.some('Could not synchronize the thread.'))
     }),
   )
 
