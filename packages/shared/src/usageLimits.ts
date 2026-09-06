@@ -1,5 +1,5 @@
 // packages/shared/src/usageLimits.ts
-// presents native provider limits from connected environments
+// pools native provider limits across connected environments
 import {
   type EnvironmentId,
   type ProviderInstanceId,
@@ -16,6 +16,7 @@ const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
 type AvailableAccountUsage = Extract<ServerProviderAccountUsage, { readonly status: 'available' }>
+type LimitWindowKind = NonNullable<ServerProviderAccountUsageWindow['kind']>
 
 export function providersWithLimits(
   providers: readonly ServerProvider[],
@@ -60,6 +61,12 @@ export function collectLimitsGroups(
   return groups.length > 1 ? groups : groups.map((group) => ({ ...group, environmentLabel: null }))
 }
 
+function accountKey(provider: ServerProvider): string
+{
+  const email = provider.auth.email?.trim().toLowerCase()
+  return email ? `${provider.driver}:${email}` : `${provider.instanceId}`
+}
+
 export interface LimitAccount
 {
   readonly key: string
@@ -85,14 +92,14 @@ export function collectLimitAccounts(
   presentations: ReadonlyMap<EnvironmentId, LimitsPresentation>,
 ): readonly LimitAccount[]
 {
-  const accounts: LimitAccount[] = []
+  const accounts = new Map<string, LimitAccount>()
   for (const [environmentId, presentation] of presentations)
   {
     const environmentLabel = presentation.entry.target.label
     for (const provider of providersWithLimits(presentation.serverConfig?.providers ?? []))
     {
       if (provider.accountUsage?.status !== 'available') continue
-      const key = `${environmentId}:${provider.instanceId}`
+      const key = accountKey(provider)
       const next: LimitAccount = {
         key,
         driver: provider.driver,
@@ -103,10 +110,36 @@ export function collectLimitAccounts(
         environments: [{ environmentId, label: environmentLabel, instanceId: provider.instanceId }],
         usage: provider.accountUsage,
       }
-      accounts.push(next)
+      const previous = accounts.get(key)
+      if (!previous)
+      {
+        accounts.set(key, next)
+        continue
+      }
+
+      const fresher = Date.parse(next.usage.observedAt) > Date.parse(previous.usage.observedAt)
+      const winner = fresher ? next : previous
+      const environments = [
+        ...previous.environments,
+        ...next.environments.filter(
+          (candidate) =>
+            !previous.environments.some(
+              (seen) =>
+                seen.environmentId === candidate.environmentId &&
+                seen.instanceId === candidate.instanceId,
+            ),
+        ),
+      ]
+      accounts.set(key, {
+        ...winner,
+        displayName: previous.displayName ?? next.displayName,
+        plan: previous.plan ?? next.plan,
+        accentColor: previous.accentColor ?? next.accentColor,
+        environments,
+      })
     }
   }
-  return accounts
+  return [...accounts.values()]
 }
 
 export function collectLimitNotices(
@@ -128,6 +161,162 @@ export function collectLimitNotices(
     }
   }
   return notices
+}
+
+export interface LimitPoolMember
+{
+  readonly account: LimitAccount
+  readonly window: ServerProviderAccountUsageWindow
+}
+
+export interface LimitPoolWindow
+{
+  readonly id: string
+  readonly kind: LimitWindowKind
+  readonly label: string
+  readonly members: readonly LimitPoolMember[]
+  readonly columns: ReadonlyArray<{
+    readonly account: LimitAccount
+    readonly window: ServerProviderAccountUsageWindow | null
+  }>
+  readonly remainingPercent: number
+  readonly usedPercent: number
+  readonly pace: LimitPace | null
+  readonly resets: ReadonlyArray<{
+    readonly member: LimitPoolMember
+    readonly at: number
+    readonly restoresPercent: number
+  }>
+}
+
+export interface LimitPool
+{
+  readonly driver: ServerProvider['driver']
+  readonly accounts: readonly LimitAccount[]
+  readonly windows: readonly LimitPoolWindow[]
+}
+
+const WINDOW_KIND_ORDER: Record<LimitWindowKind, number> = {
+  session: 0,
+  weekly: 1,
+  monthly: 2,
+  other: 3,
+}
+
+export function collectLimitPools(
+  accounts: readonly LimitAccount[],
+  now: number,
+): readonly LimitPool[]
+{
+  const byDriver = new Map<ServerProvider['driver'], LimitAccount[]>()
+  for (const account of accounts)
+  {
+    const list = byDriver.get(account.driver)
+    if (list) list.push(account)
+    else byDriver.set(account.driver, [account])
+  }
+  return [...byDriver].map(([driver, members]) =>
+  {
+    const orderWindow = members
+      .flatMap((account) => account.usage.windows)
+      .sort(
+        (left, right) => WINDOW_KIND_ORDER[windowKind(left)] - WINDOW_KIND_ORDER[windowKind(right)],
+      )[0]
+    const orderReset = (account: LimitAccount) =>
+    {
+      const window = account.usage.windows.find(
+        (candidate) =>
+          windowKind(candidate) === (orderWindow ? windowKind(orderWindow) : undefined) &&
+          candidate.id === orderWindow?.id,
+      )
+      return (window ? resetMillis(window) : null) ?? Number.POSITIVE_INFINITY
+    }
+    const sorted = [...members].sort(
+      (left, right) =>
+        orderReset(left) - orderReset(right) ||
+        accountSortName(left).localeCompare(accountSortName(right)) ||
+        left.key.localeCompare(right.key),
+    )
+    return { driver, accounts: sorted, windows: poolWindows(sorted, now) }
+  })
+}
+
+function accountSortName(account: LimitAccount): string
+{
+  return (account.displayName ?? account.email ?? account.key).toLowerCase()
+}
+
+function poolWindows(accounts: readonly LimitAccount[], now: number): readonly LimitPoolWindow[]
+{
+  const byKey = new Map<string, LimitPoolMember[]>()
+  for (const account of accounts)
+  {
+    for (const window of account.usage.windows)
+    {
+      const key = `${windowKind(window)}:${window.id}`
+      const list = byKey.get(key)
+      if (list) list.push({ account, window })
+      else byKey.set(key, [{ account, window }])
+    }
+  }
+
+  const pools = [...byKey.values()].map((members): LimitPoolWindow =>
+  {
+    const memberByAccount = new Map(members.map((member) => [member.account.key, member]))
+    const first = members[0]!.window
+    const usedPercent =
+      members.reduce((sum, member) => sum + member.window.usedPercent, 0) / members.length
+    const timed = members.flatMap((member) =>
+    {
+      const elapsed = elapsedShare(member.window, now)
+      return elapsed === null ? [] : [{ used: member.window.usedPercent, elapsed }]
+    })
+    const timedUsed = timed.reduce((sum, entry) => sum + entry.used, 0) / timed.length
+    const meanElapsed =
+      timed.length > 0 ? timed.reduce((sum, entry) => sum + entry.elapsed, 0) / timed.length : null
+    const resets = members
+      .flatMap((member) =>
+      {
+        const at = resetMillis(member.window)
+        return at === null
+          ? []
+          : [
+              {
+                member,
+                at,
+                restoresPercent: Math.round(member.window.usedPercent / members.length),
+              },
+            ]
+      })
+      .sort((left, right) => left.at - right.at)
+    return {
+      id: first.id,
+      kind: windowKind(first),
+      label: first.label,
+      members,
+      columns: accounts.map(
+        (account) => memberByAccount.get(account.key) ?? { account, window: null },
+      ),
+      usedPercent: Math.round(usedPercent),
+      remainingPercent: Math.round(100 - usedPercent),
+      pace: meanElapsed === null ? null : paceOfShares(timedUsed, meanElapsed),
+      resets,
+    }
+  })
+  return pools.sort((left, right) => WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind])
+}
+
+function windowKind(window: ServerProviderAccountUsageWindow): LimitWindowKind
+{
+  if (window.kind) return window.kind
+  const duration = window.windowDurationMins
+  if (duration !== undefined)
+  {
+    if (duration >= 30 * 24 * 60) return 'monthly'
+    if (duration >= 7 * 24 * 60) return 'weekly'
+    if (duration > 0) return 'session'
+  }
+  return 'other'
 }
 
 export function limitsNotice(usage: ServerProviderAccountUsage): string | null

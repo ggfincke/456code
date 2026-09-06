@@ -1,9 +1,8 @@
 // apps/web/src/components/usage/UsageLimitsView.tsx
-// renders native provider subscription limits by account
+// renders pooled native provider subscription limits
 import type { LimitAccount } from '@t3tools/shared/usageLimits'
 import {
-  paceOf,
-  remainingPercent,
+  collectLimitPools,
   formatDuration,
   formatResetsIn,
   limitAccountLabel,
@@ -49,18 +48,7 @@ export function UsageLimitsView({
   onRefresh,
 }: UsageLimitsViewProps)
 {
-  const pools = accounts.map((account) => ({
-    key: account.key,
-    driver: account.driver,
-    accounts: [account],
-    windows: account.usage.windows.map((window) => ({
-      ...window,
-      kind: window.kind ?? 'other',
-      remainingPercent: remainingPercent(window),
-      pace: paceOf(window, now),
-      resets: window.resetsAt ? [{ member: { window } }] : [],
-    })),
-  }))
+  const pools = collectLimitPools(accounts, now)
   return (
     <section aria-labelledby="usage-limits-heading" className="space-y-6">
       <header className="flex items-start justify-between gap-4 px-1">
@@ -69,7 +57,7 @@ export function UsageLimitsView({
             Subscription limits
           </h2>
           <p className="text-[13px] leading-relaxed text-muted-foreground">
-            Remaining quota by account across connected environments.
+            Remaining quota pooled by provider across connected environments.
           </p>
         </div>
         {onRefresh ? (
@@ -98,12 +86,12 @@ export function UsageLimitsView({
         <div className="space-y-4">
           {pools.map((pool) => (
             <section
-              key={pool.key}
-              aria-labelledby={`usage-limits-${pool.key}`}
+              key={String(pool.driver)}
+              aria-labelledby={`usage-limits-${pool.driver}`}
               className="overflow-hidden rounded-xl border border-border/70 bg-muted/10"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
-                <h3 id={`usage-limits-${pool.key}`} className="text-sm font-semibold capitalize">
+                <h3 id={`usage-limits-${pool.driver}`} className="text-sm font-semibold capitalize">
                   {String(pool.driver)}
                 </h3>
                 <span className="text-xs text-muted-foreground">

@@ -1,8 +1,8 @@
 // apps/mobile/src/features/usage/UsageLimitsSection.tsx
-// renders native provider subscription limits on mobile
+// renders pooled native provider subscription limits on mobile
 import type { LimitAccount } from '@t3tools/shared/usageLimits'
 import {
-  remainingPercent,
+  collectLimitPools,
   formatDuration,
   formatResetsIn,
   limitAccountLabel,
@@ -40,17 +40,7 @@ export function UsageLimitsSection({
   onRefresh,
 }: UsageLimitsSectionProps)
 {
-  const pools = accounts.map((account) => ({
-    key: account.key,
-    driver: account.driver,
-    accounts: [account],
-    windows: account.usage.windows.map((window) => ({
-      ...window,
-      kind: window.kind ?? 'other',
-      remainingPercent: remainingPercent(window),
-      resets: window.resetsAt ? [{ member: { window } }] : [],
-    })),
-  }))
+  const pools = collectLimitPools(accounts, now)
   return (
     <View className="gap-4">
       <View className="flex-row items-start justify-between gap-4 px-1">
@@ -83,7 +73,7 @@ export function UsageLimitsSection({
       ) : (
         pools.map((pool) => (
           <View
-            key={pool.key}
+            key={String(pool.driver)}
             className="overflow-hidden rounded-[22px] border border-border bg-card"
           >
             <View className="flex-row items-center justify-between border-b border-border px-5 py-4">
