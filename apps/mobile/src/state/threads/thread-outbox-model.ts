@@ -318,16 +318,24 @@ export function describeThreadOutboxFailure(
   )
 }
 
+// socket failures can have generic messages; only server decisions make the payload terminal.
 export function shouldRetryThreadOutboxDelivery(error: unknown): boolean
 {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    '_tag' in error &&
-    error._tag === 'ConnectionTransientError'
-  )
+  if (typeof error === 'object' && error !== null && '_tag' in error)
   {
-    return true
+    switch (error._tag)
+    {
+      case 'OrchestrationDispatchCommandError':
+      case 'EnvironmentAuthorizationError':
+        return false
+      case 'ConnectionTransientError':
+      case 'RpcClientError':
+      case 'EnvironmentRpcUnavailableError':
+      case 'EnvironmentNotRegisteredError':
+        return true
+      default:
+        break
+    }
   }
   return isTransportConnectionErrorMessage(errorMessage(error))
 }
