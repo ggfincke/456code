@@ -10,10 +10,6 @@ import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-co
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { EnvironmentId, normalizeCollaborationMode } from '@t3tools/contracts'
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from '@t3tools/client-runtime/state/runtime'
 
 import { ComposerEditor, type ComposerEditorHandle } from '../../../components/ComposerEditor'
 import {
@@ -53,10 +49,9 @@ import {
 import { deriveThreadTitleFromPrompt } from '../../../lib/projectThreadStartTurn'
 import { confirmProviderRuntimeModeWarnings } from '../../../lib/providerRuntimeModeWarnings'
 import { armAgentAwarenessLiveActivityForLocalWork } from '../../agent-awareness/remoteRegistration'
-import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from '../../../state/thread-outbox'
+import { enqueueThreadOutboxMessage } from '../../../state/thread-outbox'
 import { useRemoteConnectionStatus } from '../../../state/use-remote-environment-registry'
 import { branchBadgeLabel, useNewTaskFlow } from './new-task-flow-provider'
-import { useCreateProjectThread } from '../use-project-actions'
 import { useIncomingShare } from '../../sharing/IncomingShareProvider'
 import { ComposerCommandPopover } from '../composer/ComposerCommandPopover'
 import { useComposerCommandMenu } from '../composer/use-composer-command-menu'
@@ -91,7 +86,6 @@ export function NewTaskDraftScreen(props: {
 })
 {
   const projects = useProjects()
-  const createProjectThread = useCreateProjectThread()
   const serverConfigs = useServerConfigs()
   const flow = useNewTaskFlow()
   const navigation = useNavigation()
@@ -999,26 +993,12 @@ export function NewTaskDraftScreen(props: {
     const modelSelection = draft.modelSelection ?? flow.selectedModel
     const workspaceMode = draft.workspaceSelection?.mode ?? flow.workspaceMode
     const selectedBranchName = draft.workspaceSelection?.branch ?? flow.selectedBranchName
-    const selectedWorktreePath = draft.workspaceSelection?.worktreePath ?? flow.selectedWorktreePath
-    const startFromOrigin = draft.workspaceSelection?.startFromOrigin ?? flow.startFromOrigin
     const requestedRuntimeMode = draft.runtimeMode ?? flow.runtimeMode
     const runtimeMode = selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(
       requestedRuntimeMode,
     )
       ? requestedRuntimeMode
       : (selectedProviderRuntimeCapabilities.supportedRuntimeModes[0] ?? 'approval-required')
-    const requestedInteractionMode = normalizeCollaborationMode(
-      draft.interactionMode ?? flow.interactionMode.baseMode,
-      draft.orchestrate ?? flow.interactionMode.orchestrate,
-    )
-    const interactionMode = normalizeCollaborationMode(
-      selectedProviderRuntimeCapabilities.supportedInteractionModes.includes(
-        requestedInteractionMode.baseMode,
-      )
-        ? requestedInteractionMode.baseMode
-        : 'default',
-      requestedInteractionMode.orchestrate && showOrchestrate,
-    )
     const initialMessageText = draft.text.trim()
 
     if (
@@ -1049,53 +1029,17 @@ export function NewTaskDraftScreen(props: {
     }
 
     const editingPendingTask = flow.editingPendingTask
-
-    if (queuesInsteadOfStarting)
+    const metadata = editingPendingTask
+      ? {
+          threadId: editingPendingTask.threadId,
+          commandId: editingPendingTask.commandId,
+          messageId: editingPendingTask.messageId,
+          createdAt: editingPendingTask.createdAt,
+        }
+      : makeTurnCommandMetadata()
+    const message = flow.buildPendingTaskMessage(metadata, runtimeModeAcknowledgements)
+    if (!message)
     {
-      // offline or still uploading: keep the durable task in the outbox
-      // until its environment and attachments are ready.
-      const metadata = editingPendingTask
-        ? {
-            threadId: editingPendingTask.threadId,
-            commandId: editingPendingTask.commandId,
-            messageId: editingPendingTask.messageId,
-            createdAt: editingPendingTask.createdAt,
-          }
-        : makeTurnCommandMetadata()
-      const message = flow.buildPendingTaskMessage(metadata, runtimeModeAcknowledgements)
-      if (!message)
-      {
-        return
-      }
-      flow.setSubmitting(true)
-      try
-      {
-        await enqueueThreadOutboxMessage(message)
-      }
-      catch (error)
-      {
-        Alert.alert(
-          'Could not queue task',
-          error instanceof Error ? error.message : 'The task could not be saved to the outbox.',
-        )
-        return
-      }
-      finally
-      {
-        flow.setSubmitting(false)
-      }
-      if (editingPendingTask)
-      {
-        flow.finishEditingPendingTask()
-      }
-      else
-      {
-        clearComposerDraftContent(draftKey, {
-          clearModelSelection: true,
-          clearWorkspaceSelection: true,
-        })
-      }
-      navigation.getParent()?.goBack()
       return
     }
 
@@ -1108,56 +1052,23 @@ export function NewTaskDraftScreen(props: {
       threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
       projectTitle: selectedProject.title,
     })
-    const result = await createProjectThread({
-      project: selectedProject,
-      modelSelection,
-      envMode: workspaceMode,
-      branch: selectedBranchName,
-      worktreePath: workspaceMode === 'worktree' ? null : selectedWorktreePath,
-      startFromOrigin,
-      runtimeMode,
-      runtimeModeAcknowledgements,
-      interactionMode,
-      initialMessageText,
-      initialAttachments: draft.attachments,
-      ...(editingPendingTask
-        ? {
-            turnMetadata: {
-              threadId: editingPendingTask.threadId,
-              commandId: editingPendingTask.commandId,
-              messageId: editingPendingTask.messageId,
-              createdAt: editingPendingTask.createdAt,
-            },
-          }
-        : {}),
-    })
-    flow.setSubmitting(false)
-
-    if (result._tag === 'Failure')
+    try
     {
-      if (!isAtomCommandInterrupted(result))
-      {
-        const error = squashAtomCommandFailure(result)
-        Alert.alert(
-          'Could not start task',
-          error instanceof Error ? error.message : 'The task could not be started.',
-        )
-      }
+      await enqueueThreadOutboxMessage(message)
+    }
+    catch (error)
+    {
+      Alert.alert(
+        queuesInsteadOfStarting ? 'Could not queue task' : 'Could not start task',
+        error instanceof Error ? error.message : 'The task could not be saved to the outbox.',
+      )
       return
     }
-
-    if (editingPendingTask)
+    finally
     {
-      try
-      {
-        await removeThreadOutboxMessage(editingPendingTask)
-      }
-      catch (error)
-      {
-        console.warn('[new-task] failed to remove delivered pending task', error)
-      }
-      flow.finishEditingPendingTask()
+      flow.setSubmitting(false)
     }
+    if (editingPendingTask) flow.finishEditingPendingTask()
     else
     {
       clearComposerDraftContent(draftKey, {
@@ -1167,8 +1078,8 @@ export function NewTaskDraftScreen(props: {
     }
     navigation.dispatch(
       StackActions.replace('Thread', {
-        environmentId: String(result.value.environmentId),
-        threadId: String(result.value.threadId),
+        environmentId: String(message.environmentId),
+        threadId: String(message.threadId),
       }),
     )
   }
