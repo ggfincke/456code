@@ -464,6 +464,15 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
    }
    return nextSize;
  }
+@@ -6163,7 +6304,7 @@
+       ],
+       contentOffset: initialContentOffset !== void 0 ? horizontal ? { x: initialContentOffset, y: 0 } : { x: 0, y: initialContentOffset } : void 0,
+       horizontal,
+-      maintainVisibleContentPosition: maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
++      maintainVisibleContentPosition: Platform.OS === "ios" || maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
+       onLayout,
+       onScroll: onScroll2,
+       ref: refScrollView,
 @@ -7239,6 +7380,7 @@
      dataVersion,
      drawDistance = 250,
@@ -771,6 +780,15 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
    }
    return nextSize;
  }
+@@ -6142,7 +6283,7 @@
+       ],
+       contentOffset: initialContentOffset !== void 0 ? horizontal ? { x: initialContentOffset, y: 0 } : { x: 0, y: initialContentOffset } : void 0,
+       horizontal,
+-      maintainVisibleContentPosition: maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
++      maintainVisibleContentPosition: Platform.OS === "ios" || maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
+       onLayout,
+       onScroll: onScroll2,
+       ref: refScrollView,
 @@ -7218,6 +7359,7 @@
      dataVersion,
      drawDistance = 250,
