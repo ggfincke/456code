@@ -31,6 +31,7 @@ export interface PendingUserInput
   readonly createdAt: string
   readonly questions: ReadonlyArray<UserInputQuestion>
   readonly responseMode?: 'message'
+  readonly dismissible: boolean
 }
 
 export function requestKindFromRequestType(
@@ -272,6 +273,7 @@ export function derivePendingUserInputs(
         createdAt: activity.createdAt,
         questions,
         ...(payload?.responseMode === 'message' ? { responseMode: 'message' as const } : {}),
+        dismissible: payload?.responseMode === 'message',
       })
       continue
     }

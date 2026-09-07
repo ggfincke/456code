@@ -22,6 +22,7 @@ export interface PendingUserInputCardProps
     customAnswer: string,
   ) => void
   readonly onSubmit: () => Promise<unknown>
+  readonly onDismiss: () => Promise<unknown>
 }
 
 export function PendingUserInputCard(props: PendingUserInputCardProps)
@@ -103,6 +104,18 @@ export function PendingUserInputCard(props: PendingUserInputCardProps)
       >
         <Text className="font-sans-extrabold text-sm text-white">Submit answers</Text>
       </Pressable>
+      {props.pendingUserInput.dismissible ? (
+        <Pressable
+          accessibilityRole="button"
+          className="items-center justify-center rounded-2xl px-4 py-2.5 active:opacity-70"
+          disabled={props.respondingUserInputId === props.pendingUserInput.requestId}
+          onPress={() => void props.onDismiss()}
+        >
+          <Text className="font-sans-bold text-sm text-adaptive-neutral-600-300">
+            Dismiss without answering
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   )
 }

@@ -84,6 +84,7 @@ const checkpointRevertBlockedCommandTypes: ReadonlySet<OrchestrationCommand['typ
   'thread.turn.interrupt',
   'thread.approval.respond',
   'thread.user-input.respond',
+  'thread.user-input.dismiss',
   'thread.orchestrate-plan.respond',
   'thread.checkpoint.revert',
   'thread.session.stop',
@@ -321,7 +322,8 @@ const makeOrchestrationEngine = Effect.gen(function* ()
               }
 
               const userInputActivity =
-                envelope.command.type === 'thread.user-input.respond'
+                envelope.command.type === 'thread.user-input.respond' ||
+                envelope.command.type === 'thread.user-input.dismiss'
                   ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
                   : Option.none()
               const eventBase = yield* decideOrchestrationCommand({

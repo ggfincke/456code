@@ -8,7 +8,7 @@ import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from '../../../pendingUserInput'
-import { CheckIcon, ChevronDownIcon } from 'lucide-react'
+import { CheckIcon, ChevronDownIcon, XIcon } from 'lucide-react'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '../../ui/collapsible'
 import { cn } from '~/lib/utils'
 
@@ -20,6 +20,7 @@ interface PendingUserInputPanelProps
   questionIndex: number
   onToggleOption: (questionId: string, optionLabel: string) => void
   onAdvance: () => void
+  onDismiss: (requestId: ApprovalRequestId) => void
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -29,6 +30,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   questionIndex,
   onToggleOption,
   onAdvance,
+  onDismiss,
 }: PendingUserInputPanelProps)
 {
   if (pendingUserInputs.length === 0) return null
@@ -44,6 +46,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
+      onDismiss={onDismiss}
     />
   )
 })
@@ -55,6 +58,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex,
   onToggleOption,
   onAdvance,
+  onDismiss,
 }: {
   prompt: PendingUserInput
   isResponding: boolean
@@ -62,6 +66,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex: number
   onToggleOption: (questionId: string, optionLabel: string) => void
   onAdvance: () => void
+  onDismiss: (requestId: ApprovalRequestId) => void
 })
 {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex)
@@ -235,10 +240,40 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           <ChevronDownIcon
             aria-hidden="true"
             className={cn(
-              'ml-auto size-3.5 shrink-0 text-muted-foreground/65 transition-transform duration-150 motion-reduce:transition-none group-hover:text-foreground',
+              'size-3.5 shrink-0 text-muted-foreground/65 transition-transform duration-150 motion-reduce:transition-none group-hover:text-foreground',
+              !prompt.dismissible && 'ml-auto',
               isCollapsed && 'rotate-180',
             )}
           />
+          {prompt.dismissible ? (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Dismiss question without answering"
+              title="Dismiss question without answering"
+              data-pending-user-input-dismiss
+              aria-disabled={isResponding || undefined}
+              className={cn(
+                'ml-auto -mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-primary/25 focus-visible:outline-none',
+                isResponding && 'pointer-events-none opacity-50',
+              )}
+              onClick={(event) =>
+                {
+                event.preventDefault()
+                event.stopPropagation()
+                if (!isResponding) onDismiss(prompt.requestId)
+              }}
+              onKeyDown={(event) =>
+                {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                event.stopPropagation()
+                if (!isResponding) onDismiss(prompt.requestId)
+              }}
+            >
+              <XIcon aria-hidden="true" className="size-3.5" />
+            </span>
+          ) : null}
         </CollapsibleTrigger>
       </div>
       <CollapsiblePanel className="px-4 motion-reduce:transition-none sm:px-5">
