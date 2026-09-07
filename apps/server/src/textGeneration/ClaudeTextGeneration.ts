@@ -1,6 +1,7 @@
 // apps/server/src/textGeneration/ClaudeTextGeneration.ts
 // runs isolated Claude CLI requests for text generation
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
@@ -63,6 +64,7 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
 )
 {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const fileSystem = yield* FileSystem.FileSystem
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment, sourceCwd)
 
   const encodeJsonForOperation = (
@@ -123,17 +125,25 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
       ...(fastMode ? { fastMode: true } : {}),
       ...(ultracode ? { ultracode: true } : {}),
     }
-    const settingsJson =
-      Object.keys(settings).length > 0
-        ? yield* encodeJsonForOperation(
-            operation,
-            settings,
-            'Failed to encode Claude CLI settings.',
-          )
-        : undefined
+    const settingsJson = yield* encodeJsonForOperation(
+      operation,
+      settings,
+      'Failed to encode Claude CLI settings.',
+    )
 
     const runClaudeCommand = Effect.fn('runClaudeJson.runClaudeCommand')(function* ()
     {
+      // titles need only the supplied prompt, not config from the checkout
+      const workingDirectory =
+        operation === 'generateThreadTitle'
+          ? yield* fileSystem
+              .makeTempDirectoryScoped({ prefix: 't3code-claude-title-' })
+              .pipe(
+                Effect.mapError((cause) =>
+                  normalizeCliError('claude', operation, cause, 'Failed to create title directory'),
+                ),
+              )
+          : cwd
       const spawnCommand = yield* resolveSpawnCommand(
         claudeSettings.binaryPath || 'claude',
         [
@@ -145,14 +155,20 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
           '--model',
           resolveClaudeApiModelId(modelSelection),
           ...(cliEffort ? ['--effort', cliEffort] : []),
-          ...(settingsJson ? ['--settings', settingsJson] : []),
-          '--dangerously-skip-permissions',
+          '--settings',
+          settingsJson,
+          '--tools',
+          '',
+          '--disable-slash-commands',
+          '--strict-mcp-config',
+          '--permission-mode',
+          'dontAsk',
         ],
         { env: claudeEnvironment },
       )
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         env: claudeEnvironment,
-        cwd,
+        cwd: workingDirectory,
         shell: spawnCommand.shell,
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
