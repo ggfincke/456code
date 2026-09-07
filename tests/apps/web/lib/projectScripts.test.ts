@@ -1,9 +1,11 @@
 // tests/apps/web/lib/projectScripts.test.ts
 // verify web project script builders and command helpers
 
+import { MAX_SCRIPT_ID_LENGTH } from '@t3tools/contracts'
 import { setupProjectScript } from '@t3tools/shared/projectScripts'
 import { describe, expect, it } from 'vite-plus/test'
 
+import { shortcutLabelForCommand } from '../../../../apps/web/src/lib/keybindings'
 import {
   buildProjectScript,
   commandForProjectScript,
@@ -60,8 +62,33 @@ describe('projectScripts helpers', () =>
   {
     const command = commandForProjectScript('lint')
     expect(command).toBe('script.lint.run')
-    expect(projectScriptIdFromCommand(command)).toBe('lint')
+    expect(projectScriptIdFromCommand(command ?? '')).toBe('lint')
     expect(projectScriptIdFromCommand('terminal.toggle')).toBeNull()
+  })
+
+  it.each([
+    'install-javascript-dependencies',
+    'A',
+    'a.b',
+    'a b',
+    '-a',
+    '',
+    'a'.repeat(MAX_SCRIPT_ID_LENGTH + 1),
+  ])('omits shortcuts for legacy script ID %j without crashing script menus', (id) =>
+  {
+    const commands = ['lint', id, 'test'].map(commandForProjectScript)
+    expect(commands).toEqual(['script.lint.run', null, 'script.test.run'])
+    expect(commands.map((candidate) => shortcutLabelForCommand([], candidate))).toEqual([
+      null,
+      null,
+      null,
+    ])
+  })
+
+  it('preserves the exact ID at the shortcut length limit', () =>
+  {
+    const id = 'a'.repeat(MAX_SCRIPT_ID_LENGTH)
+    expect(projectScriptIdFromCommand(commandForProjectScript(id) ?? '')).toBe(id)
   })
 
   it('slugifies and dedupes project script ids', () =>
