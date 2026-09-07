@@ -13,6 +13,7 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
+  VcsUnsupportedOperationError,
   type RuntimeMode,
   type ProviderRuntimeModeWarning,
   type ThreadOrigin,
@@ -254,7 +255,7 @@ describe('ProviderCommandReactor', () =>
       context?: unknown,
     ) => Effect.Effect<void, ProviderAdapterRequestError>
     readonly hasRecoverableSessionEffect?: ProviderServiceShape['hasRecoverableSession']
-    readonly beforeCheckpointCapture?: () => Effect.Effect<void>
+    readonly beforeCheckpointCapture?: () => Effect.Effect<void, VcsUnsupportedOperationError>
   })
   {
     const now = '2026-01-01T00:00:00.000Z'
@@ -894,6 +895,177 @@ describe('ProviderCommandReactor', () =>
     const checkpointRef = checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0)
     expect(runGit(cwd, ['show', `${checkpointRef}:README.md`])).toBe('pre-turn')
     expect(NodeFS.readFileSync(NodePath.join(cwd, 'README.md'), 'utf8')).toBe('post-start\n')
+  })
+
+  it('settles an unsupported first-turn baseline and allows the next turn to start', async () =>
+  {
+    const cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 't3-provider-baseline-failure-'))
+    createdBaseDirs.add(cwd)
+    runGit(cwd, ['init', '--initial-branch=main'])
+    runGit(cwd, ['config', 'user.email', 'test@example.com'])
+    runGit(cwd, ['config', 'user.name', 'Test User'])
+    NodeFS.writeFileSync(NodePath.join(cwd, 'README.md'), 'initial\n', 'utf8')
+    runGit(cwd, ['add', 'README.md'])
+    runGit(cwd, ['commit', '-m', 'Initial'])
+    runGit(cwd, ['branch', '-m', '456code/1234abcd'])
+
+    let captureAttempts = 0
+    const detail = 'Changed or dirty submodules are unsupported by exact snapshot policy.'
+    const harness = await createHarness({
+      workspaceRoot: cwd,
+      startReactor: false,
+      beforeCheckpointCapture: () =>
+        Effect.suspend(() =>
+        {
+          captureAttempts += 1
+          return captureAttempts === 1
+            ? Effect.fail(
+                new VcsUnsupportedOperationError({
+                  operation: 'ProviderCommandReactor.test.capture',
+                  kind: 'git',
+                  detail,
+                }),
+              )
+            : Effect.void
+        }),
+    })
+    const threadId = ThreadId.make('thread-1')
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.meta.update',
+        commandId: CommandId.make('cmd-seed-unsupported-baseline-first-turn'),
+        threadId,
+        title: 'New thread',
+        branch: '456code/1234abcd',
+        worktreePath: cwd,
+      }),
+    )
+    await harness.run(
+      harness.delivery.ensureProgress({
+        reactorId: 'provider-command',
+        operationVersion: 1,
+        initialSequence: (await harness.readModel()).snapshotSequence,
+        mode: 'durable',
+        now: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-unsupported-baseline'),
+        threadId,
+        message: {
+          messageId: asMessageId('user-message-unsupported-baseline'),
+          role: 'user',
+          text: 'Do not invoke the provider without a baseline.',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:01.000Z',
+      }),
+    )
+
+    await harness.startReactor()
+    await harness.drain()
+
+    expect(captureAttempts).toBe(1)
+    expect(harness.startSession).not.toHaveBeenCalled()
+    expect(harness.sendTurn).not.toHaveBeenCalled()
+    expect(harness.generateBranchName).not.toHaveBeenCalled()
+    expect(harness.generateThreadTitle).not.toHaveBeenCalled()
+    expect(harness.renameBranch).not.toHaveBeenCalled()
+    const failedThread = (await harness.readModel()).threads[0]
+    expect(failedThread?.session).toMatchObject({
+      status: 'error',
+      activeTurnId: null,
+      lastError: `The turn could not start because its workspace checkpoint is unavailable. ${detail}`,
+    })
+    expect(
+      failedThread?.activities.filter((activity) => activity.kind === 'provider.turn.start.failed'),
+    ).toHaveLength(1)
+
+    const firstTurnActions = await harness.run(
+      harness.sql<{
+        readonly actionId: string
+        readonly sourceSequence: number
+        readonly sourceEventId: string
+        readonly effectKind: string
+        readonly outputIndex: number
+        readonly status: string
+      }>`
+        SELECT
+          action_id AS "actionId",
+          source_sequence AS "sourceSequence",
+          source_event_id AS "sourceEventId",
+          effect_kind AS "effectKind",
+          output_index AS "outputIndex",
+          status
+        FROM orchestration_reactor_actions
+        WHERE reactor_id = 'provider-command'
+          AND source_sequence = (
+            SELECT source_sequence
+            FROM orchestration_reactor_actions
+            WHERE reactor_id = 'provider-command'
+              AND effect_kind = 'thread.turn-start-requested'
+            ORDER BY source_sequence ASC
+            LIMIT 1
+          )
+        ORDER BY output_index ASC
+      `,
+    )
+    expect(
+      firstTurnActions.map(({ effectKind, outputIndex, status }) => ({
+        effectKind,
+        outputIndex,
+        status,
+      })),
+    ).toEqual([
+      { effectKind: 'thread.turn-start-requested', outputIndex: 0, status: 'succeeded' },
+      { effectKind: 'first-turn.worktree-branch.generate', outputIndex: 1, status: 'resolved' },
+      { effectKind: 'first-turn.thread-title.generate', outputIndex: 2, status: 'resolved' },
+    ])
+    const primaryAction = firstTurnActions[0]!
+    for (const action of firstTurnActions.slice(1))
+    {
+      expect(action.actionId).toBe(
+        makeReactorActionId({
+          reactorId: 'provider-command',
+          sourceSequence: primaryAction.sourceSequence,
+          sourceEventId: primaryAction.sourceEventId,
+          outputIndex: action.outputIndex,
+          effectKind: action.effectKind,
+          targetKind: 'thread',
+          targetId: threadId,
+          operationVersion: 1,
+        }),
+      )
+    }
+    const progress = await harness.run(harness.delivery.getProgress('provider-command'))
+    expect(progress._tag === 'Some' ? progress.value.blockedSequence : null).toBeNull()
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-after-unsupported-baseline'),
+        threadId,
+        message: {
+          messageId: asMessageId('user-message-after-unsupported-baseline'),
+          role: 'user',
+          text: 'Start a later turn after the unsupported one settles.',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:02.000Z',
+      }),
+    )
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+    await harness.drain()
+
+    expect(captureAttempts).toBe(2)
+    expect(harness.startSession).toHaveBeenCalledTimes(1)
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1)
   })
 
   it('replays the deterministic baseline record after publication succeeds and dispatch fails', async () =>

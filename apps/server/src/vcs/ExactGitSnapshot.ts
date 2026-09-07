@@ -16,6 +16,7 @@ import {
   ExactGitSnapshotError,
   OBJECT_ID,
   exactError,
+  exactPolicyError,
   runGit,
   throwIfCancelled,
   trimLineBreak,
@@ -31,7 +32,11 @@ import {
   parseMaterializedTree,
 } from './ExactGitSnapshotParse.ts'
 
-export { ExactGitSnapshotError, type ExactGitSnapshotErrorCode } from './ExactGitSnapshotGit.ts'
+export {
+  ExactGitSnapshotError,
+  type ExactGitSnapshotErrorClassification,
+  type ExactGitSnapshotErrorCode,
+} from './ExactGitSnapshotGit.ts'
 
 export const EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT = 25_000
 export const EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT = 256 * 1024 * 1024
@@ -381,7 +386,7 @@ function validateMaterializedEntries(
   {
     if (paths.has(entry.path))
     {
-      throw exactError('unsupported-entry', `Git tree repeats path '${entry.path}'.`)
+      throw exactPolicyError(`Git tree repeats path '${entry.path}'.`)
     }
     paths.add(entry.path)
     if (entry.type === 'blob') leaves.add(entry.path)
@@ -396,10 +401,7 @@ function validateMaterializedEntries(
       const parent = segments.slice(0, index).join('/')
       if (leaves.has(parent))
       {
-        throw exactError(
-          'unsupported-entry',
-          `Git tree places '${path}' below non-directory '${parent}'.`,
-        )
+        throw exactPolicyError(`Git tree places '${path}' below non-directory '${parent}'.`)
       }
     }
   }
@@ -438,10 +440,7 @@ async function collectSnapshotEntries(
   {
     if (entry.stage !== 0)
     {
-      throw exactError(
-        'unsupported-entry',
-        'Unmerged index entries are unsupported by exact snapshot policy.',
-      )
+      throw exactPolicyError('Unmerged index entries are unsupported by exact snapshot policy.')
     }
     const candidate = addCandidate(candidates, entry.path)
     candidate.index = entry
@@ -516,10 +515,7 @@ async function collectSnapshotEntries(
       {
         if (candidate.untracked && !candidateDirectories.has(candidate.path))
         {
-          throw exactError(
-            'unsupported-entry',
-            `Untracked directory '${candidate.path}' is not a regular file.`,
-          )
+          throw exactPolicyError(`Untracked directory '${candidate.path}' is not a regular file.`)
         }
       }
     }
@@ -561,10 +557,7 @@ async function collectSnapshotEntries(
     }
     else
     {
-      throw exactError(
-        'unsupported-entry',
-        `Snapshot source '${candidate.path}' is a special filesystem entry.`,
-      )
+      throw exactPolicyError(`Snapshot source '${candidate.path}' is a special filesystem entry.`)
     }
 
     assertWithinLimits(entries.length, byteCount, limits)

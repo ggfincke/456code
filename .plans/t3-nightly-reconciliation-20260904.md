@@ -1,22 +1,25 @@
 <!-- .plans/t3-nightly-reconciliation-20260904.md -->
-<!-- maintain the frozen 468-commit t3 reconciliation and checkpoint record -->
+<!-- maintain the frozen 805-commit t3 reconciliation and checkpoint record -->
 
 # Revised T3 reconciliation, including official Antigravity ACP
 
 ## Status and authority
 
-This is the maintained implementation source of truth approved on 2026-09-04. Work proceeds one
-group at a time. Each group still receives a verified checkpoint and ledger receipt, but the user's
-2026-09-04 continuation approval waives routine per-group pauses and authorizes the planned
-source-attributed commit, PR, green-CI, merge-commit, and exact merged-main verification sequence.
+This is the maintained implementation source of truth approved on 2026-09-04 and expanded on
+2026-09-07. Work proceeds one PR at a time. Each PR still receives a verified checkpoint and ledger
+receipt, but the user's continuation approval waives routine per-PR pauses and authorizes the planned
+source-attributed commit, PR, green-CI, merge, and exact merged-main verification sequence.
 Work must still stop for a material scope or behavior change, unavailable required gate, external
-authority beyond this plan, or Group 12's human personal-Google OAuth actions. Approved integrated
+authority beyond this plan, or PR 5's human personal-Google OAuth actions. Approved integrated
 gates may issue and consume pairing credentials only inside their run-owned disposable state. Use
-only the plan's existing `sync/` branches; do not create `codex/` reconciliation branches.
+only the plan's approved `fix/` or `sync/` branches; do not create `codex/` reconciliation branches.
 
 Current state:
 
-- Published `main`: `acd0514e1edcbd87f9a4d1d89e74dadb709e1445`.
+- Published `origin/main` baseline: `f592d498191d90f353fd3da15d21f9c02d9507e3`.
+- The original local `main` checkout remains intentionally dirty at
+  `a60bdbc5856fdb88e32585156238b39617bf9e86`, one commit behind `origin/main`. Its three modified
+  server/VCS files are outside this plan-document update and remain preserved.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -52,13 +55,18 @@ Current state:
   `acd0514e1edcbd87f9a4d1d89e74dadb709e1445`. Exact merged-main CI run
   [34007660096](https://github.com/ggfincke/456code/actions/runs/34007660096) passed with 15 successful
   jobs and the intentional mobile-native-static skip.
-- Active group: **09 — Streaming correctness and memory bounds**. The client lane is locally
-  verified; the non-overlapping server lane and combined/integrated gates remain active.
-- Active branch: `sync/t3-r09-20260904`, based on published `main`.
-- Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-nightly-20260903`.
-- Groups 10-27 are approved as plan scope but remain planned, not implemented. Their branches are
-  `sync/t3-rNN-20260904`, each created only from the preceding green merged `main`.
-- The exact source inventory is [the 468-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
+- Published Group 09: [PR #100](https://github.com/ggfincke/456code/pull/100) merged through merge commit
+  `a60bdbc5856fdb88e32585156238b39617bf9e86`. The focused and integrated pre-publication evidence is
+  preserved below; this update does not fabricate a new merged-main CI receipt.
+- Dependency modernization [PR #101](https://github.com/ggfincke/456code/pull/101) is merged as
+  `f592d498191d90f353fd3da15d21f9c02d9507e3`, but it is not a T3 reconciliation group and does not
+  consume a row or PR slot in the expanded delivery map.
+- Active delivery unit: **PR 0 — checkpoint fix** on
+  `fix/checkpoint-turn-start-failure-20260907`, based on published `origin/main`.
+- Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907`.
+- PRs 1-16 are approved plan scope but remain planned, not implemented. Each starts only from the
+  preceding green merged `main`.
+- The exact source inventory is [the 805-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
 ## Frozen upstream universe
 
@@ -70,28 +78,32 @@ The reconciliation universe is fixed and must not grow silently:
 2. 224 newer commits, exclusive of
    `fff33f9e851912363c5b1f3ac65598be35eb5f0d` through inclusive
    `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe`.
-3. Total: 468 distinct upstream commits. Official Antigravity foundation `06336460c` is row 239 in
+3. 337 expanded-intake non-merge commits, exclusive of
+   `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` through inclusive
+   `0d34579d674920cc47fc5c908494f51ed3895204`. They occupy rows 469-805; the first is
+   `89ee69e4430b21ee14565abf5c34dae43f38c1d8` and the last is the new cutoff.
+4. Total: 805 distinct upstream commits. Official Antigravity foundation `06336460c` is row 239 in
    the previously audited first range and is therefore included, not an extension.
 
-The initial ledger records exact API-derived commit order, full SHA, first-line title, source author,
-and original author date. Per-commit touched paths remain deliberately pending until semantic
-classification; the GitHub compare endpoint does not expose commit-local paths and 468 individual
-commit downloads are not required for the inventory checkpoint. A title is never evidence of
-equivalence, inapplicability, or implementation.
+The first 468 ledger rows retain their exact API-derived commit order and metadata. Rows 469-805 use
+the locally available upstream objects to record chronological non-merge order, full SHA, first-line
+title, source author, original author date, and commit-local touched paths. A title is never evidence
+of equivalence, inapplicability, or implementation.
 
 After Group 02's exact merged-main gate, the verified `upstream` URL fetched only frozen cutoff
 `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` into `FETCH_HEAD` with `--no-tags` so later groups can
 inspect complete source objects. `upstream/main` remained exactly
 `fff33f9e851912363c5b1f3ac65598be35eb5f0d`; no upstream branch, tag, or newer intake moved.
 
-After all accepted groups are merged, refresh upstream/nightly refs and report every commit after
-`82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` as a separate unapproved range. Do not add those commits
-to this plan or ledger without a new decision.
+The refreshed local `upstream/main` is exactly the approved cutoff
+`0d34579d674920cc47fc5c908494f51ed3895204`. Anything after that commit is a separate unapproved
+range. Do not add it to this plan or ledger without a new decision.
 
 ## Working and preservation rules
 
-- Preserve the clean original checkout and all unrelated dirty, staged, untracked, ignored,
-  credential-bearing, worktree, branch, process, simulator, installation, and cache state.
+- Preserve the intentionally dirty original checkout, including its exact three-file checkpoint/VCS
+  source diff, plus all unrelated staged, untracked, ignored, credential-bearing, worktree, branch,
+  process, simulator, installation, and cache state.
 - Use only worktree-local dependencies, caches, runtime state, and disposable fixtures. Never link
   dependencies or mutable cache state back to the original checkout.
 - Re-ground HEAD, source SHAs, status manifests, ignored state, process ownership, dependency/cache
@@ -105,10 +117,73 @@ to this plan or ledger without a new decision.
 - Tests remain under the mirrored root `tests/` tree. Add only the major regressions approved here.
   Do not add coverage tooling, `react-test-renderer`, trivial formatting/pass-through tests, exhaustive
   coverage, or unrelated cleanup.
-- Terminate only group-owned processes and remove only run-owned disposable state. Never download or
+- Terminate only PR-owned processes and remove only run-owned disposable state. Never download or
   erase simulator runtimes.
 
-## Original-to-revised group mapping
+## Approved 17-PR delivery map
+
+This map supersedes the earlier 27-group delivery sequence for all work not already merged in
+PRs #91-#100. The older mapping and detailed contracts remain below as historical source-requirement
+and acceptance evidence; they do not create extra delivery units. PR numbers here are plan-local
+sequence numbers, not existing GitHub pull request numbers.
+
+| PR | Approved scope | Exact expanded-intake allocation at this checkpoint |
+| ---: | --- | --- |
+| **0** | Checkpoint fix | Fork-specific checkpoint-turn-start failure repair; no upstream SHA. |
+| **1** | Safety / CI | `ac4f1a2b6d`, `86070cbc74`, `9cb40178a5`, `d8bc6831cd`, `4ade365180`, `1665d81bb5`. |
+| **2** | Provider maintenance | `d28077e585`, `2fb99a7a66`, `c7dc3cbd06`, `2271a27dad`. |
+| **3** | Provider runtime | Per-row allocation pending source and fork behavior trace. |
+| **4** | Skills / workspaces | Per-row allocation pending source and fork behavior trace. |
+| **5** | Antigravity runtime | Per-row allocation pending source and fork behavior trace. |
+| **6** | Antigravity models | Per-row allocation pending source and fork behavior trace. |
+| **7** | Streaming / rendering | Per-row allocation pending source and fork behavior trace. |
+| **8** | Media / citations | Per-row allocation pending source and fork behavior trace. |
+| **9** | Questions / compaction | Per-row allocation pending source and fork behavior trace. |
+| **10** | iOS reliability | Per-row allocation pending source and fork behavior trace. |
+| **11** | Web / desktop UX | Per-row allocation pending source and fork behavior trace. |
+| **12** | Runtime / tooling | Per-row allocation pending source and fork behavior trace. |
+| **13** | Settlement / checkpoints | Per-row allocation pending source and fork behavior trace. |
+| **14** | Usage / project defaults | Per-row allocation pending source and fork behavior trace. |
+| **15** | Onboarding / import | Per-row allocation pending source and fork behavior trace. |
+| **16** | Ordering / balancing | Per-row allocation pending source and fork behavior trace. |
+
+Only the ten exact PR 1/PR 2 sources above receive a new row-level owner in this inventory update.
+The 73 older approved future-source allocations belong to the historical 27-group map below; they
+remain source requirements rather than current 17-PR row allocations. The other current scope
+descriptions approve bounded destinations but are not complete SHA allocations; assigning their
+rows from titles alone would be a guess.
+
+### Expanded-intake audit provenance
+
+Three bounded read-only explorer passes covered all 337 expanded-intake commits in segments of
+135, 94, and 108 rows. Their provisional counts were:
+
+| Segment | Rows | Adapt | Equivalent | Inapplicable | Skip |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 135 | 20 | 12 | 18 | 85 |
+| 2 | 94 | 36 | 10 | 11 | 37 |
+| 3 | 108 | 61 | 1 | 11 | 35 |
+| **Total** | **337** | **117** | **23** | **40** | **157** |
+
+These classifications are provisional and superseded by the approved 17-PR delivery map. Some
+conflicted with approved product choices, so none is promoted into a final row-level disposition.
+Every final adaptation, equivalence, inapplicability, or exclusion requires behavior evidence and the
+owning PR's gates.
+
+### Five authorization dimensions for the expanded map
+
+The five existing authorization dimensions remain mandatory. For PR 0 and each later delivery unit,
+read “group” in the detailed historical contracts as the current approved PR scope.
+
+| Dimension | Expanded-run authorization |
+| --- | --- |
+| Source edits | Only the current PR's approved behavior, direct owners, maintained docs, and directly required fixture repairs. No later-PR intake or unrelated cleanup. |
+| Generated outputs | None unless the current PR contract explicitly names and owns an output. Never retain incidental build or runtime products. |
+| Hand-written tests | Only major regressions required by the current approved behavior, under the mirrored root `tests/` tree. |
+| Existing verification | Focused affected-scope tests, types/build/statics, formatting/lint/header and `git diff --check`, plus one primary-owner integrated pass for each affected client surface. No routine workspace-wide suite. |
+| Git and external actions | Only the already-approved sequential checkpoint, source-attributed commit, PR, green-CI, merge, exact merged-main verification, and run-owned cleanup sequence. Preserve unrelated refs, worktrees, credentials, installations, and external state. |
+
+## Historical original-to-revised group mapping
 
 | Original group | Revised destination | Continuity requirement |
 | --- | --- | --- |
@@ -125,11 +200,13 @@ to this plan or ledger without a new decision.
 | 11 | 27 | Carry server-owned settlement behavior forward. |
 | 12 | 04 | Carry desktop preview recovery behavior forward. |
 
-## Ordered implementation groups
+## Historical 27-group source requirement map
 
-“Conditional” means reproduce or measure the remaining fork-specific problem first. Port only
-demonstrated missing behavior. If the fork is already sufficient or the candidate is inapplicable,
-record the evidence and disposition without manufacturing an empty adaptation commit.
+This section preserves the detailed source requirements approved before the 17-PR remap. Its
+behavioral contracts still apply when their sources are assigned to a current PR. “Conditional” means
+reproduce or measure the remaining fork-specific problem first. Port only demonstrated missing
+behavior. If the fork is already sufficient or the candidate is inapplicable, record the evidence and
+disposition without manufacturing an empty adaptation commit.
 
 ### Safety and runtime foundations
 
@@ -251,7 +328,7 @@ distribution from Google's published archives with source-recorded hashes and si
 from the `agy` CLI and must not float during implementation. The source manifest is
 <https://raw.githubusercontent.com/agentclientprotocol/registry/main/antigravity-acp/agent.json>.
 
-Group 12 must land these boundaries together:
+PR 5 (historical Group 12) must land these boundaries together:
 
 1. **Managed runtime ownership.** Validate download size/hash, exact archive members, member paths,
    types and extracted sizes, executable/harness pairing, supported platforms, and ACP initialization
@@ -277,8 +354,8 @@ Group 12 must land these boundaries together:
    permission. Refuse unsupported rollback before modifying files. Do not synthesize native child
    relationships or custom-model capabilities.
 
-Group 12 includes the minimum web/iOS setup and transition UI needed for immediate use. iOS controls
-the server-side runtime; no runtime is downloaded to the phone.
+PR 5 (historical Group 12) includes the minimum web/iOS setup and transition UI needed for immediate
+use. iOS controls the server-side runtime; no runtime is downloaded to the phone.
 
 The live gate requires a human personal-Google sign-in, real model response, tool permission and
 question handling, cancellation, official-session resume across restart, legacy-session transition,
@@ -1217,10 +1294,12 @@ The source-attributed local commits are `942f66fb3` (`108f295cc`), `2296fd932` (
 `7934702f0`. Original source authors, AuthorDates, subjects, bodies, and trailers are retained where
 applicable.
 
-The checkpoint is verified and published in [PR #100](https://github.com/ggfincke/456code/pull/100).
-Exact-head checks and the merge receipt remain pending. Groups 10-27 remain queued and unchanged.
+The checkpoint was published in [PR #100](https://github.com/ggfincke/456code/pull/100) and merged as
+`a60bdbc5856fdb88e32585156238b39617bf9e86`. The pre-publication checks above remain the recorded
+verification; this reconciliation update adds no unobserved merged-main CI claim. Remaining work is
+sequenced by the approved 17-PR delivery map.
 
-## Verification policy for every group
+## Verification policy for every PR
 
 1. **Preflight and ownership:** verify HEAD, exact source SHAs, dirty/staged/ignored manifests,
    dependency/cache ownership, processes, and applicable instructions; assign non-overlapping owners.
@@ -1242,8 +1321,8 @@ Do not run full local workspace suites or duplicate integrated environments acro
 
 ## Publication after each accepted checkpoint
 
-Group 01 is explicitly approved, and standing approval covers the same sequence for each later group
-after its scoped checkpoint is green:
+The published historical Group 01 receipt preserves its original approval, and standing approval
+covers the same sequence for each current PR after its scoped checkpoint is green:
 
 1. Create coherent source-attributed commits preserving original Author, AuthorDate, subject/body, and
    trailers; append the full source SHA and fork adaptation notes. Keep fork-only repairs separate.
@@ -1260,12 +1339,12 @@ after its scoped checkpoint is green:
 Remain excluded throughout: Android; Connect/Relay/cloud restoration; cookie import; automatic
 post-update thread continuation; unrelated provider/settings redesign; cosmetics; usage-dashboard
 expansion; broad dependency/release churn; test pruning; and patches whose upstream architecture is
-absent. Group 12 personal OAuth is the only approved Antigravity authentication path. There is no
-Antigravity dual backend and no authority to alter the existing `agy` installation.
+absent. PR 5 (historical Group 12) personal OAuth is the only approved Antigravity authentication
+path. There is no Antigravity dual backend and no authority to alter the existing `agy` installation.
 
 ## Completion definition
 
-Completion requires all accepted groups merged and verified plus a final exact 468-row ledger. Every
+Completion requires all accepted PRs merged and verified plus a final exact 805-row ledger. Every
 row must end with an evidence-backed disposition, fork counterpart, dependencies, verification, and
 associated fork commit/PR. Conditional rows must have a demonstrated outcome, never “probably
 equivalent.” The current inventory intentionally leaves non-grouped rows unreviewed; that is truthful

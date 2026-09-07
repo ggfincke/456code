@@ -1437,6 +1437,84 @@ describe('CheckpointReactor', () =>
     ).toBe('v1\n')
   })
 
+  it('records one terminal baseline failure when exact capture is unsupported', async () =>
+  {
+    const checkpointStoreCalls: string[] = []
+    const harness = await createHarness({
+      hasSession: false,
+      seedFilesystemCheckpoints: false,
+      checkpointStoreCalls,
+      startReactor: false,
+    })
+    const detail = 'Changed or dirty submodules are unsupported by exact snapshot policy.'
+    const captureCheckpoint = vi
+      .spyOn(harness.checkpointStore, 'captureCheckpoint')
+      .mockImplementation(() =>
+        Effect.fail(
+          new VcsUnsupportedOperationError({
+            operation: 'CheckpointReactor.test.capture',
+            kind: 'git',
+            detail,
+          }),
+        ),
+      )
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-unsupported-baseline'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: MessageId.make('message-unsupported-baseline'),
+          role: 'user',
+          text: 'capture a baseline',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:01.000Z',
+      }),
+    )
+    await Effect.runPromise(
+      harness.delivery.ensureProgress({
+        reactorId: 'checkpoint-domain',
+        operationVersion: 1,
+        initialSequence: (await harness.readModel()).snapshotSequence - 1,
+        mode: 'durable',
+        now: '2026-01-01T00:00:01.000Z',
+      }),
+    )
+    await harness.startReactor()
+    await harness.drain()
+    await harness.drain()
+
+    expect(captureCheckpoint).toHaveBeenCalledTimes(1)
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make('thread-1'),
+    )
+    expect(
+      thread?.activities.filter((activity) => activity.kind === 'checkpoint.capture.failed'),
+    ).toEqual([
+      expect.objectContaining({
+        tone: 'error',
+        summary: 'Checkpoint capture failed',
+        payload: {
+          detail: `The turn could not start because its workspace checkpoint is unavailable. ${detail}`,
+        },
+        turnId: null,
+      }),
+    ])
+    const durable = await harness.readDurableState()
+    expect(
+      durable.actions.filter((action) => action.effectKind === 'checkpoint.baseline.capture'),
+    ).toEqual([
+      expect.objectContaining({
+        status: 'succeeded',
+      }),
+    ])
+    expect(durable.progress?.blockedSequence).toBeNull()
+  })
+
   it.effect('skips checkpoint work for imported historical backfill', () =>
     Effect.gen(function* ()
     {

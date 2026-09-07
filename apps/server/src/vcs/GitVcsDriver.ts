@@ -17,6 +17,7 @@ import { ChildProcessSpawner } from 'effect/unstable/process'
 import {
   GitCommandError,
   VcsProcessExitError,
+  VcsUnsupportedOperationError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
@@ -39,6 +40,7 @@ import {
   captureExactGitSnapshot,
   EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,
   EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
+  ExactGitSnapshotError,
   materializeExactGitTree,
   preflightExactGitTreeRestore,
   restoreExactGitTree,
@@ -958,14 +960,27 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
               },
             }),
           catch: (cause) =>
-            new VcsProcessExitError({
+          {
+            if (
+              cause instanceof ExactGitSnapshotError &&
+              (cause.code === 'dirty-submodule' || cause.classification === 'policy-refusal')
+            )
+            {
+              return new VcsUnsupportedOperationError({
+                operation,
+                kind: 'git',
+                detail: cause.message,
+              })
+            }
+            return new VcsProcessExitError({
               operation,
               command: 'capture exact Git snapshot',
               cwd: input.cwd,
               exitCode: 1,
               detail:
                 cause instanceof Error ? cause.message : 'Exact Git checkpoint capture failed.',
-            }),
+            })
+          },
         })
 
         const message = `t3 checkpoint ref=${input.checkpointRef}`
