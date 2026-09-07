@@ -162,8 +162,8 @@ function ComboboxPopup({
   anchor?: ComboboxPrimitive.Positioner.Props['anchor']
 })
 {
-  const { chipsRef } = React.use(ComboboxContext)
-  const anchor = anchorProp ?? chipsRef
+  const { chipsRef, multiple } = React.use(ComboboxContext)
+  const anchor = anchorProp ?? (multiple ? chipsRef : undefined)
 
   return (
     <ComboboxPrimitive.Portal>
