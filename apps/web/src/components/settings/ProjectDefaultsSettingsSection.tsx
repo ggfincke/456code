@@ -25,6 +25,15 @@ import { primaryServerProvidersAtom } from '../../state/server'
 import { useAtomCommand } from '../../state/use-atom-command'
 import { ProviderModelPicker } from '../chat/model-picker/ProviderModelPicker'
 import { Button } from '../ui/button'
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxTrigger,
+} from '../ui/combobox'
 import { DraftInput } from '../ui/draft-input'
 import { Input } from '../ui/input'
 import { Switch } from '../ui/switch'
@@ -212,7 +221,12 @@ export function ProjectDefaultsSettingsSection()
   )
   const updateProject = useAtomCommand(projectEnvironment.update, 'project defaults update')
   const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [projectQuery, setProjectQuery] = useState('')
   const project = projects.find((candidate) => candidate.id === selectedProjectId)
+  const projectOptions = [
+    { value: '', label: 'Choose a project' },
+    ...projects.map((project) => ({ value: project.id, label: project.title })),
+  ]
   const selectClassName =
     'max-w-full rounded-md border border-border bg-background px-3 py-2 text-sm'
   const browserOverride =
@@ -267,10 +281,42 @@ export function ProjectDefaultsSettingsSection()
           title="Project overrides"
           description="Changes apply only to the selected project on the primary environment."
           control={
-            <select className={selectClassName} aria-label="Project to customize" value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)} disabled={primary === null}>
-              <option value="">Choose a project</option>
-              {projects.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}
-            </select>
+            <Combobox
+              items={projectOptions}
+              autoHighlight
+              itemToStringLabel={(option) => option.label}
+              isItemEqualToValue={(left, right) => left.value === right.value}
+              value={projectOptions.find((option) => option.value === (project?.id ?? '')) ?? null}
+              inputValue={projectQuery}
+              onInputValueChange={setProjectQuery}
+              onOpenChange={() => setProjectQuery('')}
+              onValueChange={(option) => setSelectedProjectId(option?.value ?? '')}
+              disabled={primary === null}
+            >
+              <ComboboxTrigger
+                aria-label="Project to customize"
+                render={<Button variant="outline" className="max-w-full min-w-0" />}
+              >
+                <span className="truncate">{project?.title ?? 'Choose a project'}</span>
+              </ComboboxTrigger>
+              <ComboboxPopup align="start" className="w-72">
+                <div className="shrink-0 p-2">
+                  <ComboboxInput
+                    aria-label="Search projects"
+                    placeholder="Search projects..."
+                    showTrigger={false}
+                  />
+                </div>
+                <ComboboxEmpty>No matching projects.</ComboboxEmpty>
+                <ComboboxList className="max-h-64">
+                  {(option: (typeof projectOptions)[number]) => (
+                    <ComboboxItem key={option.value} value={option}>
+                      <span className="block truncate">{option.label}</span>
+                    </ComboboxItem>
+                  )}
+                </ComboboxList>
+              </ComboboxPopup>
+            </Combobox>
           }
         />
         {project ? (
