@@ -42,6 +42,9 @@ describe.each([
       ios: {
         bundleIdentifier,
         supportsTablet: true,
+        entitlements: {
+          'keychain-access-groups': [`$(AppIdentifierPrefix)${bundleIdentifier}`],
+        },
       },
       extra: { appVariant: variant },
     })

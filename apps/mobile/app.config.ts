@@ -165,6 +165,9 @@ const config: ExpoConfig = {
     // does not fall back to a personal team (which cannot sign app groups,
     // sign in with Apple, or push notification entitlements).
     appleTeamId: 'ARK85ZXQ4Z',
+    entitlements: {
+      'keychain-access-groups': [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
+    },
     infoPlist: {
       // swift prefixes module names that start with a digit. Expo resolves its
       // generated module provider through CFBundleName, so keep both names exact.
