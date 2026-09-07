@@ -5,7 +5,7 @@
 
 import * as NodePath from 'node:path'
 
-import { exactError } from './ExactGitSnapshotGit.ts'
+import { exactError, exactPolicyError } from './ExactGitSnapshotGit.ts'
 
 export const ALLOWED_INDEX_MODES = new Set(['100644', '100755', '120000', '160000'])
 export const REGULAR_MODES = new Set(['100644', '100755'])
@@ -67,8 +67,7 @@ export function decodePath(bytes: Buffer): string
   }
   catch (cause)
   {
-    throw exactError(
-      'unsupported-entry',
+    throw exactPolicyError(
       'Git paths must be valid UTF-8 for exact snapshot materialization.',
       cause,
     )
@@ -101,7 +100,7 @@ export function validateGitPath(path: string): void
     )
   )
   {
-    throw exactError('unsupported-entry', `Git path '${path}' is unsafe to materialize.`)
+    throw exactPolicyError(`Git path '${path}' is unsafe to materialize.`)
   }
 }
 
@@ -125,7 +124,7 @@ export function parseHeadTree(buffer: Buffer): ReadonlyArray<GitTreeEntry>
       (match[2] === 'blob' && match[1] === '160000')
     )
     {
-      throw exactError('unsupported-entry', 'The repository contains an unsupported Git entry.')
+      throw exactPolicyError('The repository contains an unsupported Git entry.')
     }
     return {
       mode: match[1],
@@ -149,7 +148,7 @@ export function parseIndex(buffer: Buffer): ReadonlyArray<IndexEntry>
     const match = /^([0-9]{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-3])$/u.exec(metadata)
     if (!match?.[1] || !match[2] || !match[3] || !ALLOWED_INDEX_MODES.has(match[1]))
     {
-      throw exactError('unsupported-entry', 'The repository index has an unsupported entry.')
+      throw exactPolicyError('The repository index has an unsupported entry.')
     }
     return {
       mode: match[1],
@@ -184,7 +183,7 @@ export function parseMaterializedTree(buffer: Buffer): ReadonlyArray<Materialize
       (type === 'commit' && mode !== '160000')
     )
     {
-      throw exactError('unsupported-entry', 'The Git tree contains an unsupported entry.')
+      throw exactPolicyError('The Git tree contains an unsupported entry.')
     }
     const size = match[4] === '-' ? 0 : Number(match[4])
     if (!Number.isSafeInteger(size) || size < 0)

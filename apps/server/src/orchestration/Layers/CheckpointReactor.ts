@@ -2692,6 +2692,16 @@ const make = Effect.gen(function* ()
             event,
             payload.targetCheckpointRef,
             action.actionId,
+          ).pipe(
+            Effect.catchTag('VcsUnsupportedOperationError', (error) =>
+              appendCaptureFailureActivity({
+                threadId: event.payload.threadId,
+                turnId: null,
+                detail: `The turn could not start because its workspace checkpoint is unavailable. ${error.detail}`,
+                createdAt: event.occurredAt,
+                actionId: action.actionId,
+              }),
+            ),
           )
           break
         case 'checkpoint.placeholder.capture':

@@ -957,6 +957,21 @@ const make = Effect.gen(function* ()
     })
   })
 
+  const reportTurnStartFailure = Effect.fn('reportTurnStartFailure')(function* (input: {
+    readonly threadId: ThreadId
+    readonly detail: string
+    readonly createdAt: string
+  })
+  {
+    yield* setThreadSessionErrorOnTurnStartFailure(input)
+    yield* appendProviderFailureActivity({
+      ...input,
+      kind: 'provider.turn.start.failed',
+      summary: 'Provider turn start failed',
+      turnId: null,
+    })
+  })
+
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId)
   {
     const thread = yield* Effect.sync(() => requireActiveEnvironment().thread)
@@ -1705,23 +1720,11 @@ const make = Effect.gen(function* ()
         return Effect.void
       }
       const detail = formatFailureDetail(cause)
-      return setThreadSessionErrorOnTurnStartFailure({
+      return reportTurnStartFailure({
         threadId: event.payload.threadId,
         detail,
         createdAt: event.payload.createdAt,
-      }).pipe(
-        Effect.flatMap(() =>
-          appendProviderFailureActivity({
-            threadId: event.payload.threadId,
-            kind: 'provider.turn.start.failed',
-            summary: 'Provider turn start failed',
-            detail,
-            turnId: null,
-            createdAt: event.payload.createdAt,
-          }),
-        ),
-        Effect.asVoid,
-      )
+      })
     }
 
     const recoverTurnStartFailure = (cause: Cause.Cause<unknown>) =>
@@ -3131,7 +3134,58 @@ const make = Effect.gen(function* ()
         {
           if (providerEvent.type === 'thread.turn-start-requested')
           {
-            yield* ensurePreTurnBaselineBeforeProvider(providerEvent.payload.createdAt)
+            const baselineReady = yield* ensurePreTurnBaselineBeforeProvider(
+              providerEvent.payload.createdAt,
+            ).pipe(
+              Effect.as(true),
+              Effect.catchTag('VcsUnsupportedOperationError', (error) =>
+                Effect.gen(function* ()
+                {
+                  yield* reportTurnStartFailure({
+                    threadId: providerEvent.payload.threadId,
+                    detail: `The turn could not start because its workspace checkpoint is unavailable. ${error.detail}`,
+                    createdAt: providerEvent.payload.createdAt,
+                  })
+                  const thread = activeEnvironment?.thread
+                  const hasBranchRename =
+                    thread !== null &&
+                    thread !== undefined &&
+                    thread.branch !== null &&
+                    thread.worktreePath !== null &&
+                    isTemporaryWorktreeBranch(thread.branch)
+                  // settle only this refused turn's naming actions, including after restart
+                  for (const followUp of [
+                    { effectKind: 'first-turn.worktree-branch.generate', outputIndex: 1 },
+                    {
+                      effectKind: 'first-turn.thread-title.generate',
+                      outputIndex: hasBranchRename ? 2 : 1,
+                    },
+                  ])
+                  {
+                    yield* delivery.skipStale({
+                      actionId: makeReactorActionId({
+                        reactorId: REACTOR_ID,
+                        sourceSequence: action.sourceSequence,
+                        sourceEventId: action.sourceEventId,
+                        ...followUp,
+                        targetKind: 'thread',
+                        targetId: action.targetId,
+                        operationVersion: action.operationVersion,
+                      }),
+                      sourceEventId: action.sourceEventId,
+                      operator: 'provider-command',
+                      detail: 'Turn did not start because its checkpoint baseline is unsupported.',
+                      now: providerEvent.payload.createdAt,
+                    })
+                  }
+                  return false
+                }),
+              ),
+            )
+            if (!baselineReady)
+            {
+              return
+            }
           }
           return yield* processDomainEvent(providerEvent)
         }

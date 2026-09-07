@@ -15,15 +15,24 @@ export type ExactGitSnapshotErrorCode =
   | 'unsupported-entry'
   | 'verification-failed'
 
+export type ExactGitSnapshotErrorClassification = 'operational' | 'policy-refusal'
+
 export class ExactGitSnapshotError extends Error
 {
   readonly code: ExactGitSnapshotErrorCode
+  readonly classification: ExactGitSnapshotErrorClassification
 
-  constructor(code: ExactGitSnapshotErrorCode, message: string, options?: ErrorOptions)
+  constructor(
+    code: ExactGitSnapshotErrorCode,
+    message: string,
+    options?: ErrorOptions,
+    classification: ExactGitSnapshotErrorClassification = 'operational',
+  )
   {
     super(message, options)
     this.name = 'ExactGitSnapshotError'
     this.code = code
+    this.classification = classification
   }
 }
 
@@ -39,6 +48,16 @@ export function exactError(
 ): ExactGitSnapshotError
 {
   return new ExactGitSnapshotError(code, message, cause === undefined ? undefined : { cause })
+}
+
+export function exactPolicyError(message: string, cause?: unknown): ExactGitSnapshotError
+{
+  return new ExactGitSnapshotError(
+    'unsupported-entry',
+    message,
+    cause === undefined ? undefined : { cause },
+    'policy-refusal',
+  )
 }
 
 export interface GitResult
