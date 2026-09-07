@@ -19,10 +19,12 @@ import {
   type ImportScanResult,
   type ProjectId,
   type ProviderInstanceId,
+  type RepositoryIdentity,
   type ServerSettings,
   type ThreadId,
 } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
+import * as Deferred from 'effect/Deferred'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -116,6 +118,9 @@ export interface ImportDiscoveryDepsShape
     normalizedRoot: string,
   ) => Effect.Effect<ProjectId | null, Error>
   readonly normalizeWorkspaceRoot: (path: string) => Effect.Effect<string, Error>
+  readonly resolveRepositoryIdentity?: (
+    normalizedRoot: string,
+  ) => Effect.Effect<RepositoryIdentity | null, Error>
   readonly scanAcpSource: (
     descriptor: AcpImportSourceDescriptor,
   ) => Effect.Effect<ReadonlyArray<AcpImportCatalogEntry>, Error>
@@ -155,6 +160,7 @@ interface CatalogMetadata
 interface ImportScanProgress
 {
   readonly candidateBuckets: Map<string, ImportScanCandidate[]>
+  readonly repositoryIdentities: Map<string, Deferred.Deferred<RepositoryIdentity | null>>
   readonly errors: ImportScanResult['errors'][number][]
   omittedErrorCount: number
   truncated: boolean
@@ -614,6 +620,23 @@ export const make = Effect.gen(function* ()
     defaultAcpScanPhaseTimeoutMs,
     configuredScanTimeoutMs,
   )
+  const resolveScanRepositoryIdentity = Effect.fn('ImportDiscovery.resolveScanRepositoryIdentity')(
+    function* (workspaceRoot: string, progress: ImportScanProgress)
+    {
+      const existing = progress.repositoryIdentities.get(workspaceRoot)
+      if (existing) return yield* Deferred.await(existing)
+      // install the shared result before yielding so concurrent transcript reads join it
+      const pending = Deferred.makeUnsafe<RepositoryIdentity | null>()
+      progress.repositoryIdentities.set(workspaceRoot, pending)
+      yield* Deferred.complete(
+        pending,
+        deps.resolveRepositoryIdentity === undefined
+          ? Effect.succeed(null)
+          : deps.resolveRepositoryIdentity(workspaceRoot).pipe(Effect.orElseSucceed(() => null)),
+      )
+      return yield* Deferred.await(pending)
+    },
+  )
 
   const appendScanError = (
     progress: ImportScanProgress,
@@ -724,6 +747,7 @@ export const make = Effect.gen(function* ()
     readonly sourcePath: string
     readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>
     readonly metadata: CatalogMetadata
+    readonly progress: ImportScanProgress
   })
   {
     const normalizedCwd =
@@ -735,6 +759,10 @@ export const make = Effect.gen(function* ()
           )
     const matchedProjectId =
       normalizedCwd === null ? null : yield* deps.findProjectByWorkspaceRoot(normalizedCwd)
+    const repositoryIdentity =
+      normalizedCwd === null
+        ? null
+        : yield* resolveScanRepositoryIdentity(normalizedCwd, input.progress)
     const nativeSessionId = boundedIdentity(input.metadata.nativeSessionId)
     const importedThread = yield* findImportedThread({
       source: input.source,
@@ -757,6 +785,7 @@ export const make = Effect.gen(function* ()
       alreadyImportedProviderInstanceId: importedThread?.providerInstanceId ?? null,
       alreadyImportedArchived: importedThread?.archived ?? false,
       matchedProjectId,
+      repositoryIdentity,
       resumable: nativeSessionId !== null && input.metadata.resumable,
     } satisfies ImportScanCandidate
   })
@@ -766,6 +795,7 @@ export const make = Effect.gen(function* ()
     sourcePath: string,
     sourceDescriptors: ReadonlyArray<ImportFileSourceDescriptor>,
     layout: ImportFileSourceDescriptorGroup['layout'],
+    progress: ImportScanProgress,
   )
   {
     if (sourcePath.length > IMPORT_SOURCE_PATH_MAX_CHARS)
@@ -842,6 +872,7 @@ export const make = Effect.gen(function* ()
         sourcePath: trustedSource.canonicalPath,
         providerInstanceIds: trustedSource.providerInstanceIds,
         metadata,
+        progress,
       }),
       warning: metadata.warning,
     }
@@ -890,7 +921,13 @@ export const make = Effect.gen(function* ()
     yield* Effect.forEach(
       paths,
       (sourcePath) =>
-        describeFileCandidate(group.source, sourcePath, sourceDescriptors, group.layout).pipe(
+        describeFileCandidate(
+          group.source,
+          sourcePath,
+          sourceDescriptors,
+          group.layout,
+          progress,
+        ).pipe(
           Effect.tap(({ candidate, warning }) =>
             Effect.sync(() =>
             {
@@ -950,6 +987,7 @@ export const make = Effect.gen(function* ()
           }
           const nativeSessionId = boundedIdentity(entry.nativeSessionId)
           const candidate = yield* enrichCandidate({
+            progress,
             source: descriptor.source,
             sourcePath: entry.sourcePath,
             providerInstanceIds: [descriptor.providerInstanceId],
@@ -1182,6 +1220,7 @@ export const make = Effect.gen(function* ()
     {
       const progress: ImportScanProgress = {
         candidateBuckets: new Map(),
+        repositoryIdentities: new Map(),
         errors: [],
         omittedErrorCount: 0,
         truncated: false,

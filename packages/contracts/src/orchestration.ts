@@ -2433,6 +2433,9 @@ export const ImportScanCandidate = Schema.Struct({
   ),
   alreadyImportedArchived: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   matchedProjectId: Schema.NullOr(ProjectId),
+  repositoryIdentity: Schema.NullOr(RepositoryIdentity).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   resumable: Schema.Boolean,
 })
 export type ImportScanCandidate = typeof ImportScanCandidate.Type
