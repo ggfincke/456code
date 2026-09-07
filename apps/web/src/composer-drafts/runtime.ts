@@ -686,9 +686,15 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             {
               return state
             }
+            const current = state.stickyModelSelectionByProvider[normalized.instanceId]
+            // model-only updates retain the last explicit trait selection
+            const nextSelection =
+              normalized.options !== undefined
+                ? normalized
+                : createModelSelection(normalized.instanceId, normalized.model, current?.options)
             const nextMap: Partial<Record<ProviderInstanceId, ModelSelection>> = {
               ...state.stickyModelSelectionByProvider,
-              [normalized.instanceId]: normalized,
+              [normalized.instanceId]: nextSelection,
             }
             if (Equal.equals(state.stickyModelSelectionByProvider, nextMap))
             {

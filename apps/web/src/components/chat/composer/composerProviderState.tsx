@@ -14,6 +14,7 @@ import type { DraftId } from '../../../composerDraftStore'
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
+  resolveComposerOptionSelections,
   type ComposerPromptInjectionState,
   type ComposerProviderState,
   type ComposerProviderStateInput,
@@ -57,9 +58,21 @@ function renderTraitsControl(
     onPromptChange,
   } = input
   const hasTarget = threadRef !== undefined || draftId !== undefined
+  const { selections: resolvedModelOptions } = resolveComposerOptionSelections(
+    models,
+    model,
+    provider,
+    modelOptions,
+  )
   if (
     !hasTarget ||
-    !shouldRenderTraitsControls({ provider, models, model, modelOptions, prompt })
+    !shouldRenderTraitsControls({
+      provider,
+      models,
+      model,
+      modelOptions: resolvedModelOptions,
+      prompt,
+    })
   )
   {
     return null
@@ -72,7 +85,7 @@ function renderTraitsControl(
       {...(threadRef ? { threadRef } : {})}
       {...(draftId ? { draftId } : {})}
       model={model}
-      modelOptions={modelOptions}
+      modelOptions={resolvedModelOptions}
       prompt={prompt}
       onPromptChange={onPromptChange}
     />

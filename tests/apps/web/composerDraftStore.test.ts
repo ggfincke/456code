@@ -1861,6 +1861,26 @@ describe('composerDraftStore sticky composer settings', () =>
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe('codex')
   })
 
+  it('preserves sticky provider options when a model change omits options', () =>
+  {
+    const store = useComposerDraftStore.getState()
+
+    store.setStickyModelSelection(
+      modelSelection(CURSOR_DRIVER, 'composer-2', {
+        fastMode: false,
+      }),
+    )
+    store.setStickyModelSelection(modelSelection(CURSOR_DRIVER, 'composer-2.5'))
+
+    expect(
+      useComposerDraftStore.getState().stickyModelSelectionByProvider[CURSOR_INSTANCE],
+    ).toEqual(
+      modelSelection(CURSOR_DRIVER, 'composer-2.5', {
+        fastMode: false,
+      }),
+    )
+  })
+
   it('normalizes empty sticky model options by dropping selection options', () =>
   {
     const store = useComposerDraftStore.getState()
