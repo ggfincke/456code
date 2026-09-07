@@ -66,6 +66,8 @@ function codexRateLimitsToWindows(
   snapshot: CodexRateLimitSnapshot,
 ): ReadonlyArray<ServerProviderAccountUsageWindow>
 {
+  if (snapshot.limitId && snapshot.limitId !== 'codex') return []
+
   const isMonthlyPlan = snapshot.planType === 'free' || snapshot.planType === 'go'
   const positions = [
     ['primary', snapshot.primary, isMonthlyPlan ? MONTH_MINS : SESSION_MINS],
@@ -138,6 +140,7 @@ export function mergeCodexRateLimits(
   update: CodexRateLimitSnapshot,
 ): CodexRateLimitSnapshot | undefined
 {
+  if (update.limitId && update.limitId !== 'codex') return previous
   if (!previous) return update
   return {
     ...previous,
