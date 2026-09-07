@@ -73,7 +73,12 @@ import {
 } from './CodexSessionRuntime.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
 import { resolveCodexLaunchArgs } from './codexLaunchArgs.ts'
-import { codexRateLimitsToUpdate } from './codexUsageLimits.ts'
+import {
+  type CodexRateLimitSnapshot,
+  codexRateLimitsToUpdate,
+  codexUsageLimitMessage,
+  mergeCodexRateLimits,
+} from './codexUsageLimits.ts'
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError)
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError)
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(CodexSessionRuntimeThreadIdMissingError)
@@ -1872,12 +1877,70 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
         )
 
         const rateLimitDedup: { lastKey: string | undefined } = { lastKey: undefined }
+        let rateLimits: CodexRateLimitSnapshot | undefined
         const terminalPublished = yield* Ref.make(false)
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* ()
           {
             yield* writeNativeEvent(event)
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId, rateLimitDedup, usageAccountIdentity)
+            if (event.method === 'account/rateLimits/updated')
+            {
+              const limitsPayload = readPayload(
+                EffectCodexSchema.V2AccountRateLimitsUpdatedNotification,
+                event.payload,
+              )
+              if (limitsPayload)
+              {
+                rateLimits = mergeCodexRateLimits(rateLimits, limitsPayload.rateLimits)
+              }
+            }
+            else if (event.method === 'error')
+            {
+              const errorPayload = readPayload(EffectCodexSchema.V2ErrorNotification, event.payload)
+              if (errorPayload?.error.codexErrorInfo === 'usageLimitExceeded') return
+            }
+
+            let usageLimitMessage: string | undefined
+            let usageLimitError: ProviderRuntimeEvent | undefined
+            if (event.method === 'turn/completed')
+            {
+              const completedPayload = readPayload(
+                EffectCodexSchema.V2TurnCompletedNotification,
+                event.payload,
+              )
+              const turnError =
+                completedPayload?.turn.status === 'failed' ? completedPayload.turn.error : undefined
+              if (turnError?.codexErrorInfo === 'usageLimitExceeded')
+              {
+                usageLimitMessage = codexUsageLimitMessage(rateLimits, event.createdAt)
+                usageLimitError = {
+                  ...runtimeEventBase(event, event.threadId),
+                  type: 'runtime.error',
+                  payload: {
+                    message: usageLimitMessage,
+                    class: 'provider_error',
+                    ...(turnError.message ? { detail: turnError.message } : {}),
+                  },
+                }
+              }
+            }
+
+            const mappedEvents = mapToRuntimeEvents(
+              event,
+              event.threadId,
+              rateLimitDedup,
+              usageAccountIdentity,
+            ).map((runtimeEvent) =>
+              runtimeEvent.type === 'turn.completed' && usageLimitMessage
+                ? {
+                    ...runtimeEvent,
+                    payload: { ...runtimeEvent.payload, errorMessage: usageLimitMessage },
+                  }
+                : runtimeEvent,
+            )
+            const runtimeEvents = usageLimitError
+              ? [usageLimitError, ...mappedEvents]
+              : mappedEvents
             if (runtimeEvents.length === 0)
             {
               yield* Effect.logDebug('ignoring unhandled Codex provider event', {
