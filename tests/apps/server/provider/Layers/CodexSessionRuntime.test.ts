@@ -732,6 +732,58 @@ describe('isRecoverableThreadResumeError', () =>
 
 describe('openCodexThread', () =>
 {
+  it.effect('resumes from metadata when saved history contains a newer item shape', () =>
+    Effect.gen(function* ()
+    {
+      const resumePayloads: Array<unknown> = []
+      const response = {
+        ...makeThreadOpenResponse('resumable-thread'),
+        thread: {
+          ...makeThreadOpenResponse('resumable-thread').thread,
+          turns: [
+            {
+              id: 'historical-turn',
+              items: [{ type: 'future_item', opaque: true }],
+              status: 'completed',
+            },
+          ],
+        },
+      }
+      const client = {
+        raw: {
+          request: (_method: 'thread/resume', payload: unknown) =>
+          {
+            resumePayloads.push(payload)
+            return Effect.succeed(response)
+          },
+        },
+        request: () => Effect.succeed(makeThreadOpenResponse('unexpected-fresh-thread')),
+      }
+
+      const opened = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make('thread-1'),
+        runtimeMode: 'full-access',
+        cwd: '/tmp/project',
+        requestedModel: 'gpt-5.3-codex',
+        serviceTier: undefined,
+        resumeThreadId: 'resumable-thread',
+        requireExisting: true,
+      })
+
+      NodeAssert.deepStrictEqual(opened, {
+        cwd: '/tmp/project',
+        model: 'gpt-5.3-codex',
+        thread: { id: 'resumable-thread' },
+      })
+      NodeAssert.equal(resumePayloads.length, 1)
+      NodeAssert.equal(
+        (resumePayloads[0] as { readonly excludeTurns?: boolean }).excludeTurns,
+        true,
+      )
+    }),
+  )
+
   it.effect('falls back to thread/start when resume fails recoverably', () =>
     Effect.gen(function* ()
     {
@@ -739,22 +791,30 @@ describe('openCodexThread', () =>
       let fallbackObserved = false
       const started = makeThreadOpenResponse('fresh-thread')
       const client = {
-        request: <M extends 'thread/start' | 'thread/resume'>(
-          method: M,
-          payload: CodexRpc.ClientRequestParamsByMethod[M],
-        ) =>
-        {
-          calls.push({ method, payload })
-          if (method === 'thread/resume')
+        raw: {
+          request: (
+            _method: 'thread/resume',
+            payload: CodexRpc.ClientRequestParamsByMethod['thread/resume'] & {
+              readonly excludeTurns?: boolean
+            },
+          ) =>
           {
+            calls.push({ method: 'thread/resume', payload })
             return Effect.fail(
               new CodexErrors.CodexAppServerRequestError({
                 code: -32603,
                 errorMessage: 'thread not found',
               }),
             )
-          }
-          return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M])
+          },
+        },
+        request: (
+          _method: 'thread/start',
+          payload: CodexRpc.ClientRequestParamsByMethod['thread/start'],
+        ) =>
+        {
+          calls.push({ method: 'thread/start', payload })
+          return Effect.succeed(started)
         },
       }
 
@@ -779,6 +839,10 @@ describe('openCodexThread', () =>
         calls.map((call) => call.method),
         ['thread/resume', 'thread/start'],
       )
+      NodeAssert.equal(
+        (calls[0]?.payload as { readonly excludeTurns?: boolean }).excludeTurns,
+        true,
+      )
     }),
   )
 
@@ -792,19 +856,17 @@ describe('openCodexThread', () =>
         errorMessage: 'thread not found',
       })
       const client = {
-        request: <M extends 'thread/start' | 'thread/resume'>(
-          method: M,
-          _payload: CodexRpc.ClientRequestParamsByMethod[M],
-        ) =>
+        raw: {
+          request: () =>
+          {
+            calls.push('thread/resume')
+            return Effect.fail(resumeError)
+          },
+        },
+        request: () =>
         {
-          calls.push(method)
-          return method === 'thread/resume'
-            ? Effect.fail(resumeError)
-            : Effect.succeed(
-                makeThreadOpenResponse(
-                  'fresh-thread',
-                ) as CodexRpc.ClientRequestResponsesByMethod[M],
-              )
+          calls.push('thread/start')
+          return Effect.succeed(makeThreadOpenResponse('fresh-thread'))
         },
       }
 
@@ -834,12 +896,8 @@ describe('openCodexThread', () =>
     Effect.gen(function* ()
     {
       const client = {
-        request: <M extends 'thread/start' | 'thread/resume'>(
-          method: M,
-          _payload: CodexRpc.ClientRequestParamsByMethod[M],
-        ) =>
-        {
-          if (method === 'thread/resume')
+        raw: {
+          request: () =>
           {
             return Effect.fail(
               new CodexErrors.CodexAppServerRequestError({
@@ -847,11 +905,9 @@ describe('openCodexThread', () =>
                 errorMessage: 'timed out waiting for server',
               }),
             )
-          }
-          return Effect.succeed(
-            makeThreadOpenResponse('fresh-thread') as CodexRpc.ClientRequestResponsesByMethod[M],
-          )
+          },
         },
+        request: () => Effect.succeed(makeThreadOpenResponse('fresh-thread')),
       }
 
       const error = yield* openCodexThread({
