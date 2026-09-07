@@ -438,7 +438,7 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
 -    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && peek$(ctx, "isAtEnd");
 +    const endTargetDistanceFromEnd = getContentSize(ctx) - state.scroll - state.scrollLength - getContentInsetEnd(ctx);
 +    const isNearEndForInsetList = getContentInsetStartAdjustment(ctx) > 0 && Number.isFinite(endTargetDistanceFromEnd) && endTargetDistanceFromEnd <= state.scrollLength * 0.5;
-+    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || isNearEndForInsetList);
++    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || !state.didUserDrag && isNearEndForInsetList);
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {
@@ -754,7 +754,7 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
 -    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && peek$(ctx, "isAtEnd");
 +    const endTargetDistanceFromEnd = getContentSize(ctx) - state.scroll - state.scrollLength - getContentInsetEnd(ctx);
 +    const isNearEndForInsetList = getContentInsetStartAdjustment(ctx) > 0 && Number.isFinite(endTargetDistanceFromEnd) && endTargetDistanceFromEnd <= state.scrollLength * 0.5;
-+    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || isNearEndForInsetList);
++    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || !state.didUserDrag && isNearEndForInsetList);
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {

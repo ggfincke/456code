@@ -172,7 +172,7 @@ patchedDependencies:
   '@effect/vitest@4.0.0-beta.107': 8e1a54f88d985a4f7d124a3d8f1f9bb30bddb66c840244a5d24cfef79d25f6e8
   '@expo/metro-config@57.0.12': 96f1a75347e6ea02dc4b7034ace815d8ee39e18b8166ebfb573d9e58328f0dc2
   '@ff-labs/fff-node@0.10.6': 80bb92ce7bb23b0bf5bb659a91ff1ec114c31b875e1c2363be948aa5961cc79f
-  '@legendapp/list@3.3.10': 475381687da11317d5604920a2e0780e2a80c35886e17a7c6e0e201bd1e0b812
+  '@legendapp/list@3.3.10': aea08c0c0f176144b4890b3af2503901b140a0cc597f4bbd4a63a9e2c9aff9b0
   '@pierre/diffs@1.4.1': 96d7078043033e2dae14c6f8188ea97dff90de8bda90453a31f89610106f201a
   '@react-native-menu/menu@2.0.0': 5ea3ae4bf1d9baf5443b65c269bb09621c27a68d556f713778f37b1e8d46aaae
   '@react-navigation/native-stack@7.18.10': e94c03528967d76c2c78ad8f417b3bb8c63cd8076b7a47a7a07ddf813d55e07b
@@ -297,7 +297,7 @@ importers:
         version: 57.0.16(bef7c6686fb9da7d1daefcebe654f3ab)
       '@legendapp/list':
         specifier: 3.3.10
-        version: 3.3.10(patch_hash=475381687da11317d5604920a2e0780e2a80c35886e17a7c6e0e201bd1e0b812)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.3)
+        version: 3.3.10(patch_hash=aea08c0c0f176144b4890b3af2503901b140a0cc597f4bbd4a63a9e2c9aff9b0)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.3)
       '@noble/curves':
         specifier: 'catalog:'
         version: 2.4.0
@@ -623,7 +623,7 @@ importers:
         version: 0.10.0
       '@legendapp/list':
         specifier: 3.3.10
-        version: 3.3.10(patch_hash=475381687da11317d5604920a2e0780e2a80c35886e17a7c6e0e201bd1e0b812)(react-dom@19.2.8(react@19.2.8))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)
+        version: 3.3.10(patch_hash=aea08c0c0f176144b4890b3af2503901b140a0cc597f4bbd4a63a9e2c9aff9b0)(react-dom@19.2.8(react@19.2.8))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)
       '@lexical/react':
         specifier: ^0.50.0
         version: 0.50.0(@typescript/typescript6@6.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(yjs@13.6.31)
@@ -1061,7 +1061,7 @@ importers:
         version: 0.10.6(patch_hash=80bb92ce7bb23b0bf5bb659a91ff1ec114c31b875e1c2363be948aa5961cc79f)
       '@legendapp/list':
         specifier: 3.3.10
-        version: 3.3.10(patch_hash=475381687da11317d5604920a2e0780e2a80c35886e17a7c6e0e201bd1e0b812)(react-dom@19.2.8(react@19.2.8))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)
+        version: 3.3.10(patch_hash=aea08c0c0f176144b4890b3af2503901b140a0cc597f4bbd4a63a9e2c9aff9b0)(react-dom@19.2.8(react@19.2.8))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)
       '@lexical/react':
         specifier: ^0.50.0
         version: 0.50.0(@typescript/typescript6@6.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(yjs@13.6.31)
@@ -11041,7 +11041,7 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@legendapp/list@3.3.10(patch_hash=475381687da11317d5604920a2e0780e2a80c35886e17a7c6e0e201bd1e0b812)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.3)':
+  '@legendapp/list@3.3.10(patch_hash=aea08c0c0f176144b4890b3af2503901b140a0cc597f4bbd4a63a9e2c9aff9b0)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.3)':
     dependencies:
       react: 19.2.3
       use-sync-external-store: 1.6.0(react@19.2.3)
@@ -11049,7 +11049,7 @@ snapshots:
       react-dom: 19.2.3(react@19.2.3)
       react-native: 0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@6.0.6)
 
-  '@legendapp/list@3.3.10(patch_hash=475381687da11317d5604920a2e0780e2a80c35886e17a7c6e0e201bd1e0b812)(react-dom@19.2.8(react@19.2.8))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)':
+  '@legendapp/list@3.3.10(patch_hash=aea08c0c0f176144b4890b3af2503901b140a0cc597f4bbd4a63a9e2c9aff9b0)(react-dom@19.2.8(react@19.2.8))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.2.8)':
     dependencies:
       react: 19.2.8
       use-sync-external-store: 1.6.0(react@19.2.8)
