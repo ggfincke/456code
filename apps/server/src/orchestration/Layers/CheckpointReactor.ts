@@ -27,6 +27,7 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { collectToolMutationTargets } from '@t3tools/shared/toolMutationTargets'
 import { makeDrainableWorker } from '@t3tools/shared/DrainableWorker'
+import { isTemporaryWorktreeBranch } from '@t3tools/shared/git'
 
 import { parseTurnDiffFilesFromNumstat } from '../../checkpointing/Diffs.ts'
 import { CheckpointIdentityResolver } from '../../checkpointing/CheckpointIdentity.ts'
@@ -1364,6 +1365,39 @@ const make = Effect.gen(function* ()
     )
   })
 
+  // only a dedicated worktree can safely adopt an out-of-band checkout.
+  const followWorktreeBranchDrift = Effect.fn('followWorktreeBranchDrift')(function* (input: {
+    readonly threadId: ThreadId
+    readonly turnId: TurnId | null
+    readonly cwd: string
+    readonly local: VcsStatusLocalResult
+  })
+  {
+    const checkedOutBranch = input.local.refName
+    if (checkedOutBranch === null || isTemporaryWorktreeBranch(checkedOutBranch)) return
+    const thread = yield* projectionSnapshotQuery.getThreadShellById(input.threadId)
+    if (Option.isNone(thread)) return
+    const current = thread.value
+    if (
+      current.branch === null ||
+      current.branch === checkedOutBranch ||
+      current.worktreePath !== input.cwd ||
+      current.archivedAt !== null ||
+      (current.session?.activeTurnId && !sameId(current.session.activeTurnId, input.turnId))
+    )
+      return
+    const shell = yield* projectionSnapshotQuery.getShellSnapshot()
+    if (shell.threads.some((other) => other.id !== current.id && other.worktreePath === input.cwd))
+      return
+    yield* orchestrationEngine.dispatch({
+      type: 'thread.meta.update',
+      commandId: yield* serverCommandId('worktree-branch-drift'),
+      threadId: current.id,
+      branch: checkedOutBranch,
+      expectedBranch: current.branch,
+    })
+  })
+
   const refreshLocalGitStatusFromTurnCompletion = Effect.fn(
     'refreshLocalGitStatusFromTurnCompletion',
   )(function* (event: Extract<ProviderRuntimeEvent, { type: 'turn.completed' }>)
@@ -1386,12 +1420,14 @@ const make = Effect.gen(function* ()
     )
     if (local === null) return
 
-    yield* refreshPullRequestAfterTurn({
+    const refresh = {
       threadId: event.threadId,
       turnId: toTurnId(event.turnId),
       cwd: sessionRuntime.value.cwd,
       local,
-    })
+    }
+    yield* followWorktreeBranchDrift(refresh)
+    yield* refreshPullRequestAfterTurn(refresh)
   })
 
   // remote status work never holds the durable checkpoint lane.

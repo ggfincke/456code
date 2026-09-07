@@ -1366,12 +1366,12 @@ describe('CheckpointReactor', () =>
     expect(gitStatusRefreshCalls).toEqual([harness.cwd])
   })
 
-  it('refreshes a missing pull request when the completed turn branch is still checked out', async () =>
+  it('follows a dedicated placeholder checkout before refreshing its missing pull request', async () =>
   {
     const pullRequestRefreshCalls: string[] = []
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: 'feature/turn-refresh',
+      threadBranch: '456code/1234abcd',
       localStatusRefName: 'feature/turn-refresh',
       pullRequestRefreshCalls,
     })
@@ -1389,6 +1389,46 @@ describe('CheckpointReactor', () =>
     await harness.drain()
 
     expect(pullRequestRefreshCalls).toEqual([harness.cwd])
+    expect(
+      (await harness.readModel()).threads.find((thread) => thread.id === 'thread-1')?.branch,
+    ).toBe('feature/turn-refresh')
+  })
+
+  it('does not adopt a checkout belonging to a shared worktree', async () =>
+  {
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: '456code/1234abcd',
+      localStatusRefName: 'feature/shared',
+    })
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.create',
+        commandId: CommandId.make('shared-checkout-thread'),
+        threadId: ThreadId.make('thread-2'),
+        projectId: asProjectId('project-1'),
+        title: 'Shared worktree',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5-codex' },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        branch: 'feature/shared',
+        worktreePath: harness.cwd,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+    harness.provider.emit({
+      type: 'turn.completed',
+      eventId: EventId.make('shared-checkout-completed'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt: '2026-01-01T00:00:01.000Z',
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-shared'),
+      payload: { state: 'completed' },
+    })
+    await harness.drain()
+    expect(
+      (await harness.readModel()).threads.find((thread) => thread.id === 'thread-1')?.branch,
+    ).toBe('456code/1234abcd')
   })
 
   it('does not refresh pull request state for an auxiliary completion', async () =>
