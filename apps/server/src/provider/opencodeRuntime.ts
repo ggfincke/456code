@@ -975,10 +975,10 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
           ...commandContext,
         }).pipe(Effect.exit)
 
-      // inventory reads are independent and retry together after transient failures.
+      // every CLI inventory command opens the same SQLite database, so run them one at a time
       const [initialModelsResult, initialAgentsResult, initialSkillsResult] = yield* Effect.all(
         [runModelsCli(), runAgentsCli(), runSkillsCli()],
-        { concurrency: 'unbounded' },
+        { concurrency: 1 },
       )
       let modelsResult = initialModelsResult
       let agentsResult = initialAgentsResult
@@ -997,7 +997,7 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
             needsAgentsRetry ? runAgentsCli() : Effect.succeed(agentsResult),
             needsSkillsRetry ? runSkillsCli() : Effect.succeed(skillsResult),
           ],
-          { concurrency: 'unbounded' },
+          { concurrency: 1 },
         )
         modelsResult = m2
         agentsResult = a2
