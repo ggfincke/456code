@@ -1284,6 +1284,33 @@ describe('thread outbox', () =>
     registry.dispose()
   })
 
+  it('keeps a claimed message visible until durable removal completes', async () =>
+  {
+    const registry = AtomRegistry.make()
+    const manager = createThreadOutboxManager({
+      registry,
+      storage: {
+        load: async () => [],
+        write: async () => undefined,
+        remove: async () => undefined,
+      },
+    })
+    const message = queuedMessage({
+      messageId: 'message-claimed',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+
+    await manager.enqueue(message)
+    await expect(manager.claimDelivery(message, () => true)).resolves.toBe(true)
+    expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({
+      'environment-1:thread-1': [message],
+    })
+
+    await manager.remove(message)
+    expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({})
+    registry.dispose()
+  })
+
   it('rolls an enqueued message back out when the durable write fails', async () =>
   {
     const registry = AtomRegistry.make()

@@ -57,18 +57,12 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
     Atom.keepAlive,
     Atom.withLabel('mobile:thread-outbox:dispatching-message-id'),
   )
-  const queuedMessagesByThreadKeyAtom = Atom.make((get) =>
-  {
-    const messagesByThreadKey = get(storedMessagesByThreadKeyAtom)
-    const dispatchingMessageId = get(dispatchingMessageIdAtom)
-    return dispatchingMessageId === null
-      ? messagesByThreadKey
-      : groupQueuedThreadMessages(
-          flattenQueuedThreadMessages(messagesByThreadKey).filter(
-            (message) => message.messageId !== dispatchingMessageId,
-          ),
-        )
-  }).pipe(Atom.withLabel('mobile:thread-outbox:queued-messages'))
+  // dispatch ownership is separate from visibility. Keep the claimed message
+  // projected until the server timeline echoes it so a send never blanks the
+  // temporary thread or removes its pending row mid-flight.
+  const queuedMessagesByThreadKeyAtom = Atom.make((get) => get(storedMessagesByThreadKeyAtom)).pipe(
+    Atom.withLabel('mobile:thread-outbox:queued-messages'),
+  )
   const warn =
     options.warn ??
     ((message: string, error: unknown) =>

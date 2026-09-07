@@ -61,11 +61,13 @@ import { useAppearancePreferences } from '../settings/appearance/AppearancePrefe
 import { collapsedWorkLogHeight, WORK_GROUP_TOGGLE_HEIGHT } from './thread-work-log'
 import type { ThreadContentPresentation } from './threadContentPresentation'
 import { fileChipMenu, resolveFileChipTarget, type FileChipAction } from './fileChipMenu'
+import { appendPendingThreadMessages } from './pending-thread-feed'
 import {
   ThreadMarkdownImage,
   ThreadMarkdownImageUnavailable,
   ThreadMarkdownImageView,
 } from './ThreadMarkdownImage'
+import type { QueuedThreadMessage } from '../../state/thread-outbox-model'
 
 // animate content shifts only near the live end of the feed
 const FEED_ITEM_LAYOUT_DURATION_MS = 180
@@ -81,6 +83,10 @@ export interface ThreadFeedProps
   readonly threadId: ThreadId
   readonly workspaceRoot?: string | null
   readonly feed: ReadonlyArray<ThreadFeedEntry>
+  readonly pendingMessages: ReadonlyArray<{
+    readonly message: QueuedThreadMessage
+    readonly acknowledged: boolean
+  }>
   readonly contentPresentation: ThreadContentPresentation
   readonly agentLabel: string
   readonly latestTurn: ThreadFeedLatestTurn | null
@@ -335,12 +341,16 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
   }, [expandedWorkGroups])
   const presentedFeed = useMemo(
     () =>
-      deriveThreadFeedPresentation(
+      appendPendingThreadMessages(
+        deriveThreadFeedPresentation(
+          props.feed,
+          props.latestTurn,
+          expandedTurnIds,
+          expandedWorkGroupIds,
+          props.activeWorkStartedAt,
+        ),
         props.feed,
-        props.latestTurn,
-        expandedTurnIds,
-        expandedWorkGroupIds,
-        props.activeWorkStartedAt,
+        props.pendingMessages,
       ),
     [
       expandedTurnIds,
@@ -348,6 +358,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
       props.activeWorkStartedAt,
       props.feed,
       props.latestTurn,
+      props.pendingMessages,
     ],
   )
 

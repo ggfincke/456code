@@ -35,6 +35,7 @@ import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from '../../lib/layout'
 import { scopedThreadKey } from '../../lib/scopedEntities'
 import type { PendingApproval, PendingUserInput, ThreadFeedEntry } from '../../lib/threadActivity'
 import type { ThreadProviderSwitchNotice } from '../../lib/thread-activity/provider-switch'
+import type { QueuedThreadMessage } from '../../state/thread-outbox-model'
 import { PendingApprovalCard } from './PendingApprovalCard'
 import { PendingUserInputCard } from './PendingUserInputCard'
 import {
@@ -55,6 +56,10 @@ export interface ThreadDetailScreenProps
   readonly connectionError: string | null
   readonly environmentLabel: string | null
   readonly selectedThreadFeed: ReadonlyArray<ThreadFeedEntry>
+  readonly pendingMessages: ReadonlyArray<{
+    readonly message: QueuedThreadMessage
+    readonly acknowledged: boolean
+  }>
   readonly activeWorkStartedAt: string | null
   readonly activePendingApproval: PendingApproval | null
   readonly respondingApprovalId: ApprovalRequestId | null
@@ -453,6 +458,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             threadId={props.selectedThread.id}
             workspaceRoot={props.threadCwd}
             feed={props.selectedThreadFeed}
+            pendingMessages={props.pendingMessages}
             contentPresentation={props.contentPresentation}
             agentLabel={agentLabel}
             latestTurn={props.selectedThread.latestTurn}

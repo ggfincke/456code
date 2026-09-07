@@ -30,6 +30,7 @@ import { AppText as Text } from '../../../components/AppText'
 import { CopyTextButton } from '../../../components/CopyTextButton'
 import { cn } from '../../../lib/cn'
 import { type ThreadFeedEntry } from '../../../lib/threadActivity'
+import type { PendingThreadFeedEntry } from '../pending-thread-feed'
 import { useAssetUrl } from '../../../state/assets'
 import { parseReviewCommentMessageSegments } from '../../review/reviewCommentSelection'
 import { ThreadWorkGroupToggle, ThreadWorkLog } from '../thread-work-log'
@@ -222,7 +223,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
 })
 
 export function renderFeedEntry(
-  info: { item: ThreadFeedEntry; index: number },
+  info: { item: PendingThreadFeedEntry; index: number },
   props: Pick<ThreadFeedProps, 'environmentId' | 'onUseArtifactTemplate' | 'skills'> & {
     readonly copiedRowId: string | null
     readonly expandedWorkRows: Record<string, boolean>
@@ -332,6 +333,14 @@ export function renderFeedEntry(
                 markdownLinkHandlers={props.markdownLinkHandlers}
               />
             ) : null}
+            {entry.pendingMessage?.attachments.map((attachment) => (
+              <Image
+                key={attachment.id}
+                source={{ uri: attachment.previewUri }}
+                accessibilityLabel={attachment.name}
+                className="h-[140px] w-[180px] rounded-[14px]"
+              />
+            ))}
             {attachments.map((attachment) =>
             {
               return (
@@ -347,7 +356,7 @@ export function renderFeedEntry(
           </View>
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             <Text className="font-sans-medium text-xs tabular-nums text-adaptive-neutral-600-400">
-              {timestampLabel}
+              {entry.pendingMessage && !entry.acknowledged ? 'Pending' : timestampLabel}
             </Text>
             {message.text.trim().length > 0 ? (
               <CopyTextButton

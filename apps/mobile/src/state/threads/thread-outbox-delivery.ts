@@ -22,6 +22,7 @@ import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'
 
 import { toUploadChatImageAttachments } from '../../lib/composerImages'
+import { retainAcknowledgedThreadMessage } from './acknowledged-thread-messages'
 import {
   describeThreadOutboxFailure,
   modelSelectionsEqual,
@@ -511,7 +512,12 @@ async function sendQueuedMessage(input: {
     update: input.update,
     warn: input.warn,
   })
-  return failure ?? removeQueuedMessage(dispatchMessage, input.remove, input.warn)
+  if (failure !== null)
+  {
+    return failure
+  }
+  retainAcknowledgedThreadMessage(dispatchMessage)
+  return removeQueuedMessage(dispatchMessage, input.remove, input.warn)
 }
 
 export async function drainExistingQueuedThreadMessage(
