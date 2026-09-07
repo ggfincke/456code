@@ -4,6 +4,7 @@
 import { TextGenerationError, type ChatAttachment } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import type * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import type * as EffectAcpSchema from 'effect-acp/schema'
@@ -12,6 +13,9 @@ import { resolveAttachmentPath } from '../attachments/attachmentStore.ts'
 import type { TextGenerationOp } from './TextGeneration.ts'
 
 const isTextGenerationError = Schema.is(TextGenerationError)
+const decodeJsonThreadTitle = Schema.decodeOption(
+  Schema.fromJsonString(Schema.Struct({ title: Schema.String })),
+)
 
 // convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present.
 export function toJsonSchemaObject(schema: Schema.Top): unknown
@@ -63,7 +67,10 @@ export function sanitizePrTitle(raw: string): string
 // normalise a raw thread title to a compact single-line sidebar-safe label.
 export function sanitizeThreadTitle(raw: string): string
 {
-  const normalized = raw
+  // unwrap before truncation can cut off the closing brace
+  const decoded = decodeJsonThreadTitle(raw)
+  const title = Option.isSome(decoded) ? decoded.value.title : raw
+  const normalized = title
     .trim()
     .split(/\r?\n/g)[0]
     ?.trim()
