@@ -8,17 +8,6 @@
  * to compose transformations, validations, and effectful operations while
  * keeping the original value as the starting point of the pipeline.
  *
- * **Common tasks**
- *
- * - Type values that expose a `.pipe(...)` method with the {@link Pipeable} interface
- * - Implement a custom `.pipe(...)` method with {@link pipeArguments}
- * - Reuse the standard implementation through {@link Prototype}, {@link Class}, or {@link Mixin}
- *
- * **Gotchas**
- *
- * - Each function receives the result of the previous function, not the original value
- * - The overloads preserve precise types for long pipelines, but very long chains may be easier to read when split
- *
  * @since 2.0.0
  */
 
@@ -37,15 +26,16 @@
  *
  * **Example** (Chaining operations with pipe)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect } from "effect"
  *
  * // The Pipeable interface allows Effect values to be chained using the pipe method
  * const program = Effect.succeed(1).pipe(
  *   Effect.map((x) => x + 1),
- *   Effect.flatMap((x) => Effect.succeed(x * 2)),
- *   Effect.tap((x) => Effect.log(`Result: ${x}`))
+ *   Effect.flatMap((x) => Effect.succeed(x * 2))
  * )
+ *
+ * Effect.runSync(program) // => 4
  * ```
  *
  * @category models
@@ -550,7 +540,7 @@ export interface Pipeable {
  *
  * **Example** (Implementing a pipe method)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Pipeable } from "effect"
  *
  * class NumberBox {
@@ -565,10 +555,10 @@ export interface Pipeable {
  *   (n) => n + 2,
  *   (n) => n * 3
  * )
- * console.log(result) // 21
+ * result // => 21
  * ```
  *
- * @category utils
+ * @category combinators
  * @since 2.0.0
  */
 export const pipeArguments = <A>(self: A, args: IArguments): unknown => {
@@ -626,8 +616,8 @@ export const Prototype: Pipeable = {
  *
  * **When to use**
  *
- * Use when extend or compose this constructor when defining a class that should support
- * Effect-style method chaining through `.pipe(...)`.
+ * Use when you need to define a class that supports Effect-style method
+ * chaining through `.pipe(...)`.
  *
  * @category constructors
  * @since 3.15.0

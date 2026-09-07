@@ -3,7 +3,7 @@
 
 import * as Schema from 'effect/Schema'
 
-export class NativeViewResolutionError extends Schema.TaggedErrorClass<NativeViewResolutionError>()(
+export class NativeViewResolutionError extends Schema.TaggedError<NativeViewResolutionError>()(
   'NativeViewResolutionError',
   {
     nativeModuleName: Schema.String,

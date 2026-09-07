@@ -63,7 +63,9 @@ import { ProviderInstanceRegistryMutator } from '../Services/ProviderInstanceReg
 import { ProviderInstanceRegistryMutableLayer } from './ProviderInstanceRegistryLive.ts'
 
 const SETTINGS_WATCHER_RETRY_SCHEDULE = Schedule.exponential('100 millis').pipe(
-  Schedule.modifyDelay((_, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+  Schedule.modifyDelay(({ duration }) =>
+    Effect.succeed(Duration.min(duration, Duration.seconds(5))),
+  ),
 )
 
 // synthesize a `ProviderInstanceConfigMap` from a `ServerSettings` snapshot.

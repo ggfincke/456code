@@ -6,27 +6,9 @@
  * `listen` options, converts `request` events into `HttpServerRequest` values,
  * writes `HttpServerResponse` bodies through Node's `ServerResponse`, and
  * handles `upgrade` events by exposing the upgraded socket through
- * `HttpServerRequest.upgrade`.
- *
- * Common use cases include serving an Effect HTTP application with {@link layer}
- * or {@link layerConfig}, embedding request or upgrade handlers into an
- * existing Node server with {@link makeHandler} and {@link makeUpgradeHandler},
- * and using {@link layerTest} for integration tests that need an ephemeral
- * listening port and a client pointed at it.
- *
- * Listen options are passed directly to Node, so host, port, backlog, and Unix
- * socket path behavior follow `node:http`. The server begins listening when the
- * `HttpServer` is acquired, and handlers are installed when `serve` is run.
- * Request fibers are interrupted with `ClientAbort` when the client disconnects
- * before a response finishes. WebSocket support only applies to Node `upgrade`
- * requests, and ordinary HTTP requests fail if their application attempts to use
- * `HttpServerRequest.upgrade`.
- *
- * Scope ownership is important: the server is closed when the acquiring scope
- * finalizes, while each `serve` call installs its own request and upgrade
- * listeners and removes them on finalization. Unless preemptive shutdown is
- * disabled, finalizing a serve scope also starts a graceful server close, using
- * the configured timeout or the default timeout.
+ * `HttpServerRequest.upgrade`. It also exports request and upgrade handler
+ * constructors plus layers for the server alone, HTTP support services, the
+ * combined server, configurable options, and tests.
  *
  * @since 4.0.0
  */
@@ -81,6 +63,26 @@ import * as NodeServices from "./NodeServices.ts"
 import { NodeWS } from "./NodeSocket.ts"
 
 /**
+ * Options accepted by the Node `HttpServer` constructors and layers.
+ *
+ * @category options
+ * @since 4.0.0
+ */
+export interface Options extends Net.ListenOptions {
+  readonly disablePreemptiveShutdown?: boolean | undefined
+  readonly gracefulShutdownTimeout?: Duration.Input | undefined
+  /**
+   * Options forwarded to the underlying `ws` `WebSocketServer`, minus the
+   * wiring options the server manages itself. Use this to enable
+   * `permessage-deflate` compression or tune payload limits, e.g.
+   * `websocket: { perMessageDeflate: true }`.
+   */
+  readonly websocket?:
+    | Omit<NodeWS.ServerOptions, "noServer" | "server" | "host" | "port" | "path">
+    | undefined
+}
+
+/**
  * Creates a scoped `HttpServer` from a Node `http.Server`, starts listening
  * with the supplied options, registers request and upgrade handling, and closes
  * the server during scope finalization with optional graceful-shutdown control.
@@ -90,10 +92,7 @@ import { NodeWS } from "./NodeSocket.ts"
  */
 export const make = Effect.fnUntraced(function*(
   evaluate: LazyArg<Http.Server>,
-  options: Net.ListenOptions & {
-    readonly disablePreemptiveShutdown?: boolean | undefined
-    readonly gracefulShutdownTimeout?: Duration.Input | undefined
-  }
+  options: Options
 ) {
   const scope = yield* Effect.scope
   const server = evaluate()
@@ -134,7 +133,7 @@ export const make = Effect.fnUntraced(function*(
   const address = server.address()!
 
   const wss = yield* Effect.acquireRelease(
-    Effect.sync(() => new NodeWS.WebSocketServer({ noServer: true })),
+    Effect.sync(() => new NodeWS.WebSocketServer({ ...options.websocket, noServer: true })),
     (wss) =>
       Effect.callback<void>((resume) => {
         wss.close(() => resume(Effect.void))
@@ -182,7 +181,7 @@ export const make = Effect.fnUntraced(function*(
  * injecting a `HttpServerRequest` and interrupting the request fiber if the
  * client closes the response before it finishes.
  *
- * @category Handlers
+ * @category handlers
  * @since 4.0.0
  */
 export const makeHandler = <
@@ -207,9 +206,8 @@ export const makeHandler = <
       nodeRequest: Http.IncomingMessage,
       nodeResponse: Http.ServerResponse
     ) {
-      const map = new Map(services.mapUnsafe)
-      map.set(HttpServerRequest.key, new ServerRequestImpl(nodeRequest, nodeResponse))
-      const fiber = Fiber.runIn(Effect.runForkWith(Context.makeUnsafe<any>(map))(handled), options.scope)
+      const context = Context.add(services, HttpServerRequest, new ServerRequestImpl(nodeRequest, nodeResponse))
+      const fiber = Fiber.runIn(Effect.runForkWith(context as Context.Context<any>)(handled), options.scope)
       nodeResponse.on("close", () => {
         if (!nodeResponse.writableEnded) {
           fiber.interruptUnsafe(parent.id, ClientAbort.annotation)
@@ -224,7 +222,7 @@ export const makeHandler = <
  * exposing the upgraded WebSocket as the request's `upgrade` effect and
  * interrupting the request fiber when the socket closes early.
  *
- * @category Handlers
+ * @category handlers
  * @since 4.0.0
  */
 export const makeUpgradeHandler = <
@@ -274,9 +272,13 @@ export const makeUpgradeHandler = <
             (ws) => Effect.sync(() => ws.close())
           )
       ))
-      const map = new Map(services.mapUnsafe)
-      map.set(HttpServerRequest.key, new ServerRequestImpl(nodeRequest, nodeResponse, upgradeEffect))
-      const fiber = Fiber.runIn(Effect.runForkWith(Context.makeUnsafe<any>(map))(handledApp), options.scope)
+      const context = Context.add(
+        services,
+        HttpServerRequest,
+        new ServerRequestImpl(nodeRequest, nodeResponse, upgradeEffect)
+      )
+      const fiber = Fiber.runIn(Effect.runForkWith(context as Context.Context<any>)(handledApp), options.scope)
+      socket.on("error", () => {})
       socket.on("close", () => {
         if (!socket.writableEnded) {
           fiber.interruptUnsafe(parent.id, ClientAbort.annotation)
@@ -348,8 +350,9 @@ class ServerRequestImpl extends NodeHttpIncomingMessage<HttpServerError> impleme
     return this.source.url!
   }
 
+  private cachedMethod: HttpMethod | undefined
   get method(): HttpMethod {
-    return this.source.method!.toUpperCase() as HttpMethod
+    return this.cachedMethod ??= this.source.method!.toUpperCase() as HttpMethod
   }
 
   override get headers(): Headers.Headers {
@@ -415,10 +418,7 @@ class ServerRequestImpl extends NodeHttpIncomingMessage<HttpServerError> impleme
  */
 export const layerServer: (
   evaluate: LazyArg<Http.Server<typeof Http.IncomingMessage, typeof Http.ServerResponse>>,
-  options: Net.ListenOptions & {
-    readonly disablePreemptiveShutdown?: boolean | undefined
-    readonly gracefulShutdownTimeout?: Duration.Input | undefined
-  }
+  options: Options
 ) => Layer.Layer<HttpServer.HttpServer, ServeError> = flow(make, Layer.effect(HttpServer.HttpServer))
 
 /**
@@ -445,10 +445,7 @@ export const layerHttpServices: Layer.Layer<
  */
 export const layer = (
   evaluate: LazyArg<Http.Server>,
-  options: Net.ListenOptions & {
-    readonly disablePreemptiveShutdown?: boolean | undefined
-    readonly gracefulShutdownTimeout?: Duration.Input | undefined
-  }
+  options: Options
 ): Layer.Layer<
   HttpServer.HttpServer | NodeServices.NodeServices | HttpPlatform.HttpPlatform | Etag.Generator,
   ServeError
@@ -459,22 +456,18 @@ export const layer = (
   )
 
 /**
- * Provides a Node `HttpServer` and HTTP support services, reading the listen
- * and shutdown options from a `Config` value.
+ * Provides a Node `HttpServer` together with the Node HTTP platform, ETag,
+ * and core Node platform services, reading the listen and shutdown options from
+ * a `Config` value.
  *
  * @category layers
  * @since 4.0.0
  */
 export const layerConfig = (
   evaluate: LazyArg<Http.Server>,
-  options: Config.Wrap<
-    Net.ListenOptions & {
-      readonly disablePreemptiveShutdown?: boolean | undefined
-      readonly gracefulShutdownTimeout?: Duration.Input | undefined
-    }
-  >
+  options: Config.Wrap<Options>
 ): Layer.Layer<
-  HttpServer.HttpServer | FileSystem.FileSystem | Path.Path | HttpPlatform.HttpPlatform | Etag.Generator,
+  HttpServer.HttpServer | NodeServices.NodeServices | HttpPlatform.HttpPlatform | Etag.Generator,
   ServeError | Config.ConfigError
 > =>
   Layer.mergeAll(
@@ -488,7 +481,7 @@ export const layerConfig = (
  * Provides a test HTTP server listening on an ephemeral port together with a
  * Fetch-backed `HttpClient` configured for server integration tests.
  *
- * @category Testing
+ * @category testing
  * @since 4.0.0
  */
 export const layerTest: Layer.Layer<
@@ -534,9 +527,20 @@ const handleResponse = (
 
   if (request.method === "HEAD") {
     nodeResponse.writeHead(response.status, headers)
-    return Effect.callback<void>((resume) => {
-      nodeResponse.end(() => resume(Effect.void))
-    })
+    return Effect.andThen(
+      cancelResponseBody(response.body),
+      Effect.callback<void>((resume) => {
+        let completed = false
+        const done = () => {
+          if (completed) return
+          completed = true
+          nodeResponse.off("close", done)
+          resume(Effect.void)
+        }
+        nodeResponse.once("close", done)
+        nodeResponse.end(done)
+      })
+    )
   }
   const body = response.body
   switch (body._tag) {
@@ -620,17 +624,9 @@ const handleResponse = (
       return body.stream.pipe(
         Stream.orDie,
         Stream.runForEachArray((array) => {
-          let needDrain = false
-          for (let i = 0; i < array.length; i++) {
-            const written = nodeResponse.write(array[i])
-            if (!written && !needDrain) {
-              needDrain = true
-              drainLatch.closeUnsafe()
-            } else if (written && needDrain) {
-              needDrain = false
-            }
-          }
-          if (!needDrain) return Effect.void
+          const chunk = array.length > 1 ? Buffer.concat(array) : array[0]
+          if (nodeResponse.write(chunk)) return Effect.void
+          drainLatch.closeUnsafe()
           return drainLatch.await
         }),
         Effect.interruptible,
@@ -641,6 +637,14 @@ const handleResponse = (
       )
     }
   }
+}
+
+const cancelResponseBody = (body: HttpServerResponse["body"]): Effect.Effect<void> => {
+  const stream = body._tag === "Raw" ? body.body : undefined
+  if (stream instanceof Readable) {
+    return Effect.sync(() => stream.destroy())
+  }
+  return Effect.void
 }
 
 const handleCause = (

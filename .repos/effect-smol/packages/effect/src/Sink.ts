@@ -1,34 +1,11 @@
 /**
- * The `Sink` module provides composable consumers for `Stream` values. A
- * `Sink<A, In, L, E, R>` pulls input elements of type `In`, may require
- * services `R`, may fail with `E`, and eventually produces a result `A` plus
- * any leftover input `L` that was read but not consumed.
+ * Consumes values from a `Stream` and produces one final result.
  *
- * **Mental model**
- *
- * - A sink is the terminal consumer used by `Stream.run`
- * - Sinks can consume zero, one, many, or all input elements before finishing
- * - Leftovers allow one sink to stop early without losing already-pulled input
- * - Sink composition preserves typed errors and service requirements
- * - Most sinks are built from `Channel` internally, but users compose them with
- *   the higher-level APIs in this module
- *
- * **Common tasks**
- *
- * - Create simple sinks: {@link succeed}, {@link fail}, {@link fromEffect}
- * - Fold input: {@link fold}
- * - Collect values: {@link collect}
- * - Count or drain input: {@link count}, {@link drain}
- * - Transform results: {@link map}, {@link mapEffect}, {@link as}
- * - Adapt input before consumption: {@link mapInput}, {@link mapInputEffect}
- *
- * **Gotchas**
- *
- * - A sink can finish before the stream is exhausted; check leftover-aware
- *   combinators when composing parsers or protocol decoders
- * - `In` is contravariant, so a sink that accepts broader input can be used
- *   where narrower input is expected
- * - Resource and service requirements are tracked in the `R` type parameter
+ * A `Sink` may read no input, a fixed amount of input, or keep reading until a
+ * condition is met. If it reads more than it needs, it can return leftovers so
+ * the stream can continue from those values. Sinks are used to collect, fold,
+ * search, count, or otherwise reduce streamed input, and they can be composed
+ * when a stream needs more than one consuming step.
  *
  * @since 2.0.0
  */
@@ -69,7 +46,7 @@ const TypeId = "~effect/Sink"
  *
  * **Example** (Running a sink with a stream)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Sink, Stream } from "effect"
  *
  * // Create a simple sink that always succeeds with a value
@@ -77,10 +54,7 @@ const TypeId = "~effect/Sink"
  *
  * // Use the sink to consume a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program).then(console.log)
- * // Output: 42
+ * await Effect.runPromise(Stream.run(stream, sink)) // => 42
  * ```
  *
  * @category models
@@ -217,14 +191,14 @@ const SinkProto = {
  *
  * **Example** (Checking for a sink)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Sink } from "effect"
  *
  * const sink = Sink.never
  * const notStream = { data: [1, 2, 3] }
  *
- * console.log(Sink.isSink(sink)) // true
- * console.log(Sink.isSink(notStream)) // false
+ * Sink.isSink(sink) // => true
+ * Sink.isSink(notStream) // => false
  * ```
  *
  * @category guards
@@ -239,6 +213,20 @@ export const isSink = (u: unknown): u is Sink<unknown, never, unknown, unknown, 
  *
  * Use to create a `Sink` from a `Channel` that processes non-empty arrays of
  * input values.
+ *
+ * **Example** (Using channel completion as the sink result)
+ *
+ * ```ts import.meta.vitest
+ * import { Channel, Effect, Sink, Stream } from "effect"
+ *
+ * const channel = Channel.identity<readonly [number, ...Array<number>], never, void>().pipe(
+ *   Channel.drain,
+ *   Channel.mapDone(() => ["consumed"] as const)
+ * )
+ * const sink = Sink.fromChannel(channel)
+ *
+ * await Effect.runPromise(Stream.run(Stream.make(1, 2, 3), sink)) // => "consumed"
+ * ```
  *
  * @see {@link toChannel} for converting a `Sink` back to a `Channel`
  * @category constructors
@@ -260,6 +248,43 @@ export const fromChannel = <L, In, E, A, R>(
       Effect.flatMap(Effect.forever({ disableYield: true })),
       Pull.catchDone(Effect.succeed)
     ) as Effect.Effect<End<A, L>, E, R>
+  )
+
+/**
+ * Creates a sink that writes its input to a Web `WritableStream`.
+ *
+ * **Example** (Collecting values in a Web stream)
+ *
+ * ```ts import.meta.vitest
+ * import { Effect, Sink, Stream } from "effect"
+ *
+ * const written: Array<number> = []
+ * const sink = Sink.fromWritableStream({
+ *   evaluate: () => new WritableStream<number>({
+ *     write(value) {
+ *       written.push(value)
+ *     }
+ *   }),
+ *   onError: (cause) => new Error(String(cause))
+ * })
+ *
+ * await Effect.runPromise(Stream.run(Stream.make(1, 2, 3), sink))
+ * written // => [1, 2, 3]
+ * ```
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const fromWritableStream = <A, E>(options: {
+  readonly evaluate: LazyArg<WritableStream<A>>
+  readonly onError: (error: unknown) => E
+  readonly closeOnDone?: boolean | undefined
+}): Sink<void, A, never, E> =>
+  fromChannel(
+    Channel.mapDone(
+      Channel.fromWritableStream<never, E, A>(options),
+      (_) => [_]
+    )
   )
 
 /**
@@ -288,14 +313,16 @@ export const fromTransform = <In, A, E, R, L = never>(
 /**
  * Creates a `Channel` from a Sink.
  *
- * **Example** (Converting a sink to a channel)
+ * **Example** (Running a sink as a channel)
  *
- * ```ts
- * import { Sink } from "effect"
+ * ```ts import.meta.vitest
+ * import { Channel, Effect, Sink, Stream } from "effect"
  *
- * // Create a sink and extract its channel
- * const sink = Sink.succeed(42)
- * const channel = Sink.toChannel(sink)
+ * const channel = Stream.toChannel(Stream.make(1, 2, 3)).pipe(
+ *   Channel.pipeTo(Sink.toChannel(Sink.sum))
+ * )
+ *
+ * await Effect.runPromise(Channel.runDone(channel)) // => [6]
  * ```
  *
  * @category constructors
@@ -448,8 +475,8 @@ export declare namespace make {
  *
  * **When to use**
  *
- * Use when the effect needs to provide both the result value and optional
- * leftovers.
+ * Use when you need to create a sink from an effect that returns both the sink
+ * result value and optional leftovers.
  *
  * @category constructors
  * @since 4.0.0
@@ -517,7 +544,7 @@ export const fromPubSub = <A>(
  *
  * **Example** (Succeeding with a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Sink, Stream } from "effect"
  *
  * // Create a sink that always yields the same value
@@ -525,10 +552,7 @@ export const fromPubSub = <A>(
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program).then(console.log)
- * // Output: 42
+ * await Effect.runPromise(Stream.run(stream, sink)) // => 42
  * ```
  *
  * @category constructors
@@ -559,18 +583,15 @@ export const suspend = <A, In, L, E, R>(evaluate: LazyArg<Sink<A, In, L, E, R>>)
  *
  * **Example** (Failing with an error)
  *
- * ```ts
- * import { Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Exit, Sink, Stream } from "effect"
  *
  * // Create a sink that always fails
- * const sink = Sink.fail(new Error("Sink failed"))
+ * const sink = Sink.fail("Sink failed")
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program).catch(console.log)
- * // Output: Error: Sink failed
+ * await Effect.runPromiseExit(Stream.run(stream, sink)) // => Exit.fail("Sink failed")
  * ```
  *
  * @category constructors
@@ -583,18 +604,15 @@ export const fail = <E>(e: E): Sink<never, unknown, never, E> => fromEffectEnd(E
  *
  * **Example** (Failing with a lazy error)
  *
- * ```ts
- * import { Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Exit, Sink, Stream } from "effect"
  *
  * // Create a sink that fails with a lazy error
- * const sink = Sink.failSync(() => new Error("Lazy error"))
+ * const sink = Sink.failSync(() => "Lazy error")
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program).catch(console.log)
- * // Output: Error: Lazy error
+ * await Effect.runPromiseExit(Stream.run(stream, sink)) // => Exit.fail("Lazy error")
  * ```
  *
  * @category constructors
@@ -608,18 +626,15 @@ export const failSync = <E>(evaluate: LazyArg<E>): Sink<never, unknown, never, E
  *
  * **Example** (Failing with a cause)
  *
- * ```ts
- * import { Cause, Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Cause, Effect, Exit, Sink, Stream } from "effect"
  *
  * // Create a sink that fails with a specific cause
- * const sink = Sink.failCause(Cause.fail(new Error("Custom cause")))
+ * const sink = Sink.failCause(Cause.fail("Custom cause"))
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program).catch(console.log)
- * // Output: Error: Custom cause
+ * await Effect.runPromiseExit(Stream.run(stream, sink)) // => Exit.fail("Custom cause")
  * ```
  *
  * @category constructors
@@ -633,18 +648,15 @@ export const failCause = <E>(cause: Cause.Cause<E>): Sink<never, unknown, never,
  *
  * **Example** (Failing with a lazy cause)
  *
- * ```ts
- * import { Cause, Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Cause, Effect, Exit, Sink, Stream } from "effect"
  *
  * // Create a sink that fails with a lazy cause
- * const sink = Sink.failCauseSync(() => Cause.fail(new Error("Lazy cause")))
+ * const sink = Sink.failCauseSync(() => Cause.fail("Lazy cause"))
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program).catch(console.log)
- * // Output: Error: Lazy cause
+ * await Effect.runPromiseExit(Stream.run(stream, sink)) // => Exit.fail("Lazy cause")
  * ```
  *
  * @category constructors
@@ -658,18 +670,15 @@ export const failCauseSync = <E>(evaluate: LazyArg<Cause.Cause<E>>): Sink<never,
  *
  * **Example** (Dying with a defect)
  *
- * ```ts
- * import { Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Exit, Sink, Stream } from "effect"
  *
  * // Create a sink that dies with a defect
- * const sink = Sink.die(new Error("Defect error"))
+ * const sink = Sink.die("Defect error")
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program).catch(console.log)
- * // Output: Error: Defect error
+ * await Effect.runPromiseExit(Stream.run(stream, sink)) // => Exit.die("Defect error")
  * ```
  *
  * @category constructors
@@ -694,7 +703,7 @@ export const never: Sink<unknown> = fromEffectEnd(Effect.never)
  * instead of being returned to downstream sink composition. This does not
  * continue pulling additional elements from the upstream stream.
  *
- * @category utils
+ * @category filtering
  * @since 2.0.0
  */
 export const ignoreLeftover = <A, In, L, E, R>(self: Sink<A, In, L, E, R>): Sink<A, In, never, E, R> =>
@@ -1073,8 +1082,8 @@ export const mapEffectEnd: {
  *
  * **When to use**
  *
- * Use when transforming a sink result itself is effectful, can fail, or needs
- * services.
+ * Use when you need a sink result transformation that is effectful, can fail,
+ * or requires services.
  *
  * **Details**
  *
@@ -1138,7 +1147,7 @@ export const mapLeftover: {
  * If more elements are pulled than needed, the remaining elements from the same
  * array are returned as leftovers.
  *
- * @category collecting
+ * @category constructors
  * @since 2.0.0
  */
 export const take = <In>(n: number): Sink<Array<In>, In, In> =>
@@ -1235,7 +1244,7 @@ export const flatMap: {
  * A sink that reduces input elements from the provided `initial` state with
  * `f` while the specified `predicate` returns `true`.
  *
- * @category reducing
+ * @category folding
  * @since 4.0.0
  */
 export const reduceWhile = <S, In>(
@@ -1271,7 +1280,7 @@ export const reduceWhile = <S, In>(
  * A sink that effectfully reduces input elements from the provided `initial`
  * state with `f` while the specified `predicate` returns `true`.
  *
- * @category reducing
+ * @category folding
  * @since 4.0.0
  */
 export const reduceWhileEffect = <S, In, E, R>(
@@ -1312,7 +1321,7 @@ export const reduceWhileEffect = <S, In, E, R>(
  * A sink that reduces non-empty input arrays from the provided `initial` state
  * with `f` while the specified `predicate` returns `true`.
  *
- * @category reducing
+ * @category folding
  * @since 4.0.0
  */
 export const reduceWhileArray = <S, In>(
@@ -1327,11 +1336,9 @@ export const reduceWhileArray = <S, In>(
     }
     return upstream.pipe(
       Effect.flatMap((arr) => {
-        for (let i = 0; i < arr.length; i++) {
-          state = f(state, arr)
-          if (!contFn(state)) {
-            return Cause.done()
-          }
+        state = f(state, arr)
+        if (!contFn(state)) {
+          return Cause.done()
         }
         return Effect.void
       }),
@@ -1344,7 +1351,7 @@ export const reduceWhileArray = <S, In>(
  * A sink that effectfully reduces non-empty input arrays from the provided
  * `initial` state with `f` while the specified `predicate` returns `true`.
  *
- * @category reducing
+ * @category folding
  * @since 4.0.0
  */
 export const reduceWhileArrayEffect = <S, In, E, R>(
@@ -1375,7 +1382,7 @@ export const reduceWhileArrayEffect = <S, In, E, R>(
  * A sink that reduces its inputs using the provided function `f` starting from
  * the provided `initial` state.
  *
- * @category reducing
+ * @category folding
  * @since 4.0.0
  */
 export const reduce = <S, In>(initial: LazyArg<S>, f: (s: S, input: In) => S): Sink<S, In> =>
@@ -1390,7 +1397,7 @@ export const reduce = <S, In>(initial: LazyArg<S>, f: (s: S, input: In) => S): S
  * A sink that reduces its inputs using the provided function `f` starting from
  * the specified `initial` state.
  *
- * @category reducing
+ * @category folding
  * @since 4.0.0
  */
 export const reduceArray = <S, In>(
@@ -1413,7 +1420,7 @@ export const reduceArray = <S, In>(
  * A sink that reduces its inputs using the provided effectful function `f`
  * starting from the specified `initial` state.
  *
- * @category reducing
+ * @category folding
  * @since 4.0.0
  */
 export const reduceEffect = <S, In, E, R>(
@@ -1444,7 +1451,8 @@ const last_ = reduceArray(Option.none<unknown>, (_, arr) => Arr.last(arr))
  *
  * **When to use**
  *
- * Use when consuming all upstream input and only the final element is needed.
+ * Use when you need to consume all upstream input and keep only the final
+ * element.
  *
  * **Details**
  *
@@ -1498,8 +1506,8 @@ export const find: {
  *
  * **When to use**
  *
- * Use when deciding whether an input matches requires an effect, can fail, or
- * needs services.
+ * Use when you need to run effects, fail, or use services while searching for
+ * the first matching input.
  *
  * **Details**
  *
@@ -1551,8 +1559,7 @@ export const count: Sink<number, unknown> = reduceArray(() => 0, (s, arr) => s +
  *
  * **When to use**
  *
- * Use to collect all upstream input elements into a single array when you need
- * a sink result containing the complete input.
+ * Use when you need a sink result containing all upstream input elements.
  *
  * @see {@link take} for collecting only a fixed number of input elements
  *
@@ -1779,21 +1786,16 @@ export const takeUntilEffect = <In, E, R>(
  *
  * **Example** (Running effects for each item)
  *
- * ```ts
- * import { Console, Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Sink, Stream } from "effect"
  *
- * // Create a sink that logs each item
- * const sink = Sink.forEach((item: number) => Console.log(`Processing: ${item}`))
+ * const processed: Array<number> = []
+ * const sink = Sink.forEach((item: number) => Effect.sync(() => processed.push(item)))
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program)
- * // Output:
- * // Processing: 1
- * // Processing: 2
- * // Processing: 3
+ * await Effect.runPromise(Stream.run(stream, sink))
+ * processed // => [1, 2, 3]
  * ```
  *
  * @category constructors
@@ -1809,22 +1811,16 @@ export const forEach = <In, X, E, R>(
  *
  * **Example** (Running effects for each chunk)
  *
- * ```ts
- * import { Console, Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Sink, Stream } from "effect"
  *
- * // Create a sink that processes chunks
- * const sink = Sink.forEachArray((chunk: ReadonlyArray<number>) =>
- *   Console.log(
- *     `Processing chunk of ${chunk.length} items: [${chunk.join(", ")}]`
- *   )
- * )
+ * const processed: Array<Array<number>> = []
+ * const sink = Sink.forEachArray((chunk: ReadonlyArray<number>) => Effect.sync(() => processed.push([...chunk])))
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3, 4, 5)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program)
- * // Output: Processing chunk of 5 items: [1, 2, 3, 4, 5]
+ * await Effect.runPromise(Stream.run(stream, sink))
+ * processed // => [[1, 2, 3, 4, 5]]
  * ```
  *
  * @category constructors
@@ -1892,24 +1888,20 @@ export const forEachWhileArray = <In, E, R>(
  *
  * **Example** (Unwrapping a sink effect)
  *
- * ```ts
- * import { Console, Effect, Sink, Stream } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Sink, Stream } from "effect"
  *
  * // Create a sink from an effect that produces a sink
+ * const processed: Array<number> = []
  * const sinkEffect = Effect.succeed(
- *   Sink.forEach((item: number) => Console.log(`Item: ${item}`))
+ *   Sink.forEach((item: number) => Effect.sync(() => processed.push(item)))
  * )
  * const sink = Sink.unwrap(sinkEffect)
  *
  * // Use it with a stream
  * const stream = Stream.make(1, 2, 3)
- * const program = Stream.run(stream, sink)
- *
- * Effect.runPromise(program)
- * // Output:
- * // Item: 1
- * // Item: 2
- * // Item: 3
+ * await Effect.runPromise(Stream.run(stream, sink))
+ * processed // => [1, 2, 3]
  * ```
  *
  * @category constructors
@@ -1922,7 +1914,7 @@ export const unwrap = <A, In, L, E, R, R2>(
 /**
  * Runs a summary effect when the sink starts and again when it completes.
  *
- * @category utils
+ * @category mapping
  * @since 2.0.0
  */
 export const summarized: {
@@ -1950,13 +1942,13 @@ export const summarized: {
 /**
  * Returns the sink that executes this one and times its execution.
  *
- * @category utils
+ * @category mapping
  * @since 2.0.0
  */
 export const withDuration = <A, In, L, E, R>(
   self: Sink<A, In, L, E, R>
 ): Sink<[A, Duration.Duration], In, L, E, R> =>
-  summarized(self, Clock.currentTimeNanos, (start, end) => Duration.nanos(end - start))
+  summarized(self, Clock.monotonicTimeNanos, (start, end) => Duration.nanos(end - start))
 
 /**
  * A sink that drains all input and returns the elapsed duration.
@@ -1974,7 +1966,7 @@ export const timed: Sink<Duration.Duration, unknown> = map(withDuration(drain), 
  * Services contained in the provided context are removed from the sink's
  * service requirements.
  *
- * @category services
+ * @category providing services
  * @since 2.0.0
  */
 export const provideContext: {
@@ -2003,7 +1995,7 @@ export const provideContext: {
  * The service identified by `key` is removed from the sink's service
  * requirements.
  *
- * @category services
+ * @category providing services
  * @since 4.0.0
  */
 export const provideService: {
@@ -2112,7 +2104,7 @@ export const catchCause: {
 const catch_: {
   <E, A2, E2, R2>(
     f: (error: Types.NoInfer<E>) => Effect.Effect<A2, E2, R2>
-  ): <A, In, L, R>(self: Sink<A, In, L, E, R>) => Sink<A2 | A, In, L, E, R2 | R>
+  ): <A, In, L, R>(self: Sink<A, In, L, E, R>) => Sink<A2 | A, In, L, E2, R2 | R>
   <A, In, L, E, R, A2, E2, R2>(
     self: Sink<A, In, L, E, R>,
     f: (error: E) => Effect.Effect<A2, E2, R2>
@@ -2152,7 +2144,7 @@ export {
  * The effect receives the sink's `Exit` for the result value. The original
  * sink result and leftovers are preserved unless the finalizer itself fails.
  *
- * @category Finalization
+ * @category resource management
  * @since 4.0.0
  */
 export const onExit: {
@@ -2180,7 +2172,7 @@ export const onExit: {
  * The original sink result and leftovers are preserved unless the finalizer
  * itself fails.
  *
- * @category Finalization
+ * @category resource management
  * @since 2.0.0
  */
 export const ensuring: {

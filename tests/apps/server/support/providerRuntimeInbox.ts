@@ -25,7 +25,7 @@ export const ProviderRuntimeInboxTestInfrastructureLive = Layer.merge(
   ProviderRuntimeInboxRunnerLive.pipe(Layer.provide(providerRuntimeInboxPersistenceTestLive)),
 )
 
-class ProviderRuntimeInboxTestAdmissionError extends Schema.TaggedErrorClass<ProviderRuntimeInboxTestAdmissionError>()(
+class ProviderRuntimeInboxTestAdmissionError extends Schema.TaggedError<ProviderRuntimeInboxTestAdmissionError>()(
   'ProviderRuntimeInboxTestAdmissionError',
   { detail: Schema.String },
 )

@@ -38,7 +38,7 @@ const asTurnId = (value: string): TurnId => TurnId.make(value)
 const asMessageId = (value: string): MessageId => MessageId.make(value)
 const asEventId = (value: string): EventId => EventId.make(value)
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value)
-const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 function makeSqlStatementCounter()
 {

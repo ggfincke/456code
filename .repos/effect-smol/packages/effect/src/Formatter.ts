@@ -1,54 +1,11 @@
 /**
- * Utilities for converting arbitrary JavaScript values into human-readable
- * strings, with support for circular references, redaction, and common JS
- * types that `JSON.stringify` handles poorly.
+ * Formats JavaScript values into readable strings.
  *
- * Mental model:
- * - A `Formatter<Value, Format>` is a callable `(value: Value) => Format`.
- * - {@link format} is the general-purpose pretty-printer: it handles
- *   primitives, arrays, objects, `BigInt`, `Symbol`, `Date`, `RegExp`,
- *   `Set`, `Map`, class instances, and circular references.
- * - {@link formatJson} is a safe `JSON.stringify` wrapper that silently
- *   drops circular references and applies redaction.
- * - Both functions accept a `space` option for indentation control.
- *
- * Common tasks:
- * - Pretty-print any value for debugging / logging -> {@link format}
- * - Serialize to JSON safely (no circular throws) -> {@link formatJson}
- * - Format a single object property key -> {@link formatPropertyKey}
- * - Format a property path like `["a"]["b"]` -> {@link formatPath}
- * - Format a `Date` to ISO string safely -> {@link formatDate}
- *
- * Gotchas:
- * - {@link format} output is **not** valid JSON; use {@link formatJson} when
- *   you need parseable JSON.
- * - {@link format} calls `toString()` on objects by default; pass
- *   `ignoreToString: true` to disable.
- * - {@link formatJson} silently omits circular references (the key is
- *   dropped from the output).
- * - Values implementing the `Redactable` protocol are automatically
- *   redacted by both {@link format} and {@link formatJson}.
- *
- * **Example** (Pretty-print a value)
- *
- * ```ts
- * import { Formatter } from "effect"
- *
- * const obj = { name: "Alice", scores: [100, 97] }
- * console.log(Formatter.format(obj))
- * // {"name":"Alice","scores":[100,97]}
- *
- * console.log(Formatter.format(obj, { space: 2 }))
- * // {
- * //   "name": "Alice",
- * //   "scores": [
- * //     100,
- * //     97
- * //   ]
- * // }
- * ```
- *
- * See also: {@link Formatter}, {@link format}, {@link formatJson}
+ * `format` is intended for logs, diagnostics, and error messages. It handles
+ * primitives, objects, arrays, dates, regular expressions, maps, sets, class
+ * instances, errors, circular references, and redactable values. `formatJson`
+ * wraps JSON formatting with redaction and circular-reference handling, and the
+ * module also includes helpers for property keys, paths, and dates.
  *
  * @since 4.0.0
  */
@@ -66,15 +23,14 @@ import { getRedacted, redact, symbolRedactable } from "./Redactable.ts"
  *
  * This is a pure callable type and carries no runtime implementation. It is contravariant in `Value` and covariant in `Format`.
  *
- * **Example** (Define a custom formatter)
+ * **Example** (Defining a custom formatter)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Formatter } from "effect"
  *
  * const upper: Formatter.Formatter<string> = (s) => s.toUpperCase()
  *
- * console.log(upper("hello"))
- * // HELLO
+ * upper("hello") // => "HELLO"
  * ```
  *
  * @see {@link format}
@@ -91,16 +47,16 @@ export interface Formatter<in Value, out Format = string> {
  *
  * **When to use**
  *
- * Use to pretty-print values for debugging, logging, or error messages.
- * - You need to handle `BigInt`, `Symbol`, `Set`, `Map`, `Date`, `RegExp`,
- *   or class instances that `JSON.stringify` cannot represent.
- * - You want circular references shown as `"[Circular]"` instead of
- *   throwing.
+ * Use when you need to format arbitrary JavaScript values for debugging,
+ * logging, or error messages.
  *
  * **Details**
  *
  * - Output is **not** valid JSON; use {@link formatJson} when you need
  *   parseable JSON.
+ * - Handles `BigInt`, `Symbol`, `Set`, `Map`, `Date`, `RegExp`, and class
+ *   instances that `JSON.stringify` cannot represent.
+ * - Circular references are shown as `"[Circular]"` instead of throwing.
  * - Primitives: stringified naturally (`null`, `undefined`, `123`, `true`).
  *   Strings are JSON-quoted.
  * - Objects with a custom `toString` (not `Object.prototype.toString`):
@@ -112,44 +68,35 @@ export interface Formatter<in Value, out Format = string> {
  * - `Redactable` values are automatically redacted.
  * - Arrays/objects with 0–1 entries are inline; larger ones are
  *   pretty-printed when `space` is set.
- * - Circular references are replaced with `"[Circular]"`.
  * - `space` — indentation unit (number of spaces, or a string like
  *   `"\t"`). Defaults to `0` (compact).
  * - `ignoreToString` — skip calling `toString()`. Defaults to `false`.
  *
- * **Example** (Compact output)
+ * **Example** (Formatting compact output)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Formatter } from "effect"
  *
- * console.log(Formatter.format({ a: 1, b: [2, 3] }))
- * // {"a":1,"b":[2,3]}
+ * Formatter.format({ a: 1, b: [2, 3] }) // => "{\"a\":1,\"b\":[2,3]}"
  * ```
  *
  * **Example** (Pretty-printed output)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Formatter } from "effect"
  *
- * console.log(Formatter.format({ a: 1, b: [2, 3] }, { space: 2 }))
- * // {
- * //   "a": 1,
- * //   "b": [
- * //     2,
- * //     3
- * //   ]
- * // }
+ * const output = Formatter.format({ a: 1, b: [2, 3] }, { space: 2 })
+ * output // => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}"
  * ```
  *
- * **Example** (Circular reference handling)
+ * **Example** (Handling circular references)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Formatter } from "effect"
  *
  * const obj: any = { name: "loop" }
  * obj.self = obj
- * console.log(Formatter.format(obj))
- * // {"name":"loop","self":[Circular]}
+ * Formatter.format(obj) // => "{\"name\":\"loop\",\"self\":[Circular]}"
  * ```
  *
  * @see {@link formatJson}
@@ -162,7 +109,7 @@ export function format(input: unknown, options?: {
   readonly ignoreToString?: boolean | undefined
 }): string {
   const space = options?.space ?? 0
-  const seen = new WeakSet<object>()
+  const ancestors = new WeakSet<object>()
   const gap = !space ? "" : (typeof space === "number" ? " ".repeat(space) : space)
   const ind = (d: number) => gap.repeat(d)
 
@@ -181,11 +128,13 @@ export function format(input: unknown, options?: {
 
   function recur(v: unknown, d = 0): string {
     if (Array.isArray(v)) {
-      if (seen.has(v)) return CIRCULAR
-      seen.add(v)
-      if (!gap || v.length <= 1) return `[${v.map((x) => recur(x, d)).join(",")}]`
-      const inner = v.map((x) => recur(x, d + 1)).join(",\n" + ind(d + 1))
-      return `[\n${ind(d + 1)}${inner}\n${ind(d)}]`
+      if (ancestors.has(v)) return CIRCULAR
+      ancestors.add(v)
+      const output = !gap || v.length <= 1
+        ? `[${v.map((x) => recur(x, d)).join(",")}]`
+        : `[\n${ind(d + 1)}${v.map((x) => recur(x, d + 1)).join(",\n" + ind(d + 1))}\n${ind(d)}]`
+      ancestors.delete(v)
+      return output
     }
 
     if (v instanceof Date) return formatDate(v)
@@ -216,24 +165,28 @@ export function format(input: unknown, options?: {
     if (typeof v === "bigint") return String(v) + "n"
 
     if (typeof v === "object" || typeof v === "function") {
-      if (seen.has(v)) return CIRCULAR
-      seen.add(v)
+      if (ancestors.has(v)) return CIRCULAR
+      ancestors.add(v)
 
-      if (symbolRedactable in v) return format(getRedacted(v as any))
-
-      if (Symbol.iterator in v) {
-        return `${v.constructor.name}(${recur(Array.from(v as any), d)})`
+      let output: string
+      if (symbolRedactable in v) {
+        output = format(getRedacted(v as any))
+      } else if (Symbol.iterator in v) {
+        output = `${v.constructor.name}(${recur(Array.from(v as any), d)})`
+      } else {
+        const keys = ownKeys(v)
+        if (!gap || keys.length <= 1) {
+          const body = `{${keys.map((k) => `${formatPropertyKey(k)}:${recur((v as any)[k], d)}`).join(",")}}`
+          output = wrap(v, body)
+        } else {
+          const body = `{\n${
+            keys.map((k) => `${ind(d + 1)}${formatPropertyKey(k)}: ${recur((v as any)[k], d + 1)}`).join(",\n")
+          }\n${ind(d)}}`
+          output = wrap(v, body)
+        }
       }
-
-      const keys = ownKeys(v)
-      if (!gap || keys.length <= 1) {
-        const body = `{${keys.map((k) => `${formatPropertyKey(k)}:${recur((v as any)[k], d)}`).join(",")}}`
-        return wrap(v, body)
-      }
-      const body = `{\n${
-        keys.map((k) => `${ind(d + 1)}${formatPropertyKey(k)}: ${recur((v as any)[k], d + 1)}`).join(",\n")
-      }\n${ind(d)}}`
-      return wrap(v, body)
+      ancestors.delete(v)
+      return output
     }
 
     return String(v)
@@ -288,53 +241,50 @@ function safeToString(input: any): string {
  *
  * **When to use**
  *
- * Use when you need valid JSON output (unlike {@link format}).
- * - The input may contain circular references and you want them silently
- *   omitted rather than throwing a `TypeError`.
+ * Use when you need valid JSON output, unlike `format`, and the input may
+ * contain circular references that should be silently omitted rather than
+ * throwing a `TypeError`.
  *
  * **Details**
  *
- * - Uses `JSON.stringify` internally with a replacer that tracks the
- *   current object ancestry.
- * - Circular references are replaced with `undefined` (omitted from
- *   output).
- * - `Redactable` values are automatically redacted before serialization.
- * - Types not supported by JSON (`BigInt`, `Symbol`, `undefined`,
- *   functions) follow standard `JSON.stringify` behavior (omitted or
- *   `null` in arrays).
- * - `space` — indentation unit (number of spaces, or a string like
- *   `"\t"`). Defaults to `0` (compact).
+ * Uses `JSON.stringify` internally with a replacer that tracks the current
+ * object ancestry. Circular references are replaced with `undefined`, which
+ * omits them from object output. `Redactable` values are automatically redacted
+ * before serialization. Values not supported by JSON otherwise follow standard
+ * `JSON.stringify` behavior. The `space` parameter controls indentation and
+ * defaults to `0`.
  *
- * **Example** (Compact JSON)
+ * **Gotchas**
  *
- * ```ts
+ * When the root input is `undefined`, a symbol, or a function, `formatJson`
+ * returns `"null"` instead of the `undefined` returned by `JSON.stringify`.
+ * Nested values retain standard `JSON.stringify` behavior.
+ *
+ * **Example** (Formatting compact JSON)
+ *
+ * ```ts import.meta.vitest
  * import { Formatter } from "effect"
  *
- * console.log(Formatter.formatJson({ name: "Alice", age: 30 }))
- * // {"name":"Alice","age":30}
+ * Formatter.formatJson({ name: "Alice", age: 30 }) // => "{\"name\":\"Alice\",\"age\":30}"
  * ```
  *
- * **Example** (Circular reference handling)
+ * **Example** (Handling circular references)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Formatter } from "effect"
  *
  * const obj: any = { name: "test" }
  * obj.self = obj
- * console.log(Formatter.formatJson(obj))
- * // {"name":"test"}
+ * Formatter.formatJson(obj) // => "{\"name\":\"test\"}"
  * ```
  *
  * **Example** (Pretty-printed JSON)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Formatter } from "effect"
  *
- * console.log(Formatter.formatJson({ name: "Alice", age: 30 }, { space: 2 }))
- * // {
- * //   "name": "Alice",
- * //   "age": 30
- * // }
+ * const output = Formatter.formatJson({ name: "Alice", age: 30 }, { space: 2 })
+ * output // => "{\n  \"name\": \"Alice\",\n  \"age\": 30\n}"
  * ```
  *
  * @see {@link format}
@@ -363,5 +313,5 @@ export function formatJson(input: unknown, options?: {
       return redacted
     },
     options?.space
-  )
+  ) ?? "null"
 }

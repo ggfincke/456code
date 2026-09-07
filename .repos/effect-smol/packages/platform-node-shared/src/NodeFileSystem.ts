@@ -7,29 +7,6 @@
  * links, metadata, temporary files and directories, and file watching through
  * the shared `FileSystem` service.
  *
- * **Mental model**
- *
- * {@link layer} installs a process-backed `FileSystem` service. Each operation
- * delegates to the corresponding Node filesystem API, then maps Node failures
- * into `PlatformError` values and invalid arguments into `BadArgument` failures.
- * Paths keep Node's normal behavior: relative paths resolve from the current
- * working directory and platform path rules still apply.
- *
- * **Common tasks**
- *
- * Provide {@link layer} at the Node runtime boundary, then depend on the
- * `FileSystem` service from application code. Use the service for ordinary
- * reads and writes, directory management, metadata inspection, links, temporary
- * resources, and file watching without importing Node's `fs` APIs directly.
- *
- * **Gotchas**
- *
- * Open files are scoped resources with tracked read and write positions; append
- * mode lets the operating system choose the write offset. File watching follows
- * `node:fs.watch` semantics unless a custom watch backend is supplied, so
- * recursive support, event coalescing, and reported paths vary by runtime and
- * platform.
- *
  * @since 4.0.0
  */
 import * as Cause from "effect/Cause"
@@ -122,6 +99,21 @@ const chown = (() => {
     handleBadArgument("chown")
   )
   return (path: string, uid: number, gid: number) => nodeChown(path, uid, gid)
+})()
+
+// == glob
+
+const glob = ((): FileSystem.FileSystem["glob"] => {
+  const nodeGlob = effectify(
+    NFS.glob,
+    handleErrnoException("FileSystem", "glob"),
+    handleBadArgument("glob")
+  )
+  return (pattern: string, options) =>
+    nodeGlob(pattern, {
+      cwd: options?.root,
+      exclude: options?.exclude
+    })
 })()
 
 // == link
@@ -218,7 +210,7 @@ const openFactory = (method: string): FileSystem.FileSystem["open"] => {
         nodeOpen(path, options?.flag ?? "r", options?.mode),
         (fd) => Effect.orDie(nodeClose(fd))
       ),
-      Effect.map((fd) => makeFile(FileSystem.FileDescriptor(fd), options?.flag?.startsWith("a") ?? false))
+      Effect.map((fd) => makeFile(fd, options?.flag?.startsWith("a") ?? false))
     )
 }
 const open = openFactory("open")
@@ -260,13 +252,13 @@ const makeFile = (() => {
 
   class FileImpl implements FileSystem.File {
     readonly [FileSystem.FileTypeId]: typeof FileSystem.FileTypeId
-    readonly fd: FileSystem.File.Descriptor
+    readonly fd: number
     private readonly append: boolean
 
     private position: bigint = BigInt(0)
 
     constructor(
-      fd: FileSystem.File.Descriptor,
+      fd: number,
       append: boolean
     ) {
       this[FileSystem.FileTypeId] = FileSystem.FileTypeId
@@ -291,7 +283,7 @@ const makeFile = (() => {
           this.position = this.position + offsetSize
         }
 
-        return this.position
+        return FileSystem.Size(this.position)
       })
     }
 
@@ -394,7 +386,7 @@ const makeFile = (() => {
     }
   }
 
-  return (fd: FileSystem.File.Descriptor, append: boolean): FileSystem.File => new FileImpl(fd, append)
+  return (fd: number, append: boolean): FileSystem.File => new FileImpl(fd, append)
 })()
 
 // == makeTempFile
@@ -558,12 +550,12 @@ const utimes = (() => {
 
 // == watch
 
-const watchNode = (path: string) =>
+const watchNode = (path: string, options?: FileSystem.WatchOptions) =>
   Stream.callback<FileSystem.WatchEvent, Error.PlatformError>((queue) =>
     Effect.acquireRelease(
       Effect.sync(() => {
         const watcher = NFS.watch(path, {
-          recursive: true
+          recursive: options?.recursive ?? false
         }, (event, path) => {
           if (!path) return
           switch (event) {
@@ -603,12 +595,16 @@ const watchNode = (path: string) =>
     )
   )
 
-const watch = (backend: Option.Option<FileSystem.WatchBackend["Service"]>, path: string) =>
+const watch = (
+  backend: Option.Option<FileSystem.WatchBackend["Service"]>,
+  path: string,
+  options?: FileSystem.WatchOptions
+) =>
   stat(path).pipe(
     Effect.map((stat) =>
       backend.pipe(
-        Option.flatMap((_) => _.register(path, stat)),
-        Option.getOrElse(() => watchNode(path))
+        Option.flatMap((_) => _.register(path, stat, options)),
+        Option.getOrElse(() => watchNode(path, options))
       )
     ),
     Stream.unwrap
@@ -642,6 +638,7 @@ const makeFileSystem = Effect.map(Effect.serviceOption(FileSystem.WatchBackend),
     chown,
     copy,
     copyFile,
+    glob,
     link,
     makeDirectory,
     makeTempDirectory,
@@ -659,8 +656,8 @@ const makeFileSystem = Effect.map(Effect.serviceOption(FileSystem.WatchBackend),
     symlink,
     truncate,
     utimes,
-    watch(path) {
-      return watch(backend, path)
+    watch(path, options) {
+      return watch(backend, path, options)
     },
     writeFile
   }))

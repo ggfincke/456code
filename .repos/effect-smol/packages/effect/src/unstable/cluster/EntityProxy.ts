@@ -1,25 +1,11 @@
 /**
- * The `EntityProxy` module derives external RPC and HTTP API surfaces from a
- * clustered {@link Entity.Entity}. It is used when callers should communicate
- * with entities through ordinary RPC clients or HTTP routes while the cluster
- * runtime keeps responsibility for locating, routing, and delivering messages
- * to the entity instance identified by `entityId`.
+ * Derives RPC and HTTP API surfaces from clustered entities.
  *
- * **Common tasks**
- *
- * - Derive an `RpcGroup` from an entity with {@link toRpcGroup}
- * - Derive an `HttpApiGroup` from an entity with {@link toHttpApiGroup}
- * - Expose both request/response calls and discard variants for fire-and-forget
- *   delivery
- *
- * **Gotchas**
- *
- * - Proxy RPC payloads wrap the original RPC payload with an `entityId`; HTTP
- *   endpoints place the same identifier in the route path.
- * - Generated RPC names are prefixed with the entity type, while HTTP endpoint
- *   paths are based on lower-cased RPC tags.
- * - Proxy errors include cluster delivery errors such as mailbox saturation,
- *   duplicate in-flight messages, and persistence failures.
+ * The generated APIs let callers use ordinary RPC clients or HTTP routes while
+ * the cluster runtime still locates and delivers messages to the entity
+ * instance identified by `entityId`. Each generated operation keeps the
+ * original payload and success schema, adds cluster client errors, and creates
+ * a discard variant for fire-and-forget delivery.
  *
  * @since 4.0.0
  */
@@ -28,7 +14,7 @@ import * as HttpApiEndpoint from "../httpapi/HttpApiEndpoint.ts"
 import * as HttpApiGroup from "../httpapi/HttpApiGroup.ts"
 import * as Rpc from "../rpc/Rpc.ts"
 import * as RpcGroup from "../rpc/RpcGroup.ts"
-import { AlreadyProcessingMessage, MailboxFull, PersistenceError } from "./ClusterError.ts"
+import { AlreadyProcessingMessage, EntityNotAssignedToRunner, MailboxFull, PersistenceError } from "./ClusterError.ts"
 import type * as Entity from "./Entity.ts"
 import type { EntityId } from "./EntityId.ts"
 
@@ -38,12 +24,17 @@ const clientErrors = [
   PersistenceError
 ] as const
 
+const requestErrors = [
+  ...clientErrors,
+  EntityNotAssignedToRunner
+] as const
+
 /**
  * Derives an `RpcGroup` from an `Entity`.
  *
  * **Example** (Deriving RPC endpoints from an entity)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Layer, Schema } from "effect"
  * import { ClusterSchema, Entity, EntityProxy, EntityProxyServer } from "effect/unstable/cluster"
  * import { Rpc, RpcServer } from "effect/unstable/rpc"
@@ -64,6 +55,7 @@ const clientErrors = [
  * const RpcServerLayer = RpcServer.layer(MyRpcs).pipe(
  *   Layer.provide(EntityProxyServer.layerRpcHandlers(Counter))
  * )
+ * const result = [MyRpcs.requests.size, Layer.isLayer(RpcServerLayer)] // => [2, true]
  * ```
  *
  * @category constructors
@@ -88,7 +80,7 @@ export const toRpcGroup = <Type extends string, Rpcs extends Rpc.Any>(
     }
     const rpc = Rpc.make(`${entity.type}.${parentRpc._tag}`, {
       payload: payloadSchema,
-      error: Schema.Union([parentRpc.errorSchema, ...clientErrors]),
+      error: Schema.Union([parentRpc.errorSchema, ...requestErrors]),
       success: parentRpc.successSchema
     }).annotateMerge(parentRpc.annotations)
     const rpcDiscard = Rpc.make(`${entity.type}.${parentRpc._tag}Discard`, {
@@ -128,11 +120,12 @@ export type ConvertRpcs<Rpcs extends Rpc.Any, Prefix extends string> = Rpcs exte
       }>,
       _Success,
       Schema.Codec<
-        _Error["Type"] | MailboxFull | AlreadyProcessingMessage | PersistenceError,
+        _Error["Type"] | MailboxFull | AlreadyProcessingMessage | PersistenceError | EntityNotAssignedToRunner,
         | _Error["Encoded"]
         | typeof MailboxFull["Encoded"]
         | typeof AlreadyProcessingMessage["Encoded"]
-        | typeof PersistenceError["Encoded"],
+        | typeof PersistenceError["Encoded"]
+        | typeof EntityNotAssignedToRunner["Encoded"],
         _Error["DecodingServices"],
         _Error["EncodingServices"]
       >
@@ -161,7 +154,7 @@ const entityIdPath = {
  *
  * **Example** (Deriving HTTP API endpoints from an entity)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Layer, Schema } from "effect"
  * import { ClusterSchema, Entity, EntityProxy, EntityProxyServer } from "effect/unstable/cluster"
  * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
@@ -189,6 +182,7 @@ const entityIdPath = {
  * const ApiLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(EntityProxyServer.layerHttpApi(MyApi, "counter", Counter))
  * )
+ * const result = [Object.keys(MyApi.groups.counter.endpoints).length, Layer.isLayer(ApiLayer)] // => [2, true]
  * ```
  *
  * @category constructors
@@ -205,7 +199,7 @@ export const toHttpApiGroup = <const Name extends string, Type extends string, R
       params: entityIdPath,
       payload: parentRpc.payloadSchema,
       success: parentRpc.successSchema,
-      error: [parentRpc.errorSchema, ...clientErrors]
+      error: [parentRpc.errorSchema, ...requestErrors]
     }).annotateMerge(parentRpc.annotations)
     const endpointDiscard = HttpApiEndpoint.post(
       `${parentRpc._tag}Discard`,
@@ -262,6 +256,7 @@ export type ConvertHttpApi<Rpcs extends Rpc.Any> = Rpcs extends Rpc.Rpc<
       | typeof MailboxFull
       | typeof AlreadyProcessingMessage
       | typeof PersistenceError
+      | typeof EntityNotAssignedToRunner
     >
     | HttpApiEndpoint.HttpApiEndpoint<
       `${_Tag}Discard`,

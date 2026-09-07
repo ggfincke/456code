@@ -507,7 +507,7 @@ effectIt.effect('aborts both protocol probes after their one-second bounds', () 
   }).pipe(Effect.provide(layer))
 })
 
-effectIt('does not swallow process probe defects', () =>
+effectIt.effect('does not swallow process probe defects', () =>
   Effect.gen(function* ()
   {
     const defect = new Error('unexpected process probe defect')
@@ -527,7 +527,7 @@ effectIt('does not swallow process probe defects', () =>
   }),
 )
 
-effectIt('does not swallow process probe interruption', () =>
+effectIt.effect('does not swallow process probe interruption', () =>
   Effect.gen(function* ()
   {
     const layer = makeProbeFailureLayer(() => Effect.interrupt)

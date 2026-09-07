@@ -30,21 +30,34 @@ const {
   showItemInFolder,
   webviewSend,
   writeFile,
-  writeImage,
+  writeClipboard,
 } = vi.hoisted(() => ({
-  createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
+  createFromPath: vi.fn((): { readonly isEmpty: () => boolean; readonly toPNG: () => Buffer } => ({
+    isEmpty: () => false,
+    toPNG: () => Buffer.from([1, 2, 3]),
+  })),
   fromId: vi.fn((_id?: number): unknown => null),
   getFocusedWebContents: vi.fn(() => null),
   mkdir: vi.fn((_path: string) => undefined),
   showItemInFolder: vi.fn(),
   webviewSend: vi.fn(),
   writeFile: vi.fn((_path: string, _data: Uint8Array) => undefined),
-  writeImage: vi.fn(),
+  writeClipboard: vi.fn((_items: ReadonlyArray<{ readonly items: Record<string, Blob> }>) =>
+    Promise.resolve(),
+  ),
 }))
 
 vi.mock('electron', () => ({
+  ClipboardItem: class
+  {
+    readonly items: Record<string, Blob>
+    constructor(items: Record<string, Blob>)
+    {
+      this.items = items
+    }
+  },
   clipboard: {
-    writeImage,
+    write: writeClipboard,
   },
   nativeImage: {
     createFromPath,
@@ -348,7 +361,7 @@ describe('PreviewManager', () =>
     mkdir.mockClear()
     writeFile.mockClear()
     showItemInFolder.mockClear()
-    writeImage.mockClear()
+    writeClipboard.mockReset()
     createFromPath.mockClear()
     webviewSend.mockClear()
   })
@@ -1999,16 +2012,25 @@ describe('PreviewManager', () =>
     ),
   )
 
-  effectIt.effect('copies screenshot artifacts to the system clipboard', () =>
+  effectIt.effect('waits for screenshot artifacts to reach the system clipboard', () =>
     withManager((manager) =>
       Effect.gen(function* ()
       {
         const artifactPath = '/tmp/t3/dev/browser-artifacts/browser-screenshot-test.png'
+        const pending = Promise.withResolvers<void>()
+        writeClipboard.mockReturnValueOnce(pending.promise)
 
-        yield* manager.copyArtifactToClipboard(artifactPath)
+        const copying = yield* manager.copyArtifactToClipboard(artifactPath).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
 
         expect(createFromPath).toHaveBeenCalledWith(artifactPath)
-        expect(writeImage).toHaveBeenCalledOnce()
+        expect(writeClipboard).toHaveBeenCalledOnce()
+        expect(copying.pollUnsafe()).toBeUndefined()
+        const png = writeClipboard.mock.calls[0]![0][0]!.items['image/png']!
+        expect(png.type).toBe('image/png')
+        expect(yield* Effect.promise(() => png.bytes())).toEqual(new Uint8Array([1, 2, 3]))
+        pending.resolve()
+        yield* Fiber.join(copying)
         const exit = yield* Effect.exit(
           manager.copyArtifactToClipboard('/tmp/t3/dev/settings.json'),
         )
@@ -2022,13 +2044,36 @@ describe('PreviewManager', () =>
         })
         expect('cause' in error).toBe(false)
 
-        createFromPath.mockReturnValueOnce({ isEmpty: () => true })
+        createFromPath.mockReturnValueOnce({ isEmpty: () => true, toPNG: () => Buffer.alloc(0) })
         const invalidImageExit = yield* Effect.exit(manager.copyArtifactToClipboard(artifactPath))
         expect(Exit.isFailure(invalidImageExit)).toBe(true)
         if (Exit.isSuccess(invalidImageExit)) return
         expect(Option.getOrThrow(Cause.findErrorOption(invalidImageExit.cause))).toMatchObject({
           _tag: 'PreviewArtifactImageLoadError',
           artifactPath,
+        })
+      }),
+    ),
+  )
+
+  effectIt.effect('reports rejected screenshot clipboard writes with artifact context', () =>
+    withManager((manager) =>
+      Effect.gen(function* ()
+      {
+        const artifactPath = '/tmp/t3/dev/browser-artifacts/browser-screenshot-test.png'
+        const cause = new Error('clipboard unavailable')
+        writeClipboard.mockRejectedValueOnce(cause)
+
+        const exit = yield* Effect.exit(manager.copyArtifactToClipboard(artifactPath))
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isSuccess(exit)) return
+        const error = Option.getOrThrow(Cause.findErrorOption(exit.cause))
+        expect(error).toMatchObject({
+          _tag: 'PreviewOperationError',
+          operation: 'copyArtifactToClipboard.write',
+          artifactPath,
+          cause,
         })
       }),
     ),

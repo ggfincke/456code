@@ -37,7 +37,7 @@ export type OrchestratePlanUpsertInput = typeof OrchestratePlanUpsertInput.Type
 export const OrchestratePlanUpsertResult = OrchestratePlanRevision
 export type OrchestratePlanUpsertResult = typeof OrchestratePlanUpsertResult.Type
 
-export class OrchestratePlanUpsertError extends Schema.TaggedErrorClass<OrchestratePlanUpsertError>()(
+export class OrchestratePlanUpsertError extends Schema.TaggedError<OrchestratePlanUpsertError>()(
   'OrchestratePlanUpsertError',
   {
     operation: Schema.String,
@@ -80,7 +80,7 @@ export type OrchestrateExecutionUpdateInput = typeof OrchestrateExecutionUpdateI
 export const OrchestrateExecutionResult = OrchestrateRunExecution
 export type OrchestrateExecutionResult = typeof OrchestrateExecutionResult.Type
 
-export class OrchestrateExecutionError extends Schema.TaggedErrorClass<OrchestrateExecutionError>()(
+export class OrchestrateExecutionError extends Schema.TaggedError<OrchestrateExecutionError>()(
   'OrchestrateExecutionError',
   {
     operation: Schema.String,

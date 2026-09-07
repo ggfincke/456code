@@ -1,70 +1,12 @@
 /**
- * Utilities for creating, accessing, transforming, and comparing fixed-length
- * arrays (tuples). Every function produces a new tuple — inputs are never
- * mutated.
+ * Works with fixed-length arrays, also called tuples.
  *
- * ## Mental model
- *
- * - **Tuple**: A fixed-length readonly array where each position can have a
- *   different type (e.g., `readonly [string, number, boolean]`).
- * - **Index-based access**: Elements are accessed by numeric index, and the
- *   type system tracks the type at each position.
- * - **Dual API**: Most functions accept arguments in both data-first
- *   (`Tuple.get(t, 0)`) and data-last (`pipe(t, Tuple.get(0))`) style.
- * - **Immutability**: All operations return a new tuple; the original is
- *   never modified.
- * - **Lambda**: A type-level function interface (from `Struct`) used by
- *   {@link map}, {@link mapPick}, and {@link mapOmit} so the compiler can
- *   track how element types change.
- *
- * ## Common tasks
- *
- * - Create a tuple → {@link make}
- * - Access an element by index → {@link get}
- * - Select / remove elements by index → {@link pick}, {@link omit}
- * - Append elements → {@link appendElement}, {@link appendElements}
- * - Transform selected elements → {@link evolve}
- * - Swap element positions → {@link renameIndices}
- * - Map all elements with a typed lambda → {@link map}, {@link mapPick},
- *   {@link mapOmit}
- * - Compare tuples → {@link makeEquivalence}, {@link makeOrder}
- * - Combine / reduce tuples → {@link makeCombiner}, {@link makeReducer}
- * - Check tuple length at runtime → `isTupleOf`, `isTupleOfAtLeast`
- *
- * ## Gotchas
- *
- * - {@link pick} and {@link omit} use numeric indices, not string keys.
- * - {@link renameIndices} takes an array of stringified source indices
- *   (e.g., `["2", "1", "0"]`), not arbitrary names.
- * - {@link map}, {@link mapPick}, {@link mapOmit} require a Lambda value
- *   created with `Struct.lambda`; a plain function won't type-check.
- * - `isTupleOf` and `isTupleOfAtLeast` only check length, not
- *   element types.
- *
- * ## Quickstart
- *
- * **Example** (Creating and transforming a tuple)
- *
- * ```ts
- * import { pipe, Tuple } from "effect"
- *
- * const point = Tuple.make(10, 20, "red")
- *
- * const result = pipe(
- *   point,
- *   Tuple.evolve([
- *     (x) => x * 2,
- *     (y) => y * 2
- *   ])
- * )
- *
- * console.log(result) // [20, 40, "red"]
- * ```
- *
- * ## See also
- *
- * - `Struct` – similar utilities for objects with named keys
- * - {@link Array} – operations on variable-length arrays
+ * The runtime helpers in this module create new tuples instead of mutating
+ * their inputs, and the types preserve element positions where possible. The
+ * helpers cover tuple construction, indexed access, selecting or removing
+ * positions, appending values, transforming elements, renaming indices, mapping
+ * typed positions, and deriving comparison or combination helpers for tuple
+ * shapes.
  *
  * @since 2.0.0
  */
@@ -80,8 +22,8 @@ import type { Apply, Lambda } from "./Struct.ts"
  *
  * **When to use**
  *
- * Use when you use this instead of `[a, b, c] as const` when you want a properly typed tuple
- * without a manual cast.
+ * Use when you need a properly typed tuple without writing `[a, b, c] as const`
+ * or another manual cast.
  *
  * **Details**
  *
@@ -90,11 +32,10 @@ import type { Apply, Lambda } from "./Struct.ts"
  *
  * **Example** (Creating a tuple)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Tuple } from "effect"
  *
- * const point = Tuple.make(10, 20, "red")
- * console.log(point) // [10, 20, "red"]
+ * Tuple.make(10, 20, "red") // => [10, 20, "red"]
  * ```
  *
  * @see {@link get} – access a single element by index
@@ -102,7 +43,8 @@ import type { Apply, Lambda } from "./Struct.ts"
  * @category constructors
  * @since 2.0.0
  */
-export const make = <Elements extends ReadonlyArray<unknown>>(...elements: Elements): Elements => elements
+export const make = <const Elements extends ReadonlyArray<unknown>>(...elements: [...Elements]): [...Elements] =>
+  elements
 
 type Indices<T extends ReadonlyArray<unknown>> = Exclude<Partial<T>["length"], T["length"]>
 
@@ -111,7 +53,7 @@ type Indices<T extends ReadonlyArray<unknown>> = Exclude<Partial<T>["length"], T
  *
  * **When to use**
  *
- * Use when you use this in a pipeline when you need to extract a single element.
+ * Use when a single tuple element should be extracted in a pipeline.
  *
  * **Details**
  *
@@ -119,11 +61,10 @@ type Indices<T extends ReadonlyArray<unknown>> = Exclude<Partial<T>["length"], T
  *
  * **Example** (Extracting an element by index)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Tuple } from "effect"
  *
- * const last = pipe(Tuple.make(1, true, "hello"), Tuple.get(2))
- * console.log(last) // "hello"
+ * pipe(Tuple.make(1, true, "hello"), Tuple.get(2)) // => "hello"
  * ```
  *
  * @see {@link make} – create a tuple
@@ -150,7 +91,9 @@ type _BuildTuple<
     [...I, unknown]
   >
 
-type PickTuple<T extends ReadonlyArray<unknown>, K> = _BuildTuple<T, K>
+type PickTuple<T extends ReadonlyArray<unknown>, I extends ReadonlyArray<Indices<T>>> = {
+  -readonly [K in keyof I]: T[I[K] & keyof T]
+}
 
 /**
  * Creates a new tuple containing only the elements at the specified indices.
@@ -165,26 +108,25 @@ type PickTuple<T extends ReadonlyArray<unknown>, K> = _BuildTuple<T, K>
  *
  * **Example** (Selecting elements by index)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Tuple } from "effect"
  *
- * const result = Tuple.pick(["a", "b", "c", "d"], [0, 2, 3])
- * console.log(result) // ["a", "c", "d"]
+ * Tuple.pick(["a", "b", "c", "d"], [0, 2, 3]) // => ["a", "c", "d"]
  * ```
  *
  * @see {@link omit} – the inverse (exclude indices instead)
  * @see {@link get} – extract a single element
- * @category utils
+ * @category filtering
  * @since 4.0.0
  */
 export const pick: {
   <const T extends ReadonlyArray<unknown>, const I extends ReadonlyArray<Indices<T>>>(
     indices: I
-  ): (self: T) => PickTuple<T, I[number]>
+  ): (self: T) => PickTuple<T, I>
   <const T extends ReadonlyArray<unknown>, const I extends ReadonlyArray<Indices<T>>>(
     self: T,
     indices: I
-  ): PickTuple<T, I[number]>
+  ): PickTuple<T, I>
 } = dual(
   2,
   <const T extends ReadonlyArray<unknown>>(
@@ -210,15 +152,14 @@ type OmitTuple<T extends ReadonlyArray<unknown>, K> = _BuildTuple<T, Exclude<Ind
  *
  * **Example** (Removing elements by index)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Tuple } from "effect"
  *
- * const result = Tuple.omit(["a", "b", "c", "d"], [1, 3])
- * console.log(result) // ["a", "c"]
+ * Tuple.omit(["a", "b", "c", "d"], [1, 3]) // => ["a", "c"]
  * ```
  *
  * @see {@link pick} – the inverse (keep only specified indices)
- * @category utils
+ * @category filtering
  * @since 4.0.0
  */
 export const omit: {
@@ -245,7 +186,8 @@ export const omit: {
  *
  * **When to use**
  *
- * Use to add one element to the end of a tuple while preserving tuple types.
+ * Use when you need the appended value to remain part of the tuple's type-level
+ * shape and preserve literal element positions.
  *
  * **Details**
  *
@@ -253,15 +195,14 @@ export const omit: {
  *
  * **Example** (Appending an element)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Tuple } from "effect"
  *
- * const result = pipe(Tuple.make(1, 2), Tuple.appendElement("end"))
- * console.log(result) // [1, 2, "end"]
+ * pipe(Tuple.make(1, 2), Tuple.appendElement("end")) // => [1, 2, "end"]
  * ```
  *
  * @see {@link appendElements} – append multiple elements (another tuple)
- * @category Concatenating
+ * @category combining
  * @since 2.0.0
  */
 export const appendElement: {
@@ -283,15 +224,14 @@ export const appendElement: {
  *
  * **Example** (Concatenating tuples)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Tuple } from "effect"
  *
- * const result = pipe(Tuple.make(1, 2), Tuple.appendElements(["a", "b"] as const))
- * console.log(result) // [1, 2, "a", "b"]
+ * pipe(Tuple.make(1, 2), Tuple.appendElements(["a", "b"] as const)) // => [1, 2, "a", "b"]
  * ```
  *
  * @see {@link appendElement} – append a single element
- * @category Concatenating
+ * @category combining
  * @since 4.0.0
  */
 export const appendElements: {
@@ -327,17 +267,16 @@ type Evolved<T, E> = { [I in keyof T]: I extends keyof E ? (E[I] extends (...a: 
  *
  * **Example** (Transforming selected elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Tuple } from "effect"
  *
- * const result = pipe(
+ * pipe(
  *   Tuple.make("hello", 42, true),
  *   Tuple.evolve([
  *     (s) => s.toUpperCase(),
  *     (n) => n * 2
  *   ])
- * )
- * console.log(result) // ["HELLO", 84, true]
+ * ) // => ["HELLO", 84, true]
  * ```
  *
  * @see {@link map} – apply the same transformation to all elements
@@ -374,18 +313,17 @@ export const evolve: {
  *
  * **Example** (Swapping elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Tuple } from "effect"
  *
- * const result = pipe(
+ * pipe(
  *   Tuple.make("a", "b", "c"),
  *   Tuple.renameIndices(["2", "1", "0"])
- * )
- * console.log(result) // ["c", "b", "a"]
+ * ) // => ["c", "b", "a"]
  * ```
  *
  * @see {@link evolve} – transform element values instead of positions
- * @category Index utilities
+ * @category transforming
  * @since 4.0.0
  */
 export const renameIndices: {
@@ -411,7 +349,7 @@ export const renameIndices: {
  *
  * **When to use**
  *
- * Use when you want to apply the same transformation to every element.
+ * Use when you want to apply the same transformation to every tuple element.
  *
  * **Details**
  *
@@ -424,7 +362,7 @@ export const renameIndices: {
  *
  * **Example** (Wrapping every element in an array)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Struct, Tuple } from "effect"
  *
  * interface AsArray extends Struct.Lambda {
@@ -433,8 +371,7 @@ export const renameIndices: {
  * }
  *
  * const asArray = Struct.lambda<AsArray>((a) => [a])
- * const result = pipe(Tuple.make(1, "hello", true), Tuple.map(asArray))
- * console.log(result) // [[1], ["hello"], [true]]
+ * pipe(Tuple.make(1, "hello", true), Tuple.map(asArray)) // => [[1], ["hello"], [true]]
  * ```
  *
  * @see {@link mapPick} – apply a lambda only to selected indices
@@ -471,7 +408,7 @@ export const map: {
  *
  * **Example** (Wrapping only selected elements in arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Struct, Tuple } from "effect"
  *
  * interface AsArray extends Struct.Lambda {
@@ -480,11 +417,10 @@ export const map: {
  * }
  *
  * const asArray = Struct.lambda<AsArray>((a) => [a])
- * const result = pipe(
+ * pipe(
  *   Tuple.make(1, "hello", true),
  *   Tuple.mapPick([0, 2], asArray)
- * )
- * console.log(result) // [[1], "hello", [true]]
+ * ) // => [[1], "hello", [true]]
  * ```
  *
  * @see {@link map} – apply a lambda to all elements
@@ -527,7 +463,7 @@ export const mapPick: {
  *
  * **Example** (Wrapping all elements except one in arrays)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe, Struct, Tuple } from "effect"
  *
  * interface AsArray extends Struct.Lambda {
@@ -536,11 +472,10 @@ export const mapPick: {
  * }
  *
  * const asArray = Struct.lambda<AsArray>((a) => [a])
- * const result = pipe(
+ * pipe(
  *   Tuple.make(1, "hello", true),
  *   Tuple.mapOmit([1], asArray)
- * )
- * console.log(result) // [[1], "hello", [true]]
+ * ) // => [[1], "hello", [true]]
  * ```
  *
  * @see {@link map} – apply a lambda to all elements
@@ -579,7 +514,7 @@ export const mapOmit: {
  *
  * **When to use**
  *
- * Use when you need to compare tuples element-by-element.
+ * Use when you need an `Equivalence` to compare tuples element-by-element.
  *
  * **Details**
  *
@@ -587,7 +522,7 @@ export const mapOmit: {
  *
  * **Example** (Comparing tuples for equivalence)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Equivalence, Tuple } from "effect"
  *
  * const eq = Tuple.makeEquivalence([
@@ -595,12 +530,12 @@ export const mapOmit: {
  *   Equivalence.strictEqual<number>()
  * ])
  *
- * console.log(eq(["Alice", 30], ["Alice", 30])) // true
- * console.log(eq(["Alice", 30], ["Bob", 30]))   // false
+ * eq(["Alice", 30], ["Alice", 30]) // => true
+ * eq(["Alice", 30], ["Bob", 30]) // => false
  * ```
  *
  * @see {@link makeOrder} – create an `Order` for tuples
- * @category Equivalence
+ * @category instances
  * @since 4.0.0
  */
 export const makeEquivalence = Equivalence.Tuple
@@ -612,7 +547,8 @@ export const makeEquivalence = Equivalence.Tuple
  *
  * **When to use**
  *
- * Use to sort or compare tuples lexicographically by element position.
+ * Use when you need to sort fixed-position arrays lexicographically, with each
+ * position using its own ordering rule.
  *
  * **Details**
  *
@@ -620,17 +556,17 @@ export const makeEquivalence = Equivalence.Tuple
  *
  * **Example** (Ordering tuples)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Number, String, Tuple } from "effect"
  *
  * const ord = Tuple.makeOrder([String.Order, Number.Order])
  *
- * console.log(ord(["Alice", 30], ["Bob", 25]))   // -1
- * console.log(ord(["Alice", 30], ["Alice", 30])) // 0
+ * ord(["Alice", 30], ["Bob", 25]) // => -1
+ * ord(["Alice", 30], ["Alice", 30]) // => 0
  * ```
  *
  * @see {@link makeEquivalence} – create an `Equivalence` for tuples
- * @category Ordering
+ * @category ordering
  * @since 4.0.0
  */
 export const makeOrder = order.Tuple
@@ -642,7 +578,8 @@ export {
    *
    * **When to use**
    *
-   * Use to guard against unexpected array lengths at runtime.
+   * Use to guard that an array has exactly the tuple length expected at
+   * runtime.
    *
    * **Details**
    *
@@ -655,13 +592,12 @@ export {
    *
    * **Example** (Checking exact length)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Tuple } from "effect"
    *
    * const arr: Array<number> = [1, 2, 3]
    * if (Tuple.isTupleOf(arr, 3)) {
-   *   console.log(arr)
-   *   // ^? [number, number, number]
+   *   arr // => [1, 2, 3]
    * }
    * ```
    *
@@ -676,8 +612,8 @@ export {
    *
    * **When to use**
    *
-   * Use to guard that an array has at least the expected number of
-   * elements.
+   * Use to guard that an array has at least the tuple length expected at
+   * runtime.
    *
    * **Details**
    *
@@ -690,13 +626,12 @@ export {
    *
    * **Example** (Checking minimum length)
    *
-   * ```ts
+   * ```ts import.meta.vitest
    * import { Tuple } from "effect"
    *
    * const arr: Array<number> = [1, 2, 3, 4]
    * if (Tuple.isTupleOfAtLeast(arr, 3)) {
-   *   console.log(arr)
-   *   // ^? [number, number, number, ...number[]]
+   *   arr // => [1, 2, 3, 4]
    * }
    * ```
    *
@@ -714,12 +649,12 @@ export {
  *
  * **When to use**
  *
- * Use when you need to merge two tuples of the same shape, such as summing
- * counters or concatenating strings.
+ * Use when you need to merge two same-shape tuples by combining each position
+ * independently, such as summing counters or concatenating strings.
  *
  * **Example** (Combining tuple elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Number, String, Tuple } from "effect"
  *
  * const C = Tuple.makeCombiner<readonly [number, string]>([
@@ -727,8 +662,7 @@ export {
  *   String.ReducerConcat
  * ])
  *
- * const result = C.combine([1, "hello"], [2, " world"])
- * console.log(result) // [3, "hello world"]
+ * C.combine([1, "hello"], [2, " world"]) // => [3, "hello world"]
  * ```
  *
  * @see {@link makeReducer} – like `makeCombiner` but with an initial value
@@ -755,11 +689,12 @@ export function makeCombiner<A extends ReadonlyArray<unknown>>(
  *
  * **When to use**
  *
- * Use to fold a collection of tuples into a single summary tuple.
+ * Use when you need to fold same-shape tuples by accumulating each position
+ * independently into one summary tuple.
  *
  * **Example** (Reducing a collection of tuples)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Number, String, Tuple } from "effect"
  *
  * const R = Tuple.makeReducer<readonly [number, string]>([
@@ -767,12 +702,11 @@ export function makeCombiner<A extends ReadonlyArray<unknown>>(
  *   String.ReducerConcat
  * ])
  *
- * const result = R.combineAll([
+ * R.combineAll([
  *   [1, "a"],
  *   [2, "b"],
  *   [3, "c"]
- * ])
- * console.log(result) // [6, "abc"]
+ * ]) // => [6, "abc"]
  * ```
  *
  * @see {@link makeCombiner} – like `makeReducer` but without an initial value

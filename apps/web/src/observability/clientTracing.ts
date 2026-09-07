@@ -7,7 +7,7 @@ import * as ManagedRuntime from 'effect/ManagedRuntime'
 import * as Scope from 'effect/Scope'
 import * as Tracer from 'effect/Tracer'
 import { HttpClient } from 'effect/unstable/http'
-import { OtlpSerialization, OtlpTracer } from 'effect/unstable/observability'
+import { OtlpExporter, OtlpSerialization, OtlpTracer } from 'effect/unstable/observability'
 
 import { settleAsyncResult, squashAtomCommandFailure } from '@t3tools/client-runtime/state/runtime'
 import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
@@ -29,6 +29,7 @@ const CLIENT_TRACING_RESOURCE = {
 const delegateRuntimeLayer = Layer.mergeAll(
   primaryEnvironmentHttpLayer,
   OtlpSerialization.layerJson,
+  OtlpExporter.layerFlusher,
   Layer.succeed(HttpClient.TracerDisabledWhen, () => true),
 )
 

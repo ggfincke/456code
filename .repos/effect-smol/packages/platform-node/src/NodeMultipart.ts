@@ -2,34 +2,11 @@
  * Node.js multipart parsing for HTTP `multipart/form-data` request bodies.
  *
  * `NodeMultipart` adapts a Node `Readable` plus incoming HTTP headers into
- * Effect's shared multipart model. It can expose form parts as a stream for
- * incremental processing, or collect a complete persisted form by writing file
- * uploads to scoped temporary files through the current `FileSystem` and `Path`
- * services.
- *
- * **Mental model**
- *
- * Multipart request bodies are one-shot byte streams. {@link stream} parses the
- * body as it arrives: fields are decoded to strings and file parts keep their
- * underlying Node readable stream. {@link persisted} consumes the same kind of
- * body, builds a `Multipart.Persisted` record, and ties temporary upload files
- * to the surrounding `Scope`.
- *
- * **Common tasks**
- *
- * - Use {@link stream} when a route validates fields while piping file uploads
- *   to storage.
- * - Use {@link persisted} when a route needs a complete form value with scoped
- *   temporary files.
- * - Use {@link fileToReadable} when a downstream Node library expects a
- *   `Readable`.
- *
- * **Gotchas**
- *
- * Consume a request body with only one parser. File parts must be drained,
- * piped, or persisted so the request can finish reading. `contentEffect` loads
- * an uploaded file into memory, so reserve it for small files. Client-supplied
- * filenames are metadata, not trusted filesystem paths.
+ * Effect's shared multipart model. It can expose form parts as a stream or
+ * collect a complete persisted form by writing file uploads to scoped temporary
+ * files through the current `FileSystem` and `Path` services. `fileToReadable`
+ * returns the underlying Node readable stream for file parts produced by this
+ * parser.
  *
  * @since 4.0.0
  */
@@ -40,11 +17,12 @@ import type * as Path from "effect/Path"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as Multipart from "effect/unstable/http/Multipart"
-import * as MP from "effect/unstable/http/Multipasta/Node"
+import * as MultipartParser from "effect/unstable/http/MultipartParser"
 import * as NFS from "node:fs"
 import type { IncomingHttpHeaders } from "node:http"
 import type { Readable } from "node:stream"
 import * as NodeStreamP from "node:stream/promises"
+import * as MP from "./NodeMultipartParser.ts"
 import * as NodeStream from "./NodeStream.ts"
 
 /**
@@ -126,13 +104,13 @@ class FieldImpl extends PartBase implements Multipart.Field {
   readonly value: string
 
   constructor(
-    info: MP.PartInfo,
+    info: MultipartParser.PartInfo,
     value: Uint8Array
   ) {
     super()
     this.key = info.name
     this.contentType = info.contentType
-    this.value = MP.decodeField(info, value)
+    this.value = MultipartParser.decodeField(info, value)
   }
 
   toJSON(): unknown {
@@ -181,7 +159,7 @@ class FileImpl extends PartBase implements Multipart.File {
   }
 }
 
-function convertError(cause: MP.MultipartError): Multipart.MultipartError {
+function convertError(cause: MultipartParser.MultipartError): Multipart.MultipartError {
   switch (cause._tag) {
     case "ReachedLimit": {
       switch (cause.limit) {

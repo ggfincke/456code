@@ -25,7 +25,7 @@ import type { ConnectionTarget } from '../connection/model.ts'
 // entries are treated as a cold cache and refetched in full.
 export const THREAD_DETAIL_CACHE_SCHEMA_VERSION = 3
 
-export class ConnectionPersistenceError extends Schema.TaggedErrorClass<ConnectionPersistenceError>()(
+export class ConnectionPersistenceError extends Schema.TaggedError<ConnectionPersistenceError>()(
   'ConnectionPersistenceError',
   {
     operation: Schema.Literals([

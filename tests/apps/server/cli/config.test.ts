@@ -2,6 +2,8 @@
 // verify cli behavior
 
 import * as NodeOS from 'node:os'
+// @effect-diagnostics nodeBuiltinImport:off - bootstrap consumes a native descriptor, no longer exposed by FileSystem.File
+import * as NodeFS from 'node:fs'
 
 import { assert, expect, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
@@ -106,7 +108,10 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
     const filePath = yield* fs.makeTempFileScoped({ prefix: 't3-bootstrap-', suffix: '.ndjson' })
     const encoded = yield* encodeDesktopBootstrap(payload)
     yield* fs.writeFileString(filePath, `${encoded}\n`)
-    const { fd } = yield* fs.open(filePath, { flag: 'r' })
+    const fd = yield* Effect.acquireRelease(
+      Effect.sync(() => NodeFS.openSync(filePath, 'r')),
+      (descriptor) => Effect.sync(() => NodeFS.closeSync(descriptor)),
+    )
     return fd
   })
 

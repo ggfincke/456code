@@ -44,6 +44,10 @@ jobs:
             exit 1
           }
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -96,12 +100,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
-          node-version: ${{ matrix.node }}
-          cache: true
+          node-version-file: package.json
+          cache: ${{ matrix.node != '22.16' }}
           run-install: true
+
+      - name: Verify native bootstrap
+        if: matrix.node == '22.16'
+        run: |
+          node --input-type=module -e '
+            import { createRequire } from "node:module";
+            const require = createRequire(new URL("./apps/server/package.json", import.meta.url));
+            const pty = require("node-pty").spawn("/bin/sh", ["-c", "printf bootstrap-ok"], { cols: 80, rows: 24 });
+            let output = "";
+            const timeout = setTimeout(() => { pty.kill(); process.exit(1); }, 10000);
+            pty.onData((data) => { output += data; });
+            pty.onExit(({ exitCode }) => { clearTimeout(timeout); if (exitCode !== 0 || !output.includes("bootstrap-ok")) process.exit(1); });
+          '
+
+      - name: Select Cartographer runtime
+        run: |
+          vp env use "${{ matrix.node }}"
+          node --version
+          node -e 'const selected = process.versions.node; if (!selected.startsWith("${{ matrix.node }}.")) throw new Error(`Unexpected runtime: ${selected}`)'
 
       - name: Build Cartographer core
         run: vp run --filter @t3tools/cartographer-core build
@@ -127,6 +154,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -168,6 +199,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -273,6 +308,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -294,6 +333,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -304,7 +347,7 @@ jobs:
       - name: Expose pnpm
         run: |
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          vp_pnpm_bin="$VP_HOME/package_manager/pnpm/$pnpm_version/pnpm/bin"
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
 
@@ -319,6 +362,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: pwsh
+        run: '"VP_HOME=$(Join-Path $env:USERPROFILE ''.vite-plus'')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -331,11 +378,27 @@ jobs:
               - --filter=@t3tools/web...
               - --filter=@t3tools/scripts...
 
+      - name: Verify Windows toolchain
+        shell: pwsh
+        run: |
+          foreach ($relativePath in @('current\bin\vp.exe', 'bin\vp.shim')) {
+            if (-not (Test-Path (Join-Path $env:VP_HOME $relativePath))) {
+              throw "Missing Vite+ toolchain path: $relativePath"
+            }
+          }
+          vp --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $pnpmVersion = (Get-Content package.json | ConvertFrom-Json).packageManager.Split('@')[-1]
+          & (Join-Path $env:VP_HOME "package_manager\pnpm\$pnpmVersion\pnpm\bin\pnpm.cmd") --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Expose pnpm
         shell: pwsh
         run: |
           $pnpmVersion = node --print "require('./package.json').packageManager.split('@').pop()"
-          $vpPnpmBin = Join-Path $env:USERPROFILE ".vite-plus/package_manager/pnpm/$pnpmVersion/pnpm/bin"
+          $vpPnpmBin = Join-Path $env:VP_HOME "package_manager/pnpm/$pnpmVersion/pnpm/bin"
           $vpPnpmBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & (Join-Path $vpPnpmBin "pnpm.cmd") --version
 
@@ -352,6 +415,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Select single-root Vite+ layout
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -390,12 +457,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: pwsh
+        run: '"VP_HOME=$(Join-Path $env:USERPROFILE ''.vite-plus'')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
           cache: true
           run-install: true
+
+      - name: Verify Windows toolchain
+        shell: pwsh
+        run: |
+          foreach ($relativePath in @('current\bin\vp.exe', 'bin\vp.shim')) {
+            if (-not (Test-Path (Join-Path $env:VP_HOME $relativePath))) {
+              throw "Missing Vite+ toolchain path: $relativePath"
+            }
+          }
+          vp --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $pnpmVersion = (Get-Content package.json | ConvertFrom-Json).packageManager.Split('@')[-1]
+          & (Join-Path $env:VP_HOME "package_manager\pnpm\$pnpmVersion\pnpm\bin\pnpm.cmd") --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Download WSL prebuild
         uses: actions/download-artifact@v8
@@ -466,12 +553,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Select single-root Vite+ layout
+        shell: pwsh
+        run: '"VP_HOME=$(Join-Path $env:USERPROFILE ''.vite-plus'')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
           cache: true
           run-install: true
+
+      - name: Verify Windows toolchain
+        shell: pwsh
+        run: |
+          foreach ($relativePath in @('current\bin\vp.exe', 'bin\vp.shim')) {
+            if (-not (Test-Path (Join-Path $env:VP_HOME $relativePath))) {
+              throw "Missing Vite+ toolchain path: $relativePath"
+            }
+          }
+          vp --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $pnpmVersion = (Get-Content package.json | ConvertFrom-Json).packageManager.Split('@')[-1]
+          & (Join-Path $env:VP_HOME "package_manager\pnpm\$pnpmVersion\pnpm\bin\pnpm.cmd") --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Download exact unsigned installers
         uses: actions/download-artifact@v8

@@ -1,10 +1,10 @@
+# .github/workflows/mobile-eas-production.yml
+# publish production mobile builds and OTA updates
+
 name: Mobile EAS Production
 
-# Production builds and OTA updates run from CI (Linux) — never from a laptop.
-# Under the fingerprint runtime-version policy the fingerprint must be computed
-# in the same OS/pnpm as the EAS build; a macOS `eas build` computes a different
-# fingerprint (platform-specific deps + pnpm version) and errors. On this Linux
-# runner, with corepack pinning pnpm 10.24 in eas.json, local == build.
+# production builds and OTA updates run from CI (Linux). keep pnpm aligned
+# with the explicit EAS build version so package-manager fingerprint inputs match.
 on:
   workflow_dispatch:
     inputs:
@@ -49,6 +49,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Select single-root Vite+ layout
+        if: steps.expo-token.outputs.present == 'true'
+        shell: bash
+        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         if: steps.expo-token.outputs.present == 'true'
         uses: voidzero-dev/setup-vp@v1
@@ -61,7 +66,7 @@ jobs:
         if: steps.expo-token.outputs.present == 'true'
         run: |
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          vp_pnpm_bin="$VP_HOME/package_manager/pnpm/$pnpm_version/pnpm/bin"
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
 
@@ -71,9 +76,8 @@ jobs:
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-          # npm, not pnpm: this only installs eas-cli into the action's own
-          # tool dir, and pnpm 11 hard-fails that install on dtrace-provider's
-          # ignored build script (no allowBuilds config outside the repo).
+          # install eas-cli in the action's tool directory through npm; the
+          # workspace allowBuilds policy does not cover this separate install.
           packager: npm
 
       - name: Pull production environment variables

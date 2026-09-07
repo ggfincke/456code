@@ -115,7 +115,7 @@ interface BackendProcessExit
   readonly result: Result.Result<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>
 }
 
-export class BackendTimeoutError extends Schema.TaggedErrorClass<BackendTimeoutError>()(
+export class BackendTimeoutError extends Schema.TaggedError<BackendTimeoutError>()(
   'BackendTimeoutError',
   {
     url: Schema.instanceOf(URL),
@@ -128,7 +128,7 @@ export class BackendTimeoutError extends Schema.TaggedErrorClass<BackendTimeoutE
   }
 }
 
-class BackendProcessBootstrapEncodeError extends Schema.TaggedErrorClass<BackendProcessBootstrapEncodeError>()(
+class BackendProcessBootstrapEncodeError extends Schema.TaggedError<BackendProcessBootstrapEncodeError>()(
   'BackendProcessBootstrapEncodeError',
   {
     entryPath: Schema.String,
@@ -142,7 +142,7 @@ class BackendProcessBootstrapEncodeError extends Schema.TaggedErrorClass<Backend
   }
 }
 
-class BackendProcessSpawnError extends Schema.TaggedErrorClass<BackendProcessSpawnError>()(
+class BackendProcessSpawnError extends Schema.TaggedError<BackendProcessSpawnError>()(
   'BackendProcessSpawnError',
   {
     executablePath: Schema.String,

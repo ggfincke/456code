@@ -1,46 +1,9 @@
 /**
- * Prometheus metrics exporter for Effect's Metric system.
+ * Formats Effect metrics for Prometheus.
  *
- * This module snapshots the metrics registered in the current Effect context
- * and renders them in the Prometheus text exposition format. It is intended for
- * services that already record `Metric` counters, gauges, histograms,
- * frequencies, or summaries and need a pull-based `/metrics` endpoint, or for
- * integrations that want the formatted scrape body for a custom HTTP server.
- *
- * Use `format` when you need the current runtime's registry rendered as a
- * string, `formatUnsafe` when you already have the `Context`, and `layerHttp`
- * when an `HttpRouter` should serve `GET /metrics` directly. Formatting happens
- * at scrape time; the module does not push metrics, schedule exports, or start
- * an HTTP server on its own. Make sure the route is installed in the same
- * application context that records the metrics you want to expose.
- *
- * Metric and label names are sanitized for Prometheus, optional prefixes and
- * name mappers are applied before output, and metric attributes become labels.
- * Keep attributes low-cardinality, avoid relying on invalid characters being
- * preserved exactly, and configure Prometheus to scrape the route served by
- * `layerHttp` with the expected `text/plain; version=0.0.4` response.
- *
- * **Example** (Exporting Prometheus metrics)
- *
- * ```ts
- * import { Effect, Metric } from "effect"
- * import { PrometheusMetrics } from "effect/unstable/observability"
- *
- * const program = Effect.gen(function*() {
- *   // Create and update metrics
- *   const counter = Metric.counter("http_requests_total", {
- *     description: "Total HTTP requests"
- *   })
- *   yield* Metric.update(counter, 42)
- *
- *   // Format metrics for Prometheus
- *   const output = yield* PrometheusMetrics.format()
- *   console.log(output)
- *   // # HELP http_requests_total Total HTTP requests
- *   // # TYPE http_requests_total counter
- *   // http_requests_total 42
- * })
- * ```
+ * This module reads metrics from the current Effect context and renders them in
+ * the Prometheus text format. It can also register a pull-based HTTP endpoint,
+ * such as `/metrics`, for Prometheus to scrape.
  *
  * @since 4.0.0
  */
@@ -56,12 +19,14 @@ import * as HttpServerResponse from "../http/HttpServerResponse.ts"
  *
  * **Example** (Mapping metric names)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { PrometheusMetrics } from "effect/unstable/observability"
  *
  * // Convert camelCase to snake_case
  * const mapper: PrometheusMetrics.MetricNameMapper = (name) =>
  *   name.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
+ *
+ * mapper("httpRequests") // => "http_requests"
  * ```
  *
  * @category models
@@ -72,7 +37,7 @@ export type MetricNameMapper = (name: string) => string
 /**
  * Options for formatting metrics.
  *
- * @category models
+ * @category options
  * @since 4.0.0
  */
 export interface FormatOptions {
@@ -90,7 +55,7 @@ export interface FormatOptions {
 /**
  * Options for exporting Prometheus metrics over HTTP.
  *
- * @category models
+ * @category options
  * @since 4.0.0
  */
 export interface HttpOptions extends FormatOptions {
@@ -105,7 +70,7 @@ export interface HttpOptions extends FormatOptions {
  *
  * **Example** (Formatting metrics)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Metric } from "effect"
  * import { PrometheusMetrics } from "effect/unstable/observability"
  *
@@ -125,10 +90,14 @@ export interface HttpOptions extends FormatOptions {
  *
  *   // Format with prefix
  *   const output2 = yield* PrometheusMetrics.format({ prefix: "myapp" })
+ *
+ *   return [output1.includes("api_requests_total"), output2.includes("myapp_active_connections")]
  * })
+ *
+ * Effect.runSync(program) // => [true, true]
  * ```
  *
- * @category Formatting
+ * @category formatting
  * @since 4.0.0
  */
 export const format: (options?: FormatOptions | undefined) => Effect.Effect<string> = Effect.fnUntraced(
@@ -143,10 +112,12 @@ export const format: (options?: FormatOptions | undefined) => Effect.Effect<stri
  *
  * **When to use**
  *
- * Use when you use this low-level function when you already have access to the context. Most
- * users should use `format` instead.
+ * Use when you already have access to the context and need low-level
+ * synchronous formatting.
  *
- * @category Formatting
+ * @see {@link format} for effectful formatting from the current context
+ *
+ * @category formatting
  * @since 4.0.0
  */
 export const formatUnsafe = (
@@ -191,7 +162,8 @@ export const formatUnsafe = (
  *
  * **Example** (Serving metrics over HTTP)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Layer } from "effect"
  * import { PrometheusMetrics } from "effect/unstable/observability"
  *
  * // Create a layer that adds /metrics endpoint to the router
@@ -202,9 +174,11 @@ export const formatUnsafe = (
  *   path: "/prometheus/metrics",
  *   prefix: "myapp"
  * })
+ *
+ * const result = [Layer.isLayer(PrometheusLayer), Layer.isLayer(CustomPrometheusLayer)] // => [true, true]
  * ```
  *
- * @category Http
+ * @category layers
  * @since 4.0.0
  */
 export const layerHttp = (

@@ -28917,7 +28917,7 @@ export const CreateConversationItemsRequestJson = Schema.StructWithRest(
       "description": "The items to add to the conversation. You may add up to 20 items at a time.\n"
     }).check(Schema.isMaxLength(20))
   }),
-  [Schema.Record(Schema.String, Schema.Json)]
+  [Schema.Record(Schema.String, Schema.Unknown)]
 )
 export type CreateConversationItems200 = ConversationItemList
 export const CreateConversationItems200 = ConversationItemList
@@ -30435,13 +30435,13 @@ export const make = (
     Type,
     DecodingServices
   >(
-    schema: Schema.Decoder<Type, DecodingServices>
+    schema: Schema.ConstraintDecoder<Type, DecodingServices>
   ) =>
   (
     request: HttpClientRequest.HttpClientRequest
   ): Stream.Stream<
     { readonly event: string; readonly id: string | undefined; readonly data: Type },
-    HttpClientError.HttpClientError | SchemaError | Sse.Retry,
+    HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
     DecodingServices
   > =>
     HttpClient.filterStatusOk(httpClient).execute(request).pipe(
@@ -30458,10 +30458,10 @@ export const make = (
       Stream.unwrap
     )
   const decodeSuccess =
-    <Schema extends Schema.Top>(schema: Schema) => (response: HttpClientResponse.HttpClientResponse) =>
+    <Schema extends Schema.Constraint>(schema: Schema) => (response: HttpClientResponse.HttpClientResponse) =>
       HttpClientResponse.schemaBodyJson(schema)(response)
   const decodeError =
-    <const Tag extends string, Schema extends Schema.Top>(tag: Tag, schema: Schema) =>
+    <const Tag extends string, Schema extends Schema.Constraint>(tag: Tag, schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
       Effect.flatMap(
         HttpClientResponse.schemaBodyJson(schema)(response),
@@ -32832,7 +32832,7 @@ export interface OpenAiClient {
     options: { readonly payload: typeof CreateSpeechRequestJson.Encoded }
   ) => Stream.Stream<
     { readonly event: string; readonly id: string | undefined; readonly data: typeof CreateSpeech200Sse.Type },
-    HttpClientError.HttpClientError | SchemaError | Sse.Retry,
+    HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
     typeof CreateSpeech200Sse.DecodingServices
   >
   /**
@@ -32868,7 +32868,7 @@ export interface OpenAiClient {
     options: { readonly payload: typeof CreateTranscriptionRequestFormData.Encoded }
   ) => Stream.Stream<
     { readonly event: string; readonly id: string | undefined; readonly data: typeof CreateTranscription200Sse.Type },
-    HttpClientError.HttpClientError | SchemaError | Sse.Retry,
+    HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
     typeof CreateTranscription200Sse.DecodingServices
   >
   /**
@@ -33058,7 +33058,7 @@ export interface OpenAiClient {
     options: { readonly payload: typeof CreateChatCompletionRequestJson.Encoded }
   ) => Stream.Stream<
     { readonly event: string; readonly id: string | undefined; readonly data: typeof CreateChatCompletion200Sse.Type },
-    HttpClientError.HttpClientError | SchemaError | Sse.Retry,
+    HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
     typeof CreateChatCompletion200Sse.DecodingServices
   >
   /**
@@ -33659,7 +33659,7 @@ export interface OpenAiClient {
     options: { readonly payload: typeof CreateImageEditRequestFormData.Encoded }
   ) => Stream.Stream<
     { readonly event: string; readonly id: string | undefined; readonly data: typeof CreateImageEdit200Sse.Type },
-    HttpClientError.HttpClientError | SchemaError | Sse.Retry,
+    HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
     typeof CreateImageEdit200Sse.DecodingServices
   >
   /**
@@ -33678,7 +33678,7 @@ export interface OpenAiClient {
     options: { readonly payload: typeof CreateImageRequestJson.Encoded }
   ) => Stream.Stream<
     { readonly event: string; readonly id: string | undefined; readonly data: typeof CreateImage200Sse.Type },
-    HttpClientError.HttpClientError | SchemaError | Sse.Retry,
+    HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
     typeof CreateImage200Sse.DecodingServices
   >
   /**
@@ -34879,7 +34879,7 @@ export interface OpenAiClient {
     options: { readonly payload: typeof CreateResponseRequestJson.Encoded }
   ) => Stream.Stream<
     { readonly event: string; readonly id: string | undefined; readonly data: typeof CreateResponse200Sse.Type },
-    HttpClientError.HttpClientError | SchemaError | Sse.Retry,
+    HttpClientError.HttpClientError | SchemaError | Sse.Retry | Sse.SseError,
     typeof CreateResponse200Sse.DecodingServices
   >
   /**

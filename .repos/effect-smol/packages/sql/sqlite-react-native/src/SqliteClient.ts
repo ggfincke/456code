@@ -1,37 +1,13 @@
 /**
- * React Native SQLite client implementation for Effect SQL, backed by
+ * Connects Effect SQL to SQLite in React Native using
  * `@op-engineering/op-sqlite`.
  *
- * This module opens an on-device SQLite database and exposes it as both the
- * React Native-specific `SqliteClient` service and the generic Effect
- * `SqlClient` service. Use it for mobile application storage, offline caches,
- * local migrations, sync queues, and tests that need the same SQLite driver as
- * the app runtime.
- *
- * **Mental model**
- *
- * A client owns one scoped op-sqlite database handle configured with the
- * provided `filename`, optional `location`, and optional `encryptionKey`.
- * Queries are compiled through the Effect SQL SQLite compiler and serialized
- * through that single handle. A transaction keeps the serialized connection
- * permit for the whole transaction scope, so other fibers using the same client
- * wait until the transaction finishes.
- *
- * **Common tasks**
- *
- * Use `layer` when a React Native app should provide both `SqliteClient` and
- * the generic `SqlClient` from a concrete configuration, `layerConfig` when the
- * configuration should come from Effect `Config`, and `make` inside a custom
- * scoped layer when you need direct lifecycle control. Use `withAsyncQuery`
- * around UI-sensitive effects or longer migration steps to run statements with
- * the driver's asynchronous API instead of the default synchronous API.
- *
- * **Gotchas**
- *
- * The default synchronous op-sqlite API can block the JavaScript thread, so keep
- * transactions short and wrap multi-statement writes in a transaction to avoid
- * partial updates. `executeStream` is not implemented for this driver, and
- * SQLite does not support `updateValues`.
+ * This module opens an on-device SQLite database and exposes it as both
+ * `SqliteClient` and the generic Effect SQL client. It serializes access,
+ * supports normal and value-based queries, and uses the driver's synchronous
+ * query API by default. `AsyncQuery` and `withAsyncQuery` switch a scoped effect
+ * to the driver's asynchronous query API. Streaming queries and `updateValues`
+ * are not supported by this driver.
  *
  * @since 4.0.0
  */
@@ -75,7 +51,7 @@ export type TypeId = "~@effect/sql-sqlite-react-native/SqliteClient"
 /**
  * React Native SQLite client service interface, extending `SqlClient` with its configuration and marking `updateValues` as unsupported for SQLite.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface SqliteClient extends Client.SqlClient {
@@ -89,7 +65,7 @@ export interface SqliteClient extends Client.SqlClient {
 /**
  * Service tag for the React Native SQLite client.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const SqliteClient = Context.Service<SqliteClient>("@effect/sql-sqlite-react-native/SqliteClient")
@@ -117,7 +93,7 @@ export interface SqliteClientConfig {
  * Use to switch React Native SQLite query execution to the asynchronous driver
  * API for a scoped effect.
  *
- * @category fiber refs
+ * @category services
  * @since 4.0.0
  */
 export const AsyncQuery = Context.Reference<boolean>(
@@ -128,7 +104,7 @@ export const AsyncQuery = Context.Reference<boolean>(
 /**
  * Runs an effect with `AsyncQuery` enabled, causing React Native SQLite queries in that effect to use the asynchronous driver API.
  *
- * @category fiber refs
+ * @category providing services
  * @since 4.0.0
  */
 export const withAsyncQuery = <R, E, A>(effect: Effect.Effect<A, E, R>) =>
@@ -167,8 +143,7 @@ export const make = (
 
       const run = (
         sql: string,
-        params: ReadonlyArray<unknown> = [],
-        values = false
+        params: ReadonlyArray<unknown> = []
       ) =>
         Effect.withFiber<Array<any>, SqlError>((fiber) => {
           if (fiber.getRef(AsyncQuery)) {
@@ -178,14 +153,29 @@ export const make = (
                 catch: (cause) =>
                   new SqlError({ reason: classifyError(cause, "Failed to execute statement (async)", "execute") })
               }),
-              (result) => values ? result.rawRows ?? [] : result.rows
+              (result) => result.rows
             )
           }
           return Effect.try({
-            try: () => {
-              const result = db.executeSync(sql, params as Array<any>)
-              return values ? result.rawRows ?? [] : result.rows
-            },
+            try: () => db.executeSync(sql, params as Array<any>).rows,
+            catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
+          })
+        })
+
+      const runValues = (
+        sql: string,
+        params: ReadonlyArray<unknown> = []
+      ) =>
+        Effect.withFiber<Array<any>, SqlError>((fiber) => {
+          if (fiber.getRef(AsyncQuery)) {
+            return Effect.tryPromise({
+              try: () => db.executeRaw(sql, params as Array<any>),
+              catch: (cause) =>
+                new SqlError({ reason: classifyError(cause, "Failed to execute statement (async)", "execute") })
+            })
+          }
+          return Effect.try({
+            try: () => db.executeRawSync(sql, params as Array<any>),
             catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
           })
         })
@@ -200,7 +190,10 @@ export const make = (
           return run(sql, params)
         },
         executeValues(sql, params) {
-          return run(sql, params, true)
+          return runValues(sql, params)
+        },
+        executeValuesUnprepared(sql, params) {
+          return runValues(sql, params)
         },
         executeUnprepared(sql, params, transformRows) {
           return this.execute(sql, params, transformRows)

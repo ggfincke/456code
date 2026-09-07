@@ -134,7 +134,7 @@ function missingDirectives(base: string, current: string): ReadonlyArray<string>
 const baseRef = resolveBaseRef()
 const changed = git(['diff', '--name-only', '--diff-filter=M', baseRef])
   .stdout.split('\n')
-  .filter((path) => CHECKED_EXTENSIONS.test(path))
+  .filter((path) => !path.startsWith('.repos/') && CHECKED_EXTENSIONS.test(path))
 
 let failures = 0
 for (const path of changed)

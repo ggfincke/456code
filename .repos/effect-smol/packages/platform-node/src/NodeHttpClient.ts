@@ -2,37 +2,10 @@
  * Node.js implementations of the Effect `HttpClient`.
  *
  * This module supplies Node runtime backends for the platform-independent
- * Effect HTTP client API. It re-exports the fetch-based client, defines an
- * Undici-backed client, and defines a lower-level `node:http` / `node:https`
- * client for integrations that need native agent configuration.
- *
- * **Mental model**
- *
- * All backends provide the same `HttpClient` service, so application code can
- * depend on the Effect HTTP client interface while the layer chooses the Node
- * implementation. The difference is where request execution and connection
- * ownership live: fetch uses `globalThis.fetch`, Undici sends through a
- * `Dispatcher`, and the `node:http` backend sends through scoped HTTP and HTTPS
- * agents.
- *
- * **Common tasks**
- *
- * Use `layerFetch` when the built-in fetch implementation is enough. Use
- * `layerUndici` for a scoped Undici `Agent`, or `layerUndiciNoDispatcher` when
- * the caller provides the `Dispatcher` service, including the process-global
- * dispatcher from `dispatcherLayerGlobal`. Use `layerNodeHttp` or
- * `layerAgentOptions` when TLS, proxy, keep-alive, socket, or other native
- * Node agent options must be configured directly.
- *
- * **Gotchas**
- *
- * Fetch, Undici, and `node:http` are not exact substitutes. They differ in
- * dispatcher and agent hooks, request body support, abort behavior, upgrade
- * support, and response body readers. Scoped layers destroy the agents or
- * dispatchers they create when the layer scope ends; `dispatcherLayerGlobal`
- * intentionally does not own or destroy Undici's process-global dispatcher.
- * Body read failures are reported as `HttpClientError` decode or transport
- * errors.
+ * Effect HTTP client API. It re-exports the fetch-based `Fetch`, `RequestInit`,
+ * and `layerFetch` APIs, defines an Undici-backed client with dispatcher
+ * services and request options, and defines a lower-level `node:http` /
+ * `node:https` client with scoped HTTP agent layers.
  *
  * @since 4.0.0
  */
@@ -78,14 +51,14 @@ export {
    * Use to access or override the fetch implementation used by the Node
    * fetch-based HTTP client.
    *
-   * @category fetch
+   * @category services
    * @since 4.0.0
    */
   Fetch,
   /**
    * Layer that provides the fetch-based HTTP client implementation.
    *
-   * @category Fetch
+   * @category layers
    * @since 4.0.0
    */
   layer as layerFetch,
@@ -96,7 +69,7 @@ export {
    *
    * Use to provide default fetch request options for Node HTTP requests.
    *
-   * @category fetch
+   * @category services
    * @since 4.0.0
    */
   RequestInit
@@ -110,7 +83,7 @@ export {
  * Service tag for the Undici `Dispatcher` used by the Undici-backed HTTP
  * client.
  *
- * @category Dispatcher
+ * @category services
  * @since 4.0.0
  */
 export class Dispatcher extends Context.Service<Dispatcher, Undici.Dispatcher>()(
@@ -121,10 +94,12 @@ export class Dispatcher extends Context.Service<Dispatcher, Undici.Dispatcher>()
  * Acquires a new Undici `Agent` dispatcher and destroys it when the enclosing
  * scope is finalized.
  *
- * @category Dispatcher
+ * @category resource management
  * @since 4.0.0
  */
 export const makeDispatcher: Effect.Effect<Undici.Dispatcher, never, Scope.Scope> = Effect.acquireRelease(
+  // oxlint cannot resolve values re-exported through the local Undici facade.
+  // oxlint-disable-next-line import/namespace
   Effect.sync(() => new Undici.Agent()),
   (dispatcher) => Effect.promise(() => dispatcher.destroy())
 )
@@ -132,7 +107,7 @@ export const makeDispatcher: Effect.Effect<Undici.Dispatcher, never, Scope.Scope
 /**
  * Provides the `Dispatcher` service using a scoped Undici `Agent`.
  *
- * @category Dispatcher
+ * @category layers
  * @since 4.0.0
  */
 export const layerDispatcher: Layer.Layer<Dispatcher> = Layer.effect(Dispatcher)(makeDispatcher)
@@ -141,16 +116,18 @@ export const layerDispatcher: Layer.Layer<Dispatcher> = Layer.effect(Dispatcher)
  * Provides the `Dispatcher` service from Undici's process-global dispatcher,
  * without creating or owning a new agent.
  *
- * @category Dispatcher
+ * @category layers
  * @since 4.0.0
  */
+// oxlint cannot resolve values re-exported through the local Undici facade.
+// oxlint-disable-next-line import/namespace
 export const dispatcherLayerGlobal: Layer.Layer<Dispatcher> = Layer.sync(Dispatcher)(() => Undici.getGlobalDispatcher())
 
 /**
  * Fiber reference containing default Undici request options applied to requests
  * sent by `makeUndici`.
  *
- * @category undici
+ * @category services
  * @since 4.0.0
  */
 export const UndiciOptions = Context.Reference<Partial<Undici.Dispatcher.RequestOptions>>(
@@ -163,7 +140,7 @@ export const UndiciOptions = Context.Reference<Partial<Undici.Dispatcher.Request
  * `Dispatcher`, converts Effect HTTP bodies to Undici bodies, and maps
  * transport and decode failures to `HttpClientError`.
  *
- * @category undici
+ * @category constructors
  * @since 4.0.0
  */
 export const makeUndici = Effect.gen(function*() {
@@ -380,7 +357,7 @@ class UndiciResponse extends Inspectable.Class implements HttpClientResponse, Pi
  * Provides an Undici-backed `HttpClient` using the current `Dispatcher`
  * service.
  *
- * @category Undici
+ * @category layers
  * @since 4.0.0
  */
 export const layerUndiciNoDispatcher: Layer.Layer<
@@ -393,7 +370,7 @@ export const layerUndiciNoDispatcher: Layer.Layer<
  * Provides an Undici-backed `HttpClient` together with a scoped default
  * Undici `Agent` dispatcher.
  *
- * @category Undici
+ * @category layers
  * @since 4.0.0
  */
 export const layerUndici: Layer.Layer<Client.HttpClient> = Layer.provide(layerUndiciNoDispatcher, layerDispatcher)
@@ -406,7 +383,7 @@ export const layerUndici: Layer.Layer<Client.HttpClient> = Layer.provide(layerUn
  * Service tag for the paired Node `http` and `https` agents used by the
  * node:http-backed HTTP client.
  *
- * @category HttpAgent
+ * @category services
  * @since 4.0.0
  */
 export class HttpAgent extends Context.Service<HttpAgent, {
@@ -418,7 +395,7 @@ export class HttpAgent extends Context.Service<HttpAgent, {
  * Acquires Node `http` and `https` agents with the supplied options and
  * destroys both agents when the enclosing scope is finalized.
  *
- * @category HttpAgent
+ * @category resource management
  * @since 4.0.0
  */
 export const makeAgent = (options?: Https.AgentOptions): Effect.Effect<HttpAgent["Service"], never, Scope.Scope> =>
@@ -438,7 +415,7 @@ export const makeAgent = (options?: Https.AgentOptions): Effect.Effect<HttpAgent
  * Provides the `HttpAgent` service using scoped Node `http` and `https`
  * agents configured with the supplied options.
  *
- * @category HttpAgent
+ * @category layers
  * @since 4.0.0
  */
 export const layerAgentOptions: (options?: Https.AgentOptions | undefined) => Layer.Layer<
@@ -449,7 +426,7 @@ export const layerAgentOptions: (options?: Https.AgentOptions | undefined) => La
  * Provides the `HttpAgent` service using default scoped Node `http` and
  * `https` agents.
  *
- * @category HttpAgent
+ * @category layers
  * @since 4.0.0
  */
 export const layerAgent: Layer.Layer<HttpAgent> = layerAgentOptions()
@@ -459,7 +436,7 @@ export const layerAgent: Layer.Layer<HttpAgent> = layerAgentOptions()
  * current `HttpAgent`, streaming request bodies, and wrapping Node responses
  * as `HttpClientResponse` values.
  *
- * @category node:http
+ * @category constructors
  * @since 4.0.0
  */
 export const makeNodeHttp = Effect.gen(function*() {
@@ -478,8 +455,11 @@ export const makeNodeHttp = Effect.gen(function*() {
         headers: request.headers,
         signal
       })
-    return Effect.forkChild(sendBody(nodeRequest, request, request.body)).pipe(
-      Effect.flatMap(() => waitForResponse(nodeRequest, request)),
+    return Effect.raceFirst(
+      waitForResponse(nodeRequest, request),
+      sendBody(nodeRequest, request, request.body).pipe(Effect.andThen(Effect.never))
+    ).pipe(
+      Effect.onError(() => Effect.sync(() => nodeRequest.destroy())),
       Effect.map((_) => new NodeHttpResponse(request, _))
     )
   })
@@ -672,7 +652,7 @@ class NodeHttpResponse extends NodeHttpIncomingMessage<Error.HttpClientError> im
  * Provides a node:http-backed `HttpClient` using the current `HttpAgent`
  * service.
  *
- * @category node:http
+ * @category layers
  * @since 4.0.0
  */
 export const layerNodeHttpNoAgent: Layer.Layer<
@@ -685,7 +665,7 @@ export const layerNodeHttpNoAgent: Layer.Layer<
  * Provides a node:http-backed `HttpClient` together with default scoped Node
  * `http` and `https` agents.
  *
- * @category node:http
+ * @category layers
  * @since 4.0.0
  */
 export const layerNodeHttp: Layer.Layer<Client.HttpClient> = Layer.provide(layerNodeHttpNoAgent, layerAgent)

@@ -106,7 +106,7 @@ export interface LatestImplementationAttemptInput
   readonly revision?: number
 }
 
-export class ProposalImplementationAttemptError extends Schema.TaggedErrorClass<ProposalImplementationAttemptError>()(
+export class ProposalImplementationAttemptError extends Schema.TaggedError<ProposalImplementationAttemptError>()(
   'ProposalImplementationAttemptError',
   {
     operation: Schema.String,

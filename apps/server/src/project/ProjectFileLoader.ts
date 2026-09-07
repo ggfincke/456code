@@ -20,7 +20,7 @@ import { ProjectFileFromJson } from '@t3tools/shared/projectFile'
 
 const decodeProjectFileJson = Schema.decodeEffect(ProjectFileFromJson)
 
-export class ProjectFileLoadError extends Schema.TaggedErrorClass<ProjectFileLoadError>()(
+export class ProjectFileLoadError extends Schema.TaggedError<ProjectFileLoadError>()(
   'ProjectFileLoadError',
   {
     operation: Schema.Literals(['read', 'decode']),

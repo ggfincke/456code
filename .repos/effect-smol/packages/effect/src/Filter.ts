@@ -1,37 +1,12 @@
 /**
- * The `Filter` module provides composable functions for accepting, rejecting,
- * narrowing, and transforming values. A `Filter<Input, Pass, Fail>` receives an
- * input and returns a `Result`: success means the value passed the filter, while
- * failure means the value was filtered out.
+ * Defines composable checks that can also transform values.
  *
- * **Mental model**
- *
- * - A filter is a typed predicate that can also transform the successful value
- * - Predicate-based filters pass the original input when the predicate returns `true`
- * - Refinement-based filters narrow the successful type, for example from `unknown` to `string`
- * - Custom filters return `Result.succeed(pass)` or `Result.fail(fail)` directly
- * - Filters compose with logical and sequential combinators instead of throwing exceptions
- * - `FilterEffect` is the effectful form for filters that need asynchronous work, errors, or services
- *
- * **Common tasks**
- *
- * - Build filters: {@link make}, {@link makeEffect}, {@link fromPredicate}, {@link fromPredicateOption}
- * - Narrow unknown values: {@link string}, {@link number}, {@link boolean}, {@link bigint}, {@link symbol}, {@link date}
- * - Match shapes and variants: {@link instanceOf}, {@link tagged}, {@link reason}, {@link has}
- * - Match exact values: {@link equals}, {@link equalsStrict}
- * - Combine alternatives: {@link or}
- * - Require multiple filters: {@link zip}, {@link zipWith}, {@link andLeft}, {@link andRight}
- * - Run filters in sequence: {@link compose}, {@link composePassthrough}
- * - Convert results: {@link toPredicate}, {@link toOption}, {@link toResult}
- * - Adjust failure values: {@link mapFail}
- *
- * **Gotchas**
- *
- * - A failed filter is data in the `Result` failure channel; it is not an exception
- * - `compose` preserves intermediate failure values, while {@link composePassthrough} fails with the original input
- * - `equalsStrict` uses JavaScript `===`; use {@link equals} for structural equality
- * - `fromPredicateOption` fails with the original input when the returned `Option` is `None`
- * - Prefer refinement predicates when you want TypeScript to narrow the successful value type
+ * A `Filter<Input, Pass, Fail>` receives an input and returns a `Result`.
+ * Success means the value passed the filter, and failure means the value was
+ * filtered out. Filters may also narrow or transform the passing value. This
+ * module includes constructors from predicates, options, and effects, built-in
+ * filters for common JavaScript values and tags, helpers for combining filters,
+ * and conversions to predicates, options, and results.
  *
  * @since 4.0.0
  */
@@ -53,14 +28,14 @@ import type { EqualsWith, ExcludeTag, ExtractReason, ExtractTag, ReasonTags, Tag
  *
  * **Example** (Defining a positive number filter)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Filter, Result } from "effect"
  *
  * // A filter that only passes positive numbers
  * const positiveFilter: Filter.Filter<number> = (n) => n > 0 ? Result.succeed(n) : Result.fail(n)
  *
- * console.log(positiveFilter(5)) // Result.succeed(5)
- * console.log(positiveFilter(-3)) // Result.fail(-3)
+ * positiveFilter(5) // => Result.succeed(5)
+ * positiveFilter(-3) // => Result.fail(-3)
  * ```
  *
  * @category models
@@ -81,7 +56,7 @@ export interface Filter<in Input, out Pass = Input, out Fail = Input> {
  *
  * **Example** (Defining an effectful user filter)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Filter, Result } from "effect"
  *
  * // An effectful filter that validates user data
@@ -99,6 +74,9 @@ export interface Filter<in Input, out Pass = Input, out Fail = Input> {
  *     const user: User = { id, isActive: id.length > 0 }
  *     return user.isActive ? Result.succeed(user) : Result.fail(user)
  *   })
+ *
+ * await Effect.runPromise(validateUser("alice")) // => Result.succeed({ id: "alice", isActive: true })
+ * await Effect.runPromise(validateUser("")) // => Result.fail({ id: "", isActive: false })
  * ```
  *
  * @category models
@@ -128,7 +106,7 @@ export interface FilterEffect<
  *
  * **Example** (Creating custom filters)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Filter, Result } from "effect"
  *
  * // Create a filter for positive numbers
@@ -138,6 +116,8 @@ export interface FilterEffect<
  * const uppercaseFilter = Filter.make((s: string) =>
  *   s.length > 0 ? Result.succeed(s.toUpperCase()) : Result.fail(s)
  * )
+ * positiveFilter(1) // => Result.succeed(1)
+ * uppercaseFilter("ok") // => Result.succeed("OK")
  * ```
  *
  * @category constructors
@@ -158,7 +138,7 @@ export const make = <Input, Pass, Fail>(
  *
  * **Example** (Creating effectful filters)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Filter, Result } from "effect"
  *
  * // Create an effectful filter that validates async
@@ -168,6 +148,8 @@ export const make = <Input, Pass, Fail>(
  *     return isValid ? Result.succeed(id) : Result.fail(id)
  *   })
  * )
+ *
+ * await Effect.runPromise(asyncValidate("id")) // => Result.succeed("id")
  * ```
  *
  * @category constructors
@@ -226,7 +208,7 @@ export {
  *
  * **Example** (Creating filters from predicates)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Filter, Result } from "effect"
  *
  * // Create filter from predicate
@@ -237,6 +219,9 @@ export {
  * const isString = Filter.fromPredicate((x: unknown): x is string =>
  *   typeof x === "string"
  * )
+ * positiveNumbers(1) // => Result.succeed(1)
+ * nonEmptyStrings("") // => Result.fail("")
+ * isString("ok") // => Result.succeed("ok")
  * ```
  *
  * @category constructors
@@ -284,11 +269,11 @@ export const toPredicate = <A, Pass, Fail>(
  *
  * **Example** (Filtering strings)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Filter, Result } from "effect"
  *
- * console.log(Filter.string("hello")) // Result.succeed("hello")
- * console.log(Filter.string(42)) // fail
+ * Filter.string("hello") // => Result.succeed("hello")
+ * Filter.string(42) // => Result.fail(42)
  * ```
  *
  * @category constructors
@@ -375,11 +360,11 @@ export const instanceOf =
  *
  * **Example** (Filtering numbers)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Filter, Result } from "effect"
  *
- * console.log(Filter.number(42)) // Result.succeed(42)
- * console.log(Filter.number("42")) // fail
+ * Filter.number(42) // => Result.succeed(42)
+ * Filter.number("42") // => Result.fail("42")
  * ```
  *
  * @category constructors
@@ -447,8 +432,8 @@ export const symbol: Filter<unknown, symbol> = fromPredicate(Predicate.isSymbol)
  *
  * **When to use**
  *
- * Use when narrowing unknown input to JavaScript `Date` instances with a
- * reusable `Filter`.
+ * Use when you need to narrow unknown input to JavaScript `Date` instances with
+ * a reusable `Filter`.
  *
  * **Details**
  *
@@ -642,13 +627,14 @@ export const zipWith: {
  *
  * **Example** (Zipping filters)
  *
- * ```ts
- * import { Filter } from "effect"
+ * ```ts import.meta.vitest
+ * import { Filter, Result } from "effect"
  *
  * const positiveNumbers = Filter.fromPredicate((n: number) => n > 0)
  * const evenNumbers = Filter.fromPredicate((n: number) => n % 2 === 0)
  *
  * const positiveAndEven = Filter.zip(positiveNumbers, evenNumbers)
+ * positiveAndEven(2) // => Result.succeed([2, 2])
  * ```
  *
  * @category combinators
@@ -675,13 +661,14 @@ export const zip: {
  *
  * **Example** (Keeping the left filter result)
  *
- * ```ts
- * import { Filter } from "effect"
+ * ```ts import.meta.vitest
+ * import { Filter, Result } from "effect"
  *
  * const positiveNumbers = Filter.fromPredicate((n: number) => n > 0)
  * const evenNumbers = Filter.fromPredicate((n: number) => n % 2 === 0)
  *
  * const positiveEven = Filter.andLeft(positiveNumbers, evenNumbers)
+ * positiveEven(2) // => Result.succeed(2)
  * ```
  *
  * @category combinators
@@ -707,7 +694,7 @@ export const andLeft: {
  *
  * **Example** (Keeping the right filter result)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Filter, Result } from "effect"
  *
  * const positiveNumbers = Filter.fromPredicate((n: number) => n > 0)
@@ -716,6 +703,7 @@ export const andLeft: {
  * )
  *
  * const positiveDoubled = Filter.andRight(positiveNumbers, doubleNumbers)
+ * positiveDoubled(2) // => Result.succeed(4)
  * ```
  *
  * @category combinators
@@ -741,7 +729,7 @@ export const andRight: {
  *
  * **Example** (Composing filters)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Filter, Result } from "effect"
  *
  * const stringFilter = Filter.string
@@ -750,6 +738,7 @@ export const andRight: {
  * )
  *
  * const stringToUpper = Filter.compose(stringFilter, nonEmptyUpper)
+ * stringToUpper("hello") // => Result.succeed("HELLO")
  * ```
  *
  * @category combinators
@@ -811,8 +800,8 @@ export const composePassthrough: {
  *
  * **When to use**
  *
- * Use when adapting a `Filter` to `Option`-based code and you only need the
- * passed value, with filtered-out inputs represented as `None`.
+ * Use when adapting a `Filter` to `Option`-based code where passed values
+ * become `Some` and filtered-out inputs become `None`.
  *
  * @see {@link toResult} for keeping the filter failure value
  * @see {@link toPredicate} for plain boolean pass/fail checks

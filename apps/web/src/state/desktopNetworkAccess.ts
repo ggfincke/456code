@@ -25,7 +25,7 @@ export interface DesktopNetworkAccessSnapshot
   readonly serverExposureState: DesktopServerExposureState
 }
 
-class DesktopNetworkAccessUnavailableError extends Schema.TaggedErrorClass<DesktopNetworkAccessUnavailableError>()(
+class DesktopNetworkAccessUnavailableError extends Schema.TaggedError<DesktopNetworkAccessUnavailableError>()(
   'DesktopNetworkAccessUnavailableError',
   {},
 )
@@ -36,7 +36,7 @@ class DesktopNetworkAccessUnavailableError extends Schema.TaggedErrorClass<Deskt
   }
 }
 
-class DesktopServerExposureStateLoadError extends Schema.TaggedErrorClass<DesktopServerExposureStateLoadError>()(
+class DesktopServerExposureStateLoadError extends Schema.TaggedError<DesktopServerExposureStateLoadError>()(
   'DesktopServerExposureStateLoadError',
   { cause: Schema.Defect() },
 )
@@ -47,7 +47,7 @@ class DesktopServerExposureStateLoadError extends Schema.TaggedErrorClass<Deskto
   }
 }
 
-class DesktopAdvertisedEndpointsLoadError extends Schema.TaggedErrorClass<DesktopAdvertisedEndpointsLoadError>()(
+class DesktopAdvertisedEndpointsLoadError extends Schema.TaggedError<DesktopAdvertisedEndpointsLoadError>()(
   'DesktopAdvertisedEndpointsLoadError',
   { cause: Schema.Defect() },
 )

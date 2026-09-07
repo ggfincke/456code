@@ -1,38 +1,29 @@
 /**
- * OTLP/HTTP metrics exporter for Effect's Metric system.
+ * Exports Effect metrics over OTLP/HTTP.
  *
- * This module periodically snapshots the metrics registered in the current
- * Effect context, serializes them as OTLP resource metrics, and posts them to a
- * metrics endpoint such as an OpenTelemetry Collector or vendor OTLP intake.
- * It is typically installed with `layer` in long-running services that already
- * update `Metric` counters, gauges, histograms, frequencies, or summaries and
- * need those values exported without adding instrumentation-specific plumbing
- * to the application code.
- *
- * Pass the concrete `/v1/metrics` endpoint to `make` or `layer`, or use the
- * higher-level `Otlp` module when you want `baseUrl` path construction for all
- * signals. The exporter requires an `HttpClient` and an `OtlpSerialization`
- * implementation, takes resource metadata from explicit options or standard
- * OTEL resource environment variables, and uses the resource `service.name` as
- * the instrumentation scope name. Choose `temporality` for the target backend:
- * cumulative is the default, while delta derives per-export changes from the
- * previous snapshot. Gauges always report their current value, and delta
- * histograms and summaries keep interval counts and sums from previous
- * snapshots, so tune export intervals and shutdown timeouts with backend
- * expectations and process shutdown behavior in mind.
+ * This module periodically snapshots metrics from the current Effect context,
+ * serializes them as OTLP resource metrics, and posts them to a metrics
+ * endpoint such as an OpenTelemetry Collector or vendor intake. It is meant for
+ * long-running services that already update `Metric` counters, gauges,
+ * histograms, frequencies, or summaries. The exporter supports cumulative
+ * reporting from a fixed start time and delta reporting from the previous
+ * export.
  *
  * @since 4.0.0
  */
 import * as Arr from "../../Array.ts"
 import { Clock } from "../../Clock.ts"
+import * as Config from "../../Config.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Metric from "../../Metric.ts"
+import * as Option from "../../Option.ts"
 import type * as Scope from "../../Scope.ts"
 import type * as Headers from "../http/Headers.ts"
 import type { HttpBody } from "../http/HttpBody.ts"
 import type * as HttpClient from "../http/HttpClient.ts"
+import * as OtlpEnv from "./internal/otlpEnv.ts"
 import * as Exporter from "./OtlpExporter.ts"
 import type { Fixed64, KeyValue } from "./OtlpResource.ts"
 import * as OtlpResource from "./OtlpResource.ts"
@@ -49,7 +40,8 @@ import { OtlpSerialization } from "./OtlpSerialization.ts"
  *
  * **Example** (Configuring aggregation temporality)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Layer } from "effect"
  * import { OtlpMetrics } from "effect/unstable/observability"
  *
  * // Use delta temporality for backends that prefer it (e.g., Datadog, Dynatrace)
@@ -63,6 +55,8 @@ import { OtlpSerialization } from "./OtlpSerialization.ts"
  *   url: "http://localhost:4318/v1/metrics",
  *   temporality: "cumulative" // This is the default
  * })
+ *
+ * const result = [Layer.isLayer(metricsLayer), Layer.isLayer(cumulativeLayer)] // => [true, true]
  * ```
  *
  * @category models
@@ -76,6 +70,9 @@ export type AggregationTemporality = "cumulative" | "delta"
  * **Details**
  *
  * The exporter snapshots registered Effect metrics on the configured interval, serializes them with the selected aggregation temporality, and flushes during scope finalization up to `shutdownTimeout`.
+ * Manual flushing also triggers a snapshot. With delta temporality, each
+ * successful export advances the previous-export state, so frequent successful
+ * flushes narrow the delta aggregation windows.
  *
  * @category constructors
  * @since 4.0.0
@@ -94,7 +91,7 @@ export const make: (options: {
 }) => Effect.Effect<
   void,
   never,
-  HttpClient.HttpClient | OtlpSerialization | Scope.Scope
+  Exporter.Flusher | HttpClient.HttpClient | OtlpSerialization | Scope.Scope
 > = Effect.fnUntraced(function*(options) {
   const clock = yield* Clock
   const serialization = yield* OtlpSerialization
@@ -111,15 +108,22 @@ export const make: (options: {
 
   // State for delta temporality tracking
   let previousExportTimeNanos: bigint = startTimeNanos
-  const previousCounterState = new Map<string, number | bigint>()
-  const previousHistogramState = new Map<string, PreviousHistogramState>()
-  const previousFrequencyState = new Map<string, Map<string, number>>()
-  const previousSummaryState = new Map<string, PreviousSummaryState>()
+  let previousCounterState = new Map<string, number | bigint>()
+  let previousHistogramState = new Map<string, PreviousHistogramState>()
+  let previousFrequencyState = new Map<string, Map<string, number>>()
+  let previousSummaryState = new Map<string, PreviousSummaryState>()
+  let snapshotSequence = 0
+  let committedSnapshotSequence = -1
 
-  const snapshot = (): HttpBody => {
+  const snapshot = (): readonly [body: HttpBody, onSuccess: Effect.Effect<void>] => {
     const snapshot = Metric.snapshotUnsafe(services)
+    const currentSnapshotSequence = snapshotSequence++
     const nowNanos = clock.currentTimeNanosUnsafe()
     const nowTime = String(nowNanos)
+    const nextCounterState = new Map(previousCounterState)
+    const nextHistogramState = new Map(previousHistogramState)
+    const nextFrequencyState = new Map(previousFrequencyState)
+    const nextSummaryState = new Map(previousSummaryState)
     const metricData: Array<IMetric> = []
     const metricDataByName = new Map<string, IMetric>()
     const addMetricData = (data: IMetric) => {
@@ -165,7 +169,7 @@ export const make: (options: {
                 }
               }
             }
-            previousCounterState.set(metricKey, currentCount)
+            nextCounterState.set(metricKey, currentCount)
           }
 
           const dataPoint: INumberDataPoint = {
@@ -256,7 +260,7 @@ export const make: (options: {
               // Note: This is a limitation - true delta min/max would require tracking
               // observations within each interval
             }
-            previousHistogramState.set(metricKey, {
+            nextHistogramState.set(metricKey, {
               count: state.state.count,
               sum: state.state.sum,
               bucketCounts: currentBuckets.counts.slice(),
@@ -317,7 +321,7 @@ export const make: (options: {
           }
 
           if (isDelta) {
-            previousFrequencyState.set(metricKey, currentOccurrences)
+            nextFrequencyState.set(metricKey, currentOccurrences)
           }
 
           if (metricDataByName.has(state.id)) {
@@ -369,7 +373,7 @@ export const make: (options: {
               reportCount = state.state.count - previousState.count
               reportSum = state.state.sum - previousState.sum
             }
-            previousSummaryState.set(metricKey, {
+            nextSummaryState.set(metricKey, {
               count: state.state.count,
               sum: state.state.sum
             })
@@ -429,12 +433,7 @@ export const make: (options: {
       }
     }
 
-    // Update the previous export time for delta calculations
-    if (isDelta) {
-      previousExportTimeNanos = nowNanos
-    }
-
-    return serialization.metrics({
+    const body = serialization.metrics({
       resourceMetrics: [{
         resource,
         scopeMetrics: [{
@@ -443,6 +442,18 @@ export const make: (options: {
         }]
       }]
     })
+    const onSuccess = isDelta
+      ? Effect.sync(() => {
+        if (currentSnapshotSequence < committedSnapshotSequence) return
+        previousCounterState = nextCounterState
+        previousHistogramState = nextHistogramState
+        previousFrequencyState = nextFrequencyState
+        previousSummaryState = nextSummaryState
+        previousExportTimeNanos = nowNanos
+        committedSnapshotSequence = currentSnapshotSequence
+      })
+      : Effect.void
+    return [body, onSuccess]
   }
 
   yield* Exporter.make({
@@ -473,7 +484,60 @@ export const layer = (options: {
   readonly exportInterval?: Duration.Input | undefined
   readonly shutdownTimeout?: Duration.Input | undefined
   readonly temporality?: AggregationTemporality | undefined
-}): Layer.Layer<never, never, HttpClient.HttpClient | OtlpSerialization> => Layer.effectDiscard(make(options))
+}): Layer.Layer<Exporter.Flusher, never, HttpClient.HttpClient | OtlpSerialization> =>
+  Layer.effectDiscard(make(options)).pipe(Layer.provideMerge(Exporter.layerFlusher))
+
+/**
+ * Creates an OTLP metrics layer from OpenTelemetry configuration.
+ *
+ * @category layers
+ * @since 4.0.0
+ */
+export const layerFromConfig = (options?: {
+  readonly resource?: {
+    readonly serviceName?: string | undefined
+    readonly serviceVersion?: string | undefined
+    readonly attributes?: Record<string, unknown>
+  } | undefined
+  readonly headers?: Headers.Input | undefined
+}): Layer.Layer<Exporter.Flusher, never, HttpClient.HttpClient | OtlpSerialization> =>
+  Effect.gen(function*() {
+    const { disabled, endpoint, exporters } = yield* Config.all({
+      disabled: Config.boolean("OTEL_SDK_DISABLED").pipe(Config.withDefault(false)),
+      endpoint: OtlpEnv.endpoint("METRICS"),
+      exporters: OtlpEnv.exporters("METRICS")
+    })
+    if (disabled || !endpoint || !exporters.includes("otlp")) {
+      return Exporter.layerFlusher
+    }
+
+    const { baseTimeout, metricsTimeout, exportTimeout, exportInterval, temporalityPreference } = yield* Config.all({
+      baseTimeout: Config.option(Config.int("OTEL_EXPORTER_OTLP_TIMEOUT")),
+      metricsTimeout: Config.option(Config.int("OTEL_EXPORTER_OTLP_METRICS_TIMEOUT")),
+      exportTimeout: Config.option(Config.int("OTEL_METRIC_EXPORT_TIMEOUT")),
+      exportInterval: Config.option(
+        Config.int("OTEL_METRIC_EXPORT_INTERVAL").pipe(
+          Config.map(Duration.millis)
+        )
+      ),
+      temporalityPreference: Config.option(
+        Config.literals(["delta", "cumulative"], "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
+      )
+    })
+
+    const shutdownTimeout = Option.firstSomeOf([metricsTimeout, baseTimeout, exportTimeout]).pipe(
+      Option.map((_) => Duration.millis(_))
+    )
+
+    return layer({
+      url: endpoint.toString(),
+      resource: options?.resource,
+      headers: options?.headers ?? (yield* OtlpEnv.headers("METRICS")),
+      exportInterval: Option.getOrUndefined(exportInterval),
+      shutdownTimeout: Option.getOrUndefined(shutdownTimeout),
+      temporality: Option.getOrUndefined(temporalityPreference)
+    })
+  }).pipe(Effect.orDie, Layer.unwrap)
 
 /**
  * OTLP metrics payload serialized by `OtlpMetrics`.

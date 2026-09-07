@@ -1,39 +1,11 @@
 /**
- * The `TxSubscriptionRef` module provides a transactional reference that can
- * also be observed as a stream of committed values. It combines the read and
- * update behavior of a `TxRef.TxRef` with a subscription channel, so each
- * subscriber first receives the current value and then receives every value
- * published by later updates.
+ * Stores transactional state and publishes committed changes.
  *
- * **Mental model**
- *
- * - The current value is stored transactionally and can be read with
- *   {@link get}
- * - Mutations such as {@link set}, {@link update}, and {@link modify} commit a
- *   new value and publish that value to active subscribers
- * - {@link changes} creates a scoped transactional queue for one subscriber
- * - {@link changesStream} exposes the same change feed as a `Stream.Stream`
- * - Subscriptions are per subscriber; each subscriber gets its own queue of
- *   committed values
- *
- * **Common tasks**
- *
- * - Create observable transactional state with {@link make}
- * - Read or replace the current value with {@link get} and {@link set}
- * - Derive new values atomically with {@link update} or {@link modify}
- * - Consume changes from transactional code with {@link changes}
- * - Consume changes from stream pipelines with {@link changesStream}
- *
- * **Gotchas**
- *
- * - A subscription starts with the value current at subscription time, not just
- *   future updates
- * - The queue returned by {@link changes} is scoped; leaving the scope removes
- *   the subscriber
- * - Updates are published even when the new value is equal to the previous
- *   value
- * - Subscriber queues are unbounded, so long-lived slow subscribers can retain
- *   pending values until they catch up or their scope closes
+ * A `TxSubscriptionRef<A>` combines a `TxRef<A>` for the current value with a
+ * transactional pub/sub channel for updates. Subscribers first receive the
+ * current value and then every later value that is published by committed
+ * updates. This module includes constructors, reads, writes, update and modify
+ * helpers, transactional-queue subscriptions, stream subscriptions, and a guard.
  *
  * @since 4.0.0
  */
@@ -64,24 +36,25 @@ const TypeId = "~effect/transactions/TxSubscriptionRef"
  *
  * **Example** (Subscribing to transactional changes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxQueue, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(0)
  *
- *   yield* Effect.scoped(
+ *   return yield* Effect.scoped(
  *     Effect.gen(function*() {
  *       const sub = yield* TxSubscriptionRef.changes(ref)
  *       const initial = yield* TxQueue.take(sub)
- *       console.log(initial) // 0
  *
  *       yield* TxSubscriptionRef.set(ref, 1)
  *       const next = yield* TxQueue.take(sub)
- *       console.log(next) // 1
+ *       return [initial, next]
  *     })
  *   )
  * })
+ *
+ * await Effect.runPromise(program) // => [0, 1]
  * ```
  *
  * @see {@link make} for creating a transactional subscription reference
@@ -123,19 +96,20 @@ const TxSubscriptionRefProto: Omit<TxSubscriptionRef<any>, typeof TypeId | "ref"
  *
  * **When to use**
  *
- * Use to create transactional state that also publishes every committed update
- * to subscribers.
+ * Use to create a `TxSubscriptionRef` that publishes every committed update to
+ * subscribers.
  *
  * **Example** (Creating a transactional subscription reference)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(42)
- *   const value = yield* TxSubscriptionRef.get(ref)
- *   console.log(value) // 42
+ *   return yield* TxSubscriptionRef.get(ref)
  * })
+ *
+ * await Effect.runPromise(program) // => 42
  * ```
  *
  * @see {@link changes} for subscribing to the created reference
@@ -163,19 +137,20 @@ export const make = <A>(value: A): Effect.Effect<TxSubscriptionRef<A>> =>
  *
  * **When to use**
  *
- * Use to read the current transactional value without subscribing to future
- * changes.
+ * Use to read the current `TxSubscriptionRef` value without subscribing to
+ * future changes.
  *
  * **Example** (Reading the current value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make("hello")
- *   const value = yield* TxSubscriptionRef.get(ref)
- *   console.log(value) // "hello"
+ *   return yield* TxSubscriptionRef.get(ref)
  * })
+ *
+ * await Effect.runPromise(program) // => "hello"
  * ```
  *
  * @see {@link changes} for reading the current value and subsequent updates
@@ -195,20 +170,21 @@ export const get = <A>(self: TxSubscriptionRef<A>): Effect.Effect<A> => TxRef.ge
  *
  * **When to use**
  *
- * Use to compute a separate return value and next state in one transactional
- * update.
+ * Use to compute a separate return value and next `TxSubscriptionRef` state in
+ * one transactional update.
  *
  * **Example** (Modifying and returning a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(10)
  *   const result = yield* TxSubscriptionRef.modify(ref, (n) => [`was ${n}`, n + 1])
- *   console.log(result) // "was 10"
- *   console.log(yield* TxSubscriptionRef.get(ref)) // 11
+ *   return [result, yield* TxSubscriptionRef.get(ref)]
  * })
+ *
+ * await Effect.runPromise(program) // => ["was 10", 11]
  * ```
  *
  * @see {@link update} for deriving the next value without a separate return value
@@ -245,18 +221,21 @@ export const modify: {
  *
  * **When to use**
  *
- * Use to replace the current value with a known value and publish it.
+ * Use to replace the current `TxSubscriptionRef` value with a known value and
+ * publish it.
  *
  * **Example** (Setting a new value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(0)
  *   yield* TxSubscriptionRef.set(ref, 42)
- *   console.log(yield* TxSubscriptionRef.get(ref)) // 42
+ *   return yield* TxSubscriptionRef.get(ref)
  * })
+ *
+ * await Effect.runPromise(program) // => 42
  * ```
  *
  * @see {@link update} for deriving the new value from the current value
@@ -279,18 +258,21 @@ export const set: {
  *
  * **When to use**
  *
- * Use to derive the next value from the current value and publish it.
+ * Use to derive the next `TxSubscriptionRef` value from the current value and
+ * publish it.
  *
  * **Example** (Updating a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(5)
  *   yield* TxSubscriptionRef.update(ref, (n) => n * 2)
- *   console.log(yield* TxSubscriptionRef.get(ref)) // 10
+ *   return yield* TxSubscriptionRef.get(ref)
  * })
+ *
+ * await Effect.runPromise(program) // => 10
  * ```
  *
  * @see {@link set} for replacing the value directly
@@ -314,19 +296,21 @@ export const update: {
  *
  * **When to use**
  *
- * Use to replace the value while returning the previous value.
+ * Use to replace a `TxSubscriptionRef` value while returning the previous value
+ * and publishing the update to subscribers.
  *
  * **Example** (Getting and setting atomically)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make("a")
  *   const old = yield* TxSubscriptionRef.getAndSet(ref, "b")
- *   console.log(old) // "a"
- *   console.log(yield* TxSubscriptionRef.get(ref)) // "b"
+ *   return [old, yield* TxSubscriptionRef.get(ref)]
  * })
+ *
+ * await Effect.runPromise(program) // => ["a", "b"]
  * ```
  *
  * @see {@link set} for setting without returning the previous value
@@ -349,19 +333,21 @@ export const getAndSet: {
  *
  * **When to use**
  *
- * Use to derive and publish a new value while returning the previous value.
+ * Use to derive and publish a new `TxSubscriptionRef` value while returning the
+ * previous value.
  *
  * **Example** (Getting and updating atomically)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(1)
  *   const old = yield* TxSubscriptionRef.getAndUpdate(ref, (n) => n + 10)
- *   console.log(old) // 1
- *   console.log(yield* TxSubscriptionRef.get(ref)) // 11
+ *   return [old, yield* TxSubscriptionRef.get(ref)]
  * })
+ *
+ * await Effect.runPromise(program) // => [1, 11]
  * ```
  *
  * @see {@link update} for updating without returning the previous value
@@ -385,18 +371,20 @@ export const getAndUpdate: {
  *
  * **When to use**
  *
- * Use to derive and publish a new value while returning that new value.
+ * Use to derive and publish a new `TxSubscriptionRef` value while returning
+ * that new value.
  *
  * **Example** (Updating and reading atomically)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(3)
- *   const result = yield* TxSubscriptionRef.updateAndGet(ref, (n) => n * 3)
- *   console.log(result) // 9
+ *   return yield* TxSubscriptionRef.updateAndGet(ref, (n) => n * 3)
  * })
+ *
+ * await Effect.runPromise(program) // => 9
  * ```
  *
  * @see {@link update} for updating without returning the new value
@@ -427,28 +415,30 @@ export const updateAndGet: {
  *
  * **When to use**
  *
- * Use to subscribe to committed changes through a scoped transactional queue.
+ * Use to subscribe to `TxSubscriptionRef` committed changes through a scoped
+ * transactional queue.
  *
  * **Example** (Subscribing to changes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxQueue, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(0)
  *
- *   yield* Effect.scoped(
+ *   return yield* Effect.scoped(
  *     Effect.gen(function*() {
  *       const sub = yield* TxSubscriptionRef.changes(ref)
  *       const initial = yield* TxQueue.take(sub)
- *       console.log(initial) // 0
  *
  *       yield* TxSubscriptionRef.set(ref, 1)
  *       const next = yield* TxQueue.take(sub)
- *       console.log(next) // 1
+ *       return [initial, next]
  *     })
  *   )
  * })
+ *
+ * await Effect.runPromise(program) // => [0, 1]
  * ```
  *
  * @see {@link changesStream} for subscribing through a `Stream`
@@ -477,11 +467,11 @@ export const changes = <A>(
  *
  * **When to use**
  *
- * Use to consume committed changes as a `Stream`.
+ * Use to consume `TxSubscriptionRef` committed changes as a `Stream`.
  *
  * **Example** (Streaming changes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Stream, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -492,8 +482,10 @@ export const changes = <A>(
  *   const values = yield* Stream.runCollect(
  *     TxSubscriptionRef.changesStream(ref).pipe(Stream.take(1))
  *   )
- *   console.log(values) // [2]
+ *   return Array.from(values)
  * })
+ *
+ * await Effect.runPromise(program) // => [2]
  * ```
  *
  * @see {@link changes} for subscribing through a transactional queue
@@ -522,14 +514,11 @@ export const changesStream = <A>(self: TxSubscriptionRef<A>): Stream.Stream<A, n
  *
  * **Example** (Checking transactional subscription references)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { TxSubscriptionRef } from "effect"
  *
- * declare const someValue: unknown
- *
- * if (TxSubscriptionRef.isTxSubscriptionRef(someValue)) {
- *   console.log("This is a TxSubscriptionRef")
- * }
+ * const someValue: unknown = {}
+ * TxSubscriptionRef.isTxSubscriptionRef(someValue) // => false
  * ```
  *
  * @see {@link make} for creating a `TxSubscriptionRef`

@@ -3,7 +3,7 @@
 
 import { useMemo } from 'react'
 import { View } from 'react-native'
-import { parseMarkdownWithOptions } from 'react-native-nitro-markdown/headless'
+import { parseMarkdownWithOptions, type MarkdownNode } from 'react-native-nitro-markdown/headless'
 
 import {
   nativeMarkdownChunkSpacing,
@@ -46,11 +46,19 @@ export function SelectableMarkdownText({
 {
   const chunks = useMemo(() =>
   {
-    const parsedDocument = parseMarkdownWithOptions(markdown, {
-      gfm: true,
-      html: true,
-      math: false,
-    })
+    let parsedDocument: MarkdownNode
+    try
+    {
+      parsedDocument = parseMarkdownWithOptions(markdown, {
+        gfm: true,
+        html: true,
+        math: false,
+      })
+    }
+    catch
+    {
+      return undefined
+    }
     const document = preserveSoftBreaks
       ? nativeMarkdownWithPreservedSoftBreaks(parsedDocument)
       : parsedDocument
@@ -70,33 +78,41 @@ export function SelectableMarkdownText({
     // the native text node an unbounded second pass and the parent only clips
     // the resulting single-line width instead of reflowing it.
     <View style={{ flexShrink: 1, minWidth: 0, marginTop, marginBottom }}>
-      {chunks.map((chunk, index) =>
-      {
-        const content =
-          chunk.kind === 'rich' ? (
-            <NativeMarkdownBlock
-              node={chunk.node}
-              textStyle={textStyle}
-              highlightCode={highlightCode}
-              onLinkPress={onLinkPress}
-            />
-          ) : (
-            <NativeMarkdownSelectableText
-              runs={chunk.runs}
-              textStyle={textStyle}
-              onLinkPress={onLinkPress}
-            />
-          )
+      {chunks === undefined ? (
+        <NativeMarkdownSelectableText
+          runs={[{ text: markdown }]}
+          textStyle={textStyle}
+          onLinkPress={onLinkPress}
+        />
+      ) : (
+        chunks.map((chunk, index) =>
+          {
+          const content =
+            chunk.kind === 'rich' ? (
+              <NativeMarkdownBlock
+                node={chunk.node}
+                textStyle={textStyle}
+                highlightCode={highlightCode}
+                onLinkPress={onLinkPress}
+              />
+            ) : (
+              <NativeMarkdownSelectableText
+                runs={chunk.runs}
+                textStyle={textStyle}
+                onLinkPress={onLinkPress}
+              />
+            )
 
-        return (
-          <View
-            key={chunk.key}
-            style={{ paddingTop: nativeMarkdownChunkSpacing(chunks[index - 1], chunk) }}
-          >
-            {content}
-          </View>
-        )
-      })}
+          return (
+            <View
+              key={chunk.key}
+              style={{ paddingTop: nativeMarkdownChunkSpacing(chunks[index - 1], chunk) }}
+            >
+              {content}
+            </View>
+          )
+        })
+      )}
     </View>
   )
 }

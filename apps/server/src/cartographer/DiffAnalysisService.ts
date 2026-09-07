@@ -118,7 +118,7 @@ const AnalyzerManifestSchema = Schema.Struct({
 const decodeAnalyzerManifest = Schema.decodeUnknownSync(AnalyzerManifestSchema, {
   onExcessProperty: 'error',
 })
-const decodeJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 type NormalizedSource =
   | {

@@ -12,7 +12,7 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 import { resolveSpawnCommand } from '@t3tools/shared/shell'
-class AntigravityRuntimeError extends Schema.TaggedErrorClass<AntigravityRuntimeError>()(
+class AntigravityRuntimeError extends Schema.TaggedError<AntigravityRuntimeError>()(
   'AntigravityRuntimeError',
   { detail: Schema.String },
 )

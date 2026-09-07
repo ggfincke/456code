@@ -1,35 +1,29 @@
 /**
  * Bun implementation of the Effect HTTP platform service.
  *
- * This module connects the portable `HttpPlatform` file response helpers to
- * Bun's Web-compatible runtime. `BunHttpServer` provides this layer when
- * applications serve local files, public assets, downloads, byte ranges, or
- * Web `File` values from Effect `HttpServerResponse` constructors.
- *
- * Path-based responses are backed by `Bun.file`, and Web `File` responses are
- * returned directly as raw response bodies. The shared `HttpPlatform` service
- * still computes file metadata such as ETags and last-modified headers, while
- * this adapter lets Bun's `Response` implementation handle the platform body.
- *
- * Because the Bun server adapter sits on top of Web `Request` and `Response`,
- * request bodies follow the usual single-consumption rules: choose the
- * streamed, text, URL-encoded, or multipart view that matches the route. For
- * `FormData` responses, let the `Response` constructor create the multipart
- * content type and boundary unless you intentionally override it. File
- * responses take filesystem paths, not request URLs; Bun request URLs are
- * absolute at the runtime edge, and route paths are normalized by
- * `BunHttpServer`, so decode and validate URL pathnames before mapping them to
- * files.
+ * This module provides one `layer` for `HttpPlatform`. It implements file
+ * responses with `Bun.file`, supports sliced file responses for byte ranges,
+ * and returns Web `File` values as raw HTTP server responses. The layer also
+ * provides the Bun file-system layer and ETag generator required by
+ * `HttpPlatform`.
  *
  * @since 4.0.0
  */
-import type { Effect } from "effect"
+import * as NodeHttpCompression from "@effect/platform-node-shared/NodeHttpCompression"
+import type * as Effect from "effect/Effect"
 import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Etag from "effect/unstable/http/Etag"
 import * as Platform from "effect/unstable/http/HttpPlatform"
 import * as Response from "effect/unstable/http/HttpServerResponse"
 import * as BunFileSystem from "./BunFileSystem.ts"
+
+// Bun's CompressionStream supports an extended format set covering brotli and
+// zstd
+const compression = NodeHttpCompression.make(Platform.makeCompressionWeb({
+  algorithms: ["gzip", "deflate", "br", "zstd"],
+  transform: (algorithm) => Platform.compressionTransformWeb(algorithm === "br" ? "brotli" : algorithm)
+}))
 
 /**
  * @category constructors
@@ -40,6 +34,8 @@ const make: Effect.Effect<
   never,
   FileSystem | Etag.Generator
 > = Platform.make({
+  platform: "bun",
+  compression,
   fileResponse(path, status, statusText, headers, start, end, _contentLength) {
     let file = Bun.file(path)
     if (start > 0 || end !== undefined) {
@@ -47,8 +43,13 @@ const make: Effect.Effect<
     }
     return Response.raw(file, { headers, status, statusText })
   },
-  fileWebResponse(file, status, statusText, headers, _options) {
-    return Response.raw(file, { headers, status, statusText })
+  fileWebResponse(file, status, statusText, headers, options) {
+    const start = Number(options?.offset ?? 0)
+    const end = options?.bytesToRead !== undefined ? start + Number(options.bytesToRead) : undefined
+    const body = start > 0 || end !== undefined
+      ? (file as File).slice(start, end, file.type)
+      : file
+    return Response.raw(body, { headers, status, statusText })
   }
 })
 

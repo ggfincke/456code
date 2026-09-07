@@ -8,7 +8,7 @@ import type {
   ScopedThreadRef,
 } from '@t3tools/contracts'
 import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
-import { EditorProvider, File, Virtualizer } from '@pierre/diffs/react'
+import { File, Virtualizer } from '@pierre/diffs/react'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,

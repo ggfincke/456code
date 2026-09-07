@@ -1,48 +1,10 @@
 /**
- * The `Function` module provides small, pure helpers for defining, composing,
- * adapting, and reusing TypeScript functions. It is the foundation for the
- * data-first and data-last APIs used throughout Effect, and it includes the
- * core pipeline utilities that make those APIs ergonomic.
+ * Provides small helpers for defining and reusing TypeScript functions.
  *
- * **Mental model**
- *
- * - {@link pipe} starts with a value and passes it through one unary function at
- *   a time
- * - {@link flow} composes unary functions into a reusable function
- * - {@link dual} builds APIs that support both direct calls and `pipe`-friendly
- *   data-last calls
- * - {@link identity}, {@link constant}, and the `const*` helpers model common
- *   identity and thunk patterns without allocating ad hoc callbacks
- * - {@link tupled}, {@link untupled}, {@link flip}, and {@link apply} adapt
- *   call shapes without changing the underlying behavior
- * - Type helpers such as {@link LazyArg}, {@link FunctionN}, {@link satisfies},
- *   and {@link cast} describe or constrain functions at the type level
- *
- * **Common tasks**
- *
- * - Build readable transformation pipelines: {@link pipe}
- * - Create reusable composed functions: {@link flow}, {@link compose}
- * - Define functions callable in both data-first and data-last style: {@link dual}
- * - Return a value unchanged: {@link identity}
- * - Create thunks and common constant functions: {@link constant},
- *   {@link constTrue}, {@link constFalse}, {@link constNull},
- *   {@link constUndefined}, {@link constVoid}
- * - Convert between rest-argument and tuple-argument functions: {@link tupled},
- *   {@link untupled}
- * - Express impossible branches: {@link absurd}
- * - Cache results for object keys: {@link memoize}
- *
- * **Gotchas**
- *
- * - Functions passed to {@link pipe} and {@link flow} are applied left-to-right
- *   and should be unary at each step
- * - {@link dual} uses either an arity or a predicate to decide whether a call is
- *   data-first or data-last; use a predicate when optional arguments make arity
- *   ambiguous
- * - {@link cast} changes only the static TypeScript type and performs no runtime
- *   validation
- * - {@link memoize} is intended for object keys and stores cached values in a
- *   `WeakMap`
+ * The main helpers are `pipe` and `flow` for left-to-right composition and
+ * `dual` for APIs that support both direct and pipe-friendly call styles. The
+ * module also contains small identity, constant, tuple, type-level, and
+ * memoization helpers used across the library.
  *
  * @since 2.0.0
  */
@@ -54,11 +16,12 @@ import { pipeArguments } from "./Pipeable.ts"
  *
  * **When to use**
  *
- * Use to represent unary function types in higher-kinded type operations.
+ * Use when defining higher-kinded abstractions that must accept function types
+ * as one of their type-lambda inputs.
  *
  * **Example** (Creating a function type with a type lambda)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Function, HKT } from "effect"
  *
  * // Create a function type using the type lambda
@@ -66,7 +29,7 @@ import { pipeArguments } from "./Pipeable.ts"
  * // Equivalent to: (a: string) => number
  * ```
  *
- * @category type lambdas
+ * @category utility types
  * @since 2.0.0
  */
 export interface FunctionTypeLambda extends TypeLambda {
@@ -88,9 +51,9 @@ export interface FunctionTypeLambda extends TypeLambda {
  * whether the current call is data-first. Arity is the common case. Use a
  * predicate when optional arguments make arity ambiguous.
  *
- * **Example** (Using arity to determine data-first or data-last style)
+ * **Example** (Selecting data-first or data-last style by arity)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function, pipe } from "effect"
  *
  * const sum = Function.dual<
@@ -98,13 +61,13 @@ export interface FunctionTypeLambda extends TypeLambda {
  *   (self: number, that: number) => number
  * >(2, (self, that) => self + that)
  *
- * console.log(sum(2, 3)) // 5
- * console.log(pipe(2, sum(3))) // 5
+ * sum(2, 3) // => 5
+ * pipe(2, sum(3)) // => 5
  * ```
  *
- * **Example** (Using call signatures to define the overloads)
+ * **Example** (Defining overloads with call signatures)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function, pipe } from "effect"
  *
  * const sum: {
@@ -112,13 +75,13 @@ export interface FunctionTypeLambda extends TypeLambda {
  *   (self: number, that: number): number
  * } = Function.dual(2, (self: number, that: number): number => self + that)
  *
- * console.log(sum(2, 3)) // 5
- * console.log(pipe(2, sum(3))) // 5
+ * sum(2, 3) // => 5
+ * pipe(2, sum(3)) // => 5
  * ```
  *
- * **Example** (Using a predicate to determine data-first or data-last style)
+ * **Example** (Selecting data-first or data-last style with a predicate)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function, pipe } from "effect"
  *
  * const sum = Function.dual<
@@ -129,8 +92,8 @@ export interface FunctionTypeLambda extends TypeLambda {
  *   (self, that) => self + that
  * )
  *
- * console.log(sum(2, 3)) // 5
- * console.log(pipe(2, sum(3))) // 5
+ * sum(2, 3) // => 5
+ * pipe(2, sum(3)) // => 5
  * ```
  *
  * @category combinators
@@ -206,11 +169,10 @@ export const dual: {
  *
  * **Example** (Applying an argument to a function)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function, pipe, String } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(pipe(String.length, Function.apply("hello")), 5)
+ * pipe(String.length, Function.apply("hello")) // => 5
  * ```
  *
  * @see {@link pipe} for building left-to-right pipelines
@@ -229,10 +191,11 @@ export const apply = <A>(a: A) => <B>(self: (a: A) => B): B => self(a)
  *
  * **Example** (Creating a lazy argument)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
  *
  * const constNull: Function.LazyArg<null> = Function.constant(null)
+ * constNull() // => null
  * ```
  *
  * @category models
@@ -250,12 +213,11 @@ export type LazyArg<A> = () => A
  *
  * **Example** (Typing a variadic function)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Function } from "effect"
- * import * as assert from "node:assert"
  *
  * const sum: Function.FunctionN<[number, number], number> = (a, b) => a + b
- * assert.deepStrictEqual(sum(2, 3), 5)
+ * sum(2, 3) // => 5
  * ```
  *
  * @category models
@@ -272,11 +234,10 @@ export type FunctionN<A extends ReadonlyArray<unknown>, B> = (...args: A) => B
  *
  * **Example** (Returning the same value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { identity } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(identity(5), 5)
+ * identity(5) // => 5
  * ```
  *
  * @category combinators
@@ -295,22 +256,19 @@ export const identity = <A>(a: A): A => a
  *
  * **Example** (Checking an expression against a type)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
- * const test1 = Function.satisfies<number>()(5 as const)
+ * const test1 = Function.satisfies<number>()(5 as const) // => 5
  * // ^? const test: 5
  * // @ts-expect-error
  * const test2 = Function.satisfies<string>()(5)
  * // ^? Argument of type 'number' is not assignable to parameter of type 'string'
- *
- * assert.deepStrictEqual(Function.satisfies<number>()(5), 5)
  * ```
  *
  * @see {@link cast} for changing only the static TypeScript type
  *
- * @category type utils
+ * @category utility types
  * @since 2.0.0
  */
 export const satisfies = <A>() => <B extends A>(b: B) => b
@@ -330,7 +288,7 @@ export const satisfies = <A>() => <B extends A>(b: B) => b
  *
  * @see {@link satisfies} for checking assignability without changing the resulting type
  *
- * @category type utils
+ * @category utility types
  * @since 4.0.0
  */
 export const cast: <A, B>(a: A) => B = identity as any
@@ -340,19 +298,18 @@ export const cast: <A, B>(a: A) => B = identity as any
  *
  * **When to use**
  *
- * Use when an API expects a thunk or callback and every invocation
- * should return the same value.
+ * Use when you need a thunk or callback that returns the same value on every
+ * invocation.
  *
  * **Example** (Creating a constant thunk)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
  * const constNull = Function.constant(null)
  *
- * assert.deepStrictEqual(constNull(), null)
- * assert.deepStrictEqual(constNull(), null)
+ * constNull() // => null
+ * constNull() // => null
  * ```
  *
  * @category constructors
@@ -365,15 +322,14 @@ export const constant = <A>(value: A): LazyArg<A> => () => value
  *
  * **When to use**
  *
- * Use when an API expects a thunk and every invocation should return `true`.
+ * Use when you need a thunk that returns `true` on every invocation.
  *
  * **Example** (Returning true from a thunk)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(Function.constTrue(), true)
+ * Function.constTrue() // => true
  * ```
  *
  * @category constants
@@ -386,15 +342,14 @@ export const constTrue: LazyArg<boolean> = constant(true)
  *
  * **When to use**
  *
- * Use when an API expects a thunk and every invocation should return `false`.
+ * Use when you need a thunk that returns `false` on every invocation.
  *
  * **Example** (Returning false from a thunk)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(Function.constFalse(), false)
+ * Function.constFalse() // => false
  * ```
  *
  * @category constants
@@ -407,15 +362,14 @@ export const constFalse: LazyArg<boolean> = constant(false)
  *
  * **When to use**
  *
- * Use when an API expects a thunk and every invocation should return `null`.
+ * Use when you need a thunk that returns `null` on every invocation.
  *
  * **Example** (Returning null from a thunk)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(Function.constNull(), null)
+ * Function.constNull() // => null
  * ```
  *
  * @category constants
@@ -428,16 +382,14 @@ export const constNull: LazyArg<null> = constant(null)
  *
  * **When to use**
  *
- * Use when an API expects a thunk and every invocation should return
- * `undefined`.
+ * Use when you need a thunk that returns `undefined` on every invocation.
  *
  * **Example** (Returning undefined from a thunk)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(Function.constUndefined(), undefined)
+ * Function.constUndefined() // => undefined
  * ```
  *
  * @category constants
@@ -450,16 +402,15 @@ export const constUndefined: LazyArg<undefined> = constant(undefined)
  *
  * **When to use**
  *
- * Use when an API expects a thunk used only for its call effect and not for a
+ * Use when you need a thunk that is called only for its effect and has no
  * meaningful return value.
  *
  * **Example** (Returning void from a thunk)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(Function.constVoid(), undefined)
+ * Function.constVoid() // => undefined
  * ```
  *
  * @category constants
@@ -477,13 +428,12 @@ export const constVoid: LazyArg<void> = constUndefined
  *
  * **Example** (Flipping curried arguments)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
  * const f = (a: number) => (b: string) => a - b.length
  *
- * assert.deepStrictEqual(Function.flip(f)("aaa")(2), -1)
+ * Function.flip(f)("aaa")(2) // => -1
  * ```
  *
  * @category combinators
@@ -505,14 +455,13 @@ export const flip = <A extends Array<unknown>, B extends Array<unknown>, C>(
  *
  * **Example** (Composing two functions)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
  * const increment = (n: number) => n + 1
  * const square = (n: number) => n * n
  *
- * assert.strictEqual(Function.compose(increment, square)(2), 9)
+ * Function.compose(increment, square)(2) // => 9
  * ```
  *
  * @see {@link flow} for composing a left-to-right sequence of functions
@@ -532,8 +481,8 @@ export const compose: {
  *
  * **When to use**
  *
- * Use when exhaustive checks prove a branch cannot be reached, but
- * TypeScript still needs a return value.
+ * Use when you need a return value in a branch that exhaustive checks prove
+ * cannot be reached.
  *
  * **Gotchas**
  *
@@ -542,7 +491,7 @@ export const compose: {
  *
  * **Example** (Handling impossible values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { absurd } from "effect"
  *
  * const handleNever = (value: never) => {
@@ -550,7 +499,7 @@ export const compose: {
  * }
  * ```
  *
- * @category utils
+ * @category utility types
  * @since 2.0.0
  */
 export const absurd = <A>(_: never): A => {
@@ -566,13 +515,12 @@ export const absurd = <A>(_: never): A => {
  *
  * **Example** (Converting arguments to a tuple)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
  * const sumTupled = Function.tupled((x: number, y: number): number => x + y)
  *
- * assert.deepStrictEqual(sumTupled([1, 2]), 3)
+ * sumTupled([1, 2]) // => 3
  * ```
  *
  * @see {@link untupled} for adapting a tuple-argument function back to multiple arguments
@@ -591,13 +539,12 @@ export const tupled = <A extends ReadonlyArray<unknown>, B>(f: (...a: A) => B): 
  *
  * **Example** (Converting a tuple to arguments)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
  * const getFirst = Function.untupled(<A, B>(tuple: [A, B]): A => tuple[0])
  *
- * assert.deepStrictEqual(getFirst(1, 2), 1)
+ * getFirst(1, 2) // => 1
  * ```
  *
  * @see {@link tupled} for adapting a multi-argument function to one tuple argument
@@ -613,101 +560,51 @@ export const untupled = <A extends ReadonlyArray<unknown>, B>(f: (a: A) => B): (
  *
  * **When to use**
  *
- * Use when you use `pipe` with data-last functions to build readable transformation
- * pipelines and to write method-style chains as ordinary function calls.
+ * Use when you need to compose data-last functions into readable
+ * transformation pipelines instead of method-style chains.
  *
  * **Details**
  *
- * `pipe` takes an initial value, passes it to the first function, then passes
- * each result to the next function in order. The final function result is
- * returned.
+ * Takes an initial value, passes it to the first function, then passes each
+ * result to the next function in order. The final function result is returned.
  *
  * **Gotchas**
  *
  * Each function passed after the initial value must accept a single argument,
  * because `pipe` calls each step with only the previous result.
  *
- * **Example** (Using pipeline syntax)
+ * **Example** (Piping values through functions)
  *
  * In this example, `1` is passed to the first function, and each result becomes
  * the input for the next function.
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { pipe } from "effect"
  *
- * const result = pipe(
+ * pipe(
  *   1,
  *   (n) => n + 1,
  *   (n) => n * 2,
  *   (n) => `result: ${n}`
- * )
- *
- * console.log(result) // "result: 4"
- * ```
- *
- * **Example** (Chaining methods before conversion)
- *
- * ```ts
- * const numbers = [1, 2, 3, 4]
- * const double = (n: number) => n * 2
- * const greaterThanFour = (n: number) => n > 4
- *
- * const result = numbers.map(double).filter(greaterThanFour)
- *
- * console.log(result) // [6, 8]
+ * ) // => "result: 4"
  * ```
  *
  * **Example** (Rewriting method chains with pipe)
  *
  * The same transformation can be written with data-last functions.
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Array, pipe } from "effect"
  *
  * const numbers = [1, 2, 3, 4]
  * const double = (n: number) => n * 2
  * const greaterThanFour = (n: number) => n > 4
  *
- * const result = pipe(
+ * pipe(
  *   numbers,
  *   Array.map(double),
  *   Array.filter(greaterThanFour)
- * )
- *
- * console.log(result) // [6, 8]
- * ```
- *
- * **Example** (Chaining arithmetic operations)
- *
- * ```ts
- * import { pipe } from "effect"
- *
- * // Define simple arithmetic operations
- * const increment = (x: number) => x + 1
- * const double = (x: number) => x * 2
- * const subtractTen = (x: number) => x - 10
- *
- * // Sequentially apply these operations using `pipe`
- * const result = pipe(5, increment, double, subtractTen)
- *
- * console.log(result)
- * // Output: 2
- * ```
- *
- * **Example** (Building a simple transformation pipeline)
- *
- * ```ts
- * import { pipe } from "effect"
- *
- * // Simple transformation pipeline
- * const result = pipe(
- *   5,
- *   (x) => x * 2, // 10
- *   (x) => x + 1, // 11
- *   (x) => x.toString() // "11"
- * )
- *
- * console.log(result) // "11"
+ * ) // => [6, 8]
  * ```
  *
  * @category combinators
@@ -1180,16 +1077,15 @@ export function pipe(a: unknown, ...args: Array<any>): unknown {
  *
  * **Example** (Composing functions left to right)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { flow } from "effect"
- * import * as assert from "node:assert"
  *
  * const len = (s: string): number => s.length
  * const double = (n: number): number => n * 2
  *
  * const f = flow(len, double)
  *
- * assert.strictEqual(f("aaa"), 6)
+ * f("aaa") // => 6
  * ```
  *
  * @see {@link pipe} for applying a value through a left-to-right sequence immediately
@@ -1377,7 +1273,7 @@ export function flow(
  *
  * **Example** (Creating a development placeholder)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { hole } from "effect"
  *
  * // Intentionally not called: `hole` throws if the placeholder is evaluated.
@@ -1386,10 +1282,9 @@ export function flow(
  *   name: hole<string>()
  * })
  *
- * console.log(typeof buildUser) // "function"
  * ```
  *
- * @category utils
+ * @category utility types
  * @since 2.0.0
  */
 export const hole: <T>() => T = cast(absurd)
@@ -1405,11 +1300,10 @@ export const hole: <T>() => T = cast(absurd)
  *
  * **Example** (Discarding the first argument)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Function } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(Function.SK(0, "hello"), "hello")
+ * Function.SK(0, "hello") // => "hello"
  * ```
  *
  * @category combinators
@@ -1429,26 +1323,63 @@ export const SK = <A, B>(_: A, b: B): B => b
  * **Details**
  *
  * Each memoized wrapper owns a private `WeakMap` keyed by object identity.
- * Cached `undefined` results are still returned because the cache is checked
- * with `WeakMap.has`.
  *
  * **Gotchas**
+ *
+ * `undefined` is reserved to represent a cache miss and is therefore not
+ * supported as a return value.
  *
  * Structurally equal objects do not share cache entries. If the same object is
  * mutated after its first call, later calls still return the cached result for
  * that reference.
  *
- * @category utils
+ * @category caching
  * @since 4.0.0
  */
-export function memoize<A extends object, O>(f: (a: A) => O): (ast: A) => O {
+export function memoize<A extends object, O extends {} | null>(f: (a: A) => O): (ast: A) => O {
   const cache = new WeakMap<object, O>()
   return (a) => {
-    if (cache.has(a)) {
-      return cache.get(a)!
-    }
+    const cached = cache.get(a)
+    if (cached !== undefined) return cached
     const result = f(a)
     cache.set(a, result)
+    return result
+  }
+}
+
+/**
+ * Creates a memoized idempotent object transformation that caches both inputs
+ * and their outputs by object identity.
+ *
+ * **When to use**
+ *
+ * Use when an object transformation is idempotent and its output can be safely
+ * reused as a fixed point.
+ *
+ * **Details**
+ *
+ * After computing an input, the returned function caches both the input and
+ * the output. Calling it with either reference returns the output without
+ * invoking the supplied function again.
+ *
+ * **Gotchas**
+ *
+ * The returned function treats each computed output as a fixed point. If
+ * applying the supplied function to an output would produce an observably
+ * different value, this memoization changes that behavior.
+ *
+ * @see {@link memoize} for memoizing functions without an idempotence requirement
+ * @category caching
+ * @since 4.0.0
+ */
+export function memoizeIdempotent<A extends object>(f: (a: A) => A): (a: A) => A {
+  const cache = new WeakMap<A, A>()
+  return (a) => {
+    const cached = cache.get(a)
+    if (cached !== undefined) return cached
+    const result = f(a)
+    cache.set(a, result)
+    cache.set(result, result)
     return result
   }
 }

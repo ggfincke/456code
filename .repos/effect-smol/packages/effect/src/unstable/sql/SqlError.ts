@@ -1,37 +1,12 @@
 /**
- * Structured SQL failures for unstable SQL clients and driver integrations.
+ * Defines structured failures for SQL clients and driver integrations.
  *
- * This module provides the top-level `SqlError` wrapper, the concrete
- * `SqlErrorReason` variants used by adapters, schemas for encoding or decoding
- * those errors, guards for recognizing them, and a SQLite classifier for native
- * driver causes. The model keeps query mistakes, authentication and
- * authorization failures, constraint violations, connection failures, lock
- * waits, deadlocks, serialization conflicts, statement timeouts, and unknown
- * failures distinguishable in the Effect error channel.
- *
- * **Mental model**
- *
- * `SqlError` wraps exactly one reason. Its `message`, `cause`, and
- * `isRetryable` values are delegated to that reason, so recovery code can branch
- * on either the reason tag or the retryability flag without losing the original
- * native cause. Reasons are intentionally driver-neutral; adapters translate
- * database-specific error codes into this shared vocabulary.
- *
- * **Common tasks**
- *
- * Construct a reason when adapting a driver failure, wrap it in `SqlError` for
- * client APIs, use `isSqlError` or `isSqlErrorReason` at boundaries that receive
- * unknown failures, and use `classifySqliteError` when mapping SQLite `code` or
- * `errno` values.
- *
- * **Gotchas**
- *
- * Preserve the native `cause` and `operation` metadata when constructing these
- * errors; they are often the only way to diagnose dialect-specific failures.
- * Retryable reasons represent transient infrastructure or concurrency problems,
- * while syntax, credential, permission, and constraint failures generally need a
- * changed query, configuration, or data set. SQLite unique violations include a
- * best-effort constraint name when one can be extracted.
+ * `SqlError` wraps the different reasons a SQL operation can fail, such as
+ * connection, authentication, authorization, syntax, constraint, or transaction
+ * problems. Each reason keeps the original cause, optional message and
+ * operation metadata, and whether retrying may succeed. This module also
+ * includes schemas, guards, a SQLite error classifier, and the
+ * `ResultLengthMismatch` error used by ordered batched SQL resolvers.
  *
  * @since 4.0.0
  */
@@ -42,7 +17,7 @@ const TypeId = "~effect/sql/SqlError" as const
 const ReasonTypeId = "~effect/sql/SqlError/Reason" as const
 
 const ReasonFields = {
-  cause: Schema.Defect,
+  cause: Schema.Defect(),
   message: Schema.optional(Schema.String),
   operation: Schema.optional(Schema.String)
 }
@@ -53,7 +28,7 @@ const ReasonFields = {
  * @category errors
  * @since 4.0.0
  */
-export class ConnectionError extends Schema.TaggedErrorClass<ConnectionError>("effect/sql/SqlError/ConnectionError")(
+export class ConnectionError extends Schema.TaggedError<ConnectionError>("effect/sql/SqlError/ConnectionError")(
   "ConnectionError",
   ReasonFields
 ) {
@@ -81,7 +56,7 @@ export class ConnectionError extends Schema.TaggedErrorClass<ConnectionError>("e
  * @category errors
  * @since 4.0.0
  */
-export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>(
+export class AuthenticationError extends Schema.TaggedError<AuthenticationError>(
   "effect/sql/SqlError/AuthenticationError"
 )("AuthenticationError", ReasonFields) {
   /**
@@ -108,7 +83,7 @@ export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationE
  * @category errors
  * @since 4.0.0
  */
-export class AuthorizationError extends Schema.TaggedErrorClass<AuthorizationError>(
+export class AuthorizationError extends Schema.TaggedError<AuthorizationError>(
   "effect/sql/SqlError/AuthorizationError"
 )("AuthorizationError", ReasonFields) {
   /**
@@ -134,7 +109,7 @@ export class AuthorizationError extends Schema.TaggedErrorClass<AuthorizationErr
  * @category errors
  * @since 4.0.0
  */
-export class SqlSyntaxError extends Schema.TaggedErrorClass<SqlSyntaxError>("effect/sql/SqlError/SqlSyntaxError")(
+export class SqlSyntaxError extends Schema.TaggedError<SqlSyntaxError>("effect/sql/SqlError/SqlSyntaxError")(
   "SqlSyntaxError",
   ReasonFields
 ) {
@@ -167,7 +142,7 @@ const UniqueViolationFields = {
  * @category errors
  * @since 4.0.0
  */
-export class UniqueViolation extends Schema.TaggedErrorClass<UniqueViolation>("effect/sql/SqlError/UniqueViolation")(
+export class UniqueViolation extends Schema.TaggedError<UniqueViolation>("effect/sql/SqlError/UniqueViolation")(
   "UniqueViolation",
   UniqueViolationFields
 ) {
@@ -194,7 +169,7 @@ export class UniqueViolation extends Schema.TaggedErrorClass<UniqueViolation>("e
  * @category errors
  * @since 4.0.0
  */
-export class ConstraintError extends Schema.TaggedErrorClass<ConstraintError>("effect/sql/SqlError/ConstraintError")(
+export class ConstraintError extends Schema.TaggedError<ConstraintError>("effect/sql/SqlError/ConstraintError")(
   "ConstraintError",
   ReasonFields
 ) {
@@ -221,7 +196,7 @@ export class ConstraintError extends Schema.TaggedErrorClass<ConstraintError>("e
  * @category errors
  * @since 4.0.0
  */
-export class DeadlockError extends Schema.TaggedErrorClass<DeadlockError>("effect/sql/SqlError/DeadlockError")(
+export class DeadlockError extends Schema.TaggedError<DeadlockError>("effect/sql/SqlError/DeadlockError")(
   "DeadlockError",
   ReasonFields
 ) {
@@ -249,7 +224,7 @@ export class DeadlockError extends Schema.TaggedErrorClass<DeadlockError>("effec
  * @category errors
  * @since 4.0.0
  */
-export class SerializationError extends Schema.TaggedErrorClass<SerializationError>(
+export class SerializationError extends Schema.TaggedError<SerializationError>(
   "effect/sql/SqlError/SerializationError"
 )("SerializationError", ReasonFields) {
   /**
@@ -276,7 +251,7 @@ export class SerializationError extends Schema.TaggedErrorClass<SerializationErr
  * @category errors
  * @since 4.0.0
  */
-export class LockTimeoutError extends Schema.TaggedErrorClass<LockTimeoutError>("effect/sql/SqlError/LockTimeoutError")(
+export class LockTimeoutError extends Schema.TaggedError<LockTimeoutError>("effect/sql/SqlError/LockTimeoutError")(
   "LockTimeoutError",
   ReasonFields
 ) {
@@ -303,7 +278,7 @@ export class LockTimeoutError extends Schema.TaggedErrorClass<LockTimeoutError>(
  * @category errors
  * @since 4.0.0
  */
-export class StatementTimeoutError extends Schema.TaggedErrorClass<StatementTimeoutError>(
+export class StatementTimeoutError extends Schema.TaggedError<StatementTimeoutError>(
   "effect/sql/SqlError/StatementTimeoutError"
 )("StatementTimeoutError", ReasonFields) {
   /**
@@ -329,7 +304,7 @@ export class StatementTimeoutError extends Schema.TaggedErrorClass<StatementTime
  * @category errors
  * @since 4.0.0
  */
-export class UnknownError extends Schema.TaggedErrorClass<UnknownError>("effect/sql/SqlError/UnknownError")(
+export class UnknownError extends Schema.TaggedError<UnknownError>("effect/sql/SqlError/UnknownError")(
   "UnknownError",
   ReasonFields
 ) {
@@ -409,7 +384,7 @@ export const SqlErrorReason: Schema.Union<[
  * @category errors
  * @since 4.0.0
  */
-export class SqlError extends Schema.TaggedErrorClass<SqlError>("effect/sql/SqlError")("SqlError", {
+export class SqlError extends Schema.TaggedError<SqlError>("effect/sql/SqlError")("SqlError", {
   reason: SqlErrorReason
 }) {
   /**
@@ -599,9 +574,9 @@ export const classifySqliteError = (
  * @since 4.0.0
  */
 export class ResultLengthMismatch
-  extends Schema.TaggedErrorClass<ResultLengthMismatch>("effect/sql/ResultLengthMismatch")("ResultLengthMismatch", {
-    expected: Schema.Number,
-    actual: Schema.Number
+  extends Schema.TaggedError<ResultLengthMismatch>("effect/sql/ResultLengthMismatch")("ResultLengthMismatch", {
+    expected: Schema.Natural,
+    actual: Schema.Natural
   })
 {
   /**

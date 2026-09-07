@@ -40,7 +40,7 @@ const desktopShellEnvironmentCommandFields = {
   argumentCount: Schema.Number,
 }
 
-export class DesktopShellEnvironmentCommandError extends Schema.TaggedErrorClass<DesktopShellEnvironmentCommandError>()(
+export class DesktopShellEnvironmentCommandError extends Schema.TaggedError<DesktopShellEnvironmentCommandError>()(
   'DesktopShellEnvironmentCommandError',
   {
     ...desktopShellEnvironmentCommandFields,
@@ -54,7 +54,7 @@ export class DesktopShellEnvironmentCommandError extends Schema.TaggedErrorClass
   }
 }
 
-export class DesktopShellEnvironmentCommandTimeoutError extends Schema.TaggedErrorClass<DesktopShellEnvironmentCommandTimeoutError>()(
+export class DesktopShellEnvironmentCommandTimeoutError extends Schema.TaggedError<DesktopShellEnvironmentCommandTimeoutError>()(
   'DesktopShellEnvironmentCommandTimeoutError',
   {
     ...desktopShellEnvironmentCommandFields,

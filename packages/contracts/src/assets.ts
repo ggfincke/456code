@@ -73,7 +73,7 @@ export const AttachmentDeleteInput = Schema.Struct({
 })
 export type AttachmentDeleteInput = typeof AttachmentDeleteInput.Type
 
-export class AttachmentDeleteError extends Schema.TaggedErrorClass<AttachmentDeleteError>()(
+export class AttachmentDeleteError extends Schema.TaggedError<AttachmentDeleteError>()(
   'AttachmentDeleteError',
   { cause: Schema.Defect() },
 )
@@ -84,7 +84,7 @@ export class AttachmentDeleteError extends Schema.TaggedErrorClass<AttachmentDel
   }
 }
 
-export class AttachmentUploadSigningKeyError extends Schema.TaggedErrorClass<AttachmentUploadSigningKeyError>()(
+export class AttachmentUploadSigningKeyError extends Schema.TaggedError<AttachmentUploadSigningKeyError>()(
   'AttachmentUploadSigningKeyError',
   { cause: Schema.Defect() },
 )
@@ -95,7 +95,7 @@ export class AttachmentUploadSigningKeyError extends Schema.TaggedErrorClass<Att
   }
 }
 
-export class AssetWorkspaceContextNotFoundError extends Schema.TaggedErrorClass<AssetWorkspaceContextNotFoundError>()(
+export class AssetWorkspaceContextNotFoundError extends Schema.TaggedError<AssetWorkspaceContextNotFoundError>()(
   'AssetWorkspaceContextNotFoundError',
   {
     resource: AssetResource,
@@ -108,7 +108,7 @@ export class AssetWorkspaceContextNotFoundError extends Schema.TaggedErrorClass<
   }
 }
 
-export class AssetWorkspaceContextResolutionError extends Schema.TaggedErrorClass<AssetWorkspaceContextResolutionError>()(
+export class AssetWorkspaceContextResolutionError extends Schema.TaggedError<AssetWorkspaceContextResolutionError>()(
   'AssetWorkspaceContextResolutionError',
   {
     resource: AssetResource,
@@ -122,7 +122,7 @@ export class AssetWorkspaceContextResolutionError extends Schema.TaggedErrorClas
   }
 }
 
-export class AssetWorkspaceRootNormalizationError extends Schema.TaggedErrorClass<AssetWorkspaceRootNormalizationError>()(
+export class AssetWorkspaceRootNormalizationError extends Schema.TaggedError<AssetWorkspaceRootNormalizationError>()(
   'AssetWorkspaceRootNormalizationError',
   {
     resource: AssetResource,
@@ -136,7 +136,7 @@ export class AssetWorkspaceRootNormalizationError extends Schema.TaggedErrorClas
   }
 }
 
-export class AssetWorkspacePathValidationError extends Schema.TaggedErrorClass<AssetWorkspacePathValidationError>()(
+export class AssetWorkspacePathValidationError extends Schema.TaggedError<AssetWorkspacePathValidationError>()(
   'AssetWorkspacePathValidationError',
   {
     resource: AssetResource,
@@ -150,7 +150,7 @@ export class AssetWorkspacePathValidationError extends Schema.TaggedErrorClass<A
   }
 }
 
-export class AssetPreviewTypeValidationError extends Schema.TaggedErrorClass<AssetPreviewTypeValidationError>()(
+export class AssetPreviewTypeValidationError extends Schema.TaggedError<AssetPreviewTypeValidationError>()(
   'AssetPreviewTypeValidationError',
   {
     resource: AssetResource,
@@ -163,7 +163,7 @@ export class AssetPreviewTypeValidationError extends Schema.TaggedErrorClass<Ass
   }
 }
 
-export class AssetWorkspaceAssetInspectionError extends Schema.TaggedErrorClass<AssetWorkspaceAssetInspectionError>()(
+export class AssetWorkspaceAssetInspectionError extends Schema.TaggedError<AssetWorkspaceAssetInspectionError>()(
   'AssetWorkspaceAssetInspectionError',
   {
     resource: AssetResource,
@@ -177,7 +177,7 @@ export class AssetWorkspaceAssetInspectionError extends Schema.TaggedErrorClass<
   }
 }
 
-export class AssetWorkspaceAssetNotFoundError extends Schema.TaggedErrorClass<AssetWorkspaceAssetNotFoundError>()(
+export class AssetWorkspaceAssetNotFoundError extends Schema.TaggedError<AssetWorkspaceAssetNotFoundError>()(
   'AssetWorkspaceAssetNotFoundError',
   {
     resource: AssetResource,
@@ -190,7 +190,7 @@ export class AssetWorkspaceAssetNotFoundError extends Schema.TaggedErrorClass<As
   }
 }
 
-export class AssetWorkspaceResolutionError extends Schema.TaggedErrorClass<AssetWorkspaceResolutionError>()(
+export class AssetWorkspaceResolutionError extends Schema.TaggedError<AssetWorkspaceResolutionError>()(
   'AssetWorkspaceResolutionError',
   {
     resource: AssetResource,
@@ -204,7 +204,7 @@ export class AssetWorkspaceResolutionError extends Schema.TaggedErrorClass<Asset
   }
 }
 
-export class AssetAttachmentNotFoundError extends Schema.TaggedErrorClass<AssetAttachmentNotFoundError>()(
+export class AssetAttachmentNotFoundError extends Schema.TaggedError<AssetAttachmentNotFoundError>()(
   'AssetAttachmentNotFoundError',
   {
     resource: AssetResource,
@@ -217,7 +217,7 @@ export class AssetAttachmentNotFoundError extends Schema.TaggedErrorClass<AssetA
   }
 }
 
-export class AssetProjectFaviconResolutionError extends Schema.TaggedErrorClass<AssetProjectFaviconResolutionError>()(
+export class AssetProjectFaviconResolutionError extends Schema.TaggedError<AssetProjectFaviconResolutionError>()(
   'AssetProjectFaviconResolutionError',
   {
     resource: AssetResource,
@@ -231,7 +231,7 @@ export class AssetProjectFaviconResolutionError extends Schema.TaggedErrorClass<
   }
 }
 
-export class AssetProjectFaviconInspectionError extends Schema.TaggedErrorClass<AssetProjectFaviconInspectionError>()(
+export class AssetProjectFaviconInspectionError extends Schema.TaggedError<AssetProjectFaviconInspectionError>()(
   'AssetProjectFaviconInspectionError',
   {
     resource: AssetResource,
@@ -245,7 +245,7 @@ export class AssetProjectFaviconInspectionError extends Schema.TaggedErrorClass<
   }
 }
 
-export class AssetProjectFaviconNotFoundError extends Schema.TaggedErrorClass<AssetProjectFaviconNotFoundError>()(
+export class AssetProjectFaviconNotFoundError extends Schema.TaggedError<AssetProjectFaviconNotFoundError>()(
   'AssetProjectFaviconNotFoundError',
   {
     resource: AssetResource,
@@ -258,7 +258,7 @@ export class AssetProjectFaviconNotFoundError extends Schema.TaggedErrorClass<As
   }
 }
 
-export class AssetSigningKeyLoadError extends Schema.TaggedErrorClass<AssetSigningKeyLoadError>()(
+export class AssetSigningKeyLoadError extends Schema.TaggedError<AssetSigningKeyLoadError>()(
   'AssetSigningKeyLoadError',
   {
     resource: AssetResource,

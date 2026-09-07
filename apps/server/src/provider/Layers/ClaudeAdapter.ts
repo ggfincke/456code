@@ -938,6 +938,8 @@ function presentableResultError(error: string | undefined): string | undefined
 // a Record rather than a switch so a new SDK union member fails the build here instead of
 // silently degrading to a generic message
 const ASSISTANT_ERROR_MESSAGES: Record<SDKAssistantMessageError, string> = {
+  account_on_hold:
+    'This Claude account is on hold, so the turn stopped. Check your account status.',
   authentication_failed:
     'Claude authentication failed. Reconnect this provider instance, then retry the turn.',
   billing_error: 'Claude reported a billing problem on this account, so the turn stopped.',

@@ -1,30 +1,16 @@
 /**
- * The `RunnerServer` module provides the transport-agnostic server side of the
- * cluster runner protocol. It turns the runner RPC group into handlers that
- * receive ping, notification, request, stream, and envelope messages from other
- * runners, then forwards them into `Sharding` and coordinates persisted replies
- * through `MessageStorage`.
+ * Provides server-side layers for the cluster runner protocol.
  *
- * **Common tasks**
- *
- * - Build a runner server once an `RpcServer.Protocol` has been supplied by a
- *   transport such as HTTP, WebSocket, or sockets
- * - Provide the complete runner runtime with `Sharding` and `Runners` clients
- *   using {@link layerWithClients}
- * - Embed a cluster client without serving runner RPCs or accepting shard
- *   assignments using {@link layerClientOnly}
- *
- * **Gotchas**
- *
- * - This module does not choose a wire transport; transport-specific modules
- *   provide the `RpcServer.Protocol`
- * - Persisted requests register reply handlers in `MessageStorage` before the
- *   message is delivered to `Sharding`
- * - Client-only layers clear the configured runner address, so they can send
- *   cluster messages but do not register as shard-owning runners
+ * Runner protocol handlers receive ping, notification, request, stream, and
+ * envelope messages from other runners. They forward those messages into
+ * `Sharding` and coordinate persisted replies through `MessageStorage`. This
+ * module includes the handler layer, a transport-independent RPC server layer, a
+ * full server layer that also provides runner clients, and a client-only layer
+ * for applications that do not serve runner RPCs.
  *
  * @since 4.0.0
  */
+import type * as Cause from "../../Cause.ts"
 import * as Effect from "../../Effect.ts"
 import type * as Exit from "../../Exit.ts"
 import * as Fiber from "../../Fiber.ts"
@@ -32,6 +18,7 @@ import { constant } from "../../Function.ts"
 import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
 import * as Queue from "../../Queue.ts"
+import type * as Rpc from "../rpc/Rpc.ts"
 import * as RpcServer from "../rpc/RpcServer.ts"
 import type * as ClusterError from "./ClusterError.ts"
 import * as Message from "./Message.ts"
@@ -44,6 +31,16 @@ import * as Sharding from "./Sharding.ts"
 import { ShardingConfig } from "./ShardingConfig.ts"
 
 const constVoid = constant(Effect.void)
+
+const serializeDefectReply = <R extends Rpc.Any>(
+  reply: Reply.ReplyWithContext<R>,
+  defect: unknown
+): Effect.Effect<Reply.Encoded> =>
+  Effect.orDie(Reply.serialize(Reply.ReplyWithContext.fromDefect({
+    id: reply.reply.id,
+    requestId: reply.reply.requestId,
+    defect
+  })))
 
 /**
  * Layer that handles runner protocol RPCs by forwarding requests to `Sharding`
@@ -78,7 +75,7 @@ export const layerHandlers = Runners.Rpcs.toLayer(Effect.gen(function*() {
         envelope: request,
         lastSentReply: Option.none(),
         respond(reply) {
-          resume(Effect.orDie(Reply.serialize(reply)))
+          resume(Reply.serializeOrDefect(reply))
           return Effect.void
         }
       })
@@ -123,23 +120,37 @@ export const layerHandlers = Runners.Rpcs.toLayer(Effect.gen(function*() {
     },
     Stream: ({ persisted, request }) =>
       Effect.flatMap(
-        Queue.make<Reply.Encoded, ClusterError.EntityNotAssignedToRunner>(),
+        Queue.make<Reply.Encoded, ClusterError.EntityNotAssignedToRunner | Cause.Done>(),
         (queue) => {
           const message = new Message.IncomingRequest({
             envelope: request,
             lastSentReply: Option.none(),
             respond(reply) {
-              return Effect.flatMap(Reply.serialize(reply), (reply) => {
-                Queue.offerUnsafe(queue, reply)
-                return Effect.void
-              })
+              return Reply.serialize(reply).pipe(
+                Effect.flatMap((reply) => {
+                  Queue.offerUnsafe(queue, reply)
+                  if (reply._tag === "WithExit") {
+                    Queue.endUnsafe(queue)
+                  }
+                  return Effect.void
+                }),
+                Effect.catchTag("MalformedMessage", (error) =>
+                  Effect.flatMap(serializeDefectReply(reply, error), (reply) => {
+                    // the fallback defect reply is terminal, so end the stream
+                    Queue.offerUnsafe(queue, reply)
+                    Queue.endUnsafe(queue)
+                    return Effect.void
+                  }))
+              )
             }
           })
           return Effect.as(
             persisted ?
               Effect.andThen(
                 storage.registerReplyHandler(message).pipe(
-                  Effect.onError((cause) => Queue.failCause(queue, cause)),
+                  Effect.onError((cause) =>
+                    Queue.failCause(queue, cause)
+                  ),
                   Effect.forkScoped
                 ),
                 sharding.notify(message, constWaitUntilRead)
@@ -183,7 +194,8 @@ export const layer: Layer.Layer<
   RpcServer.Protocol | Sharding.Sharding | MessageStorage.MessageStorage
 > = RpcServer.layer(Runners.Rpcs, {
   spanPrefix: "RunnerServer",
-  disableTracing: true
+  disableTracing: true,
+  disableFatalDefects: true
 }).pipe(Layer.provide(layerHandlers))
 
 /**
@@ -212,8 +224,8 @@ export const layerWithClients: Layer.Layer<
  *
  * **When to use**
  *
- * Use when you use this layer to embed a cluster client inside another Effect application
- * without registering with the ShardManager or receiving shard assignments.
+ * Use to embed a cluster client inside another Effect application without registering with
+ * the ShardManager or receiving shard assignments.
  *
  * @category layers
  * @since 4.0.0

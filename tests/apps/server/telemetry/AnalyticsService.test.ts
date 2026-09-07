@@ -49,7 +49,7 @@ const explicitConfig = {
 }
 
 const recordEvents = Effect.fn('recordEvents')(function* (
-  provider: ConfigProvider.ConfigProvider,
+  provider?: ConfigProvider.ConfigProvider,
   count = 1,
 )
 {
@@ -72,7 +72,7 @@ const recordEvents = Effect.fn('recordEvents')(function* (
         prefix: 't3-telemetry-base-',
       }),
     ),
-    Layer.provide(ConfigProvider.layer(provider)),
+    Layer.provide(provider === undefined ? Layer.empty : ConfigProvider.layer(provider)),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
   )
 
@@ -148,10 +148,13 @@ it.layer(NodeServices.layer)('AnalyticsService test', (it) =>
         vi.stubEnv(key, '')
         const requests = yield* recordEvents(
           ConfigProvider.fromEnv({
+            preserveEmptyStrings: true,
             env: { ...explicitConfig, [key]: process.env[key]! },
           }),
         )
         assert.equal(requests.length, 0)
+        const productionRequests = yield* recordEvents()
+        assert.equal(productionRequests.length, 0)
       }),
     )
   }

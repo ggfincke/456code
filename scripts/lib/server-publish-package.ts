@@ -5,6 +5,7 @@
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
+import * as YAML from 'yaml'
 
 import { resolveCatalogDependencies } from './resolve-catalog.ts'
 
@@ -242,6 +243,49 @@ export function pinStagedCartographerDependencyVersions(
       const installed = readInstalledPackageManifest(cartographerCoreDirectory, dependencyName)
       return [dependencyName, pinInstalledDependency(dependencyName, sourceSpec, installed)]
     }),
+  )
+}
+
+// install from pnpm's pruned lock in a standalone workspace to avoid hoisted deploy links
+export function prepareCartographerDependencyWorkspace(
+  repoRoot: string,
+  deployDirectory: string,
+  dependencyWorkspace: string,
+): void
+{
+  NodeFS.mkdirSync(dependencyWorkspace, { recursive: true })
+  NodeFS.copyFileSync(
+    NodePath.join(deployDirectory, 'node_modules', '.pnpm', 'lock.yaml'),
+    NodePath.join(dependencyWorkspace, 'pnpm-lock.yaml'),
+  )
+  const manifest: Record<string, unknown> = JSON.parse(
+    NodeFS.readFileSync(NodePath.join(repoRoot, 'packages/cartographer-core/package.json'), 'utf8'),
+  )
+  delete manifest.devDependencies
+  delete manifest.scripts
+  delete manifest.packageManager
+  NodeFS.writeFileSync(
+    NodePath.join(dependencyWorkspace, 'package.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  )
+
+  const workspace: Record<string, unknown> = YAML.parse(
+    NodeFS.readFileSync(NodePath.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8'),
+  )
+  workspace.packages = []
+  if (typeof workspace.patchedDependencies === 'object' && workspace.patchedDependencies !== null)
+  {
+    workspace.patchedDependencies = Object.fromEntries(
+      Object.entries(workspace.patchedDependencies).map(([name, patch]) =>
+      {
+        if (typeof patch !== 'string') throw new Error(`Invalid patch path for ${name}`)
+        return [name, NodePath.resolve(repoRoot, patch)]
+      }),
+    )
+  }
+  NodeFS.writeFileSync(
+    NodePath.join(dependencyWorkspace, 'pnpm-workspace.yaml'),
+    YAML.stringify(workspace),
   )
 }
 

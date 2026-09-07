@@ -12,7 +12,7 @@ import * as Electron from 'electron'
 
 const ElectronTrayOperation = Schema.Literals(['create', 'set-context-menu'])
 
-export class ElectronTrayOperationError extends Schema.TaggedErrorClass<ElectronTrayOperationError>()(
+export class ElectronTrayOperationError extends Schema.TaggedError<ElectronTrayOperationError>()(
   'ElectronTrayOperationError',
   {
     operation: ElectronTrayOperation,

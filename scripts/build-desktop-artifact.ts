@@ -156,7 +156,7 @@ type StageWorkspaceConfig = typeof StageWorkspaceConfig.Type
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL('..', import.meta.url))),
 )
-const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString)
+const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig))
 const decodeNodePtyManifest = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ version: Schema.String })),
@@ -232,7 +232,7 @@ const getDefaultArch = Effect.fn('getDefaultArch')(function* (platform: typeof B
   return yield* getDefaultBuildArch(platform, config)
 })
 
-export class UnsupportedHostBuildPlatformError extends Schema.TaggedErrorClass<UnsupportedHostBuildPlatformError>()(
+export class UnsupportedHostBuildPlatformError extends Schema.TaggedError<UnsupportedHostBuildPlatformError>()(
   'UnsupportedHostBuildPlatformError',
   {
     hostPlatform: Schema.String,
@@ -251,7 +251,7 @@ const InvalidMockUpdateServerPortReason = Schema.Literals([
   'out-of-range',
 ])
 
-export class InvalidMockUpdateServerPortError extends Schema.TaggedErrorClass<InvalidMockUpdateServerPortError>()(
+export class InvalidMockUpdateServerPortError extends Schema.TaggedError<InvalidMockUpdateServerPortError>()(
   'InvalidMockUpdateServerPortError',
   {
     reason: InvalidMockUpdateServerPortReason,
@@ -275,7 +275,7 @@ export class InvalidMockUpdateServerPortError extends Schema.TaggedErrorClass<In
   }
 }
 
-export class BuildCommandFailedError extends Schema.TaggedErrorClass<BuildCommandFailedError>()(
+export class BuildCommandFailedError extends Schema.TaggedError<BuildCommandFailedError>()(
   'BuildCommandFailedError',
   {
     command: Schema.String,
@@ -303,7 +303,7 @@ const desktopIconPlatformNames = {
   win: 'Windows',
 } satisfies Record<typeof BuildPlatform.Type, string>
 
-export class DesktopIconSourceMissingError extends Schema.TaggedErrorClass<DesktopIconSourceMissingError>()(
+export class DesktopIconSourceMissingError extends Schema.TaggedError<DesktopIconSourceMissingError>()(
   'DesktopIconSourceMissingError',
   {
     platform: BuildPlatform,
@@ -317,7 +317,7 @@ export class DesktopIconSourceMissingError extends Schema.TaggedErrorClass<Deskt
   }
 }
 
-export class BundledClientAssetsMissingError extends Schema.TaggedErrorClass<BundledClientAssetsMissingError>()(
+export class BundledClientAssetsMissingError extends Schema.TaggedError<BundledClientAssetsMissingError>()(
   'BundledClientAssetsMissingError',
   {
     indexPath: Schema.String,
@@ -333,7 +333,7 @@ export class BundledClientAssetsMissingError extends Schema.TaggedErrorClass<Bun
   }
 }
 
-export class UnsupportedDesktopBuildPlatformError extends Schema.TaggedErrorClass<UnsupportedDesktopBuildPlatformError>()(
+export class UnsupportedDesktopBuildPlatformError extends Schema.TaggedError<UnsupportedDesktopBuildPlatformError>()(
   'UnsupportedDesktopBuildPlatformError',
   {
     platform: Schema.String,
@@ -357,7 +357,7 @@ const DependencyResolutionKind = Schema.Literals([
   'desktop-runtime',
 ])
 
-export class DesktopBuildDependencyResolutionError extends Schema.TaggedErrorClass<DesktopBuildDependencyResolutionError>()(
+export class DesktopBuildDependencyResolutionError extends Schema.TaggedError<DesktopBuildDependencyResolutionError>()(
   'DesktopBuildDependencyResolutionError',
   {
     kind: DependencyResolutionKind,
@@ -372,7 +372,7 @@ export class DesktopBuildDependencyResolutionError extends Schema.TaggedErrorCla
   }
 }
 
-export class MissingServerProductionDependenciesError extends Schema.TaggedErrorClass<MissingServerProductionDependenciesError>()(
+export class MissingServerProductionDependenciesError extends Schema.TaggedError<MissingServerProductionDependenciesError>()(
   'MissingServerProductionDependenciesError',
   {
     manifestPath: Schema.String,
@@ -399,7 +399,7 @@ const desktopBuildInputArtifactNames = {
   'bundled-server-client': 'bundled server client',
 } satisfies Record<DesktopBuildInputArtifact, string>
 
-export class MissingDesktopBuildInputError extends Schema.TaggedErrorClass<MissingDesktopBuildInputError>()(
+export class MissingDesktopBuildInputError extends Schema.TaggedError<MissingDesktopBuildInputError>()(
   'MissingDesktopBuildInputError',
   {
     artifact: DesktopBuildInputArtifact,
@@ -414,7 +414,7 @@ export class MissingDesktopBuildInputError extends Schema.TaggedErrorClass<Missi
   }
 }
 
-export class DesktopBuildDistDirectoryMissingError extends Schema.TaggedErrorClass<DesktopBuildDistDirectoryMissingError>()(
+export class DesktopBuildDistDirectoryMissingError extends Schema.TaggedError<DesktopBuildDistDirectoryMissingError>()(
   'DesktopBuildDistDirectoryMissingError',
   {
     distPath: Schema.String,
@@ -429,7 +429,7 @@ export class DesktopBuildDistDirectoryMissingError extends Schema.TaggedErrorCla
   }
 }
 
-export class DesktopBuildNoArtifactsProducedError extends Schema.TaggedErrorClass<DesktopBuildNoArtifactsProducedError>()(
+export class DesktopBuildNoArtifactsProducedError extends Schema.TaggedError<DesktopBuildNoArtifactsProducedError>()(
   'DesktopBuildNoArtifactsProducedError',
   {
     distPath: Schema.String,
@@ -444,7 +444,7 @@ export class DesktopBuildNoArtifactsProducedError extends Schema.TaggedErrorClas
   }
 }
 
-export class WslNodePtyPrebuildMissingError extends Schema.TaggedErrorClass<WslNodePtyPrebuildMissingError>()(
+export class WslNodePtyPrebuildMissingError extends Schema.TaggedError<WslNodePtyPrebuildMissingError>()(
   'WslNodePtyPrebuildMissingError',
   {
     prebuildPath: Schema.String,
@@ -457,7 +457,7 @@ export class WslNodePtyPrebuildMissingError extends Schema.TaggedErrorClass<WslN
   }
 }
 
-export class WslNodePtyManifestReadError extends Schema.TaggedErrorClass<WslNodePtyManifestReadError>()(
+export class WslNodePtyManifestReadError extends Schema.TaggedError<WslNodePtyManifestReadError>()(
   'WslNodePtyManifestReadError',
   {
     manifestPath: Schema.String,
@@ -473,7 +473,7 @@ export class WslNodePtyManifestReadError extends Schema.TaggedErrorClass<WslNode
 
 const WindowsServerSidecarOperation = Schema.Literals(['pack', 'hash', 'extract', 'validate'])
 
-export class WindowsServerSidecarError extends Schema.TaggedErrorClass<WindowsServerSidecarError>()(
+export class WindowsServerSidecarError extends Schema.TaggedError<WindowsServerSidecarError>()(
   'WindowsServerSidecarError',
   {
     operation: WindowsServerSidecarOperation,
@@ -489,7 +489,7 @@ export class WindowsServerSidecarError extends Schema.TaggedErrorClass<WindowsSe
   }
 }
 
-export class WindowsPrimaryNativeProbeError extends Schema.TaggedErrorClass<WindowsPrimaryNativeProbeError>()(
+export class WindowsPrimaryNativeProbeError extends Schema.TaggedError<WindowsPrimaryNativeProbeError>()(
   'WindowsPrimaryNativeProbeError',
   {
     executablePath: Schema.String,
@@ -504,7 +504,7 @@ export class WindowsPrimaryNativeProbeError extends Schema.TaggedErrorClass<Wind
   }
 }
 
-export class WindowsPackagedPayloadValidationError extends Schema.TaggedErrorClass<WindowsPackagedPayloadValidationError>()(
+export class WindowsPackagedPayloadValidationError extends Schema.TaggedError<WindowsPackagedPayloadValidationError>()(
   'WindowsPackagedPayloadValidationError',
   {
     packagedAppDir: Schema.String,
@@ -520,7 +520,7 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedErrorCla
   }
 }
 
-export class CartographerCoreBuildOutputMissingError extends Schema.TaggedErrorClass<CartographerCoreBuildOutputMissingError>()(
+export class CartographerCoreBuildOutputMissingError extends Schema.TaggedError<CartographerCoreBuildOutputMissingError>()(
   'CartographerCoreBuildOutputMissingError',
   {
     distPath: Schema.String,
@@ -534,7 +534,7 @@ export class CartographerCoreBuildOutputMissingError extends Schema.TaggedErrorC
   }
 }
 
-export class CartographerCorePackOutputError extends Schema.TaggedErrorClass<CartographerCorePackOutputError>()(
+export class CartographerCorePackOutputError extends Schema.TaggedError<CartographerCorePackOutputError>()(
   'CartographerCorePackOutputError',
   {
     packDirectory: Schema.String,
@@ -548,7 +548,7 @@ export class CartographerCorePackOutputError extends Schema.TaggedErrorClass<Car
   }
 }
 
-export class LinuxIconResizeError extends Schema.TaggedErrorClass<LinuxIconResizeError>()(
+export class LinuxIconResizeError extends Schema.TaggedError<LinuxIconResizeError>()(
   'LinuxIconResizeError',
   {
     operation: Schema.Literal('resize'),
@@ -1205,6 +1205,7 @@ export const createBuildConfig = Effect.fn('createBuildConfig')(function* (
   {
     buildConfig.mac = {
       target: target === 'dmg' ? [target, 'zip'] : [target],
+      minimumSystemVersion: '13.0.0',
       icon: 'icon.icns',
       category: 'public.app-category.developer-tools',
       protocols: [
@@ -1753,7 +1754,7 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
   const probeRoot = yield* fs.makeTempDirectoryScoped({
     prefix: '456code-windows-primary-native-probe-',
   })
-  const fffEntryPath = path.join(input.asarPath, 'node_modules/@ff-labs/fff-node/dist/src/index.js')
+  const fffEntryPath = path.join(input.asarPath, 'node_modules/@ff-labs/fff-node/dist/index.js')
   const probeEnv = { ...process.env }
   delete probeEnv.ELECTRON_NO_ASAR
   delete probeEnv.NODE_OPTIONS

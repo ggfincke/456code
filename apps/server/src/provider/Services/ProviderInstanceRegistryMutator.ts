@@ -32,7 +32,7 @@ import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 
-export class ProviderInstanceLifecycleReconcileError extends Schema.TaggedErrorClass<ProviderInstanceLifecycleReconcileError>()(
+export class ProviderInstanceLifecycleReconcileError extends Schema.TaggedError<ProviderInstanceLifecycleReconcileError>()(
   'ProviderInstanceLifecycleReconcileError',
   {
     detail: Schema.String,

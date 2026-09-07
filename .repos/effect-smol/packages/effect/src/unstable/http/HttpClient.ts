@@ -1,38 +1,13 @@
 /**
- * Dependency-injected HTTP client for executing outgoing requests from Effect
- * programs.
+ * Provides the service used to run outgoing HTTP requests.
  *
- * This module defines the `HttpClient` service used by platform clients,
- * tests, and API-specific clients. It executes immutable `HttpClientRequest`
- * values, returns `HttpClientResponse` values, and keeps outbound HTTP behind a
- * service boundary so call sites do not depend on a concrete runtime transport.
- *
- * **Mental model**
- *
- * A client is an `execute` function plus method helpers such as `get`, `post`,
- * and `del`. Before a request reaches the runtime, it passes through a
- * preprocessing pipeline. After the runtime returns a response, it passes
- * through a postprocessing pipeline. Combinators such as `mapRequest`,
- * `filterStatusOk`, `retry`, `followRedirects`, `withCookiesRef`, and
- * `withRateLimiter` return a new client with behavior layered around the
- * previous one.
- *
- * **Common tasks**
- *
- * Use method helpers for straightforward calls, construct `HttpClientRequest`
- * values directly when a request is assembled across several steps, and use
- * `make` or `makeWith` when adapting a lower-level transport. Use
- * `filterStatus` or `filterStatusOk` when non-success HTTP statuses should fail
- * the Effect. Use `withScope` when response resources should live for a
- * surrounding scope instead of only the individual request.
- *
- * **Gotchas**
- *
- * Receiving a response is a successful Effect even for non-2xx statuses unless
- * a status filter has been applied. `mapRequestInput` prepends work before
- * existing request middleware, while `mapRequest` appends after it. Without
- * `withScope`, non-scoped responses are attached to an abort controller so
- * interruption can clean up the request.
+ * `HttpClient` executes immutable `HttpClientRequest` values and returns
+ * `HttpClientResponse` values. Keeping HTTP behind this service lets programs,
+ * tests, and generated API clients use the same request model without depending
+ * on one concrete platform transport. This module includes request accessors,
+ * constructors and layers, request and response transformations, status
+ * filtering, retries, rate limiting, cookies, redirect handling, scoped request
+ * abortion, and tracing support.
  *
  * @since 4.0.0
  */
@@ -59,13 +34,14 @@ import type { EqualsWith, ExcludeTag, ExtractTag, NoExcessProperties, NoInfer, T
 import type * as RateLimiter from "../persistence/RateLimiter.ts"
 import * as Cookies from "./Cookies.ts"
 import * as Headers from "./Headers.ts"
+import * as HttpBody from "./HttpBody.ts"
 import * as Error from "./HttpClientError.ts"
 import * as HttpClientRequest from "./HttpClientRequest.ts"
 import * as HttpClientResponse from "./HttpClientResponse.ts"
 import * as HttpIncomingMessage from "./HttpIncomingMessage.ts"
 import * as HttpMethod from "./HttpMethod.ts"
 import * as TraceContext from "./HttpTraceContext.ts"
-import * as UrlParams from "./UrlParams.ts"
+import * as Url from "./Url.ts"
 
 const TypeId = "~effect/http/HttpClient"
 
@@ -165,10 +141,10 @@ export declare namespace HttpClient {
  *
  * **When to use**
  *
- * Use to provide the HTTP client implementation consumed by the module's
- * request accessor functions.
+ * Use to provide the default outgoing HTTP client service used by request
+ * accessors such as `execute`, `get`, and `post`.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const HttpClient: Context.Service<HttpClient, HttpClient> = Context.Service<HttpClient, HttpClient>(
@@ -282,7 +258,7 @@ export const options: (url: string | URL, options?: HttpClientRequest.Options.No
  *
  * The transformation receives both the response effect and the original request, allowing it to change success, error, and environment behavior.
  *
- * @category mapping & sequencing
+ * @category mapping
  * @since 4.0.0
  */
 export const transform: {
@@ -314,7 +290,7 @@ export const transform: {
 /**
  * Transforms a client by applying an effectful transformation to each response effect.
  *
- * @category mapping & sequencing
+ * @category mapping
  * @since 4.0.0
  */
 export const transformResponse: {
@@ -501,7 +477,7 @@ export const catchTags: {
 /**
  * Filters the result of a response, or runs an alternative effect if the predicate fails.
  *
- * @category filters
+ * @category filtering
  * @since 4.0.0
  */
 export const filterOrElse: {
@@ -546,7 +522,7 @@ export const filterOrElse: {
 /**
  * Filters successful responses, or fails with the error produced by `orFailWith` when the predicate does not match.
  *
- * @category filters
+ * @category filtering
  * @since 4.0.0
  */
 export const filterOrFail: {
@@ -573,7 +549,7 @@ export const filterOrFail: {
 /**
  * Filters responses by HTTP status code.
  *
- * @category filters
+ * @category filtering
  * @since 4.0.0
  */
 export const filterStatus: {
@@ -588,7 +564,7 @@ export const filterStatus: {
 /**
  * Filters responses that return a 2xx status code.
  *
- * @category filters
+ * @category filtering
  * @since 4.0.0
  */
 export const filterStatusOk: <E, R>(self: HttpClient.With<E, R>) => HttpClient.With<E | Error.HttpClientError, R> =
@@ -662,7 +638,7 @@ export const make = (
       Effect.withFiber((fiber) => {
         const scopedController = scopedRequests.get(request)
         const controller = scopedController ?? new AbortController()
-        const urlResult = UrlParams.makeUrl(request.url, request.urlParams, Option.getOrUndefined(request.hash))
+        const urlResult = Url.make(request.url, request.urlParams, Option.getOrUndefined(request.hash))
         if (Result.isFailure(urlResult)) {
           return Effect.fail(
             new Error.HttpClientError({
@@ -711,8 +687,10 @@ export const make = (
               span.attribute("url.query", query)
             }
             const redactedHeaderNames = fiber.getRef(Headers.CurrentRedactedNames)
+            const headerFilter = fiber.getRef(TracerHeaderFilter)
             const redactedHeaders = Headers.redact(request.headers, redactedHeaderNames)
             for (const name in redactedHeaders) {
+              if (!headerFilter(name, "request")) continue
               span.attribute(`http.request.header.${name}`, String(redactedHeaders[name]))
             }
             request = fiber.getRef(TracerPropagationEnabled)
@@ -726,6 +704,7 @@ export const make = (
                     span.attribute("http.response.status_code", response.status)
                     const redactedHeaders = Headers.redact(response.headers, redactedHeaderNames)
                     for (const name in redactedHeaders) {
+                      if (!headerFilter(name, "response")) continue
                       span.attribute(`http.response.header.${name}`, String(redactedHeaders[name]))
                     }
 
@@ -749,7 +728,7 @@ export const make = (
 /**
  * Appends a transformation of the request object before sending it.
  *
- * @category mapping & sequencing
+ * @category mapping
  * @since 4.0.0
  */
 export const mapRequest: {
@@ -771,7 +750,7 @@ export const mapRequest: {
 /**
  * Appends an effectful transformation of the request object before sending it.
  *
- * @category mapping & sequencing
+ * @category mapping
  * @since 4.0.0
  */
 export const mapRequestEffect: {
@@ -794,7 +773,7 @@ export const mapRequestEffect: {
 /**
  * Prepends a transformation of the request object before sending it.
  *
- * @category mapping & sequencing
+ * @category mapping
  * @since 4.0.0
  */
 export const mapRequestInput: {
@@ -816,7 +795,7 @@ export const mapRequestInput: {
 /**
  * Prepends an effectful transformation of the request object before sending it.
  *
- * @category mapping & sequencing
+ * @category mapping
  * @since 4.0.0
  */
 export const mapRequestInputEffect: {
@@ -1013,7 +992,8 @@ export declare namespace WithRateLimiter {
    *
    * **Details**
    *
-   * They define the backing limiter, initial limit window, keying strategy, algorithm, token cost, and whether response headers update future limits.
+   * They define the backing limiter, initial limit window, keying strategy,
+   * algorithm, token cost, retry count, and response header inspection.
    *
    * @category rate limiting
    * @since 4.0.0
@@ -1046,9 +1026,50 @@ export declare namespace WithRateLimiter {
      */
     readonly tokens?: number | ((request: HttpClientRequest.HttpClientRequest) => number) | undefined
     /**
-     * Disable automatic limits updates from response headers.
+     * The maximum number of automatic retries after an HTTP `429` response.
+     * Use a non-negative integer. Defaults to an unlimited number of retries.
+     * Set to `0` to disable automatic retries.
+     */
+    readonly times?: number | undefined
+    /**
+     * Overrides the response header names used for rate limit inspection.
+     * Header names are matched case-insensitively. An omitted field continues
+     * using the built-in names, while a configured field replaces them for
+     * that value. Header value formats are unchanged.
+     */
+    readonly responseHeaders?: {
+      /**
+       * Header containing the maximum number of requests in a window.
+       */
+      readonly limit?: string | undefined
+      /**
+       * Header containing the number of requests remaining in a window.
+       */
+      readonly remaining?: string | undefined
+      /**
+       * Header containing the rate limit reset time.
+       */
+      readonly reset?: string | undefined
+      /**
+       * Header containing the number of seconds until the rate limit resets.
+       */
+      readonly resetAfter?: string | undefined
+      /**
+       * Header containing the retry delay for an HTTP `429` response.
+       */
+      readonly retryAfter?: string | undefined
+    } | undefined
+    /**
+     * Disables automatic limit updates, `Retry-After` delays, and adaptive
+     * feedback from response headers. This does not disable automatic HTTP
+     * `429` retries. Set `times` to `0` to disable them.
      */
     readonly disableResponseInspection?: boolean | undefined
+    /**
+     * Disables adaptive learning from `Retry-After` responses. Response
+     * inspection and direct `Retry-After` delays remain enabled.
+     */
+    readonly disableAdaptiveLearning?: boolean | undefined
   }
 }
 
@@ -1060,6 +1081,12 @@ export declare namespace WithRateLimiter {
  * It can update limits by inspecting common rate limit response headers and
  * automatically retries HTTP `429` responses (or `HttpClientError` values
  * wrapping a `429` response) by forcing the retry back through the limiter.
+ *
+ * **Gotchas**
+ *
+ * Automatic HTTP `429` retries are unlimited unless `times` is specified.
+ * Disabling response inspection does not disable retries; set `times` to `0`
+ * to return or fail with the first `429`.
  *
  * @category rate limiting
  * @since 4.0.0
@@ -1091,6 +1118,8 @@ export const withRateLimiter: {
   const resolveTokens: (request: HttpClientRequest.HttpClientRequest) => number = typeof tokensOption === "function"
     ? tokensOption
     : constant(tokensOption ?? 1)
+  const adaptiveLearningEnabled = !options.disableAdaptiveLearning
+  const headerNames = resolveRateLimiterHeaderNames(options.responseHeaders)
 
   const getState = (key: string): RateLimiterState => {
     const current = states.get(key)
@@ -1105,13 +1134,13 @@ export const withRateLimiter: {
     ? undefined
     : (clock: Clock, key: string, headers: Headers.Headers, tokens: number) => {
       const current = getState(key)
-      const next = parseRateLimiterState(current, clock, headers, tokens)
+      const next = parseRateLimiterState(current, clock, headers, tokens, headerNames)
       if (next.limit !== current.limit || !Duration.equals(next.window, current.window)) {
         states.set(key, next)
       }
     }
 
-  return transform(self, function loop(effect, request): Effect.Effect<
+  return transform(self, function loop(effect, request, retries = 0): Effect.Effect<
     HttpClientResponse.HttpClientResponse,
     E | RateLimiter.RateLimiterError,
     R
@@ -1121,12 +1150,38 @@ export const withRateLimiter: {
     const key = resolveKey(request)
     const tokens = Math.max(resolveTokens(request), 1)
     const current = getState(key)
-    function retry(response: HttpClientResponse.HttpClientResponse) {
-      if (options.disableResponseInspection) return loop(effect, request)
-      const retryAfter = parseRetryAfter(clock, getHeader(response.headers, "retry-after"))
+    const canRetry = options.times === undefined || retries < options.times
+    function retry(retryAfter: Duration.Duration | undefined) {
       return retryAfter
-        ? Effect.flatMap(Effect.sleep(retryAfter), () => loop(effect, request))
-        : loop(effect, request)
+        ? Effect.flatMap(Effect.sleep(retryAfter), () => loop(effect, request, retries + 1))
+        : loop(effect, request, retries + 1)
+    }
+    const inspectResponse = (
+      response: HttpClientResponse.HttpClientResponse,
+      adaptive: RateLimiter.AdaptiveConsumeResult | undefined
+    ) => {
+      onResponse?.(clock, key, response.headers, tokens)
+      if (options.disableResponseInspection || response.status !== 429) {
+        return Effect.succeed<Duration.Duration | undefined>(undefined)
+      }
+      const retryAfter = parseRetryAfter(clock, getHeader(response.headers, ...headerNames.retryAfter))
+      if (retryAfter === undefined) {
+        return Effect.succeed<Duration.Duration | undefined>(undefined)
+      }
+      const delay = parseRateLimitWindow(clock, response.headers, headerNames) ?? retryAfter
+      if (adaptive === undefined) {
+        return Effect.succeed<Duration.Duration | undefined>(delay)
+      }
+      return Effect.as(
+        options.limiter.adaptiveFeedback({
+          key,
+          epoch: adaptive.epoch,
+          tokens,
+          status: response.status,
+          retryAfter: delay
+        }),
+        delay
+      )
     }
     return Effect.flatMap(
       options.limiter.consume({
@@ -1138,24 +1193,83 @@ export const withRateLimiter: {
         tokens
       }),
       ({ delay }) => {
-        const run = Effect.matchEffect(effect, {
-          onSuccess(response) {
-            onResponse?.(clock, key, response.headers, tokens)
-            if (response.status !== 429) return Effect.succeed(response)
-            return retry(response)
-          },
-          onFailure(error) {
-            if (isTooManyRequestsHttpClientError(error)) {
-              onResponse?.(clock, key, error.reason.response.headers, tokens)
-              return retry(error.reason.response)
-            }
-            return Effect.fail(error)
+        const runAdaptive = (): Effect.Effect<
+          HttpClientResponse.HttpClientResponse,
+          E | RateLimiter.RateLimiterError,
+          R
+        > => {
+          const runRequest = (adaptive: RateLimiter.AdaptiveConsumeResult | undefined) => {
+            const request = Effect.matchEffect(effect, {
+              onSuccess(response) {
+                return Effect.flatMap(inspectResponse(response, adaptive), (retryAfter) => {
+                  if (response.status !== 429 || !canRetry) return Effect.succeed(response)
+                  return retry(retryAfter)
+                })
+              },
+              onFailure(error) {
+                if (isTooManyRequestsHttpClientError(error)) {
+                  return Effect.flatMap(
+                    inspectResponse(error.reason.response, adaptive),
+                    (retryAfter) => canRetry ? retry(retryAfter) : Effect.fail(error)
+                  )
+                }
+                return Effect.fail(error)
+              }
+            })
+            return adaptive === undefined || Duration.isZero(adaptive.delay)
+              ? request
+              : Effect.delay(request, adaptive.delay)
           }
-        })
-        return Duration.isZero(delay) ? run : Effect.delay(run, delay)
+          if (!adaptiveLearningEnabled) {
+            return runRequest(undefined)
+          }
+          return Effect.flatMap(
+            options.limiter.adaptiveConsume({
+              key,
+              tokens,
+              fallbackLimit: current.limit,
+              fallbackWindow: current.window
+            }),
+            (adaptive) => {
+              if (!Duration.isZero(adaptive.delay) && adaptive.phase === "cooldown") {
+                return Effect.flatMap(Effect.sleep(adaptive.delay), runAdaptive)
+              }
+              return runRequest(adaptive)
+            }
+          )
+        }
+        return Duration.isZero(delay) ? runAdaptive() : Effect.flatMap(Effect.sleep(delay), runAdaptive)
       }
     )
   })
+})
+
+interface RateLimiterHeaderNames {
+  readonly limit: ReadonlyArray<string>
+  readonly remaining: ReadonlyArray<string>
+  readonly reset: ReadonlyArray<string>
+  readonly resetAfter: ReadonlyArray<string>
+  readonly retryAfter: ReadonlyArray<string>
+}
+
+const resolveRateLimiterHeaderNames = (
+  responseHeaders: WithRateLimiter.Options["responseHeaders"]
+): RateLimiterHeaderNames => ({
+  limit: responseHeaders?.limit === undefined
+    ? ["ratelimit-limit", "x-ratelimit-limit"]
+    : [responseHeaders.limit.toLowerCase()],
+  remaining: responseHeaders?.remaining === undefined
+    ? ["ratelimit-remaining", "x-ratelimit-remaining"]
+    : [responseHeaders.remaining.toLowerCase()],
+  reset: responseHeaders?.reset === undefined
+    ? ["ratelimit-reset", "x-ratelimit-reset"]
+    : [responseHeaders.reset.toLowerCase()],
+  resetAfter: responseHeaders?.resetAfter === undefined
+    ? ["ratelimit-reset-after", "x-ratelimit-reset-after"]
+    : [responseHeaders.resetAfter.toLowerCase()],
+  retryAfter: responseHeaders?.retryAfter === undefined
+    ? ["retry-after"]
+    : [responseHeaders.retryAfter.toLowerCase()]
 })
 
 interface RateLimiterState {
@@ -1168,10 +1282,11 @@ const parseRateLimiterState = (
   state: RateLimiterState,
   clock: Clock,
   headers: Headers.Headers,
-  tokens: number
+  tokens: number,
+  headerNames: RateLimiterHeaderNames
 ): RateLimiterState => {
-  const limit = parseRateLimitLimit(state, headers, tokens) ?? state.limit
-  const window = parseRateLimitWindow(clock, headers) ?? state.window
+  const limit = parseRateLimitLimit(state, headers, tokens, headerNames) ?? state.limit
+  const window = parseRateLimitWindow(clock, headers, headerNames) ?? state.window
   if (limit === state.limit && Duration.equals(window, state.window)) {
     return state
   }
@@ -1181,42 +1296,40 @@ const parseRateLimiterState = (
 const parseRateLimitLimit = (
   state: RateLimiterState,
   headers: Headers.Headers,
-  tokens: number
+  tokens: number,
+  headerNames: RateLimiterHeaderNames
 ): number | undefined => {
-  const raw = getHeader(headers, "ratelimit-limit", "x-ratelimit-limit")
+  const raw = getHeader(headers, ...headerNames.limit)
   const value = parseNumberHeader(raw)
   if (value !== undefined && value > 0) {
     return value
   }
-  const remaining = parseRateLimitRemaining(headers)
+  const remaining = parseRateLimitRemaining(headers, headerNames)
   if (remaining === undefined) {
     return undefined
   }
   return state.initial ? remaining + tokens : Math.max(remaining + tokens, state.limit)
 }
 
-const parseRateLimitRemaining = (headers: Headers.Headers): number | undefined => {
-  const raw = getHeader(headers, "ratelimit-remaining", "x-ratelimit-remaining")
+const parseRateLimitRemaining = (
+  headers: Headers.Headers,
+  headerNames: RateLimiterHeaderNames
+): number | undefined => {
+  const raw = getHeader(headers, ...headerNames.remaining)
   const value = parseNumberHeader(raw)
   return value !== undefined && value >= 0 ? value : undefined
 }
 
 const parseRateLimitWindow = (
   clock: Clock,
-  headers: Headers.Headers
+  headers: Headers.Headers,
+  headerNames: RateLimiterHeaderNames
 ): Duration.Duration | undefined => {
-  const retryAfter = parseRetryAfter(
-    clock,
-    getHeader(headers, "retry-after")
-  )
-  if (retryAfter !== undefined) {
-    return retryAfter
-  }
-  const resetAfter = parseResetAfter(getHeader(headers, "ratelimit-reset-after", "x-ratelimit-reset-after"))
+  const resetAfter = parseResetAfter(getHeader(headers, ...headerNames.resetAfter))
   if (resetAfter !== undefined) {
     return resetAfter
   }
-  return parseResetHeader(clock, getHeader(headers, "ratelimit-reset", "x-ratelimit-reset"))
+  return parseResetHeader(clock, getHeader(headers, ...headerNames.reset))
 }
 
 const parseRetryAfter = (
@@ -1292,7 +1405,7 @@ const getHeader = (headers: Headers.Headers, ...keys: Array<string>): string | u
 /**
  * Performs an additional effect after a successful request.
  *
- * @category mapping & sequencing
+ * @category sequencing
  * @since 4.0.0
  */
 export const tap: {
@@ -1314,7 +1427,7 @@ export const tap: {
 /**
  * Performs an additional effect after an unsuccessful request.
  *
- * @category mapping & sequencing
+ * @category sequencing
  * @since 4.0.0
  */
 export const tapError: {
@@ -1336,7 +1449,7 @@ export const tapError: {
 /**
  * Performs an additional effect on the request before sending it.
  *
- * @category mapping & sequencing
+ * @category sequencing
  * @since 4.0.0
  */
 export const tapRequest: {
@@ -1436,17 +1549,29 @@ export const followRedirects: {
       ): Effect.Effect<HttpClientResponse.HttpClientResponse, E, R> =>
         Effect.flatMap(
           self.postprocess(Effect.succeed(request)),
-          (response) =>
-            response.status >= 300 && response.status < 400 && response.headers.location &&
-              redirects < (maxRedirects ?? 10)
-              ? loop(
-                HttpClientRequest.setUrl(
-                  request,
-                  new URL(response.headers.location, response.request.url)
-                ),
-                redirects + 1
-              )
-              : Effect.succeed(response)
+          (response) => {
+            if (
+              response.status < 300 || response.status >= 400 || !response.headers.location ||
+              redirects >= (maxRedirects ?? 10)
+            ) {
+              return Effect.succeed(response)
+            }
+            const url = new URL(response.headers.location, response.request.url)
+            let nextRequest = request
+            if (
+              ((response.status === 301 || response.status === 302) && request.method === "POST") ||
+              (response.status === 303 && request.method !== "GET" && request.method !== "HEAD")
+            ) {
+              nextRequest = HttpClientRequest.setMethod(nextRequest, "GET")
+              nextRequest = HttpClientRequest.setBody(nextRequest, HttpBody.empty)
+            }
+            if (url.origin !== new URL(response.request.url).origin) {
+              nextRequest = HttpClientRequest.removeHeader(nextRequest, "authorization")
+              nextRequest = HttpClientRequest.removeHeader(nextRequest, "proxy-authorization")
+              nextRequest = HttpClientRequest.removeHeader(nextRequest, "cookie")
+            }
+            return loop(HttpClientRequest.setUrl(nextRequest, url), redirects + 1)
+          }
         )
       return Effect.flatMap(request, (request) => loop(request, 0))
     },
@@ -1456,7 +1581,7 @@ export const followRedirects: {
 /**
  * Context reference for a predicate that disables client-side tracing for matching outgoing requests.
  *
- * @category references
+ * @category services
  * @since 4.0.0
  */
 export const TracerDisabledWhen = Context.Reference<
@@ -1466,9 +1591,21 @@ export const TracerDisabledWhen = Context.Reference<
 })
 
 /**
+ * Context reference for filtering request and response headers added to client spans.
+ *
+ * @category services
+ * @since 4.0.0
+ */
+export const TracerHeaderFilter = Context.Reference<
+  (headerName: string, phase: "request" | "response") => boolean
+>("effect/http/HttpClient/TracerHeaderFilter", {
+  defaultValue: () => constTrue
+})
+
+/**
  * Context reference that controls whether outgoing client spans are propagated to request headers.
  *
- * @category references
+ * @category services
  * @since 4.0.0
  */
 export const TracerPropagationEnabled = Context.Reference<boolean>("effect/HttpClient/TracerPropagationEnabled", {
@@ -1478,7 +1615,7 @@ export const TracerPropagationEnabled = Context.Reference<boolean>("effect/HttpC
 /**
  * Context reference for generating the span name used for outgoing client request spans.
  *
- * @category references
+ * @category services
  * @since 4.0.0
  */
 export const SpanNameGenerator = Context.Reference<

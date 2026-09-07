@@ -1,4 +1,4 @@
-import { Config, Schema } from "effect"
+import { Config, ConfigProvider, Schema } from "effect"
 import { describe, expect, it } from "tstyche"
 
 describe("Config", () => {
@@ -27,5 +27,26 @@ describe("Config", () => {
 
     type S = Config.Success<typeof c>
     expect<S>().type.toBe<"a" | "b">()
+  })
+
+  it("Record", () => {
+    const c = Config.schema(Config.Record(Schema.String, Schema.FiniteFromString))
+
+    expect(c).type.toBe<Config.Config<{ readonly [x: string]: number }>>()
+  })
+
+  it("Array", () => {
+    const c = Config.schema(Config.Array(Schema.FiniteFromString))
+
+    expect(c).type.toBe<Config.Config<ReadonlyArray<number>>>()
+  })
+
+  it("parse", () => {
+    const config = Config.string("a")
+    const provider = ConfigProvider.fromUnknown({ a: "value" })
+
+    config.parse(provider)
+    // @ts-expect-error Expected 1 arguments, but got 2.
+    config.parse(provider, ["prefix"])
   })
 })

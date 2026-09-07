@@ -1,55 +1,11 @@
 /**
- * The `Crypto` module provides a platform-agnostic service for cryptographic
- * operations. Runtime packages such as `@effect/platform-node`,
- * `@effect/platform-bun`, and `@effect/platform-browser` provide concrete
- * implementations backed by the host platform's cryptography APIs.
+ * Defines a platform-independent service for cryptographic operations.
  *
- * Use `Crypto` for cryptographic randomness, UUID generation, random values,
- * and message digests. The base `Random` service is not cryptographically
- * secure unless you replace it with a cryptographically secure implementation.
- *
- * **Example** (Providing a test Crypto service)
- *
- * ```ts
- * import { Console, Crypto, Effect, Layer } from "effect"
- *
- * const TestCrypto = Layer.succeed(
- *   Crypto.Crypto,
- *   Crypto.make({
- *     randomBytes: (size) => new Uint8Array(size),
- *     digest: (_algorithm, data) => Effect.succeed(data)
- *   })
- * )
- *
- * const program = Effect.gen(function*() {
- *   const crypto = yield* Crypto.Crypto
- *   const id = yield* crypto.randomUUIDv4
- *   yield* Console.log(`Created id: ${id}`)
- * })
- *
- * Effect.runPromise(Effect.provide(program, TestCrypto))
- * ```
- *
- * **Example** (Generating random bytes)
- *
- * ```ts
- * import { Crypto, Effect, Layer } from "effect"
- *
- * const TestCrypto = Layer.succeed(
- *   Crypto.Crypto,
- *   Crypto.make({
- *     randomBytes: (size) => new Uint8Array(size),
- *     digest: (_algorithm, data) => Effect.succeed(data)
- *   })
- * )
- *
- * const program = Effect.gen(function*() {
- *   const crypto = yield* Crypto.Crypto
- *   return yield* crypto.randomBytes(32)
- * })
- *
- * Effect.runPromise(Effect.provide(program, TestCrypto))
- * ```
+ * Runtime packages provide concrete implementations backed by the host
+ * platform's cryptography APIs. This module defines the service interface and a
+ * constructor from random-byte and digest primitives. The service provides
+ * secure random bytes and numbers, UUIDv4 and UUIDv7 generation, shuffling, and
+ * SHA message digests.
  *
  * @since 4.0.0
  */
@@ -69,7 +25,7 @@ const TypeId = "~effect/platform/Crypto"
  *
  * **Example** (Using a digest algorithm)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Crypto } from "effect"
  *
  * const algorithm: Crypto.DigestAlgorithm = "SHA-256"
@@ -91,7 +47,7 @@ export type DigestAlgorithm = "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512"
  *
  * **Example** (Using cryptographic operations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Crypto, Effect, Layer } from "effect"
  *
  * const TestCrypto = Layer.succeed(
@@ -106,15 +62,14 @@ export type DigestAlgorithm = "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512"
  *   const crypto = yield* Crypto.Crypto
  *   const bytes = yield* crypto.randomBytes(16)
  *   const uuidv4 = yield* crypto.randomUUIDv4
- *   const uuidv7 = yield* crypto.randomUUIDv7
  *   const hash = yield* crypto.digest("SHA-256", bytes)
- *   return { uuidv4, uuidv7, hash }
+ *   return [bytes.length, uuidv4.length, hash.length]
  * })
  *
- * Effect.runPromise(Effect.provide(program, TestCrypto))
+ * await Effect.runPromise(Effect.provide(program, TestCrypto)) // => [16, 36, 16]
  * ```
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface Crypto {
@@ -202,13 +157,13 @@ export interface Crypto {
  *
  * **When to use**
  *
- * Use when you need to provide or retrieve the full platform Crypto service
- * from an effect's context.
+ * Use when you need to provide or retrieve the full platform cryptography
+ * service from an effect's context.
  *
  * **Details**
  *
- * Providing this service supplies the cryptographic operations described by the
- * `Crypto` interface.
+ * Providing this service supplies platform-agnostic cryptographic operations
+ * such as hashing, UUID generation, and secure random values.
  *
  * @see {@link make} for constructing a Crypto service from primitive operations
  *
@@ -240,16 +195,15 @@ export const Crypto: Context.Service<Crypto, Crypto> = Context.Service("effect/C
  *
  * **Example** (Creating a Crypto service)
  *
- * ```ts
- * import { Crypto, Effect, Layer } from "effect"
+ * ```ts import.meta.vitest
+ * import { Crypto, Effect } from "effect"
  *
- * const TestCrypto = Layer.succeed(
- *   Crypto.Crypto,
- *   Crypto.make({
- *     randomBytes: (size) => new Uint8Array(size),
- *     digest: (_algorithm, data) => Effect.succeed(data)
- *   })
- * )
+ * const testCrypto = Crypto.make({
+ *   randomBytes: (size) => new Uint8Array(size),
+ *   digest: (_algorithm, data) => Effect.succeed(data)
+ * })
+ *
+ * await Effect.runPromise(testCrypto.randomBytes(4)) // => new Uint8Array([0, 0, 0, 0])
  * ```
  *
  * @category constructors
@@ -268,15 +222,24 @@ export const make = (
 
   const randomBytes: Crypto["randomBytes"] = (size) => Effect.map(validateSize("randomBytes", size), randomBytesUnsafe)
 
-  const nextDoubleUnsafe = (): number => {
-    const bytes = randomBytesUnsafe(7)
-    const value = ((bytes[0] & 0x1f) * 2 ** 48) + (bytes[1] * 2 ** 40) + (bytes[2] * 2 ** 32) +
-      (bytes[3] * 2 ** 24) + (bytes[4] * 2 ** 16) + (bytes[5] * 2 ** 8) + bytes[6]
-    return value / 2 ** 53
-  }
+  const readUint53 = (bytes: Uint8Array): number =>
+    ((bytes[0] & 0x1f) * 2 ** 48) + (bytes[1] * 2 ** 40) + (bytes[2] * 2 ** 32) +
+    (bytes[3] * 2 ** 24) + (bytes[4] * 2 ** 16) + (bytes[5] * 2 ** 8) + bytes[6]
 
-  const nextIntUnsafe = (): number =>
-    Math.floor(nextDoubleUnsafe() * (Number.MAX_SAFE_INTEGER - Number.MIN_SAFE_INTEGER + 1)) + Number.MIN_SAFE_INTEGER
+  const nextDoubleUnsafe = (): number => readUint53(randomBytesUnsafe(7)) / 2 ** 53
+
+  const nextIntUnsafe = (): number => {
+    while (true) {
+      const bytes = randomBytesUnsafe(7)
+      const value = readUint53(bytes)
+      if ((bytes[0] & 0x20) === 0) {
+        return value + Number.MIN_SAFE_INTEGER
+      }
+      if (value < Number.MAX_SAFE_INTEGER) {
+        return value + 1
+      }
+    }
+  }
 
   return Crypto.of({
     [TypeId]: TypeId,

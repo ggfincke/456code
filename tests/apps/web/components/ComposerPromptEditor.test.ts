@@ -11,6 +11,7 @@ import {
   COMMAND_PRIORITY_EDITOR,
   createEditor,
   PASTE_COMMAND,
+  type PasteCommandType,
 } from 'lexical'
 
 import { registerComposerInlineTokenPaste } from '../../../../apps/web/src/components/composerInlineTokenPaste'
@@ -90,8 +91,9 @@ describe('registerComposerInlineTokenPaste', () =>
   {
     vi.stubGlobal('ClipboardEvent', TestClipboardEvent)
     const editor = createEditor()
-    const plainTextFallback = vi.fn((event: ClipboardEvent) =>
+    const plainTextFallback = vi.fn((event: PasteCommandType) =>
     {
+      if (!(event instanceof ClipboardEvent)) return false
       const selection = $getSelection()
       if (!$isRangeSelection(selection)) return false
       selection.insertText(event.clipboardData?.getData('text/plain') ?? '')

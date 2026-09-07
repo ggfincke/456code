@@ -20,7 +20,7 @@ class StreamUsers extends Rpc.make("StreamUsers", {
 
 class CurrentUser extends Context.Service<CurrentUser, User>()("CurrentUser") {}
 
-class Unauthorized extends Schema.ErrorClass<Unauthorized>("Unauthorized")({
+class Unauthorized extends Schema.Error<Unauthorized>("Unauthorized")({
   _tag: Schema.tag("Unauthorized")
 }) {}
 
@@ -57,7 +57,7 @@ export const UserRpcs = RpcGroup.make(
   }),
   Rpc.make("ProduceDefect"),
   Rpc.make("ProduceDefectCustom", {
-    defect: Schema.DefectWithStack
+    defect: Schema.Defect({ includeStack: true })
   }),
   Rpc.make("Never"),
   Rpc.make("nested.test"),

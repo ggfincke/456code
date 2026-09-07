@@ -1,29 +1,9 @@
 /**
  * The `AnthropicLanguageModel` module provides the Anthropic implementation of
- * Effect AI's `LanguageModel` service. It turns Effect AI prompts, tools, files,
- * reasoning parts, and provider options into Anthropic Messages API requests,
- * and converts Anthropic responses and streams back into Effect AI response
- * parts with Anthropic-specific metadata.
- *
- * **When to use**
- *
- * Use when create an Anthropic-backed model with {@link model}
- * - Build or provide a `LanguageModel.LanguageModel` layer with {@link layer}
- *   or {@link make}
- * - Supply default request options through {@link Config}
- * - Override configuration for a scoped operation with {@link withConfigOverride}
- * - Attach Anthropic provider options for prompt caching, document citations,
- *   reasoning signatures, MCP metadata, and server-side tools
- *
- * **Gotchas**
- *
- * - Prompt files are translated to Anthropic image or document blocks; only the
- *   supported media types can be sent to the provider.
- * - Structured output support depends on the selected Claude model, so this
- *   module may use Anthropic's native structured output or fall back to a JSON
- *   response tool.
- * - Some features require Anthropic beta headers, which are added
- *   automatically from the selected tools, files, and model capabilities.
+ * Effect AI's `LanguageModel` service. It translates Effect AI prompts, tools,
+ * files, reasoning content, and Anthropic-specific options into Messages API
+ * requests, then converts normal and streaming Anthropic responses back into
+ * Effect AI response content with provider metadata.
  *
  * @since 4.0.0
  */
@@ -40,6 +20,7 @@ import * as Predicate from "effect/Predicate"
 import * as Redactable from "effect/Redactable"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
+import * as SchemaIssue from "effect/SchemaIssue"
 import * as Stream from "effect/Stream"
 import type { Span } from "effect/Tracer"
 import type { Mutable, Simplify } from "effect/Types"
@@ -59,19 +40,15 @@ import type { AnthropicTool } from "./AnthropicTool.ts"
 import type * as Generated from "./Generated.ts"
 import * as InternalUtilities from "./internal/utilities.ts"
 
+const formatIssue = SchemaIssue.makeFormatterDefault()
+
 /**
  * Known Anthropic Claude model identifiers exposed by the generated Anthropic schema.
- *
- * **Details**
- *
- * The Anthropic language model constructors accept `Model` values and custom
- * string model ids, so this type is best used for autocomplete and type checking
- * of known Claude ids.
  *
  * @category models
  * @since 4.0.0
  */
-export type Model = typeof Generated.Model.Type
+export type Model = (typeof Generated.Model)["members"][1]["Encoded"]
 
 // =============================================================================
 // Configuration
@@ -82,15 +59,16 @@ export type Model = typeof Generated.Model.Type
  *
  * **When to use**
  *
- * Use when you need to provide or override Anthropic model configuration on a
- * per-request basis via `Context.Service`.
+ * Use when you need scoped Anthropic model request defaults or per-operation
+ * overrides from Effect context.
  *
  * **Details**
  *
- * This service can be used to provide default configuration values or to
- * override configuration on a per-request basis.
+ * The service stores request fields that are merged into Anthropic Messages API
+ * requests. Scoped configuration overrides defaults supplied to `model`,
+ * `make`, or `layer`.
  *
- * @category configuration
+ * @category services
  * @since 4.0.0
  */
 export class Config extends Context.Service<
@@ -136,7 +114,7 @@ declare module "effect/unstable/ai/Prompt" {
    * These options are used when translating system messages into Anthropic
    * request content.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface SystemMessageOptions extends ProviderOptions {
@@ -156,7 +134,7 @@ declare module "effect/unstable/ai/Prompt" {
    * These options are used when translating user messages into Anthropic
    * request content.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface UserMessageOptions extends ProviderOptions {
@@ -176,7 +154,7 @@ declare module "effect/unstable/ai/Prompt" {
    * These options are used when replaying assistant messages in Anthropic
    * conversation history.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface AssistantMessageOptions extends ProviderOptions {
@@ -196,7 +174,7 @@ declare module "effect/unstable/ai/Prompt" {
    * These options are used when converting tool results into Anthropic user
    * content blocks.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface ToolMessageOptions extends ProviderOptions {
@@ -215,7 +193,7 @@ declare module "effect/unstable/ai/Prompt" {
    *
    * Use when you use these options to control how text blocks are sent to Anthropic.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface TextPartOptions extends ProviderOptions {
@@ -235,7 +213,7 @@ declare module "effect/unstable/ai/Prompt" {
    * Preserves Claude thinking metadata when reasoning content is sent back to
    * Anthropic in later turns.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningPartOptions extends ProviderOptions {
@@ -270,7 +248,7 @@ declare module "effect/unstable/ai/Prompt" {
    * Controls document metadata, citations, and prompt caching for files sent to
    * Anthropic.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface FilePartOptions extends ProviderOptions {
@@ -308,7 +286,7 @@ declare module "effect/unstable/ai/Prompt" {
    * Carries Anthropic tool caller metadata, MCP metadata, and cache control for
    * tool use blocks.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface ToolCallPartOptions extends ProviderOptions {
@@ -338,13 +316,23 @@ declare module "effect/unstable/ai/Prompt" {
    *
    * **Details**
    *
-   * Controls Anthropic prompt caching for tool result content.
+   * Carries Anthropic MCP metadata and controls prompt caching for tool result
+   * content.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface ToolResultPartOptions extends ProviderOptions {
     readonly anthropic?: {
+      /**
+       * Contains details about the MCP tool that produced the result.
+       */
+      readonly mcp_tool?: {
+        /**
+         * The name of the MCP server
+         */
+        readonly server: string
+      } | null
       /**
        * A breakpoint which marks the end of reusable content eligible for caching.
        */
@@ -359,7 +347,7 @@ declare module "effect/unstable/ai/Prompt" {
    *
    * Controls prompt caching for human approval requests in conversations.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface ToolApprovalRequestPartOptions extends ProviderOptions {
@@ -378,7 +366,7 @@ declare module "effect/unstable/ai/Prompt" {
    *
    * Controls prompt caching for human approval responses in conversations.
    *
-   * @category request
+   * @category models
    * @since 4.0.0
    */
   export interface ToolApprovalResponsePartOptions extends ProviderOptions {
@@ -400,7 +388,7 @@ declare module "effect/unstable/ai/Response" {
    * Includes Claude thinking metadata needed to continue reasoning-aware
    * conversations.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningStartPartMetadata extends ProviderMetadata {
@@ -430,7 +418,7 @@ declare module "effect/unstable/ai/Response" {
    *
    * Includes the signature for streamed Claude thinking content when available.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningDeltaPartMetadata extends ProviderMetadata {
@@ -453,7 +441,7 @@ declare module "effect/unstable/ai/Response" {
    *
    * Preserves Claude thinking or redacted thinking information for later turns.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningPartMetadata extends ProviderMetadata {
@@ -484,7 +472,7 @@ declare module "effect/unstable/ai/Response" {
    * Identifies Anthropic caller details and MCP tool metadata emitted by the
    * provider.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface ToolCallPartMetadata extends ProviderMetadata {
@@ -513,7 +501,7 @@ declare module "effect/unstable/ai/Response" {
    * Identifies MCP tool metadata associated with provider-executed tool
    * results.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface ToolResultPartMetadata extends ProviderMetadata {
@@ -537,7 +525,7 @@ declare module "effect/unstable/ai/Response" {
    *
    * Records the cited document span by character position or page number.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface DocumentSourcePartMetadata extends ProviderMetadata {
@@ -581,7 +569,7 @@ declare module "effect/unstable/ai/Response" {
    *
    * Records cited URL text or web-search source freshness information.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface UrlSourcePartMetadata extends ProviderMetadata {
@@ -611,7 +599,7 @@ declare module "effect/unstable/ai/Response" {
    * Includes container state, context management information, stop details, and
    * token usage reported by Anthropic.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface FinishPartMetadata extends ProviderMetadata {
@@ -630,7 +618,7 @@ declare module "effect/unstable/ai/Response" {
    *
    * Includes the provider request identifier when Anthropic returns one.
    *
-   * @category response
+   * @category models
    * @since 4.0.0
    */
   export interface ErrorPartMetadata extends ProviderMetadata {
@@ -669,8 +657,8 @@ export const model = (
  *
  * **When to use**
  *
- * Use when an Effect needs to construct a `LanguageModel.Service` value backed
- * by `AnthropicClient`.
+ * Use when you need to construct a `LanguageModel.Service` value backed by
+ * `AnthropicClient` inside an Effect.
  *
  * **Details**
  *
@@ -914,7 +902,7 @@ const prepareMessages = Effect.fnUntraced(
                           : {
                             type: "text",
                             media_type: "text/plain",
-                            data: typeof part.data === "string" ? part.data : Encoding.encodeBase64(part.data)
+                            data: typeof part.data === "string" ? part.data : new TextDecoder().decode(part.data)
                           } as const
 
                         content.push({
@@ -1639,16 +1627,19 @@ const makeResponse = Effect.fnUntraced(
             const callerInfo = Predicate.isNotNullish(caller)
               ? {
                 type: caller.type,
-                toolId: "tool_id" in caller ? caller.tool_id : undefined
+                toolId: "tool_id" in caller ? caller.tool_id : null
               }
               : undefined
 
-            const params = yield* transformToolCallParams(options.tools, part.name, part.input)
+            // Map the provider wire name (e.g. "memory") back to the tool's
+            // custom name (e.g. "AnthropicMemory") that the toolkit is keyed by
+            const toolName = toolNameMapper.getCustomName(part.name)
+            const params = yield* transformToolCallParams(options.tools, toolName, part.input)
 
             parts.push({
               type: "tool-call",
               id: part.id,
-              name: part.name,
+              name: toolName,
               params,
               ...(Predicate.isNotUndefined(callerInfo)
                 ? { metadata: { anthropic: { caller: callerInfo } } }
@@ -2061,10 +2052,15 @@ const makeStreamResponse = Effect.fnUntraced(
                     }
                     : undefined
 
+                  // Map the provider wire name (e.g. "memory") back to the
+                  // tool's custom name (e.g. "AnthropicMemory") that the toolkit
+                  // is keyed by
+                  const toolName = toolNameMapper.getCustomName(part.name)
+
                   parts.push({
                     type: "tool-params-start",
                     id: part.id,
-                    name: part.name
+                    name: toolName
                   })
 
                   parts.push({
@@ -2078,12 +2074,12 @@ const makeStreamResponse = Effect.fnUntraced(
                     id: part.id
                   })
 
-                  const params = yield* transformToolCallParams(options.tools, part.name, part.input)
+                  const params = yield* transformToolCallParams(options.tools, toolName, part.input)
 
                   parts.push({
                     type: "tool-call",
                     id: part.id,
-                    name: part.name,
+                    name: toolName,
                     params,
                     ...(Predicate.isNotUndefined(callerInfo)
                       ? { metadata: { anthropic: { caller: callerInfo } } }
@@ -2231,10 +2227,15 @@ const makeStreamResponse = Effect.fnUntraced(
 
                 const hasParams = Object.keys(part.input).length > 0
                 const initialParams = hasParams ? JSON.stringify(part.input) : ""
+                // Map the provider wire name (e.g. "memory") back to the tool's
+                // custom name (e.g. "AnthropicMemory") that the toolkit is keyed
+                // by. The mapped name flows to the finalized tool-call via
+                // `contentBlock.name` on `content_block_stop`.
+                const toolName = toolNameMapper.getCustomName(part.name)
                 contentBlocks.set(event.index, {
                   type: "tool-call",
                   id: part.id,
-                  name: part.name,
+                  name: toolName,
                   params: initialParams,
                   firstDelta: initialParams.length > 0,
                   ...(Predicate.isNotUndefined(caller) ? { caller } : undefined)
@@ -2243,7 +2244,7 @@ const makeStreamResponse = Effect.fnUntraced(
                 parts.push({
                   type: "tool-params-start",
                   id: part.id,
-                  name: part.name
+                  name: toolName
                 })
 
                 break
@@ -2587,7 +2588,7 @@ const makeStreamResponse = Effect.fnUntraced(
                   (contentBlock.providerName === "bash_code_execution" ||
                     contentBlock.providerName === "text_editor_code_execution")
                 ) {
-                  delta = `{"type":${contentBlock.providerName},${delta.substring(1)}}`
+                  delta = `{"type":${JSON.stringify(contentBlock.providerName)},${delta.substring(1)}`
                 }
 
                 parts.push({
@@ -2662,7 +2663,7 @@ const makeStreamResponse = Effect.fnUntraced(
                   }
 
                   const params = contentBlock.providerExecuted === true
-                    ? finalParams
+                    ? Tool.unsafeSecureJsonParse(finalParams)
                     : yield* transformToolCallParams(
                       options.tools,
                       contentBlock.name,
@@ -2983,6 +2984,17 @@ interface ModelCapabilities {
  */
 const getModelCapabilities = (modelId: string): ModelCapabilities => {
   if (
+    modelId.includes("claude-opus-4-6") ||
+    modelId.includes("claude-sonnet-4-6") ||
+    modelId.includes("claude-opus-4-7") ||
+    modelId.includes("claude-opus-4-8")
+  ) {
+    return {
+      maxOutputTokens: 128000,
+      supportsStructuredOutput: true,
+      isKnownModel: true
+    }
+  } else if (
     modelId.includes("claude-sonnet-4-5") ||
     modelId.includes("claude-opus-4-5") ||
     modelId.includes("claude-haiku-4-5")
@@ -3043,13 +3055,13 @@ const unsupportedSchemaError = (error: unknown, method: string): AiError.AiError
     })
   })
 
-const tryCodecTransform = <S extends Schema.Top>(schema: S, method: string) =>
+const tryCodecTransform = <S extends Schema.Constraint>(schema: S, method: string) =>
   Effect.try({
     try: () => toCodecAnthropic(schema),
     catch: (error) => unsupportedSchemaError(error, method)
   })
 
-const tryJsonSchema = <S extends Schema.Top>(schema: S, method: string) =>
+const tryJsonSchema = <S extends Schema.Constraint>(schema: S, method: string) =>
   Effect.try({
     try: () => Tool.getJsonSchemaFromSchema(schema, { transformer: toCodecAnthropic }),
     catch: (error) => unsupportedSchemaError(error, method)
@@ -3106,7 +3118,7 @@ const transformToolCallParams = Effect.fnUntraced(function*<Tools extends Readon
       reason: new AiError.ToolParameterValidationError({
         toolName,
         toolParams,
-        description: error.issue.toString()
+        description: formatIssue(error.issue)
       })
     })
   ))

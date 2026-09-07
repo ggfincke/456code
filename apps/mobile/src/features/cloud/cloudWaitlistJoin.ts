@@ -10,7 +10,7 @@ interface CloudWaitlistJoiner
   }>
 }
 
-export class CloudWaitlistJoinRejectedError extends Schema.TaggedErrorClass<CloudWaitlistJoinRejectedError>()(
+export class CloudWaitlistJoinRejectedError extends Schema.TaggedError<CloudWaitlistJoinRejectedError>()(
   'CloudWaitlistJoinRejectedError',
   {
     code: Schema.String,
@@ -24,7 +24,7 @@ export class CloudWaitlistJoinRejectedError extends Schema.TaggedErrorClass<Clou
   }
 }
 
-export class CloudWaitlistJoinRequestError extends Schema.TaggedErrorClass<CloudWaitlistJoinRequestError>()(
+export class CloudWaitlistJoinRequestError extends Schema.TaggedError<CloudWaitlistJoinRequestError>()(
   'CloudWaitlistJoinRequestError',
   {
     cause: Schema.Defect(),

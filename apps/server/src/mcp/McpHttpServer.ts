@@ -10,7 +10,7 @@ import * as Schema from 'effect/Schema'
 import * as Sink from 'effect/Sink'
 import * as Stream from 'effect/Stream'
 import type * as Types from 'effect/Types'
-import { McpSchema, McpServer, Tool } from 'effect/unstable/ai'
+import { McpProtocol, McpSchema, McpServer, Tool, type Toolkit } from 'effect/unstable/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { ArchitecturePlanImpactUpsertInput, ArchitectureToolError } from '@t3tools/contracts'
 
@@ -235,9 +235,38 @@ const registerPreviewSnapshot = Effect.fn('McpHttpServer.registerPreviewSnapshot
   })
 })
 
-const PreviewStandardToolkitRegistrationLive = McpServer.toolkit(PreviewStandardToolkit).pipe(
-  Layer.provide(PreviewStandardToolkitHandlersLive),
-)
+// validation failures remain tool results so clients can correct arguments and retry
+const registerToolkit = Effect.fn('McpHttpServer.registerToolkit')(function* <
+  Tools extends Record<string, Tool.Any>,
+>(toolkit: Toolkit.Toolkit<Tools>)
+{
+  const server = yield* McpServer.McpServer
+  const registrationBoundary = McpServer.McpServer.of({
+    ...server,
+    addTool: (registration) =>
+      server.addTool({
+        ...registration,
+        handle: (payload) =>
+          registration.handle(payload).pipe(
+            Effect.catchTag('InvalidParams', (error) =>
+              Effect.succeed(
+                new McpSchema.CallToolResult({
+                  isError: true,
+                  content: [{ type: 'text', text: error.message }],
+                }),
+              ),
+            ),
+          ),
+      }),
+  })
+  yield* McpServer.registerToolkit(toolkit).pipe(
+    Effect.provideService(McpServer.McpServer, registrationBoundary),
+  )
+})
+
+const PreviewStandardToolkitRegistrationLive = Layer.effectDiscard(
+  registerToolkit(PreviewStandardToolkit),
+).pipe(Layer.provide(PreviewStandardToolkitHandlersLive), Layer.provide(McpServer.McpServer.layer))
 
 const PreviewSnapshotRegistrationLive = Layer.effectDiscard(registerPreviewSnapshot()).pipe(
   Layer.provide(PreviewSnapshotToolkitHandlersLive),
@@ -248,13 +277,13 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 )
 
-export const ProposalToolkitRegistrationLive = McpServer.toolkit(ProposalToolkit).pipe(
-  Layer.provide(ProposalToolkitHandlersLive),
-)
+export const ProposalToolkitRegistrationLive = Layer.effectDiscard(
+  registerToolkit(ProposalToolkit),
+).pipe(Layer.provide(ProposalToolkitHandlersLive), Layer.provide(McpServer.McpServer.layer))
 
-export const OrchestrateToolkitRegistrationLive = McpServer.toolkit(OrchestrateToolkit).pipe(
-  Layer.provide(OrchestrateToolkitHandlersLive),
-)
+export const OrchestrateToolkitRegistrationLive = Layer.effectDiscard(
+  registerToolkit(OrchestrateToolkit),
+).pipe(Layer.provide(OrchestrateToolkitHandlersLive), Layer.provide(McpServer.McpServer.layer))
 
 export const ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT =
   'Architecture tool failed unexpectedly. Retry, or ask the operator to check the server log.'
@@ -455,6 +484,7 @@ const McpTransportLive = McpServer.layerHttp({
   name: '456code',
   version: packageJson.version,
   path: '/mcp',
+  protocols: [McpProtocol.v2025_06_18],
 }).pipe(Layer.provide([McpAuthMiddlewareLive, mcpRequestBodyLimitLayer()]))
 
 export const layer = Layer.mergeAll(

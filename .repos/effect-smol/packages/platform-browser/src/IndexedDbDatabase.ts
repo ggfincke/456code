@@ -4,25 +4,9 @@
  * This module turns an `IndexedDbVersion` migration chain into an
  * `IndexedDbDatabase` layer. The layer opens the browser database, runs any
  * pending upgrade migrations, provides a query builder for the current schema,
- * and exposes a `rebuild` effect that deletes and reopens the database. It is
- * the database-level companion to the table, version, and query builder
- * modules.
- *
- * Use it for browser-local persistence such as offline-first application
- * state, cached server data, background queues, drafts, and other client-side
- * stores that need typed reads and writes backed by IndexedDB transactions.
- *
- * IndexedDB schema changes can only happen inside upgrade transactions, so
- * every call to `make` or `.add` represents the next browser database version
- * and only migrations after the existing browser version are run. Table and
- * index definitions type the migration and query APIs, but object stores and
- * indexes still need to be created or removed explicitly with the migration
- * transaction helpers. Include the complete target table set in each version,
- * create indexes before querying them, and treat key path or auto-increment
- * changes as store migrations that copy data into a replacement object store.
- * Upgrades can be blocked by other open connections, and all migration reads,
- * writes, store changes, and index changes share the single upgrade
- * transaction supplied by the browser.
+ * and exposes a `rebuild` effect that deletes and reopens the database.
+ * Migration transactions can create or delete object stores and indexes, and
+ * database failures are represented as `IndexedDbDatabaseError` values.
  *
  * @since 4.0.0
  */
@@ -47,12 +31,6 @@ const SchemaProto = {
   [TypeId]: {
     _A: (_: never) => _
   },
-  ...Effectable.Prototype<IndexedDbSchema<any, any, any>>({
-    label: "IndexedDbSchema",
-    evaluate() {
-      return this.getQueryBuilder
-    }
-  }),
   get getQueryBuilder() {
     const self = this as unknown as IndexedDbSchema<any, any, any>
     return IndexedDbDatabase.useSync(({ database, IDBKeyRange, reactivity }) =>
@@ -64,6 +42,12 @@ const SchemaProto = {
       })
     )
   },
+  ...Effectable.Prototype<IndexedDbSchema<any, any, any>>({
+    label: "IndexedDbSchema",
+    evaluate() {
+      return this.getQueryBuilder
+    }
+  }),
   add<Version extends IndexedDbVersion.AnyWithProps>(
     this: IndexedDbSchema<any, any, any>,
     version: Version,
@@ -125,7 +109,7 @@ export class IndexedDbDatabaseError extends Data.TaggedError(
  *
  * **When to use**
  *
- * Use when an effect needs access to the live database service after an
+ * Use when you need access to the live database service after an
  * `IndexedDbSchema` layer has been provided, especially for `rebuild` or
  * lower-level database primitives.
  *
@@ -142,7 +126,7 @@ export class IndexedDbDatabaseError extends Data.TaggedError(
  * @see {@link IndexedDb.IndexedDb} for the lower-level browser IndexedDB primitives
  * @see {@link make} for creating a schema that provides this service as a layer
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export class IndexedDbDatabase extends Context.Service<
@@ -250,7 +234,7 @@ export interface Transaction<
 /**
  * Extracts the string-literal index names defined by an `IndexedDbTable`.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type IndexFromTable<Table extends IndexedDbTable.AnyWithProps> = IsStringLiteral<
@@ -261,7 +245,7 @@ export type IndexFromTable<Table extends IndexedDbTable.AnyWithProps> = IsString
 /**
  * Extracts the valid index names for a table name within an IndexedDB version.
  *
- * @category models
+ * @category utility types
  * @since 4.0.0
  */
 export type IndexFromTableName<
@@ -494,6 +478,12 @@ const layer = <DatabaseName extends string>(
             Effect.provideService(IndexedDbQueryBuilder.IndexedDbTransaction, transaction)
           )
           fiber = runForkWith(effect)
+          fiber.addObserver((exit) => {
+            if (exit._tag === "Failure") {
+              transaction.abort()
+              resume(exit)
+            }
+          })
           fiber.currentDispatcher.flush()
         }
 

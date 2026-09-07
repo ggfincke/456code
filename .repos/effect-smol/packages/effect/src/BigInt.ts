@@ -1,69 +1,10 @@
 /**
- * Tools for working with JavaScript `bigint` values in Effect code. The module
- * includes arithmetic, comparisons, range checks, safe conversions, integer
- * square roots, aggregation helpers, and `Order`, `Equivalence`, `Reducer`, and
- * `Combiner` instances for APIs that consume those abstractions.
+ * Works with JavaScript `bigint` values.
  *
- * Reach for `BigInt` when values may exceed JavaScript's safe `number` integer
- * range, when conversions should make failure explicit with `Option`, or when
- * Effect collection APIs need bigint-specific ordering or combining behavior.
- *
- * **Mental model**
- *
- * - Values are native JavaScript `bigint`s; the module does not introduce a
- *   wrapper type.
- * - Binary operations such as {@link sum}, {@link multiply}, {@link subtract},
- *   {@link divide}, {@link min}, and {@link max} are dual and work in
- *   data-first or data-last style.
- * - Safe operations return `Option`, including {@link divide}, {@link sqrt},
- *   {@link fromString}, {@link fromNumber}, and {@link toNumber}.
- * - Unsafe or native operations keep JavaScript behavior, including thrown
- *   errors from {@link BigInt}, {@link divideUnsafe}, {@link sqrtUnsafe}, and
- *   {@link remainder} for invalid inputs.
- *
- * **Common tasks**
- *
- * - Check and construct values: {@link isBigInt}, {@link BigInt},
- *   {@link fromString}, {@link fromNumber}, {@link toNumber}
- * - Do arithmetic: {@link sum}, {@link multiply}, {@link subtract},
- *   {@link divide}, {@link divideUnsafe}, {@link remainder}, {@link increment},
- *   {@link decrement}
- * - Compare and bound values: {@link Order}, {@link Equivalence},
- *   {@link isLessThan}, {@link isLessThanOrEqualTo}, {@link isGreaterThan},
- *   {@link isGreaterThanOrEqualTo}, {@link between}, {@link clamp},
- *   {@link min}, {@link max}
- * - Work with signs and number theory: {@link sign}, {@link abs}, {@link gcd},
- *   {@link lcm}, {@link sqrt}, {@link sqrtUnsafe}
- * - Aggregate many values: {@link sumAll}, {@link multiplyAll},
- *   {@link ReducerSum}, {@link ReducerMultiply}, {@link CombinerMax},
- *   {@link CombinerMin}
- *
- * **Gotchas**
- *
- * - JavaScript does not allow mixing `number` and `bigint` in arithmetic. Use
- *   {@link fromNumber} and {@link toNumber} when crossing that boundary.
- * - JavaScript `bigint` division truncates toward zero, and {@link remainder}
- *   follows JavaScript `%` semantics.
- * - The native {@link BigInt} constructor follows JavaScript coercion rules and
- *   may throw. Use {@link fromString} or {@link fromNumber} when failed
- *   conversion should be represented as `Option.none()`.
- *
- * **Quickstart**
- *
- * **Example** (Safe arithmetic and conversion)
- *
- * ```ts
- * import { BigInt } from "effect"
- *
- * const total = BigInt.sumAll([10n, 20n, 30n])
- * const average = BigInt.divide(total, 3n)
- * const bounded = BigInt.clamp(total, { minimum: 0n, maximum: 50n })
- *
- * console.log(total) // 60n
- * console.log(average) // Option.some(20n)
- * console.log(bounded) // 50n
- * console.log(BigInt.fromString("not an integer")) // Option.none()
- * ```
+ * This module exposes the native `BigInt` constructor together with helpers for
+ * checking, arithmetic, comparison, range checks, safe parsing and conversions
+ * that return `Option`, integer square roots, aggregation, ordering,
+ * equivalence, reducers, and combiners.
  *
  * @since 2.0.0
  */
@@ -95,14 +36,11 @@ import * as Reducer from "./Reducer.ts"
  *
  * **Example** (Constructing bigints)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
  *
- * const bigInt = BigInt.BigInt(123)
- * console.log(bigInt) // 123n
- *
- * const fromString = BigInt.BigInt("456")
- * console.log(fromString) // 456n
+ * BigInt.BigInt(123) // => 123n
+ * BigInt.BigInt("456") // => 456n
  * ```
  *
  * @category constructors
@@ -123,12 +61,11 @@ const bigint2 = BigInt(2)
  *
  * **Example** (Checking for bigints)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.isBigInt(1n), true)
- * assert.deepStrictEqual(BigInt.isBigInt(1), false)
+ * BigInt.isBigInt(1n) // => true
+ * BigInt.isBigInt(1) // => false
  * ```
  *
  * @category guards
@@ -141,15 +78,15 @@ export const isBigInt: (u: unknown) => u is bigint = predicate.isBigInt
  *
  * **When to use**
  *
- * Use to add two `bigint` values.
+ * Use when you need a binary addition function for piping or higher-order APIs
+ * instead of the infix addition operator.
  *
  * **Example** (Adding bigints)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.sum(2n, 3n), 5n)
+ * BigInt.sum(2n, 3n) // => 5n
  * ```
  *
  * @see {@link sumAll} for summing an iterable of `bigint` values
@@ -171,11 +108,10 @@ export const sum: {
  *
  * **Example** (Multiplying bigints)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.multiply(2n, 3n), 6n)
+ * BigInt.multiply(2n, 3n) // => 6n
  * ```
  *
  * @see {@link multiplyAll} for multiplying an iterable of `bigint` values
@@ -197,11 +133,10 @@ export const multiply: {
  *
  * **Example** (Subtracting bigints)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.subtract(2n, 3n), -1n)
+ * BigInt.subtract(2n, 3n) // => -1n
  * ```
  *
  * @category math
@@ -227,12 +162,11 @@ export const subtract: {
  *
  * **Example** (Dividing bigints safely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt, Option } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.divide(6n, 3n), Option.some(2n))
- * assert.deepStrictEqual(BigInt.divide(6n, 0n), Option.none())
+ * BigInt.divide(6n, 3n) // => Option.some(2n)
+ * BigInt.divide(6n, 0n) // => Option.none()
  * ```
  *
  * @see {@link divideUnsafe} for division that throws when the divisor is `0n`
@@ -254,8 +188,8 @@ export const divide: {
  *
  * **When to use**
  *
- * Use when the divisor is known to be non-zero and division by zero should be a
- * thrown exception.
+ * Use to divide `bigint` values where the divisor is known to be non-zero and
+ * division by zero should be a thrown exception.
  *
  * **Details**
  *
@@ -268,12 +202,11 @@ export const divide: {
  *
  * **Example** (Dividing bigints unsafely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.divideUnsafe(6n, 3n), 2n)
- * assert.deepStrictEqual(BigInt.divideUnsafe(6n, 4n), 1n)
+ * BigInt.divideUnsafe(6n, 3n) // => 2n
+ * BigInt.divideUnsafe(6n, 4n) // => 1n
  * ```
  *
  * @see {@link divide} for division that returns `Option.none` when the divisor is `0n`
@@ -295,11 +228,10 @@ export const divideUnsafe: {
  *
  * **Example** (Incrementing a bigint)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.increment(2n), 3n)
+ * BigInt.increment(2n) // => 3n
  * ```
  *
  * @category math
@@ -316,11 +248,10 @@ export const increment = (n: bigint): bigint => n + bigint1
  *
  * **Example** (Decrementing a bigint)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.decrement(3n), 2n)
+ * BigInt.decrement(3n) // => 2n
  * ```
  *
  * @category math
@@ -333,21 +264,21 @@ export const decrement = (n: bigint): bigint => n - bigint1
  *
  * **When to use**
  *
- * Use when sorting or comparing bigint values through APIs that accept an
- * ordering instance.
+ * Use when you need to sort or compare bigint values through APIs that accept
+ * an ordering instance.
  *
  * **Example** (Comparing bigints with Order)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
  *
  * const a = 123n
  * const b = 456n
  * const c = 123n
  *
- * console.log(BigInt.Order(a, b)) // -1 (a < b)
- * console.log(BigInt.Order(b, a)) // 1 (b > a)
- * console.log(BigInt.Order(a, c)) // 0 (a === c)
+ * BigInt.Order(a, b) // => -1
+ * BigInt.Order(b, a) // => 1
+ * BigInt.Order(a, c) // => 0
  * ```
  *
  * @category instances
@@ -365,11 +296,11 @@ export const Order: order.Order<bigint> = order.BigInt
  *
  * **Example** (Comparing bigints for equivalence)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
  *
- * console.log(BigInt.Equivalence(1n, 1n)) // true
- * console.log(BigInt.Equivalence(1n, 2n)) // false
+ * BigInt.Equivalence(1n, 1n) // => true
+ * BigInt.Equivalence(1n, 2n) // => false
  * ```
  *
  * @category instances
@@ -386,13 +317,12 @@ export const Equivalence: Equ.Equivalence<bigint> = Equ.BigInt
  *
  * **Example** (Checking less-than comparisons)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.isLessThan(2n, 3n), true)
- * assert.deepStrictEqual(BigInt.isLessThan(3n, 3n), false)
- * assert.deepStrictEqual(BigInt.isLessThan(4n, 3n), false)
+ * BigInt.isLessThan(2n, 3n) // => true
+ * BigInt.isLessThan(3n, 3n) // => false
+ * BigInt.isLessThan(4n, 3n) // => false
  * ```
  *
  * @category predicates
@@ -412,13 +342,12 @@ export const isLessThan: {
  *
  * **Example** (Checking less-than-or-equal comparisons)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.isLessThanOrEqualTo(2n, 3n), true)
- * assert.deepStrictEqual(BigInt.isLessThanOrEqualTo(3n, 3n), true)
- * assert.deepStrictEqual(BigInt.isLessThanOrEqualTo(4n, 3n), false)
+ * BigInt.isLessThanOrEqualTo(2n, 3n) // => true
+ * BigInt.isLessThanOrEqualTo(3n, 3n) // => true
+ * BigInt.isLessThanOrEqualTo(4n, 3n) // => false
  * ```
  *
  * @category predicates
@@ -438,13 +367,12 @@ export const isLessThanOrEqualTo: {
  *
  * **Example** (Checking greater-than comparisons)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.isGreaterThan(2n, 3n), false)
- * assert.deepStrictEqual(BigInt.isGreaterThan(3n, 3n), false)
- * assert.deepStrictEqual(BigInt.isGreaterThan(4n, 3n), true)
+ * BigInt.isGreaterThan(2n, 3n) // => false
+ * BigInt.isGreaterThan(3n, 3n) // => false
+ * BigInt.isGreaterThan(4n, 3n) // => true
  * ```
  *
  * @category predicates
@@ -464,13 +392,12 @@ export const isGreaterThan: {
  *
  * **Example** (Checking greater-than-or-equal comparisons)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.isGreaterThanOrEqualTo(2n, 3n), false)
- * assert.deepStrictEqual(BigInt.isGreaterThanOrEqualTo(3n, 3n), true)
- * assert.deepStrictEqual(BigInt.isGreaterThanOrEqualTo(4n, 3n), true)
+ * BigInt.isGreaterThanOrEqualTo(2n, 3n) // => false
+ * BigInt.isGreaterThanOrEqualTo(3n, 3n) // => true
+ * BigInt.isGreaterThanOrEqualTo(4n, 3n) // => true
  * ```
  *
  * @category predicates
@@ -490,15 +417,14 @@ export const isGreaterThanOrEqualTo: {
  *
  * **Example** (Checking whether a bigint is within bounds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
  * const between = BigInt.between({ minimum: 0n, maximum: 5n })
  *
- * assert.deepStrictEqual(between(3n), true)
- * assert.deepStrictEqual(between(-1n), false)
- * assert.deepStrictEqual(between(6n), false)
+ * between(3n) // => true
+ * between(-1n) // => false
+ * between(6n) // => false
  * ```
  *
  * @see {@link clamp} for forcing a `bigint` into an inclusive range
@@ -526,21 +452,20 @@ export const between: {
  *
  * **Details**
  *
- * - If the `bigint` is less than the `minimum` value, the function returns the `minimum` value.
- * - If the `bigint` is greater than the `maximum` value, the function returns the `maximum` value.
- * - Otherwise, it returns the original `bigint`.
+ * If the `bigint` is less than the minimum, the function returns the minimum.
+ * If the `bigint` is greater than the maximum, the function returns the
+ * maximum. Otherwise, it returns the original `bigint`.
  *
  * **Example** (Clamping a bigint to bounds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
  * const clamp = BigInt.clamp({ minimum: 1n, maximum: 5n })
  *
- * assert.equal(clamp(3n), 3n)
- * assert.equal(clamp(0n), 1n)
- * assert.equal(clamp(6n), 5n)
+ * clamp(3n) // => 3n
+ * clamp(0n) // => 1n
+ * clamp(6n) // => 5n
  * ```
  *
  * @see {@link between} for checking whether a `bigint` is already inside a range
@@ -568,11 +493,10 @@ export const clamp: {
  *
  * **Example** (Finding the minimum bigint)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.min(2n, 3n), 2n)
+ * BigInt.min(2n, 3n) // => 2n
  * ```
  *
  * @see {@link max} for selecting the larger value
@@ -594,11 +518,10 @@ export const min: {
  *
  * **Example** (Finding the maximum bigint)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.max(2n, 3n), 3n)
+ * BigInt.max(2n, 3n) // => 3n
  * ```
  *
  * @see {@link min} for selecting the smaller value
@@ -620,13 +543,12 @@ export const max: {
  *
  * **Example** (Determining bigint signs)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.sign(-5n), -1)
- * assert.deepStrictEqual(BigInt.sign(0n), 0)
- * assert.deepStrictEqual(BigInt.sign(5n), 1)
+ * BigInt.sign(-5n) // => -1
+ * BigInt.sign(0n) // => 0
+ * BigInt.sign(5n) // => 1
  * ```
  *
  * @category math
@@ -643,13 +565,12 @@ export const sign = (n: bigint): Ordering => order.BigInt(n, bigint0)
  *
  * **Example** (Calculating absolute values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.abs(-5n), 5n)
- * assert.deepStrictEqual(BigInt.abs(0n), 0n)
- * assert.deepStrictEqual(BigInt.abs(5n), 5n)
+ * BigInt.abs(-5n) // => 5n
+ * BigInt.abs(0n) // => 0n
+ * BigInt.abs(5n) // => 5n
  * ```
  *
  * @category math
@@ -666,13 +587,12 @@ export const abs = (n: bigint): bigint => (n < bigint0 ? -n : n)
  *
  * **Example** (Calculating greatest common divisors)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.gcd(2n, 3n), 1n)
- * assert.deepStrictEqual(BigInt.gcd(2n, 4n), 2n)
- * assert.deepStrictEqual(BigInt.gcd(16n, 24n), 8n)
+ * BigInt.gcd(2n, 3n) // => 1n
+ * BigInt.gcd(2n, 4n) // => 2n
+ * BigInt.gcd(16n, 24n) // => 8n
  * ```
  *
  * @see {@link lcm} for computing the least common multiple
@@ -689,7 +609,7 @@ export const gcd: {
     that = self % that
     self = t
   }
-  return self
+  return abs(self)
 })
 
 /**
@@ -701,13 +621,12 @@ export const gcd: {
  *
  * **Example** (Calculating least common multiples)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.lcm(2n, 3n), 6n)
- * assert.deepStrictEqual(BigInt.lcm(2n, 4n), 4n)
- * assert.deepStrictEqual(BigInt.lcm(16n, 24n), 48n)
+ * BigInt.lcm(2n, 3n) // => 6n
+ * BigInt.lcm(2n, 4n) // => 4n
+ * BigInt.lcm(16n, 24n) // => 48n
  * ```
  *
  * @see {@link gcd} for computing the greatest common divisor
@@ -718,14 +637,20 @@ export const gcd: {
 export const lcm: {
   (that: bigint): (self: bigint) => bigint
   (self: bigint, that: bigint): bigint
-} = dual(2, (self: bigint, that: bigint): bigint => (self * that) / gcd(self, that))
+} = dual(
+  2,
+  (self: bigint, that: bigint): bigint =>
+    self === bigint0 || that === bigint0 ? bigint0 : abs((self * that) / gcd(self, that))
+)
 
 /**
  * Returns the integer square root of a non-negative `bigint`.
  *
  * **When to use**
  *
- * Use when the input is known to be non-negative and invalid input should throw.
+ * Use when you need to compute an integer square root for a `bigint` that has
+ * already been validated as non-negative, and you want negative input to throw
+ * instead of returning `Option.none`.
  *
  * **Details**
  *
@@ -738,13 +663,12 @@ export const lcm: {
  *
  * **Example** (Calculating square roots unsafely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.sqrtUnsafe(4n), 2n)
- * assert.deepStrictEqual(BigInt.sqrtUnsafe(9n), 3n)
- * assert.deepStrictEqual(BigInt.sqrtUnsafe(16n), 4n)
+ * BigInt.sqrtUnsafe(4n) // => 2n
+ * BigInt.sqrtUnsafe(9n) // => 3n
+ * BigInt.sqrtUnsafe(16n) // => 4n
  * ```
  *
  * @see {@link sqrt} for returning `Option.none` when the input is negative
@@ -782,13 +706,13 @@ export const sqrtUnsafe = (n: bigint): bigint => {
  *
  * **Example** (Calculating square roots safely)
  *
- * ```ts
- * import { BigInt } from "effect"
+ * ```ts import.meta.vitest
+ * import { BigInt, Option } from "effect"
  *
- * BigInt.sqrt(4n) // Option.some(2n)
- * BigInt.sqrt(9n) // Option.some(3n)
- * BigInt.sqrt(16n) // Option.some(4n)
- * BigInt.sqrt(-1n) // Option.none()
+ * BigInt.sqrt(4n) // => Option.some(2n)
+ * BigInt.sqrt(9n) // => Option.some(3n)
+ * BigInt.sqrt(16n) // => Option.some(4n)
+ * BigInt.sqrt(-1n) // => Option.none()
  * ```
  *
  * @see {@link sqrtUnsafe} for square root computation that throws on negative input
@@ -804,15 +728,15 @@ export const sqrt = (n: bigint): Option.Option<bigint> =>
  *
  * **When to use**
  *
- * Use to sum all `bigint` values in an iterable.
+ * Use when you want an immediate aggregate from an iterable instead of a
+ * folding reducer owned by another API.
  *
  * **Example** (Summing iterable bigints)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.sumAll([2n, 3n, 4n]), 9n)
+ * BigInt.sumAll([2n, 3n, 4n]) // => 9n
  * ```
  *
  * @see {@link sum} for adding two `bigint` values
@@ -838,11 +762,10 @@ export const sumAll = (collection: Iterable<bigint>): bigint => {
  *
  * **Example** (Multiplying iterable bigints)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
- * import * as assert from "node:assert"
  *
- * assert.deepStrictEqual(BigInt.multiplyAll([2n, 3n, 4n]), 24n)
+ * BigInt.multiplyAll([2n, 3n, 4n]) // => 24n
  * ```
  *
  * @see {@link multiply} for multiplying two `bigint` values
@@ -877,12 +800,12 @@ export const multiplyAll = (collection: Iterable<bigint>): bigint => {
  *
  * **Example** (Converting bigints to numbers)
  *
- * ```ts
- * import { BigInt as BI } from "effect"
+ * ```ts import.meta.vitest
+ * import { BigInt as BI, Option } from "effect"
  *
- * BI.toNumber(42n) // Option.some(42)
- * BI.toNumber(BigInt(Number.MAX_SAFE_INTEGER) + 1n) // Option.none()
- * BI.toNumber(BigInt(Number.MIN_SAFE_INTEGER) - 1n) // Option.none()
+ * BI.toNumber(42n) // => Option.some(42)
+ * BI.toNumber(9007199254740992n) // => Option.none()
+ * BI.toNumber(-9007199254740992n) // => Option.none()
  * ```
  *
  * @see {@link fromNumber} for converting a safe integer number to `bigint`
@@ -911,12 +834,12 @@ export const toNumber = (b: bigint): Option.Option<number> => {
  *
  * **Example** (Parsing strings as bigints)
  *
- * ```ts
- * import { BigInt } from "effect"
+ * ```ts import.meta.vitest
+ * import { BigInt, Option } from "effect"
  *
- * BigInt.fromString("42") // Option.some(42n)
- * BigInt.fromString(" ") // Option.none()
- * BigInt.fromString("a") // Option.none()
+ * BigInt.fromString("42") // => Option.some(42n)
+ * BigInt.fromString(" ") // => Option.none()
+ * BigInt.fromString("a") // => Option.none()
  * ```
  *
  * @see {@link BigInt} for native constructor coercion that throws on invalid input
@@ -949,13 +872,12 @@ export const fromString = (s: string): Option.Option<bigint> => {
  *
  * **Example** (Converting numbers to bigints)
  *
- * ```ts
- * import { BigInt } from "effect"
+ * ```ts import.meta.vitest
+ * import { BigInt, Option } from "effect"
  *
- * BigInt.fromNumber(42) // Option.some(42n)
- *
- * BigInt.fromNumber(Number.MAX_SAFE_INTEGER + 1) // Option.none()
- * BigInt.fromNumber(Number.MIN_SAFE_INTEGER - 1) // Option.none()
+ * BigInt.fromNumber(42) // => Option.some(42n)
+ * BigInt.fromNumber(Number.MAX_SAFE_INTEGER + 1) // => Option.none()
+ * BigInt.fromNumber(Number.MIN_SAFE_INTEGER - 1) // => Option.none()
  * ```
  *
  * @see {@link toNumber} for converting `bigint` values back to safe integer numbers
@@ -981,12 +903,8 @@ export function fromNumber(n: number): Option.Option<bigint> {
  *
  * **When to use**
  *
- * Use to compute the JavaScript `%` remainder for two `bigint` values.
- *
- * **Details**
- *
- * The result follows JavaScript `%` semantics, including the sign of the
- * dividend.
+ * Use when you want native remainder semantics, including signed remainders and
+ * a thrown division-by-zero error.
  *
  * **Gotchas**
  *
@@ -994,12 +912,11 @@ export function fromNumber(n: number): Option.Option<bigint> {
  *
  * **Example** (Calculating remainders)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { BigInt } from "effect"
  *
- * BigInt.remainder(10n, 3n) // 1n
- *
- * BigInt.remainder(15n, 4n) // 3n
+ * BigInt.remainder(10n, 3n) // => 1n
+ * BigInt.remainder(15n, 4n) // => 3n
  * ```
  *
  * @see {@link divide} for quotient calculation with division-by-zero represented as `Option.none`

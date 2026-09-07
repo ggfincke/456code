@@ -151,7 +151,7 @@ export interface LoadedImportSourceFile extends BoundedUtf8File
   readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>
 }
 
-export class ImportSourcePathResolutionError extends Schema.TaggedErrorClass<ImportSourcePathResolutionError>()(
+export class ImportSourcePathResolutionError extends Schema.TaggedError<ImportSourcePathResolutionError>()(
   'ImportSourcePathResolutionError',
   {
     sourcePath: Schema.String,
@@ -166,7 +166,7 @@ export class ImportSourcePathResolutionError extends Schema.TaggedErrorClass<Imp
   }
 }
 
-class SourceCatalogRootResolutionError extends Schema.TaggedErrorClass<SourceCatalogRootResolutionError>()(
+class SourceCatalogRootResolutionError extends Schema.TaggedError<SourceCatalogRootResolutionError>()(
   'SourceCatalogRootResolutionError',
   {
     sourcePath: Schema.String,

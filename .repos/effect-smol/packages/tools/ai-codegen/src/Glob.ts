@@ -23,7 +23,7 @@ export class GlobError extends Data.TaggedError("GlobError")<{
 /**
  * Service for glob pattern matching.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface Glob {
@@ -36,7 +36,7 @@ export interface Glob {
 /**
  * Service tag for glob pattern matching used by AI codegen tooling.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const Glob: Context.Service<Glob, Glob> = Context.Service("@effect/ai-codegen/Glob")

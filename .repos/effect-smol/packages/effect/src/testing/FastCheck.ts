@@ -1,11 +1,10 @@
 /**
- * This module provides a re-export of the fast-check library for property-based testing.
- * Fast-check is a property-based testing framework that generates random test cases
- * to validate that properties hold true for a wide range of inputs.
+ * Re-exports `fast-check` for property-based testing.
  *
- * Property-based testing is a testing methodology where you specify properties that
- * should hold true for your functions, and the framework generates many random test
- * cases to try to find counterexamples.
+ * Property-based tests describe a rule that should hold for many inputs, and
+ * `fast-check` generates random examples to look for counterexamples. This
+ * module exposes the library from `effect/testing` so tests can use it alongside
+ * the other Effect testing helpers.
  *
  * @since 3.10.0
  */
@@ -21,7 +20,7 @@
  *
  * **Example** (Checking an array reversal property)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { FastCheck } from "effect/testing"
  *
  * // Property: reverse of reverse should equal original
@@ -30,17 +29,18 @@
  *   (arr: Array<number>) => {
  *     const reversed = arr.slice().reverse()
  *     const doubleReversed = reversed.slice().reverse()
- *     return JSON.stringify(arr) === JSON.stringify(doubleReversed)
+ *     return arr.length === doubleReversed.length &&
+ *       arr.every((value, index) => value === doubleReversed[index])
  *   }
  * )
  *
  * // Run the property test
- * FastCheck.assert(reverseProp)
+ * FastCheck.assert(reverseProp, { seed: 1, numRuns: 100 }) // => undefined
  * ```
  *
  * **Example** (Checking string concatenation properties)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { FastCheck } from "effect/testing"
  *
  * // Test string concatenation properties
@@ -55,12 +55,12 @@
  *   }
  * )
  *
- * FastCheck.assert(concatProp)
+ * FastCheck.assert(concatProp, { seed: 2, numRuns: 100 }) // => undefined
  * ```
  *
  * **Example** (Generating record data for properties)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { FastCheck } from "effect/testing"
  *
  * // Generate random data for testing
@@ -81,7 +81,7 @@
  *   }
  * )
  *
- * FastCheck.assert(validPersonProp)
+ * FastCheck.assert(validPersonProp, { seed: 3, numRuns: 100 }) // => undefined
  * ```
  *
  * @category re-exports

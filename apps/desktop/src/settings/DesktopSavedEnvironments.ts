@@ -88,7 +88,7 @@ const DesktopSavedEnvironmentSecretProtectionOperation = Schema.Literals([
   'decrypt-secret',
 ])
 
-export class DesktopSavedEnvironmentsWriteError extends Schema.TaggedErrorClass<DesktopSavedEnvironmentsWriteError>()(
+export class DesktopSavedEnvironmentsWriteError extends Schema.TaggedError<DesktopSavedEnvironmentsWriteError>()(
   'DesktopSavedEnvironmentsWriteError',
   {
     operation: DesktopSavedEnvironmentsWriteOperation,
@@ -103,7 +103,7 @@ export class DesktopSavedEnvironmentsWriteError extends Schema.TaggedErrorClass<
   }
 }
 
-export class DesktopSavedEnvironmentsReadError extends Schema.TaggedErrorClass<DesktopSavedEnvironmentsReadError>()(
+export class DesktopSavedEnvironmentsReadError extends Schema.TaggedError<DesktopSavedEnvironmentsReadError>()(
   'DesktopSavedEnvironmentsReadError',
   {
     registryPath: Schema.String,
@@ -117,7 +117,7 @@ export class DesktopSavedEnvironmentsReadError extends Schema.TaggedErrorClass<D
   }
 }
 
-export class DesktopSavedEnvironmentsDocumentDecodeError extends Schema.TaggedErrorClass<DesktopSavedEnvironmentsDocumentDecodeError>()(
+export class DesktopSavedEnvironmentsDocumentDecodeError extends Schema.TaggedError<DesktopSavedEnvironmentsDocumentDecodeError>()(
   'DesktopSavedEnvironmentsDocumentDecodeError',
   {
     registryPath: Schema.String,
@@ -131,7 +131,7 @@ export class DesktopSavedEnvironmentsDocumentDecodeError extends Schema.TaggedEr
   }
 }
 
-export class DesktopSavedEnvironmentSecretDecodeError extends Schema.TaggedErrorClass<DesktopSavedEnvironmentSecretDecodeError>()(
+export class DesktopSavedEnvironmentSecretDecodeError extends Schema.TaggedError<DesktopSavedEnvironmentSecretDecodeError>()(
   'DesktopSavedEnvironmentSecretDecodeError',
   {
     environmentId: Schema.String,
@@ -147,7 +147,7 @@ export class DesktopSavedEnvironmentSecretDecodeError extends Schema.TaggedError
   }
 }
 
-export class DesktopSavedEnvironmentSecretProtectionError extends Schema.TaggedErrorClass<DesktopSavedEnvironmentSecretProtectionError>()(
+export class DesktopSavedEnvironmentSecretProtectionError extends Schema.TaggedError<DesktopSavedEnvironmentSecretProtectionError>()(
   'DesktopSavedEnvironmentSecretProtectionError',
   {
     operation: DesktopSavedEnvironmentSecretProtectionOperation,

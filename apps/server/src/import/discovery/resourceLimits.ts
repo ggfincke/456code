@@ -83,7 +83,7 @@ export interface ImportSourceValidation
   readonly roots: ReadonlyArray<ImportValidatedRoot>
 }
 
-export class ImportResourceLimitError extends Schema.TaggedErrorClass<ImportResourceLimitError>()(
+export class ImportResourceLimitError extends Schema.TaggedError<ImportResourceLimitError>()(
   'ImportResourceLimitError',
   {
     sourcePath: Schema.String,

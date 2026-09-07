@@ -1,33 +1,12 @@
 /**
- * The `Runners` module defines the service used by the unstable cluster runtime
- * to communicate with processes that host entity shards. It is the transport
- * boundary between sharding decisions and runner execution: callers can ping a
- * runner, send requests or envelopes, notify a runner that persisted work is
- * available, and report an address as unavailable.
+ * Handles communication between Effect Cluster runners.
  *
- * The default implementation wraps lower-level runner callbacks with cluster
- * message semantics. Persisted messages are written to `MessageStorage` before
- * delivery, duplicate requests can resume from stored replies, and local sends
- * can optionally serialize and deserialize messages to exercise the same path as
- * remote delivery.
- *
- * **Common tasks**
- *
- * - Provide runner communication with {@link layerRpc}
- * - Build a custom implementation with {@link make}
- * - Use {@link makeNoop} or {@link layerNoop} when no remote runners are
- *   available
- * - Define runner-to-runner protocol support with {@link Rpcs} and
- *   {@link RpcClientProtocol}
- *
- * **Gotchas**
- *
- * - `notify` is only for RPCs annotated as persisted; non-persisted messages
- *   should be sent directly.
- * - Failed remote sends can fall back to reading replies from storage, so reply
- *   polling and `entityReplyPollInterval` affect recovery latency.
- * - Unavailable runners invalidate cached RPC clients, but shard ownership and
- *   rebalancing are coordinated by the sharding layer rather than this module.
+ * `Runners` sits between sharding decisions and runner execution. It can ping a
+ * runner, send requests or control envelopes, notify a runner that persisted
+ * work is available, and record that a runner address is unavailable. This
+ * module defines the runner communication service, its RPC protocol, no-op and
+ * RPC-backed implementations, local persistence support, reply recovery, and
+ * the protocol service used by transport-specific runner layers.
  *
  * @since 4.0.0
  */
@@ -62,7 +41,7 @@ import * as Snowflake from "./Snowflake.ts"
  * sending and notifying messages, coordinating persisted replies, and marking
  * runners unavailable.
  *
- * @category context
+ * @category services
  * @since 4.0.0
  */
 export class Runners extends Context.Service<Runners, {
@@ -152,9 +131,9 @@ export class Runners extends Context.Service<Runners, {
  *
  * **When to use**
  *
- * Use to build a custom `Runners` service when you already have remote `ping`,
- * `send`, `notify`, and `onRunnerUnavailable` callbacks and want the standard
- * local persistence and reply recovery behavior added around them.
+ * Use when you need a custom `Runners` service around remote `ping`, `send`,
+ * `notify`, and `onRunnerUnavailable` callbacks, with standard local
+ * persistence and reply recovery behavior.
  *
  * **Details**
  *
@@ -446,7 +425,7 @@ export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal
  * `EntityNotAssignedToRunner` and ignores notifications, pings, and unavailable
  * runner reports.
  *
- * @category No-op
+ * @category constructors
  * @since 4.0.0
  */
 export const makeNoop: Effect.Effect<
@@ -487,7 +466,7 @@ const rpcErrors: Schema.Union<[
  * RPC group used for runner-to-runner communication, including ping, notify,
  * effect, stream, and envelope messages.
  *
- * @category Rpcs
+ * @category models
  * @since 4.0.0
  */
 export class Rpcs extends RpcGroup.make(
@@ -528,7 +507,7 @@ export class Rpcs extends RpcGroup.make(
 /**
  * Client interface generated from the runner RPC group.
  *
- * @category Rpcs
+ * @category models
  * @since 4.0.0
  */
 export interface RpcClient extends RpcClient_.FromGroup<typeof Rpcs, RpcClientError> {}
@@ -537,7 +516,7 @@ export interface RpcClient extends RpcClient_.FromGroup<typeof Rpcs, RpcClientEr
  * Builds a runner RPC client from the current `RpcClient.Protocol`, using the
  * `Runners` span prefix with tracing disabled.
  *
- * @category Rpcs
+ * @category constructors
  * @since 4.0.0
  */
 export const makeRpcClient: Effect.Effect<
@@ -595,11 +574,22 @@ export const makeRpc: Effect.Effect<
               persisted: isPersisted
             })
           ),
-          Effect.catchTag("RpcClientError", Effect.die),
           Effect.scoped,
-          Effect.catchDefect(() => Effect.fail(new RunnerUnavailable({ address })))
+          Effect.catchTag("RpcClientError", () => Effect.fail(new RunnerUnavailable({ address })))
         )
       }
+      // Persisted requests can recover their reply from storage via the
+      // `RunnerUnavailable` path, volatile requests receive the defect as their reply.
+      const respondDefect = (defect: unknown) =>
+        isPersisted
+          ? Effect.fail(new RunnerUnavailable({ address }))
+          : message.respond(
+            new Reply.WithExit({
+              id: snowflakeGen.nextUnsafe(),
+              requestId: message.envelope.requestId,
+              exit: Exit.die(defect)
+            })
+          )
       const isStream = RpcSchema.isStreamSchema(rpc.successSchema)
       if (!isStream) {
         return Effect.matchEffect(Message.serializeRequest(message), {
@@ -611,7 +601,6 @@ export const makeRpc: Effect.Effect<
                   persisted: isPersisted
                 })
               ),
-              Effect.catchTag("RpcClientError", Effect.die),
               Effect.flatMap((reply) =>
                 Schema.decodeEffect(Reply.Reply(message.rpc))(reply).pipe(
                   Effect.provideContext(message.context),
@@ -620,7 +609,8 @@ export const makeRpc: Effect.Effect<
               ),
               Effect.flatMap(message.respond),
               Effect.scoped,
-              Effect.catchDefect(() => Effect.fail(new RunnerUnavailable({ address })))
+              Effect.catchTag("RpcClientError", () => Effect.fail(new RunnerUnavailable({ address }))),
+              Effect.catchDefect(respondDefect)
             ),
           onFailure: (error) =>
             message.respond(
@@ -647,10 +637,10 @@ export const makeRpc: Effect.Effect<
                 Effect.flatMap((reply) => Effect.orDie(decode(reply))),
                 Effect.flatMap(message.respond),
                 Effect.forever,
-                Effect.catchTag("RpcClientError", Effect.die),
                 Effect.provideContext(message.context),
                 Effect.catchTag("Done", (_) => Effect.void),
-                Effect.catchDefect(() => Effect.fail(new RunnerUnavailable({ address })))
+                Effect.catchTag("RpcClientError", () => Effect.fail(new RunnerUnavailable({ address }))),
+                Effect.catchDefect(respondDefect)
               )
             }),
             Effect.scoped
@@ -702,7 +692,7 @@ export const layerRpc: Layer.Layer<
  * Service that creates an RPC client protocol for communicating with a runner at a
  * given address.
  *
- * @category Client
+ * @category services
  * @since 4.0.0
  */
 export class RpcClientProtocol extends Context.Service<

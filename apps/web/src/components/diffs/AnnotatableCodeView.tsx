@@ -39,7 +39,7 @@ interface DiffCommentAnnotationGroup
 }
 
 type DiffCommentLineAnnotation = DiffLineAnnotation<DiffCommentAnnotationGroup>
-export type AnnotatableCodeViewHandle = CodeViewHandle<DiffCommentAnnotationGroup>
+export type AnnotatableCodeViewHandle = CodeViewHandle<DiffCommentAnnotationGroup, undefined>
 const EMPTY_REVIEW_COMMENTS: ReadonlyArray<ReviewCommentContext> = []
 
 function annotationSide(range: SelectedLineRange): AnnotationSide
@@ -89,7 +89,7 @@ interface AnnotatableCodeViewProps
   sectionId: string
   sectionTitle: string
   composerDraftTarget: ScopedThreadRef | DraftId
-  options: NonNullable<CodeViewProps<DiffCommentAnnotationGroup>['options']>
+  options: NonNullable<CodeViewProps<DiffCommentAnnotationGroup, undefined>['options']>
   viewerRef?: Ref<AnnotatableCodeViewHandle>
   className?: string
   renderHeaderPrefix: (fileDiff: FileDiffMetadata, fileKey: string, collapsed: boolean) => ReactNode

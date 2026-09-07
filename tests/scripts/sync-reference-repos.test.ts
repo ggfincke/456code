@@ -213,7 +213,7 @@ it.layer(NodeServices.layer)('sync-reference-repos', (it) =>
         'subtree',
         'add',
         '--prefix=.repos/effect-smol',
-        'https://github.com/Effect-TS/effect-smol.git',
+        'https://github.com/Effect-TS/effect.git',
         'effect@4.0.0-beta.73',
         '--squash',
       ])
@@ -250,7 +250,7 @@ it.layer(NodeServices.layer)('sync-reference-repos', (it) =>
             'subtree',
             'add',
             '--prefix=.repos/effect-smol',
-            'https://github.com/Effect-TS/effect-smol.git',
+            'https://github.com/Effect-TS/effect.git',
             'effect@4.0.0-beta.73',
             '--squash',
           ],

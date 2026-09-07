@@ -55,7 +55,7 @@ const encodeProviderDeletionPayload = Schema.encodeEffect(StoredProviderDeletion
 const decodeProviderDeletionPayload = Schema.decodeUnknownEffect(StoredProviderDeletionPayload)
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-class ThreadDeletionPayloadError extends Schema.TaggedErrorClass<ThreadDeletionPayloadError>()(
+class ThreadDeletionPayloadError extends Schema.TaggedError<ThreadDeletionPayloadError>()(
   'ThreadDeletionPayloadError',
   { detail: Schema.String },
 )

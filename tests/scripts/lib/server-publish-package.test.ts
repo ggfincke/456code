@@ -70,6 +70,30 @@ it('packs a concrete private Cartographer runtime inside the public server artif
       )
     }
 
+    const sdkDirectory = NodePath.join(dependencyClosureDirectory, '@modelcontextprotocol/sdk')
+    NodeFS.writeFileSync(
+      NodePath.join(sdkDirectory, 'package.json'),
+      JSON.stringify({
+        name: '@modelcontextprotocol/sdk',
+        version: '1.29.0',
+        dependencies: { 'fixture-transitive': '1.0.0' },
+      }),
+    )
+    NodeFS.writeFileSync(
+      NodePath.join(sdkDirectory, 'index.js'),
+      "module.exports = require('fixture-transitive')\n",
+    )
+    const transitiveDirectory = NodePath.join(dependencyClosureDirectory, 'fixture-transitive')
+    NodeFS.mkdirSync(transitiveDirectory)
+    NodeFS.writeFileSync(
+      NodePath.join(transitiveDirectory, 'package.json'),
+      JSON.stringify({ name: 'fixture-transitive', version: '1.0.0' }),
+    )
+    NodeFS.writeFileSync(
+      NodePath.join(transitiveDirectory, 'index.js'),
+      "module.exports = 'portable-closure'\n",
+    )
+
     const staged = stageServerPublishPackage({
       repoRoot,
       stageDirectory,
@@ -144,7 +168,28 @@ it('packs a concrete private Cartographer runtime inside the public server artif
     })
     const archives = NodeFS.readdirSync(packDirectory).filter((entry) => entry.endsWith('.tgz'))
     assert.equal(archives.length, 1)
-    assertPackedServerArchive(NodePath.join(packDirectory, archives[0]!))
+    const archivePath = NodePath.join(packDirectory, archives[0]!)
+    assertPackedServerArchive(archivePath)
+    const entries = NodeChildProcess.execFileSync('tar', ['-tf', archivePath], { encoding: 'utf8' })
+      .trim()
+      .split(/\r?\n/u)
+    assert.isTrue(
+      entries.every((entry) => entry.startsWith('package/') && !entry.split('/').includes('..')),
+    )
+    NodeFS.rmSync(dependencyClosureDirectory, { recursive: true, force: true })
+    NodeFS.rmSync(stageDirectory, { recursive: true, force: true })
+    const extracted = NodePath.join(repoRoot, 'extracted')
+    NodeFS.mkdirSync(extracted)
+    NodeChildProcess.execFileSync('tar', ['-xf', archivePath, '-C', extracted])
+    const result = NodeChildProcess.execFileSync(
+      process.execPath,
+      [
+        '-e',
+        "process.stdout.write(require('./package/node_modules/@t3tools/cartographer-core/node_modules/@modelcontextprotocol/sdk'))",
+      ],
+      { cwd: extracted, encoding: 'utf8' },
+    )
+    assert.equal(result, 'portable-closure')
   }
   finally
   {

@@ -35,7 +35,9 @@ import {
 const OFFLINE_BRANCH_LIST_LIMIT = 100
 const VCS_REFS_IDLE_TTL_MS = 30_000
 const VCS_REFS_RETRY_SCHEDULE = Schedule.exponential('1 second').pipe(
-  Schedule.modifyDelay((_, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(30)))),
+  Schedule.modifyDelay(({ duration }) =>
+    Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+  ),
 )
 
 function canUseVcsRefsCache(input: VcsListRefsInput): boolean

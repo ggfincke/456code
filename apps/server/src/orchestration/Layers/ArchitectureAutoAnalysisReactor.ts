@@ -69,7 +69,7 @@ const encodeOutcome = Schema.encodeSync(AutoAnalysisOutcome)
 const decodeOutcome = Schema.decodeUnknownSync(AutoAnalysisOutcome)
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-class ArchitectureAutoAnalysisPayloadError extends Schema.TaggedErrorClass<ArchitectureAutoAnalysisPayloadError>()(
+class ArchitectureAutoAnalysisPayloadError extends Schema.TaggedError<ArchitectureAutoAnalysisPayloadError>()(
   'ArchitectureAutoAnalysisPayloadError',
   { detail: Schema.String },
 )

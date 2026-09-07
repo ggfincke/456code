@@ -15,7 +15,7 @@ import type { EventNdjsonLogger } from '../../../../../apps/server/src/provider/
 import { makeAcpNativeLoggerFactory } from '../../../../../apps/server/src/provider/acp/AcpNativeLogging.ts'
 
 const nodeServicesIt = it.layer(NodeServices.layer)
-const encodeUnknownJson = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 nodeServicesIt('ACP native logging', (it) =>
 {

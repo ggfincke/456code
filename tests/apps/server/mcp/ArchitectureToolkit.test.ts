@@ -111,8 +111,9 @@ const proposePatchResult: ArchitectureProposePatchResult = {
 
 const client = McpSchema.McpServerClient.of({
   clientId: 1,
+  protocolVersion: '2025-06-18',
   initializePayload: {
-    protocolVersion: '2025-03-26',
+    protocolVersion: '2025-06-18',
     capabilities: {},
     clientInfo: { name: 'architecture-mcp-test', version: '1.0.0' },
   },

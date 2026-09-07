@@ -67,7 +67,7 @@ const decodeCheckpointCursorEnvelope = Schema.decodeUnknownEffect(
   Schema.fromJsonString(RuntimeRecoveryCheckpointCursorEnvelope),
 )
 
-export class RuntimeRecoveryAdminNotFoundError extends Schema.TaggedErrorClass<RuntimeRecoveryAdminNotFoundError>()(
+export class RuntimeRecoveryAdminNotFoundError extends Schema.TaggedError<RuntimeRecoveryAdminNotFoundError>()(
   'RuntimeRecoveryAdminNotFoundError',
   {
     subjectKind: Schema.Literals(['reactor-action', 'checkpoint-revert']),
@@ -76,7 +76,7 @@ export class RuntimeRecoveryAdminNotFoundError extends Schema.TaggedErrorClass<R
 )
 {}
 
-export class RuntimeRecoveryAdminStaleError extends Schema.TaggedErrorClass<RuntimeRecoveryAdminStaleError>()(
+export class RuntimeRecoveryAdminStaleError extends Schema.TaggedError<RuntimeRecoveryAdminStaleError>()(
   'RuntimeRecoveryAdminStaleError',
   {
     subjectKind: Schema.Literals(['reactor-action', 'checkpoint-revert']),
@@ -85,7 +85,7 @@ export class RuntimeRecoveryAdminStaleError extends Schema.TaggedErrorClass<Runt
 )
 {}
 
-export class RuntimeRecoveryAdminInvalidCursorError extends Schema.TaggedErrorClass<RuntimeRecoveryAdminInvalidCursorError>()(
+export class RuntimeRecoveryAdminInvalidCursorError extends Schema.TaggedError<RuntimeRecoveryAdminInvalidCursorError>()(
   'RuntimeRecoveryAdminInvalidCursorError',
   {
     listKind: Schema.Literals(['reactor-actions', 'checkpoint-reverts']),
@@ -93,7 +93,7 @@ export class RuntimeRecoveryAdminInvalidCursorError extends Schema.TaggedErrorCl
 )
 {}
 
-export class RuntimeRecoveryAdminInternalError extends Schema.TaggedErrorClass<RuntimeRecoveryAdminInternalError>()(
+export class RuntimeRecoveryAdminInternalError extends Schema.TaggedError<RuntimeRecoveryAdminInternalError>()(
   'RuntimeRecoveryAdminInternalError',
   {
     operation: Schema.String,

@@ -30,12 +30,18 @@ export default mergeConfig(
         'react-dom',
         'react-native',
         'react-native-nitro-markdown',
+        'react-native-nitro-modules',
         'react-native-reanimated',
         'react-native-safe-area-context',
       ],
     },
     test: {
       dir: '../../tests/apps/mobile',
+      server: {
+        deps: {
+          inline: ['react-native-nitro-markdown'],
+        },
+      },
     },
   }),
 )

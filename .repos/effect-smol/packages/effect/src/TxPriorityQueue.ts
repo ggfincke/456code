@@ -1,33 +1,13 @@
 /**
- * The `TxPriorityQueue` module provides a mutable priority queue whose state is
- * stored in a transactional reference. Elements are kept in the order defined by
- * the `Order` supplied at construction time, and dequeue operations return the
- * first element according to that ordering.
+ * Transactional priority queues whose state is stored in a `TxRef`. Elements
+ * are kept in the order defined by the `Order` supplied at construction time,
+ * and dequeue operations return the first element according to that ordering.
  *
- * A `TxPriorityQueue<A>` is useful when multiple fibers coordinate through a
- * shared queue and the queue operation needs to compose with other
- * transactional state changes. Every operation returns an `Effect`; group
- * several queue operations with `Effect.tx` when the whole sequence must commit
- * or retry as one transaction.
- *
- * **Common tasks**
- *
- * - Create queues with {@link empty}, {@link fromIterable}, or {@link make}
- * - Insert values with {@link offer} and {@link offerAll}
- * - Read priority order with {@link peek}, {@link peekOption}, and
- *   {@link toArray}
- * - Remove values with {@link take}, {@link takeOption}, {@link takeAll}, and
- *   {@link takeUpTo}
- * - Keep or remove subsets with {@link retainIf} and {@link removeIf}
- *
- * **Gotchas**
- *
- * - `take` and `peek` retry when the queue is empty; use `takeOption` or
- *   `peekOption` when empty queues should be represented as `Option.none`.
- * - `Order.Number` is ascending, so lower numbers are dequeued first. Provide a
- *   reversed order when larger values should have higher priority.
- * - The queue preserves all values with equal priority; equal values are not
- *   merged or deduplicated.
+ * Use `TxPriorityQueue` when multiple fibers coordinate through a shared queue
+ * and queue operations need to compose with other transactional state changes.
+ * The retrying `peek` and `take` operations wait transactionally when the queue
+ * is empty, so they can be combined with other transactional reads and writes in
+ * one atomic workflow.
  *
  * @since 4.0.0
  */
@@ -59,7 +39,7 @@ const TypeId = "~effect/transactions/TxPriorityQueue"
  *
  * **Example** (Dequeuing values by priority)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
@@ -67,9 +47,10 @@ const TypeId = "~effect/transactions/TxPriorityQueue"
  *   yield* TxPriorityQueue.offer(pq, 3)
  *   yield* TxPriorityQueue.offer(pq, 1)
  *   yield* TxPriorityQueue.offer(pq, 2)
- *   const first = yield* TxPriorityQueue.take(pq)
- *   console.log(first) // 1
+ *   return yield* TxPriorityQueue.take(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category models
@@ -127,14 +108,15 @@ const insertSorted = <A>(chunk: Chunk<A>, value: A, ord: Order<A>): Chunk<A> => 
  *
  * **Example** (Creating an empty priority queue)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.empty<number>(Order.Number)
- *   const empty = yield* TxPriorityQueue.isEmpty(pq)
- *   console.log(empty) // true
+ *   return yield* TxPriorityQueue.isEmpty(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => true
  * ```
  *
  * @category constructors
@@ -148,14 +130,15 @@ export const empty = <A>(order: Order<A>): Effect.Effect<TxPriorityQueue<A>> =>
  *
  * **Example** (Creating a priority queue from an iterable)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [3, 1, 2])
- *   const first = yield* TxPriorityQueue.take(pq)
- *   console.log(first) // 1
+ *   return yield* TxPriorityQueue.take(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category constructors
@@ -180,14 +163,15 @@ export const fromIterable: {
  *
  * **Example** (Creating a priority queue from variadic values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.make(Order.Number)(3, 1, 2)
- *   const first = yield* TxPriorityQueue.take(pq)
- *   console.log(first) // 1
+ *   return yield* TxPriorityQueue.take(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category constructors
@@ -201,14 +185,15 @@ export const make = <A>(order: Order<A>) => (...elements: Array<A>): Effect.Effe
  *
  * **Example** (Getting the queue size)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [1, 2, 3])
- *   const s = yield* TxPriorityQueue.size(pq)
- *   console.log(s) // 3
+ *   return yield* TxPriorityQueue.size(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 3
  * ```
  *
  * @category getters
@@ -221,17 +206,18 @@ export const size = <A>(self: TxPriorityQueue<A>): Effect.Effect<number> => Effe
  *
  * **Example** (Checking whether a queue is empty)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.empty<number>(Order.Number)
- *   const empty = yield* TxPriorityQueue.isEmpty(pq)
- *   console.log(empty) // true
+ *   return yield* TxPriorityQueue.isEmpty(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => true
  * ```
  *
- * @category getters
+ * @category predicates
  * @since 2.0.0
  */
 export const isEmpty = <A>(self: TxPriorityQueue<A>): Effect.Effect<boolean> => Effect.map(size(self), (n) => n === 0)
@@ -241,17 +227,18 @@ export const isEmpty = <A>(self: TxPriorityQueue<A>): Effect.Effect<boolean> => 
  *
  * **Example** (Checking whether a queue has elements)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [1])
- *   const nonEmpty = yield* TxPriorityQueue.isNonEmpty(pq)
- *   console.log(nonEmpty) // true
+ *   return yield* TxPriorityQueue.isNonEmpty(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => true
  * ```
  *
- * @category getters
+ * @category predicates
  * @since 2.0.0
  */
 export const isNonEmpty = <A>(self: TxPriorityQueue<A>): Effect.Effect<boolean> => Effect.map(size(self), (n) => n > 0)
@@ -266,14 +253,15 @@ export const isNonEmpty = <A>(self: TxPriorityQueue<A>): Effect.Effect<boolean> 
  *
  * **Example** (Peeking at the next value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [3, 1, 2])
- *   const top = yield* TxPriorityQueue.peek(pq)
- *   console.log(top) // 1
+ *   return yield* TxPriorityQueue.peek(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category getters
@@ -299,14 +287,15 @@ export const peek = <A>(self: TxPriorityQueue<A>): Effect.Effect<A> =>
  *
  * **Example** (Peeking without retrying)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Option, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.empty<number>(Order.Number)
- *   const result = yield* TxPriorityQueue.peekOption(pq)
- *   console.log(Option.isNone(result)) // true
+ *   return yield* TxPriorityQueue.peekOption(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => Option.none()
  * ```
  *
  * @category getters
@@ -320,16 +309,17 @@ export const peekOption = <A>(self: TxPriorityQueue<A>): Effect.Effect<Option<A>
  *
  * **Example** (Offering a value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.empty<number>(Order.Number)
  *   yield* TxPriorityQueue.offer(pq, 2)
  *   yield* TxPriorityQueue.offer(pq, 1)
- *   const first = yield* TxPriorityQueue.take(pq)
- *   console.log(first) // 1
+ *   return yield* TxPriorityQueue.take(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category mutations
@@ -349,15 +339,16 @@ export const offer: {
  *
  * **Example** (Offering multiple values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.empty<number>(Order.Number)
  *   yield* TxPriorityQueue.offerAll(pq, [3, 1, 2])
- *   const first = yield* TxPriorityQueue.take(pq)
- *   console.log(first) // 1
+ *   return yield* TxPriorityQueue.take(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category mutations
@@ -380,14 +371,15 @@ export const offerAll: {
  *
  * **Example** (Taking the next value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [3, 1, 2])
- *   const first = yield* TxPriorityQueue.take(pq)
- *   console.log(first) // 1
+ *   return yield* TxPriorityQueue.take(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category mutations
@@ -409,14 +401,15 @@ export const take = <A>(self: TxPriorityQueue<A>): Effect.Effect<A> =>
  *
  * **Example** (Taking all values in priority order)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [3, 1, 2])
- *   const all = yield* TxPriorityQueue.takeAll(pq)
- *   console.log(all) // [1, 2, 3]
+ *   return yield* TxPriorityQueue.takeAll(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => [1, 2, 3]
  * ```
  *
  * @category mutations
@@ -433,14 +426,15 @@ export const takeAll = <A>(self: TxPriorityQueue<A>): Effect.Effect<Array<A>> =>
  *
  * **Example** (Taking without retrying)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Option, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.empty<number>(Order.Number)
- *   const result = yield* TxPriorityQueue.takeOption(pq)
- *   console.log(Option.isNone(result)) // true
+ *   return yield* TxPriorityQueue.takeOption(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => Option.none()
  * ```
  *
  * @category mutations
@@ -460,14 +454,15 @@ export const takeOption = <A>(self: TxPriorityQueue<A>): Effect.Effect<Option<A>
  *
  * **Example** (Taking up to a limit)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [5, 3, 1, 4, 2])
- *   const top2 = yield* TxPriorityQueue.takeUpTo(pq, 2)
- *   console.log(top2) // [1, 2]
+ *   return yield* TxPriorityQueue.takeUpTo(pq, 2)
  * })
+ *
+ * await Effect.runPromise(program) // => [1, 2]
  * ```
  *
  * @category mutations
@@ -494,15 +489,16 @@ export const takeUpTo: {
  *
  * **Example** (Removing matching values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [1, 2, 3, 4, 5])
  *   yield* TxPriorityQueue.removeIf(pq, (n) => n % 2 === 0)
- *   const all = yield* TxPriorityQueue.takeAll(pq)
- *   console.log(all) // [1, 3, 5]
+ *   return yield* TxPriorityQueue.takeAll(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => [1, 3, 5]
  * ```
  *
  * @category filtering
@@ -522,15 +518,16 @@ export const removeIf: {
  *
  * **Example** (Retaining matching values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [1, 2, 3, 4, 5])
  *   yield* TxPriorityQueue.retainIf(pq, (n) => n % 2 === 0)
- *   const all = yield* TxPriorityQueue.takeAll(pq)
- *   console.log(all) // [2, 4]
+ *   return yield* TxPriorityQueue.takeAll(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => [2, 4]
  * ```
  *
  * @category filtering
@@ -550,14 +547,15 @@ export const retainIf: {
  *
  * **Example** (Reading values in priority order)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.fromIterable(Order.Number, [3, 1, 2])
- *   const all = yield* TxPriorityQueue.toArray(pq)
- *   console.log(all) // [1, 2, 3]
+ *   return yield* TxPriorityQueue.toArray(pq)
  * })
+ *
+ * await Effect.runPromise(program) // => [1, 2, 3]
  * ```
  *
  * @category converting
@@ -571,14 +569,15 @@ export const toArray = <A>(self: TxPriorityQueue<A>): Effect.Effect<Array<A>> =>
  *
  * **Example** (Checking for a TxPriorityQueue)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Order, TxPriorityQueue } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const pq = yield* TxPriorityQueue.empty<number>(Order.Number)
- *   console.log(TxPriorityQueue.isTxPriorityQueue(pq)) // true
- *   console.log(TxPriorityQueue.isTxPriorityQueue("nope")) // false
+ *   return [TxPriorityQueue.isTxPriorityQueue(pq), TxPriorityQueue.isTxPriorityQueue("nope")]
  * })
+ *
+ * await Effect.runPromise(program) // => [true, false]
  * ```
  *
  * @category guards

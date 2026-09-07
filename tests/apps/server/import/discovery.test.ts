@@ -36,8 +36,8 @@ const CODEX_DEFAULT = ProviderInstanceId.make('codex')
 const CLAUDE_DEFAULT = ProviderInstanceId.make('claudeAgent')
 const OPENCODE_DEFAULT = ProviderInstanceId.make('opencode')
 const DISCOVERY_PATH = '/usr/bin:/bin'
-const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
-const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
 function codexSessionContent(nativeSessionId: string): string
 {

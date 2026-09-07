@@ -1,59 +1,11 @@
 /**
- * Runtime helpers for turning an `Effect` program into a host application's
- * main entry point.
- *
- * This module is the low-level layer used by platform adapters to run a main
- * effect, observe its fiber, report unhandled failures, and translate the
- * resulting `Exit` into an application or process exit code. Application code
- * usually calls the platform-provided runner; runtime integrations use
- * {@link makeRunMain} directly.
- *
- * **Mental model**
- *
- * - {@link makeRunMain} forks the supplied `Effect` and gives the host adapter
- *   the running fiber plus a teardown callback
- * - The host adapter installs platform-specific hooks such as signal handlers,
- *   fiber observers, process exits, worker termination, or test harness
- *   callbacks
- * - {@link defaultTeardown} maps successful exits to `0`, interruption-only
- *   failures to `130`, failures with {@link errorExitCode} to that code, and
- *   other failures to `1`
- * - {@link errorReported} controls automatic failure logging; set it to
- *   `false` on errors that have already been reported
- *
- * **Common tasks**
- *
- * - Build a platform runner: {@link makeRunMain}
- * - Reuse the standard exit-code rules: {@link defaultTeardown}
- * - Customize failure exit codes: {@link errorExitCode},
- *   {@link getErrorExitCode}
- * - Control automatic failure logging: {@link errorReported},
- *   {@link getErrorReported}
- *
- * **Gotchas**
- *
- * - `makeRunMain` starts the main fiber, but the adapter callback is
- *   responsible for observing that fiber and eventually invoking teardown.
- * - `disableErrorReporting` only disables automatic failure logging. It does
- *   not change the `Exit`, interruption behavior, or teardown exit-code rules.
- * - Error markers are read from `Cause.squash(cause)`, so causes with multiple
- *   failures use the squashed failure value to determine logging and exit code.
- *
- * **Example** (Creating a minimal runner)
- *
- * ```ts
- * import { Effect, Runtime } from "effect"
- *
- * const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
- *   fiber.addObserver((exit) => {
- *     teardown(exit, (code) => {
- *       console.log(`finished with exit code ${code}`)
- *     })
- *   })
- * })
- *
- * runMain(Effect.log("booted"))
- * ```
+ * Helpers for turning an `Effect` program into a host application's main entry
+ * point. This module is the low-level layer used by platform adapters to run a
+ * main effect, observe its fiber, report unhandled failures, and translate the
+ * resulting `Exit` into an application or process exit code. It provides
+ * `makeRunMain`, the default teardown behavior, and error markers for custom
+ * exit codes and already-reported failures. Application code usually calls the
+ * platform-provided runner instead of using this module directly.
  *
  * @since 4.0.0
  */
@@ -79,31 +31,27 @@ import type * as Fiber from "./Fiber.ts"
  *
  * **Example** (Customizing teardown behavior)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Runtime } from "effect"
  *
- * // Custom teardown that logs completion status
+ * // Custom teardown that maps completion status to an exit code
  * const customTeardown: Runtime.Teardown = (exit, onExit) => {
- *   if (Exit.isSuccess(exit)) {
- *     console.log("Program completed successfully with value:", exit.value)
- *     onExit(0)
- *   } else {
- *     console.log("Program failed with cause:", exit.cause)
- *     onExit(1)
- *   }
+ *   onExit(Exit.isSuccess(exit) ? 0 : 1)
  * }
  *
+ * const completed = new Promise<readonly [Exit.Exit<unknown, unknown>, number]>((resolve) => {
  * // Use with makeRunMain
- * const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
- *   fiber.addObserver((exit) => {
- *     teardown(exit, (code) => {
- *       console.log(`Exiting with code: ${code}`)
+ *   const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
+ *     fiber.addObserver((exit) => {
+ *       teardown(exit, (code) => resolve([exit, code]))
  *     })
  *   })
+ *
+ *   const program = Effect.succeed("Hello, World!")
+ *   runMain(program, { teardown: customTeardown })
  * })
  *
- * const program = Effect.succeed("Hello, World!")
- * runMain(program, { teardown: customTeardown })
+ * await completed // => [Exit.succeed("Hello, World!"), 0]
  * ```
  *
  * @category models
@@ -118,8 +66,8 @@ export interface Teardown {
  *
  * **When to use**
  *
- * Use as the standard teardown for main programs when you want conventional
- * process exit codes and support for {@link errorExitCode}.
+ * Use as the standard teardown for main programs with conventional process
+ * exit codes and support for {@link errorExitCode}.
  *
  * **Details**
  *
@@ -136,25 +84,20 @@ export interface Teardown {
  * The `130` code is used only when the Cause contains interruptions and no
  * other failure reasons. Mixed causes use the squashed error path instead.
  *
- * **Example** (Using default teardown)
+ * **Example** (Referencing default teardown)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Exit, Runtime } from "effect"
  *
- * const logExitCode = (exit: Exit.Exit<any, any>) => {
- *   Runtime.defaultTeardown(exit, (code) => {
- *     console.log(`Exit code: ${code}`)
- *   })
- * }
+ * const exitCodes: Array<number> = []
+ * const collectExitCode = (exit: Exit.Exit<any, any>) =>
+ *   Runtime.defaultTeardown(exit, (code) => exitCodes.push(code))
  *
- * logExitCode(Exit.succeed(42))
- * // Output: Exit code: 0
+ * collectExitCode(Exit.succeed(42))
+ * collectExitCode(Exit.fail("error"))
+ * collectExitCode(Exit.interrupt(123))
  *
- * logExitCode(Exit.fail("error"))
- * // Output: Exit code: 1
- *
- * logExitCode(Exit.interrupt(123))
- * // Output: Exit code: 130
+ * exitCodes // => [0, 1, 130]
  * ```
  *
  * @see {@link errorExitCode} for customizing failure exit codes
@@ -176,13 +119,16 @@ export const defaultTeardown: Teardown = <E, A>(
  *
  * **When to use**
  *
- * Use when building a runtime adapter for a host platform. Most applications
- * should use a platform-provided runner, such as `NodeRuntime.runMain`, rather
- * than constructing one directly.
+ * Use when building a runtime adapter for a host platform.
  *
  * **Details**
  *
- * The runner executes Effect programs as main entry points. The provided function receives a forked fiber and a teardown callback so it can install platform-specific signal handling, fiber observers, and final exit behavior.
+ * The runner executes Effect programs as main entry points. The provided
+ * function receives a forked fiber and a teardown callback so it can install
+ * platform-specific signal handling, fiber observers, and final exit behavior.
+ *
+ * Most applications should use a platform-provided runner, such as
+ * `NodeRuntime.runMain`, rather than constructing one directly.
  *
  * `disableErrorReporting` disables the automatic log emitted for unreported
  * non-interruption failures. It does not change exit-code calculation or the
@@ -197,47 +143,36 @@ export const defaultTeardown: Teardown = <E, A>(
  *
  * **Example** (Creating platform runners)
  *
- * ```ts
- * import { Effect, Fiber, Runtime } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Exit, Runtime } from "effect"
  *
+ * const events: Array<string> = []
+ * const completed = new Promise<readonly [Exit.Exit<unknown, unknown>, number]>((resolve) => {
  * // Create a simple runner for a hypothetical platform
- * const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
- *   // Set up signal handling
- *   const handleSignal = () => {
- *     Effect.runSync(Fiber.interrupt(fiber))
- *   }
- *
- *   // Add signal listeners (platform-specific)
- *   // process.on('SIGINT', handleSignal)
- *   // process.on('SIGTERM', handleSignal)
- *
- *   // Handle fiber completion
- *   fiber.addObserver((exit) => {
- *     teardown(exit, (code) => {
- *       console.log(`Program finished with exit code: ${code}`)
- *       // process.exit(code)
+ *   const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
+ *     // Handle fiber completion
+ *     fiber.addObserver((exit) => {
+ *       teardown(exit, (code) => resolve([exit, code]))
  *     })
+ *   })
+ *
+ *   // Use the runner
+ *   const program = Effect.sync(() => {
+ *     events.push("Starting program", "Program completed")
+ *     return "success"
+ *   })
+ *
+ *   runMain(program, {
+ *     teardown: (exit, onExit) => {
+ *       events.push("Custom teardown logic")
+ *       Runtime.defaultTeardown(exit, onExit)
+ *     }
  *   })
  * })
  *
- * // Use the runner
- * const program = Effect.gen(function*() {
- *   yield* Effect.log("Starting program")
- *   yield* Effect.sleep(1000)
- *   yield* Effect.log("Program completed")
- *   return "success"
- * })
- *
- * // Run with default options
- * runMain(program)
- *
- * // Run with custom teardown
- * runMain(program, {
- *   teardown: (exit, onExit) => {
- *     console.log("Custom teardown logic")
- *     Runtime.defaultTeardown(exit, onExit)
- *   }
- * })
+ * const result = await completed
+ * result // => [Exit.succeed("success"), 0]
+ * events // => ["Starting program", "Program completed", "Custom teardown logic"]
  * ```
  *
  * @category running
@@ -330,16 +265,14 @@ export type errorExitCode = "~effect/Runtime/errorExitCode"
  *
  * **Example** (Setting a process exit code)
  *
- * ```ts
- * import { Data, Effect, Runtime } from "effect"
- * import { NodeRuntime } from "@effect/platform-node"
+ * ```ts import.meta.vitest
+ * import { Data, Runtime } from "effect"
  *
  * class MyError extends Data.TaggedError("MyError") {
  *   readonly [Runtime.errorExitCode] = 42
  * }
  *
- * // If the program fails with MyError, the process will exit with code 42
- * NodeRuntime.runMain(Effect.fail(new MyError()))
+ * Runtime.getErrorExitCode(new MyError()) // => 42
  * ```
  *
  * @see {@link errorReported} for controlling automatic error logging
@@ -372,7 +305,7 @@ export const errorExitCode: errorExitCode = "~effect/Runtime/errorExitCode"
  *
  * @see {@link errorExitCode} for the marker read by this function
  *
- * @category accessors
+ * @category getters
  * @since 4.0.0
  */
 export const getErrorExitCode = (u: unknown): number => {
@@ -403,8 +336,8 @@ export type errorReported = "~effect/Runtime/errorReported"
  *
  * **When to use**
  *
- * Use when error classes are already reported by application code and should
- * not be logged again by the default main runner.
+ * Use when you need error classes reported by application code to avoid being
+ * logged again by the default main runner.
  *
  * **Details**
  *
@@ -422,17 +355,14 @@ export type errorReported = "~effect/Runtime/errorReported"
  *
  * **Example** (Suppressing error reporting)
  *
- * ```ts
- * import { Data, Effect, Runtime } from "effect"
- * import { NodeRuntime } from "@effect/platform-node"
+ * ```ts import.meta.vitest
+ * import { Data, Runtime } from "effect"
  *
  * class MyError extends Data.TaggedError("MyError") {
  *   readonly [Runtime.errorReported] = false
  * }
  *
- * // If the program fails with MyError, the process will exit with code 1 but
- * // no error will be logged.
- * NodeRuntime.runMain(Effect.fail(new MyError()))
+ * Runtime.getErrorReported(new MyError()) // => false
  * ```
  *
  * @see {@link errorExitCode} for controlling failure exit codes
@@ -463,7 +393,7 @@ export const errorReported: errorReported = "~effect/Runtime/errorReported"
  *
  * @see {@link errorReported} for the marker read by this function
  *
- * @category accessors
+ * @category getters
  * @since 4.0.0
  */
 export const getErrorReported = (u: unknown): boolean => {

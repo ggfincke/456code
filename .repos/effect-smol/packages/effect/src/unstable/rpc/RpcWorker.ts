@@ -1,35 +1,11 @@
 /**
- * Bootstrap messages for worker-backed RPC protocols.
+ * Initial messages for worker-backed RPC protocols.
  *
- * Worker-backed RPC clients sometimes need to send data before the first RPC
- * request is handled: per-worker configuration, credentials, feature flags,
- * preloaded caches, or transferable handles. This module defines the
- * {@link InitialMessage} service plus helpers that encode that bootstrap value
- * on the client side and decode it on the worker server side.
- *
- * **Mental model**
- *
- * The initial message is a one-time envelope outside the normal RPC request and
- * response stream. {@link makeInitialMessage} runs the build effect, encodes
- * its value with the supplied schema's JSON codec, and collects transferables.
- * {@link layerInitialMessage} stores that encoded payload in context for the
- * RPC client runtime. Inside the worker, {@link initialMessage} reads the
- * protocol's bootstrap payload and decodes it with the same schema.
- *
- * **Common tasks**
- *
- * - Provide typed worker startup data with {@link layerInitialMessage}
- * - Precompute encoded data and transfer lists with {@link makeInitialMessage}
- * - Read typed startup data in the worker with {@link initialMessage}
- *
- * **Gotchas**
- *
- * The payload is posted with worker `postMessage`, so encoded values still must
- * cross the structured clone boundary. Transferables collected during encoding
- * are moved to the worker; buffers and ports may no longer be usable by the
- * sender after transfer. The initial message is separate from
- * `RpcSerialization`, so changing request/response serialization does not
- * change how this bootstrap payload is encoded.
+ * A worker-backed RPC client can send one schema-encoded value before normal RPC
+ * requests are handled. This module defines the `InitialMessage` service, a
+ * helper for encoding that value while collecting transferables, a layer for
+ * providing it to the client protocol, and a decoder for reading it from the
+ * worker server protocol.
  *
  * @since 4.0.0
  */
@@ -45,7 +21,7 @@ import type { Protocol } from "./RpcServer.ts"
  * Context service that supplies the initial RPC worker message as encoded data
  * paired with any transferables that should be posted with it.
  *
- * @category initial message
+ * @category services
  * @since 4.0.0
  */
 export class InitialMessage extends Context.Service<
@@ -68,7 +44,7 @@ export declare namespace InitialMessage {
    * Tagged wire representation of an RPC worker initial message after schema
    * encoding.
    *
-   * @category initial message
+   * @category models
    * @since 4.0.0
    */
   export interface Encoded {
@@ -85,10 +61,10 @@ const ProtocolTag = Context.Service<Protocol, Protocol["Service"]>(
  * Runs an effect, encodes its result with the schema's JSON codec, and returns
  * the encoded value together with collected transferables.
  *
- * @category initial message
+ * @category encoding
  * @since 4.0.0
  */
-export const makeInitialMessage = <S extends Schema.Top, E, R2>(
+export const makeInitialMessage = <S extends Schema.Constraint, E, R2>(
   schema: S,
   effect: Effect.Effect<S["Type"], E, R2>
 ): Effect.Effect<
@@ -110,10 +86,10 @@ export const makeInitialMessage = <S extends Schema.Top, E, R2>(
  * Provides the `InitialMessage` service from a schema and build effect,
  * capturing the layer context and dying if schema encoding fails.
  *
- * @category initial message
+ * @category layers
  * @since 4.0.0
  */
-export const layerInitialMessage = <S extends Schema.Top, R2>(
+export const layerInitialMessage = <S extends Schema.Constraint, R2>(
   schema: S,
   build: Effect.Effect<S["Type"], never, R2>
 ): Layer.Layer<InitialMessage, never, S["EncodingServices"] | R2> =>
@@ -129,10 +105,10 @@ export const layerInitialMessage = <S extends Schema.Top, R2>(
  * Reads the protocol initial message and decodes it with the supplied schema,
  * failing if no initial message is available or decoding fails.
  *
- * @category initial message
+ * @category decoding
  * @since 4.0.0
  */
-export const initialMessage = <S extends Schema.Top>(
+export const initialMessage = <S extends Schema.Constraint>(
   schema: S
 ): Effect.Effect<S["Type"], NoSuchElementError | Schema.SchemaError, Protocol | S["DecodingServices"]> =>
   ProtocolTag.pipe(

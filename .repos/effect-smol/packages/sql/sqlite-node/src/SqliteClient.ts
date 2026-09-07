@@ -1,48 +1,19 @@
 /**
- * Node.js SQLite driver for Effect SQL, backed by `better-sqlite3`.
+ * Connects Effect SQL to SQLite on Node.js using `node:sqlite`.
  *
- * Use this module to provide a scoped {@link SqliteClient} for file-backed or
- * in-memory SQLite databases in Node.js. The provided layers install both the
- * SQLite-specific service and the generic `SqlClient`, making the module useful
- * for local applications, tests, migrations, development tools, and embedded
- * persistence that need Effect SQL query compilation with SQLite-specific
- * operations.
- *
- * ## Mental model
- *
- * Each client owns one scoped `better-sqlite3` database handle and serializes
- * all SQL access through it. Because `better-sqlite3` executes statements
- * synchronously, a long-running query or transaction holds the serialized
- * connection until it completes. Prepared statements are cached by SQL text and
- * result-name transforms are applied after rows are read.
- *
- * The service adds Node SQLite capabilities on top of the generic `SqlClient`:
- * database export, file backup, and native extension loading.
- *
- * ## Common tasks
- *
- * - Use {@link layer} with a concrete filename and options.
- * - Use {@link layerConfig} when the filename or flags should come from
- *   `Config`.
- * - Use {@link make} inside a custom scoped layer when you need to manage the
- *   client lifecycle directly.
- * - Use `client.export`, `client.backup`, or `client.loadExtension` for
- *   operations that are specific to this Node SQLite driver.
- *
- * ## Gotchas
- *
- * WAL mode is enabled by default. Set `disableWAL` for read-only databases or
- * when the database file or directory cannot be updated with SQLite WAL side
- * files. Separate database handles or processes can still contend for SQLite
- * write locks even though access through one client is serialized.
- *
- * Safe integer handling follows the generic `SqlClient` fiber-local setting.
- * `executeStream` is not implemented for this driver, and SQLite does not
- * support `updateValues`.
+ * This module opens a SQLite database and exposes it as both `SqliteClient` and
+ * the generic Effect SQL client. It serializes access through one connection,
+ * caches prepared statements, enables WAL mode unless disabled, and waits up
+ * to five seconds for busy databases by default. Explicit transactions on
+ * writable connections use `BEGIN IMMEDIATE` to avoid read-to-write lock
+ * upgrades, which serializes them behind other writers even when they only
+ * read. Clients opened with `readonly: true` are unaffected. Busy waits block
+ * the Node.js event loop because `node:sqlite` is synchronous. Database backup
+ * and extension loading are supported; streaming queries and `updateValues`
+ * are not.
  *
  * @since 4.0.0
  */
-import Sqlite from "better-sqlite3"
 import * as Cache from "effect/Cache"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -59,11 +30,11 @@ import * as Client from "effect/unstable/sql/SqlClient"
 import type { Connection } from "effect/unstable/sql/SqlConnection"
 import { classifySqliteError, SqlError } from "effect/unstable/sql/SqlError"
 import * as Statement from "effect/unstable/sql/Statement"
+import { backup as backupDatabase, DatabaseSync } from "node:sqlite"
+import type { StatementSync } from "node:sqlite"
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name"
-
-const classifyError = (cause: unknown, message: string, operation: string) =>
-  classifySqliteError(cause, { message, operation })
+const MAX_BUSY_TIMEOUT = 2_147_483_647
 
 /**
  * Runtime type identifier used to mark Node `SqliteClient` values.
@@ -84,13 +55,12 @@ export type TypeId = "~@effect/sql-sqlite-node/SqliteClient"
 /**
  * Node SQLite client service, extending `SqlClient` with database export, backup, and extension loading helpers. `updateValues` is not supported.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface SqliteClient extends Client.SqlClient {
   readonly [TypeId]: TypeId
   readonly config: SqliteClientConfig
-  readonly export: Effect.Effect<Uint8Array, SqlError>
   readonly backup: (destination: string) => Effect.Effect<BackupMetadata, SqlError>
   readonly loadExtension: (path: string) => Effect.Effect<void, SqlError>
 
@@ -112,13 +82,13 @@ export interface BackupMetadata {
 /**
  * Service tag for the node SQLite client implementation.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const SqliteClient = Context.Service<SqliteClient>("@effect/sql-sqlite-node/SqliteClient")
 
 /**
- * Configuration for a node SQLite client backed by `better-sqlite3`, including the database filename, read-only mode, statement cache settings, WAL behavior, span attributes, and query/result name transforms.
+ * Configuration for a node SQLite client backed by `node:sqlite`, including the database filename, read-only mode, statement cache settings, WAL and busy timeout behavior, span attributes, and query/result name transforms.
  *
  * @category models
  * @since 4.0.0
@@ -129,6 +99,12 @@ export interface SqliteClientConfig {
   readonly prepareCacheSize?: number | undefined
   readonly prepareCacheTTL?: Duration.Input | undefined
   readonly disableWAL?: boolean | undefined
+  /**
+   * How long SQLite waits when the database is busy. Defaults to 5 seconds.
+   * `Duration.infinity` is clamped to SQLite's maximum timeout.
+   * Waiting blocks the Node.js event loop because `node:sqlite` is synchronous.
+   */
+  readonly busyTimeout?: Duration.Input | undefined
   readonly spanAttributes?: Record<string, unknown> | undefined
 
   readonly transformResultNames?: ((str: string) => string) | undefined
@@ -136,13 +112,12 @@ export interface SqliteClientConfig {
 }
 
 interface SqliteConnection extends Connection {
-  readonly export: Effect.Effect<Uint8Array, SqlError>
   readonly backup: (destination: string) => Effect.Effect<BackupMetadata, SqlError>
   readonly loadExtension: (path: string) => Effect.Effect<void, SqlError>
 }
 
 /**
- * Creates a scoped node SQLite client from the supplied configuration, using a single serialized connection with WAL enabled by default and exposing SQLite-specific `export`, `backup`, and `loadExtension` operations.
+ * Creates a scoped node SQLite client from the supplied configuration, using a single serialized connection with WAL and a 5-second busy timeout enabled by default. Explicit transactions on writable connections take the write lock for their duration, even when they only read; clients opened with `readonly: true` are unaffected.
  *
  * @category constructors
  * @since 4.0.0
@@ -160,13 +135,20 @@ export const make = (
 
     const makeConnection = Effect.gen(function*() {
       const scope = yield* Effect.scope
-      const db = new Sqlite(options.filename, {
-        readonly: options.readonly ?? false
+      const db = new DatabaseSync(options.filename, {
+        readOnly: options.readonly ?? false,
+        allowExtension: true
       })
       yield* Scope.addFinalizer(scope, Effect.sync(() => db.close()))
+      db.enableLoadExtension(false)
+      const busyTimeout = Math.min(
+        MAX_BUSY_TIMEOUT,
+        Math.max(0, Math.round(Duration.toMillis(options.busyTimeout ?? Duration.seconds(5))))
+      )
+      db.exec(`PRAGMA busy_timeout = ${busyTimeout}`)
 
       if (options.disableWAL !== true) {
-        db.pragma("journal_mode = WAL")
+        db.exec("PRAGMA journal_mode = WAL")
       }
 
       const prepareCache = yield* Cache.make({
@@ -180,23 +162,62 @@ export const make = (
       })
 
       const runStatement = (
-        statement: Sqlite.Statement,
+        statement: StatementSync,
         params: ReadonlyArray<unknown>,
         raw: boolean
       ) =>
         Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
-          if (Context.get(fiber.context, Client.SafeIntegers)) {
-            statement.safeIntegers(true)
-          }
-          try {
-            if (statement.reader) {
-              return Effect.succeed(statement.all(...params))
-            }
-            const result = statement.run(...params)
-            return Effect.succeed(raw ? result as unknown as ReadonlyArray<any> : [])
-          } catch (cause) {
-            return Effect.fail(new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") }))
-          }
+          const useSafeIntegers = Context.get(fiber.context, Client.SafeIntegers)
+          return Effect.try({
+            try: () => {
+              statement.setReadBigInts(useSafeIntegers)
+              if (statement.columns().length > 0) {
+                return statement.all(...(params as Array<any>)) as ReadonlyArray<any>
+              }
+              const result = statement.run(...(params as Array<any>))
+              return raw ? { changes: result.changes, lastInsertRowid: result.lastInsertRowid } as any : []
+            },
+            catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
+          })
+        })
+
+      const runStatementValues = (
+        statement: StatementSync,
+        params: ReadonlyArray<unknown>
+      ) =>
+        Effect.withFiber<ReadonlyArray<ReadonlyArray<unknown>>, SqlError>((fiber) => {
+          const useSafeIntegers = Context.get(fiber.context, Client.SafeIntegers)
+          return Effect.try({
+            try: () => {
+              statement.setReadBigInts(useSafeIntegers)
+              if (statement.columns().length > 0) {
+                return statement.all(...(params as Array<any>)) as unknown as ReadonlyArray<ReadonlyArray<unknown>>
+              }
+              statement.run(...(params as Array<any>))
+              return []
+            },
+            catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
+          })
+        })
+
+      const runStatementValuesUnprepared = (
+        statement: StatementSync,
+        params: ReadonlyArray<unknown>
+      ) =>
+        Effect.withFiber<ReadonlyArray<ReadonlyArray<unknown>>, SqlError>((fiber) => {
+          const useSafeIntegers = Context.get(fiber.context, Client.SafeIntegers)
+          return Effect.try({
+            try: () => {
+              statement.setReadBigInts(useSafeIntegers)
+              statement.setReturnArrays(true)
+              if (statement.columns().length > 0) {
+                return statement.all(...(params as Array<any>)) as unknown as ReadonlyArray<ReadonlyArray<unknown>>
+              }
+              statement.run(...(params as Array<any>))
+              return []
+            },
+            catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
+          })
         })
 
       const run = (
@@ -215,22 +236,17 @@ export const make = (
       ) =>
         Effect.acquireUseRelease(
           Cache.get(prepareCache, sql),
-          (statement) =>
-            Effect.try({
-              try: () => {
-                if (statement.reader) {
-                  statement.raw(true)
-                  return statement.all(...params) as ReadonlyArray<
-                    ReadonlyArray<unknown>
-                  >
-                }
-                statement.run(...params)
-                return []
-              },
-              catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
-            }),
-          (statement) => Effect.sync(() => statement.reader && statement.raw(false))
+          (statement) => {
+            statement.setReturnArrays(true)
+            return runStatementValues(statement, params)
+          },
+          (statement) => Effect.sync(() => statement.setReturnArrays(false))
         )
+
+      const runValuesUnprepared = (
+        sql: string,
+        params: ReadonlyArray<unknown>
+      ) => runStatementValuesUnprepared(db.prepare(sql), params)
 
       return identity<SqliteConnection>({
         execute(sql, params, transformRows) {
@@ -244,6 +260,9 @@ export const make = (
         executeValues(sql, params) {
           return runValues(sql, params)
         },
+        executeValuesUnprepared(sql, params) {
+          return runValuesUnprepared(sql, params)
+        },
         executeUnprepared(sql, params, transformRows) {
           const effect = runStatement(db.prepare(sql), params ?? [], false)
           return transformRows ? Effect.map(effect, transformRows) : effect
@@ -251,22 +270,31 @@ export const make = (
         executeStream(_sql, _params) {
           return Stream.die("executeStream not implemented")
         },
-        export: Effect.try({
-          try: () => db.serialize(),
-          catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to export database", "export") })
-        }),
         backup(destination) {
-          return Effect.tryPromise({
-            try: () => db.backup(destination),
-            catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to backup database", "backup") })
+          return Effect.suspend(() => {
+            let totalPages = 0
+            return Effect.tryPromise({
+              try: () =>
+                backupDatabase(db, destination, {
+                  progress: (progress) => {
+                    totalPages = progress.totalPages
+                  }
+                }).then((pages): BackupMetadata => ({ totalPages: totalPages || pages, remainingPages: 0 })),
+              catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to backup database", "backup") })
+            })
           })
         },
         loadExtension(path) {
-          return Effect.try({
-            try: () => db.loadExtension(path),
-            catch: (cause) =>
-              new SqlError({ reason: classifyError(cause, "Failed to load extension", "loadExtension") })
-          })
+          return Effect.acquireUseRelease(
+            Effect.sync(() => db.enableLoadExtension(true)),
+            () =>
+              Effect.try({
+                try: () => db.loadExtension(path),
+                catch: (cause) =>
+                  new SqlError({ reason: classifyError(cause, "Failed to load extension", "loadExtension") })
+              }),
+            () => Effect.sync(() => db.enableLoadExtension(false))
+          )
         }
       })
     })
@@ -292,6 +320,7 @@ export const make = (
         acquirer,
         compiler,
         transactionAcquirer,
+        beginTransaction: "BEGIN IMMEDIATE",
         spanAttributes: [
           ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
           [ATTR_DB_SYSTEM_NAME, "sqlite"]
@@ -301,7 +330,6 @@ export const make = (
       {
         [TypeId]: TypeId as TypeId,
         config: options,
-        export: Effect.flatMap(acquirer, (_) => _.export),
         backup: (destination: string) => Effect.flatMap(acquirer, (_) => _.backup(destination)),
         loadExtension: (path: string) => Effect.flatMap(acquirer, (_) => _.loadExtension(path))
       }
@@ -343,3 +371,19 @@ export const layer = (
         Context.add(Client.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer))
+
+// internal
+
+const classifyError = (cause: unknown, message: string, operation: string) =>
+  classifySqliteError(sqliteCauseWithErrno(cause), { message, operation })
+
+const sqliteCauseWithErrno = (cause: unknown): unknown => {
+  if (typeof cause !== "object" || cause === null || !("errcode" in cause) || "errno" in cause) {
+    return cause
+  }
+  const errcode = (cause as { readonly errcode: unknown }).errcode
+  if (typeof errcode !== "number") {
+    return cause
+  }
+  return Object.assign(cause, { errno: errcode })
+}

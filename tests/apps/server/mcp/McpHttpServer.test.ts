@@ -9,7 +9,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'
-import { AiError, McpSchema, McpServer } from 'effect/unstable/ai'
+import { AiError, McpProtocol, McpSchema, McpServer } from 'effect/unstable/ai'
 import {
   HttpBody,
   HttpClient,
@@ -36,8 +36,9 @@ const invocation = {
 }
 const client = McpSchema.McpServerClient.of({
   clientId: 1,
+  protocolVersion: '2025-06-18',
   initializePayload: {
-    protocolVersion: '2025-03-26',
+    protocolVersion: '2025-06-18',
     capabilities: {},
     clientInfo: { name: 'mcp-test', version: '1.0.0' },
   },
@@ -155,6 +156,7 @@ it.effect('terminates HTTP MCP sessions with DELETE', () =>
         name: 'MCP termination test',
         version: '1.0.0',
         path: '/mcp',
+        protocols: [McpProtocol.v2025_06_18],
       })
       yield* HttpRouter.serve(serverLayer, {
         disableListenLog: true,

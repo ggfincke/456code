@@ -47,7 +47,7 @@ const ClaudeOutputEnvelope = Schema.Struct({
   structured_output: Schema.Unknown,
 })
 
-const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString)
+const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const decodeClaudeOutputEnvelope = Schema.decodeEffect(Schema.fromJsonString(ClaudeOutputEnvelope))
 
 export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(function* (

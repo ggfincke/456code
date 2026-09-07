@@ -20,7 +20,7 @@ const ServerEnvironmentLabelCommandProbe = Schema.Literals([
 ])
 type ServerEnvironmentLabelCommandProbe = typeof ServerEnvironmentLabelCommandProbe.Type
 
-export class ServerEnvironmentLabelFileError extends Schema.TaggedErrorClass<ServerEnvironmentLabelFileError>()(
+export class ServerEnvironmentLabelFileError extends Schema.TaggedError<ServerEnvironmentLabelFileError>()(
   'ServerEnvironmentLabelFileError',
   {
     operation: Schema.Literals(['inspect', 'read']),
@@ -35,7 +35,7 @@ export class ServerEnvironmentLabelFileError extends Schema.TaggedErrorClass<Ser
   }
 }
 
-export class ServerEnvironmentLabelCommandError extends Schema.TaggedErrorClass<ServerEnvironmentLabelCommandError>()(
+export class ServerEnvironmentLabelCommandError extends Schema.TaggedError<ServerEnvironmentLabelCommandError>()(
   'ServerEnvironmentLabelCommandError',
   {
     probe: ServerEnvironmentLabelCommandProbe,

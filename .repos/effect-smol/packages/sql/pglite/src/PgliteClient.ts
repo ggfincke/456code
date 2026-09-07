@@ -1,36 +1,13 @@
 /**
- * Embedded PostgreSQL client for Effect SQL, backed by `@electric-sql/pglite`.
+ * Connects Effect SQL to PGlite, the embedded PostgreSQL-compatible database
+ * from `@electric-sql/pglite`.
  *
- * This module creates or wraps a PGlite database and exposes it as both the
- * PGlite-specific {@link PgliteClient} service and the generic Effect SQL
- * `SqlClient` service. Use it for local-first browser storage, worker-hosted
- * databases, tests, demos, migrations, and development tools that need
- * PostgreSQL syntax without a separate PostgreSQL server process.
- *
- * **Mental model**
- *
- * A client is a scoped adapter around one PGlite instance. {@link make} creates
- * and closes that instance unless the configuration supplies a caller-owned
- * `liveClient`; {@link fromClient} always wraps an existing instance. SQL is
- * compiled with the PostgreSQL statement compiler, while access through the
- * Effect SQL connection is serialized through the shared embedded database.
- *
- * **Common tasks**
- *
- * Use {@link layer} with concrete PGlite options, {@link layerConfig} when the
- * options should come from Effect `Config`, and {@link layerFrom} when another
- * scoped effect acquires the client. Use `client.json`, `client.listen`,
- * `client.notify`, `client.dumpDataDir`, and `client.refreshArrayTypes` for
- * PGlite-specific capabilities.
- *
- * **Gotchas**
- *
- * PGlite runs inside the current JavaScript runtime, so persistence,
- * durability, extension support, and lifecycle follow the selected `dataDir`
- * and runtime rather than a hosted PostgreSQL server. A supplied `liveClient`
- * remains caller-owned and is not closed by this module's layer. Long-running
- * transactions and streams keep the serialized connection permit until their
- * scope closes.
+ * This module can create a managed PGlite instance or wrap an existing one and
+ * expose it as both `PgliteClient` and the generic Effect SQL client. The client
+ * runs PostgreSQL-style SQL, adds helpers for JSON values and LISTEN/NOTIFY
+ * messages, can dump the PGlite data directory, and can refresh PGlite array
+ * types. It also provides layers and maps common PostgreSQL-style failures into
+ * Effect SQL errors.
  *
  * @since 4.0.0
  */
@@ -83,7 +60,7 @@ export type TypeId = "~@effect/sql-pglite/PgliteClient"
 /**
  * PGlite-backed PostgreSQL client service, extending `SqlClient` with access to the PGlite instance, JSON fragments, LISTEN/NOTIFY, data directory dumps, and array type refresh.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface PgliteClient extends Client.SqlClient {
@@ -104,7 +81,7 @@ export interface PgliteClient extends Client.SqlClient {
  *
  * Use to access or provide a PGlite client through the Effect context.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export const PgliteClient = Context.Service<PgliteClient>("@effect/sql-pglite/PgliteClient")
@@ -331,6 +308,16 @@ class PgliteConnection implements Connection {
       (result) => result.rows as ReadonlyArray<ReadonlyArray<any>>
     )
   }
+  executeValuesUnprepared(sql: string, params: ReadonlyArray<unknown>) {
+    return Effect.map(
+      Effect.tryPromise({
+        try: () => this.pglite.query<any>(sql, params as Array<any>, { rowMode: "array" }),
+        catch: (cause) =>
+          new SqlError({ reason: classifyError(cause, "Failed to execute statement", "executeValuesUnprepared") })
+      }),
+      (result) => result.rows as ReadonlyArray<ReadonlyArray<any>>
+    )
+  }
   executeUnprepared(
     sql: string,
     params: ReadonlyArray<unknown>,
@@ -449,13 +436,13 @@ const escapeLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`
 /**
  * PGlite-specific custom statement fragments supported by the compiler, currently JSON parameter fragments.
  *
- * @category custom types
+ * @category models
  * @since 4.0.0
  */
 export type PgCustom = PgJson
 
 /**
- * @category custom types
+ * @category models
  * @since 4.0.0
  */
 interface PgJson extends Custom<"PgJson", unknown> {}

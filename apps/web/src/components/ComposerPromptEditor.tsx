@@ -1944,7 +1944,7 @@ function ComposerPromptEditorInner({
 
   const handleEditorChange = useCallback((editorState: EditorState) =>
   {
-    editorState.read(() =>
+    const change = editorState.read(() =>
     {
       const nextValue = $getRoot().getTextContent()
       const fallbackCursor = clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor)
@@ -1985,14 +1985,18 @@ function ComposerPromptEditorInner({
       const cursorAdjacentToMention =
         isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, 'left') ||
         isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, 'right')
-      onChangeRef.current(
+      return [
         nextValue,
         nextCursor,
         nextExpandedCursor,
         cursorAdjacentToMention,
         terminalContextIds,
-      )
+      ] as const
     })
+    if (change)
+    {
+      onChangeRef.current(...change)
+    }
   }, [])
 
   return (

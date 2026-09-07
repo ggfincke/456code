@@ -132,11 +132,26 @@ export type ParsedOperationMediaTypeEncoding =
  * @category models
  * @since 4.0.0
  */
-export interface ParsedOperationMediaTypeSchema {
-  readonly contentType: string
-  readonly encoding: ParsedOperationMediaTypeEncoding
-  readonly schema: string
-}
+export type ParsedOperationMediaTypeSchema =
+  | {
+    readonly contentType: string
+    readonly encoding: ParsedOperationMediaTypeEncoding
+    readonly schema: string
+    readonly effectStream?: undefined
+  }
+  | {
+    readonly contentType: string
+    readonly encoding: "text"
+    readonly schema: string
+    readonly effectStream: "sse"
+    readonly errorSchema: string
+  }
+  | {
+    readonly contentType: string
+    readonly encoding: "binary"
+    readonly schema?: undefined
+    readonly effectStream: "uint8array"
+  }
 
 /**
  * Parsed response metadata together with generated schema references.
@@ -206,6 +221,7 @@ export interface ParsedOperation {
   readonly voidSchemas: ReadonlySet<string>
   // SSE streaming response schema (text/event-stream)
   readonly sseSchema?: string
+  readonly sseSchemaMode: "data" | "event"
   // Binary stream response (application/octet-stream)
   readonly binaryResponse: boolean
 }
@@ -258,5 +274,6 @@ export const makeDeepMutable = (options: {
   errorSchemas: new Map(),
   voidSchemas: new Set(),
   paramsOptional: true,
+  sseSchemaMode: "data",
   binaryResponse: false
 })

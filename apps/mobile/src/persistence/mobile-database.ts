@@ -109,7 +109,7 @@ const MobileDatabaseOperation = Schema.Literals([
   'prune-environment-cleanup-intent',
 ])
 
-export class MobileDatabaseError extends Schema.TaggedErrorClass<MobileDatabaseError>()(
+export class MobileDatabaseError extends Schema.TaggedError<MobileDatabaseError>()(
   'MobileDatabaseError',
   {
     operation: MobileDatabaseOperation,

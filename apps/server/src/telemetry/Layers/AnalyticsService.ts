@@ -7,6 +7,8 @@
 // @module AnalyticsService
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Config from 'effect/Config'
+import * as ConfigProvider from 'effect/ConfigProvider'
+import * as Context from 'effect/Context'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -53,7 +55,11 @@ const TelemetryOptOutConfig = Config.all({
 
 export const make = Effect.gen(function* ()
 {
-  const optOut = yield* TelemetryOptOutConfig
+  const context = yield* Effect.context()
+  const optOutProvider =
+    Context.getOrUndefined(context, ConfigProvider.ConfigProvider) ??
+    ConfigProvider.fromEnv({ preserveEmptyStrings: true })
+  const optOut = yield* TelemetryOptOutConfig.parse(optOutProvider)
   // inspect blanks before boolean parsing; a blank enabled flag means off
   const enabled = Option.exists(optOut.enabled, (raw) => raw.trim().length === 0)
     ? false

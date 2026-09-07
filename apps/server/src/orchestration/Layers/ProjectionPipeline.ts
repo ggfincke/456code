@@ -100,7 +100,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
 } as const
 
 const encodeThreadOriginJson = Schema.encodeSync(Schema.fromJsonString(ThreadOrigin))
-const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 const encodeOrchestratePlanStagesJson = Schema.encodeSync(
   Schema.fromJsonString(OrchestratePlanRevision.fields.stages),
 )

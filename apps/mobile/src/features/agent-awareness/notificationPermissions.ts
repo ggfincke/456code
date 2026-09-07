@@ -11,7 +11,7 @@ export type NotificationPermissionResult =
   | { readonly type: 'granted' }
   | { readonly type: 'denied'; readonly canAskAgain: boolean }
 
-export class NotificationPermissionReadError extends Schema.TaggedErrorClass<NotificationPermissionReadError>()(
+export class NotificationPermissionReadError extends Schema.TaggedError<NotificationPermissionReadError>()(
   'NotificationPermissionReadError',
   {
     cause: Schema.Defect(),
@@ -24,7 +24,7 @@ export class NotificationPermissionReadError extends Schema.TaggedErrorClass<Not
   }
 }
 
-export class NotificationPermissionRequestError extends Schema.TaggedErrorClass<NotificationPermissionRequestError>()(
+export class NotificationPermissionRequestError extends Schema.TaggedError<NotificationPermissionRequestError>()(
   'NotificationPermissionRequestError',
   {
     cause: Schema.Defect(),

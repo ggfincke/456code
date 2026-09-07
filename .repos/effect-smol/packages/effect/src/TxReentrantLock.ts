@@ -1,44 +1,12 @@
 /**
- * The `TxReentrantLock` module provides a transactional read/write lock whose
- * ownership is tracked per fiber. Multiple fibers may hold read locks at the
- * same time, while a write lock gives one fiber exclusive access.
+ * Coordinates shared access inside transactions with read and write locks.
  *
- * **Mental model**
- *
- * The lock stores reader counts and an optional writer count in transactional
- * state. A fiber can reacquire locks it already owns, so nested read or write
- * sections are safe as long as each acquisition is matched by a release. A
- * write acquisition waits when another fiber owns a read or write lock, and a
- * read acquisition waits when another fiber owns the write lock.
- *
- * **Common tasks**
- *
- * - Use `withReadLock` to run an effect that may share access with other
- *   readers.
- * - Use `withWriteLock` or `withLock` to run an effect with exclusive access.
- * - Use `readLock` or `writeLock` when lock ownership should be tied to an
- *   existing scope.
- *
- * **Example** (Protecting a read/write workflow)
- *
- * ```ts
- * import { Effect, Ref, TxReentrantLock } from "effect"
- *
- * const program = Effect.gen(function*() {
- *   const lock = yield* TxReentrantLock.make()
- *   const state = yield* Ref.make(0)
- *
- *   yield* TxReentrantLock.withWriteLock(lock, Ref.update(state, (n) => n + 1))
- *   return yield* TxReentrantLock.withReadLock(lock, Ref.get(state))
- * })
- * ```
- *
- * **Gotchas**
- *
- * - Manual acquisitions are counted; release the same number of times or use
- *   the scoped and `with*` helpers.
- * - Releasing a lock from a fiber that does not own it leaves the lock
- *   unchanged and returns `0`.
+ * A `TxReentrantLock` lets many fibers hold read locks at the same time, or one
+ * fiber hold a write lock for exclusive access. Lock ownership is tracked by
+ * fiber, so a fiber that already holds the lock can acquire it again and later
+ * release each acquisition. Attempts that cannot proceed retry transactionally
+ * until the lock becomes available. This module includes manual, scoped, and
+ * wrapper-style operations for read and write locking.
  *
  * @since 4.0.0
  */
@@ -76,18 +44,21 @@ const emptyState: LockState = {
  *
  * **Example** (Using read and write locks)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *
  *   // Multiple readers can proceed concurrently
- *   yield* TxReentrantLock.withReadLock(lock, Effect.succeed("reading"))
+ *   const read = yield* TxReentrantLock.withReadLock(lock, Effect.succeed("reading"))
  *
  *   // Writer gets exclusive access
- *   yield* TxReentrantLock.withWriteLock(lock, Effect.succeed("writing"))
+ *   const write = yield* TxReentrantLock.withWriteLock(lock, Effect.succeed("writing"))
+ *   return [read, write]
  * })
+ *
+ * await Effect.runPromise(program) // => ["reading", "writing"]
  * ```
  *
  * @category models
@@ -123,14 +94,15 @@ const TxReentrantLockProto: Omit<TxReentrantLock, typeof TypeId | "stateRef"> = 
  *
  * **Example** (Creating a reentrant lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const isLocked = yield* TxReentrantLock.locked(lock)
- *   console.log(isLocked) // false
+ *   return yield* TxReentrantLock.locked(lock)
  * })
+ *
+ * await Effect.runPromise(program) // => false
  * ```
  *
  * @category constructors
@@ -156,15 +128,17 @@ export const make = (): Effect.Effect<TxReentrantLock> =>
  *
  * **Example** (Acquiring a read lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *   const count = yield* TxReentrantLock.acquireRead(lock)
- *   console.log(count) // 1
  *   yield* TxReentrantLock.releaseRead(lock)
+ *   return count
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category mutations
@@ -210,15 +184,17 @@ export const acquireRead = (self: TxReentrantLock): Effect.Effect<number> =>
  *
  * **Example** (Acquiring a write lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *   const count = yield* TxReentrantLock.acquireWrite(lock)
- *   console.log(count) // 1
  *   yield* TxReentrantLock.releaseWrite(lock)
+ *   return count
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category mutations
@@ -275,38 +251,39 @@ export const acquireWrite = (self: TxReentrantLock): Effect.Effect<number> =>
  *
  * **Example** (Releasing a read lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *   yield* TxReentrantLock.acquireRead(lock)
- *   const remaining = yield* TxReentrantLock.releaseRead(lock)
- *   console.log(remaining) // 0
+ *   return yield* TxReentrantLock.releaseRead(lock)
  * })
+ *
+ * await Effect.runPromise(program) // => 0
  * ```
  *
  * @category mutations
  * @since 2.0.0
  */
+const releaseReadFor = (self: TxReentrantLock, fiberId: number): Effect.Effect<number> =>
+  Effect.gen(function*() {
+    const state = yield* TxRef.get(self.stateRef)
+    const currentCount = Option.getOrElse(HashMap.get(state.readers, fiberId), () => 0)
+
+    if (currentCount <= 0) return 0
+
+    const newCount = currentCount - 1
+    const newReaders = newCount === 0
+      ? HashMap.remove(state.readers, fiberId)
+      : HashMap.set(state.readers, fiberId, newCount)
+
+    yield* TxRef.set(self.stateRef, { ...state, readers: newReaders })
+    return newCount
+  }).pipe(Effect.tx)
+
 export const releaseRead = (self: TxReentrantLock): Effect.Effect<number> =>
-  Effect.withFiber((fiber) =>
-    Effect.gen(function*() {
-      const state = yield* TxRef.get(self.stateRef)
-      const fiberId = fiber.id
-      const currentCount = Option.getOrElse(HashMap.get(state.readers, fiberId), () => 0)
-
-      if (currentCount <= 0) return 0
-
-      const newCount = currentCount - 1
-      const newReaders = newCount === 0
-        ? HashMap.remove(state.readers, fiberId)
-        : HashMap.set(state.readers, fiberId, newCount)
-
-      yield* TxRef.set(self.stateRef, { ...state, readers: newReaders })
-      return newCount
-    }).pipe(Effect.tx)
-  )
+  Effect.withFiber((fiber) => releaseReadFor(self, fiber.id))
 
 /**
  * Releases one write lock held by the current fiber.
@@ -321,37 +298,38 @@ export const releaseRead = (self: TxReentrantLock): Effect.Effect<number> =>
  *
  * **Example** (Releasing a write lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *   yield* TxReentrantLock.acquireWrite(lock)
- *   const remaining = yield* TxReentrantLock.releaseWrite(lock)
- *   console.log(remaining) // 0
+ *   return yield* TxReentrantLock.releaseWrite(lock)
  * })
+ *
+ * await Effect.runPromise(program) // => 0
  * ```
  *
  * @category mutations
  * @since 2.0.0
  */
+const releaseWriteFor = (self: TxReentrantLock, fiberId: number): Effect.Effect<number> =>
+  Effect.gen(function*() {
+    const state = yield* TxRef.get(self.stateRef)
+
+    if (Option.isNone(state.writer) || state.writer.value[0] !== fiberId) return 0
+
+    const newCount = state.writer.value[1] - 1
+    const newWriter = newCount <= 0
+      ? Option.none<readonly [number, number]>()
+      : Option.some([fiberId, newCount] as const)
+
+    yield* TxRef.set(self.stateRef, { ...state, writer: newWriter })
+    return newCount
+  }).pipe(Effect.tx)
+
 export const releaseWrite = (self: TxReentrantLock): Effect.Effect<number> =>
-  Effect.withFiber((fiber) =>
-    Effect.gen(function*() {
-      const state = yield* TxRef.get(self.stateRef)
-      const fiberId = fiber.id
-
-      if (Option.isNone(state.writer) || state.writer.value[0] !== fiberId) return 0
-
-      const newCount = state.writer.value[1] - 1
-      const newWriter = newCount <= 0
-        ? Option.none<readonly [number, number]>()
-        : Option.some([fiberId, newCount] as const)
-
-      yield* TxRef.set(self.stateRef, { ...state, writer: newWriter })
-      return newCount
-    }).pipe(Effect.tx)
-  )
+  Effect.withFiber((fiber) => releaseWriteFor(self, fiber.id))
 
 /**
  * Acquires a read lock for the duration of the scope.
@@ -359,29 +337,35 @@ export const releaseWrite = (self: TxReentrantLock): Effect.Effect<number> =>
  *
  * **Example** (Holding a scoped read lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *
- *   yield* Effect.scoped(
+ *   const held = yield* Effect.scoped(
  *     Effect.gen(function*() {
  *       yield* TxReentrantLock.readLock(lock)
  *       // read lock is held for the duration of the scope
+ *       return yield* TxReentrantLock.readLocks(lock)
  *     })
  *   )
  *   // read lock is released
+ *   return [held, yield* TxReentrantLock.readLocks(lock)]
  * })
+ *
+ * await Effect.runPromise(program) // => [1, 0]
  * ```
  *
  * @category mutations
  * @since 2.0.0
  */
 export const readLock = (self: TxReentrantLock): Effect.Effect<number, never, Scope.Scope> =>
-  Effect.acquireRelease(
-    acquireRead(self),
-    () => releaseRead(self)
+  Effect.withFiber((fiber) =>
+    Effect.acquireRelease(
+      acquireRead(self),
+      () => releaseReadFor(self, fiber.id)
+    )
   )
 
 /**
@@ -390,29 +374,35 @@ export const readLock = (self: TxReentrantLock): Effect.Effect<number, never, Sc
  *
  * **Example** (Holding a scoped write lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *
- *   yield* Effect.scoped(
+ *   const held = yield* Effect.scoped(
  *     Effect.gen(function*() {
  *       yield* TxReentrantLock.writeLock(lock)
  *       // write lock is held for the duration of the scope
+ *       return yield* TxReentrantLock.writeLocks(lock)
  *     })
  *   )
  *   // write lock is released
+ *   return [held, yield* TxReentrantLock.writeLocks(lock)]
  * })
+ *
+ * await Effect.runPromise(program) // => [1, 0]
  * ```
  *
  * @category mutations
  * @since 2.0.0
  */
 export const writeLock = (self: TxReentrantLock): Effect.Effect<number, never, Scope.Scope> =>
-  Effect.acquireRelease(
-    acquireWrite(self),
-    () => releaseWrite(self)
+  Effect.withFiber((fiber) =>
+    Effect.acquireRelease(
+      acquireWrite(self),
+      () => releaseWriteFor(self, fiber.id)
+    )
   )
 
 /**
@@ -421,17 +411,18 @@ export const writeLock = (self: TxReentrantLock): Effect.Effect<number, never, S
  *
  * **Example** (Running an effect with a read lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const result = yield* TxReentrantLock.withReadLock(
+ *   return yield* TxReentrantLock.withReadLock(
  *     lock,
  *     Effect.succeed("read data")
  *   )
- *   console.log(result) // "read data"
  * })
+ *
+ * await Effect.runPromise(program) // => "read data"
  * ```
  *
  * @category mutations
@@ -464,17 +455,18 @@ export const withReadLock: {
  *
  * **Example** (Running an effect with a write lock)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const result = yield* TxReentrantLock.withWriteLock(
+ *   return yield* TxReentrantLock.withWriteLock(
  *     lock,
  *     Effect.succeed("wrote data")
  *   )
- *   console.log(result) // "wrote data"
  * })
+ *
+ * await Effect.runPromise(program) // => "wrote data"
  * ```
  *
  * @category mutations
@@ -506,21 +498,23 @@ export const withWriteLock: {
  *
  * **When to use**
  *
- * Use as the short alias for {@link withWriteLock}.
+ * Use when you need to run an effect with exclusive write access through a
+ * `TxReentrantLock` and prefer the concise lock helper.
  *
  * **Example** (Running an effect with exclusive access)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const result = yield* TxReentrantLock.withLock(
+ *   return yield* TxReentrantLock.withLock(
  *     lock,
  *     Effect.succeed("exclusive operation")
  *   )
- *   console.log(result) // "exclusive operation"
  * })
+ *
+ * await Effect.runPromise(program) // => "exclusive operation"
  * ```
  *
  * @category mutations
@@ -540,16 +534,18 @@ export const withLock: {
  *
  * **Example** (Counting read locks)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
  *   yield* TxReentrantLock.acquireRead(lock)
  *   const count = yield* TxReentrantLock.readLocks(lock)
- *   console.log(count) // 1
  *   yield* TxReentrantLock.releaseRead(lock)
+ *   return count
  * })
+ *
+ * await Effect.runPromise(program) // => 1
  * ```
  *
  * @category getters
@@ -570,14 +566,15 @@ export const readLocks = (self: TxReentrantLock): Effect.Effect<number> =>
  *
  * **Example** (Counting write locks)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const count = yield* TxReentrantLock.writeLocks(lock)
- *   console.log(count) // 0
+ *   return yield* TxReentrantLock.writeLocks(lock)
  * })
+ *
+ * await Effect.runPromise(program) // => 0
  * ```
  *
  * @category getters
@@ -594,14 +591,15 @@ export const writeLocks = (self: TxReentrantLock): Effect.Effect<number> =>
  *
  * **Example** (Checking whether a lock is held)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const isLocked = yield* TxReentrantLock.locked(lock)
- *   console.log(isLocked) // false
+ *   return yield* TxReentrantLock.locked(lock)
  * })
+ *
+ * await Effect.runPromise(program) // => false
  * ```
  *
  * @category getters
@@ -618,14 +616,15 @@ export const locked = (self: TxReentrantLock): Effect.Effect<boolean> =>
  *
  * **Example** (Checking whether a read lock is held)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const isReadLocked = yield* TxReentrantLock.readLocked(lock)
- *   console.log(isReadLocked) // false
+ *   return yield* TxReentrantLock.readLocked(lock)
  * })
+ *
+ * await Effect.runPromise(program) // => false
  * ```
  *
  * @category getters
@@ -642,14 +641,15 @@ export const readLocked = (self: TxReentrantLock): Effect.Effect<boolean> =>
  *
  * **Example** (Checking whether a write lock is held)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, TxReentrantLock } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const lock = yield* TxReentrantLock.make()
- *   const isWriteLocked = yield* TxReentrantLock.writeLocked(lock)
- *   console.log(isWriteLocked) // false
+ *   return yield* TxReentrantLock.writeLocked(lock)
  * })
+ *
+ * await Effect.runPromise(program) // => false
  * ```
  *
  * @category getters
@@ -670,14 +670,12 @@ export const writeLocked = (self: TxReentrantLock): Effect.Effect<boolean> =>
  *
  * **Example** (Checking for TxReentrantLock values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { TxReentrantLock } from "effect"
  *
- * declare const someValue: unknown
+ * const someValue: unknown = {}
  *
- * if (TxReentrantLock.isTxReentrantLock(someValue)) {
- *   console.log("This is a TxReentrantLock")
- * }
+ * TxReentrantLock.isTxReentrantLock(someValue) // => false
  * ```
  *
  * @category guards

@@ -59,7 +59,7 @@ const ProjectAtlasPublishMarkerSchema = Schema.Struct({
 
 type ProjectAtlasPublishMarker = typeof ProjectAtlasPublishMarkerSchema.Type
 
-const decodeJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 const decodeMetadata = Schema.decodeUnknownSync(ProjectAtlasMetadataSchema, {
   onExcessProperty: 'error',
 })

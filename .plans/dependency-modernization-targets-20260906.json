@@ -1,0 +1,2645 @@
+{
+  "date": "2026-09-06",
+  "source": "Publisher npm registry metadata; reviewed against Expo 57.0.20 bundledNativeModules and existing patches.",
+  "defaultNode": "24.20.0",
+  "mobileReact": "19.2.3",
+  "dependencies": [
+    {
+      "name": "@babel/plugin-transform-react-jsx",
+      "aliases": [
+        "@babel/plugin-transform-react-jsx"
+      ],
+      "current": [
+        "7.28.6"
+      ],
+      "target": "7.29.7",
+      "specs": [
+        "7.28.6"
+      ],
+      "manifests": [
+        "package.json"
+      ],
+      "policy": "Expo 57 Babel 7 peer compatibility; Babel 8 caused new peer conflicts during validation"
+    },
+    {
+      "name": "@effect/tsgo",
+      "aliases": [
+        "@effect/tsgo"
+      ],
+      "current": [
+        "0.24.3"
+      ],
+      "target": "0.41.0",
+      "specs": [
+        "0.24.3"
+      ],
+      "manifests": [
+        "package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@oxlint/plugins",
+      "aliases": [
+        "@oxlint/plugins"
+      ],
+      "current": [
+        "1.76.0"
+      ],
+      "target": "1.81.0",
+      "specs": [
+        "^1.76.0"
+      ],
+      "manifests": [
+        "package.json",
+        "oxlint-plugin-456code/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@types/node",
+      "aliases": [
+        "@types/node"
+      ],
+      "current": [
+        "24.12.4"
+      ],
+      "target": "24.13.3",
+      "specs": [
+        "24.12.4"
+      ],
+      "manifests": [
+        "package.json",
+        "packages/tailscale/package.json",
+        "packages/ssh/package.json",
+        "packages/shared/package.json",
+        "packages/effect-codex-app-server/package.json",
+        "packages/effect-acp/package.json",
+        "packages/cartographer-core/package.json",
+        "apps/server/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "typescript",
+      "aliases": [
+        "@typescript/native",
+        "typescript-7"
+      ],
+      "current": [
+        "typescript@7.0.2"
+      ],
+      "target": "7.0.2",
+      "specs": [
+        "7.0.2"
+      ],
+      "manifests": [
+        "package.json",
+        "packages/cartographer-core/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "prettier",
+      "aliases": [
+        "prettier"
+      ],
+      "current": [
+        "3.9.6"
+      ],
+      "target": "3.9.6",
+      "specs": [
+        "3.9.6"
+      ],
+      "manifests": [
+        "package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "prettier-plugin-brace-style",
+      "aliases": [
+        "prettier-plugin-brace-style"
+      ],
+      "current": [
+        "0.10.3"
+      ],
+      "target": "0.10.3",
+      "specs": [
+        "0.10.3"
+      ],
+      "manifests": [
+        "package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@typescript/typescript6",
+      "aliases": [
+        "typescript"
+      ],
+      "current": [
+        "@typescript/typescript6@6.0.2"
+      ],
+      "target": "6.0.2",
+      "specs": [
+        "6.0.2"
+      ],
+      "manifests": [
+        "package.json",
+        "packages/cartographer-core/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "vite-plus",
+      "aliases": [
+        "vite-plus"
+      ],
+      "current": [
+        "0.2.7"
+      ],
+      "target": "0.3.0",
+      "specs": [
+        "0.2.7"
+      ],
+      "manifests": [
+        "package.json",
+        "oxlint-plugin-456code/package.json",
+        "tests/package.json",
+        "scripts/package.json",
+        "packages/tailscale/package.json",
+        "packages/ssh/package.json",
+        "packages/shared/package.json",
+        "packages/effect-codex-app-server/package.json",
+        "packages/effect-acp/package.json",
+        "packages/contracts/package.json",
+        "packages/client-runtime/package.json",
+        "packages/cartographer-core/package.json",
+        "apps/web/package.json",
+        "apps/server/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@effect/platform-node",
+      "aliases": [
+        "@effect/platform-node"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "oxlint-plugin-456code/package.json",
+        "tests/package.json",
+        "scripts/package.json",
+        "packages/tailscale/package.json",
+        "packages/ssh/package.json",
+        "packages/shared/package.json",
+        "packages/effect-codex-app-server/package.json",
+        "packages/effect-acp/package.json",
+        "apps/web/package.json",
+        "apps/server/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "effect",
+      "aliases": [
+        "effect"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "oxlint-plugin-456code/package.json",
+        "tests/package.json",
+        "scripts/package.json",
+        "packages/tailscale/package.json",
+        "packages/ssh/package.json",
+        "packages/shared/package.json",
+        "packages/effect-codex-app-server/package.json",
+        "packages/effect-acp/package.json",
+        "packages/contracts/package.json",
+        "packages/client-runtime/package.json",
+        "apps/web/package.json",
+        "apps/server/package.json",
+        "apps/mobile/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@effect/vitest",
+      "aliases": [
+        "@effect/vitest"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "oxlint-plugin-456code/package.json",
+        "tests/package.json",
+        "scripts/package.json",
+        "packages/tailscale/package.json",
+        "packages/ssh/package.json",
+        "packages/shared/package.json",
+        "packages/effect-codex-app-server/package.json",
+        "packages/effect-acp/package.json",
+        "packages/contracts/package.json",
+        "packages/client-runtime/package.json",
+        "apps/web/package.json",
+        "apps/server/package.json",
+        "apps/mobile/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@anthropic-ai/claude-agent-sdk",
+      "aliases": [
+        "@anthropic-ai/claude-agent-sdk"
+      ],
+      "current": [
+        "0.3.220"
+      ],
+      "target": "0.3.261",
+      "specs": [
+        "^0.3.220"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/server/package.json"
+      ],
+      "policy": "Exact aged release; 0.3.263 was published less than 1440 minutes before installation. Preserve release-age policy without new exemptions."
+    },
+    {
+      "name": "@clerk/expo",
+      "aliases": [
+        "@clerk/expo"
+      ],
+      "current": [
+        "4.0.2"
+      ],
+      "target": "4.6.5",
+      "specs": [
+        "4.0.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@effect/atom-react",
+      "aliases": [
+        "@effect/atom-react"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@expo/ui",
+      "aliases": [
+        "@expo/ui"
+      ],
+      "current": [
+        "57.0.14"
+      ],
+      "target": "57.0.16",
+      "specs": [
+        "~57.0.14"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@ff-labs/fff-node",
+      "aliases": [
+        "@ff-labs/fff-node"
+      ],
+      "current": [
+        "0.9.4"
+      ],
+      "target": "0.10.6",
+      "specs": [
+        "0.9.4"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@legendapp/list",
+      "aliases": [
+        "@legendapp/list"
+      ],
+      "current": [
+        "3.2.0"
+      ],
+      "target": "3.3.10",
+      "specs": [
+        "3.2.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@modelcontextprotocol/sdk",
+      "aliases": [
+        "@modelcontextprotocol/sdk"
+      ],
+      "current": [
+        "1.29.0"
+      ],
+      "target": "1.30.0",
+      "specs": [
+        "^1.29.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "packages/cartographer-core/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@noble/hashes",
+      "aliases": [
+        "@noble/hashes"
+      ],
+      "current": [
+        "1.8.0"
+      ],
+      "target": "2.4.0",
+      "specs": [
+        "1.8.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "packages/shared/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@pierre/diffs",
+      "aliases": [
+        "@pierre/diffs"
+      ],
+      "current": [
+        "1.3.0-beta.5"
+      ],
+      "target": "1.4.1",
+      "specs": [
+        "1.3.0-beta.5"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json",
+        "apps/server/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@react-navigation/native",
+      "aliases": [
+        "@react-navigation/native"
+      ],
+      "current": [
+        "7.3.4"
+      ],
+      "target": "7.3.18",
+      "specs": [
+        "7.3.4"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@tanstack/react-router",
+      "aliases": [
+        "@tanstack/react-router"
+      ],
+      "current": [
+        "1.170.10"
+      ],
+      "target": "1.170.32",
+      "specs": [
+        "^1.160.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@types/pngjs",
+      "aliases": [
+        "@types/pngjs"
+      ],
+      "current": [
+        "6.0.5"
+      ],
+      "target": "6.0.5",
+      "specs": [
+        "6.0.5"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "scripts/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@types/react",
+      "aliases": [
+        "@types/react"
+      ],
+      "current": [
+        "19.2.16"
+      ],
+      "target": "19.2.18",
+      "specs": [
+        "~19.2.14",
+        "~19.2.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@types/react-dom",
+      "aliases": [
+        "@types/react-dom"
+      ],
+      "current": [
+        "19.2.3"
+      ],
+      "target": "19.2.7",
+      "specs": [
+        "~19.2.3"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@xterm/xterm",
+      "aliases": [
+        "@xterm/xterm"
+      ],
+      "current": [
+        "6.0.0"
+      ],
+      "target": "6.0.0",
+      "specs": [
+        "^6.0.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "electron",
+      "aliases": [
+        "electron"
+      ],
+      "current": [
+        "41.5.0"
+      ],
+      "target": "44.2.0",
+      "specs": [
+        "41.5.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "electron-updater",
+      "aliases": [
+        "electron-updater"
+      ],
+      "current": [
+        "6.8.3"
+      ],
+      "target": "6.8.9",
+      "specs": [
+        "^6.6.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo",
+      "aliases": [
+        "expo"
+      ],
+      "current": [
+        "57.0.18"
+      ],
+      "target": "57.0.20",
+      "specs": [
+        "~57.0.18"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-clipboard",
+      "aliases": [
+        "expo-clipboard"
+      ],
+      "current": [
+        "57.0.1"
+      ],
+      "target": "57.0.1",
+      "specs": [
+        "~57.0.1"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-constants",
+      "aliases": [
+        "expo-constants"
+      ],
+      "current": [
+        "57.0.16"
+      ],
+      "target": "57.0.17",
+      "specs": [
+        "~57.0.16"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-crypto",
+      "aliases": [
+        "expo-crypto"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.2",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-file-system",
+      "aliases": [
+        "expo-file-system"
+      ],
+      "current": [
+        "57.0.6"
+      ],
+      "target": "57.0.6",
+      "specs": [
+        "~57.0.6"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-haptics",
+      "aliases": [
+        "expo-haptics"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.2",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-notifications",
+      "aliases": [
+        "expo-notifications"
+      ],
+      "current": [
+        "57.0.15"
+      ],
+      "target": "57.0.17",
+      "specs": [
+        "~57.0.15"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-secure-store",
+      "aliases": [
+        "expo-secure-store"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.3",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-sharing",
+      "aliases": [
+        "expo-sharing"
+      ],
+      "current": [
+        "57.0.16"
+      ],
+      "target": "57.0.18",
+      "specs": [
+        "~57.0.16"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-sqlite",
+      "aliases": [
+        "expo-sqlite"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.2",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-widgets",
+      "aliases": [
+        "expo-widgets"
+      ],
+      "current": [
+        "57.0.15"
+      ],
+      "target": "57.0.17",
+      "specs": [
+        "~57.0.15"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "happy-dom",
+      "aliases": [
+        "happy-dom"
+      ],
+      "current": [
+        "20.11.2"
+      ],
+      "target": "20.14.0",
+      "specs": [
+        "^20.11.2"
+      ],
+      "manifests": [
+        "tests/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "heic-to",
+      "aliases": [
+        "heic-to"
+      ],
+      "current": [
+        "1.5.2"
+      ],
+      "target": "1.5.2",
+      "specs": [
+        "^1.5.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "jose",
+      "aliases": [
+        "jose"
+      ],
+      "current": [
+        "6.2.2"
+      ],
+      "target": "6.2.12",
+      "specs": [
+        "6.2.2"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "packages/shared/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "lexical",
+      "aliases": [
+        "lexical"
+      ],
+      "current": [
+        "0.41.0"
+      ],
+      "target": "0.50.0",
+      "specs": [
+        "^0.41.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "node-pty",
+      "aliases": [
+        "node-pty"
+      ],
+      "current": [
+        "1.1.0"
+      ],
+      "target": "1.1.0",
+      "specs": [
+        "^1.1.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "pngjs",
+      "aliases": [
+        "pngjs"
+      ],
+      "current": [
+        "7.0.0"
+      ],
+      "target": "7.0.0",
+      "specs": [
+        "7.0.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "scripts/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react",
+      "aliases": [
+        "react"
+      ],
+      "current": [
+        "19.2.6",
+        "19.2.3"
+      ],
+      "target": "19.2.8",
+      "specs": [
+        "19.2.6",
+        "19.2.3"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-dom",
+      "aliases": [
+        "react-dom"
+      ],
+      "current": [
+        "19.2.6",
+        "19.2.3"
+      ],
+      "target": "19.2.8",
+      "specs": [
+        "19.2.6",
+        "19.2.3"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-grab",
+      "aliases": [
+        "react-grab"
+      ],
+      "current": [
+        "0.1.50"
+      ],
+      "target": "0.2.0",
+      "specs": [
+        "^0.1.50"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-markdown",
+      "aliases": [
+        "react-markdown"
+      ],
+      "current": [
+        "10.1.0"
+      ],
+      "target": "10.1.0",
+      "specs": [
+        "^10.1.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-native",
+      "aliases": [
+        "react-native"
+      ],
+      "current": [
+        "0.86.3"
+      ],
+      "target": "0.86.3",
+      "specs": [
+        "0.86.3"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "react-native-nitro-markdown",
+      "aliases": [
+        "react-native-nitro-markdown"
+      ],
+      "current": [
+        "0.5.8"
+      ],
+      "target": "0.12.1",
+      "specs": [
+        "^0.5.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-native-reanimated",
+      "aliases": [
+        "react-native-reanimated"
+      ],
+      "current": [
+        "4.5.1"
+      ],
+      "target": "4.5.1",
+      "specs": [
+        "4.5.1"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "react-native-safe-area-context",
+      "aliases": [
+        "react-native-safe-area-context"
+      ],
+      "current": [
+        "5.7.0"
+      ],
+      "target": "5.7.0",
+      "specs": [
+        "~5.7.0"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "remark-gfm",
+      "aliases": [
+        "remark-gfm"
+      ],
+      "current": [
+        "4.0.1"
+      ],
+      "target": "4.0.1",
+      "specs": [
+        "^4.0.1"
+      ],
+      "manifests": [
+        "tests/package.json",
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@electron/asar",
+      "aliases": [
+        "@electron/asar"
+      ],
+      "current": [
+        "4.3.0"
+      ],
+      "target": "4.3.0",
+      "specs": [
+        "4.3.0"
+      ],
+      "manifests": [
+        "scripts/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "yaml",
+      "aliases": [
+        "yaml"
+      ],
+      "current": [
+        "2.9.0"
+      ],
+      "target": "2.9.0",
+      "specs": [
+        "^2.9.0"
+      ],
+      "manifests": [
+        "scripts/package.json",
+        "packages/shared/package.json",
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "node-gyp",
+      "aliases": [
+        "node-gyp"
+      ],
+      "current": [
+        "12.3.0"
+      ],
+      "target": "13.0.2",
+      "specs": [
+        "12.3.0"
+      ],
+      "manifests": [
+        "scripts/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@noble/curves",
+      "aliases": [
+        "@noble/curves"
+      ],
+      "current": [
+        "1.9.1"
+      ],
+      "target": "2.4.0",
+      "specs": [
+        "1.9.1"
+      ],
+      "manifests": [
+        "packages/shared/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@effect/openapi-generator",
+      "aliases": [
+        "@effect/openapi-generator"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "packages/effect-codex-app-server/package.json",
+        "packages/effect-acp/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@agentclientprotocol/sdk",
+      "aliases": [
+        "@agentclientprotocol/sdk"
+      ],
+      "current": [
+        "1.3.0"
+      ],
+      "target": "1.4.0",
+      "specs": [
+        "1.3.0"
+      ],
+      "manifests": [
+        "packages/effect-acp/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "zod",
+      "aliases": [
+        "zod"
+      ],
+      "current": [
+        "4.4.3"
+      ],
+      "target": "4.5.4",
+      "specs": [
+        "4.4.3",
+        "^4.4.3"
+      ],
+      "manifests": [
+        "packages/effect-acp/package.json",
+        "packages/cartographer-core/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "dependency-cruiser",
+      "aliases": [
+        "dependency-cruiser"
+      ],
+      "current": [
+        "18.1.1"
+      ],
+      "target": "18.2.0",
+      "specs": [
+        "^18.0.0"
+      ],
+      "manifests": [
+        "packages/cartographer-core/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "eslint",
+      "aliases": [
+        "eslint"
+      ],
+      "current": [
+        "10.8.0"
+      ],
+      "target": "10.10.0",
+      "specs": [
+        "^10.4.1"
+      ],
+      "manifests": [
+        "packages/cartographer-core/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@base-ui/react",
+      "aliases": [
+        "@base-ui/react"
+      ],
+      "current": [
+        "1.5.0"
+      ],
+      "target": "1.8.0",
+      "specs": [
+        "^1.4.1"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@dnd-kit/core",
+      "aliases": [
+        "@dnd-kit/core"
+      ],
+      "current": [
+        "6.3.1"
+      ],
+      "target": "6.3.1",
+      "specs": [
+        "^6.3.1"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@dnd-kit/modifiers",
+      "aliases": [
+        "@dnd-kit/modifiers"
+      ],
+      "current": [
+        "9.0.0"
+      ],
+      "target": "9.0.0",
+      "specs": [
+        "^9.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@dnd-kit/sortable",
+      "aliases": [
+        "@dnd-kit/sortable"
+      ],
+      "current": [
+        "10.0.0"
+      ],
+      "target": "10.0.0",
+      "specs": [
+        "^10.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@dnd-kit/utilities",
+      "aliases": [
+        "@dnd-kit/utilities"
+      ],
+      "current": [
+        "3.2.2"
+      ],
+      "target": "3.2.2",
+      "specs": [
+        "^3.2.2"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@fontsource-variable/dm-sans",
+      "aliases": [
+        "@fontsource-variable/dm-sans"
+      ],
+      "current": [
+        "5.2.8"
+      ],
+      "target": "5.3.0",
+      "specs": [
+        "^5.2.8"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@fontsource/jetbrains-mono",
+      "aliases": [
+        "@fontsource/jetbrains-mono"
+      ],
+      "current": [
+        "5.2.8"
+      ],
+      "target": "5.3.0",
+      "specs": [
+        "^5.2.8"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@formkit/auto-animate",
+      "aliases": [
+        "@formkit/auto-animate"
+      ],
+      "current": [
+        "0.10.0"
+      ],
+      "target": "0.10.0",
+      "specs": [
+        "^0.10.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@lexical/react",
+      "aliases": [
+        "@lexical/react"
+      ],
+      "current": [
+        "0.41.0"
+      ],
+      "target": "0.50.0",
+      "specs": [
+        "^0.41.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@pierre/trees",
+      "aliases": [
+        "@pierre/trees"
+      ],
+      "current": [
+        "1.0.0-beta.4"
+      ],
+      "target": "1.0.0-beta.6",
+      "specs": [
+        "1.0.0-beta.4"
+      ],
+      "manifests": [
+        "apps/web/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@tanstack/react-pacer",
+      "aliases": [
+        "@tanstack/react-pacer"
+      ],
+      "current": [
+        "0.22.1"
+      ],
+      "target": "0.23.0",
+      "specs": [
+        "^0.22.1"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@xterm/addon-fit",
+      "aliases": [
+        "@xterm/addon-fit"
+      ],
+      "current": [
+        "0.11.0"
+      ],
+      "target": "0.11.0",
+      "specs": [
+        "^0.11.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "class-variance-authority",
+      "aliases": [
+        "class-variance-authority"
+      ],
+      "current": [
+        "0.7.1"
+      ],
+      "target": "0.7.1",
+      "specs": [
+        "^0.7.1"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "culori",
+      "aliases": [
+        "culori"
+      ],
+      "current": [
+        "4.0.2"
+      ],
+      "target": "4.0.2",
+      "specs": [
+        "4.0.2"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "lucide-react",
+      "aliases": [
+        "lucide-react"
+      ],
+      "current": [
+        "0.564.0"
+      ],
+      "target": "1.41.0",
+      "specs": [
+        "^0.564.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "rehype-raw",
+      "aliases": [
+        "rehype-raw"
+      ],
+      "current": [
+        "7.0.0"
+      ],
+      "target": "7.0.0",
+      "specs": [
+        "^7.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "rehype-sanitize",
+      "aliases": [
+        "rehype-sanitize"
+      ],
+      "current": [
+        "6.0.0"
+      ],
+      "target": "6.0.0",
+      "specs": [
+        "^6.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "remark-breaks",
+      "aliases": [
+        "remark-breaks"
+      ],
+      "current": [
+        "4.0.0"
+      ],
+      "target": "4.0.0",
+      "specs": [
+        "^4.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "tailwind-merge",
+      "aliases": [
+        "tailwind-merge"
+      ],
+      "current": [
+        "3.6.0"
+      ],
+      "target": "3.6.0",
+      "specs": [
+        "^3.4.0",
+        "^3.5.0"
+      ],
+      "manifests": [
+        "apps/web/package.json",
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "zustand",
+      "aliases": [
+        "zustand"
+      ],
+      "current": [
+        "5.0.14"
+      ],
+      "target": "5.0.15",
+      "specs": [
+        "^5.0.11"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@rolldown/plugin-babel",
+      "aliases": [
+        "@rolldown/plugin-babel"
+      ],
+      "current": [
+        "0.2.3"
+      ],
+      "target": "0.2.3",
+      "specs": [
+        "^0.2.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@tailwindcss/vite",
+      "aliases": [
+        "@tailwindcss/vite"
+      ],
+      "current": [
+        "4.3.0"
+      ],
+      "target": "4.3.3",
+      "specs": [
+        "^4.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@tanstack/router-plugin",
+      "aliases": [
+        "@tanstack/router-plugin"
+      ],
+      "current": [
+        "1.168.13"
+      ],
+      "target": "1.168.35",
+      "specs": [
+        "^1.161.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@types/babel__core",
+      "aliases": [
+        "@types/babel__core"
+      ],
+      "current": [
+        "7.20.5"
+      ],
+      "target": "7.20.5",
+      "specs": [
+        "^7.20.5"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@types/culori",
+      "aliases": [
+        "@types/culori"
+      ],
+      "current": [
+        "4.0.1"
+      ],
+      "target": "4.0.1",
+      "specs": [
+        "4.0.1"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@vercel/config",
+      "aliases": [
+        "@vercel/config"
+      ],
+      "current": [
+        "0.5.5"
+      ],
+      "target": "0.7.0",
+      "specs": [
+        "^0.5.5"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@vitejs/plugin-react",
+      "aliases": [
+        "@vitejs/plugin-react"
+      ],
+      "current": [
+        "6.0.2"
+      ],
+      "target": "6.1.1",
+      "specs": [
+        "^6.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "babel-plugin-react-compiler",
+      "aliases": [
+        "babel-plugin-react-compiler"
+      ],
+      "current": [
+        "1.0.0"
+      ],
+      "target": "1.0.0",
+      "specs": [
+        "1.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "msw",
+      "aliases": [
+        "msw"
+      ],
+      "current": [
+        "2.12.11"
+      ],
+      "target": "2.15.0",
+      "specs": [
+        "2.12.11"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "tailwindcss",
+      "aliases": [
+        "tailwindcss"
+      ],
+      "current": [
+        "4.3.0"
+      ],
+      "target": "4.3.3",
+      "specs": [
+        "^4.0.0"
+      ],
+      "manifests": [
+        "apps/web/package.json",
+        "apps/mobile/package.json",
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@voidzero-dev/vite-plus-core",
+      "aliases": [
+        "vite"
+      ],
+      "current": [
+        "@voidzero-dev/vite-plus-core@0.2.7"
+      ],
+      "target": "0.3.0",
+      "specs": [
+        "0.2.7"
+      ],
+      "manifests": [
+        "apps/web/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@effect/platform-bun",
+      "aliases": [
+        "@effect/platform-bun"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@effect/platform-node-shared",
+      "aliases": [
+        "@effect/platform-node-shared"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@effect/sql-sqlite-bun",
+      "aliases": [
+        "@effect/sql-sqlite-bun"
+      ],
+      "current": [
+        "4.0.0-beta.78"
+      ],
+      "target": "4.0.0-beta.107",
+      "specs": [
+        "4.0.0-beta.78"
+      ],
+      "manifests": [
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@opencode-ai/sdk",
+      "aliases": [
+        "@opencode-ai/sdk"
+      ],
+      "current": [
+        "1.15.13"
+      ],
+      "target": "1.18.29",
+      "specs": [
+        "^1.3.15"
+      ],
+      "manifests": [
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "mdx-forge",
+      "aliases": [
+        "mdx-forge"
+      ],
+      "current": [
+        "0.9.1"
+      ],
+      "target": "0.10.2",
+      "specs": [
+        "0.9.1"
+      ],
+      "manifests": [
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@types/bun",
+      "aliases": [
+        "@types/bun"
+      ],
+      "current": [
+        "1.3.14"
+      ],
+      "target": "1.4.1",
+      "specs": [
+        "1.3.14"
+      ],
+      "manifests": [
+        "apps/server/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@callstack/liquid-glass",
+      "aliases": [
+        "@callstack/liquid-glass"
+      ],
+      "current": [
+        "0.7.1"
+      ],
+      "target": "0.8.1",
+      "specs": [
+        "^0.7.1"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@expo-google-fonts/dm-sans",
+      "aliases": [
+        "@expo-google-fonts/dm-sans"
+      ],
+      "current": [
+        "0.4.2"
+      ],
+      "target": "0.4.2",
+      "specs": [
+        "^0.4.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@expo/metro-runtime",
+      "aliases": [
+        "@expo/metro-runtime"
+      ],
+      "current": [
+        "57.0.14"
+      ],
+      "target": "57.0.15",
+      "specs": [
+        "~57.0.14"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@react-native-menu/menu",
+      "aliases": [
+        "@react-native-menu/menu"
+      ],
+      "current": [
+        "2.0.0"
+      ],
+      "target": "2.0.0",
+      "specs": [
+        "^2.0.0"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@react-navigation/elements",
+      "aliases": [
+        "@react-navigation/elements"
+      ],
+      "current": [
+        "2.9.26"
+      ],
+      "target": "2.9.40",
+      "specs": [
+        "2.9.26"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@react-navigation/native-stack",
+      "aliases": [
+        "@react-navigation/native-stack"
+      ],
+      "current": [
+        "7.17.6"
+      ],
+      "target": "7.18.10",
+      "specs": [
+        "7.17.6"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@shikijs/core",
+      "aliases": [
+        "@shikijs/core"
+      ],
+      "current": [
+        "4.2.0"
+      ],
+      "target": "4.4.3",
+      "specs": [
+        "4.2.0"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@shikijs/engine-javascript",
+      "aliases": [
+        "@shikijs/engine-javascript"
+      ],
+      "current": [
+        "4.2.0"
+      ],
+      "target": "4.4.3",
+      "specs": [
+        "4.2.0"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@shikijs/langs",
+      "aliases": [
+        "@shikijs/langs"
+      ],
+      "current": [
+        "4.2.0"
+      ],
+      "target": "4.4.3",
+      "specs": [
+        "4.2.0"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "@shikijs/themes",
+      "aliases": [
+        "@shikijs/themes"
+      ],
+      "current": [
+        "4.2.0"
+      ],
+      "target": "4.4.3",
+      "specs": [
+        "4.2.0"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "clsx",
+      "aliases": [
+        "clsx"
+      ],
+      "current": [
+        "2.1.1"
+      ],
+      "target": "2.1.1",
+      "specs": [
+        "^2.1.1"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "diff",
+      "aliases": [
+        "diff"
+      ],
+      "current": [
+        "8.0.3"
+      ],
+      "target": "9.0.0",
+      "specs": [
+        "8.0.3"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-asset",
+      "aliases": [
+        "expo-asset"
+      ],
+      "current": [
+        "57.0.15"
+      ],
+      "target": "57.0.16",
+      "specs": [
+        "~57.0.15"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-auth-session",
+      "aliases": [
+        "expo-auth-session"
+      ],
+      "current": [
+        "57.0.10"
+      ],
+      "target": "57.0.11",
+      "specs": [
+        "~57.0.10"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-blur",
+      "aliases": [
+        "expo-blur"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.2",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-build-properties",
+      "aliases": [
+        "expo-build-properties"
+      ],
+      "current": [
+        "57.0.15"
+      ],
+      "target": "57.0.17",
+      "specs": [
+        "~57.0.15"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-camera",
+      "aliases": [
+        "expo-camera"
+      ],
+      "current": [
+        "57.0.4"
+      ],
+      "target": "57.0.4",
+      "specs": [
+        "~57.0.4"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-dev-client",
+      "aliases": [
+        "expo-dev-client"
+      ],
+      "current": [
+        "57.0.16"
+      ],
+      "target": "57.0.18",
+      "specs": [
+        "~57.0.16"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-font",
+      "aliases": [
+        "expo-font"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.3",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-glass-effect",
+      "aliases": [
+        "expo-glass-effect"
+      ],
+      "current": [
+        "57.0.1"
+      ],
+      "target": "57.0.1",
+      "specs": [
+        "~57.0.1"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-image",
+      "aliases": [
+        "expo-image"
+      ],
+      "current": [
+        "57.0.3"
+      ],
+      "target": "57.0.4",
+      "specs": [
+        "~57.0.3"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-image-picker",
+      "aliases": [
+        "expo-image-picker"
+      ],
+      "current": [
+        "57.0.14"
+      ],
+      "target": "57.0.16",
+      "specs": [
+        "~57.0.14"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-linking",
+      "aliases": [
+        "expo-linking"
+      ],
+      "current": [
+        "57.0.8"
+      ],
+      "target": "57.0.9",
+      "specs": [
+        "~57.0.8"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-network",
+      "aliases": [
+        "expo-network"
+      ],
+      "current": [
+        "57.0.1"
+      ],
+      "target": "57.0.1",
+      "specs": [
+        "~57.0.1"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-paste-input",
+      "aliases": [
+        "expo-paste-input"
+      ],
+      "current": [
+        "0.1.15"
+      ],
+      "target": "0.2.2",
+      "specs": [
+        "^0.1.15"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-splash-screen",
+      "aliases": [
+        "expo-splash-screen"
+      ],
+      "current": [
+        "57.0.8"
+      ],
+      "target": "57.0.8",
+      "specs": [
+        "~57.0.8"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-symbols",
+      "aliases": [
+        "expo-symbols"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.2",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-updates",
+      "aliases": [
+        "expo-updates"
+      ],
+      "current": [
+        "57.0.19"
+      ],
+      "target": "57.0.21",
+      "specs": [
+        "~57.0.19"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "expo-web-browser",
+      "aliases": [
+        "expo-web-browser"
+      ],
+      "current": [
+        "57.0.2"
+      ],
+      "target": "57.0.2",
+      "specs": [
+        "~57.0.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "punycode",
+      "aliases": [
+        "punycode"
+      ],
+      "current": [
+        "2.3.1"
+      ],
+      "target": "2.3.1",
+      "specs": [
+        "^2.3.1"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-native-gesture-handler",
+      "aliases": [
+        "react-native-gesture-handler"
+      ],
+      "current": [
+        "2.32.0"
+      ],
+      "target": "2.32.0",
+      "specs": [
+        "~2.32.0"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "react-native-image-viewing",
+      "aliases": [
+        "react-native-image-viewing"
+      ],
+      "current": [
+        "0.2.2"
+      ],
+      "target": "0.2.2",
+      "specs": [
+        "^0.2.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-native-keyboard-controller",
+      "aliases": [
+        "react-native-keyboard-controller"
+      ],
+      "current": [
+        "1.21.13"
+      ],
+      "target": "1.21.13",
+      "specs": [
+        "1.21.13"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "react-native-nitro-modules",
+      "aliases": [
+        "react-native-nitro-modules"
+      ],
+      "current": [
+        "0.35.9"
+      ],
+      "target": "0.37.1",
+      "specs": [
+        "0.35.9"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-native-screens",
+      "aliases": [
+        "react-native-screens"
+      ],
+      "current": [
+        "4.26.2"
+      ],
+      "target": "4.26.2",
+      "specs": [
+        "4.26.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "react-native-shiki-engine",
+      "aliases": [
+        "react-native-shiki-engine"
+      ],
+      "current": [
+        "0.3.12"
+      ],
+      "target": "0.3.12",
+      "specs": [
+        "^0.3.12"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "react-native-svg",
+      "aliases": [
+        "react-native-svg"
+      ],
+      "current": [
+        "15.15.4"
+      ],
+      "target": "15.15.4",
+      "specs": [
+        "15.15.4"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "react-native-webview",
+      "aliases": [
+        "react-native-webview"
+      ],
+      "current": [
+        "13.16.1"
+      ],
+      "target": "13.16.1",
+      "specs": [
+        "^13.16.1"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "react-native-worklets",
+      "aliases": [
+        "react-native-worklets"
+      ],
+      "current": [
+        "0.10.1"
+      ],
+      "target": "0.10.1",
+      "specs": [
+        "0.10.1"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    },
+    {
+      "name": "shiki",
+      "aliases": [
+        "shiki"
+      ],
+      "current": [
+        "4.2.0"
+      ],
+      "target": "4.4.3",
+      "specs": [
+        "4.2.0"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "uniwind",
+      "aliases": [
+        "uniwind"
+      ],
+      "current": [
+        "1.7.0"
+      ],
+      "target": "1.12.0",
+      "specs": [
+        "^1.6.2"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "babel-preset-expo",
+      "aliases": [
+        "babel-preset-expo"
+      ],
+      "current": [
+        "57.0.9"
+      ],
+      "target": "57.0.10",
+      "specs": [
+        "~57.0.9"
+      ],
+      "manifests": [
+        "apps/mobile/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "electron-store",
+      "aliases": [
+        "electron-store"
+      ],
+      "current": [
+        "8.2.0"
+      ],
+      "target": "11.0.2",
+      "specs": [
+        "^8.2.0"
+      ],
+      "manifests": [
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "playwright-core",
+      "aliases": [
+        "playwright-core"
+      ],
+      "current": [
+        "1.60.0"
+      ],
+      "target": "1.63.0",
+      "specs": [
+        "1.60.0"
+      ],
+      "manifests": [
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "cross-env",
+      "aliases": [
+        "cross-env"
+      ],
+      "current": [
+        "10.1.0"
+      ],
+      "target": "10.1.0",
+      "specs": [
+        "^10.1.0"
+      ],
+      "manifests": [
+        "apps/desktop/package.json"
+      ],
+      "policy": "Stable latest or existing prerelease family"
+    },
+    {
+      "name": "electron-builder",
+      "aliases": [
+        "electron-builder"
+      ],
+      "current": [
+        "26.15.6"
+      ],
+      "target": "26.16.0",
+      "specs": [
+        "26.15.6"
+      ],
+      "manifests": [
+        "apps/desktop/package.json"
+      ],
+      "policy": "Explicit approved compatibility selection"
+    }
+  ],
+  "transitiveCompatibilityUpdates": [
+    {
+      "name": "node-abi",
+      "from": "4.31.0",
+      "target": "4.35.0",
+      "reason": "Recognizes Electron 44 ABI 149 within electron-rebuild declared range; production native rebuild passed."
+    }
+  ]
+}

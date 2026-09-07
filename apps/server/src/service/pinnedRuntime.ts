@@ -43,7 +43,7 @@ export function pinnedRuntimePaths(
   }
 }
 
-export class PinnedRuntimeInstallError extends Schema.TaggedErrorClass<PinnedRuntimeInstallError>()(
+export class PinnedRuntimeInstallError extends Schema.TaggedError<PinnedRuntimeInstallError>()(
   'PinnedRuntimeInstallError',
   {
     step: Schema.String,

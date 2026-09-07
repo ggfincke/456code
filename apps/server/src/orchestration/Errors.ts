@@ -37,7 +37,7 @@ const DIFF_KIND_LABEL: Record<CheckpointDiffOperation, string> = {
 }
 
 /** The computed result does not satisfy the checkpoint RPC contract. */
-export class CheckpointDiffResultInvalidError extends Schema.TaggedErrorClass<CheckpointDiffResultInvalidError>()(
+export class CheckpointDiffResultInvalidError extends Schema.TaggedError<CheckpointDiffResultInvalidError>()(
   'CheckpointDiffResultInvalidError',
   {
     operation: CheckpointDiffOperation,
@@ -53,7 +53,7 @@ export class CheckpointDiffResultInvalidError extends Schema.TaggedErrorClass<Ch
 }
 
 /** Projection state no longer contains the requested checkpoint thread. */
-export class CheckpointThreadNotFoundError extends Schema.TaggedErrorClass<CheckpointThreadNotFoundError>()(
+export class CheckpointThreadNotFoundError extends Schema.TaggedError<CheckpointThreadNotFoundError>()(
   'CheckpointThreadNotFoundError',
   {
     operation: CheckpointDiffOperation,
@@ -68,7 +68,7 @@ export class CheckpointThreadNotFoundError extends Schema.TaggedErrorClass<Check
 }
 
 /** The checkpoint thread has no workspace path from which to compute a diff. */
-export class CheckpointWorkspacePathMissingError extends Schema.TaggedErrorClass<CheckpointWorkspacePathMissingError>()(
+export class CheckpointWorkspacePathMissingError extends Schema.TaggedError<CheckpointWorkspacePathMissingError>()(
   'CheckpointWorkspacePathMissingError',
   {
     operation: CheckpointDiffOperation,
@@ -84,7 +84,7 @@ export class CheckpointWorkspacePathMissingError extends Schema.TaggedErrorClass
 }
 
 /** The requested turn lies beyond the latest available checkpoint. */
-export class CheckpointTurnRangeUnavailableError extends Schema.TaggedErrorClass<CheckpointTurnRangeUnavailableError>()(
+export class CheckpointTurnRangeUnavailableError extends Schema.TaggedError<CheckpointTurnRangeUnavailableError>()(
   'CheckpointTurnRangeUnavailableError',
   {
     operation: CheckpointDiffOperation,
@@ -101,7 +101,7 @@ export class CheckpointTurnRangeUnavailableError extends Schema.TaggedErrorClass
 }
 
 /** Expected checkpoint metadata does not contain the requested Git ref. */
-export class CheckpointRefUnavailableError extends Schema.TaggedErrorClass<CheckpointRefUnavailableError>()(
+export class CheckpointRefUnavailableError extends Schema.TaggedError<CheckpointRefUnavailableError>()(
   'CheckpointRefUnavailableError',
   {
     operation: CheckpointDiffOperation,
@@ -118,7 +118,7 @@ export class CheckpointRefUnavailableError extends Schema.TaggedErrorClass<Check
 }
 
 /** The worktree recorded as the run's integration tree no longer resolves. */
-export class CheckpointRunIntegrationUnavailableError extends Schema.TaggedErrorClass<CheckpointRunIntegrationUnavailableError>()(
+export class CheckpointRunIntegrationUnavailableError extends Schema.TaggedError<CheckpointRunIntegrationUnavailableError>()(
   'CheckpointRunIntegrationUnavailableError',
   {
     operation: CheckpointDiffOperation,
@@ -134,7 +134,7 @@ export class CheckpointRunIntegrationUnavailableError extends Schema.TaggedError
 }
 
 /** No base commit could be resolved for the run's integration branch. */
-export class CheckpointRunBaseUnavailableError extends Schema.TaggedErrorClass<CheckpointRunBaseUnavailableError>()(
+export class CheckpointRunBaseUnavailableError extends Schema.TaggedError<CheckpointRunBaseUnavailableError>()(
   'CheckpointRunBaseUnavailableError',
   {
     operation: CheckpointDiffOperation,
@@ -172,7 +172,7 @@ export type CheckpointRunDiffQueryError =
   | CheckpointRunIntegrationUnavailableError
   | CheckpointRunBaseUnavailableError
 
-export class CheckpointRunExecutionNotFoundError extends Schema.TaggedErrorClass<CheckpointRunExecutionNotFoundError>()(
+export class CheckpointRunExecutionNotFoundError extends Schema.TaggedError<CheckpointRunExecutionNotFoundError>()(
   'CheckpointRunExecutionNotFoundError',
   {
     operation: Schema.Literal('CheckpointDiffQuery.getRunExecutionDiffV1'),
@@ -191,7 +191,7 @@ export class CheckpointRunExecutionNotFoundError extends Schema.TaggedErrorClass
   }
 }
 
-export class CheckpointRunExecutionHeadUnavailableError extends Schema.TaggedErrorClass<CheckpointRunExecutionHeadUnavailableError>()(
+export class CheckpointRunExecutionHeadUnavailableError extends Schema.TaggedError<CheckpointRunExecutionHeadUnavailableError>()(
   'CheckpointRunExecutionHeadUnavailableError',
   {
     operation: Schema.Literal('CheckpointDiffQuery.getRunExecutionDiffV1'),
@@ -217,7 +217,7 @@ export type CheckpointRunExecutionDiffQueryError =
   | CheckpointRunExecutionNotFoundError
   | CheckpointRunExecutionHeadUnavailableError
 
-export class OrchestrationCommandJsonParseError extends Schema.TaggedErrorClass<OrchestrationCommandJsonParseError>()(
+export class OrchestrationCommandJsonParseError extends Schema.TaggedError<OrchestrationCommandJsonParseError>()(
   'OrchestrationCommandJsonParseError',
   {
     detail: Schema.String,
@@ -231,7 +231,7 @@ export class OrchestrationCommandJsonParseError extends Schema.TaggedErrorClass<
   }
 }
 
-export class OrchestrationCommandDecodeError extends Schema.TaggedErrorClass<OrchestrationCommandDecodeError>()(
+export class OrchestrationCommandDecodeError extends Schema.TaggedError<OrchestrationCommandDecodeError>()(
   'OrchestrationCommandDecodeError',
   {
     issue: Schema.String,
@@ -245,7 +245,7 @@ export class OrchestrationCommandDecodeError extends Schema.TaggedErrorClass<Orc
   }
 }
 
-export class OrchestrationCommandInvariantError extends Schema.TaggedErrorClass<OrchestrationCommandInvariantError>()(
+export class OrchestrationCommandInvariantError extends Schema.TaggedError<OrchestrationCommandInvariantError>()(
   'OrchestrationCommandInvariantError',
   {
     commandType: Schema.String,
@@ -261,7 +261,7 @@ export class OrchestrationCommandInvariantError extends Schema.TaggedErrorClass<
   }
 }
 
-export class OrchestrationCommandPreviouslyRejectedError extends Schema.TaggedErrorClass<OrchestrationCommandPreviouslyRejectedError>()(
+export class OrchestrationCommandPreviouslyRejectedError extends Schema.TaggedError<OrchestrationCommandPreviouslyRejectedError>()(
   'OrchestrationCommandPreviouslyRejectedError',
   {
     commandId: Schema.String,
@@ -277,7 +277,7 @@ export class OrchestrationCommandPreviouslyRejectedError extends Schema.TaggedEr
   }
 }
 
-export class OrchestrationCommandIdConflictError extends Schema.TaggedErrorClass<OrchestrationCommandIdConflictError>()(
+export class OrchestrationCommandIdConflictError extends Schema.TaggedError<OrchestrationCommandIdConflictError>()(
   'OrchestrationCommandIdConflictError',
   {
     commandId: Schema.String,
@@ -294,7 +294,7 @@ export class OrchestrationCommandIdConflictError extends Schema.TaggedErrorClass
   }
 }
 
-export class OrchestrationProjectorDecodeError extends Schema.TaggedErrorClass<OrchestrationProjectorDecodeError>()(
+export class OrchestrationProjectorDecodeError extends Schema.TaggedError<OrchestrationProjectorDecodeError>()(
   'OrchestrationProjectorDecodeError',
   {
     eventType: Schema.String,
@@ -309,7 +309,7 @@ export class OrchestrationProjectorDecodeError extends Schema.TaggedErrorClass<O
   }
 }
 
-export class OrchestrationListenerCallbackError extends Schema.TaggedErrorClass<OrchestrationListenerCallbackError>()(
+export class OrchestrationListenerCallbackError extends Schema.TaggedError<OrchestrationListenerCallbackError>()(
   'OrchestrationListenerCallbackError',
   {
     listener: Schema.Literals(['read-model', 'domain-event']),

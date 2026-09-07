@@ -1,33 +1,12 @@
 /**
- * The `Unify` module defines the type-level protocol Effect uses to collapse
- * unions of protocol-enabled values into their public data types. It is mostly
- * for maintainers of Effect data types and advanced library authors; ordinary
- * application code usually benefits from unification through APIs such as
- * `Effect`, `Option`, `Result`, `Stream`, `Layer`, and `Match`.
+ * Defines Effect's type-level unification protocol.
  *
- * **Mental model**
- *
- * A type opts in by carrying phantom entries keyed by {@link typeSymbol} and
- * {@link unifySymbol}. {@link Unify} reads those entries, ignores any protocol
- * members listed through {@link ignoreSymbol}, and widens matching union
- * members to the public type each entry returns. The runtime helper
- * {@link unify} is an identity function; it changes only the static type that
- * TypeScript sees.
- *
- * **Common tasks**
- *
- * - Add unification support to a new Effect data type so mixed unions infer as
- *   the public container type instead of an implementation shape.
- * - Normalize the return type of branching APIs, matchers, or builders that can
- *   produce several protocol-enabled values.
- * - Apply unification to a value or curried function result with {@link unify}
- *   while preserving the original runtime behavior.
- *
- * **Gotchas**
- *
- * - Unification is a compile-time protocol, not a runtime conversion hook.
- * - Protocol entries should be specific to the data type they widen; overly
- *   broad entries can make inferred unions less precise.
+ * Unification collapses unions of protocol-enabled values into their public data
+ * types. It is mostly for maintainers of Effect data types and advanced library
+ * authors; application code usually benefits from it through APIs such as
+ * `Effect`, `Option`, `Result`, `Stream`, `Layer`, and `Match`. This module
+ * exports the protocol symbols, the `Unify` type that performs normalization,
+ * and `unify`, an identity function that changes only the inferred type.
  *
  * @since 2.0.0
  */
@@ -79,8 +58,8 @@ export type unifySymbol = typeof unifySymbol
  *
  * **When to use**
  *
- * Use with `unifySymbol` to expose the source type that unification should read
- * from a protocol-enabled data type.
+ * Use when you need a type-level protocol key that exposes the source type
+ * read by `Unify` from a protocol-enabled data type.
  *
  * **Details**
  *
@@ -199,7 +178,7 @@ type FilterOut<A> = A extends any ? typeSymbol extends keyof A ? never : A : nev
  *
  * **Example** (Unifying protocol types)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import type { Unify } from "effect"
  *
  * // Example of types that can be unified
@@ -217,7 +196,8 @@ type FilterOut<A> = A extends any ? typeSymbol extends keyof A ? never : A : nev
  *
  * // Unify automatically handles the union
  * type Unified = Unify.Unify<UnifiableA | UnifiableB>
- * // Results in a properly unified type
+ *
+ * const witness: Unified = "value"
  * ```
  *
  * @see {@link unify} for applying this normalization to a value or function
@@ -264,32 +244,29 @@ export type Unify<A> = Values<
  *
  * **Example** (Unifying values and function results)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Unify } from "effect"
  *
  * // Unify a simple value
- * const unifiedValue = Unify.unify("hello")
+ * const unifiedValue = Unify.unify("hello") // => "hello"
  * // Type: string
  *
  * // Unify a function result
- * const createUnifiableValue = () => ({
- *   value: "test",
- *   [Unify.typeSymbol]: "string" as const,
- *   [Unify.unifySymbol]: { String: () => "test" as const }
- * })
+ * const createValue = () => ({ value: "test" })
  *
- * const unifiedFunction = Unify.unify(createUnifiableValue)
- * // The result will be properly unified
+ * const unifiedFunction = Unify.unify(createValue)
+ * unifiedFunction().value // => "test"
  *
  * // Unify with curried functions
  * const curriedFunction = (a: string) => (b: number) => ({ result: a + b })
  * const unifiedCurried = Unify.unify(curriedFunction)
  * // Type: (a: string) => (b: number) => Unify<{ result: string }>
+ * unifiedCurried("value-")(1).result // => "value-1"
  * ```
  *
  * @see {@link Unify} for the type-level normalization applied by this helper
  *
- * @category utils
+ * @category utility types
  * @since 2.0.0
  */
 export const unify: {

@@ -135,7 +135,7 @@ export const CartographerGetDiffAnalysisInput = Schema.Struct({
 })
 export type CartographerGetDiffAnalysisInput = typeof CartographerGetDiffAnalysisInput.Type
 
-export class DiffAnalysisError extends Schema.TaggedErrorClass<DiffAnalysisError>()(
+export class DiffAnalysisError extends Schema.TaggedError<DiffAnalysisError>()(
   'DiffAnalysisError',
   {
     code: DiffAnalysisErrorCode,
@@ -156,7 +156,7 @@ export const CartographerPrepareCurrentWorktreeArchitectureInput = Schema.Struct
 export type CartographerPrepareCurrentWorktreeArchitectureInput =
   typeof CartographerPrepareCurrentWorktreeArchitectureInput.Type
 
-export class CartographerError extends Schema.TaggedErrorClass<CartographerError>()(
+export class CartographerError extends Schema.TaggedError<CartographerError>()(
   'CartographerError',
   {
     failure: Schema.Literals([
@@ -236,7 +236,7 @@ export const ProposalGenerationLatestInput = Schema.Struct({
 })
 export type ProposalGenerationLatestInput = typeof ProposalGenerationLatestInput.Type
 
-export class ProposalGenerationError extends Schema.TaggedErrorClass<ProposalGenerationError>()(
+export class ProposalGenerationError extends Schema.TaggedError<ProposalGenerationError>()(
   'ProposalGenerationError',
   {
     failure: Schema.Literals([

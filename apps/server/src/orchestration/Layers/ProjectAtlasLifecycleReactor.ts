@@ -43,7 +43,7 @@ const encodeEventPayload = Schema.encodeEffect(EventPayload)
 const decodeEventPayload = Schema.decodeUnknownEffect(EventPayload)
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-class ProjectAtlasLifecyclePayloadError extends Schema.TaggedErrorClass<ProjectAtlasLifecyclePayloadError>()(
+class ProjectAtlasLifecyclePayloadError extends Schema.TaggedError<ProjectAtlasLifecyclePayloadError>()(
   'ProjectAtlasLifecyclePayloadError',
   { detail: Schema.String },
 )

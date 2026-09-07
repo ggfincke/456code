@@ -1,46 +1,11 @@
 /**
- * The `RequestResolver` module provides the data-loading side of
- * `Effect.request`. A `Request` describes what a fiber needs, while a
- * `RequestResolver` describes how to collect, batch, execute, cache, trace,
- * and complete those requests.
+ * Resolves data requests made with `Effect.request`.
  *
- * **Mental model**
- *
- * - A resolver receives one or more `Request.Entry` values and must complete
- *   each entry with either a success or failure
- * - Concurrent requests made with the same resolver can be gathered into a
- *   batch before the resolver is run
- * - Batch keys split pending requests into independent groups, which is useful
- *   when different backends, tenants, or query shapes must be resolved
- *   separately
- * - Delays and `batchN` tune how long requests are collected and how large
- *   each batch may become
- * - Resolvers can be wrapped with tracing, in-memory caching, cache services,
- *   and persistence without changing the request type
- *
- * **Common tasks**
- *
- * - Create a resolver from batch logic: {@link make}
- * - Create grouped batch logic: {@link makeGrouped} or {@link grouped}
- * - Create a resolver from pure logic: {@link fromFunction} or
- *   {@link fromFunctionBatched}
- * - Create a resolver from effectful logic: {@link fromEffect} or
- *   {@link fromEffectTagged}
- * - Control batching: {@link setDelay}, {@link setDelayEffect},
- *   {@link batchN}
- * - Add operational behavior: {@link around}, {@link race}, {@link withSpan}
- * - Reuse results: {@link withCache}, {@link asCache}, {@link persisted}
- *
- * **Gotchas**
- *
- * - Every entry passed to a resolver must be completed; leaving an entry
- *   incomplete causes the waiting request to fail
- * - Batched result collections must line up with the input entries in order
- *   and length when using the batched helper constructors
- * - Grouping controls which requests share a resolver run; choose stable keys
- *   for requests that can safely be handled together
- * - Caching and persistence depend on request identity and the request's
- *   equality semantics, so model request values deliberately when cached
+ * A `Request` describes what a fiber needs, while a `RequestResolver` describes
+ * how to collect request entries, group them into batches, run backend work,
+ * and complete each waiting entry. This module includes constructors for common
+ * resolver shapes and tools for controlling batching, grouping, delays,
+ * tracing, caching, racing, hooks around resolver execution, and persistence.
  *
  * @since 2.0.0
  */
@@ -87,14 +52,14 @@ const TypeId = "~effect/RequestResolver"
  *
  * **Example** (Defining a request resolver)
  *
- * ```ts
- * import { Effect, Exit, RequestResolver } from "effect"
- * import type { Request } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetUserRequest extends Request.Request<string, Error> {
  *   readonly _tag: "GetUserRequest"
  *   readonly id: number
  * }
+ * const GetUserRequest = Request.tagged<GetUserRequest>("GetUserRequest")
  *
  * // In practice, you would typically use RequestResolver.make() instead
  * const resolver = RequestResolver.make<GetUserRequest>((entries) =>
@@ -104,6 +69,9 @@ const TypeId = "~effect/RequestResolver"
  *     }
  *   })
  * )
+ *
+ * const program = Effect.request(GetUserRequest({ id: 1 }), resolver)
+ * await Effect.runPromise(program) // => "User 1"
  * ```
  *
  * @category models
@@ -237,7 +205,7 @@ const defaultKey = (_request: unknown): unknown => defaultKeyObject
  *
  * **Example** (Creating a request resolver)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * // Define a request type
@@ -259,6 +227,7 @@ const defaultKey = (_request: unknown): unknown => defaultKeyObject
  *
  * // Use the resolver to handle requests
  * const getUserEffect = Effect.request(GetUserRequest({ id: 123 }), UserResolver)
+ * await Effect.runPromise(getUserEffect) // => "User 123"
  * ```
  *
  * @category constructors
@@ -283,7 +252,7 @@ export const make = <A extends Request.Any>(
  *
  * **Example** (Grouping requests by key)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetUserByRole extends Request.Request<string, Error> {
@@ -293,12 +262,14 @@ export const make = <A extends Request.Any>(
  * }
  * const GetUserByRole = Request.tagged<GetUserByRole>("GetUserByRole")
  *
+ * const batches: Array<[role: string, size: number]> = []
+ *
  * // Group requests by role for efficient batch processing
  * const UserByRoleResolver = RequestResolver.makeGrouped<GetUserByRole, string>({
  *   key: ({ request }) => request.role,
  *   resolver: (entries, role) =>
  *     Effect.sync(() => {
- *       console.log(`Processing ${entries.length} requests for role: ${role}`)
+ *       batches.push([role, entries.length])
  *       for (const entry of entries) {
  *         entry.completeUnsafe(
  *           Exit.succeed(`User ${entry.request.id} with role ${role}`)
@@ -306,6 +277,15 @@ export const make = <A extends Request.Any>(
  *       }
  *     })
  * })
+ *
+ * const program = Effect.all([
+ *   Effect.request<GetUserByRole>(GetUserByRole({ role: "admin", id: 1 }), UserByRoleResolver),
+ *   Effect.request<GetUserByRole>(GetUserByRole({ role: "admin", id: 2 }), UserByRoleResolver)
+ * ] as const, { concurrency: "unbounded" })
+ * const result = await Effect.runPromise(program)
+ *
+ * batches // => [["admin", 2]]
+ * result // => ["User 1 with role admin", "User 2 with role admin"]
  * ```
  *
  * @category constructors
@@ -340,7 +320,7 @@ const hashGroupKey = <A, K>(get: (entry: Request.Entry<A>) => K) => {
  *
  * **Example** (Creating a resolver from a pure function)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Request, RequestResolver } from "effect"
  *
  * interface GetSquareRequest extends Request.Request<number> {
@@ -359,7 +339,7 @@ const hashGroupKey = <A, K>(get: (entry: Request.Entry<A>) => K) => {
  *   GetSquareRequest({ value: 5 }),
  *   SquareResolver
  * )
- * // Will resolve to 25
+ * await Effect.runPromise(getSquareEffect) // => 25
  * ```
  *
  * @category constructors
@@ -385,7 +365,7 @@ export const fromFunction = <A extends Request.Any>(
  *
  * **Example** (Batching pure request handling)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Request, RequestResolver } from "effect"
  *
  * interface GetDoubleRequest extends Request.Request<number> {
@@ -403,7 +383,8 @@ export const fromFunction = <A extends Request.Any>(
  * const effects = [1, 2, 3].map((value) =>
  *   Effect.request(GetDoubleRequest({ value }), DoubleResolver)
  * )
- * const batchedEffect = Effect.all(effects) // [2, 4, 6]
+ * const batchedEffect = Effect.all(effects)
+ * await Effect.runPromise(batchedEffect) // => [2, 4, 6]
  * ```
  *
  * @category constructors
@@ -428,7 +409,7 @@ export const fromFunctionBatched = <A extends Request.Any>(
  *
  * **Example** (Creating a resolver from an effectful function)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Request, RequestResolver } from "effect"
  *
  * interface GetUserFromAPIRequest extends Request.Request<string> {
@@ -441,13 +422,7 @@ export const fromFunctionBatched = <A extends Request.Any>(
  *
  * // Create a resolver that uses effects (like HTTP calls)
  * const UserAPIResolver = RequestResolver.fromEffect<GetUserFromAPIRequest>(
- *   (entry) =>
- *     Effect.gen(function*() {
- *       // Simulate an API call
- *       yield* Effect.sleep("100 millis")
- *       // Just return the result without error handling for simplicity
- *       return `User ${entry.request.id} from API`
- *     })
+ *   (entry) => Effect.succeed(`User ${entry.request.id} from API`)
  * )
  *
  * // Usage
@@ -455,6 +430,7 @@ export const fromFunctionBatched = <A extends Request.Any>(
  *   GetUserFromAPIRequest({ id: 123 }),
  *   UserAPIResolver
  * )
+ * await Effect.runPromise(getUserEffect) // => "User 123 from API"
  * ```
  *
  * @category constructors
@@ -491,9 +467,8 @@ export const fromEffect = <A extends Request.Any>(
  *
  * **Example** (Handling tagged request batches)
  *
- * ```ts
- * import { Effect, RequestResolver } from "effect"
- * import type { Request } from "effect"
+ * ```ts import.meta.vitest
+ * import { Effect, Request, RequestResolver } from "effect"
  *
  * interface GetUser extends Request.Request<string, Error> {
  *   readonly _tag: "GetUser"
@@ -506,6 +481,8 @@ export const fromEffect = <A extends Request.Any>(
  * }
  *
  * type MyRequest = GetUser | GetPost
+ * const GetUser = Request.tagged<GetUser>("GetUser")
+ * const GetPost = Request.tagged<GetPost>("GetPost")
  *
  * // Create a resolver that handles different request types
  * const MyResolver = RequestResolver.fromEffectTagged<MyRequest>()({
@@ -514,6 +491,12 @@ export const fromEffect = <A extends Request.Any>(
  *   GetPost: (requests) =>
  *     Effect.succeed(requests.map((req) => `Post ${req.request.id}`))
  * })
+ *
+ * const program = Effect.all([
+ *   Effect.request<GetUser>(GetUser({ id: 1 }), MyResolver),
+ *   Effect.request<GetPost>(GetPost({ id: 2 }), MyResolver)
+ * ] as const)
+ * await Effect.runPromise(program) // => ["User 1", "Post 2"]
  * ```
  *
  * @category constructors
@@ -569,7 +552,7 @@ export const fromEffectTagged = <A extends Request.Any & { readonly _tag: string
  *
  * **Example** (Setting an effectful batch delay)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetDataRequest extends Request.Request<string> {
@@ -585,17 +568,21 @@ export const fromEffectTagged = <A extends Request.Any & { readonly _tag: string
  *   })
  * )
  *
- * // Set a custom delay effect (e.g., with logging)
+ * let delayRan = false
+ *
+ * // Set a custom delay effect
  * const resolverWithCustomDelay = RequestResolver.setDelayEffect(
  *   resolver,
- *   Effect.gen(function*() {
- *     yield* Effect.log("Waiting before processing batch...")
- *     yield* Effect.sleep("50 millis")
+ *   Effect.sync(() => {
+ *     delayRan = true
  *   })
  * )
+ *
+ * await Effect.runPromise(resolverWithCustomDelay.delay)
+ * Array.of(delayRan, RequestResolver.isRequestResolver(resolverWithCustomDelay)) // => [true, true]
  * ```
  *
- * @category delay
+ * @category delays & timeouts
  * @since 4.0.0
  */
 export const setDelayEffect: {
@@ -615,7 +602,7 @@ export const setDelayEffect: {
  *
  * **Example** (Setting a batch delay)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetDataRequest extends Request.Request<string> {
@@ -634,11 +621,11 @@ export const setDelayEffect: {
  * // Add a 100ms delay to batch requests together
  * const delayedResolver = RequestResolver.setDelay(resolver, "100 millis")
  *
- * // Can also use number for milliseconds
- * const delayedResolver2 = RequestResolver.setDelay(resolver, 100)
+ * const program = Effect.request(GetDataRequest(), delayedResolver)
+ * await Effect.runPromise(program) // => "data"
  * ```
  *
- * @category delay
+ * @category delays & timeouts
  * @since 4.0.0
  */
 export const setDelay: {
@@ -658,13 +645,15 @@ export const setDelay: {
  *
  * **Example** (Running effects around request resolution)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetDataRequest extends Request.Request<string> {
  *   readonly _tag: "GetDataRequest"
  * }
  * const GetDataRequest = Request.tagged<GetDataRequest>("GetDataRequest")
+ *
+ * const events: Array<string> = []
  *
  * const resolver = RequestResolver.make<GetDataRequest>((entries) =>
  *   Effect.sync(() => {
@@ -679,16 +668,20 @@ export const setDelay: {
  *   resolver,
  *   (entries) =>
  *     Effect.gen(function*() {
- *       yield* Effect.log(`Starting batch of ${entries.length} requests`)
+ *       events.push(`Starting batch of ${entries.length} requests`)
  *       return entries.length
  *     }),
  *   (entries, initialSize) =>
- *     Effect.gen(function*() {
- *       yield* Effect.log(
- *         `Batch completed with ${entries.length} requests (started with ${initialSize})`
- *       )
+ *     Effect.sync(() => {
+ *       events.push(`Batch completed with ${entries.length} requests (started with ${initialSize})`)
  *     })
  * )
+ *
+ * const program = Effect.request(GetDataRequest(), resolverWithAround)
+ * const result = await Effect.runPromise(program)
+ *
+ * events // => ["Starting batch of 1 requests", "Batch completed with 1 requests (started with 1)"]
+ * result // => "data"
  * ```
  *
  * @category combinators
@@ -751,7 +744,7 @@ export const never: RequestResolver<never> = make(() => Effect.never)
  *
  * **Example** (Limiting parallel request batches)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetDataRequest extends Request.Request<string> {
@@ -760,9 +753,11 @@ export const never: RequestResolver<never> = make(() => Effect.never)
  * }
  * const GetDataRequest = Request.tagged<GetDataRequest>("GetDataRequest")
  *
+ * const batchSizes: Array<number> = []
+ *
  * const resolver = RequestResolver.make<GetDataRequest>((entries) =>
  *   Effect.sync(() => {
- *     console.log(`Processing batch of ${entries.length} requests`)
+ *     batchSizes.push(entries.length)
  *     for (const entry of entries) {
  *       entry.completeUnsafe(Exit.succeed(`data-${entry.request.id}`))
  *     }
@@ -777,6 +772,13 @@ export const never: RequestResolver<never> = make(() => Effect.never)
  *   { length: 12 },
  *   (_, i) => Effect.request(GetDataRequest({ id: i }), limitedResolver)
  * )
+ *
+ * const result = await Effect.runPromise(Effect.all(requests, { concurrency: "unbounded" }))
+ * batchSizes // => [5, 5, 2]
+ *
+ * result.length // => 12
+ *
+ * Array.of(result[0], result[11]) // => ["data-0", "data-11"]
  * ```
  *
  * @category combinators
@@ -797,7 +799,7 @@ export const batchN: {
  *
  * **Example** (Grouping resolver requests)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetUserRequest extends Request.Request<string> {
@@ -807,9 +809,11 @@ export const batchN: {
  * }
  * const GetUserRequest = Request.tagged<GetUserRequest>("GetUserRequest")
  *
+ * const batchSizes: Array<number> = []
+ *
  * const resolver = RequestResolver.make<GetUserRequest>((entries) =>
  *   Effect.sync(() => {
- *     console.log(`Processing ${entries.length} users`)
+ *     batchSizes.push(entries.length)
  *     for (const entry of entries) {
  *       entry.completeUnsafe(Exit.succeed(`User ${entry.request.userId}`))
  *     }
@@ -837,6 +841,13 @@ export const batchN: {
  *     groupedResolver
  *   )
  * ]
+ *
+ * const result = await Effect.runPromise(Effect.all(requests, { concurrency: "unbounded" }))
+ * batchSizes.sort()
+ *
+ * batchSizes // => [1, 2]
+ *
+ * result // => ["User 1", "User 2", "User 3"]
  * ```
  *
  * @category combinators
@@ -865,7 +876,7 @@ export const grouped: {
  *
  * **Example** (Racing request resolvers)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetDataRequest extends Request.Request<string> {
@@ -896,6 +907,8 @@ export const grouped: {
  *
  * // Race resolvers - will use whichever completes first
  * const racingResolver = RequestResolver.race(fastResolver, slowResolver)
+ * const program = Effect.request(GetDataRequest({ id: 1 }), racingResolver)
+ * await Effect.runPromise(program) // => "fast-1"
  * ```
  *
  * @category combinators
@@ -923,7 +936,7 @@ export const race: {
  *
  * **Example** (Adding a tracing span)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Effect, Exit, Request, RequestResolver } from "effect"
  *
  * interface GetDataRequest extends Request.Request<string> {
@@ -954,6 +967,7 @@ export const race: {
  *
  * // Spans will automatically include batch size and request links
  * const effect = Effect.request(GetDataRequest({ id: 123 }), tracedResolver)
+ * await Effect.runPromise(effect) // => "data-123"
  * ```
  *
  * @category combinators
@@ -1022,7 +1036,7 @@ export const withSpan: {
  * @see {@link persisted} for storing persistable request results outside process memory
  * @see {@link Cache.Cache} for operations available on the returned cache
  *
- * @category Caching
+ * @category caching
  * @since 4.0.0
  */
 export const asCache: {
@@ -1106,7 +1120,7 @@ export const asCache: {
  * @see {@link asCache} for exposing the resolver as a `Cache` with time-to-live and service lookup controls
  * @see {@link persisted} for backing persistable requests with the configured persistence store
  *
- * @category Caching
+ * @category caching
  * @since 4.0.0
  */
 export const withCache: {
@@ -1194,7 +1208,7 @@ export const withCache: {
  * @see {@link withCache} for in-memory resolver caching that does not require persistable request values or a persistence store
  * @see {@link asCache} for exposing resolver results through a `Cache` instead of returning another resolver
  *
- * @category Persistence
+ * @category caching
  * @since 4.0.0
  */
 export const persisted: {

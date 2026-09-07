@@ -1,19 +1,46 @@
+<!-- docs/getting-started/quick-start.md -->
+<!-- install the development toolchain and run the application -->
+
 # Quick start
 
-456code uses [Vite+](https://viteplus.dev/guide/), so you need the global `vp` command:
+Use Node 24.20.0 LTS or a later Node 24 release. The repository pins pnpm 12.3.4 and
+[Vite+](https://viteplus.dev/guide/) 0.3.0. Install the matching global `vp` command:
 
 ```bash
-curl -fsSL https://vite.plus | bash
+curl -fsSL https://vite.plus | env VP_VERSION=0.3.0 bash
 ```
 
-On Windows, use `irm https://vite.plus/ps1 | iex` instead. Without a global install, prefix
-every command below with `pnpm exec`.
+On Windows, use PowerShell:
+
+```powershell
+$env:VP_VERSION = "0.3.0"
+irm https://vite.plus/ps1 | iex
+```
 
 Install dependencies once:
 
 ```bash
-vp i
+vp install --frozen-lockfile
 ```
+
+Vite+ downloads the pinned native pnpm executable. Older Vite+ releases before 0.2.8 cannot
+bootstrap pnpm 12.
+
+Without a global Vite+ install, bootstrap through the compatible Corepack release:
+
+```bash
+npx --yes corepack@0.36.0 pnpm install --frozen-lockfile
+```
+
+Then prefix the `vp` commands below with `npx --yes corepack@0.36.0 pnpm exec`. This uses cached
+tools without replacing a global pnpm or Corepack installation. Older Corepack installations
+may look for the removed `bin/pnpm.cjs` entry point.
+
+CI explicitly selects `~/.vite-plus` through `VP_HOME` before `setup-vp`, keeping its executable
+discovery consistent with Vite+ 0.3's single-root layout. EAS profiles separately pin Node 24.20.0
+and pnpm 12.3.4 with Corepack disabled, so EAS provisions pnpm before dependency installation.
+An `eas-build-pre-install` hook cannot repair an incompatible pnpm bootstrap because EAS runs
+that hook through pnpm too. Keep the EAS pnpm pin aligned with the root `packageManager` field.
 
 ## Commands
 
@@ -40,6 +67,9 @@ node apps/server/dist/bin.mjs --help
 ```
 
 ## Desktop artifacts
+
+The macOS desktop app requires macOS 13 (Ventura) or later, matching the
+[Electron 44 minimum](https://www.electronjs.org/blog/electron-44-0#removed-macos-12-support).
 
 Fetch the Electron runtime first, then build for your platform:
 

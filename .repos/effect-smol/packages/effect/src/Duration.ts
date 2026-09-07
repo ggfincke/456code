@@ -1,51 +1,11 @@
 /**
- * The `Duration` module models spans of time as immutable values with support
- * for unit conversion, ordering, arithmetic, and positive or negative infinity.
- * It is the standard representation for delays, timeouts, intervals, and
- * TTL-like values across Effect APIs.
+ * Represents immutable spans of time.
  *
- * **Mental model**
- *
- * - A `Duration` stores either milliseconds, nanoseconds, `Infinity`, or
- *   `-Infinity`; operations preserve that distinction where it matters
- * - Constructor helpers such as {@link seconds} and {@link millis} build
- *   duration values for the chosen unit
- * - {@link Input} values are decoded at API boundaries: numbers mean
- *   milliseconds, bigints mean nanoseconds, tuples mean `[seconds, nanos]`,
- *   and strings use units such as `"5 seconds"`
- * - Arithmetic and ordering helpers return new duration values rather than
- *   mutating existing ones
- *
- * **Common tasks**
- *
- * - Build durations with {@link nanos}, {@link micros}, {@link millis},
- *   {@link seconds}, {@link minutes}, {@link hours}, {@link days}, or
- *   {@link weeks}
- * - Decode flexible inputs with {@link fromInput} or {@link fromInputUnsafe}
- * - Convert with {@link toMillis}, {@link toSeconds}, {@link toNanos},
- *   {@link toHrTime}, {@link parts}, or {@link format}
- * - Compare and constrain durations with {@link Order}, {@link between},
- *   {@link min}, {@link max}, and {@link clamp}
- * - Combine durations with {@link sum}, {@link subtract}, {@link times}, and
- *   {@link divide}
- *
- * **Gotchas**
- *
- * - Passing a plain number means milliseconds, not seconds
- * - {@link toNanosUnsafe} throws for infinite durations; {@link toNanos}
- *   returns `Option.none()` instead
- * - Unsafe decoders and unsafe math helpers throw or apply fallback rules for
- *   invalid inputs; prefer the safe variants when input is external
- *
- * **Example** (Decoding and formatting a duration)
- *
- * ```ts
- * import { Duration, Option } from "effect"
- *
- * const formatted = Duration.fromInput("90 seconds").pipe(
- *   Option.map((duration) => Duration.format(duration))
- * )
- * ```
+ * A `Duration` can be finite, positive infinity, or negative infinity. It is
+ * the standard representation for delays, timeouts, intervals, and
+ * time-to-live values across Effect APIs. This module includes constructors
+ * from common input shapes, unit conversions, comparisons, arithmetic,
+ * formatting, and reusable reducer or combiner helpers.
  *
  * @since 2.0.0
  */
@@ -66,11 +26,43 @@ import * as Reducer from "./Reducer.ts"
 const TypeId = "~effect/time/Duration"
 
 const bigint0 = BigInt(0)
+const bigint1 = BigInt(1)
+const bigint2 = BigInt(2)
+const bigint10 = BigInt(10)
 const bigint24 = BigInt(24)
 const bigint60 = BigInt(60)
 const bigint1e3 = BigInt(1_000)
 const bigint1e6 = BigInt(1_000_000)
 const bigint1e9 = BigInt(1_000_000_000)
+
+const roundTiesAwayFromZero = (input: number): bigint =>
+  BigInt(input < 0 ? Math.ceil(input - 0.5) : Math.floor(input + 0.5))
+
+const roundMillisToNanos = (millis: number): bigint => roundTiesAwayFromZero(millis * 1_000_000)
+
+const parseNanos = (input: string, scale: bigint): bigint => {
+  const decimalIndex = input.indexOf(".")
+  if (decimalIndex === -1) return BigInt(input) * scale
+
+  const isNegative = input[0] === "-"
+  const fractional = input.slice(decimalIndex + 1)
+  const fractionalScale = bigint10 ** BigInt(fractional.length)
+  const scaled = (
+    BigInt(input.slice(isNegative ? 1 : 0, decimalIndex)) * fractionalScale + BigInt(fractional)
+  ) * scale
+  const rounded = scaled / fractionalScale +
+    (scaled % fractionalScale * bigint2 >= fractionalScale ? bigint1 : bigint0)
+  return isNegative ? -rounded : rounded
+}
+
+const nanosToHrTime = (nanos: bigint): [seconds: number, nanos: number] => {
+  const sign = nanos < bigint0 ? -bigint1 : bigint1
+  const absolute = nanos < bigint0 ? -nanos : nanos
+  return [
+    Number(sign * (absolute / bigint1e9)),
+    Number(sign * (absolute % bigint1e9))
+  ]
+}
 
 /**
  * Represents a span of time with high precision, supporting operations from
@@ -165,7 +157,9 @@ export type Unit =
  * **Details**
  *
  * String inputs accept values like `"10 seconds"`, `"500 millis"`,
- * `"Infinity"`, and `"-Infinity"`.
+ * `"Infinity"`, and `"-Infinity"`. Finite fractional values that are
+ * normalized to nanoseconds are rounded to the nearest nanosecond, with ties
+ * away from zero.
  *
  * @see {@link fromInput} for safe conversion to `Option`
  * @see {@link fromInputUnsafe} for throwing conversion
@@ -195,12 +189,12 @@ export type Input =
  *
  * **Example** (Combining duration object fields)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * Duration.fromInputUnsafe({ seconds: 30 })
- * Duration.fromInputUnsafe({ days: 1 })
- * Duration.fromInputUnsafe({ seconds: 1, nanoseconds: 500 })
+ * Duration.fromInputUnsafe({ seconds: 30 }) // => Duration.seconds(30)
+ * Duration.fromInputUnsafe({ days: 1 }) // => Duration.days(1)
+ * Duration.fromInputUnsafe({ seconds: 1, nanoseconds: 500 }) // => Duration.nanos(1_000_000_500n)
  * ```
  *
  * @category models
@@ -222,19 +216,24 @@ const DURATION_REGEXP = /^(-?\d+(?:\.\d+)?)\s+(nanos?|micros?|millis?|seconds?|m
 /**
  * Decodes a `Duration.Input` into a `Duration`.
  *
+ * **When to use**
+ *
+ * Use when the input has already been validated or comes from a trusted source
+ * and throwing is acceptable for invalid duration syntax.
+ *
  * **Gotchas**
  *
  * If the input is not a valid `Duration.Input`, it throws an error.
  *
  * **Example** (Decoding duration inputs)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration1 = Duration.fromInputUnsafe(1000) // 1000 milliseconds
- * const duration2 = Duration.fromInputUnsafe("5 seconds")
- * const duration3 = Duration.fromInputUnsafe("Infinity")
- * const duration4 = Duration.fromInputUnsafe([2, 500_000_000]) // 2 seconds and 500ms
+ * Duration.fromInputUnsafe(1000) // => Duration.millis(1000)
+ * Duration.fromInputUnsafe("5 seconds") // => Duration.seconds(5)
+ * Duration.fromInputUnsafe("Infinity") // => Duration.infinity
+ * Duration.fromInputUnsafe([2, 500_000_000]) // => Duration.nanos(2_500_000_000n)
  * ```
  *
  * @category constructors
@@ -256,14 +255,14 @@ export const fromInputUnsafe = (input: Input): Duration => {
       const match = DURATION_REGEXP.exec(input)
       if (!match) break
       const [_, valueStr, unit] = match
+      if (unit === "nano" || unit === "nanos") {
+        return nanos(parseNanos(valueStr, bigint1))
+      }
+      if (unit === "micro" || unit === "micros") {
+        return nanos(parseNanos(valueStr, bigint1e3))
+      }
       const value = Number(valueStr)
       switch (unit) {
-        case "nano":
-        case "nanos":
-          return nanos(BigInt(valueStr))
-        case "micro":
-        case "micros":
-          return micros(BigInt(valueStr))
         case "milli":
         case "millis":
           return millis(value)
@@ -301,7 +300,7 @@ export const fromInputUnsafe = (input: Input): Duration => {
         if (input[0] === Infinity || input[1] === Infinity) {
           return infinity
         }
-        return make(BigInt(Math.round(input[0] * 1_000_000_000)) + BigInt(Math.round(input[1])))
+        return make(roundTiesAwayFromZero(input[0] * 1_000_000_000 + input[1]))
       }
       const obj = input as DurationObject
       let millis = 0
@@ -313,10 +312,9 @@ export const fromInputUnsafe = (input: Input): Duration => {
       if (obj.seconds) millis += obj.seconds * 1_000
       if (obj.milliseconds) millis += obj.milliseconds
       if (!obj.microseconds && !obj.nanoseconds) return make(millis)
-      let nanos = BigInt(millis) * bigint1e6
-      if (obj.microseconds) nanos += BigInt(obj.microseconds) * bigint1e3
-      if (obj.nanoseconds) nanos += BigInt(obj.nanoseconds)
-      return make(nanos)
+      return make(roundTiesAwayFromZero(
+        millis * 1_000_000 + (obj.microseconds ?? 0) * 1_000 + (obj.nanoseconds ?? 0)
+      ))
     }
   }
   return invalid(input)
@@ -332,12 +330,11 @@ const invalid = (input: unknown): never => {
  *
  * **Example** (Safely decoding duration inputs)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration, Option } from "effect"
  *
- * Duration.fromInput(1000).pipe(Option.map(Duration.toSeconds)) // Some(1)
- *
- * Duration.fromInput("invalid" as any) // None
+ * Duration.fromInput(1000) // => Option.some(Duration.seconds(1))
+ * Duration.fromInput("invalid" as any) // => Option.none()
  * ```
  *
  * @category constructors
@@ -354,7 +351,18 @@ const negativeInfinityDurationValue: DurationValue = { _tag: "NegativeInfinity" 
 const DurationProto: Omit<Duration, "value"> = {
   [TypeId]: TypeId,
   [Hash.symbol](this: Duration) {
-    return Hash.structure(this.value)
+    // Hash equal finite durations using the same canonical nanoseconds
+    // representation used by `equals`.
+    switch (this.value._tag) {
+      case "Millis": {
+        const nanos = this.value.millis * 1_000_000
+        return Number.isFinite(nanos) ? Hash.hash(roundTiesAwayFromZero(nanos)) : Hash.number(this.value.millis)
+      }
+      case "Nanos":
+        return Hash.hash(this.value.nanos)
+      default:
+        return Hash.structure(this.value)
+    }
   },
   [Equal.symbol](this: Duration, that: unknown): boolean {
     return isDuration(that) && equals(this, that)
@@ -399,7 +407,7 @@ const make = (input: number | bigint): Duration => {
     } else if (!Number.isFinite(input)) {
       duration.value = input > 0 ? infinityDurationValue : negativeInfinityDurationValue
     } else if (!Number.isInteger(input)) {
-      duration.value = { _tag: "Nanos", nanos: BigInt(Math.round(input * 1_000_000)) }
+      duration.value = { _tag: "Nanos", nanos: roundMillisToNanos(input) }
     } else {
       duration.value = { _tag: "Millis", millis: input }
     }
@@ -416,11 +424,11 @@ const make = (input: number | bigint): Duration => {
  *
  * **Example** (Checking for durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.isDuration(Duration.seconds(1))) // true
- * console.log(Duration.isDuration(1000)) // false
+ * Duration.isDuration(Duration.seconds(1)) // => true
+ * Duration.isDuration(1000) // => false
  * ```
  *
  * @category guards
@@ -433,14 +441,14 @@ export const isDuration = (u: unknown): u is Duration => hasProperty(u, TypeId)
  *
  * **Example** (Checking finite durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.isFinite(Duration.seconds(5))) // true
- * console.log(Duration.isFinite(Duration.infinity)) // false
+ * Duration.isFinite(Duration.seconds(5)) // => true
+ * Duration.isFinite(Duration.infinity) // => false
  * ```
  *
- * @category guards
+ * @category predicates
  * @since 2.0.0
  */
 export const isFinite = (self: Duration): boolean =>
@@ -451,14 +459,14 @@ export const isFinite = (self: Duration): boolean =>
  *
  * **Example** (Checking for zero durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.isZero(Duration.zero)) // true
- * console.log(Duration.isZero(Duration.seconds(1))) // false
+ * Duration.isZero(Duration.zero) // => true
+ * Duration.isZero(Duration.seconds(1)) // => false
  * ```
  *
- * @category guards
+ * @category predicates
  * @since 3.5.0
  */
 export const isZero = (self: Duration): boolean => {
@@ -478,15 +486,15 @@ export const isZero = (self: Duration): boolean => {
  *
  * **Example** (Checking for negative durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.isNegative(Duration.seconds(-5))) // true
- * console.log(Duration.isNegative(Duration.zero)) // false
- * console.log(Duration.isNegative(Duration.negativeInfinity)) // true
+ * Duration.isNegative(Duration.seconds(-5)) // => true
+ * Duration.isNegative(Duration.zero) // => false
+ * Duration.isNegative(Duration.negativeInfinity) // => true
  * ```
  *
- * @category guards
+ * @category predicates
  * @since 4.0.0
  */
 export const isNegative = (self: Duration): boolean => {
@@ -507,15 +515,15 @@ export const isNegative = (self: Duration): boolean => {
  *
  * **Example** (Checking for positive durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.isPositive(Duration.seconds(5))) // true
- * console.log(Duration.isPositive(Duration.zero)) // false
- * console.log(Duration.isPositive(Duration.infinity)) // true
+ * Duration.isPositive(Duration.seconds(5)) // => true
+ * Duration.isPositive(Duration.zero) // => false
+ * Duration.isPositive(Duration.infinity) // => true
  * ```
  *
- * @category guards
+ * @category predicates
  * @since 4.0.0
  */
 export const isPositive = (self: Duration): boolean => {
@@ -536,11 +544,11 @@ export const isPositive = (self: Duration): boolean => {
  *
  * **Example** (Taking absolute duration values)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * Duration.toMillis(Duration.abs(Duration.seconds(-5))) // 5000
- * Duration.abs(Duration.negativeInfinity) === Duration.infinity // true
+ * Duration.abs(Duration.seconds(-5)) // => Duration.seconds(5)
+ * Duration.abs(Duration.negativeInfinity) // => Duration.infinity
  * ```
  *
  * @category math
@@ -563,11 +571,11 @@ export const abs = (self: Duration): Duration => {
  *
  * **Example** (Negating durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * Duration.toMillis(Duration.negate(Duration.seconds(5))) // -5000
- * Duration.negate(Duration.infinity) === Duration.negativeInfinity // true
+ * Duration.negate(Duration.seconds(5)) // => Duration.seconds(-5)
+ * Duration.negate(Duration.infinity) // => Duration.negativeInfinity
  * ```
  *
  * @category math
@@ -589,12 +597,12 @@ export const negate = (self: Duration): Duration => {
 /**
  * A Duration representing zero time.
  *
- * **Example** (Using the zero duration)
+ * **Example** (Referencing the zero duration)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toMillis(Duration.zero)) // 0
+ * Duration.toMillis(Duration.zero) // => 0
  * ```
  *
  * @category constructors
@@ -605,12 +613,12 @@ export const zero: Duration = make(0)
 /**
  * A Duration representing infinite time.
  *
- * **Example** (Using infinite duration)
+ * **Example** (Referencing infinite duration)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toMillis(Duration.infinity)) // Infinity
+ * Duration.toMillis(Duration.infinity) // => Infinity
  * ```
  *
  * @category constructors
@@ -621,12 +629,12 @@ export const infinity: Duration = make(Infinity)
 /**
  * A Duration representing negative infinite time.
  *
- * **Example** (Using negative infinite duration)
+ * **Example** (Referencing negative infinite duration)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toMillis(Duration.negativeInfinity)) // -Infinity
+ * Duration.toMillis(Duration.negativeInfinity) // => -Infinity
  * ```
  *
  * @category constructors
@@ -639,11 +647,10 @@ export const negativeInfinity: Duration = make(-Infinity)
  *
  * **Example** (Creating durations from nanoseconds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.nanos(BigInt(500_000_000))
- * console.log(Duration.toMillis(duration)) // 500
+ * Duration.nanos(500_000_000n) // => Duration.nanos(500_000_000n)
  * ```
  *
  * @category constructors
@@ -656,11 +663,10 @@ export const nanos = (nanos: bigint): Duration => make(nanos)
  *
  * **Example** (Creating durations from microseconds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.micros(BigInt(500_000))
- * console.log(Duration.toMillis(duration)) // 500
+ * Duration.micros(500_000n) // => Duration.nanos(500_000_000n)
  * ```
  *
  * @category constructors
@@ -673,11 +679,10 @@ export const micros = (micros: bigint): Duration => make(micros * bigint1e3)
  *
  * **Example** (Creating durations from milliseconds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.millis(1000)
- * console.log(Duration.toMillis(duration)) // 1000
+ * Duration.toMillis(Duration.millis(1000)) // => 1000
  * ```
  *
  * @category constructors
@@ -690,11 +695,10 @@ export const millis = (millis: number): Duration => make(millis)
  *
  * **Example** (Creating durations from seconds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.seconds(30)
- * console.log(Duration.toMillis(duration)) // 30000
+ * Duration.toMillis(Duration.seconds(30)) // => 30_000
  * ```
  *
  * @category constructors
@@ -707,11 +711,10 @@ export const seconds = (seconds: number): Duration => make(seconds * 1000)
  *
  * **Example** (Creating durations from minutes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.minutes(5)
- * console.log(Duration.toMillis(duration)) // 300000
+ * Duration.toMillis(Duration.minutes(5)) // => 300_000
  * ```
  *
  * @category constructors
@@ -724,11 +727,10 @@ export const minutes = (minutes: number): Duration => make(minutes * 60_000)
  *
  * **Example** (Creating durations from hours)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.hours(2)
- * console.log(Duration.toMillis(duration)) // 7200000
+ * Duration.toMillis(Duration.hours(2)) // => 7_200_000
  * ```
  *
  * @category constructors
@@ -741,11 +743,10 @@ export const hours = (hours: number): Duration => make(hours * 3_600_000)
  *
  * **Example** (Creating durations from days)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.days(1)
- * console.log(Duration.toMillis(duration)) // 86400000
+ * Duration.toMillis(Duration.days(1)) // => 86_400_000
  * ```
  *
  * @category constructors
@@ -758,11 +759,10 @@ export const days = (days: number): Duration => make(days * 86_400_000)
  *
  * **Example** (Creating durations from weeks)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.weeks(1)
- * console.log(Duration.toMillis(duration)) // 604800000
+ * Duration.toMillis(Duration.weeks(1)) // => 604_800_000
  * ```
  *
  * @category constructors
@@ -775,11 +775,11 @@ export const weeks = (weeks: number): Duration => make(weeks * 604_800_000)
  *
  * **Example** (Converting durations to milliseconds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toMillis(Duration.seconds(5))) // 5000
- * console.log(Duration.toMillis(Duration.minutes(2))) // 120000
+ * Duration.toMillis(Duration.seconds(5)) // => 5000
+ * Duration.toMillis(Duration.minutes(2)) // => 120_000
  * ```
  *
  * @category getters
@@ -798,11 +798,11 @@ export const toMillis = (self: Input): number =>
  *
  * **Example** (Converting durations to seconds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toSeconds(Duration.millis(5000))) // 5
- * console.log(Duration.toSeconds(Duration.minutes(2))) // 120
+ * Duration.toSeconds(Duration.millis(5000)) // => 5
+ * Duration.toSeconds(Duration.minutes(2)) // => 120
  * ```
  *
  * @category getters
@@ -821,11 +821,11 @@ export const toSeconds = (self: Input): number =>
  *
  * **Example** (Converting durations to minutes)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toMinutes(Duration.seconds(120))) // 2
- * console.log(Duration.toMinutes(Duration.hours(1))) // 60
+ * Duration.toMinutes(Duration.seconds(120)) // => 2
+ * Duration.toMinutes(Duration.hours(1)) // => 60
  * ```
  *
  * @category getters
@@ -844,11 +844,11 @@ export const toMinutes = (self: Input): number =>
  *
  * **Example** (Converting durations to hours)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toHours(Duration.minutes(120))) // 2
- * console.log(Duration.toHours(Duration.days(1))) // 24
+ * Duration.toHours(Duration.minutes(120)) // => 2
+ * Duration.toHours(Duration.days(1)) // => 24
  * ```
  *
  * @category getters
@@ -867,11 +867,11 @@ export const toHours = (self: Input): number =>
  *
  * **Example** (Converting durations to days)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toDays(Duration.hours(48))) // 2
- * console.log(Duration.toDays(Duration.weeks(1))) // 7
+ * Duration.toDays(Duration.hours(48)) // => 2
+ * Duration.toDays(Duration.weeks(1)) // => 7
  * ```
  *
  * @category getters
@@ -890,11 +890,11 @@ export const toDays = (self: Input): number =>
  *
  * **Example** (Converting durations to weeks)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * console.log(Duration.toWeeks(Duration.days(14))) // 2
- * console.log(Duration.toWeeks(Duration.days(7))) // 1
+ * Duration.toWeeks(Duration.days(14)) // => 2
+ * Duration.toWeeks(Duration.days(7)) // => 1
  * ```
  *
  * @category getters
@@ -909,7 +909,17 @@ export const toWeeks = (self: Input): number =>
   })
 
 /**
- * Gets the duration in nanoseconds as a bigint, throwing for infinite durations.
+ * Gets the duration in nanoseconds as a bigint.
+ *
+ * **When to use**
+ *
+ * Use when the duration is known to be finite and you need the nanosecond value
+ * as a `bigint`.
+ *
+ * **Details**
+ *
+ * Millisecond-backed fractional durations are rounded to the nearest
+ * nanosecond, with ties away from zero.
  *
  * **Gotchas**
  *
@@ -917,12 +927,10 @@ export const toWeeks = (self: Input): number =>
  *
  * **Example** (Reading nanoseconds unsafely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.seconds(2)
- * const nanos = Duration.toNanosUnsafe(duration)
- * console.log(nanos) // 2000000000n
+ * Duration.toNanosUnsafe(Duration.seconds(2)) // => 2_000_000_000n
  *
  * // Duration.toNanosUnsafe(Duration.infinity)
  * // throws Error: "Cannot convert infinite duration to nanos"
@@ -940,7 +948,7 @@ export const toNanosUnsafe = (input: Input): bigint => {
     case "Nanos":
       return self.value.nanos
     case "Millis":
-      return BigInt(Math.round(self.value.millis * 1_000_000))
+      return roundMillisToNanos(self.value.millis)
   }
 }
 
@@ -953,13 +961,11 @@ export const toNanosUnsafe = (input: Input): bigint => {
  *
  * **Example** (Safely reading nanoseconds)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration, Option } from "effect"
  *
- * Duration.toNanos(Duration.seconds(1)) // Some(1000000000n)
- *
- * Duration.toNanos(Duration.infinity) // None
- * Option.getOrUndefined(Duration.toNanos(Duration.infinity)) // undefined
+ * Duration.toNanos(Duration.seconds(1)) // => Option.some(1_000_000_000n)
+ * Duration.toNanos(Duration.infinity) // => Option.none()
  * ```
  *
  * @category getters
@@ -972,12 +978,10 @@ export const toNanos: (self: Input) => Option.Option<bigint> = Option.liftThrowa
  *
  * **Example** (Converting durations to high-resolution time)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const duration = Duration.millis(1500)
- * const hrtime = Duration.toHrTime(duration)
- * console.log(hrtime) // [1, 500000000]
+ * Duration.toHrTime(Duration.millis(1500)) // => [1, 500_000_000]
  * ```
  *
  * @category getters
@@ -990,24 +994,10 @@ export const toHrTime = (input: Input): [seconds: number, nanos: number] => {
       return [Infinity, 0]
     case "NegativeInfinity":
       return [-Infinity, 0]
-    case "Nanos": {
-      const n = self.value.nanos
-      const sign = n < bigint0 ? -BigInt(1) : BigInt(1)
-      const a = n < bigint0 ? -n : n
-      return [
-        Number(sign * (a / bigint1e9)),
-        Number(sign * (a % bigint1e9))
-      ]
-    }
-    case "Millis": {
-      const m = self.value.millis
-      const sign = m < 0 ? -1 : 1
-      const a = Math.abs(m)
-      return [
-        sign * Math.floor(a / 1000),
-        sign * Math.round((a % 1000) * 1_000_000)
-      ]
-    }
+    case "Nanos":
+      return nanosToHrTime(self.value.nanos)
+    case "Millis":
+      return nanosToHrTime(roundMillisToNanos(self.value.millis))
   }
 }
 
@@ -1022,15 +1012,14 @@ export const toHrTime = (input: Input): [seconds: number, nanos: number] => {
  *
  * **Example** (Pattern matching on duration representations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const result = Duration.match(Duration.seconds(5), {
+ * Duration.match(Duration.seconds(5), {
  *   onMillis: (millis) => `${millis} milliseconds`,
  *   onNanos: (nanos) => `${nanos} nanoseconds`,
  *   onInfinity: () => "infinite"
- * })
- * console.log(result) // "5000 milliseconds"
+ * }) // => "5000 milliseconds"
  * ```
  *
  * @category pattern matching
@@ -1080,15 +1069,14 @@ export const match: {
  *
  * **Example** (Pattern matching on duration pairs)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const sum = Duration.matchPair(Duration.seconds(3), Duration.seconds(2), {
+ * Duration.matchPair(Duration.seconds(3), Duration.seconds(2), {
  *   onMillis: (a, b) => a + b,
  *   onNanos: (a, b) => Number(a + b),
  *   onInfinity: () => Infinity
- * })
- * console.log(sum) // 5000
+ * }) // => 5000
  * ```
  *
  * @category pattern matching
@@ -1143,7 +1131,7 @@ export const matchPair: {
  *
  * **Example** (Sorting durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
  * const durations = [
@@ -1151,8 +1139,7 @@ export const matchPair: {
  *   Duration.seconds(1),
  *   Duration.seconds(2)
  * ]
- * const sorted = durations.sort((a, b) => Duration.Order(a, b))
- * console.log(sorted.map(Duration.toSeconds)) // [1, 2, 3]
+ * durations.sort((a, b) => Duration.Order(a, b)).map(Duration.toSeconds) // => [1, 2, 3]
  * ```
  *
  * @category instances
@@ -1193,14 +1180,13 @@ export const Order: order.Order<Duration> = order.make((self, that) =>
  *
  * **Example** (Checking duration ranges)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const isInRange = Duration.between(Duration.seconds(3), {
+ * Duration.between(Duration.seconds(3), {
  *   minimum: Duration.seconds(2),
  *   maximum: Duration.seconds(5)
- * })
- * console.log(isInRange) // true
+ * }) // => true
  * ```
  *
  * @see {@link clamp} for constraining a duration to a range
@@ -1220,11 +1206,10 @@ export const between: {
  *
  * **Example** (Comparing durations for equivalence)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const isEqual = Duration.Equivalence(Duration.seconds(5), Duration.millis(5000))
- * console.log(isEqual) // true
+ * Duration.Equivalence(Duration.seconds(5), Duration.millis(5000)) // => true
  * ```
  *
  * @category instances
@@ -1242,11 +1227,10 @@ export const Equivalence: Equ.Equivalence<Duration> = (self, that) =>
  *
  * **Example** (Selecting the shorter duration)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const shorter = Duration.min(Duration.seconds(5), Duration.seconds(3))
- * console.log(Duration.toSeconds(shorter)) // 3
+ * Duration.min(Duration.seconds(5), Duration.seconds(3)) // => Duration.seconds(3)
  * ```
  *
  * @category ordering
@@ -1262,14 +1246,13 @@ export const min: {
  *
  * **Example** (Selecting the longer duration)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const longer = Duration.max(Duration.seconds(5), Duration.seconds(3))
- * console.log(Duration.toSeconds(longer)) // 5
+ * Duration.max(Duration.seconds(5), Duration.seconds(3)) // => Duration.seconds(5)
  * ```
  *
- * @category order
+ * @category ordering
  * @since 2.0.0
  */
 export const max: {
@@ -1282,17 +1265,16 @@ export const max: {
  *
  * **Example** (Clamping durations to a range)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const clamped = Duration.clamp(Duration.seconds(10), {
+ * Duration.clamp(Duration.seconds(10), {
  *   minimum: Duration.seconds(2),
  *   maximum: Duration.seconds(5)
- * })
- * console.log(Duration.toSeconds(clamped)) // 5
+ * }) // => Duration.seconds(5)
  * ```
  *
- * @category order
+ * @category ordering
  * @since 2.0.0
  */
 export const clamp: {
@@ -1311,13 +1293,11 @@ export const clamp: {
  *
  * **Example** (Safely dividing durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration, Option } from "effect"
  *
- * const d = Duration.divide(Duration.seconds(10), 2)
- * console.log(Option.map(d, Duration.toSeconds)) // Some(5)
- *
- * Duration.divide(Duration.seconds(10), 0) // None
+ * Duration.divide(Duration.seconds(10), 2) // => Option.some(Duration.seconds(5))
+ * Duration.divide(Duration.seconds(10), 0) // => Option.none()
  * ```
  *
  * @category math
@@ -1350,6 +1330,11 @@ export const divide: {
  * Divides a `Duration` by a number using fallback rules instead of returning
  * an `Option`.
  *
+ * **When to use**
+ *
+ * Use when dividing a `Duration` should return `Duration.zero` or signed
+ * infinity for invalid cases instead of forcing callers to handle `Option.none`.
+ *
  * **Details**
  *
  * Non-finite divisors return `Duration.zero`. Division by positive or negative
@@ -1360,14 +1345,11 @@ export const divide: {
  *
  * **Example** (Dividing durations unsafely)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const half = Duration.divideUnsafe(Duration.seconds(10), 2)
- * console.log(Duration.toSeconds(half)) // 5
- *
- * const infinite = Duration.divideUnsafe(Duration.seconds(10), 0)
- * console.log(Duration.toMillis(infinite)) // Infinity
+ * Duration.divideUnsafe(Duration.seconds(10), 2) // => Duration.seconds(5)
+ * Duration.divideUnsafe(Duration.seconds(10), 0) // => Duration.infinity
  * ```
  *
  * @category math
@@ -1414,11 +1396,10 @@ export const divideUnsafe: {
  *
  * **Example** (Multiplying durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const doubled = Duration.times(Duration.seconds(5), 2)
- * console.log(Duration.toSeconds(doubled)) // 10
+ * Duration.times(Duration.seconds(5), 2) // => Duration.seconds(10)
  * ```
  *
  * @category math
@@ -1443,24 +1424,19 @@ export const times: {
  *
  * **Details**
  *
- * Infinity subtraction follows these rules:
- *
- * - infinity - infinity = 0
- * - infinity - negativeInfinity = infinity
- * - infinity - finite = infinity
- * - negativeInfinity - negativeInfinity = 0
- * - negativeInfinity - infinity = negativeInfinity
- * - negativeInfinity - finite = negativeInfinity
- * - finite - infinity = negativeInfinity
- * - finite - negativeInfinity = infinity
+ * Infinity subtraction follows signed-infinity arithmetic. Subtracting the
+ * same infinity from itself returns zero. Positive infinity minus negative
+ * infinity or any finite duration remains positive infinity. Negative infinity
+ * minus positive infinity or any finite duration remains negative infinity.
+ * Finite durations minus positive infinity produce negative infinity, and
+ * finite durations minus negative infinity produce positive infinity.
  *
  * **Example** (Subtracting durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const result = Duration.subtract(Duration.seconds(10), Duration.seconds(3))
- * console.log(Duration.toSeconds(result)) // 7
+ * Duration.subtract(Duration.seconds(10), Duration.seconds(3)) // => Duration.seconds(7)
  * ```
  *
  * @category math
@@ -1500,11 +1476,10 @@ export const subtract: {
  *
  * **Example** (Adding durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const total = Duration.sum(Duration.seconds(5), Duration.seconds(3))
- * console.log(Duration.toSeconds(total)) // 8
+ * Duration.sum(Duration.seconds(5), Duration.seconds(3)) // => Duration.seconds(8)
  * ```
  *
  * @category math
@@ -1537,11 +1512,10 @@ export const sum: {
  *
  * **Example** (Comparing durations with less than)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const isLess = Duration.isLessThan(Duration.seconds(3), Duration.seconds(5))
- * console.log(isLess) // true
+ * Duration.isLessThan(Duration.seconds(3), Duration.seconds(5)) // => true
  * ```
  *
  * @category predicates
@@ -1557,14 +1531,13 @@ export const isLessThan: {
  *
  * **Example** (Comparing durations with less than or equal)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const isLessOrEqual = Duration.isLessThanOrEqualTo(
+ * Duration.isLessThanOrEqualTo(
  *   Duration.seconds(5),
  *   Duration.seconds(5)
- * )
- * console.log(isLessOrEqual) // true
+ * ) // => true
  * ```
  *
  * @category predicates
@@ -1580,11 +1553,10 @@ export const isLessThanOrEqualTo: {
  *
  * **Example** (Comparing durations with greater than)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const isGreater = Duration.isGreaterThan(Duration.seconds(5), Duration.seconds(3))
- * console.log(isGreater) // true
+ * Duration.isGreaterThan(Duration.seconds(5), Duration.seconds(3)) // => true
  * ```
  *
  * @category predicates
@@ -1600,14 +1572,13 @@ export const isGreaterThan: {
  *
  * **Example** (Comparing durations with greater than or equal)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const isGreaterOrEqual = Duration.isGreaterThanOrEqualTo(
+ * Duration.isGreaterThanOrEqualTo(
  *   Duration.seconds(5),
  *   Duration.seconds(5)
- * )
- * console.log(isGreaterOrEqual) // true
+ * ) // => true
  * ```
  *
  * @category predicates
@@ -1623,11 +1594,10 @@ export const isGreaterThanOrEqualTo: {
  *
  * **Example** (Checking duration equality)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * const isEqual = Duration.equals(Duration.seconds(5), Duration.millis(5000))
- * console.log(isEqual) // true
+ * Duration.equals(Duration.seconds(5), Duration.millis(5000)) // => true
  * ```
  *
  * @category predicates
@@ -1649,7 +1619,7 @@ export const equals: {
  *
  * **Example** (Decomposing durations into parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
  * // Create a complex duration by adding multiple parts
@@ -1660,28 +1630,10 @@ export const equals: {
  *   ),
  *   Duration.millis(123)
  * )
- * const components = Duration.parts(duration)
- * console.log(components)
- * // {
- * //   days: 1,
- * //   hours: 2,
- * //   minutes: 30,
- * //   seconds: 45,
- * //   millis: 123,
- * //   nanos: 0
- * // }
+ * Duration.parts(duration) // => ({ days: 1, hours: 2, minutes: 30, seconds: 45, millis: 123, nanos: 0 })
  *
  * const complex = Duration.sum(Duration.hours(25), Duration.minutes(90))
- * const complexParts = Duration.parts(complex)
- * console.log(complexParts)
- * // {
- * //   days: 1,
- * //   hours: 2,
- * //   minutes: 30,
- * //   seconds: 0,
- * //   millis: 0,
- * //   nanos: 0
- * // }
+ * Duration.parts(complex) // => ({ days: 1, hours: 2, minutes: 30, seconds: 0, millis: 0, nanos: 0 })
  * ```
  *
  * @category converting
@@ -1741,11 +1693,11 @@ export const parts = (self: Duration): {
  *
  * **Example** (Formatting durations)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Duration } from "effect"
  *
- * Duration.format(Duration.millis(1000)) // "1s"
- * Duration.format(Duration.millis(1001)) // "1s 1ms"
+ * Duration.format(Duration.millis(1000)) // => "1s"
+ * Duration.format(Duration.millis(1001)) // => "1s 1ms"
  * ```
  *
  * @category converting

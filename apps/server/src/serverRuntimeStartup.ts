@@ -46,7 +46,7 @@ import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefRe
 import * as ArchitectureAdmissionService from './architecture/ArchitectureAdmissionService.ts'
 import { formatHeadlessServeOutput, issueHeadlessServeAccessInfo } from './startupAccess.ts'
 
-export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
+export class ServerRuntimeStartupError extends Schema.TaggedError<ServerRuntimeStartupError>()(
   'ServerRuntimeStartupError',
   {
     mode: ServerConfig.RuntimeMode,
@@ -62,7 +62,7 @@ export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRun
   }
 }
 
-export class ServerRuntimeCommandTimeoutError extends Schema.TaggedErrorClass<ServerRuntimeCommandTimeoutError>()(
+export class ServerRuntimeCommandTimeoutError extends Schema.TaggedError<ServerRuntimeCommandTimeoutError>()(
   'ServerRuntimeCommandTimeoutError',
   {
     timeoutMs: Schema.Number,

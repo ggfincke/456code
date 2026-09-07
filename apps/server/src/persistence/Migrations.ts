@@ -172,7 +172,7 @@ export interface MigrationIdentity
   readonly name: string
 }
 
-export class MigrationLineageError extends Schema.TaggedErrorClass<MigrationLineageError>()(
+export class MigrationLineageError extends Schema.TaggedError<MigrationLineageError>()(
   'MigrationLineageError',
   {
     reason: Schema.Literals([

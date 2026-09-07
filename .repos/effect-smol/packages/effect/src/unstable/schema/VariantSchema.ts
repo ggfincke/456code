@@ -1,32 +1,20 @@
 /**
- * Build families of related struct schemas from one field definition.
+ * Builds related schemas for named variants from shared field definitions.
  *
- * `VariantSchema` is useful when the same domain object needs several schema
- * views, such as database select / insert / update shapes, JSON read / write
- * shapes, public versus private API views, or constructor schemas with
- * generated defaults. {@link make} fixes a closed set of variant names and a
- * default variant, then returns helpers for defining shared `Struct` values,
- * per-variant `Field` values, schema classes, unions, and extracted
- * `Schema.Struct` projections.
- *
- * A plain schema in a variant struct is present in every variant, a `Field`
- * contributes a property only to the variants named in its config, and nested
- * variant structs are extracted recursively. Variants are projections, not
- * discriminated alternatives: this module does not add a tag field, so include
- * an explicit literal tag when a decoded union needs runtime discrimination.
- * Also remember that the default variant is the schema used by generated
- * classes and ordinary variant unions; per-variant schemas are exposed
- * separately on those generated values.
+ * `make` fixes the variant names and default variant, then lets callers define
+ * fields that are shared by all variants or specific to some variants. From
+ * those definitions it can create schema classes, unions, extracted struct
+ * schemas, and helpers for changing fields across variants.
  *
  * @since 4.0.0
  */
 import type { Brand } from "../../Brand.ts"
 import * as Effect from "../../Effect.ts"
 import { dual } from "../../Function.ts"
+import * as InternalRecord from "../../internal/record.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
-import type * as AST from "../../SchemaAST.ts"
 import * as Struct_ from "../../Struct.ts"
 
 /**
@@ -38,6 +26,7 @@ import * as Struct_ from "../../Struct.ts"
 export const TypeId = "~effect/schema/VariantSchema"
 
 const cacheSymbol = Symbol.for(`${TypeId}/cache`)
+const defaultCacheSymbol = Symbol.for(`${TypeId}/defaultCache`)
 
 /**
  * Pipeable container of schema fields that can be extracted into per-variant
@@ -50,6 +39,8 @@ export interface Struct<in out A extends Field.Fields> extends Pipeable {
   readonly [TypeId]: A
   /** @internal */
   [cacheSymbol]?: Record<string, Schema.Top>
+  /** @internal */
+  [defaultCacheSymbol]?: Record<string, Schema.Top>
 }
 
 /**
@@ -99,7 +90,7 @@ export declare namespace Struct {
   export type Validate<A, Variant extends string> = {
     readonly [K in keyof A]: A[K] extends { readonly [TypeId]: infer _ } ? Validate<A[K], Variant> :
       A[K] extends Field<infer Config> ? [keyof Config] extends [Variant] ? {} : "field must have valid variants"
-      : {}
+      : unknown
   }
 }
 
@@ -156,7 +147,7 @@ export declare namespace Field {
    * @since 4.0.0
    */
   export type ConfigWithKeys<K extends string> = {
-    readonly [P in K]?: Schema.Top
+    readonly [P in K]?: Schema.Top | undefined
   }
 
   /**
@@ -179,7 +170,7 @@ export declare namespace Field {
  * Computes the `Schema.Struct` field map for a variant by selecting matching
  * field schemas and recursively extracting nested structs.
  *
- * @category extractors
+ * @category utility types
  * @since 4.0.0
  */
 export type ExtractFields<V extends string, Fields extends Struct.Fields, IsDefault = false> = {
@@ -198,7 +189,7 @@ export type ExtractFields<V extends string, Fields extends Struct.Fields, IsDefa
  * Computes the schema type produced by extracting a single variant from a variant
  * schema struct.
  *
- * @category extractors
+ * @category utility types
  * @since 4.0.0
  */
 export type Extract<V extends string, A extends Struct<any>, IsDefault = false> = [A] extends [
@@ -226,29 +217,38 @@ const extract: {
       readonly isDefault?: boolean | undefined
     }
   ): Extract<V, A> => {
-    const cache = self[cacheSymbol] ?? (self[cacheSymbol] = {})
-    const cacheKey = options?.isDefault === true ? "__default" : variant
-    if (cache[cacheKey] !== undefined) {
-      return cache[cacheKey] as any
+    const cache = options?.isDefault === true
+      ? self[defaultCacheSymbol] ?? (self[defaultCacheSymbol] = Object.create(null))
+      : self[cacheSymbol] ?? (self[cacheSymbol] = Object.create(null))
+    if (Object.hasOwn(cache, variant)) {
+      return cache[variant] as any
     }
     const fields: Record<string, any> = {}
     for (const key of Object.keys(self[TypeId])) {
       const value = self[TypeId][key]
+      if (value === undefined) {
+        continue
+      }
       if (TypeId in value) {
         if (options?.isDefault === true && Schema.isSchema(value)) {
-          fields[key] = value
+          InternalRecord.assignProperty(fields, key, value)
         } else {
-          fields[key] = extract(value, variant)
+          InternalRecord.assignProperty(fields, key, extract(value, variant))
         }
       } else if (FieldTypeId in value) {
-        if (variant in value.schemas) {
-          fields[key] = value.schemas[variant]
+        if (Object.hasOwn(value.schemas, variant)) {
+          const schema = value.schemas[variant]
+          if (schema !== undefined) {
+            InternalRecord.assignProperty(fields, key, schema)
+          }
         }
       } else {
-        fields[key] = value
+        InternalRecord.assignProperty(fields, key, value)
       }
     }
-    return cache[cacheKey] = Schema.Struct(fields) as any
+    const schema = Schema.Struct(fields)
+    cache[variant] = schema
+    return schema as any
   }
 )
 
@@ -273,26 +273,15 @@ export interface Class<
   S extends Schema.Top & {
     readonly fields: Schema.Struct.Fields
   }
-> extends
-  Schema.Bottom<
-    Self,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
-    AST.Declaration,
-    Schema.decodeTo<Schema.declareConstructor<Self, S["Encoded"], readonly [S], S["Iso"]>, S>,
-    S["~type.make.in"],
-    S["Iso"],
-    readonly [S],
-    Self,
-    S["~type.mutability"],
-    S["~type.optionality"],
-    S["~type.constructor.default"],
-    S["~encoded.mutability"],
-    S["~encoded.optionality"]
-  >,
-  Struct<Struct_.Simplify<Fields>>
-{
+> extends Schema.Class<Self, S, {}>, Struct<Struct_.Simplify<Fields>> {
+  readonly "Type": Self
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": Self
+  readonly "Iso": S["Iso"]
+
   new(
     props: S["~type.make.in"],
     options?: {
@@ -317,12 +306,13 @@ type MissingSelfGeneric<Params extends string = ""> =
  * @category models
  * @since 4.0.0
  */
-export interface Union<Members extends ReadonlyArray<Struct<any>>> extends
-  Schema.Union<
-    {
-      readonly [K in keyof Members]: [Members[K]] extends [Schema.Top] ? Members[K] : never
-    }
-  >
+export interface Union<Members extends ReadonlyArray<Struct<any>>, Default extends string = string>
+  extends
+    Schema.Union<
+      {
+        readonly [K in keyof Members]: Extract<Default, Members[K], true>
+      }
+    >
 {}
 
 /**
@@ -431,7 +421,7 @@ export const make = <
       }
   readonly Union: <const Members extends ReadonlyArray<Struct<any>>>(
     members: Members
-  ) => Union<Members> & Union.Variants<Members, Variants[number]>
+  ) => Union<Members, Default> & Union.Variants<Members, Variants[number]>
   readonly extract: {
     <V extends Variants[number]>(
       variant: V
@@ -473,7 +463,7 @@ export const make = <
     return function<S extends Schema.Top>(schema: S) {
       const obj: Record<string, S> = {}
       for (const key of keys) {
-        obj[key] = schema
+        InternalRecord.assignProperty(obj, key, schema)
       }
       return Field(obj)
     }
@@ -483,14 +473,14 @@ export const make = <
       const obj: Record<string, S> = {}
       for (const variant of options.variants) {
         if (!keys.includes(variant)) {
-          obj[variant] = schema
+          InternalRecord.assignProperty(obj, variant, schema)
         }
       }
       return Field(obj)
     }
   }
   function UnionVariants(members: ReadonlyArray<Struct<any>>) {
-    return Union(members, options.variants)
+    return Union(members, options.defaultVariant, options.variants)
   }
   const fieldEvolve = dual(
     2,
@@ -527,7 +517,7 @@ export const make = <
 /**
  * Marks a value as an explicit override for an `Overrideable` schema default.
  *
- * @category overrideable
+ * @category constructors
  * @since 4.0.0
  */
 export const Override = <A>(value: A): A & Brand<"Override"> => value as any
@@ -536,34 +526,35 @@ export const Override = <A>(value: A): A & Brand<"Override"> => value as any
  * Schema type whose constructor can use an effectful default unless a value is
  * explicitly branded with `Override`.
  *
- * @category overrideable
+ * @category schemas
  * @since 4.0.0
  */
 export interface Overrideable<S extends Schema.Top & Schema.WithoutConstructorDefault> extends
-  Schema.Bottom<
-    S["Type"] & Brand<"Override">,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+  Schema.BottomLazy<
     S["ast"],
     Overrideable<S>,
-    S["~type.make.in"],
-    (S["Type"] & Brand<"Override">) | undefined,
     S["~type.parameters"],
-    (S["Type"] & Brand<"Override">) | undefined,
     S["~type.mutability"],
     "required",
     "with-default",
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{}
+{
+  readonly "Type": S["Type"] & Brand<"Override">
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": (S["Type"] & Brand<"Override">) | undefined
+  readonly "Iso": (S["Type"] & Brand<"Override">) | undefined
+}
 
 /**
  * Wraps a schema with an effectful constructor default while allowing explicit
  * values to be marked with `Override`.
  *
- * @category overrideable
+ * @category schemas
  * @since 4.0.0
  */
 export const Overrideable = <S extends Schema.Top & Schema.WithoutConstructorDefault>(
@@ -602,11 +593,18 @@ const Field = <const A extends Field.Config>(schemas: A): Field<A> => {
   return self
 }
 
-const Union = <Members extends ReadonlyArray<Struct<any>>, Variants extends ReadonlyArray<string>>(
+const Union = <
+  Members extends ReadonlyArray<Struct<any>>,
+  Default extends string,
+  Variants extends ReadonlyArray<string>
+>(
   members: Members,
+  defaultVariant: Default,
   variants: Variants
 ) => {
-  const VariantUnion = Schema.Union(members.filter((member) => Schema.isSchema(member))) as any
+  const VariantUnion = Schema.Union(
+    members.map((member) => Schema.isSchema(member) ? member : extract(member, defaultVariant, { isDefault: true }))
+  ) as any
   for (const variant of variants) {
     Object.defineProperty(VariantUnion, variant, {
       value: Schema.Union(members.map((member) => extract(member, variant)))

@@ -1,67 +1,22 @@
 /**
- * The `Prompt` module provides several data structures to simplify creating and
- * combining prompts.
+ * Defines prompts sent to AI language models.
  *
- * This module defines the complete structure of a conversation with a large
- * language model, including messages, content parts, and provider-specific
- * options. It supports rich content types like text, files, tool calls, and
- * reasoning.
- *
- * **Example** (Creating a structured conversation)
- *
- * ```ts
- * import { Prompt } from "effect/unstable/ai"
- *
- * // Create a structured conversation
- * const conversation = Prompt.make([
- *   {
- *     role: "system",
- *     content: "You are a helpful assistant specialized in mathematics."
- *   },
- *   {
- *     role: "user",
- *     content: [{
- *       type: "text",
- *       text: "What is the derivative of x²?"
- *     }]
- *   },
- *   {
- *     role: "assistant",
- *     content: [{
- *       type: "text",
- *       text: "The derivative of x² is 2x."
- *     }]
- *   }
- * ])
- * ```
- *
- * **Example** (Combining prompts)
- *
- * ```ts
- * import { Prompt } from "effect/unstable/ai"
- *
- * // Concatenate multiple prompts together sequentially
- * const systemPrompt = Prompt.make([{
- *   role: "system",
- *   content: "You are a coding assistant."
- * }])
- *
- * const userPrompt = Prompt.make("Help me write a function")
- *
- * const combined = Prompt.concat(systemPrompt, userPrompt)
- * ```
+ * A prompt is an ordered list of messages. Messages can use roles such as
+ * system, user, assistant, and tool, and their content can be split into typed
+ * parts such as text, files, reasoning, tool calls, tool results, and approval
+ * messages. This module helps build prompts, combine them, and convert raw
+ * input or response parts into the shared prompt shape.
  *
  * @since 4.0.0
  */
 import * as Arr from "../../Array.ts"
 import * as Effect from "../../Effect.ts"
 import { dual } from "../../Function.ts"
-import * as Option from "../../Option.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
 import * as SchemaIssue from "../../SchemaIssue.ts"
-import * as Parser from "../../SchemaParser.ts"
+import * as SchemaParser from "../../SchemaParser.ts"
 import * as SchemaTransformation from "../../SchemaTransformation.ts"
 import type * as Response from "./Response.ts"
 
@@ -78,7 +33,7 @@ import type * as Response from "./Response.ts"
  * Provider-specific options are keyed by provider-specific names, and each
  * value is JSON or `null`.
  *
- * @category models
+ * @category options
  * @since 4.0.0
  */
 export const ProviderOptions: Schema.$Record<
@@ -90,7 +45,7 @@ export const ProviderOptions: Schema.$Record<
  * Type of provider-specific options that can be attached to prompt messages
  * and content parts.
  *
- * @category models
+ * @category options
  * @since 4.0.0
  */
 export type ProviderOptions = typeof ProviderOptions.Type
@@ -197,7 +152,7 @@ const BasePart = Schema.Struct({
  *
  * **Example** (Creating content parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const textPart = Prompt.makePart("text", {
@@ -209,6 +164,8 @@ const BasePart = Schema.Struct({
  *   fileName: "screenshot.png",
  *   data: new Uint8Array([1, 2, 3])
  * })
+ *
+ * const result = [textPart.type, filePart.type] // => ["text", "file"]
  * ```
  *
  * @category constructors
@@ -239,7 +196,7 @@ export const makePart = <const Type extends Part["type"]>(
  * A utility type for specifying the parameters required to construct a
  * specific part of a prompt.
  *
- * @category Utility Types
+ * @category utility types
  * @since 4.0.0
  */
 export type PartConstructorParams<P extends Part> = Omit<P, typeof PartTypeId | "type" | "options"> & {
@@ -263,12 +220,13 @@ export type PartConstructorParams<P extends Part> = Omit<P, typeof PartTypeId | 
  *
  * **Example** (Creating text parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const textPart: Prompt.TextPart = Prompt.makePart("text", {
  *   text: "Hello, how can I help you today?"
  * })
+ * textPart.text // => "Hello, how can I help you today?"
  * ```
  *
  * @category models
@@ -298,7 +256,7 @@ export interface TextPartEncoded extends BasePartEncoded<"text", TextPartOptions
  * Represents provider-specific options that can be associated with a
  * `TextPart` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface TextPartOptions extends ProviderOptions {}
@@ -345,13 +303,14 @@ export const textPart = (params: PartConstructorParams<TextPart>): TextPart => m
  *
  * **Example** (Creating reasoning parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const reasoningPart: Prompt.ReasoningPart = Prompt.makePart("reasoning", {
  *   text:
  *     "Summary: the response compares the requested options by price and availability."
  * })
+ * reasoningPart.type // => "reasoning"
  * ```
  *
  * @category models
@@ -381,7 +340,7 @@ export interface ReasoningPartEncoded extends BasePartEncoded<"reasoning", Reaso
  * Represents provider-specific options that can be associated with a
  * `ReasoningPart` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface ReasoningPartOptions extends ProviderOptions {}
@@ -431,7 +390,7 @@ export const reasoningPart = (params: PartConstructorParams<ReasoningPart>): Rea
  *
  * **Example** (Creating file parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const imagePart: Prompt.FilePart = Prompt.makePart("file", {
@@ -445,6 +404,8 @@ export const reasoningPart = (params: PartConstructorParams<ReasoningPart>): Rea
  *   fileName: "report.pdf",
  *   data: new Uint8Array([1, 2, 3])
  * })
+ *
+ * const result = [imagePart.mediaType, documentPart.fileName] // => ["image/jpeg", "report.pdf"]
  * ```
  *
  * @category models
@@ -490,7 +451,7 @@ export interface FilePartEncoded extends BasePartEncoded<"file", FilePartOptions
  * Represents provider-specific options that can be associated with a
  * `FilePart` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface FilePartOptions extends ProviderOptions {}
@@ -545,7 +506,7 @@ export const filePart = (params: PartConstructorParams<FilePart>): FilePart => m
  *
  * **Example** (Creating tool call parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const toolCallPart: Prompt.ToolCallPart = Prompt.makePart("tool-call", {
@@ -554,6 +515,7 @@ export const filePart = (params: PartConstructorParams<FilePart>): FilePart => m
  *   params: { city: "San Francisco", units: "celsius" },
  *   providerExecuted: false
  * })
+ * toolCallPart.name // => "get_weather"
  * ```
  *
  * @category models
@@ -607,7 +569,7 @@ export interface ToolCallPartEncoded extends BasePartEncoded<"tool-call", ToolCa
  * Represents provider-specific options that can be associated with a
  * `ToolCallPart` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface ToolCallPartOptions extends ProviderOptions {}
@@ -658,7 +620,7 @@ export const toolCallPart = (params: PartConstructorParams<ToolCallPart>): ToolC
  *
  * **Example** (Creating tool result parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const toolResultPart: Prompt.ToolResultPart = Prompt.makePart("tool-result", {
@@ -669,8 +631,10 @@ export const toolCallPart = (params: PartConstructorParams<ToolCallPart>): ToolC
  *     temperature: 22,
  *     condition: "sunny",
  *     humidity: 65
- *   }
+ *   },
+ *   providerExecuted: false
  * })
+ * const result = [toolResultPart.name, toolResultPart.isFailure] // => ["get_weather", false]
  * ```
  *
  * @category models
@@ -693,6 +657,10 @@ export interface ToolResultPart extends BasePart<"tool-result", ToolResultPartOp
    * The result returned by the tool execution.
    */
   readonly result: unknown
+  /**
+   * Whether the tool was executed by the provider (true) or framework (false).
+   */
+  readonly providerExecuted: boolean
 }
 
 /**
@@ -718,13 +686,17 @@ export interface ToolResultPartEncoded extends BasePartEncoded<"tool-result", To
    * The result returned by the tool execution.
    */
   readonly result: unknown
+  /**
+   * Whether the tool was executed by the provider (true) or framework (false).
+   */
+  readonly providerExecuted?: boolean | undefined
 }
 
 /**
  * Represents provider-specific options that can be associated with a
  * `ToolResultPart` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface ToolResultPartOptions extends ProviderOptions {}
@@ -741,6 +713,7 @@ export const ToolResultPart: Schema.Struct<{
   readonly name: Schema.String
   readonly isFailure: Schema.Boolean
   readonly result: Schema.Unknown
+  readonly providerExecuted: Schema.withDecodingDefault<Schema.Boolean>
   readonly "~effect/ai/Prompt/Part": Schema.withDecodingDefaultKey<Schema.Literal<"~effect/ai/Prompt/Part">>
   readonly options: Schema.withDecodingDefault<
     Schema.$Record<
@@ -754,7 +727,8 @@ export const ToolResultPart: Schema.Struct<{
   id: Schema.String,
   name: Schema.String,
   isFailure: Schema.Boolean,
-  result: Schema.Unknown
+  result: Schema.Unknown,
+  providerExecuted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false)))
 }).annotate({ identifier: "ToolResultPart" })
 
 /**
@@ -775,12 +749,12 @@ export const toolResultPart = (params: PartConstructorParams<ToolResultPart>): T
  *
  * **When to use**
  *
- * Use when you use this part in tool messages to approve or deny tool execution when tools
- * have the `needsApproval` property set.
+ * Use when tool messages must approve or deny tool execution for tools with the
+ * `needsApproval` property set.
  *
  * **Example** (Creating tool approval responses)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const approvalResponse: Prompt.ToolApprovalResponsePart = Prompt.makePart(
@@ -799,6 +773,8 @@ export const toolResultPart = (params: PartConstructorParams<ToolResultPart>): T
  *     reason: "Operation not allowed"
  *   }
  * )
+ *
+ * const result = [approvalResponse.approved, denialResponse.approved] // => [true, false]
  * ```
  *
  * @category models
@@ -846,7 +822,7 @@ export interface ToolApprovalResponsePartEncoded
  * Represents provider-specific options that can be associated with a
  * `ToolApprovalResponsePart` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface ToolApprovalResponsePartOptions extends ProviderOptions {}
@@ -902,7 +878,7 @@ export const toolApprovalResponsePart = (
  *
  * **Example** (Creating tool approval requests)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const approvalRequest: Prompt.ToolApprovalRequestPart = Prompt.makePart(
@@ -912,6 +888,7 @@ export const toolApprovalResponsePart = (
  *     toolCallId: "call_456"
  *   }
  * )
+ * const result = [approvalRequest.approvalId, approvalRequest.toolCallId] // => ["approval_123", "call_456"]
  * ```
  *
  * @category models
@@ -951,7 +928,7 @@ export interface ToolApprovalRequestPartEncoded
  * Represents provider-specific options that can be associated with a
  * `ToolApprovalRequestPart` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface ToolApprovalRequestPartOptions extends ProviderOptions {}
@@ -989,6 +966,32 @@ export const ToolApprovalRequestPart: Schema.Struct<{
 export const toolApprovalRequestPart = (
   params: PartConstructorParams<ToolApprovalRequestPart>
 ): ToolApprovalRequestPart => makePart("tool-approval-request", params as any)
+
+/**
+ * Schema for validation and encoding of content parts.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const Part: Schema.Union<
+  readonly [
+    typeof TextPart,
+    typeof ReasoningPart,
+    typeof FilePart,
+    typeof ToolCallPart,
+    typeof ToolResultPart,
+    typeof ToolApprovalResponsePart,
+    typeof ToolApprovalRequestPart
+  ]
+> = Schema.Union([
+  TextPart,
+  ReasoningPart,
+  FilePart,
+  ToolCallPart,
+  ToolResultPart,
+  ToolApprovalResponsePart,
+  ToolApprovalRequestPart
+])
 
 // =============================================================================
 // Base Message
@@ -1056,7 +1059,7 @@ const BaseMessage = Schema.Struct({
  *
  * **Example** (Creating messages)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const textPart = Prompt.makePart("text", {
@@ -1066,6 +1069,7 @@ const BaseMessage = Schema.Struct({
  * const userMessage = Prompt.makeMessage("user", {
  *   content: [textPart]
  * })
+ * const result = [userMessage.role, userMessage.content.length] // => ["user", 1]
  * ```
  *
  * @category constructors
@@ -1087,7 +1091,7 @@ export const makeMessage = <const Role extends Message["role"]>(
  * A utility type for specifying the parameters required to construct a
  * specific message for a prompt.
  *
- * @category Utility Types
+ * @category utility types
  * @since 4.0.0
  */
 export type MessageConstructorParams<M extends Message> = Omit<M, typeof MessageTypeId | "role" | "options"> & {
@@ -1140,13 +1144,14 @@ export const ContentFromString: Schema.decodeTo<
  *
  * **Example** (Creating system messages)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const systemMessage: Prompt.SystemMessage = Prompt.makeMessage("system", {
  *   content: "You are a helpful assistant specialized in mathematics. " +
  *     "Always show your work step by step."
  * })
+ * systemMessage.role // => "system"
  * ```
  *
  * @category models
@@ -1176,7 +1181,7 @@ export interface SystemMessageEncoded extends BaseMessageEncoded<"system", Syste
  * Represents provider-specific options that can be associated with a
  * `SystemMessage` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface SystemMessageOptions extends ProviderOptions {}
@@ -1221,7 +1226,7 @@ export const systemMessage = (params: MessageConstructorParams<SystemMessage>): 
  *
  * **Example** (Creating user messages)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const textUserMessage: Prompt.UserMessage = Prompt.makeMessage("user", {
@@ -1244,6 +1249,8 @@ export const systemMessage = (params: MessageConstructorParams<SystemMessage>): 
  *     })
  *   ]
  * })
+ *
+ * const result = [textUserMessage.content.length, multimodalUserMessage.content.length] // => [1, 2]
  * ```
  *
  * @category models
@@ -1286,10 +1293,21 @@ export interface UserMessageEncoded extends BaseMessageEncoded<"user", UserMessa
 export type UserMessagePartEncoded = TextPartEncoded | FilePartEncoded
 
 /**
+ * Schema for validation and encoding of user message content parts.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const UserMessagePart: Schema.Union<readonly [typeof TextPart, typeof FilePart]> = Schema.Union([
+  TextPart,
+  FilePart
+])
+
+/**
  * Represents provider-specific options that can be associated with a
  * `UserMessage` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface UserMessageOptions extends ProviderOptions {}
@@ -1389,7 +1407,7 @@ export const userMessage = (params: MessageConstructorParams<UserMessage>): User
  *
  * **Example** (Creating assistant messages)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const assistantMessage: Prompt.AssistantMessage = Prompt.makeMessage(
@@ -1413,7 +1431,8 @@ export const userMessage = (params: MessageConstructorParams<UserMessage>): User
  *         result: {
  *           temperature: 72,
  *           condition: "sunny"
- *         }
+ *         },
+ *         providerExecuted: true
  *       }),
  *       Prompt.makePart("text", {
  *         text: "The weather in San Francisco is currently 72°F and sunny."
@@ -1421,6 +1440,7 @@ export const userMessage = (params: MessageConstructorParams<UserMessage>): User
  *     ]
  *   }
  * )
+ * assistantMessage.content.map((part) => part.type) // => ["text", "tool-call", "tool-result", "text"]
  * ```
  *
  * @category models
@@ -1472,10 +1492,34 @@ export type AssistantMessagePartEncoded =
   | ToolApprovalRequestPartEncoded
 
 /**
+ * Schema for validation and encoding of assistant message content parts.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const AssistantMessagePart: Schema.Union<
+  readonly [
+    typeof TextPart,
+    typeof FilePart,
+    typeof ReasoningPart,
+    typeof ToolCallPart,
+    typeof ToolResultPart,
+    typeof ToolApprovalRequestPart
+  ]
+> = Schema.Union([
+  TextPart,
+  FilePart,
+  ReasoningPart,
+  ToolCallPart,
+  ToolResultPart,
+  ToolApprovalRequestPart
+])
+
+/**
  * Represents provider-specific options that can be associated with a
  * `AssistantMessage` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface AssistantMessageOptions extends ProviderOptions {}
@@ -1580,7 +1624,7 @@ export const assistantMessage = (params: MessageConstructorParams<AssistantMessa
  *
  * **Example** (Creating tool messages)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const toolMessage: Prompt.ToolMessage = Prompt.makeMessage("tool", {
@@ -1595,10 +1639,12 @@ export const assistantMessage = (params: MessageConstructorParams<AssistantMessa
  *           { title: "TypeScript Handbook", url: "https://..." },
  *           { title: "Effective TypeScript", url: "https://..." }
  *         ]
- *       }
+ *       },
+ *       providerExecuted: false
  *     })
  *   ]
  * })
+ * const result = [toolMessage.role, toolMessage.content[0].type] // => ["tool", "tool-result"]
  * ```
  *
  * @category models
@@ -1641,10 +1687,23 @@ export interface ToolMessageEncoded extends BaseMessageEncoded<"tool", ToolMessa
 export type ToolMessagePartEncoded = ToolResultPartEncoded | ToolApprovalResponsePartEncoded
 
 /**
+ * Schema for validation and encoding of tool message content parts.
+ *
+ * @category schemas
+ * @since 4.0.0
+ */
+export const ToolMessagePart: Schema.Union<
+  readonly [typeof ToolResultPart, typeof ToolApprovalResponsePart]
+> = Schema.Union([
+  ToolResultPart,
+  ToolApprovalResponsePart
+])
+
+/**
  * Represents provider-specific options that can be associated with a
  * `ToolMessage` through module augmentation.
  *
- * @category ProviderOptions
+ * @category options
  * @since 4.0.0
  */
 export interface ToolMessageOptions extends ProviderOptions {}
@@ -1781,22 +1840,30 @@ export const Prompt: Schema.Codec<Prompt, PromptEncoded> = Schema.Struct({
   Schema.decodeTo(
     $Prompt,
     SchemaTransformation.transformOrFail({
-      decode: (input) =>
+      decode: (input, options) =>
         Effect.mapBothEager(
-          Parser.decodeEffect(Schema.Array(Message))(input.content),
+          SchemaParser.decodeEffect(Schema.Array(Message))(input.content),
           {
             onSuccess: makePrompt,
             onFailure: () =>
-              new SchemaIssue.InvalidValue(Option.some(input.content), { message: "Invalid Prompt messages" })
+              new SchemaIssue.InvalidValue(
+                { message: "Invalid Prompt messages" },
+                input.content,
+                options
+              )
           }
         ),
-      encode: (prompt) =>
+      encode: (prompt, options) =>
         Effect.mapBothEager(
-          Parser.encodeEffect(Schema.Array(Message))(prompt.content),
+          SchemaParser.encodeEffect(Schema.Array(Message))(prompt.content),
           {
             onSuccess: (messages) => ({ content: messages }),
             onFailure: () =>
-              new SchemaIssue.InvalidValue(Option.some(prompt.content), { message: "Invalid Prompt messages" })
+              new SchemaIssue.InvalidValue(
+                { message: "Invalid Prompt messages" },
+                prompt.content,
+                options
+              )
           }
         )
     })
@@ -1809,8 +1876,8 @@ export const Prompt: Schema.Codec<Prompt, PromptEncoded> = Schema.Struct({
  *
  * **Example** (Accepting raw prompt input)
  *
- * ```ts
- * import type { Prompt } from "effect/unstable/ai"
+ * ```ts import.meta.vitest
+ * import { Prompt } from "effect/unstable/ai"
  *
  * // String input - creates a user message
  * const stringInput: Prompt.RawInput = "Hello, world!"
@@ -1821,9 +1888,9 @@ export const Prompt: Schema.Codec<Prompt, PromptEncoded> = Schema.Struct({
  *   { role: "user", content: [{ type: "text", text: "Hi!" }] }
  * ]
  *
- * // Existing prompt
- * declare const existingPrompt: Prompt.Prompt
- * const promptInput: Prompt.RawInput = existingPrompt
+ * const promptInput: Prompt.RawInput = Prompt.empty
+ *
+ * const result = [typeof stringInput, Array.isArray(messagesInput), promptInput.content.length] // => ["string", true, 0]
  * ```
  *
  * @category models
@@ -1853,11 +1920,11 @@ const decodeMessagesSync = Schema.decodeSync(Schema.Array(Message))
  *
  * **Example** (Creating an empty prompt)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const emptyPrompt = Prompt.empty
- * console.log(emptyPrompt.content) // []
+ * emptyPrompt.content // => []
  * ```
  *
  * @category constructors
@@ -1875,7 +1942,7 @@ export const empty: Prompt = makePrompt([])
  *
  * **Example** (Creating prompts from inputs)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * // From string - creates a user message
@@ -1887,9 +1954,9 @@ export const empty: Prompt = makePrompt([])
  *   { role: "user", content: [{ type: "text", text: "Hi!" }] }
  * ])
  *
- * // From existing prompt
- * declare const existingPrompt: Prompt.Prompt
- * const copiedPrompt = Prompt.make(existingPrompt)
+ * const copiedPrompt = Prompt.make(Prompt.empty)
+ *
+ * const result = [textPrompt.content[0].role, structuredPrompt.content.length, copiedPrompt.content.length] // => ["user", 2, 0]
  * ```
  *
  * @category constructors
@@ -1916,7 +1983,7 @@ export const make = (input: RawInput): Prompt => {
  *
  * **Example** (Creating prompts from messages)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const messages: ReadonlyArray<Prompt.Message> = [
@@ -1929,6 +1996,7 @@ export const make = (input: RawInput): Prompt => {
  * ]
  *
  * const prompt = Prompt.fromMessages(messages)
+ * prompt.content.length // => 2
  * ```
  *
  * @category constructors
@@ -1936,15 +2004,27 @@ export const make = (input: RawInput): Prompt => {
  */
 export const fromMessages = (messages: ReadonlyArray<Message>): Prompt => makePrompt(messages)
 
+const mergeOptions = (left: ProviderOptions, right: ProviderOptions): ProviderOptions => {
+  const result: Record<string, ProviderOptions[string]> = { ...left }
+  for (const [provider, metadata] of Object.entries(right)) {
+    const previous = result[provider]
+    result[provider] = Predicate.isObject(previous) && Predicate.isObject(metadata)
+      ? Object.assign({}, previous, metadata)
+      : metadata
+  }
+  return result
+}
+
 /**
  * Creates a `Prompt` from response parts by folding completed text and
- * reasoning streams into assistant parts, placing tool calls and approval
- * requests in an assistant message, and placing non-preliminary tool results
- * in a tool message using their encoded results.
+ * reasoning streams into assistant parts, preserving provider metadata as
+ * prompt options, placing tool calls and approval requests in an assistant
+ * message, and placing non-preliminary tool results in a tool message using
+ * their encoded results.
  *
  * **Example** (Creating prompts from response parts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt, Response } from "effect/unstable/ai"
  *
  * const responseParts: ReadonlyArray<Response.AnyPart> = [
@@ -1970,6 +2050,7 @@ export const fromMessages = (messages: ReadonlyArray<Message>): Prompt => makePr
  *
  * const prompt = Prompt.fromResponseParts(responseParts)
  * // Creates an assistant message with the response content
+ * prompt.content.map((message) => message.role) // => ["assistant", "tool"]
  * ```
  *
  * @category constructors
@@ -1983,55 +2064,63 @@ export const fromResponseParts = (parts: ReadonlyArray<Response.AnyPart>): Promp
   const assistantParts: Array<AssistantMessagePart> = []
   const toolParts: Array<ToolMessagePart> = []
 
-  const activeTextDeltas = new Map<string, { text: string }>()
-  const activeReasoningDeltas = new Map<string, { text: string }>()
+  const activeTextDeltas = new Map<string, { text: string; options: ProviderOptions }>()
+  const activeReasoningDeltas = new Map<string, { text: string; options: ProviderOptions }>()
 
   for (const part of parts) {
     switch (part.type) {
       // Text Parts
       case "text": {
-        assistantParts.push(makePart("text", { text: part.text }))
+        assistantParts.push(makePart("text", { text: part.text, options: part.metadata }))
         break
       }
 
       // Text Parts (streaming)
       case "text-start": {
-        activeTextDeltas.set(part.id, { text: "" })
+        activeTextDeltas.set(part.id, { text: "", options: part.metadata })
         break
       }
       case "text-delta": {
         if (activeTextDeltas.has(part.id)) {
-          activeTextDeltas.get(part.id)!.text += part.delta
+          const active = activeTextDeltas.get(part.id)!
+          active.text += part.delta
+          active.options = mergeOptions(active.options, part.metadata)
         }
         break
       }
       case "text-end": {
         if (activeTextDeltas.has(part.id)) {
-          assistantParts.push(makePart("text", activeTextDeltas.get(part.id)!))
+          const active = activeTextDeltas.get(part.id)!
+          active.options = mergeOptions(active.options, part.metadata)
+          assistantParts.push(makePart("text", active))
         }
         break
       }
 
       // Reasoning Parts
       case "reasoning": {
-        assistantParts.push(makePart("reasoning", { text: part.text }))
+        assistantParts.push(makePart("reasoning", { text: part.text, options: part.metadata }))
         break
       }
 
       // Reasoning Parts (streaming)
       case "reasoning-start": {
-        activeReasoningDeltas.set(part.id, { text: "" })
+        activeReasoningDeltas.set(part.id, { text: "", options: part.metadata })
         break
       }
       case "reasoning-delta": {
         if (activeReasoningDeltas.has(part.id)) {
-          activeReasoningDeltas.get(part.id)!.text += part.delta
+          const active = activeReasoningDeltas.get(part.id)!
+          active.text += part.delta
+          active.options = mergeOptions(active.options, part.metadata)
         }
         break
       }
       case "reasoning-end": {
         if (activeReasoningDeltas.has(part.id)) {
-          assistantParts.push(makePart("reasoning", activeReasoningDeltas.get(part.id)!))
+          const active = activeReasoningDeltas.get(part.id)!
+          active.options = mergeOptions(active.options, part.metadata)
+          assistantParts.push(makePart("reasoning", active))
         }
         break
       }
@@ -2042,7 +2131,8 @@ export const fromResponseParts = (parts: ReadonlyArray<Response.AnyPart>): Promp
           id: part.id,
           name: part.name,
           params: part.params,
-          providerExecuted: part.providerExecuted ?? false
+          providerExecuted: part.providerExecuted ?? false,
+          options: part.metadata
         }))
         break
       }
@@ -2050,11 +2140,14 @@ export const fromResponseParts = (parts: ReadonlyArray<Response.AnyPart>): Promp
       // Tool Result Parts (skip preliminary results)
       case "tool-result": {
         if (part.preliminary !== true) {
-          toolParts.push(makePart("tool-result", {
+          const target = part.providerExecuted === true ? assistantParts : toolParts
+          target.push(makePart("tool-result", {
             id: part.id,
             name: part.name,
             isFailure: part.isFailure,
-            result: part.encodedResult
+            result: part.encodedResult,
+            providerExecuted: part.providerExecuted ?? false,
+            options: part.metadata
           }))
         }
         break
@@ -2102,7 +2195,7 @@ export const fromResponseParts = (parts: ReadonlyArray<Response.AnyPart>): Promp
  *
  * **Example** (Concatenating prompts)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const systemPrompt = Prompt.make([{
@@ -2111,6 +2204,7 @@ export const fromResponseParts = (parts: ReadonlyArray<Response.AnyPart>): Promp
  * }])
  *
  * const merged = Prompt.concat(systemPrompt, "Hello, world!")
+ * merged.content.map((message) => message.role) // => ["system", "user"]
  * ```
  *
  * @category combinators
@@ -2145,7 +2239,7 @@ export const concat: {
  *
  * **Example** (Replacing system instructions)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const systemPrompt = Prompt.make([{
@@ -2161,6 +2255,7 @@ export const concat: {
  *   prompt,
  *   "You are an expert in programming"
  * )
+ * replaced.content[0].content // => "You are an expert in programming"
  * ```
  *
  * @category combinators
@@ -2187,7 +2282,7 @@ export const setSystem: {
  *
  * **Example** (Prepending system instructions)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const systemPrompt = Prompt.make([{
@@ -2204,6 +2299,7 @@ export const setSystem: {
  *   "You are a helpful assistant. "
  * )
  * // result content: "You are a helpful assistant. You are an expert in programming."
+ * replaced.content[0].content // => "You are a helpful assistant. You are an expert in programming."
  * ```
  *
  * @category combinators
@@ -2236,7 +2332,7 @@ export const prependSystem: {
  *
  * **Example** (Appending system instructions)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Prompt } from "effect/unstable/ai"
  *
  * const systemPrompt = Prompt.make([{
@@ -2253,6 +2349,7 @@ export const prependSystem: {
  *   " You are a helpful assistant."
  * )
  * // result content: "You are an expert in programming. You are a helpful assistant."
+ * replaced.content[0].content // => "You are an expert in programming. You are a helpful assistant."
  * ```
  *
  * @category combinators

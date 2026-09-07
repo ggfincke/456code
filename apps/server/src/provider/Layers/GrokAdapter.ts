@@ -73,7 +73,7 @@ import type {
 import { makeAcpAdapterSessionLifecycle } from './AcpAdapterSessionLifecycle.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
 
-const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString)
+const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown))
 
 const PROVIDER = ProviderDriverKind.make('grok')
 const GROK_RESUME_VERSION = 1 as const

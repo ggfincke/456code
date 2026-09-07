@@ -72,7 +72,7 @@ const StoredProviderDeletionPayload = Schema.fromJsonString(
 const decodeProviderDeletionPayload = Schema.decodeUnknownSync(StoredProviderDeletionPayload)
 const encodeProviderDeletionPayload = Schema.encodeSync(StoredProviderDeletionPayload)
 
-class CleanupFailure extends Schema.TaggedErrorClass<CleanupFailure>()('CleanupFailure', {
+class CleanupFailure extends Schema.TaggedError<CleanupFailure>()('CleanupFailure', {
   operation: Schema.String,
 })
 {}
