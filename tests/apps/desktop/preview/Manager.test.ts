@@ -144,6 +144,54 @@ const TEST_ANNOTATION_IMAGE = {
   toDataURL: () => 'data:image/png;base64,cGljaw==',
 }
 
+describe('isPreviewEditingShortcut', () =>
+{
+  const input = (platform: NodeJS.Platform, key: string, overrides: Partial<Electron.Input> = {}) =>
+    ({
+      type: 'keyDown',
+      key,
+      meta: platform === 'darwin',
+      control: platform !== 'darwin',
+      shift: false,
+      alt: false,
+      ...overrides,
+    }) as Electron.Input
+
+  it.each(['darwin', 'linux', 'win32'] as const)(
+    'allows native editing chords on %s without allowing host shortcuts',
+    (platform) =>
+    {
+      for (const key of ['a', 'c', 'v', 'x', 'z', 'V'])
+      {
+        expect(PreviewManager.isPreviewEditingShortcut(input(platform, key), platform)).toBe(true)
+      }
+      const redo =
+        platform === 'win32' ? input(platform, 'y') : input(platform, 'z', { shift: true })
+      expect(PreviewManager.isPreviewEditingShortcut(redo, platform)).toBe(true)
+      expect(
+        PreviewManager.isPreviewEditingShortcut(
+          input(platform, 'v', { shift: true, alt: platform === 'darwin' }),
+          platform,
+        ),
+      ).toBe(true)
+
+      for (const key of ['k', ',', 'w', 'j', 'q', '+', '=', '-', '0', 'r', 'F12'])
+      {
+        expect(PreviewManager.isPreviewEditingShortcut(input(platform, key), platform)).toBe(false)
+      }
+    },
+  )
+
+  it('recognizes macOS Paste and Match Style when Option changes the key', () =>
+  {
+    const pasteAndMatchStyle = input('darwin', '◊', { code: 'KeyV', alt: true, shift: true })
+    expect(PreviewManager.isPreviewEditingShortcut(pasteAndMatchStyle, 'darwin')).toBe(true)
+    expect(
+      PreviewManager.isPreviewEditingShortcut({ ...pasteAndMatchStyle, code: 'KeyC' }, 'darwin'),
+    ).toBe(false)
+  })
+})
+
 const makePickerWebContents = (
   capturePage: () => Promise<unknown>,
   onSend?: (channel: string, ...args: ReadonlyArray<unknown>) => void,
@@ -440,6 +488,7 @@ describe('PreviewManager', () =>
         fromId.mockImplementation(() => active)
         const popup = () => ({
           webContents: {
+            on: vi.fn(),
             setIgnoreMenuShortcuts: vi.fn(),
             setWindowOpenHandler: vi.fn(),
           },
@@ -507,7 +556,7 @@ describe('PreviewManager', () =>
       }),
   )
 
-  effectIt.effect('keeps preview shortcuts out of the host window', () =>
+  effectIt.effect('allows editing shortcuts only in the focused preview contents', () =>
     withManager((manager) =>
       Effect.gen(function* ()
       {
@@ -524,7 +573,29 @@ describe('PreviewManager', () =>
         yield* manager.registerWebview('tab_shortcuts', 42)
 
         expect(preview.setIgnoreMenuShortcuts).toHaveBeenCalledWith(true)
-        expect(preview.listenerCount('before-input-event')).toBe(0)
+        expect(preview.listenerCount('before-input-event')).toBe(1)
+        const beforeInput = [...(preview.listeners.get('before-input-event') ?? [])][0]!
+        const paste = {
+          type: 'keyDown',
+          key: 'v',
+          meta: false,
+          control: true,
+          shift: false,
+          alt: false,
+        } as Electron.Input
+        getFocusedWebContents.mockReturnValue(preview.webContents)
+        beforeInput({} as Electron.Event, paste)
+        expect(preview.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false)
+
+        beforeInput({} as Electron.Event, { ...paste, type: 'keyUp', key: 'Control' })
+        expect(preview.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false)
+
+        beforeInput({} as Electron.Event, { ...paste, key: 'w' })
+        expect(preview.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true)
+
+        getFocusedWebContents.mockReturnValue(null)
+        beforeInput({} as Electron.Event, paste)
+        expect(preview.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true)
         expect(sendInputEvent).not.toHaveBeenCalled()
       }),
     ),
