@@ -38,6 +38,7 @@ import {
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
   enrichCursorSnapshot,
+  makeCursorModelDiscovery,
 } from '../Layers/CursorProvider.ts'
 import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
 import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
@@ -172,8 +173,13 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         instanceId,
       })
       const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv)
+      const discoverModels = yield* makeCursorModelDiscovery(effectiveConfig, processEnv)
 
-      const checkProvider = checkCursorProviderStatus(effectiveConfig, processEnv).pipe(
+      const checkProvider = checkCursorProviderStatus(
+        effectiveConfig,
+        processEnv,
+        discoverModels,
+      ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),

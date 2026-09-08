@@ -9,6 +9,7 @@ import {
   type SDKMessage,
   type SDKConversationResetMessage,
   type SDKAssistantMessageError,
+  type SDKRateLimitInfo,
   type SDKResultMessage,
   type SettingSource,
   type TerminalReason,
@@ -127,7 +128,7 @@ import {
   toolResultStreamKind,
 } from '../claude/ClaudeToolProjection.ts'
 import { resolveClaudeSdkExecutablePath } from '../Drivers/ClaudeExecutable.ts'
-import { makeClaudeEnvironment } from '../Drivers/ClaudeHome.ts'
+import { claudeSignedOutMessage, makeClaudeEnvironment } from '../Drivers/ClaudeHome.ts'
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
@@ -186,6 +187,9 @@ interface ClaudeTurnState
   latestAssistantUsage: unknown | undefined
   compactedSinceLatestAssistantUsage: boolean
   nextSyntheticAssistantBlockIndex: number
+  authenticationFailureMessage: string | undefined
+  readonly announcedUsageLimitKeys: Set<string>
+  readonly rejectedRateLimitTypes: Set<string>
 }
 
 interface AssistantTextBlockState
@@ -888,7 +892,10 @@ function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStat
 
 // SDKResultSuccess carries no `errors` array, so a turn that failed inside a success frame has no
 // message to show; name the cause instead of falling back to a bare 'Claude turn failed.'
-function successResultErrorMessage(result: SDKResultMessage): string | undefined
+function successResultErrorMessage(
+  result: SDKResultMessage,
+  failureHint?: string,
+): string | undefined
 {
   if (result.subtype !== 'success')
   {
@@ -915,6 +922,14 @@ function successResultErrorMessage(result: SDKResultMessage): string | undefined
       ? 'Claude rate limited this request (HTTP 429). The turn stopped before it finished.'
       : `Claude returned HTTP ${apiErrorStatus}. The turn stopped before it finished.`
   }
+  if (
+    failureHint !== undefined &&
+    (result.terminal_reason === 'api_error' ||
+      (result.is_error && result.terminal_reason === undefined))
+  )
+  {
+    return failureHint
+  }
   return result.terminal_reason === undefined
     ? undefined
     : `Claude ended the turn early (${result.terminal_reason}).`
@@ -933,6 +948,42 @@ function presentableResultError(error: string | undefined): string | undefined
     return undefined
   }
   return trimmed
+}
+
+function firstPresentableResultError(
+  errors: ReadonlyArray<string> | undefined,
+): string | undefined
+{
+  return errors?.map(presentableResultError).find((error) => error !== undefined)
+}
+
+const CLAUDE_USAGE_LIMIT_WINDOWS = {
+  five_hour: '5-hour',
+  seven_day: '7-day',
+  seven_day_opus: '7-day Opus',
+  seven_day_sonnet: '7-day Sonnet',
+  seven_day_overage_included: '7-day model',
+  overage: 'overage',
+} satisfies Record<NonNullable<SDKRateLimitInfo['rateLimitType']>, string>
+
+function describeClaudeUsageLimit(info: SDKRateLimitInfo): string
+{
+  const window = info.rateLimitType && CLAUDE_USAGE_LIMIT_WINDOWS[info.rateLimitType]
+  return `Claude usage limit reached${window ? ` for the ${window} window` : ''}. This turn is paused; check your plan usage for when it resets.`
+}
+
+function readClaudeRateLimitInfo(value: unknown): SDKRateLimitInfo | undefined
+{
+  if (typeof value !== 'object' || value === null || !('status' in value))
+  {
+    return undefined
+  }
+  const status = value.status
+  if (status !== 'allowed' && status !== 'allowed_warning' && status !== 'rejected')
+  {
+    return undefined
+  }
+  return value as SDKRateLimitInfo
 }
 
 // a Record rather than a switch so a new SDK union member fails the build here instead of
@@ -2404,9 +2455,22 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     // turnStatusFromResult now marks that frame failed: a runtime.error raised here is wiped
     // ~0.5 s later by any turn.completed that is not itself 'failed', since
     // ProviderRuntimeIngestion nulls lastError whenever the session goes ready
+    const assistantFailureMessage =
+      message.error === 'authentication_failed'
+        ? claudeSignedOutMessage({
+            configDir: claudeEnvironment.CLAUDE_CONFIG_DIR,
+            cwd: path.resolve(context.session.cwd ?? '.'),
+          })
+        : message.error === undefined
+          ? undefined
+          : assistantErrorMessage(message.error)
     if (message.error !== undefined)
     {
-      yield* emitRuntimeError(context, assistantErrorMessage(message.error), message.error)
+      yield* emitRuntimeError(
+        context,
+        assistantFailureMessage ?? assistantErrorMessage(message.error),
+        message.error,
+      )
     }
 
     // auto-start a synthetic turn for assistant messages that arrive without
@@ -2426,6 +2490,9 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         latestAssistantUsage: undefined,
         compactedSinceLatestAssistantUsage: false,
         nextSyntheticAssistantBlockIndex: -1,
+        authenticationFailureMessage: undefined,
+        announcedUsageLimitKeys: new Set(),
+        rejectedRateLimitTypes: new Set(),
       }
       context.session = {
         ...context.session,
@@ -2490,6 +2557,10 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (context.turnState)
     {
+      if (message.error === 'authentication_failed')
+      {
+        context.turnState.authenticationFailureMessage = assistantFailureMessage
+      }
       context.turnState.items.push(message.message)
       if (
         normalizeClaudeActiveTokenUsage(
@@ -2526,10 +2597,16 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     const status = refusal === undefined ? turnStatusFromResult(message) : 'failed'
     const rawError = message.subtype === 'success' ? undefined : message.errors[0]
+    const turnFailureHint =
+      context.turnState?.authenticationFailureMessage ??
+      (context.turnState && context.turnState.rejectedRateLimitTypes.size > 0
+        ? 'Claude usage limit reached. The turn stopped before it finished; check your plan usage for when it resets.'
+        : undefined)
     const errorMessage =
       (message.subtype === 'success'
-        ? successResultErrorMessage(message)
-        : presentableResultError(rawError)) ?? refusal
+        ? successResultErrorMessage(message, turnFailureHint)
+        : (firstPresentableResultError(message.errors) ??
+          (message.terminal_reason === 'api_error' ? turnFailureHint : undefined))) ?? refusal
 
     const resumeAttempt = context.resumeAttempt
     const isResumeHandshake =
@@ -3001,31 +3078,65 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (message.type === 'rate_limit_event')
     {
-      const info = message.rate_limit_info
-      // the SDK re-streams this frame on every tick. keying on the transition, not the
-      // percentage, keeps a slowly-climbing window from writing a row per tick
-      const key = `${info.status}:${info.rateLimitType ?? ''}`
-      if (context.lastRateLimitKey === key)
+      const info = readClaudeRateLimitInfo(message.rate_limit_info)
+      if (info === undefined)
       {
         return
       }
-      context.lastRateLimitKey = key
-      const resetsAt = info.resetsAt === undefined ? undefined : claudeResetsAtToIso(info.resetsAt)
-      yield* offerRuntimeEvent(context, {
-        ...base,
-        type: 'account.rate-limits.updated',
-        payload: {
-          snapshot: {
-            status: info.status,
-            ...(info.rateLimitType ? { windowId: info.rateLimitType } : {}),
-            ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
-            ...(resetsAt !== undefined ? { resetsAt } : {}),
+      // the SDK re-streams this frame on every tick. keying on the transition, not the
+      // percentage, keeps a slowly-climbing window from writing a row per tick
+      const key = `${info.status}:${info.rateLimitType ?? ''}`
+      if (context.lastRateLimitKey !== key)
+      {
+        context.lastRateLimitKey = key
+        const resetsAt =
+          typeof info.resetsAt === 'number' ? claudeResetsAtToIso(info.resetsAt) : undefined
+        yield* offerRuntimeEvent(context, {
+          ...base,
+          type: 'account.rate-limits.updated',
+          payload: {
+            snapshot: {
+              status: info.status,
+              ...(info.rateLimitType ? { windowId: info.rateLimitType } : {}),
+              ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
+              ...(resetsAt !== undefined ? { resetsAt } : {}),
+            },
+            // the snapshot, not the envelope. the envelope is already carried verbatim by
+            // base.raw.payload, so wrapping it again lost the shape a consumer could read
+            rateLimits: info,
           },
-          // the snapshot, not the envelope. the envelope is already carried verbatim by
-          // base.raw.payload, so wrapping it again lost the shape a consumer could read
-          rateLimits: info,
-        },
-      })
+        })
+      }
+
+      const overageAllowed =
+        info.overageStatus === 'allowed' ||
+        info.overageStatus === 'allowed_warning' ||
+        info.isUsingOverage === true ||
+        info.overageInUse === true
+      const blocked = info.status === 'rejected' && !overageAllowed
+      const limitType = info.rateLimitType ?? 'unknown'
+      if (context.turnState)
+      {
+        if (blocked)
+        {
+          context.turnState.rejectedRateLimitTypes.add(limitType)
+        }
+        else
+        {
+          context.turnState.rejectedRateLimitTypes.delete(limitType)
+        }
+      }
+      if (!blocked || context.turnState === undefined)
+      {
+        return
+      }
+      const warningKey = `${limitType}:${typeof info.resetsAt === 'number' ? info.resetsAt : 'unknown'}`
+      if (context.turnState.announcedUsageLimitKeys.has(warningKey))
+      {
+        return
+      }
+      context.turnState.announcedUsageLimitKeys.add(warningKey)
+      yield* emitRuntimeWarning(context, describeClaudeUsageLimit(info), info)
       return
     }
   })
@@ -4274,6 +4385,9 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         latestAssistantUsage: undefined,
         compactedSinceLatestAssistantUsage: false,
         nextSyntheticAssistantBlockIndex: -1,
+        authenticationFailureMessage: undefined,
+        announcedUsageLimitKeys: new Set(),
+        rejectedRateLimitTypes: new Set(),
       }
 
       const updatedAt = yield* nowIso

@@ -222,3 +222,9 @@ If the preset needs different Claude files, give it a different `Claude HOME pat
 different API keys, base URLs, or router settings, use Environment variables.
 
 Do not put environment variable assignments in `Launch arguments`.
+
+## Can I Keep Claude Verbose Mode Enabled?
+
+Yes. Claude Code's verbose mode works for text generation, including thread titles, branch names,
+commit messages, and pull request descriptions. Remote connections use the Claude configuration on
+the connected server.

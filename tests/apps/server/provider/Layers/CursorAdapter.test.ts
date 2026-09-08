@@ -15,6 +15,7 @@ import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
+import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
@@ -237,6 +238,45 @@ const cursorAdapterTestLayer = it.layer(
 
 cursorAdapterTestLayer('CursorAdapterLive', (it) =>
 {
+  it.effect('rejects a Cursor transport error returned as a successful assistant answer', () =>
+    Effect.gen(function* ()
+    {
+      const adapter = yield* CursorAdapter
+      const settings = yield* ServerSettingsService
+      const threadId = ThreadId.make('cursor-transport-error-answer')
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({
+          T3_ACP_PROMPT_RESPONSE_TEXT: 'Error: RetriableError: WritableIterable is closed',
+        }),
+      )
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
+      const runtimeEventsRef = yield* Ref.make<Array<ProviderRuntimeEvent>>([])
+      const runtimeEventsFiber = yield* Stream.runForEach(
+        unwrapAcpRuntimeEvents(adapter),
+        (event) => Ref.update(runtimeEventsRef, (events) => [...events, event]),
+      ).pipe(Effect.forkChild)
+      yield* startAcpTestSession(adapter, {
+        threadId,
+        provider: ProviderDriverKind.make('cursor'),
+        cwd: process.cwd(),
+        runtimeMode: 'full-access',
+      })
+      const error = yield* adapter
+        .sendTurn({ threadId, input: 'continue', attachments: [] })
+        .pipe(Effect.flip)
+      assert.equal(error._tag, 'ProviderAdapterRequestError')
+      if (error._tag === 'ProviderAdapterRequestError')
+      {
+        assert.equal(error.detail, 'Cursor reported a transport failure.')
+        assert.equal(error.cause, 'Error: RetriableError: WritableIterable is closed')
+      }
+      const runtimeEvents = yield* Ref.get(runtimeEventsRef)
+      assert.isFalse(runtimeEvents.some((event) => event.type === 'turn.completed'))
+      yield* adapter.stopSession(threadId)
+      yield* Fiber.interrupt(runtimeEventsFiber)
+    }),
+  )
+
   it.effect('preserves the strict import marker through a successful Cursor turn', () =>
     Effect.gen(function* ()
     {

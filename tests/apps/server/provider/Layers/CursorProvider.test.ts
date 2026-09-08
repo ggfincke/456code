@@ -5,6 +5,7 @@ import * as NodeOS from 'node:os'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import type * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import type * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
@@ -20,6 +21,7 @@ import {
   discoverCursorModelsViaAcp,
   getCursorFallbackModels,
   getCursorParameterizedModelPickerUnsupportedMessage,
+  makeCursorModelDiscovery,
   parseCursorAboutOutput,
   parseCursorCliConfigChannel,
   parseCursorVersionDate,
@@ -505,6 +507,94 @@ describe('checkCursorProviderStatus', () =>
 
 describe('discoverCursorModelsViaAcp', () =>
 {
+  it('reuses successful discovery until the CLI version or account changes', async () =>
+  {
+    await runNode(
+      Effect.gen(function* ()
+      {
+        const { requestLogPath, wrapperPath } = yield* makeProviderStatusEnvFixture()
+        const fileSystem = yield* FileSystem.FileSystem
+        const settings = {
+          enabled: true,
+          binaryPath: wrapperPath,
+          apiEndpoint: '',
+          customModels: [],
+        }
+        const discover = yield* makeCursorModelDiscovery(settings, {
+          ...process.env,
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+        })
+        const about = {
+          version: '2026.08.11',
+          auth: { status: 'authenticated' as const, label: 'first@example.test' },
+        }
+        const first = yield* discover(about)
+        expect(first.length).toBeGreaterThan(0)
+        yield* fileSystem.writeFileString(requestLogPath, '')
+        expect(yield* discover(about)).toEqual(first)
+        expect(yield* fileSystem.readFileString(requestLogPath)).toBe('')
+        yield* discover({ ...about, version: '2026.08.12' })
+        expect(yield* fileSystem.readFileString(requestLogPath)).toContain('initialize')
+        yield* fileSystem.writeFileString(requestLogPath, '')
+        yield* discover({
+          version: '2026.08.12',
+          auth: { ...about.auth, label: 'second@example.test' },
+        })
+        expect(yield* fileSystem.readFileString(requestLogPath)).toContain('initialize')
+      }),
+    )
+  })
+
+  it('retries discovery after a failed probe instead of caching the failure', async () =>
+  {
+    await runNode(
+      Effect.gen(function* ()
+      {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const mockAgentPath = yield* resolveMockAgentPath()
+        const tempDir = yield* fileSystem.makeTempDirectoryScoped({
+          directory: NodeOS.tmpdir(),
+          prefix: 'cursor-provider-retry-mock-',
+        })
+        const attemptPath = path.join(tempDir, 'attempted')
+        const wrapperPath = path.join(tempDir, 'fake-agent.sh')
+        yield* fileSystem.writeFileString(
+          wrapperPath,
+          `#!/bin/sh
+if [ ! -f "$T3_CURSOR_ATTEMPT_PATH" ]; then
+  : > "$T3_CURSOR_ATTEMPT_PATH"
+  exit 1
+fi
+exec node "$T3_CURSOR_MOCK_AGENT" "$@"
+`,
+        )
+        yield* fileSystem.chmod(wrapperPath, 0o755)
+
+        const discover = yield* makeCursorModelDiscovery(
+          {
+            enabled: true,
+            binaryPath: wrapperPath,
+            apiEndpoint: '',
+            customModels: [],
+          },
+          {
+            ...process.env,
+            T3_CURSOR_ATTEMPT_PATH: attemptPath,
+            T3_CURSOR_MOCK_AGENT: mockAgentPath,
+          },
+        )
+        const about = {
+          version: '2026.08.11',
+          auth: { status: 'authenticated' as const, label: 'cursor@example.test' },
+        }
+
+        expect(Exit.isFailure(yield* Effect.exit(discover(about)))).toBe(true)
+        expect((yield* discover(about)).length).toBeGreaterThan(0)
+      }).pipe(Effect.scoped),
+    )
+  })
+
   it('closes the ACP probe runtime after discovery completes', async () =>
   {
     const { exitLogPath, wrapperPath } = await runNode(

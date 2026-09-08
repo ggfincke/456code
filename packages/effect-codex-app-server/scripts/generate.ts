@@ -200,18 +200,28 @@ const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
   },
 }
 
+// pinned protocol JSON omits newer errors that remain valid in saved thread history
+const CodexErrorInfoCompatibilityValues = [
+  'rateLimitExceeded',
+  'misalignmentPolicyViolation',
+] as const
+
+const CodexErrorInfoCompatibilityExports = new Set([
+  'V2ThreadReadResponse',
+  'V2ThreadResumeResponse',
+  'V2ThreadRollbackResponse',
+  'V2ThreadForkResponse',
+  'V2TurnCompletedNotification',
+])
+
 function applyCodex0151DefinitionCompatibility(
   exportName: string,
   definitionName: string,
   definitionSchema: Schema.Json,
 ): Schema.Json
 {
-  const isThreadResponse =
-    exportName === 'V2ThreadReadResponse' ||
-    exportName === 'V2ThreadResumeResponse' ||
-    exportName === 'V2ThreadRollbackResponse'
   if (
-    !isThreadResponse ||
+    !CodexErrorInfoCompatibilityExports.has(exportName) ||
     definitionName !== 'CodexErrorInfo' ||
     typeof definitionSchema !== 'object'
   )
@@ -223,17 +233,30 @@ function applyCodex0151DefinitionCompatibility(
     readonly oneOf?: ReadonlyArray<{ readonly enum?: ReadonlyArray<string> }>
   }
   const [firstVariant, ...remainingVariants] = schema.oneOf ?? []
-  if (!firstVariant?.enum || firstVariant.enum.includes('rateLimitExceeded'))
+  const currentEnum = firstVariant?.enum
+  if (!currentEnum)
   {
     return definitionSchema
   }
 
+  const missingValues = CodexErrorInfoCompatibilityValues.filter(
+    (value) => !currentEnum.includes(value),
+  )
+  if (missingValues.length === 0)
+  {
+    return definitionSchema
+  }
+
+  const enumValues = [...currentEnum]
+  const otherIndex = enumValues.indexOf('other')
+  const nextEnum =
+    otherIndex === -1
+      ? [...enumValues, ...missingValues]
+      : [...enumValues.slice(0, otherIndex), ...missingValues, ...enumValues.slice(otherIndex)]
+
   return {
     ...definitionSchema,
-    oneOf: [
-      { ...firstVariant, enum: [...firstVariant.enum, 'rateLimitExceeded'] },
-      ...remainingVariants,
-    ],
+    oneOf: [{ ...firstVariant, enum: nextEnum }, ...remainingVariants],
   }
 }
 

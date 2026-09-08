@@ -246,6 +246,17 @@ describe('buildThreadTitlePrompt', () =>
 
 describe('sanitizeThreadTitle', () =>
 {
+  it('unwraps JSON-wrapped titles before normalizing them', () =>
+  {
+    expect(sanitizeThreadTitle('{"title":"  Fix   reconnect failures  "}')).toBe(
+      'Fix reconnect failures',
+    )
+    expect(sanitizeThreadTitle('{\n  "title": "Refresh staging instances"\n}')).toBe(
+      'Refresh staging instances',
+    )
+    expect(sanitizeThreadTitle('{"title":42}')).toBe('{"title":42}')
+  })
+
   it('truncates long titles with the shared sidebar-safe limit', () =>
   {
     expect(

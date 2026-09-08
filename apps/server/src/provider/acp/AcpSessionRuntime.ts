@@ -294,6 +294,11 @@ export const make = (
     // resolved on the first termination fact so waiters (e.g. drainEvents
     // barriers) cannot hang once the consumer fiber is gone
     const terminationLatch = yield* Deferred.make<void>()
+    // scope closure can stop event consumers before process termination is observed
+    yield* Scope.addFinalizer(
+      runtimeScope,
+      Deferred.succeed(terminationLatch, undefined).pipe(Effect.asVoid),
+    )
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined)
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallTrackedState>())
     const assistantItemRuntimeId = yield* crypto.randomUUIDv4.pipe(

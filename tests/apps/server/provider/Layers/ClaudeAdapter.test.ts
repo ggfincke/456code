@@ -1670,6 +1670,294 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
+  it.effect('surfaces each rejected Claude usage window once per active turn', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const firstTurnEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      const firstTurn = yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'first turn',
+        attachments: [],
+      })
+
+      const rejectedLimit = {
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'rejected',
+          rateLimitType: 'seven_day',
+          resetsAt: 1_788_840_000,
+        },
+        uuid: 'rate-limit-rejected',
+        session_id: 'sdk-session-rate-limit',
+      } as unknown as SDKMessage
+      harness.query.emit(rejectedLimit)
+      harness.query.emit(rejectedLimit)
+      harness.query.emit({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        session_id: 'sdk-session-rate-limit',
+        uuid: 'result-rate-limit-first-turn',
+      } as unknown as SDKMessage)
+
+      const firstTurnEvents = Array.from(yield* Fiber.join(firstTurnEventsFiber))
+      const firstWarnings = firstTurnEvents.filter((event) => event.type === 'runtime.warning')
+      assert.equal(firstWarnings.length, 1)
+      assert.equal(String(firstWarnings[0]?.turnId), String(firstTurn.turnId))
+      if (firstWarnings[0]?.type === 'runtime.warning')
+      {
+        assert.equal(
+          firstWarnings[0].payload.message,
+          'Claude usage limit reached for the 7-day window. This turn is paused; check your plan usage for when it resets.',
+        )
+      }
+
+      const nextWarningFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.filter((event) => event.type === 'runtime.warning'),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+      const secondTurn = yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'second turn',
+        attachments: [],
+      })
+      harness.query.emit(rejectedLimit)
+
+      const nextWarnings = Array.from(yield* Fiber.join(nextWarningFiber))
+      assert.equal(nextWarnings.length, 1)
+      assert.equal(String(nextWarnings[0]?.turnId), String(secondTurn.turnId))
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('ignores malformed Claude rate-limit envelopes without stopping the stream', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'account.rate-limits.updated'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'rate_limit_event',
+        rate_limit_info: undefined,
+        uuid: 'rate-limit-malformed',
+        session_id: 'sdk-session-rate-limit-malformed',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour' },
+        uuid: 'rate-limit-valid-after-malformed',
+        session_id: 'sdk-session-rate-limit-malformed',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      assert.equal(
+        runtimeEvents.some((event) => event.type === 'runtime.error'),
+        false,
+      )
+      assert.equal(
+        runtimeEvents.filter((event) => event.type === 'account.rate-limits.updated').length,
+        1,
+      )
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('uses the first presentable Claude result error after internal diagnostics', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        errors: ['[ede_diagnostic] internal state', 'Readable provider failure'],
+        session_id: 'sdk-session-diagnostic-first',
+        uuid: 'result-diagnostic-first',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      const runtimeError = runtimeEvents.find((event) => event.type === 'runtime.error')
+      assert.equal(runtimeError?.type, 'runtime.error')
+      if (runtimeError?.type === 'runtime.error')
+      {
+        assert.equal(runtimeError.payload.message, 'Readable provider failure')
+      }
+      const completed = runtimeEvents.find((event) => event.type === 'turn.completed')
+      assert.equal(completed?.type, 'turn.completed')
+      if (completed?.type === 'turn.completed')
+      {
+        assert.equal(completed.payload.errorMessage, 'Readable provider failure')
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('retains Claude authentication guidance through a generic terminal API error', () =>
+  {
+    const harness = makeHarness({
+      claudeConfig: { homePath: "/tmp/Claude config's" },
+    })
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+        cwd: "/tmp/repo path's",
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'assistant',
+        error: 'authentication_failed',
+        message: { content: [] },
+        parent_tool_use_id: null,
+        session_id: 'sdk-session-auth-failure',
+        uuid: 'assistant-auth-failure',
+      } as unknown as SDKMessage)
+      harness.query.emit({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        terminal_reason: 'api_error',
+        session_id: 'sdk-session-auth-failure',
+        uuid: 'result-auth-failure',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      const expectedMessage =
+        'Claude could not authenticate. For subscription login, run `claude auth login` on this environment\'s machine from "/tmp/repo path\'s", with CLAUDE_CONFIG_DIR set to "/tmp/Claude config\'s", then start a new thread. For API-key authentication, check this instance\'s configured credentials.'
+      const runtimeErrors = runtimeEvents.filter((event) => event.type === 'runtime.error')
+      assert.equal(runtimeErrors.length, 2)
+      assert.equal(runtimeErrors[0]?.payload.message, expectedMessage)
+      assert.equal(runtimeErrors[1]?.payload.message, expectedMessage)
+      const completed = runtimeEvents.find((event) => event.type === 'turn.completed')
+      assert.equal(completed?.type, 'turn.completed')
+      if (completed?.type === 'turn.completed')
+      {
+        assert.equal(completed.payload.state, 'failed')
+        assert.equal(completed.payload.errorMessage, expectedMessage)
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('keeps HTTP 429 Claude success frames failed', () =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      harness.query.emit({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        api_error_status: 429,
+        terminal_reason: 'api_error',
+        session_id: 'sdk-session-http-429',
+        uuid: 'result-http-429',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      const completed = runtimeEvents.find((event) => event.type === 'turn.completed')
+      assert.equal(completed?.type, 'turn.completed')
+      if (completed?.type === 'turn.completed')
+      {
+        assert.equal(completed.payload.state, 'failed')
+        assert.equal(
+          completed.payload.errorMessage,
+          'Claude rate limited this request (HTTP 429). The turn stopped before it finished.',
+        )
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
   it.effect('closes the session when the Claude stream aborts after a turn starts', () =>
   {
     const harness = makeHarness()

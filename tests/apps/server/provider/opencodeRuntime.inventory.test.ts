@@ -2,6 +2,7 @@
 // verifies optional OpenCode inventory sources degrade independently
 
 import * as NodeAssert from 'node:assert/strict'
+import * as NodeURL from 'node:url'
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
@@ -198,6 +199,67 @@ it.layer(testLayer)('loadOpenCodeInventory', (it) =>
       NodeAssert.deepEqual(inventory.providerList.connected, ['openai'])
       NodeAssert.equal(inventory.skills.length, 0)
     }),
+  )
+
+  it.effect('serializes CLI inventory commands that share the OpenCode SQLite database', () =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const hostEnvironment = yield* HostProcessEnvironment
+      const executablePath = yield* HostProcessExecutablePath
+      const hostPlatform = yield* HostProcessPlatform
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: 't3-opencode-ordering-' })
+      const isWindows = hostPlatform === 'win32'
+      const binaryPath = path.join(tempDir, isWindows ? 'opencode.cmd' : 'opencode')
+      const fixturePath = NodeURL.fileURLToPath(
+        new URL('./testFixtures/openCodeCliOrderingMock.mjs', import.meta.url),
+      )
+      const orderLogPath = path.join(tempDir, 'order.log')
+      const lockPath = path.join(tempDir, 'opencode.sqlite.lock')
+
+      yield* fs.writeFileString(
+        binaryPath,
+        [
+          ...(isWindows ? ['@echo off'] : ['#!/bin/sh']),
+          isWindows
+            ? '"%T3_TEST_NODE_BINARY%" "%T3_TEST_OPENCODE_SCRIPT%" %*'
+            : 'exec "$T3_TEST_NODE_BINARY" "$T3_TEST_OPENCODE_SCRIPT" "$@"',
+          '',
+        ].join('\n'),
+      )
+      if (!isWindows)
+      {
+        yield* fs.chmod(binaryPath, 0o755)
+      }
+
+      const runtime = yield* OpenCodeRuntime
+      const inventory = yield* runtime.loadInventoryFromCli({
+        binaryPath,
+        cwd: tempDir,
+        environment: {
+          ...hostEnvironment,
+          T3_TEST_NODE_BINARY: executablePath,
+          T3_TEST_OPENCODE_SCRIPT: fixturePath,
+          T3_TEST_OPENCODE_ORDER_LOG: orderLogPath,
+          T3_TEST_OPENCODE_LOCK_PATH: lockPath,
+        },
+      })
+
+      NodeAssert.deepEqual(inventory.providerList.connected, ['openai'])
+      NodeAssert.equal(
+        yield* fs.readFileString(orderLogPath),
+        [
+          'start models --verbose',
+          'end models --verbose',
+          'start agent list',
+          'end agent list',
+          'start debug skill',
+          'end debug skill',
+          '',
+        ].join('\n'),
+      )
+    }).pipe(Effect.scoped),
   )
 
   it.effect('caps and drains command stdout and stderr when requested', () =>

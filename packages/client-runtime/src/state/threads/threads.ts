@@ -204,8 +204,8 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
     Effect.forkScoped,
   )
 
-  const setSynchronizing = SubscriptionRef.update(state, (current) =>
-    current.status === 'deleted'
+  const setConnecting = SubscriptionRef.update(state, (current) =>
+    current.status === 'deleted' || Option.isSome(current.error)
       ? current
       : {
           ...current,
@@ -214,7 +214,7 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
         },
   )
   const setReady = SubscriptionRef.update(state, (current) =>
-    current.status === 'live' || current.status === 'deleted'
+    current.status === 'live' || current.status === 'deleted' || Option.isSome(current.error)
       ? current
       : {
           ...current,
@@ -226,12 +226,16 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
   {
     yield* Ref.set(awaitingCompletion, false)
     yield* Ref.set(awaitingFreshSnapshot, false)
-    yield* SubscriptionRef.update(state, (current) => ({
-      ...current,
-      status: current.status === 'deleted' ? current.status : statusWithoutLiveData(current.data),
-    }))
+    yield* SubscriptionRef.update(state, (current) =>
+      current.status === 'deleted' || Option.isSome(current.error)
+        ? current
+        : {
+            ...current,
+            status: statusWithoutLiveData(current.data),
+          },
+    )
   })
-  const setStreamError = (cause: Cause.Cause<unknown>) =>
+  const setStreamError = (message: string) =>
     Ref.set(awaitingCompletion, false).pipe(
       Effect.andThen(Ref.set(awaitingFreshSnapshot, false)),
       Effect.andThen(
@@ -239,7 +243,7 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
           ...current,
           status:
             current.status === 'deleted' ? current.status : statusWithoutLiveData(current.data),
-          error: Option.some(formatThreadError(cause)),
+          error: Option.some(message),
         })),
       ),
     )
@@ -249,11 +253,16 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
   )
   {
     const waiting = (yield* Ref.get(awaitingCompletion)) || (yield* Ref.get(awaitingFreshSnapshot))
-    yield* SubscriptionRef.set(state, {
+    yield* SubscriptionRef.update(state, (current) => ({
       data: Option.some(thread),
-      status: waiting ? 'synchronizing' : 'live',
-      error: Option.none(),
-    })
+      // buffered values from a terminated attempt must not erase its diagnostic
+      status: Option.isSome(current.error)
+        ? ('cached' as const)
+        : waiting
+          ? ('synchronizing' as const)
+          : ('live' as const),
+      error: current.error,
+    }))
     // active threads can update many times per second and retain large tool
     // payloads. The server remains the source of truth while a turn is active;
     // persist once it settles so cache encoding stays off the streaming path.
@@ -294,7 +303,7 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
     {
       yield* Ref.set(awaitingCompletion, false)
       yield* SubscriptionRef.update(state, (current) =>
-        Option.isSome(current.data) && current.status !== 'deleted'
+        Option.isSome(current.data) && current.status !== 'deleted' && Option.isNone(current.error)
           ? { ...current, status: 'live' as const, error: Option.none() }
           : current,
       )
@@ -344,7 +353,7 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
       switch (connectionProjectionPhase(connectionState))
       {
         case 'synchronizing':
-          return setSynchronizing
+          return setConnecting
         case 'disconnected':
           return setDisconnected
         case 'ready':
@@ -360,18 +369,23 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
       service.changes.pipe(Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup)),
   })
 
-  yield* setSynchronizing
+  yield* setConnecting
   yield* Effect.forkScoped(
     subscribeDynamic(
       ORCHESTRATION_WS_METHODS.subscribeThread,
       Effect.fn('EnvironmentThreadState.makeSubscribeInput')(function* (session)
       {
+        // connection notifications do not prove that the subscription restarted
+        yield* SubscriptionRef.update(state, (current) =>
+          current.status === 'deleted'
+            ? current
+            : { ...current, status: 'synchronizing' as const, error: Option.none() },
+        )
         const supportsCompletionMarker = yield* session.initialConfig.pipe(
           Effect.map((config) => config.threadResumeCompletionMarker === true),
           Effect.orElseSucceed(() => false),
         )
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker)
-        yield* setSynchronizing
 
         let current = yield* SubscriptionRef.get(state)
         // a snapshot fetched inside this attempt is as trustworthy a boundary
@@ -418,7 +432,8 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
         }
       }),
       {
-        onExpectedFailure: setStreamError,
+        onDefect: () => setStreamError('Could not synchronize the thread.'),
+        onExpectedFailure: (cause) => setStreamError(formatThreadError(cause)),
         retryExpectedFailureAfter: '250 millis',
         resubscribe: foregroundResubscriptions,
       },

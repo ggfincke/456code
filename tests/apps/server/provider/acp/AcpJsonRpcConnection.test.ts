@@ -11,8 +11,10 @@ import * as NodeFS from 'node:fs'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as Option from 'effect/Option'
+import * as Scope from 'effect/Scope'
 import * as TestClock from 'effect/testing/TestClock'
 import * as Stream from 'effect/Stream'
 import { describe, expect } from 'vite-plus/test'
@@ -33,6 +35,32 @@ const userMessageSha256 = (text: string): string => sha256(JSON.stringify([{ typ
 
 describe('AcpSessionRuntime', () =>
 {
+  it.effect('releases a pending event drain when the runtime scope closes', () =>
+    Effect.gen(function* ()
+    {
+      const runtimeScope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(runtimeScope, Exit.void))
+      const runtime = yield* AcpSessionRuntime.make({
+        spawn: {
+          command: mockAgentCommand,
+          args: mockAgentArgs,
+        },
+        cwd: process.cwd(),
+        clientInfo: { name: 't3-test', version: '0.0.0' },
+        authMethodId: 'test',
+      }).pipe(Effect.provideService(Scope.Scope, runtimeScope))
+
+      const drain = yield* runtime.drainEvents.pipe(Effect.forkChild)
+      const pendingBarrier = yield* Stream.runHead(runtime.getEvents()).pipe(
+        Effect.timeout('1 second'),
+      )
+      expect(Option.getOrThrow(pendingBarrier)._tag).toBe('EventStreamBarrier')
+
+      yield* Scope.close(runtimeScope, Exit.void)
+      yield* Fiber.join(drain).pipe(Effect.timeout('1 second'))
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  )
+
   it.effect('merges custom initialize client capabilities into the ACP handshake', () =>
   {
     const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = []

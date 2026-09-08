@@ -4,6 +4,7 @@
 import { EnvironmentId, type RelayClientInstallProgressEvent, WS_METHODS } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
@@ -29,6 +30,7 @@ import {
   request,
   runStream,
   subscribe,
+  subscribeDynamic,
 } from '../../../../packages/client-runtime/src/rpc/client.ts'
 
 const TARGET = new PrimaryConnectionTarget({
@@ -389,39 +391,98 @@ describe('environment RPC', () =>
     }),
   )
 
-  it.effect('does not classify subscription defects as expected failures', () =>
+  it.effect.each(['input', 'stream'] as const)(
+    'reports %s subscription defects without classifying them as expected failures',
+    (where) =>
+      Effect.gen(function* ()
+      {
+        const defect = new Error('subscription invariant failed')
+        const observedDefects: unknown[] = []
+        let expectedFailureCount = 0
+        let inputs = 0
+        let streams = 0
+        const client = {
+          [WS_METHODS.subscribeTerminalEvents]: () =>
+          {
+            streams += 1
+            return where === 'stream' ? Stream.die(defect) : Stream.never
+          },
+        } as unknown as WsRpcProtocolClient
+        const { activeSession, supervisor } = yield* makeHarness()
+
+        yield* SubscriptionRef.set(activeSession, Option.some(session(client)))
+        const exit = yield* subscribeDynamic(
+          WS_METHODS.subscribeTerminalEvents,
+          () =>
+            Effect.sync(() =>
+            {
+              inputs += 1
+            }).pipe(Effect.andThen(where === 'input' ? Effect.die(defect) : Effect.succeed({}))),
+          {
+            onDefect: (cause) =>
+              Effect.sync(() =>
+              {
+                observedDefects.push(Cause.squash(cause))
+              }),
+            onExpectedFailure: () =>
+              Effect.sync(() =>
+              {
+                expectedFailureCount += 1
+              }),
+          },
+        ).pipe(
+          Stream.runDrain,
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.exit,
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit))
+        {
+          expect(Cause.hasDies(exit.cause)).toBe(true)
+          expect(Cause.squash(exit.cause)).toBe(defect)
+        }
+        expect(inputs).toBe(1)
+        expect(streams).toBe(where === 'input' ? 0 : 1)
+        expect(expectedFailureCount).toBe(0)
+        expect(observedDefects).toEqual([defect])
+      }),
+  )
+
+  it.effect('does not report subscription interruption as a defect', () =>
     Effect.gen(function* ()
     {
-      const defect = new Error('subscription invariant failed')
-      let expectedFailureCount = 0
+      const subscribed = yield* Deferred.make<void>()
+      const observedDefects: unknown[] = []
       const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () => Stream.die(defect),
+        [WS_METHODS.subscribeTerminalEvents]: () =>
+          Stream.fromEffect(Deferred.succeed(subscribed, undefined)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          ),
       } as unknown as WsRpcProtocolClient
       const { activeSession, supervisor } = yield* makeHarness()
-
       yield* SubscriptionRef.set(activeSession, Option.some(session(client)))
-      const exit = yield* subscribe(
+
+      const fiber = yield* subscribe(
         WS_METHODS.subscribeTerminalEvents,
         {},
         {
-          onExpectedFailure: () =>
+          onDefect: (cause) =>
             Effect.sync(() =>
             {
-              expectedFailureCount += 1
+              observedDefects.push(Cause.squash(cause))
             }),
         },
       ).pipe(
         Stream.runDrain,
         Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.exit,
+        Effect.forkChild,
       )
+      yield* Deferred.await(subscribed)
+      yield* Fiber.interrupt(fiber)
 
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit))
-      {
-        expect(Cause.hasDies(exit.cause)).toBe(true)
-      }
-      expect(expectedFailureCount).toBe(0)
+      expect(observedDefects).toEqual([])
     }),
   )
 })

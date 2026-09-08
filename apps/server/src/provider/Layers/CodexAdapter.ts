@@ -392,6 +392,38 @@ function collabItemMetadata(item: CodexLifecycleItem): {
   }
 }
 
+function nonEmptyDetail(value: string | null | undefined): string | undefined
+{
+  const trimmed = value?.trim()
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
+}
+
+const MAX_DESCRIBED_FILE_CHANGES = 20
+
+function describeFileChanges(
+  fileChanges: EffectCodexSchema.ServerRequest__ApplyPatchApprovalParams['fileChanges'] | undefined,
+): string | undefined
+{
+  if (fileChanges === undefined)
+  {
+    return undefined
+  }
+  const entries = Object.entries(fileChanges).toSorted(([left], [right]) =>
+    left.localeCompare(right),
+  )
+  if (entries.length === 0)
+  {
+    return undefined
+  }
+  const described = entries.slice(0, MAX_DESCRIBED_FILE_CHANGES).map(([path, change]) =>
+  {
+    const movePath = change.type === 'update' ? change.move_path : undefined
+    return movePath ? `${change.type} ${path} -> ${movePath}` : `${change.type} ${path}`
+  })
+  const remaining = entries.length - described.length
+  return remaining > 0 ? `${described.join('\n')}\n+${remaining} more` : described.join('\n')
+}
+
 function toRequestTypeFromMethod(method: string): CanonicalRequestType
 {
   switch (method)
@@ -715,7 +747,7 @@ function mapToRuntimeEvents(
             EffectCodexSchema.ServerRequest__FileChangeRequestApprovalParams,
             event.payload,
           )
-          return payload?.reason ?? undefined
+          return nonEmptyDetail(payload?.reason) ?? nonEmptyDetail(payload?.grantRoot)
         }
         case 'mcpServer/elicitation/request':
           return elicitation?.message
@@ -725,7 +757,11 @@ function mapToRuntimeEvents(
             EffectCodexSchema.ServerRequest__ApplyPatchApprovalParams,
             event.payload,
           )
-          return payload?.reason ?? undefined
+          return (
+            nonEmptyDetail(payload?.reason) ??
+            describeFileChanges(payload?.fileChanges) ??
+            nonEmptyDetail(payload?.grantRoot)
+          )
         }
         case 'execCommandApproval':
         {

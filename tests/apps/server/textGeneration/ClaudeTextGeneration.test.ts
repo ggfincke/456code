@@ -372,6 +372,43 @@ it.layer(ClaudeTextGenerationTestLayer)('ClaudeTextGeneration', (it) =>
     ),
   )
 
+  it.effect.each([
+    {
+      mode: 'normal',
+      output: {
+        type: 'result',
+        structured_output: { title: '{"title":"Refresh staging instances"}' },
+      },
+    },
+    {
+      mode: 'verbose',
+      output: [
+        { type: 'system', subtype: 'init' },
+        { type: 'assistant', message: { content: [] } },
+        {
+          type: 'result',
+          structured_output: { title: '{"title":"Refresh staging instances"}' },
+        },
+      ],
+    },
+  ])('unwraps JSON-wrapped titles from $mode Claude output', ({ output }) =>
+    withFakeClaudeEnv({ output: JSON.stringify(output) }, (textGeneration) =>
+      Effect.gen(function* ()
+      {
+        const generated = yield* textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: 'Refresh staging instances',
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('claudeAgent'),
+            model: 'claude-sonnet-4-6',
+          },
+        })
+
+        expect(generated.title).toBe('Refresh staging instances')
+      }),
+    ),
+  )
+
   it.effect('runs Claude text generation with the configured CLAUDE_CONFIG_DIR', () =>
     Effect.gen(function* ()
     {
