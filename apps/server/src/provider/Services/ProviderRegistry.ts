@@ -47,6 +47,7 @@ export interface ProviderRegistryShape
   readonly getProviderMaintenanceCapabilitiesForInstance: (
     instanceId: ProviderInstanceId,
     provider: ProviderDriverKind,
+    options?: { readonly fresh?: boolean },
   ) => Effect.Effect<ProviderMaintenanceCapabilities>
 
   // apply volatile maintenance-action state to one configured instance.

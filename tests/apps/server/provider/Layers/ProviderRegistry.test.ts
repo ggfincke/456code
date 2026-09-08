@@ -144,6 +144,17 @@ function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {})
 const noClaudeCapabilities = () =>
   Effect.sync(() => undefined as TestClaudeCapabilities | undefined)
 
+function resolveManualMaintenance(provider: ProviderDriverKind)
+{
+  return () =>
+    Effect.succeed(
+      makeManualOnlyProviderMaintenanceCapabilities({
+        provider,
+        packageName: null,
+      }),
+    )
+}
+
 function mockHandle(result: { stdout: string; stderr: string; code: number })
 {
   return ChildProcessSpawner.makeHandle({
@@ -1090,6 +1101,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             continuation: { groupKey: 'codex:instance:codex' },
           } as const satisfies ServerProvider
           const refreshCalls = yield* Ref.make(0)
+          const maintenanceResolutions = yield* Ref.make<
+            ReadonlyArray<{ readonly fresh?: boolean } | undefined>
+          >([])
+          const maintenanceCapabilities = makeManualOnlyProviderMaintenanceCapabilities({
+            provider: codexDriver,
+            packageName: null,
+          })
           const instance = {
             instanceId: codexInstanceId,
             driverKind: codexDriver,
@@ -1104,10 +1122,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: codexDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: (options) =>
+                Ref.update(maintenanceResolutions, (requests) => [...requests, options]).pipe(
+                  Effect.as(maintenanceCapabilities),
+                ),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Ref.update(refreshCalls, (count) => count + 1).pipe(
                 Effect.andThen(Effect.never),
@@ -1146,6 +1164,15 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             const registry = yield* ProviderRegistry.ProviderRegistry
             assert.deepStrictEqual(yield* registry.getProviders, [initialProvider])
             assert.strictEqual(yield* Ref.get(refreshCalls), 0)
+            assert.strictEqual(
+              yield* registry.getProviderMaintenanceCapabilitiesForInstance(
+                codexInstanceId,
+                codexDriver,
+                { fresh: true },
+              ),
+              maintenanceCapabilities,
+            )
+            assert.deepStrictEqual(yield* Ref.get(maintenanceResolutions), [{ fresh: true }])
           }).pipe(Effect.provide(runtimeServices))
         }),
       )
@@ -1186,10 +1213,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: codexDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: resolveManualMaintenance(codexDriver),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Effect.succeed(initialProvider),
               streamChanges: Stream.empty,
@@ -1357,10 +1381,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: cursorDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: resolveManualMaintenance(cursorDriver),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Effect.succeed(refreshedProvider),
               streamChanges: Stream.fromPubSub(changes),
@@ -1492,10 +1513,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               displayName: undefined,
               enabled: true,
               snapshot: {
-                maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                  provider: openCodeDriver,
-                  packageName: null,
-                }),
+                resolveMaintenance: resolveManualMaintenance(openCodeDriver),
                 getSnapshot: Effect.succeed(initialProvider),
                 refresh: Effect.succeed(authoritativeProvider),
                 streamChanges: Stream.fromPubSub(changes),
@@ -1637,10 +1655,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: 'Codex Personal',
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: codexDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: resolveManualMaintenance(codexDriver),
               getSnapshot: Effect.succeed(pendingProvider),
               refresh: Ref.get(nextProvider),
               streamChanges: Stream.empty,
@@ -1732,10 +1747,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: codexDriver,
-                packageName: null,
-              }),
+              resolveMaintenance: resolveManualMaintenance(codexDriver),
               getSnapshot: Effect.succeed(cachedProvider),
               refresh: Effect.die(new Error('simulated refresh failure')),
               streamChanges: Stream.empty,
@@ -1832,10 +1844,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
-              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
-                provider: provider.driver,
-                packageName: null,
-              }),
+              resolveMaintenance: resolveManualMaintenance(provider.driver),
               getSnapshot: Effect.succeed(provider),
               refresh: Effect.succeed(provider),
               streamChanges: Stream.empty,

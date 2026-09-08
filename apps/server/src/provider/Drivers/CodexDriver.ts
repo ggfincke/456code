@@ -46,7 +46,9 @@ import type { ServerProviderDraft } from '../providerSnapshot.ts'
 import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
 import {
   enrichProviderSnapshotWithVersionAdvisory,
+  makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
+  normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from '../maintenance/providerMaintenance.ts'
 import {
@@ -59,12 +61,25 @@ const decodeCodexSettings = Schema.decodeSync(CodexSettings)
 
 const DRIVER_KIND = ProviderDriverKind.make('codex')
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
-const UPDATE = makePackageManagedProviderMaintenanceResolver({
-  provider: DRIVER_KIND,
-  npmPackageName: '@openai/codex',
-  homebrewFormula: 'codex',
-  nativeUpdate: null,
-})
+
+function isCodexStandaloneCommandPath(commandPath: string): boolean
+{
+  return normalizeCommandPath(commandPath).includes('/packages/standalone/')
+}
+
+// point standalone updates at the shared package tree, not the optional auth overlay
+function makeCodexMaintenanceResolver(sharedHomePath: string)
+{
+  return makePackageManagedProviderMaintenanceResolver({
+    provider: DRIVER_KIND,
+    npmPackageName: '@openai/codex',
+    nativeUpdate: {
+      args: ['update'],
+      isCommandPath: isCodexStandaloneCommandPath,
+      env: { CODEX_HOME: sharedHomePath },
+    },
+  })
+}
 
 // services the driver needs to materialize an instance. Surfaced as the
 // driver's `R` so the registry layer aggregates these across every
@@ -149,10 +164,19 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? '',
       } satisfies CodexSettings
-      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
-        env: processEnv,
-      })
+      const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
+        resolveProviderMaintenanceCapabilitiesEffect(
+          makeCodexMaintenanceResolver(homeLayout.sharedHomePath),
+          {
+            binaryPath: effectiveConfig.binaryPath,
+            env: processEnv,
+          },
+        ).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        ),
+      )
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -177,7 +201,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       )
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
-        maintenanceCapabilities,
+        resolveMaintenance,
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
@@ -185,9 +209,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
           makePendingCodexProvider(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider,
         enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
-          enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
-            enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-          }).pipe(
+          resolveMaintenance().pipe(
+            Effect.flatMap((maintenanceCapabilities) =>
+              enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
+                enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
+              }),
+            ),
             Effect.provideService(HttpClient.HttpClient, httpClient),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),

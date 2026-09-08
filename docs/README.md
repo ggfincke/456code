@@ -16,6 +16,7 @@
   - [Environment authentication](./architecture/environment-auth.md)
 - User guides
   - [Background service](./user/background-service.md)
+  - [Provider updates](./user/provider-updates.md)
   - [Remote access](./user/remote-access.md)
   - [Keeping 456code in sync](./user/server-updates.md)
   - [Keybindings](./user/keybindings.md)
