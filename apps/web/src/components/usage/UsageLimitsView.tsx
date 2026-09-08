@@ -12,6 +12,7 @@ import { RefreshCwIcon } from 'lucide-react'
 
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'
+import { RedactedSensitiveText } from '../settings/RedactedSensitiveText'
 
 const PACE_LABEL: Record<LimitPace, string> = {
   ahead: 'Ahead of pace',
@@ -103,7 +104,17 @@ export function UsageLimitsView({
                   {pool.accounts.map((account) => (
                     <span key={account.key} className="inline-flex items-center gap-1.5">
                       <Badge variant="outline">
-                        {limitAccountLabel(account)}
+                        {limitAccountLabel(account).includes('@') ? (
+                          <RedactedSensitiveText
+                            key={limitAccountLabel(account)}
+                            value={limitAccountLabel(account)}
+                            ariaLabel="Toggle account label visibility"
+                            revealTooltip="Reveal account label"
+                            hideTooltip="Hide account label"
+                          />
+                        ) : (
+                          limitAccountLabel(account)
+                        )}
                         {account.environments.length > 1
                           ? ` · ${account.environments.length} envs`
                           : ''}

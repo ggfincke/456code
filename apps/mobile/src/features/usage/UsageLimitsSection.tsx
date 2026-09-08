@@ -8,8 +8,26 @@ import {
   limitAccountLabel,
 } from '@t3tools/shared/usageLimits'
 import { Pressable, View } from 'react-native'
+import { useState } from 'react'
 
 import { AppText as Text } from '../../components/AppText'
+
+function AccountLabel({ value }: { readonly value: string })
+{
+  const [revealed, setRevealed] = useState(false)
+  if (!value.includes('@')) return <Text className="text-xs font-sans-medium">{value}</Text>
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={revealed ? 'Hide account label' : 'Reveal account label'}
+      hitSlop={10}
+      onPress={() => setRevealed((current) => !current)}
+    >
+      <Text className="text-xs font-sans-medium">{revealed ? value : '••••••@••••••'}</Text>
+    </Pressable>
+  )
+}
 
 function resetCreditsLabel(account: LimitAccount, now: number): string | null
 {
@@ -86,7 +104,10 @@ export function UsageLimitsSection({
               <View className="flex-row flex-wrap gap-2">
                 {pool.accounts.map((account) => (
                   <View key={account.key} className="gap-1 rounded-2xl bg-subtle px-3 py-2">
-                    <Text className="text-xs font-sans-medium">{limitAccountLabel(account)}</Text>
+                    <AccountLabel
+                      key={limitAccountLabel(account)}
+                      value={limitAccountLabel(account)}
+                    />
                     {resetCreditsLabel(account, now) ? (
                       <Text className="text-xs text-foreground-muted">
                         {resetCreditsLabel(account, now)}

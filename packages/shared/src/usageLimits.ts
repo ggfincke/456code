@@ -172,7 +172,9 @@ export function collectLimitNotices(
       const notice = provider.accountUsage ? limitsNotice(provider.accountUsage) : null
       if (notice)
       {
-        const name = provider.displayName?.trim() || String(provider.driver)
+        const displayName = provider.displayName?.trim()
+        const name =
+          displayName && !displayName.includes('@') ? displayName : String(provider.driver)
         notices.push(`${prefix}${name}: ${notice}`)
       }
     }
