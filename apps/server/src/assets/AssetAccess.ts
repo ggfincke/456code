@@ -65,6 +65,21 @@ const PREVIEW_ASSET_EXTENSIONS = new Set([
   '.woff',
   '.woff2',
 ])
+const HOST_MEDIA_EXTENSIONS = new Set([
+  '.avif',
+  '.bmp',
+  '.gif',
+  '.ico',
+  '.jpeg',
+  '.jpg',
+  '.m4v',
+  '.mov',
+  '.mp4',
+  '.png',
+  '.svg',
+  '.webm',
+  '.webp',
+])
 
 const AssetClaimsSchema = Schema.Union([
   Schema.Struct({
@@ -206,21 +221,28 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
   {
     case 'workspace-file':
     {
-      if (!input.workspaceRoot)
+      const hostAbsolutePath =
+        input.workspaceRoot === undefined && path.isAbsolute(input.resource.path)
+      if (input.workspaceRoot === undefined && !hostAbsolutePath)
       {
         return yield* new AssetWorkspaceContextNotFoundError({
           resource: input.resource,
         })
       }
-      const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.workspaceRoot).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AssetWorkspaceRootNormalizationError({
-              resource: input.resource,
-              cause,
-            }),
-        ),
-      )
+      const requestedWorkspaceRoot = hostAbsolutePath
+        ? path.dirname(input.resource.path)
+        : input.workspaceRoot!
+      const workspaceRoot = yield* workspacePaths
+        .normalizeWorkspaceRoot(requestedWorkspaceRoot)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new AssetWorkspaceRootNormalizationError({
+                resource: input.resource,
+                cause,
+              }),
+          ),
+        )
       const relativePath = path.isAbsolute(input.resource.path)
         ? path.relative(workspaceRoot, input.resource.path)
         : input.resource.path
@@ -235,7 +257,11 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
               }),
           ),
         )
-      if (!isWorkspacePreviewEntryPath(resolved.relativePath))
+      if (
+        hostAbsolutePath
+          ? !HOST_MEDIA_EXTENSIONS.has(path.extname(resolved.relativePath).toLowerCase())
+          : !isWorkspacePreviewEntryPath(resolved.relativePath)
+      )
       {
         return yield* new AssetPreviewTypeValidationError({
           resource: input.resource,
@@ -268,21 +294,22 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
             }),
         ),
       )
-      claims = isWorkspaceImagePreviewPath(resolved.relativePath)
-        ? {
-            version: 1,
-            kind: 'workspace-file-exact',
-            workspaceRoot: canonicalWorkspaceRoot,
-            relativePath: resolved.relativePath,
-            expiresAt,
-          }
-        : {
-            version: 1,
-            kind: 'workspace-file',
-            workspaceRoot: canonicalWorkspaceRoot,
-            baseRelativePath: path.dirname(resolved.relativePath),
-            expiresAt,
-          }
+      claims =
+        hostAbsolutePath || isWorkspaceImagePreviewPath(resolved.relativePath)
+          ? {
+              version: 1,
+              kind: 'workspace-file-exact',
+              workspaceRoot: canonicalWorkspaceRoot,
+              relativePath: resolved.relativePath,
+              expiresAt,
+            }
+          : {
+              version: 1,
+              kind: 'workspace-file',
+              workspaceRoot: canonicalWorkspaceRoot,
+              baseRelativePath: path.dirname(resolved.relativePath),
+              expiresAt,
+            }
       fileName = path.basename(resolved.relativePath)
       break
     }

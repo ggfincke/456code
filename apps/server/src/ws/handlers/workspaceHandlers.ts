@@ -20,6 +20,7 @@ import {
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
+import * as Path from 'effect/Path'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
 import type * as AssetAccess from '../../assets/AssetAccess.ts'
@@ -342,7 +343,13 @@ export function makeWorkspaceRpcHandlers({
         WS_METHODS.assetsCreateUrl,
         Effect.gen(function* ()
         {
+          const path = yield* Path.Path
           if (input.resource._tag !== 'workspace-file')
+          {
+            return yield* issueAssetUrl({ resource: input.resource })
+          }
+          // absolute media can originate from a thread hosted by another environment.
+          if (path.isAbsolute(input.resource.path))
           {
             return yield* issueAssetUrl({ resource: input.resource })
           }
