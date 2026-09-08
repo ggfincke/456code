@@ -171,12 +171,18 @@ export const PreviewScrollTool = safeBrowserTool(
   }).annotate(Tool.Title, 'Scroll preview page'),
 )
 
+export const PreviewEvaluateResult = Schema.Struct({
+  value: Schema.Unknown.annotate({
+    description: 'The JSON-serializable value the expression produced, or null.',
+  }),
+}).annotate({ description: 'The evaluated expression result.' })
+
 export const PreviewEvaluateTool = browserTool(
   Tool.make('preview_evaluate', {
     description:
-      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Returns a serializable result up to 64 KB; the expression may mutate page state.",
+      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Returns {value} with a serializable result up to 64 KB; the expression may mutate page state.",
     parameters: PreviewAutomationEvaluateInput,
-    success: Schema.Unknown,
+    success: PreviewEvaluateResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, 'Evaluate JavaScript in preview'),
