@@ -1379,6 +1379,13 @@ textarea,
   -webkit-app-region: drag;
 }
 
+/* electron 44 inherits app-region, so avoid child drag rectangles over controls */
+@layer base {
+  .drag-region > * {
+    -webkit-app-region: initial;
+  }
+}
+
 .drag-region button,
 .drag-region input,
 .drag-region textarea,
