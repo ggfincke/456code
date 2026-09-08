@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   onChangeDraftMessage: vi.fn(),
   onUpdateInteractionMode: vi.fn(),
   onUpdateModelSelection: vi.fn(),
+  refreshProvidersAtom: {},
+  refreshProviders: vi.fn(async () => ({ _tag: 'Failure' as const })),
 }))
 vi.mock('../../../../../../apps/mobile/src/state/projects', () => ({
   projectEnvironment: { searchEntries: mocks.searchEntries },
@@ -31,12 +33,31 @@ vi.mock('../../../../../../apps/mobile/src/state/query', () => ({
     refresh: vi.fn(),
   }),
 }))
+vi.mock('../../../../../../apps/mobile/src/state/server', () => ({
+  serverEnvironment: { refreshProviders: mocks.refreshProvidersAtom },
+}))
+vi.mock('../../../../../../apps/mobile/src/state/use-atom-command', () => ({
+  useAtomCommand: () => mocks.refreshProviders,
+}))
 
 import { useComposerCommandMenu } from '../../../../../../apps/mobile/src/features/threads/composer/use-composer-command-menu'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const environmentId = EnvironmentId.make('remote')
+const providerInstanceId = ProviderInstanceId.make('opencode-work')
 const provider = {
+  instanceId: providerInstanceId,
+  driver: 'opencode',
+  enabled: true,
+  installed: true,
+  version: '1.0.0',
+  status: 'ready',
+  auth: { status: 'authenticated' },
+  checkedAt: '2026-09-08T00:00:00.000Z',
+  models: [],
+  slashCommands: [],
+  skills: [],
+  workspaceSnapshots: [],
   capabilities: {
     ...CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
     supportedInteractionModes: ['default', 'plan'],
@@ -45,7 +66,7 @@ const provider = {
   },
 } as unknown as ServerProvider
 const modelSelection = {
-  instanceId: ProviderInstanceId.make('opencode-work'),
+  instanceId: providerInstanceId,
   model: 'github-copilot/claude',
   options: [{ id: 'reasoningEffort', value: 'high' }],
 }
