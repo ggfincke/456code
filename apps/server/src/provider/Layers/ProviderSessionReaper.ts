@@ -113,8 +113,7 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue
         }
 
-        const idleDurationMs = now - lastSeenMs
-        if (idleDurationMs < inactivityThresholdMs)
+        if (now - lastSeenMs < inactivityThresholdMs)
         {
           continue
         }
@@ -122,6 +121,17 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
         const thread = yield* projectionSnapshotQuery
           .getThreadShellById(binding.threadId)
           .pipe(Effect.map(Option.getOrUndefined))
+        // ingestion updates the session timestamp when a turn settles, so long
+        // turns receive a full idle window after that transition
+        const sessionUpdatedAtMs = Date.parse(thread?.session?.updatedAt ?? binding.lastSeenAt)
+        const lastActivityMs = Number.isNaN(sessionUpdatedAtMs)
+          ? lastSeenMs
+          : Math.max(lastSeenMs, sessionUpdatedAtMs)
+        let idleDurationMs = now - lastActivityMs
+        if (idleDurationMs < inactivityThresholdMs)
+        {
+          continue
+        }
         if (thread?.session?.activeTurnId != null)
         {
           yield* Effect.logDebug('provider.session.reaper.skipped-active-turn', {
@@ -165,6 +175,23 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           latestBinding.lastSeenAt !== binding.lastSeenAt ||
           now - latestLastSeenMs < inactivityThresholdMs
         )
+        {
+          continue
+        }
+
+        // re-read the shell after the binding fence so a concurrently completed
+        // turn cannot be reaped using the stale pre-completion timestamp
+        const latestThread = yield* projectionSnapshotQuery
+          .getThreadShellById(latestBinding.threadId)
+          .pipe(Effect.map(Option.getOrUndefined))
+        const latestSessionUpdatedAtMs = Date.parse(
+          latestThread?.session?.updatedAt ?? latestBinding.lastSeenAt,
+        )
+        const latestActivityMs = Number.isNaN(latestSessionUpdatedAtMs)
+          ? latestLastSeenMs
+          : Math.max(latestLastSeenMs, latestSessionUpdatedAtMs)
+        idleDurationMs = now - latestActivityMs
+        if (latestThread?.session?.activeTurnId != null || idleDurationMs < inactivityThresholdMs)
         {
           continue
         }
