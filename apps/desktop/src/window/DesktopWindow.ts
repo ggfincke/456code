@@ -538,59 +538,92 @@ export const make = Effect.gen(function* ()
       webPreferences.contextIsolation = false
     })
 
-    window.webContents.on('context-menu', (event, params) =>
+    const contextMenuContents = new WeakSet<Electron.WebContents>()
+    const installContextMenu = (
+      ownerWindow: Electron.BrowserWindow,
+      contents: Electron.WebContents,
+    ): void =>
     {
-      event.preventDefault()
-
-      const menuTemplate: Electron.MenuItemConstructorOptions[] = []
-
-      if (params.misspelledWord)
+      if (contextMenuContents.has(contents)) return
+      contextMenuContents.add(contents)
+      contents.on('context-menu', (event, params) =>
       {
-        for (const suggestion of params.dictionarySuggestions.slice(0, 5))
+        event.preventDefault()
+        if (contents.isDestroyed() || ownerWindow.isDestroyed()) return
+        // native editing roles target whichever contents owns focus
+        contents.focus()
+
+        const menuTemplate: Electron.MenuItemConstructorOptions[] = []
+
+        if (params.misspelledWord)
+        {
+          for (const suggestion of params.dictionarySuggestions.slice(0, 5))
+          {
+            menuTemplate.push({
+              label: suggestion,
+              click: () =>
+              {
+                if (!contents.isDestroyed()) contents.replaceMisspelling(suggestion)
+              },
+            })
+          }
+          if (params.dictionarySuggestions.length === 0)
+          {
+            menuTemplate.push({ label: 'No suggestions', enabled: false })
+          }
+          menuTemplate.push({ type: 'separator' })
+        }
+
+        if (Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL)))
+        {
+          menuTemplate.push(
+            {
+              label: 'Copy Link',
+              click: () =>
+              {
+                void runPromise(electronShell.copyText(params.linkURL))
+              },
+            },
+            { type: 'separator' },
+          )
+        }
+
+        if (params.mediaType === 'image')
         {
           menuTemplate.push({
-            label: suggestion,
-            click: () => window.webContents.replaceMisspelling(suggestion),
-          })
-        }
-        if (params.dictionarySuggestions.length === 0)
-        {
-          menuTemplate.push({ label: 'No suggestions', enabled: false })
-        }
-        menuTemplate.push({ type: 'separator' })
-      }
-
-      if (Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL)))
-      {
-        menuTemplate.push(
-          {
-            label: 'Copy Link',
+            label: 'Copy Image',
             click: () =>
             {
-              void runPromise(electronShell.copyText(params.linkURL))
+              if (!contents.isDestroyed()) contents.copyImageAt(params.x, params.y)
             },
-          },
-          { type: 'separator' },
+          })
+          menuTemplate.push({ type: 'separator' })
+        }
+
+        menuTemplate.push(
+          { role: 'cut', enabled: params.editFlags.canCut },
+          { role: 'copy', enabled: params.editFlags.canCopy },
+          { role: 'paste', enabled: params.editFlags.canPaste },
+          { role: 'selectAll', enabled: params.editFlags.canSelectAll },
         )
-      }
 
-      if (params.mediaType === 'image')
+        void runPromise(
+          electronMenu.popupTemplate({
+            window: ownerWindow,
+            template: menuTemplate,
+            ...(params.frame ? { frame: params.frame } : {}),
+          }),
+        )
+      })
+      contents.on('did-create-window', (popup) =>
       {
-        menuTemplate.push({
-          label: 'Copy Image',
-          click: () => window.webContents.copyImageAt(params.x, params.y),
-        })
-        menuTemplate.push({ type: 'separator' })
-      }
-
-      menuTemplate.push(
-        { role: 'cut', enabled: params.editFlags.canCut },
-        { role: 'copy', enabled: params.editFlags.canCopy },
-        { role: 'paste', enabled: params.editFlags.canPaste },
-        { role: 'selectAll', enabled: params.editFlags.canSelectAll },
-      )
-
-      void runPromise(electronMenu.popupTemplate({ window, template: menuTemplate }))
+        installContextMenu(popup, popup.webContents)
+      })
+    }
+    installContextMenu(window, window.webContents)
+    window.webContents.on('did-attach-webview', (_event, contents) =>
+    {
+      installContextMenu(window, contents)
     })
 
     window.webContents.setWindowOpenHandler(({ url }) =>
