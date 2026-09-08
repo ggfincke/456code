@@ -78,6 +78,62 @@ describe('mobile composer menu policy', () =>
     ).toEqual(['cmd:model', 'cmd:default'])
   })
 
+  it('keeps skills but hides provider commands after earlier draft text', () =>
+  {
+    const provider = {
+      driver: 'claudeAgent',
+      slashCommands: [{ name: 'compact' }],
+      skills: [
+        { name: 'review', path: '/skills/review', enabled: true },
+        {
+          name: 'private-review',
+          path: '/skills/private-review',
+          enabled: true,
+          userInvocable: false,
+        },
+      ],
+    } as unknown as ServerProvider
+    const draft = 'please /'
+
+    expect(
+      buildMobileComposerCommandItems({
+        trigger: detectComposerTrigger(draft, draft.length),
+        selectedProviderStatus: provider,
+        modelOptions: [],
+        interactionMode: { baseMode: 'default', orchestrate: false },
+        hasThread: true,
+        pathEntries: [],
+      }).map((item) => item.id),
+    ).toEqual(['cmd:model', 'cmd:default', 'skill:review'])
+  })
+
+  it('uses the exact-workspace skill and command arrays supplied by the hook', () =>
+  {
+    const provider = {
+      driver: 'cursor',
+      slashCommands: [{ name: 'machine-command' }],
+      skills: [{ name: 'machine-skill', path: '/skills/machine', enabled: true }],
+    } as unknown as ServerProvider
+
+    const items = buildMobileComposerCommandItems({
+      trigger: detectComposerTrigger('/', 1),
+      selectedProviderStatus: provider,
+      providerSkills: [{ name: 'project-skill', path: '/skills/project', enabled: true }],
+      providerSlashCommands: [{ name: 'project-command' }],
+      modelOptions: [],
+      interactionMode: { baseMode: 'default', orchestrate: false },
+      hasThread: true,
+      pathEntries: [],
+    })
+
+    expect(items.map((item) => item.id)).toEqual([
+      'cmd:model',
+      'cmd:default',
+      'pcmd:project-command',
+      'skill:project-skill',
+    ])
+  })
+
   it('searches model sources without changing the selected instance or model options', () =>
   {
     const selection = {
@@ -140,6 +196,7 @@ describe('mobile composer skills', () =>
       { name: 'building-native-ui', path: '/skills/native', enabled: true },
       { name: 'ui', displayName: 'UI design', path: '/skills/ui', enabled: true },
       { name: 'ui-disabled', path: '/skills/disabled', enabled: false },
+      { name: 'ui-private', path: '/skills/private', enabled: true, userInvocable: false },
       { name: 'backend', path: '/skills/backend', enabled: true },
     ]
     const items = searchMobileComposerSkills(skills, '$ui')

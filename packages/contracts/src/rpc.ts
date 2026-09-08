@@ -4,6 +4,7 @@
 import * as Schema from 'effect/Schema'
 import * as Rpc from 'effect/unstable/rpc/Rpc'
 import * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
+import { TrimmedNonEmptyString } from './baseSchemas.ts'
 
 import { ExternalLauncherError, LaunchEditorInput } from './editor.ts'
 import {
@@ -387,6 +388,8 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
     // behaviour retained for transports that still dispatch untargeted
     // refreshes.
     instanceId: Schema.optional(ProviderInstanceId),
+    // valid only with `instanceId`; the server authorizes an exact workspace.
+    cwd: Schema.optional(TrimmedNonEmptyString),
   }),
   success: ServerProviderUpdatedPayload,
   error: EnvironmentAuthorizationError,

@@ -3,6 +3,7 @@
 
 import {
   type EnvironmentId,
+  type ProviderInstanceId,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
@@ -35,6 +36,21 @@ export interface ServerConfigProjection
   readonly config: ServerConfig
   readonly latestEvent: ServerConfigStreamEvent
   readonly source: 'cache' | 'live'
+}
+
+export function providerRefreshSingleFlightKey(input: {
+  readonly environmentId: EnvironmentId
+  readonly input: {
+    readonly instanceId?: ProviderInstanceId | undefined
+    readonly cwd?: string | undefined
+  }
+}): string
+{
+  return JSON.stringify([
+    input.environmentId,
+    input.input.instanceId ?? null,
+    input.input.cwd ?? null,
+  ])
 }
 
 export function applyServerConfigProjection(
@@ -370,7 +386,7 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverRefreshProviders,
       concurrency: {
         mode: 'singleFlight',
-        key: ({ environmentId }) => environmentId,
+        key: providerRefreshSingleFlightKey,
       },
     }),
     updateProvider: createEnvironmentRpcCommand(runtime, {

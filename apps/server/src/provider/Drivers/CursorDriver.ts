@@ -57,6 +57,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from '../maintenance/providerUpdateSettings.ts'
+import { discoverCursorSkills, probeCursorSkills } from './CursorSkills.ts'
 const decodeCursorSettings = Schema.decodeSync(CursorSettings)
 
 const DRIVER_KIND = ProviderDriverKind.make('cursor')
@@ -175,12 +176,11 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv)
       const discoverModels = yield* makeCursorModelDiscovery(effectiveConfig, processEnv)
 
-      const checkProvider = checkCursorProviderStatus(
-        effectiveConfig,
-        processEnv,
-        discoverModels,
-      ).pipe(
-        Effect.map(stampIdentity),
+      const checkProvider = Effect.all([
+        checkCursorProviderStatus(effectiveConfig, processEnv, discoverModels),
+        discoverCursorSkills(undefined, processEnv),
+      ]).pipe(
+        Effect.map(([provider, skills]) => stampIdentity({ ...provider, skills })),
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -224,6 +224,25 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
             }),
         ),
       )
+      const snapshotForCwd = (workspaceCwd: string) =>
+        !effectiveConfig.enabled
+          ? snapshot.getSnapshot
+          : Effect.all([
+              snapshot.getSnapshot,
+              probeCursorSkills(workspaceCwd, processEnv).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderDriverError({
+                      driver: DRIVER_KIND,
+                      instanceId,
+                      detail: `Failed to discover Cursor skills for '${workspaceCwd}'`,
+                      cause,
+                    }),
+                ),
+              ),
+            ]).pipe(Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })))
 
       return {
         instanceId,
@@ -235,6 +254,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        snapshotForCwd,
         adapter,
         textGeneration,
       } satisfies ProviderInstance

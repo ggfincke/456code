@@ -16,9 +16,9 @@ only the plan's approved `fix/` or `sync/` branches; do not create `codex/` reco
 
 Current state:
 
-- Published `origin/main` baseline: `b81e104af65e3dc09faadef40bd0019ea28c3e6f`.
+- Published `origin/main` baseline: `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`.
 - The original local `main` checkout is clean and synchronized at
-  `b81e104af65e3dc09faadef40bd0019ea28c3e6f`.
+  `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -77,14 +77,28 @@ Current state:
   successful and three intentional skipped checks. PR #104 merged through merge commit
   `b81e104af65e3dc09faadef40bd0019ea28c3e6f`, and exact merged-main CI run
   [34256034956](https://github.com/ggfincke/456code/actions/runs/34256034956) completed successfully.
-- Active delivery unit: **PR 3 — Provider runtime** on
-  `sync/t3-provider-runtime-20260907`, based on exact green merged `main`
-  `b81e104af65e3dc09faadef40bd0019ea28c3e6f`. All thirteen exact source adaptations are implemented,
-  locally verified, and committed with source attribution, followed by scoped fork-integration repair
-  `dfec8ad74d6648097cfbd4ded35ca641afe57a95`. Integrated retained-diagnostic web acceptance passed;
-  final affected-package gates passed. Publication and hosted CI remain pending.
+- Published PR 3: [PR #105](https://github.com/ggfincke/456code/pull/105) published all thirteen
+  source-attributed Provider runtime adaptations plus scoped fork-integration repair
+  `dfec8ad74d6648097cfbd4ded35ca641afe57a95` at exact head
+  `09e534b9aea985744e1440ceb9c13039b408dfec`. Exact-head CI run
+  [34276546918](https://github.com/ggfincke/456code/actions/runs/34276546918) completed with 19
+  successful and three intentional skipped checks. PR #105 merged through exact merge
+  `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`, and exact merged-main CI run
+  [34278388492](https://github.com/ggfincke/456code/actions/runs/34278388492) completed successfully.
+- Active delivery unit: **PR 4 — Skills / workspaces** on
+  `sync/t3-skills-workspaces-20260907`, based on exact green merged `main`
+  `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`. Seven exact sources are allocated. Sources
+  `ea71a19d4181ce13b0e8f374f45ba9237ee4a9ce`,
+  `80a14b6588f0e856983e6d10002cde9e00e9d3e2`,
+  `15fea6c5f40331c8325f33bd08b2dcbf924e935a`,
+  `18573d60aab1344bf124a044b01445086e910c4c`,
+  `2152d44de2db30a6bae965b0afd30be080e5c872`,
+  `087cfb8ae262f344f7e409f5a8c0eda6f0ef12f9`, and
+  `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` are locally implemented and verified in coherent
+  source-attributed fork commits. Final combined gates and primary integrated web acceptance passed;
+  publication and hosted CI remain pending.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907`.
-- PRs 4-16 are approved plan scope but remain planned, not implemented. Each starts only from the
+- PRs 5-16 are approved plan scope but remain planned, not implemented. Each starts only from the
   preceding green merged `main`.
 - The exact source inventory is [the 805-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -153,7 +167,7 @@ sequence numbers, not existing GitHub pull request numbers.
 | **1** | Safety / CI | `ac4f1a2b6d`, `86070cbc74`, `9cb40178a5`, `d8bc6831cd`, `4ade365180`, `1665d81bb5`. |
 | **2** | Provider maintenance | `d28077e585`, `2fb99a7a66`, `c7dc3cbd06`, `2271a27dad`. |
 | **3** | Provider runtime | `940e8233c2`, `57a6b70e24`, `1246146f59`, `0d8a91a25a`, `bd16b86d50`, `4c7cd17a83`, `29c5ecd0ee`, `3d00cfd5a7`, `95139254ba`, `1abc717f0d`, `9ab0635db6`, `52b2bf77a9`, `6134b90ffb`. |
-| **4** | Skills / workspaces | Per-row allocation pending source and fork behavior trace. |
+| **4** | Skills / workspaces | `ea71a19d4`, `80a14b658`, `15fea6c5f`, `18573d60a`, `2152d44de`, `087cfb8ae`, `82f64cd8d`. |
 | **5** | Antigravity runtime | Per-row allocation pending source and fork behavior trace. |
 | **6** | Antigravity models | Per-row allocation pending source and fork behavior trace. |
 | **7** | Streaming / rendering | Per-row allocation pending source and fork behavior trace. |
@@ -167,7 +181,7 @@ sequence numbers, not existing GitHub pull request numbers.
 | **15** | Onboarding / import | Per-row allocation pending source and fork behavior trace. |
 | **16** | Ordering / balancing | Per-row allocation pending source and fork behavior trace. |
 
-Only the 23 exact PR 1/PR 2/PR 3 sources above receive a new row-level owner in this inventory update.
+Only the 30 exact PR 1/PR 2/PR 3/PR 4 sources above receive a new row-level owner in this inventory update.
 The 73 older approved future-source allocations belong to the historical 27-group map below; they
 remain source requirements rather than current 17-PR row allocations. The other current scope
 descriptions approve bounded destinations but are not complete SHA allocations; assigning their
@@ -1523,9 +1537,8 @@ unrelated worktrees and refs, and the pre-existing stash remain preserved.
 PR 3 started from exact green merged `main`
 `b81e104af65e3dc09faadef40bd0019ea28c3e6f` on
 `sync/t3-provider-runtime-20260907`. Thirteen exact sources are allocated to Provider runtime. This
-checkpoint records all thirteen rows as locally implemented, verified, and source-attributed. The
-scoped shared-runtime shutdown repair and final affected-package gates are also verified. Publication
-and hosted CI remain pending:
+checkpoint records all thirteen rows as implemented, verified, source-attributed, published, and
+merged. The scoped shared-runtime shutdown repair and final affected-package gates are also verified:
 
 | Source | Checkpoint state | Adaptation boundary |
 | --- | --- | --- |
@@ -1658,16 +1671,116 @@ exactly one projection-only `runtime.error` activity, id
 the authenticated isolated web UI displayed the exact **Runtime error** label and payload message in
 the expanded work group, then displayed both again after a full page reload and reopening the group.
 The screenshot at `/tmp/t3code-pr3-gemini-wrapper.0RCuQY/pr3-runtime-diagnostic.png` was inspected
-locally and awaits GitHub upload. This synthetic fixture proves only retained projection rendering
+locally and its original 352,759-byte PNG was uploaded to the
+[integrated evidence comment](https://github.com/ggfincke/456code/pull/105#issuecomment-5591639417)
+as [GitHub asset c8ca7110-4824-4fcb-a3a6-546ab1fd8c17](https://github.com/user-attachments/assets/c8ca7110-4824-4fcb-a3a6-546ab1fd8c17).
+The synthetic fixture proves only retained projection rendering
 and reload persistence, not real provider event emission or provider business behavior. On final
 code at `9cd2909fd1424e8b94c9081e0285dd598d2edb55`, stopping the backend showed **Environment
 disconnected** while retaining the exact synthetic detail; restarting the same disposable backend
-and refreshing restored the diagnostic with an available composer and no disconnected control. The
-final 352,759-byte screenshot remains local pending GitHub upload. The default
+and refreshing restored the diagnostic with an available composer and no disconnected control. The default
 disposable environment probed installed provider inventories before they were disabled, and the
 default text-generation writer may have generated the first failed thread title. User prompt
-execution used only the mock Gemini wrapper; no updater or installer ran. No PR 3 publication or
-hosted-CI claim is made here.
+execution used only the mock Gemini wrapper; no updater or installer ran.
+
+[PR #105](https://github.com/ggfincke/456code/pull/105) published this checkpoint at exact head
+`09e534b9aea985744e1440ceb9c13039b408dfec`. Exact-head CI run
+[34276546918](https://github.com/ggfincke/456code/actions/runs/34276546918) completed with 19 successful
+and three intentional skipped checks. The integrated synthetic-rendering receipt and screenshot were
+published in [PR comment 5591639417](https://github.com/ggfincke/456code/pull/105#issuecomment-5591639417).
+PR #105 merged through exact merge
+`7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`, and exact merged-main CI run
+[34278388492](https://github.com/ggfincke/456code/actions/runs/34278388492) completed successfully at
+that merge. The original clean `main` checkout was narrowly fast-forwarded to that exact merge, and
+the merged PR 3 local, live-origin, and origin-tracking refs were compare-and-deleted after holder,
+identity, lease, and merged-state checks. Both run-owned history-surgery backup refs remain preserved.
+
+## PR 4 implementation checkpoint
+
+PR 4 started from exact green merged `main`
+`7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc` on
+`sync/t3-skills-workspaces-20260907`. Seven exact sources are allocated to Skills / workspaces:
+`ea71a19d4181ce13b0e8f374f45ba9237ee4a9ce`,
+`80a14b6588f0e856983e6d10002cde9e00e9d3e2`,
+`15fea6c5f40331c8325f33bd08b2dcbf924e935a`,
+`18573d60aab1344bf124a044b01445086e910c4c`,
+`2152d44de2db30a6bae965b0afd30be080e5c872`,
+`087cfb8ae262f344f7e409f5a8c0eda6f0ef12f9`, and
+`82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe`.
+
+All seven sources are locally implemented and verified at this checkpoint. Coherent source-attributed fork commit
+`e7a36bf2f10ab2c3e2792ee6d7457ddf5542ee7e` discovers native Claude skills, applies enabled and
+user-invocable policy before composer selection, and converts recognized `$skill` selections into
+Claude-native slash dispatch while preserving unknown mentions. Its focused gates passed three
+server files/104 tests, two web files/eight tests, one mobile file/four tests, and one client-runtime
+file/three tests; web and mobile typechecks passed. The server typecheck was not claimed because
+concurrent, incomplete later-source work produced acknowledged errors outside this source boundary.
+Targeted formatting, lint, comments, and diff checks passed with only existing composer warnings.
+Backup `backup/sync-t3-skills-ea71-provisional-20260908T1742` preserves the provisional contract-only
+tip `3738a450669ca4a56be2015badb2dabaf4286651` from the approved coherent amendment.
+
+Coherent source-attributed fork commit `7477d00c746d1950afd3e06dc45420a5f6430f53`
+adds authorized exact-CWD workspace snapshots and refresh ownership while retaining selected-instance
+environment, live-instance fencing, failed-probe retention, a 16-entry successful snapshot cap, a
+20-second probe bound, and no workspace cache persistence. Focused gates passed one contracts file/10
+tests, two client-runtime files/12 tests, six server files/163 tests, and one post-review registry
+file/50 tests; contracts, client-runtime, server, and web typechecks plus targeted static checks passed.
+
+Coherent source-attributed fork commit `eba130560c19c5ec48c6d8f64e8b716aee9ce707`
+extends typed exact-CWD discovery to Cursor and Grok, rewrites only enabled and invocable discovered
+commands, and feeds exact-CWD snapshots into web and mobile composers without merging another
+workspace's catalog. Backend focused gates passed three files/60 tests and the full Cursor adapter
+file/31 tests; the mobile consumer file passed five tests; server, web, and mobile typechecks plus
+targeted formatting and lint passed. The disposable Cursor fixture directly proved that mode `000`
+on the owned beta skill directory produces a typed filesystem probe failure, then restoring mode
+`0755` returns only beta-project and machine skills, never alpha-project skills. Primary integrated
+browser acceptance below separately proves the same isolation and recovery through the user interface.
+
+Coherent source-attributed fork commit `0d9b52d0b37fadbee75513d750706712bfd7c4a7`
+keeps image attachments before the final native Claude slash-command text so attachment-bearing skill
+dispatch remains expandable. The full Claude adapter file passed 91 tests; targeted formatting, lint,
+comments, and diff checks passed.
+
+Coherent source-attributed fork commit `dc806ed29954bc7b6196f4e065cf7e994437265f`
+loads OpenCode workspace skills through the SDK boundary instead of a truncation-prone CLI pipe. Its
+focused OpenCode driver file passed two tests; server typecheck and targeted static checks passed.
+Coherent source-attributed fork commit `32ccefcce7faa0a392d2e4748b3b17469cc06dd3`
+admits valid symlinked Cursor skill package boundaries without weakening current authorization guards.
+Its full Cursor provider file passed 27 tests; server typecheck and targeted static checks passed.
+
+Coherent source-attributed fork commit `cfad06d4eeb100df0a06d57fc28091beea83e555`
+supports digit-leading skill names in Cursor discovery, Claude dispatch, shared composer tokens, web
+rendering, and native mobile rendering while preserving compact currency and numeric expressions as
+prose. Combined source gates passed two server files/34 tests, one shared file/13 tests, two web
+files/22 tests, and one mobile file/28 tests; server typecheck and targeted static checks passed.
+
+The final combined server gate passed 15 files/337 tests. Additional final gates passed one contracts
+file/10 tests, two client-runtime files/12 tests, one shared file/13 tests, four web files/30 tests,
+and two mobile files/33 tests. Contracts, client-runtime, shared, server, web, and mobile typechecks
+passed with existing suggestions only. The web production build transformed 4,882 modules and completed in 12.08 seconds
+with only the expected dynamic-import, large-chunk, and plugin-timing warnings. The automated iOS
+export bundled 3,330 modules in 16.371 seconds to the ignored disposable output
+`/tmp/t3code-pr4-ios-export.z1jRTH`; no native rebuild, simulator, or manual iOS gate ran. Final
+changed TypeScript/TSX Prettier, Vite+ lint, JS comments/header, committed-range diff, and worktree
+diff checks passed; lint reported only known React/compiler warnings and an existing unused Cursor
+test helper. Independent peer review found no actionable issue. Publication and hosted CI remain
+pending. A run-owned
+success-only Cursor fixture is prepared under
+`/private/tmp/t3code-pr4-cursor-fixture.gwrHgf` with all legacy providers disabled before first boot,
+one isolated custom Cursor instance, an ACP-mock wrapper, a machine skill, and two distinct disposable
+Git projects. Primary browser acceptance authenticated through the normal pairing flow. Alpha showed
+only `2spec`, Alpha Review, Machine Global, and Manual Only; agent-only remained absent. With Beta's
+owned skill directory at mode `000`, the typed failed probe showed only Machine Global and never any
+Alpha skill. Restoring mode `0755` and switching Alpha -> Beta showed only Beta Review and Machine
+Global. Selecting Beta Review with Cursor's valid `default` model sent exact ACP prompt
+`/beta-review`, rendered the fixture response, and returned an available composer. An earlier
+`grok-build` attempt failed model validation and is not acceptance. After final source contents were
+stable, a full browser reload preserved the same exact-CWD catalogs and successful skill-send result;
+the implementation owner confirmed the subsequent source commit contained no behavior edits. The
+owned browser tab closed and dev session `22612` stopped with exit 130. Three inspected,
+secret-free screenshots remain in the fixture directory pending GitHub upload:
+`pr4-failed-workspace-fallback.png` (31,543 bytes), `pr4-beta-recovered.png` (33,623 bytes), and
+`pr4-skill-send-reload.png` (43,223 bytes). No repository-owned PR assets were created.
 
 ## Verification policy for every PR
 

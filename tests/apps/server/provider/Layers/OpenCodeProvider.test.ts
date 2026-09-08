@@ -108,12 +108,14 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           }),
         )
       : Effect.succeed(runtimeMock.state.inventory as OpenCodeInventory),
+  loadOpenCodeSkills: () => Effect.succeed([]),
   loadInventoryFromCli: () =>
     Effect.sync(() =>
     {
       runtimeMock.state.cliInventoryCalls += 1
       return runtimeMock.state.inventory as OpenCodeInventory
     }),
+  loadSkillsFromCli: () => Effect.succeed([]),
 }
 
 beforeEach(() =>

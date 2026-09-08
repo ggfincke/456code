@@ -1320,6 +1320,23 @@ const make = Effect.gen(function* ()
       }
     }
     const effectiveCwd = requireActiveEnvironment().workspaceCwd ?? undefined
+    const ensureWorkspaceSnapshot =
+      effectiveCwd === undefined
+        ? Effect.void
+        : Effect.gen(function* ()
+          {
+            const providers = yield* providerRegistry.getProviders
+            const alreadyLoaded = providers
+              .find((provider) => provider.instanceId === desiredInstanceId)
+              ?.workspaceSnapshots?.some((snapshot) => snapshot.cwd === effectiveCwd)
+            if (alreadyLoaded)
+              {
+              return
+            }
+            yield* providerRegistry
+              .refreshWorkspaceSnapshot({ instanceId: desiredInstanceId, cwd: effectiveCwd })
+              .pipe(Effect.forkDetach)
+          })
 
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown
@@ -1328,7 +1345,7 @@ const make = Effect.gen(function* ()
       Effect.gen(function* ()
       {
         yield* revalidateImportContinuationAuthority()
-        return yield* invokeProvider(
+        const session = yield* invokeProvider(
           providerService.startSession(
             threadId,
             {
@@ -1353,6 +1370,8 @@ const make = Effect.gen(function* ()
           ),
           { trackIndeterminate: false },
         )
+        yield* ensureWorkspaceSnapshot
+        return session
       })
 
     const bindSessionToThread = (session: ProviderSession) =>
@@ -1416,6 +1435,7 @@ const make = Effect.gen(function* ()
         !shouldRestartForModelSelectionChange
       )
       {
+        yield* ensureWorkspaceSnapshot
         return activeSession
       }
 

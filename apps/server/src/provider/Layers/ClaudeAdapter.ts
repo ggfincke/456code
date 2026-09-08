@@ -129,6 +129,8 @@ import {
 } from '../claude/ClaudeToolProjection.ts'
 import { resolveClaudeSdkExecutablePath } from '../Drivers/ClaudeExecutable.ts'
 import { claudeSignedOutMessage, makeClaudeEnvironment } from '../Drivers/ClaudeHome.ts'
+import { planClaudeSkillDispatch } from '../Drivers/ClaudeSkillDispatch.ts'
+import { discoverClaudeSkills } from '../Drivers/ClaudeSkills.ts'
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
@@ -757,15 +759,20 @@ const buildUserMessageEffect = Effect.fn('buildUserMessageEffect')(function* (
     readonly fileSystem: FileSystem.FileSystem
     readonly attachmentsDir: string
     readonly boundInstanceId: ProviderInstanceId
+    readonly skillNames: ReadonlySet<string>
   },
 )
 {
   const text = buildPromptText(input, dependencies.boundInstanceId)
   const sdkContent: Array<Record<string, unknown>> = []
 
-  if (text.length > 0)
+  // claude expands a slash invocation only from the final text block. Split
+  // the last known `$skill` mention so the native CLI runs it and keeps the
+  // surrounding prose in order.
+  const dispatch = planClaudeSkillDispatch(text, dependencies.skillNames)
+  if (dispatch?.leadingText !== undefined)
   {
-    sdkContent.push({ type: 'text', text })
+    sdkContent.push({ type: 'text', text: dispatch.leadingText })
   }
 
   for (const attachment of input.attachments ?? [])
@@ -816,6 +823,17 @@ const buildUserMessageEffect = Effect.fn('buildUserMessageEffect')(function* (
         bytes,
       }),
     )
+  }
+
+  // image blocks must precede the final text so Claude can still expand a
+  // hand-typed or composer-generated slash command.
+  if (dispatch)
+  {
+    sdkContent.push({ type: 'text', text: dispatch.commandText })
+  }
+  else if (text.length > 0)
+  {
+    sdkContent.push({ type: 'text', text })
   }
 
   return buildUserMessage({ sdkContent })
@@ -4412,10 +4430,25 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       })
     }
 
+    // rescan for each send so mid-session additions and settings changes are
+    // reflected before turning a visible skill mention into a native command.
+    const skills = yield* discoverClaudeSkills(
+      claudeSettings,
+      context.session.cwd,
+      claudeEnvironment,
+    ).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    )
     const message = yield* buildUserMessageEffect(input, {
       fileSystem,
       attachmentsDir: serverConfig.attachmentsDir,
       boundInstanceId,
+      skillNames: new Set(
+        skills
+          .filter((skill) => skill.enabled && skill.userInvocable !== false)
+          .map((skill) => skill.name),
+      ),
     })
 
     yield* Queue.offer(context.promptQueue, {

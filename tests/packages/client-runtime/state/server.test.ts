@@ -3,6 +3,7 @@
 
 import {
   EnvironmentId,
+  ProviderInstanceId,
   type EnvironmentTheme,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -29,6 +30,7 @@ import {
   applyServerConfigProjection,
   makeEnvironmentServerConfigState,
   projectServerWelcome,
+  providerRefreshSingleFlightKey,
   resolveServerConfigValue,
   type ServerConfigProjection,
 } from '../../../../packages/client-runtime/src/state/server.ts'
@@ -70,6 +72,35 @@ function session(client: WsRpcProtocolClient): RpcSession
 
 describe('server state projection', () =>
 {
+  it('deduplicates only identical provider workspace refreshes', () =>
+  {
+    const environmentId = EnvironmentId.make('environment-1')
+    const instanceId = ProviderInstanceId.make('codex')
+    const first = providerRefreshSingleFlightKey({
+      environmentId,
+      input: { instanceId, cwd: '/workspace/one' },
+    })
+
+    expect(
+      providerRefreshSingleFlightKey({
+        environmentId,
+        input: { instanceId, cwd: '/workspace/one' },
+      }),
+    ).toBe(first)
+    expect(
+      providerRefreshSingleFlightKey({
+        environmentId,
+        input: { instanceId, cwd: '/workspace/two' },
+      }),
+    ).not.toBe(first)
+    expect(
+      providerRefreshSingleFlightKey({
+        environmentId: EnvironmentId.make('environment-2'),
+        input: { instanceId, cwd: '/workspace/one' },
+      }),
+    ).not.toBe(first)
+  })
+
   it('applies every config category to the projected snapshot', () =>
   {
     const snapshot = applyServerConfigProjection(Option.none(), {

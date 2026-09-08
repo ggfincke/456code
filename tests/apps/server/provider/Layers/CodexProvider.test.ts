@@ -20,6 +20,7 @@ import {
   mapCodexAccountUsage,
   mapCodexModelCapabilities,
   parseCodexModelListResponse,
+  probeCodexSkillsForCwd,
   resolveCodexAccountUsage,
 } from '../../../../../apps/server/src/provider/Layers/CodexProvider.ts'
 
@@ -133,6 +134,137 @@ const makeStalledUsageSpawner = Effect.fn('makeStalledUsageSpawner')(function* (
     spawner: ChildProcessSpawner.make(() => Effect.succeed(handle)),
   }
 })
+
+const makeSkillsSpawner = Effect.fn('makeSkillsSpawner')(function* ()
+{
+  const stdout = yield* Queue.unbounded<Uint8Array>()
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+  let remainder = ''
+  const spawnInputs: unknown[] = []
+
+  const stdin = Sink.forEach((chunk: Uint8Array) =>
+  {
+    remainder += decoder.decode(chunk, { stream: true })
+    const lines = remainder.split('\n')
+    remainder = lines.pop() ?? ''
+    return Effect.forEach(
+      lines,
+      (line) =>
+      {
+        const message = JSON.parse(line) as {
+          readonly id?: unknown
+          readonly method?: unknown
+          readonly params?: { readonly cwds?: ReadonlyArray<string> }
+        }
+        if (message.method === 'initialize')
+        {
+          return Queue.offer(
+            stdout,
+            encoder.encode(
+              `${JSON.stringify({
+                id: message.id,
+                result: {
+                  userAgent: 'codex-cli/1.0.0',
+                  codexHome: '/tmp/codex-home',
+                  platformFamily: 'unix',
+                  platformOs: 'test',
+                },
+              })}\n`,
+            ),
+          )
+        }
+        if (message.method === 'skills/list')
+        {
+          const cwd = message.params?.cwds?.[0] ?? ''
+          return Queue.offer(
+            stdout,
+            encoder.encode(
+              `${JSON.stringify({
+                id: message.id,
+                result: {
+                  data: [
+                    {
+                      cwd,
+                      skills: [
+                        {
+                          name: 'workspace-review',
+                          path: `${cwd}/.codex/skills/workspace-review/SKILL.md`,
+                          description: 'Review the current workspace.',
+                          enabled: true,
+                          scope: 'repo',
+                        },
+                      ],
+                      errors: [],
+                    },
+                  ],
+                },
+              })}\n`,
+            ),
+          )
+        }
+        return Effect.void
+      },
+      { discard: true },
+    )
+  })
+  const handle = ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: Effect.never,
+    isRunning: Effect.succeed(true),
+    kill: () => Effect.void,
+    unref: Effect.succeed(Effect.void),
+    stdin,
+    stdout: Stream.fromQueue(stdout),
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  })
+
+  return {
+    spawnInputs,
+    spawner: ChildProcessSpawner.make((command) =>
+      Effect.sync(() =>
+      {
+        spawnInputs.push(command)
+        return handle
+      }),
+    ),
+  }
+})
+
+it.effect('probes Codex skills with the exact workspace and selected instance environment', () =>
+  Effect.gen(function* ()
+  {
+    const { spawnInputs, spawner } = yield* makeSkillsSpawner()
+    const skills = yield* probeCodexSkillsForCwd({
+      binaryPath: process.execPath,
+      homePath: '/tmp/codex-home',
+      launchArgs: '--enable workspace-skills',
+      cwd: '/workspace/project',
+      environment: { PATH: process.env.PATH, PROVIDER_SCOPE: 'work' },
+    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner), Effect.scoped)
+
+    assert.deepStrictEqual(skills, [
+      {
+        name: 'workspace-review',
+        path: '/workspace/project/.codex/skills/workspace-review/SKILL.md',
+        description: 'Review the current workspace.',
+        enabled: true,
+        scope: 'repo',
+      },
+    ])
+    const command = spawnInputs[0] as {
+      readonly args: ReadonlyArray<string>
+      readonly options?: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv }
+    }
+    assert.strictEqual(command.options?.cwd, '/workspace/project')
+    assert.strictEqual(command.options?.env?.CODEX_HOME, '/tmp/codex-home')
+    assert.strictEqual(command.options?.env?.PROVIDER_SCOPE, 'work')
+    assert.deepStrictEqual(command.args, ['app-server', '--enable', 'workspace-skills'])
+  }),
+)
 
 it('normalizes and de-duplicates Codex account usage windows', () =>
 {

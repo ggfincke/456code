@@ -653,7 +653,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               ref={inputRef}
               multiline
               value={props.draftMessage}
-              skills={selectedProviderStatus?.skills ?? []}
+              skills={commandMenu.skills}
               selection={commandMenu.selection}
               onChangeText={props.onChangeDraftMessage}
               onSelectionChange={commandMenu.onSelectionChange}

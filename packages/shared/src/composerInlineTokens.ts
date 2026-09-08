@@ -22,7 +22,11 @@ export interface CollectComposerInlineTokensOptions
   readonly preserveTrailingFrom?: ReadonlyArray<ComposerInlineToken>
 }
 
-const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s)/g
+// digit-leading skill names are valid, but compact currency amounts and
+// numeric expressions must remain prose. Requiring a letter separates the
+// ambiguous forms without restricting the rest of the skill grammar.
+const SKILL_TOKEN_REGEX =
+  /(^|\s)\$(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s)/g
 const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g
 // cap each candidate scan so unmatched bracket runs stay linear
 const MAX_FILE_LINK_LABEL_LENGTH = 512

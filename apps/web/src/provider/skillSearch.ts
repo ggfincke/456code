@@ -2,6 +2,7 @@
 // search provider skills
 
 import type { ServerProviderSkill } from '@t3tools/contracts'
+import { isProviderSkillUserInvocable } from '@t3tools/client-runtime/providerSkills'
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
@@ -77,7 +78,7 @@ export function searchProviderSkills(
   limit = Number.POSITIVE_INFINITY,
 ): ServerProviderSkill[]
 {
-  const enabledSkills = skills.filter((skill) => skill.enabled)
+  const enabledSkills = skills.filter(isProviderSkillUserInvocable)
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ })
 
   if (!normalizedQuery)

@@ -7,14 +7,22 @@ import type {
   ModelSelection,
   ServerProvider,
 } from '@t3tools/contracts'
+import {
+  resolveProviderSkillsForCwd,
+  resolveProviderSlashCommandsForCwd,
+} from '@t3tools/client-runtime/providerSkills'
 import { detectComposerTrigger, replaceTextRange } from '@t3tools/shared/composerTrigger'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ComposerEditorSelection } from '../../../components/ComposerEditor'
 import type { ModelOption } from '../../../lib/modelOptions'
+import { serverEnvironment } from '../../../state/server'
+import { useAtomCommand } from '../../../state/use-atom-command'
 import { useComposerPathSearch } from '../../../state/use-composer-path-search'
 import type { ComposerCommandItem } from './ComposerCommandPopover'
 import { buildMobileComposerCommandItems, composerCommandReplacement } from './composerCommandItems'
+
+const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000
 
 export function useComposerCommandMenu({
   draftMessage,
@@ -68,6 +76,80 @@ export function useComposerCommandMenu({
     if (!enabled || selection.start !== selection.end) return null
     return detectComposerTrigger(draftMessage, selection.end)
   }, [draftMessage, enabled, selection])
+  const skills = useMemo(
+    () =>
+      selectedProviderStatus ? resolveProviderSkillsForCwd(selectedProviderStatus, projectCwd) : [],
+    [projectCwd, selectedProviderStatus],
+  )
+  const slashCommands = useMemo(
+    () =>
+      selectedProviderStatus
+        ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, projectCwd)
+        : [],
+    [projectCwd, selectedProviderStatus],
+  )
+  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
+    reportFailure: false,
+  })
+  const selectedProviderInstanceId = selectedProviderStatus?.instanceId
+  const hasWorkspaceSnapshot = Boolean(
+    projectCwd &&
+    selectedProviderStatus?.workspaceSnapshots?.some((snapshot) => snapshot.cwd === projectCwd),
+  )
+  const workspaceRefreshKeyRef = useRef<string | null>(null)
+  const workspaceRefreshRetryRef = useRef<{ key: string; notBefore: number } | null>(null)
+  const hadWorkspaceSnapshotRef = useRef(false)
+  useEffect(() =>
+  {
+    if (hadWorkspaceSnapshotRef.current && !hasWorkspaceSnapshot)
+    {
+      workspaceRefreshKeyRef.current = null
+      workspaceRefreshRetryRef.current = null
+    }
+    hadWorkspaceSnapshotRef.current = hasWorkspaceSnapshot
+  }, [hasWorkspaceSnapshot])
+  useEffect(() =>
+  {
+    if (!environmentId || !projectCwd || !selectedProviderInstanceId) return
+    const key = `${environmentId}:${selectedProviderInstanceId}:${projectCwd}`
+    if (workspaceRefreshKeyRef.current === key) return
+    if (hasWorkspaceSnapshot)
+    {
+      workspaceRefreshKeyRef.current = key
+      workspaceRefreshRetryRef.current = null
+      return
+    }
+    const retry = workspaceRefreshRetryRef.current
+    if (retry?.key === key && Date.now() < retry.notBefore) return
+    workspaceRefreshKeyRef.current = key
+    const retryLater = () =>
+    {
+      if (workspaceRefreshKeyRef.current !== key) return
+      workspaceRefreshKeyRef.current = null
+      workspaceRefreshRetryRef.current = {
+        key,
+        notBefore: Date.now() + WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS,
+      }
+    }
+    void refreshProviders({
+      environmentId,
+      input: { instanceId: selectedProviderInstanceId, cwd: projectCwd },
+    }).then((result) =>
+    {
+      const refreshed =
+        result._tag === 'Success' &&
+        result.value.providers
+          .find((provider) => provider.instanceId === selectedProviderInstanceId)
+          ?.workspaceSnapshots?.some((snapshot) => snapshot.cwd === projectCwd)
+      if (!refreshed) retryLater()
+    }, retryLater)
+  }, [
+    environmentId,
+    hasWorkspaceSnapshot,
+    projectCwd,
+    refreshProviders,
+    selectedProviderInstanceId,
+  ])
   const pathSearch = useComposerPathSearch({
     environmentId,
     cwd: trigger?.kind === 'path' ? projectCwd : null,
@@ -78,12 +160,23 @@ export function useComposerCommandMenu({
       buildMobileComposerCommandItems({
         trigger,
         selectedProviderStatus,
+        providerSkills: skills,
+        providerSlashCommands: slashCommands,
         modelOptions,
         interactionMode,
         hasThread,
         pathEntries: pathSearch.entries,
       }),
-    [hasThread, interactionMode, modelOptions, pathSearch.entries, selectedProviderStatus, trigger],
+    [
+      hasThread,
+      interactionMode,
+      modelOptions,
+      pathSearch.entries,
+      selectedProviderStatus,
+      skills,
+      slashCommands,
+      trigger,
+    ],
   )
 
   const onSelect = useCallback(
@@ -130,5 +223,13 @@ export function useComposerCommandMenu({
     ],
   )
 
-  return { selection, onSelectionChange, trigger, items, isLoading: pathSearch.isPending, onSelect }
+  return {
+    selection,
+    onSelectionChange,
+    trigger,
+    items,
+    skills,
+    isLoading: pathSearch.isPending,
+    onSelect,
+  }
 }
