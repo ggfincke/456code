@@ -16,9 +16,9 @@ only the plan's approved `fix/` or `sync/` branches; do not create `codex/` reco
 
 Current state:
 
-- Published `origin/main` baseline: `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`.
+- Published `origin/main` baseline: `b81e104af65e3dc09faadef40bd0019ea28c3e6f`.
 - The original local `main` checkout is clean and synchronized at
-  `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`.
+  `b81e104af65e3dc09faadef40bd0019ea28c3e6f`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -70,13 +70,21 @@ Current state:
   PR #103 merged through merge commit `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`, and exact
   merged-main CI run [34245504087](https://github.com/ggfincke/456code/actions/runs/34245504087)
   completed successfully.
-- Active delivery unit: **PR 2 — Provider maintenance** on
-  `sync/t3-provider-maintenance-20260907`, based on exact green merged `main`
-  `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`. Its four source adaptations are implemented and
-  locally verified through exact head `153888165c0cc3e8dbad57de4161e3c0cf34e5dd`; publication is
-  pending.
+- Published PR 2: [PR #104](https://github.com/ggfincke/456code/pull/104) published the four
+  source-attributed Provider maintenance adaptations at exact head
+  `6b2f473509feec9a3e6ae726b855a7b6be7d2ea3`. Exact-head CI run
+  [34254531283](https://github.com/ggfincke/456code/actions/runs/34254531283) completed with 19
+  successful and three intentional skipped checks. PR #104 merged through merge commit
+  `b81e104af65e3dc09faadef40bd0019ea28c3e6f`, and exact merged-main CI run
+  [34256034956](https://github.com/ggfincke/456code/actions/runs/34256034956) completed successfully.
+- Active delivery unit: **PR 3 — Provider runtime** on
+  `sync/t3-provider-runtime-20260907`, based on exact green merged `main`
+  `b81e104af65e3dc09faadef40bd0019ea28c3e6f`. All thirteen exact source adaptations are implemented,
+  locally verified, and committed with source attribution, followed by scoped fork-integration repair
+  `dfec8ad74d6648097cfbd4ded35ca641afe57a95`. Integrated retained-diagnostic web acceptance passed;
+  final affected-package gates passed. Publication and hosted CI remain pending.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907`.
-- PRs 3-16 are approved plan scope but remain planned, not implemented. Each starts only from the
+- PRs 4-16 are approved plan scope but remain planned, not implemented. Each starts only from the
   preceding green merged `main`.
 - The exact source inventory is [the 805-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -144,7 +152,7 @@ sequence numbers, not existing GitHub pull request numbers.
 | **0** | Checkpoint fix | Fork-specific checkpoint-turn-start failure repair; no upstream SHA. |
 | **1** | Safety / CI | `ac4f1a2b6d`, `86070cbc74`, `9cb40178a5`, `d8bc6831cd`, `4ade365180`, `1665d81bb5`. |
 | **2** | Provider maintenance | `d28077e585`, `2fb99a7a66`, `c7dc3cbd06`, `2271a27dad`. |
-| **3** | Provider runtime | Per-row allocation pending source and fork behavior trace. |
+| **3** | Provider runtime | `940e8233c2`, `57a6b70e24`, `1246146f59`, `0d8a91a25a`, `bd16b86d50`, `4c7cd17a83`, `29c5ecd0ee`, `3d00cfd5a7`, `95139254ba`, `1abc717f0d`, `9ab0635db6`, `52b2bf77a9`, `6134b90ffb`. |
 | **4** | Skills / workspaces | Per-row allocation pending source and fork behavior trace. |
 | **5** | Antigravity runtime | Per-row allocation pending source and fork behavior trace. |
 | **6** | Antigravity models | Per-row allocation pending source and fork behavior trace. |
@@ -155,11 +163,11 @@ sequence numbers, not existing GitHub pull request numbers.
 | **11** | Web / desktop UX | Per-row allocation pending source and fork behavior trace. |
 | **12** | Runtime / tooling | Per-row allocation pending source and fork behavior trace. |
 | **13** | Settlement / checkpoints | Per-row allocation pending source and fork behavior trace. |
-| **14** | Usage / project defaults | Per-row allocation pending source and fork behavior trace. |
+| **14** | Usage / project defaults | Usage limits, pooled views, custom pricing, `/usage-limits`, and iOS are approved; exact per-row allocation remains pending source and fork behavior trace. |
 | **15** | Onboarding / import | Per-row allocation pending source and fork behavior trace. |
 | **16** | Ordering / balancing | Per-row allocation pending source and fork behavior trace. |
 
-Only the ten exact PR 1/PR 2 sources above receive a new row-level owner in this inventory update.
+Only the 23 exact PR 1/PR 2/PR 3 sources above receive a new row-level owner in this inventory update.
 The 73 older approved future-source allocations belong to the historical 27-group map below; they
 remain source requirements rather than current 17-PR row allocations. The other current scope
 descriptions approve bounded destinations but are not complete SHA allocations; assigning their
@@ -1486,18 +1494,180 @@ contained spaces and an apostrophe. It reported deterministic old version `0.1.0
 ACP behavior to the existing mock agent in Gemini mode. In the authenticated isolated web UI, the
 selected Gemini instance showed the behind-version state but remained manual-only: no **Update now**
 control or copied update command appeared, and that state persisted after refresh and full reload.
-No real updater or installer executed. The retained 81,608-byte screenshot is primary-owned evidence
-for later GitHub upload and is not claimed as uploaded.
+No real updater or installer executed. The retained 81,608-byte screenshot was published in PR
+comment [5588872610](https://github.com/ggfincke/456code/pull/104#issuecomment-5588872610) as asset
+`8f1dc1fb-2a85-4937-b9cd-d886c3909616`.
 
 Cleanup closed Chrome tab `484368441`, stopped owned dev session `76709` with exit 130, and left
 ports 5733 and 13773 without listeners. Exact run-owned directories
 `/tmp/t3code-pr2-state.Z2xwu5` and `/tmp/t3code-pr2-gemini-wrapper.mazuC1` had no live handles and
-were moved recoverably to macOS Trash. The original `main` checkout remains clean at
-`58c0e6a3173fe185c34079d4496a246b3a7c2e1e`; dependency paths were worktree-local. The implementation
-owner reported no remaining actionable review issue. No files are staged, no PR is published, and
-no publication or hosted-CI receipt is claimed. Recovery branch
+were moved recoverably to macOS Trash. Dependency paths were worktree-local, and the implementation
+owner reported no remaining actionable review issue. Recovery branch
 `backup/sync-t3-provider-maintenance-38ad-20260908T1158` intentionally retains pre-amend commit
 `38ad69442282734d827f41d79c005f13d9ef6dee`; the unrelated pre-existing Coral stash was untouched.
+
+The plan checkpoint was committed as `6b2f473509feec9a3e6ae726b855a7b6be7d2ea3`, which became exact
+[PR #104](https://github.com/ggfincke/456code/pull/104) head. Exact-head CI run
+[34254531283](https://github.com/ggfincke/456code/actions/runs/34254531283) completed with 19 successful
+and three intentional skipped checks at that head. PR #104 merged by merge-commit strategy at
+`2026-09-08T17:15:48Z` through exact merge `b81e104af65e3dc09faadef40bd0019ea28c3e6f`;
+exact merged-main CI run
+[34256034956](https://github.com/ggfincke/456code/actions/runs/34256034956) completed successfully at
+that merge. The original clean `main` checkout was narrowly fast-forwarded to `b81e104af65e3dc09faadef40bd0019ea28c3e6f`.
+After holder, identity, and merged-state checks, the exact local, live-origin, and origin-tracking PR 2
+refs at `6b2f473509feec9a3e6ae726b855a7b6be7d2ea3` were compare-and-deleted. The backup branch,
+unrelated worktrees and refs, and the pre-existing stash remain preserved.
+
+## PR 3 implementation checkpoint
+
+PR 3 started from exact green merged `main`
+`b81e104af65e3dc09faadef40bd0019ea28c3e6f` on
+`sync/t3-provider-runtime-20260907`. Thirteen exact sources are allocated to Provider runtime. This
+checkpoint records all thirteen rows as locally implemented, verified, and source-attributed. The
+scoped shared-runtime shutdown repair and final affected-package gates are also verified. Publication
+and hosted CI remain pending:
+
+| Source | Checkpoint state | Adaptation boundary |
+| --- | --- | --- |
+| `52b2bf77a941740b4d979f3f4cae1c2851c14a69` | Source-attributed fork commit `63f20dab5a0c2dbfd9f8ed386046832b632c894d`; locally verified | Decode both ordinary and verbose Claude JSON output and unwrap JSON-encoded thread titles before normalization and truncation. |
+| `0d8a91a25a35618c7cae1e02791e491afa1f0a00` | Source-attributed fork commit `1620347ac4e547505de349e368d82bf9ec4ac2f8`; locally verified | Cache successful nonempty Cursor model discovery for 30 minutes per driver instance, invalidating on version/account changes and retrying failed probes. |
+| `6134b90ffb19c18e0b2f468aa172095a393470b0` | Source-attributed fork commit `204857834884b497e9d36cbbf2d4efc40921c86c`; locally verified with repair `dfec8ad74d6648097cfbd4ded35ca641afe57a95` | Detect only bounded standalone Cursor transport dumps and fail the final non-cancelled prompt without publishing `turn.completed`. |
+| `9ab0635db6abb1abf15e664141a0f8b6f0c33eae` | Source-attributed fork commit `8bfd2497e5ca7c674916ae3184854b53da509a3d`; locally verified | Serialize both initial and retrying OpenCode CLI inventory probes that share SQLite state. |
+| `29c5ecd0ee288489d254905dc6aa9844be36db8e` | Source-attributed fork commit `7c3ead54ecdf5a376a3ef53c531d3f87798d0de2`; locally verified | Add MCP-only `includeImage: false` response shaping while preserving complete browser capture, structured screenshot metadata, and default image behavior. |
+| `1246146f59a5a0f7a6f2da46bdd91f79b231d6a6` | Source-attributed fork commit `aba48d71232d4ed68cc2dd9c27c691d39ad1580d`; locally verified | Retain a runtime warning/error payload message as work-log detail only when no stronger detail exists and the message is not already the row label. |
+| `940e8233c227a186044078e99e45e1933eb525e4` | Source-attributed fork commit `1e8272c4b838818afcab6131d84a3022883c9471`; locally verified | Claude usage-limit pause diagnostics. |
+| `3d00cfd5a710a58bf108de7a66fbe00a1420cc78` | Source-attributed fork commit `c7cbd370d9377259682b200ab2ca1997deb344b8`; locally verified | Claude expired-login and usage-limit terminal naming. |
+| `4c7cd17a832269ef17edcf99e987ac25ae1b640a` | Source-attributed fork commit `545fb6bd9140a206c7156a49a7cc7d40713f607b`; locally verified | Shared Claude result status and error mapping. |
+| `95139254ba98fb8ad12a001ebcbc9d4b833ead19` | Source-attributed fork commit `805263295126a010e5e2ef982847546cfdf3a74c`; locally verified | Accept the additional Codex resume error unions in the generated schema boundary. |
+| `57a6b70e24221f00c9a161f1e5b6b2ddd753bc8f` | Source-attributed fork commit `cd0d0f017edca2c129efd576806e0d067e6aeb3a`; locally verified | Preserve file-change approval detail through the current Codex adapter request surface. |
+| `1abc717f0dbd08027b5be4ec45ae6c5bccf96418` | Source-attributed fork commit `3719e69993f173a2a05198192e9da6d29ed310c2`; locally verified | Resume interrupted threads from persisted metadata only; the automatic update-startup hunk remains excluded. |
+| `bd16b86d50c1df49afeb7c0a7568a4908ade4048` | Source-attributed fork commit `9cd2909fd1424e8b94c9081e0285dd598d2edb55`; locally verified | Report initializer and method-stream defects, retain diagnostics across buffered failed-attempt values and connection notifications, and clear them only when a real subscription attempt starts. |
+
+The complete 38-path implementation and mirrored-test manifest is:
+
+```text
+apps/server/src/mcp/McpHttpServer.ts
+apps/server/src/mcp/toolkits/preview/handlers.ts
+apps/server/src/mcp/toolkits/preview/tools.ts
+apps/server/src/provider/Drivers/ClaudeHome.ts
+apps/server/src/provider/Drivers/CursorDriver.ts
+apps/server/src/provider/Layers/ClaudeAdapter.ts
+apps/server/src/provider/Layers/CodexAdapter.ts
+apps/server/src/provider/Layers/CodexSessionRuntime.ts
+apps/server/src/provider/Layers/CursorAdapter.ts
+apps/server/src/provider/Layers/CursorProvider.ts
+apps/server/src/provider/acp/AcpSessionRuntime.ts
+apps/server/src/provider/acp/CursorTransportFailure.ts
+apps/server/src/provider/opencodeRuntime.ts
+apps/server/src/textGeneration/ClaudeTextGeneration.ts
+apps/server/src/textGeneration/TextGenerationUtils.ts
+apps/web/src/session/worklog.ts
+docs/providers/claude.md
+packages/client-runtime/src/rpc/client.ts
+packages/client-runtime/src/state/threads/threads.ts
+packages/effect-codex-app-server/scripts/generate.ts
+packages/effect-codex-app-server/src/_generated/schema.gen.ts
+tests/apps/server/mcp/McpHttpServer.test.ts
+tests/apps/server/provider/Drivers/ClaudeHome.test.ts
+tests/apps/server/provider/Layers/ClaudeAdapter.test.ts
+tests/apps/server/provider/Layers/CodexAdapter.test.ts
+tests/apps/server/provider/Layers/CodexSessionRuntime.test.ts
+tests/apps/server/provider/Layers/CursorAdapter.test.ts
+tests/apps/server/provider/Layers/CursorProvider.test.ts
+tests/apps/server/provider/acp/AcpJsonRpcConnection.test.ts
+tests/apps/server/provider/acp/CursorTransportFailure.test.ts
+tests/apps/server/provider/opencodeRuntime.inventory.test.ts
+tests/apps/server/provider/testFixtures/openCodeCliOrderingMock.mjs
+tests/apps/server/textGeneration/ClaudeTextGeneration.test.ts
+tests/apps/server/textGeneration/TextGenerationPrompts.test.ts
+tests/apps/web/session-logic.test.ts
+tests/packages/client-runtime/rpc/client.test.ts
+tests/packages/client-runtime/state/threads-sync.test.ts
+tests/packages/effect-codex-app-server/schema.test.ts
+```
+
+The six-source lane changes 18 tracked paths and adds three mirrored source/test fixture paths. Its
+focused verification passed six server test files and 80 tests, the named Cursor adapter regression
+with one passing test and 29 skipped tests, and the full web session-logic file with 75 passing tests.
+Server and web package typechecks exited zero. The affected web production build transformed 4,881
+modules and completed in 11.53 seconds with the expected `useSettings.ts` dynamic-import, large-chunk,
+and plugin-timing warnings. Targeted lint exited zero with only the pre-existing unused
+`waitForCursorSessionDrop` test-helper warning; targeted Prettier and comment checks passed, and
+`git diff --check` produced no output. No full suite ran.
+
+The later expanded Cursor adapter suite initially hung in `emits one Cursor exit when graceful stop races ACP
+termination`. A controlled, reversible removal of only the new Cursor `drainEvents` call made that
+named race pass in 1.07 seconds; the file was then restored byte-identically. Read-only tracing found
+with SHA-256 `577a9465473ac4d2286f78b74d8660c992d4dfd10a84cf2b27398b9e5955ec1d`.
+Read-only tracing found that the event-drain barrier could outlive its notification consumer during
+graceful scope closure because the termination latch was not completed by a runtime-scope finalizer.
+Separate fork-integration repair
+`dfec8ad74d6648097cfbd4ded35ca641afe57a95` completes only that private latch during scope closure,
+emits no synthetic termination event, and adds one direct unacknowledged-barrier regression. The
+named barrier regression passed once with 24 other tests skipped; the named Cursor graceful-stop race
+passed once with 29 other tests skipped; the full Cursor adapter file passed all 30 tests; the full
+ACP runtime file passed all 25 tests; and the combined server gate passed 12 files and all 290 tests.
+Independent review and primary review found no remaining issue. Message-only metadata amendment
+backup `backup/sync-t3-provider-runtime-e9d087006-20260908T1633` retains pre-amend commit
+`e9d087006949372ccd35374bbc6bf09f15565192`; its tree is identical and the final repair preserves the
+requested `Co-authored-by: Codex <noreply@openai.com>` trailer.
+
+The separate three-source Claude lane preserves each upstream author, AuthorDate, subject, and
+co-author trailers while appending `Source` and `Adaptation` bodies. Its final two focused mirrored
+test files passed 94 tests, and primary review found no remaining actionable issue in that lane.
+
+The final four-source Codex/client lane preserves the same source metadata boundary. Its Codex tests
+contributed 61 passing tests to the four-file, 155-test combined Claude/Codex gate; the generated
+schema test passed 29 tests, and two client-runtime files passed 29 tests. The implementation owner
+reported the affected package typechecks green. An independent read-only review of the terminated
+subscription adaptation found no actionable issue: protocol defects remain transport-waiting and
+recover on a real attempt, ordinary domain failures retain their bounded retry, fatal defects remain
+terminal, connection notifications do not erase the diagnostic, and buffered values preserve both
+cached data and the failure message. After the client changes landed, the web typecheck exited zero
+with suggestions only and the production build transformed 4,881 modules in 11.43 seconds with the
+same expected dynamic-import, large-chunk, and plugin-timing warnings.
+
+The final serial automated gate used these exact commands from the noted package or worktree root:
+
+```text
+apps/server: mise exec -- pnpm exec vp test run '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/textGeneration/ClaudeTextGeneration.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/textGeneration/TextGenerationPrompts.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Layers/CursorProvider.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Layers/CursorAdapter.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/acp/CursorTransportFailure.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/opencodeRuntime.inventory.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/mcp/McpHttpServer.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Drivers/ClaudeHome.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Layers/ClaudeAdapter.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Layers/CodexAdapter.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Layers/CodexSessionRuntime.test.ts' '/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/acp/AcpJsonRpcConnection.test.ts'
+packages/effect-codex-app-server: mise exec -- ../../node_modules/.bin/vp test run ../../tests/packages/effect-codex-app-server/schema.test.ts
+packages/client-runtime: mise exec -- ../../node_modules/.bin/vp test run ../../tests/packages/client-runtime/rpc/client.test.ts ../../tests/packages/client-runtime/state/threads-sync.test.ts
+worktree root: mise exec -- pnpm --filter ./apps/server typecheck
+worktree root: mise exec -- pnpm --filter effect-codex-app-server typecheck
+worktree root: mise exec -- pnpm --filter @t3tools/client-runtime typecheck
+worktree root: mise exec -- pnpm --filter @t3tools/mobile typecheck
+```
+
+The server gate exited zero with 12 files and 290 tests passed. The Effect Codex schema gate exited zero with one file
+and 29 tests passed; the client-runtime gate exited zero with two files and 29 tests passed. All four
+typechecks exited zero; the first three printed suggestions only and mobile was silent. Formatting
+over all 38 committed paths, the JavaScript comment/header check, and committed-range plus worktree
+`git diff --check` all exited zero. No full workspace suite, simulator, or manual iOS gate ran.
+
+The primary integrated web gate passed for the retained diagnostic renderer. The first disposable Gemini attempts using models
+`auto` and `default` failed safely at model validation and are not diagnostic acceptance. A later
+`grok-build` attempt reached the expected Gemini prompt-failure alert but did not create a
+`runtime.error` work-log row because the Gemini adapter maps that path to a failed `turn.completed`
+event. With the server stopped and both owned ports free of listeners, the guarded SQLite fixture
+helper backed up the disposable state database to
+`/tmp/t3code-pr3-state.PHxC9L/userdata/state.sqlite.backup-2026-09-08T18-46-17.747Z` and appended
+exactly one projection-only `runtime.error` activity, id
+`fixture:pr3-retained-runtime-diagnostic`, to the existing latest turn. The synthetic payload message is
+`Synthetic PR 3 renderer check: retained runtime diagnostic survived persistence and reload.`;
+the authenticated isolated web UI displayed the exact **Runtime error** label and payload message in
+the expanded work group, then displayed both again after a full page reload and reopening the group.
+The screenshot at `/tmp/t3code-pr3-gemini-wrapper.0RCuQY/pr3-runtime-diagnostic.png` was inspected
+locally and awaits GitHub upload. This synthetic fixture proves only retained projection rendering
+and reload persistence, not real provider event emission or provider business behavior. On final
+code at `9cd2909fd1424e8b94c9081e0285dd598d2edb55`, stopping the backend showed **Environment
+disconnected** while retaining the exact synthetic detail; restarting the same disposable backend
+and refreshing restored the diagnostic with an available composer and no disconnected control. The
+final 352,759-byte screenshot remains local pending GitHub upload. The default
+disposable environment probed installed provider inventories before they were disabled, and the
+default text-generation writer may have generated the first failed thread title. User prompt
+execution used only the mock Gemini wrapper; no updater or installer ran. No PR 3 publication or
+hosted-CI claim is made here.
 
 ## Verification policy for every PR
 
@@ -1537,10 +1707,12 @@ covers the same sequence for each current PR after its scoped checkpoint is gree
 ## Exclusions
 
 Remain excluded throughout: Android; Connect/Relay/cloud restoration; cookie import; automatic
-post-update thread continuation; unrelated provider/settings redesign; cosmetics; usage-dashboard
-expansion; broad dependency/release churn; test pruning; and patches whose upstream architecture is
-absent. PR 5 (historical Group 12) personal OAuth is the only approved Antigravity authentication
-path. There is no Antigravity dual backend and no authority to alter the existing `agy` installation.
+post-update thread continuation; unrelated provider/settings redesign; cosmetics; unapproved
+usage-dashboard, CLIProxy, and hub-reset work outside PR 14's approved usage limits, pooled views,
+custom pricing, `/usage-limits`, and iOS scope; broad dependency/release churn; test pruning; and
+patches whose upstream architecture is absent. PR 5 (historical Group 12) personal OAuth is the only
+approved Antigravity authentication path. There is no Antigravity dual backend and no authority to
+alter the existing `agy` installation.
 
 ## Completion definition
 
