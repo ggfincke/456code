@@ -306,6 +306,11 @@ describe('split/new/close terminal shortcuts', () =>
 
 describe('shortcutLabelForCommand', () =>
 {
+  it('returns null when the command is unavailable', () =>
+  {
+    assert.isNull(shortcutLabelForCommand(DEFAULT_BINDINGS, null, 'MacIntel'))
+  })
+
   it('returns the effective binding label', () =>
   {
     const bindings = compile([

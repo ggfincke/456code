@@ -333,8 +333,13 @@ const findActiveProjectTarget = Effect.fn('findActiveProjectTarget')(function* (
     normalizeWorkspaceRootForProjectCommand(trimmedIdentifier),
   )
   const normalizedWorkspaceRoot =
-    normalizedWorkspaceRootResult._tag === 'Success' ? normalizedWorkspaceRootResult.success : null
+    normalizedWorkspaceRootResult._tag === 'Success'
+      ? normalizedWorkspaceRootResult.success
+      : normalizedWorkspaceRootResult.failure._tag === 'WorkspaceRootNotExistsError'
+        ? normalizedWorkspaceRootResult.failure.normalizedWorkspaceRoot
+        : null
 
+  // a normalized stored path still identifies its project after the directory is gone
   const exactWorkspaceMatch =
     normalizedWorkspaceRoot === null
       ? undefined

@@ -16,10 +16,9 @@ only the plan's approved `fix/` or `sync/` branches; do not create `codex/` reco
 
 Current state:
 
-- Published `origin/main` baseline: `f592d498191d90f353fd3da15d21f9c02d9507e3`.
-- The original local `main` checkout remains intentionally dirty at
-  `a60bdbc5856fdb88e32585156238b39617bf9e86`, one commit behind `origin/main`. Its three modified
-  server/VCS files are outside this plan-document update and remain preserved.
+- Published `origin/main` baseline: `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`.
+- The original local `main` checkout is clean and synchronized at
+  `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -61,10 +60,14 @@ Current state:
 - Dependency modernization [PR #101](https://github.com/ggfincke/456code/pull/101) is merged as
   `f592d498191d90f353fd3da15d21f9c02d9507e3`, but it is not a T3 reconciliation group and does not
   consume a row or PR slot in the expanded delivery map.
-- Active delivery unit: **PR 0 — checkpoint fix** on
-  `fix/checkpoint-turn-start-failure-20260907`, based on published `origin/main`.
+- Published PR 0: [PR #102](https://github.com/ggfincke/456code/pull/102) merged through merge commit
+  `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`. Exact merged-main CI run
+  [34171682069](https://github.com/ggfincke/456code/actions/runs/34171682069) completed successfully.
+- Active delivery unit: **PR 1 — Safety / CI** on `sync/t3-safety-ci-20260907`, based on exact green
+  merged `main` `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`. Its six source adaptations are implemented and
+  locally verified; publication is pending.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907`.
-- PRs 1-16 are approved plan scope but remain planned, not implemented. Each starts only from the
+- PRs 2-16 are approved plan scope but remain planned, not implemented. Each starts only from the
   preceding green merged `main`.
 - The exact source inventory is [the 805-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -1298,6 +1301,88 @@ The checkpoint was published in [PR #100](https://github.com/ggfincke/456code/pu
 `a60bdbc5856fdb88e32585156238b39617bf9e86`. The pre-publication checks above remain the recorded
 verification; this reconciliation update adds no unobserved merged-main CI claim. Remaining work is
 sequenced by the approved 17-PR delivery map.
+
+## PR 0 published checkpoint
+
+The fork-specific checkpoint-turn-start failure repair was published from
+`fix/checkpoint-turn-start-failure-20260907` in
+[PR #102](https://github.com/ggfincke/456code/pull/102). It merged through exact merge commit
+`d9d513bf9e544f9324b94763c63dfe9fb09b6e12`, and exact merged-main CI run
+[34171682069](https://github.com/ggfincke/456code/actions/runs/34171682069) completed successfully.
+The original `main` checkout is clean and synchronized to that exact commit. PR 0 is fork-specific,
+has no upstream source SHA, and therefore consumes no row in the frozen 805-row ledger.
+
+## PR 1 implementation checkpoint
+
+PR 1 started from exact green merged `main`
+`d9d513bf9e544f9324b94763c63dfe9fb09b6e12` on `sync/t3-safety-ci-20260907`. All six approved
+sources are adapted in the working tree, with their current fork counterparts inspected directly:
+
+| Source | Fork adaptation and current evidence |
+| --- | --- |
+| `ac4f1a2b6d52b082edcc06d866892f8dcfdc033f` | `serverSettings.ts` preserves the effective last inline sensitive value when a redacted settings save migrates it into the secret store. Explicit replacement and clearing remain authoritative, and migration failure leaves the persisted inline setting intact. |
+| `86070cbc7430957e542f5b1d4c6a38359329002d` | `GitVcsDriverCore.ts` resolves the active index path before status, declines to run status/clean filters while the index is locked, and resumes for root, nested, and linked-worktree paths after unlock. |
+| `9cb40178a53cca279c67a9079afab3cddf6b6ddb` | `cli/project.ts` uses the normalized path carried by `WorkspaceRootNotExistsError` to match a stored project after its directory disappears. The post-review repair preserves syntactic path identity rather than collapsing symlink-distinct project entries. |
+| `d8bc6831cd822b294d875364cf3aa0a17c999258` | The server rejects newly introduced script IDs that cannot form a valid shortcut command while keeping pre-existing invalid IDs editable and removable. Web command and label helpers treat such legacy scripts as having no shortcut, so script menus remain usable. The `ChatView.tsx` hunk only widens the local `keybindingCommand` type to nullable. |
+| `4ade365180231983008bcd46ca7312f8155e1224` | The local composite action rewrites Ubuntu archive/security sources to an ordered mirror list and bounds per-mirror timeouts; the Linux release job invokes it before package installation. No unrelated workflow lane is changed. |
+| `1665d81bb5d78f33be6734e8962297b369396ac3` | The Windows release job requests `Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre`, matching the runtime component required by the packaged executable. |
+
+The pre-publication checkpoint implementation manifest was 17 paths: one new composite action, one
+release workflow, four server source files, four web source files, four mirrored server tests, and
+three mirrored web tests. These two maintained plan documents were the only additional checkpoint-
+document paths. No dependency or lock manifest changed.
+
+```text
+?? .github/actions/setup-apt-mirrors/action.yml
+ M .github/workflows/release.yml
+ M apps/server/src/cli/project.ts
+ M apps/server/src/orchestration/decider.ts
+ M apps/server/src/serverSettings.ts
+ M apps/server/src/vcs/GitVcsDriverCore.ts
+ M apps/web/src/components/ChatView.tsx
+ M apps/web/src/lib/keybindings.ts
+ M apps/web/src/lib/projectScriptKeybindings.ts
+ M apps/web/src/lib/projectScripts.ts
+ M tests/apps/server/bin.test.ts
+ M tests/apps/server/orchestration/decider.projectScripts.test.ts
+ M tests/apps/server/serverSettings.test.ts
+ M tests/apps/server/vcs/GitVcsDriverCore.test.ts
+ M tests/apps/web/lib/keybindings.test.ts
+ M tests/apps/web/lib/projectScriptKeybindings.test.ts
+ M tests/apps/web/lib/projectScripts.test.ts
+ M .plans/t3-nightly-reconciliation-20260904.md
+ M .plans/t3-nightly-reconciliation-20260904-ledger.md
+```
+
+Focused server verification across the four affected test files passed 126 tests. After review found
+the missing-workspace normalization edge case, the repair and its major symlink/normalized-path
+coverage were added and the complete focused `bin.test.ts` rerun passed 20 tests. The three focused
+web test files passed 72 tests. Server and web typechecks passed. YAML parsing and Bash syntax checks
+for the composite action/workflow passed, as did the changed-file comment/header gate and
+`git diff --check`. No full workspace suite ran.
+
+The primary integrated owner used one authenticated isolated web environment, added a disposable
+local repository, created a project action, edited its name, and confirmed the new toolbar label
+persisted while the UI remained usable. Clicking **Run** before any persisted thread existed returned
+`Unknown terminal thread`; terminal execution is therefore not claimed as passed. That pre-thread
+terminal issue is retained as an unresolved PR 12 follow-up rather than being silently repaired in PR
+1. The observation does not expand the `ChatView.tsx` change beyond its nullable keybinding-command
+type adjustment.
+
+Cleanup closed browser tab `484368408`, interrupted the owned development process with exit 130, and
+left ports 5733 and 13773 without listeners. Only exact disposable paths
+`/tmp/t3code-pr1-state.Goq41l` and `/tmp/t3code-pr1-project.4u0kTS` were moved recoverably to macOS
+Trash. The pre-publication checkpoint had no staged changes or commits. Source-attributed commits, PR
+publication, exact-head CI, merge, and exact merged-main CI are not yet recorded in this receipt.
+
+After that checkpoint, the exact source-attributed commit stack was created in approved source order:
+`52f2fcda4221b975b4c6d1fa0e21574538400c61` (`ac4f1a2b6d`),
+`22c991c6de47a51c5e87d11b7629c5b78bc03f22` (`86070cbc74`),
+`c5a895b8e45db2bbb7bb0a1bbc5978dd34b00653` (`9cb40178a5`),
+`3f8bef53e5190a704537b2c9070475234a0b6821` (`d8bc6831cd`),
+`556d6e4030c2abb53b3a75b95d0b8d880726c5a7` (`4ade365180`), and
+`c7a1b66ee0b2ef06c57af20992fb12ce3c01842d` (`1665d81bb5`). The maintained plan/ledger receipt
+remains the only uncommitted manifest; PR publication and hosted gates remain pending.
 
 ## Verification policy for every PR
 

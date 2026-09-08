@@ -298,10 +298,11 @@ export function formatShortcutLabel(
 
 export function shortcutLabelForCommand(
   keybindings: ResolvedKeybindingsConfig,
-  command: KeybindingCommand,
+  command: KeybindingCommand | null,
   options?: string | ResolvedShortcutLabelOptions,
 ): string | null
 {
+  if (command === null) return null
   const resolvedOptions =
     typeof options === 'string'
       ? ({ platform: options } satisfies ResolvedShortcutLabelOptions)
