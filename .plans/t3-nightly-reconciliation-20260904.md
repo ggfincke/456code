@@ -16,9 +16,9 @@ only the plan's approved `fix/` or `sync/` branches; do not create `codex/` reco
 
 Current state:
 
-- Published `origin/main` baseline: `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`.
+- Published `origin/main` baseline: `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`.
 - The original local `main` checkout is clean and synchronized at
-  `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`.
+  `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`.
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -63,11 +63,20 @@ Current state:
 - Published PR 0: [PR #102](https://github.com/ggfincke/456code/pull/102) merged through merge commit
   `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`. Exact merged-main CI run
   [34171682069](https://github.com/ggfincke/456code/actions/runs/34171682069) completed successfully.
-- Active delivery unit: **PR 1 — Safety / CI** on `sync/t3-safety-ci-20260907`, based on exact green
-  merged `main` `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`. Its six source adaptations are implemented and
-  locally verified; publication is pending.
+- Published PR 1: [PR #103](https://github.com/ggfincke/456code/pull/103) published the six
+  source-attributed Safety / CI adaptations at exact head
+  `d43e332121ce51de305a56c88a08cd4e9d7b0bae`. Exact-head CI run
+  [34243865070](https://github.com/ggfincke/456code/actions/runs/34243865070) completed successfully.
+  PR #103 merged through merge commit `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`, and exact
+  merged-main CI run [34245504087](https://github.com/ggfincke/456code/actions/runs/34245504087)
+  completed successfully.
+- Active delivery unit: **PR 2 — Provider maintenance** on
+  `sync/t3-provider-maintenance-20260907`, based on exact green merged `main`
+  `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`. Its four source adaptations are implemented and
+  locally verified through exact head `153888165c0cc3e8dbad57de4161e3c0cf34e5dd`; publication is
+  pending.
 - Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907`.
-- PRs 2-16 are approved plan scope but remain planned, not implemented. Each starts only from the
+- PRs 3-16 are approved plan scope but remain planned, not implemented. Each starts only from the
   preceding green merged `main`.
 - The exact source inventory is [the 805-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
 
@@ -1316,7 +1325,7 @@ has no upstream source SHA, and therefore consumes no row in the frozen 805-row 
 
 PR 1 started from exact green merged `main`
 `d9d513bf9e544f9324b94763c63dfe9fb09b6e12` on `sync/t3-safety-ci-20260907`. All six approved
-sources are adapted in the working tree, with their current fork counterparts inspected directly:
+sources were adapted and published, with their fork counterparts inspected directly:
 
 | Source | Fork adaptation and current evidence |
 | --- | --- |
@@ -1373,7 +1382,7 @@ Cleanup closed browser tab `484368408`, interrupted the owned development proces
 left ports 5733 and 13773 without listeners. Only exact disposable paths
 `/tmp/t3code-pr1-state.Goq41l` and `/tmp/t3code-pr1-project.4u0kTS` were moved recoverably to macOS
 Trash. The pre-publication checkpoint had no staged changes or commits. Source-attributed commits, PR
-publication, exact-head CI, merge, and exact merged-main CI are not yet recorded in this receipt.
+publication, exact-head CI, merge, and exact merged-main CI were not yet available at that checkpoint.
 
 After that checkpoint, the exact source-attributed commit stack was created in approved source order:
 `52f2fcda4221b975b4c6d1fa0e21574538400c61` (`ac4f1a2b6d`),
@@ -1381,8 +1390,114 @@ After that checkpoint, the exact source-attributed commit stack was created in a
 `c5a895b8e45db2bbb7bb0a1bbc5978dd34b00653` (`9cb40178a5`),
 `3f8bef53e5190a704537b2c9070475234a0b6821` (`d8bc6831cd`),
 `556d6e4030c2abb53b3a75b95d0b8d880726c5a7` (`4ade365180`), and
-`c7a1b66ee0b2ef06c57af20992fb12ce3c01842d` (`1665d81bb5`). The maintained plan/ledger receipt
-remains the only uncommitted manifest; PR publication and hosted gates remain pending.
+`c7a1b66ee0b2ef06c57af20992fb12ce3c01842d` (`1665d81bb5`). Exact PR head
+`d43e332121ce51de305a56c88a08cd4e9d7b0bae` was published as
+[PR #103](https://github.com/ggfincke/456code/pull/103). Exact-head CI run
+[34243865070](https://github.com/ggfincke/456code/actions/runs/34243865070) completed successfully;
+PR #103 then merged through `58c0e6a3173fe185c34079d4496a246b3a7c2e1e`, and exact merged-main
+CI run [34245504087](https://github.com/ggfincke/456code/actions/runs/34245504087) completed
+successfully. The original `main` checkout is clean and synchronized to that merge commit. This
+publication receipt does not claim a fresh local test rerun: the focused and integrated evidence
+above remains the acceptance record, including the truthful limitation that pre-thread terminal
+execution returned `Unknown terminal thread` and is not claimed as passed.
+
+## PR 2 implementation checkpoint
+
+PR 2 started from exact green merged `main`
+`58c0e6a3173fe185c34079d4496a246b3a7c2e1e` on
+`sync/t3-provider-maintenance-20260907`. The source-attributed stack preserves Julius Marminge's
+original author identity, AuthorDate, and subject for all four sources, plus the original source 2
+co-author trailer and a `Source`/`Adaptation` body on each commit:
+
+| Source | Fork commit | Adaptation and verified boundary |
+| --- | --- | --- |
+| `d28077e585d5123b9a562f4ebef257969c81aa31` | `e3a45125e05a1a960f58736da3fe21a95c339593` | Quote copied POSIX and PowerShell native-provider update commands, select the resolved executable, and preserve host-platform handling. |
+| `2fb99a7a664faf045f1884f38c620016b34874cb` | `88848ab4be844aa75fe3171ad6d5367aad15ea20` | Resolve maintenance per provider instance; carry the selected environment through eligibility, spawn resolution, and execution; allow updates only through the installer that owns the selected binary; recheck ownership under the update lock; and expose controls per instance. A vanished provider cannot report success. |
+| `c7dc3cbd068a93c9fb5027df7bea719d16e4ffbe` | `e9bf7713f174bf717ed3ce8930ff22ca8a00ff62` | Keep mise npm-backend and alias installations manual-only with case-sensitive ownership proof while retaining npm updates when a genuine npm global under mise-managed Node owns the binary. |
+| `2271a27dad1205b403a66af01461f856986e5064` | `153888165c0cc3e8dbad57de4161e3c0cf34e5dd` | Keep Homebrew-owned mise shims manual-only while preserving npm ownership for a mise-managed Node global that wins `PATH`; require identity-matching Homebrew information and safely quote copied arguments. |
+
+The 29-path implementation manifest is 21 source/maintained-document paths and eight mirrored root
+tests:
+
+```text
+apps/server/src/provider/Drivers/AntigravityDriver.ts
+apps/server/src/provider/Drivers/ClaudeDriver.ts
+apps/server/src/provider/Drivers/CodexDriver.ts
+apps/server/src/provider/Drivers/CoralDriver.ts
+apps/server/src/provider/Drivers/CursorDriver.ts
+apps/server/src/provider/Drivers/GeminiDriver.ts
+apps/server/src/provider/Drivers/GrokDriver.ts
+apps/server/src/provider/Drivers/OpenCodeDriver.ts
+apps/server/src/provider/Layers/ProviderRegistry.ts
+apps/server/src/provider/Services/ProviderRegistry.ts
+apps/server/src/provider/Services/ServerProvider.ts
+apps/server/src/provider/catalog/makeManagedServerProvider.ts
+apps/server/src/provider/maintenance/providerMaintenance.ts
+apps/server/src/provider/maintenance/providerMaintenanceRunner.ts
+apps/server/src/provider/testUtils/providerRegistryMock.ts
+apps/web/src/components/provider-update/ProviderUpdateLaunchNotification.logic.ts
+apps/web/src/components/settings/ProviderInstanceCard.tsx
+apps/web/src/components/settings/panels/ProviderSettingsPanel.tsx
+docs/README.md
+docs/architecture/providers.md
+docs/user/provider-updates.md
+tests/apps/server/provider/Drivers/CodexDriver.test.ts
+tests/apps/server/provider/Layers/ProviderAdapterRegistry.test.ts
+tests/apps/server/provider/Layers/ProviderRegistry.test.ts
+tests/apps/server/provider/catalog/makeManagedServerProvider.test.ts
+tests/apps/server/provider/maintenance/providerMaintenance.test.ts
+tests/apps/server/provider/maintenance/providerMaintenanceRunner.test.ts
+tests/apps/server/server.test.ts
+tests/apps/web/components/provider-update/ProviderUpdateLaunchNotification.logic.test.ts
+```
+
+From `apps/server`, the final focused server gate was:
+
+```text
+pnpm exec vp test run /Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Drivers/CodexDriver.test.ts /Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/catalog/makeManagedServerProvider.test.ts /Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Layers/ProviderRegistry.test.ts /Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/Layers/ProviderAdapterRegistry.test.ts /Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/maintenance/providerMaintenance.test.ts /Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/provider/maintenance/providerMaintenanceRunner.test.ts /Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/server/server.test.ts
+```
+
+It passed eight files and 223 tests. The seven explicit paths contributed 216 tests; Vite+/Vitest
+treated the CLI arguments as filters, so `server.test.ts` also suffix-matched
+`tests/apps/server/mcp/McpHttpServer.test.ts`, whose seven tests supplied the eighth file and brought
+the total to 223. A verbose-reporter reproduction confirmed that exact implicit match. From
+`apps/web`,
+`pnpm exec vp test run
+/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907/tests/apps/web/components/provider-update/ProviderUpdateLaunchNotification.logic.test.ts`
+passed one file and 47 tests. The earlier focused fixture migration gate passed four files and 171
+tests and is included in the combined server result.
+
+From the worktree root, `pnpm --filter ./apps/server typecheck` and
+`pnpm --filter ./apps/web typecheck` both exited zero with suggestions only.
+`pnpm --filter ./apps/web build` exited zero after transforming 4,881 modules and building in 12.02
+seconds; its ineffective dynamic-import note for `src/hooks/useSettings.ts`, large-chunk notice, and
+plugin-timing output were expected warnings.
+`git diff --name-only -z 58c0e6a3173fe185c34079d4496a246b3a7c2e1e..HEAD | xargs -0 pnpm exec vp exec prettier --check`
+reported that all matched files use Prettier style.
+`git diff --name-only -z 58c0e6a3173fe185c34079d4496a246b3a7c2e1e..HEAD -- '*.ts' '*.tsx' | xargs -0 pnpm exec vp lint`
+exited zero with only the pre-existing inline-schema warning in `providerMaintenance.ts` and
+pre-existing unused `_` warnings in `server.test.ts`.
+`git diff --name-only -z 58c0e6a3173fe185c34079d4496a246b3a7c2e1e..HEAD -- '*.ts' '*.tsx' | xargs -0 pnpm run comments:check --`
+passed, and `git diff --check 58c0e6a3173fe185c34079d4496a246b3a7c2e1e..HEAD` produced no
+output. No full workspace suite ran.
+
+The primary integrated owner configured a disposable custom Gemini executable whose filename
+contained spaces and an apostrophe. It reported deterministic old version `0.1.0` while delegating
+ACP behavior to the existing mock agent in Gemini mode. In the authenticated isolated web UI, the
+selected Gemini instance showed the behind-version state but remained manual-only: no **Update now**
+control or copied update command appeared, and that state persisted after refresh and full reload.
+No real updater or installer executed. The retained 81,608-byte screenshot is primary-owned evidence
+for later GitHub upload and is not claimed as uploaded.
+
+Cleanup closed Chrome tab `484368441`, stopped owned dev session `76709` with exit 130, and left
+ports 5733 and 13773 without listeners. Exact run-owned directories
+`/tmp/t3code-pr2-state.Z2xwu5` and `/tmp/t3code-pr2-gemini-wrapper.mazuC1` had no live handles and
+were moved recoverably to macOS Trash. The original `main` checkout remains clean at
+`58c0e6a3173fe185c34079d4496a246b3a7c2e1e`; dependency paths were worktree-local. The implementation
+owner reported no remaining actionable review issue. No files are staged, no PR is published, and
+no publication or hosted-CI receipt is claimed. Recovery branch
+`backup/sync-t3-provider-maintenance-38ad-20260908T1158` intentionally retains pre-amend commit
+`38ad69442282734d827f41d79c005f13d9ef6dee`; the unrelated pre-existing Coral stash was untouched.
 
 ## Verification policy for every PR
 
