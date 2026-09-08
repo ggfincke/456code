@@ -208,6 +208,7 @@ function savedConnection(): SavedRemoteConnection
 
 const relayTestLayer = managedRelayClientLayer('https://relay.example.test').pipe(
   Layer.provide(Layer.mergeAll(FetchHttpClient.layer, cryptoLayer)),
+  Layer.provide(Layer.succeed(FetchHttpClient.Fetch, (...args) => globalThis.fetch(...args))),
 )
 
 const runBackgroundOperations = Effect.fn('TestRemoteRegistration.runBackgroundOperations')(
@@ -245,6 +246,23 @@ describe('makeRelayDeviceRegistrationRequest', () =>
   {
     vi.unstubAllGlobals()
     vi.stubGlobal('__DEV__', false)
+    vi.stubGlobal('fetch', (request: RequestInfo | URL) =>
+    {
+      const url = request instanceof Request ? request.url : String(request)
+      return Promise.resolve(
+        Response.json(
+          url.endsWith('/v1/client/dpop-token')
+            ? {
+                access_token: 'relay-dpop-token',
+                issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+                token_type: 'DPoP',
+                expires_in: 300,
+                scope: 'mobile:registration',
+              }
+            : { ok: true },
+        ),
+      )
+    })
     secureStore.clear()
     backgroundRuntime.pending.length = 0
     Constants.expoConfig!.extra = {}
@@ -890,6 +908,56 @@ describe('makeRelayDeviceRegistrationRequest', () =>
     {
       yield* runBackgroundOperations()
       expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1)
+    }).pipe(Effect.provide(relayTestLayer))
+  })
+
+  it.effect('disables notifications when an APNs token rotates after permission is revoked', () =>
+  {
+    const registrations: unknown[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) =>
+    {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.endsWith('/v1/client/dpop-token'))
+      {
+        return Response.json({
+          access_token: 'relay-dpop-token',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          token_type: 'DPoP',
+          expires_in: 300,
+          scope: 'mobile:registration',
+        })
+      }
+      registrations.push(
+        await (input instanceof Request ? input.clone().json() : new Response(init?.body).json()),
+      )
+      return Response.json({ ok: true })
+    })
+    Constants.expoConfig!.extra = {
+      relay: {
+        url: 'https://relay.example.test/',
+      },
+    }
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve('clerk-token-user-a'))
+
+    return Effect.gen(function* ()
+    {
+      yield* runBackgroundOperations()
+      expect(registrations.at(-1)).toMatchObject({
+        preferences: { notificationsEnabled: true },
+      })
+
+      vi.mocked(Notifications.getPermissionsAsync).mockResolvedValueOnce({
+        granted: false,
+      } as Awaited<ReturnType<typeof Notifications.getPermissionsAsync>>)
+      const tokenListener = vi.mocked(Notifications.addPushTokenListener).mock.calls.at(-1)?.[0]
+      expect(tokenListener).toBeDefined()
+      tokenListener?.({ type: 'ios', data: 'rotated-apns-token' } as never)
+      yield* runBackgroundOperations()
+
+      expect(registrations.at(-1)).toMatchObject({
+        preferences: { notificationsEnabled: false },
+      })
+      expect(registrations.at(-1)).not.toHaveProperty('pushToken')
     }).pipe(Effect.provide(relayTestLayer))
   })
 
