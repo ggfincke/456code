@@ -32,6 +32,7 @@ import {
   AGENT_CURSOR_CLICK_LEAD_MS,
   AGENT_CURSOR_MOVE_MS,
   MAX_EVALUATION_BYTES,
+  MAX_INTERACTIVE_ELEMENT_NAME_LENGTH,
   MAX_INTERACTIVE_ELEMENTS,
   MAX_SCREENSHOT_WIDTH,
   MAX_VISIBLE_TEXT_LENGTH,
@@ -228,7 +229,7 @@ export const createAutomationOperations = (deps: ManagerAutomationDeps) =>
             return {
               tag: element.tagName.toLowerCase(),
               role: element.getAttribute("role"),
-              name: element.getAttribute("aria-label") || element.innerText || element.getAttribute("name") || "",
+              name: (element.getAttribute("aria-label") || element.innerText || element.getAttribute("name") || "").slice(0, ${MAX_INTERACTIVE_ELEMENT_NAME_LENGTH}),
               selector: selectorFor(element),
               x: rect.x,
               y: rect.y,
