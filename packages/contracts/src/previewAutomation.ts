@@ -564,6 +564,8 @@ export const PreviewAutomationRecordingStatus = Schema.Struct({
 })
 export type PreviewAutomationRecordingStatus = typeof PreviewAutomationRecordingStatus.Type
 
+export const PREVIEW_RECORDING_STOP_TIMEOUT_MS = 120_000
+
 export const PreviewAutomationRecordingArtifact = Schema.Struct({
   id: Schema.String,
   tabId: PreviewTabId,
@@ -573,6 +575,20 @@ export const PreviewAutomationRecordingArtifact = Schema.Struct({
   createdAt: Schema.String,
 })
 export type PreviewAutomationRecordingArtifact = typeof PreviewAutomationRecordingArtifact.Type
+
+export const PreviewAutomationRecordingStopInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  transferToEnvironment: Schema.optional(Schema.Boolean),
+})
+export type PreviewAutomationRecordingStopInput = typeof PreviewAutomationRecordingStopInput.Type
+
+export const PreviewAutomationRecordingTransferArtifact = Schema.Struct({
+  ...PreviewAutomationRecordingArtifact.fields,
+  // absent responses identify desktop hosts that predate environment transfer.
+  uploadedAttachmentId: Schema.optional(TrimmedNonEmptyString),
+})
+export type PreviewAutomationRecordingTransferArtifact =
+  typeof PreviewAutomationRecordingTransferArtifact.Type
 
 export const PreviewAutomationClientId = TrimmedNonEmptyString.check(Schema.isMaxLength(128))
 export type PreviewAutomationClientId = typeof PreviewAutomationClientId.Type
@@ -908,7 +924,67 @@ export class PreviewAutomationMalformedResponseError extends Schema.TaggedError<
   }
 }
 
+export class PreviewAutomationRecordingTransferError extends Schema.TaggedError<PreviewAutomationRecordingTransferError>()(
+  'PreviewAutomationRecordingTransferError',
+  {
+    threadId: ThreadId,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return 'Preview recording could not be saved to the agent environment. The saved copy remains on the desktop.'
+  }
+}
+
+export class PreviewAutomationRecordingDesktopUpdateRequiredError extends Schema.TaggedError<PreviewAutomationRecordingDesktopUpdateRequiredError>()(
+  'PreviewAutomationRecordingDesktopUpdateRequiredError',
+  {
+    threadId: ThreadId,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return 'Update the desktop app to transfer recordings. The recording remains on the desktop.'
+  }
+}
+
+export class PreviewAutomationRecordingTooLargeError extends Schema.TaggedError<PreviewAutomationRecordingTooLargeError>()(
+  'PreviewAutomationRecordingTooLargeError',
+  {
+    threadId: ThreadId,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return 'The recording exceeds 50 MiB. The saved copy remains on the desktop.'
+  }
+}
+
+export class PreviewAutomationRecordingDeadlineExpiredError extends Schema.TaggedError<PreviewAutomationRecordingDeadlineExpiredError>()(
+  'PreviewAutomationRecordingDeadlineExpiredError',
+  {
+    threadId: ThreadId,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return 'The recording transfer deadline expired. The saved copy remains on the desktop.'
+  }
+}
+
 export const PreviewAutomationError = Schema.Union([
+  PreviewAutomationRecordingTransferError,
+  PreviewAutomationRecordingDesktopUpdateRequiredError,
+  PreviewAutomationRecordingTooLargeError,
+  PreviewAutomationRecordingDeadlineExpiredError,
   PreviewAutomationUnavailableError,
   PreviewAutomationNoAvailableHostError,
   PreviewAutomationUnsupportedClientError,

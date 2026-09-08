@@ -119,6 +119,8 @@ interface ActiveRecording
   readonly mimeType: string
   readonly startedAt: string
   readonly startupSettled: Promise<void>
+  savedBlob?: Blob
+  uploadPromise?: Promise<string>
   nextFrameSequence: number
   lastDrawnFrameSequence: number
   lifecycle: BrowserRecordingLifecycle
@@ -529,6 +531,7 @@ const finalizeBrowserRecording = async (
         mimeType,
         new Uint8Array(await blob.arrayBuffer()),
       )
+      recording.savedBlob = blob
       result = { _tag: 'Success', artifact }
     }
     catch (cause)
@@ -635,4 +638,18 @@ export function stopBrowserRecording(
     })
   recording.lifecycle = { phase: 'stopping', stopPromise }
   return stopPromise
+}
+
+// join the local stop and share one transfer among concurrent automation callers
+export async function stopBrowserRecordingForUpload(
+  tabId: string,
+  upload: (artifact: DesktopPreviewRecordingArtifact, blob: Blob) => Promise<string>,
+): Promise<(DesktopPreviewRecordingArtifact & { uploadedAttachmentId: string }) | null>
+{
+  const recording = active
+  if (!recording || recording.tabId !== tabId) return null
+  const artifact = await stopBrowserRecording(tabId)
+  if (!artifact || !recording.savedBlob) return null
+  recording.uploadPromise ??= upload(artifact, recording.savedBlob)
+  return { ...artifact, uploadedAttachmentId: await recording.uploadPromise }
 }

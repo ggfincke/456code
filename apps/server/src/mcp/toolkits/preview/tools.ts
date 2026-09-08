@@ -21,15 +21,29 @@ import {
   PreviewAutomationTypeInput,
   PreviewAutomationWaitForInput,
 } from '@t3tools/contracts'
+import * as FileSystem from 'effect/FileSystem'
 import * as Schema from 'effect/Schema'
 import { Tool, Toolkit } from 'effect/unstable/ai'
 
 import * as McpInvocationContext from '../../McpInvocationContext.ts'
 import * as PreviewAutomationBroker from '../../PreviewAutomationBroker.ts'
+import * as ServerConfig from '../../../config.ts'
+import * as ProjectionSnapshotQuery from '../../../orchestration/Services/ProjectionSnapshotQuery.ts'
+import { AttachmentLifecycleRepository } from '../../../persistence/Services/AttachmentLifecycle.ts'
+import { ProviderService } from '../../../provider/Services/ProviderService.ts'
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
   PreviewAutomationBroker.PreviewAutomationBroker,
+]
+
+const recordingDependencies = [
+  ...dependencies,
+  FileSystem.FileSystem,
+  ServerConfig.ServerConfig,
+  ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+  AttachmentLifecycleRepository,
+  ProviderService,
 ]
 
 const PreviewActionResult = Schema.Record(Schema.String, Schema.Never).annotate({
@@ -212,11 +226,12 @@ export const PreviewRecordingStartTool = safeBrowserTool(
 
 export const PreviewRecordingStopTool = safeBrowserTool(
   Tool.make('preview_recording_stop', {
-    description: 'Stop the active browser recording and save it as a local evidence artifact.',
+    description:
+      'Stop the collaborative browser recording and transfer the compressed recording once (up to 50 MiB) to an evidence file readable in this agent environment. Returns its environment-local path after transfer succeeds.',
     parameters: PreviewAutomationTabTargetInput,
     success: PreviewAutomationRecordingArtifact,
     failure: PreviewAutomationError,
-    dependencies,
+    dependencies: recordingDependencies,
   }).annotate(Tool.Title, 'Stop browser recording'),
 )
 

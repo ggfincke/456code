@@ -61,6 +61,7 @@ import {
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
   stopBrowserRecording,
+  stopBrowserRecordingForUpload,
 } from '../../../../apps/web/src/browser/browserRecording'
 import { previewRuntimeTabId } from '../../../../apps/web/src/browser/previewRuntimeTabId'
 
@@ -343,6 +344,46 @@ describe('browser recording', () =>
     expect(duplicateArtifact).toEqual(firstArtifact)
     expect(stopScreencast).toHaveBeenCalledOnce()
     expect(save).toHaveBeenCalledOnce()
+  })
+
+  it('saves locally before transferring the encoded recording only once', async () =>
+  {
+    await startBrowserRecording('recording-tab')
+    let finishUpload!: () => void
+    const uploaded = new Promise<void>((resolve) =>
+    {
+      finishUpload = resolve
+    })
+    const transfer = vi.fn(async (artifact, blob: Blob) =>
+    {
+      expect(save).toHaveBeenCalledOnce()
+      expect(artifact.path).toBe('/tmp/recording-test.webm')
+      expect(blob).toBeInstanceOf(Blob)
+      await uploaded
+      return 'uploaded-recording'
+    })
+    const localStop = stopBrowserRecording('recording-tab')
+    const firstStop = stopBrowserRecordingForUpload('recording-tab', transfer)
+    const secondStop = stopBrowserRecordingForUpload('recording-tab', transfer)
+    finishUpload()
+
+    expect(await firstStop).toEqual(await secondStop)
+    expect((await firstStop)?.uploadedAttachmentId).toBe('uploaded-recording')
+    expect((await localStop)?.path).toBe('/tmp/recording-test.webm')
+    expect(transfer).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the saved desktop file and releases recording state when transfer fails', async () =>
+  {
+    await startBrowserRecording('recording-tab')
+    await expect(
+      stopBrowserRecordingForUpload('recording-tab', async () =>
+      {
+        throw new Error('Connection interrupted')
+      }),
+    ).rejects.toThrow('Connection interrupted')
+    expect(save).toHaveBeenCalledOnce()
+    expect(readActiveBrowserRecordingTabId()).toBeNull()
   })
 
   it('stops a screencast that finishes starting after cancellation', async () =>
