@@ -9,6 +9,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
+  type ProviderSendTurnInput,
   type ProviderSession,
   RuntimeItemId,
   RuntimeRequestId,
@@ -2542,6 +2543,24 @@ export function makeOpenCodeAdapter(
           break
         }
 
+        case 'session.compacted':
+        {
+          yield* emit(context, {
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              ...(turnId ? { turnId } : {}),
+              raw: event,
+            })),
+            type: 'thread.state.changed',
+            payload: {
+              state: 'compacted',
+              compaction: { trigger: 'manual' },
+              detail: event,
+            },
+          })
+          break
+        }
+
         case 'message.updated':
         {
           const promptAdmission = context.promptAdmission
@@ -4025,6 +4044,79 @@ export function makeOpenCodeAdapter(
       },
     )
 
+    const compactThread = Effect.fn('compactThread')(function* (
+      threadId: ThreadId,
+      requestedModelSelection?: ProviderSendTurnInput['modelSelection'],
+    )
+    {
+      const context = yield* ensureSessionContext(sessions, threadId)
+      yield* awaitOpenCodeContextReady(context)
+      const modelSelection =
+        requestedModelSelection ??
+        (context.session.model
+          ? { instanceId: boundInstanceId, model: context.session.model }
+          : undefined)
+      if (modelSelection !== undefined && modelSelection.instanceId !== boundInstanceId)
+      {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: 'compactThread',
+          issue: `OpenCode model selection is bound to instance '${modelSelection.instanceId}', expected '${boundInstanceId}'.`,
+        })
+      }
+      const parsedModel = parseOpenCodeModelSlug(modelSelection?.model)
+      if (!parsedModel)
+      {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: 'compactThread',
+          issue: "OpenCode compaction requires an active 'provider/model' selection.",
+        })
+      }
+      yield* context.promptSemaphore.withPermit(
+        Effect.gen(function* ()
+        {
+          if (sessions.get(threadId) !== context || (yield* Ref.get(context.stopped)))
+          {
+            return yield* Effect.interrupt
+          }
+          if (context.activeTurnId !== undefined)
+          {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: 'compactThread',
+              issue: 'OpenCode cannot compact while a turn is running.',
+            })
+          }
+          yield* runOpenCodeSdk('session.summarize', (signal) =>
+            context.client.session.summarize(
+              {
+                sessionID: context.openCodeSessionId,
+                ...parsedModel,
+                auto: false,
+              },
+              { signal },
+            ),
+          ).pipe(
+            Effect.timeout('10 minutes'),
+            Effect.catchTags({
+              OpenCodeRuntimeError: (cause) => Effect.fail(toRequestError(cause)),
+              TimeoutError: (cause) =>
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: 'session.summarize',
+                    detail: 'OpenCode session compaction did not complete within 10 minutes.',
+                    cause,
+                  }),
+                ),
+            }),
+            Effect.asVoid,
+          )
+        }),
+      )
+    })
+
     const respondToRequest: OpenCodeAdapterShape['respondToRequest'] = Effect.fn(
       'respondToRequest',
     )(function* (threadId, requestId, decision)
@@ -4245,6 +4337,9 @@ export function makeOpenCodeAdapter(
       function* (threadId)
       {
         const context = yield* ensureSessionContext(sessions, threadId)
+        const session = yield* runOpenCodeSdk('session.get', (signal) =>
+          context.client.session.get({ sessionID: context.openCodeSessionId }, { signal }),
+        ).pipe(Effect.mapError(toRequestError))
         const messages = yield* runOpenCodeSdk('session.messages', (signal) =>
           context.client.session.messages(
             {
@@ -4257,6 +4352,7 @@ export function makeOpenCodeAdapter(
         const turns: Array<OpenCodeTurnSnapshot> = []
         for (const entry of messages.data ?? [])
         {
+          if (entry.info.id === session.data?.revert?.messageID) break
           if (entry.info.role === 'assistant')
           {
             turns.push({
@@ -4277,31 +4373,25 @@ export function makeOpenCodeAdapter(
       function* (threadId, numTurns)
       {
         const context = yield* ensureSessionContext(sessions, threadId)
-        const messages = yield* runOpenCodeSdk('session.messages', (signal) =>
-          context.client.session.messages(
-            {
-              sessionID: context.openCodeSessionId,
-            },
-            { signal },
-          ),
-        ).pipe(Effect.mapError(toRequestError))
+        const snapshot = yield* readThread(threadId)
+        const targetIndex = Math.max(0, snapshot.turns.length - numTurns)
+        const target = snapshot.turns[targetIndex]
+        if (target)
+        {
+          yield* runOpenCodeSdk('session.revert', (signal) =>
+            context.client.session.revert(
+              {
+                sessionID: context.openCodeSessionId,
+                messageID: target.id,
+              },
+              { signal },
+            ),
+          ).pipe(Effect.mapError(toRequestError))
+          // native revert can move the boundary to the preceding user message
+          return yield* readThread(threadId)
+        }
 
-        const assistantMessages = (messages.data ?? []).filter(
-          (entry) => entry.info.role === 'assistant',
-        )
-        const targetIndex = assistantMessages.length - numTurns - 1
-        const target = targetIndex >= 0 ? assistantMessages[targetIndex] : null
-        yield* runOpenCodeSdk('session.revert', (signal) =>
-          context.client.session.revert(
-            {
-              sessionID: context.openCodeSessionId,
-              ...(target ? { messageID: target.info.id } : {}),
-            },
-            { signal },
-          ),
-        ).pipe(Effect.mapError(toRequestError))
-
-        return yield* readThread(threadId)
+        return snapshot
       },
     )
 
@@ -4332,6 +4422,7 @@ export function makeOpenCodeAdapter(
       capabilities: OPENCODE_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
+      compaction: { type: 'native', start: compactThread },
       interruptTurn,
       respondToRequest,
       respondToUserInput,

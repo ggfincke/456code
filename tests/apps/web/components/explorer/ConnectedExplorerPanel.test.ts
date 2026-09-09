@@ -5,7 +5,9 @@ import {
   type ArchitectureImpactProjectionResult,
   type ProposalGenerationId,
 } from '@t3tools/contracts'
-import { describe, expect, it } from 'vite-plus/test'
+import { describe, expect, it, vi } from 'vite-plus/test'
+
+vi.mock('@pierre/diffs/worker/worker.js?worker', () => ({ default: vi.fn() }))
 
 import {
   isExplorerTargetScopedToThread,

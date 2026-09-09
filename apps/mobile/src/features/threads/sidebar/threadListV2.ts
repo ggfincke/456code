@@ -146,9 +146,9 @@ export interface ThreadListV2Layout
 }
 
 // partitions visible threads into the active card block (creation order) and
-// the settled recency tail, matching the web v2 list. Mobile owns its merge
-// preference locally but has no inactivity-threshold control, so
-// `autoSettleAfterDays` retains the web default of 3.
+// the settled recency tail, matching the web v2 list. Legacy servers use the
+// mobile merge preference and three-day inactivity default; newer servers
+// project their already-settled result and are never evaluated again here.
 export function buildThreadListV2Items(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>
   readonly environmentId: EnvironmentId | null
@@ -164,6 +164,9 @@ export function buildThreadListV2Items(input: {
   // other environments never classify as settled — the user could neither
   // un-settle nor pin them. Absent = no gating (tests).
   readonly settlementEnvironmentIds?: ReadonlySet<EnvironmentId>
+  // environments where legacy clients still evaluate inactivity and merge.
+  // server-managed environments keep explicit settled rows but skip this work.
+  readonly clientAutoSettlementEnvironmentIds?: ReadonlySet<EnvironmentId>
   // environments whose server supports thread.snooze/unsnooze. Same
   // contract as settlementEnvironmentIds.
   readonly snoozeEnvironmentIds?: ReadonlySet<EnvironmentId>
@@ -212,6 +215,8 @@ export function buildThreadListV2Items(input: {
     )
       continue
     const supportsSettlement = input.settlementEnvironmentIds?.has(thread.environmentId) ?? true
+    const evaluatesAutoSettlement =
+      input.clientAutoSettlementEnvironmentIds?.has(thread.environmentId) ?? true
     const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true
     const changeRequestState =
       input.changeRequestStateByKey?.get(`${thread.environmentId}:${thread.id}`) ?? null
@@ -233,8 +238,8 @@ export function buildThreadListV2Items(input: {
       supportsSettlement &&
       effectiveSettled(thread, {
         now,
-        autoSettleAfterDays,
-        autoSettleOnMerge,
+        autoSettleAfterDays: evaluatesAutoSettlement ? autoSettleAfterDays : null,
+        autoSettleOnMerge: evaluatesAutoSettlement ? autoSettleOnMerge : false,
         changeRequestState,
       })
     )

@@ -94,6 +94,7 @@ import { startNewThreadFromContext } from '../lib/chatThreadActions'
 import { useClientSettings, useUpdateClientSettings } from '../hooks/useSettings'
 import { useCopyToClipboard } from '../hooks/useCopyToClipboard'
 import { useNowMinute } from '../hooks/useNowMinute'
+import { resolveClientAutoSettlementEvaluation } from '../lib/threadAutoSettlement'
 import { useEnvironments, usePrimaryEnvironmentId } from '../state/environments'
 import { useProjects, useThreadShells } from '../state/entities'
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from '../state/server'
@@ -1394,8 +1395,8 @@ export default function SidebarV2()
   const router = useRouter()
   const { isMobile, setOpenMobile } = useSidebar()
   const keybindings = useAtomValue(primaryServerKeybindingsAtom)
-  const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays)
-  const autoSettleOnMerge = useClientSettings((s) => s.sidebarAutoSettleOnMerge)
+  const legacyAutoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays)
+  const legacyAutoSettleOnMerge = useClientSettings((s) => s.sidebarAutoSettleOnMerge)
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive)
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete)
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder)
@@ -1919,9 +1920,15 @@ export default function SidebarV2()
         // or descriptor not loaded yet) never classify as settled: the user
         // could neither un-settle nor pin them, so auto-settling them would
         // strand rows in a tail with no working affordances.
-        const supportsSettlement =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true
+        const serverConfig = serverConfigs.get(thread.environmentId)
+        const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true
+        const { autoSettleAfterDays, autoSettleOnMerge } = resolveClientAutoSettlementEvaluation(
+          serverConfig,
+          {
+            autoSettleAfterDays: legacyAutoSettleAfterDays,
+            autoSettleOnMerge: legacyAutoSettleOnMerge,
+          },
+        )
         const supportsSnooze =
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
         const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
@@ -1990,9 +1997,9 @@ export default function SidebarV2()
       }
     },
     [
-      autoSettleAfterDays,
-      autoSettleOnMerge,
       changeRequestSnapshotByKey,
+      legacyAutoSettleAfterDays,
+      legacyAutoSettleOnMerge,
       terminalChangeRequestObservationByKey,
       nowMinute,
       scopedProjectKeys,

@@ -16,6 +16,7 @@ import * as Scope from 'effect/Scope'
 import { describe, expect } from 'vite-plus/test'
 
 import { checkpointRefForThreadTurn } from '../../../../apps/server/src/checkpointing/Utils.ts'
+import { parseTurnDiffFilesFromNumstat } from '../../../../apps/server/src/checkpointing/Diffs.ts'
 import * as CheckpointStore from '../../../../apps/server/src/checkpointing/CheckpointStore.ts'
 import * as VcsDriverRegistry from '../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
 import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
@@ -388,6 +389,63 @@ it.layer(TestLayer)('CheckpointStore.layer', (it) =>
         expect(diff).toContain('diff --git')
         expect(diff).not.toContain('[truncated]')
         expect(diff).toContain('+line 04999')
+      }),
+    )
+
+    it.effect('keeps patch prefixes when repository config disables them', () =>
+      Effect.gen(function* ()
+      {
+        const tmp = yield* makeTmpDir()
+        yield* initRepoWithCommit(tmp)
+        yield* git(tmp, ['config', 'diff.noprefix', 'true'])
+        yield* git(tmp, ['config', 'diff.mnemonicPrefix', 'true'])
+        const checkpointStore = yield* CheckpointStore.CheckpointStore
+        const threadId = ThreadId.make('thread-checkpoint-store-noprefix')
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0)
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1)
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: fromCheckpointRef })
+        yield* writeTextFile(NodePath.join(tmp, 'README.md'), '# changed\n')
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: toCheckpointRef })
+
+        const diff = yield* checkpointStore.diffCheckpoints({
+          cwd: tmp,
+          fromCheckpointRef,
+          toCheckpointRef,
+          ignoreWhitespace: false,
+        })
+        expect(diff).toContain('diff --git a/README.md b/README.md')
+      }),
+    )
+
+    it.effect('summarizes a patch larger than the checkpoint output limit', () =>
+      Effect.gen(function* ()
+      {
+        const tmp = yield* makeTmpDir()
+        yield* initRepoWithCommit(tmp)
+        const checkpointStore = yield* CheckpointStore.CheckpointStore
+        const threadId = ThreadId.make('large-checkpoint-summary')
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0)
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1)
+        const filePath = NodePath.join(tmp, 'README.md')
+        const lineCount = 20_000
+        yield* writeTextFile(filePath, `${'before'.repeat(50)}\n`.repeat(lineCount))
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: fromCheckpointRef })
+        yield* writeTextFile(filePath, `${'after'.repeat(60)}\n`.repeat(lineCount))
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: toCheckpointRef })
+
+        const numstat = yield* checkpointStore.diffCheckpoints({
+          cwd: tmp,
+          fromCheckpointRef,
+          toCheckpointRef,
+          ignoreWhitespace: false,
+          format: 'numstat',
+        })
+
+        expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+          { path: 'README.md', additions: lineCount, deletions: lineCount },
+        ])
+        expect(numstat.length).toBeLessThan(100)
       }),
     )
 

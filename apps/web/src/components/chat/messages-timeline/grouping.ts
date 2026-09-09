@@ -466,11 +466,30 @@ function timelineEntryTurnId(entry: TimelineEntry): TurnId | null
 // settled turns fold their commentary and tool activity behind a
 // "Worked for ..." row anchored at the turn's first foldable entry; the
 // first and terminal assistant messages stay visible around the fold.
+function deriveActiveVisualResponseTurnIds(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>
+  unsettledTurnId: TurnId | null
+  isWorking: boolean
+}): ReadonlySet<TurnId>
+{
+  const turnIds = new Set<TurnId>()
+  if (input.unsettledTurnId === null) return turnIds
+  turnIds.add(input.unsettledTurnId)
+  if (!input.isWorking) return turnIds
+  const latestUserMessageIndex = lastUserMessageIndex(input.timelineEntries)
+  for (let index = latestUserMessageIndex + 1; index < input.timelineEntries.length; index += 1)
+  {
+    const turnId = timelineEntryTurnId(input.timelineEntries[index]!)
+    if (turnId !== null) turnIds.add(turnId)
+  }
+  return turnIds
+}
+
 function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>
   terminalAssistantMessageIds: ReadonlySet<string>
   latestTurn: TimelineLatestTurn | null
-  unsettledTurnId: TurnId | null
+  unfoldedTurnIds: ReadonlySet<TurnId>
 }): ReadonlyMap<string, TurnFold>
 {
   interface TurnGroup
@@ -539,7 +558,7 @@ function deriveTurnFolds(input: {
   const foldsByAnchorEntryId = new Map<string, TurnFold>()
   for (const [turnId, group] of groupsByTurnId)
   {
-    if (turnId === input.unsettledTurnId)
+    if (input.unfoldedTurnIds.has(turnId))
     {
       continue
     }
@@ -630,11 +649,16 @@ export function deriveMessagesTimelineRows(input: {
     input.latestTurn ?? null,
     input.runningTurnId ?? null,
   )
+  const activeVisualResponseTurnIds = deriveActiveVisualResponseTurnIds({
+    timelineEntries: input.timelineEntries,
+    unsettledTurnId,
+    isWorking: input.isWorking,
+  })
   const foldsByAnchorEntryId = deriveTurnFolds({
     timelineEntries: input.timelineEntries,
     terminalAssistantMessageIds,
     latestTurn: input.latestTurn ?? null,
-    unsettledTurnId,
+    unfoldedTurnIds: activeVisualResponseTurnIds,
   })
   const collapsedEntryIds = new Set<string>()
   for (const fold of foldsByAnchorEntryId.values())
@@ -652,15 +676,7 @@ export function deriveMessagesTimelineRows(input: {
   if (input.isWorking)
   {
     const latestUserMessageIndex = lastUserMessageIndex(input.timelineEntries)
-    const firstOwnedAfterUser =
-      unsettledTurnId === null
-        ? -1
-        : input.timelineEntries.findIndex(
-            (entry, index) =>
-              index > latestUserMessageIndex && timelineEntryTurnId(entry) === unsettledTurnId,
-          )
-    activeTurnHeaderIndex =
-      firstOwnedAfterUser >= 0 ? firstOwnedAfterUser : latestUserMessageIndex + 1
+    activeTurnHeaderIndex = latestUserMessageIndex + 1
   }
   const entryBelongsToActiveTurn = (entry: TimelineEntry, index: number) =>
     input.isWorking &&
@@ -745,10 +761,17 @@ export function deriveMessagesTimelineRows(input: {
       : null
   const appendWorkingRow = () =>
   {
+    const latestUserMessage = input.timelineEntries[lastUserMessageIndex(input.timelineEntries)]
+    const visualResponseStartedAt =
+      activeVisualResponseTurnIds.size > 1 &&
+      latestUserMessage?.kind === 'message' &&
+      latestUserMessage.message.role === 'user'
+        ? latestUserMessage.message.createdAt
+        : input.activeTurnStartedAt
     nextRows.push({
       kind: 'working',
       id: 'working-indicator-row',
-      createdAt: input.activeTurnStartedAt,
+      createdAt: visualResponseStartedAt,
       showThinking: activeWorkRow === null && !activeTurnHasVisibleContent,
     })
   }
@@ -1004,8 +1027,8 @@ export function deriveMessagesTimelineRows(input: {
 
     const assistantTurnStillInProgress =
       timelineEntry.message.role === 'assistant' &&
-      unsettledTurnId !== null &&
-      timelineEntry.message.turnId === unsettledTurnId
+      timelineEntry.message.turnId != null &&
+      activeVisualResponseTurnIds.has(timelineEntry.message.turnId)
 
     const durationStart =
       durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt

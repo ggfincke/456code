@@ -292,6 +292,13 @@ export function useThreadComposerState()
     const thread = selectedThreadDetail ?? selectedThreadShell
     const text = draft.text.trim()
     const attachments = draft.attachments
+    if (text.toLowerCase() === '/compact')
+    {
+      setPendingConnectionError(
+        'Compaction must be confirmed and sent immediately from an idle connected task.',
+      )
+      return null
+    }
     if (text.length === 0 && attachments.length === 0)
     {
       return null

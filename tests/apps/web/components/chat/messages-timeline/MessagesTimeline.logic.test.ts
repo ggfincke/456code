@@ -14,6 +14,91 @@ import {
 
 describe('shouldPreserveAssistantLineBreaks', () =>
 {
+  it('keeps promptless replacement turns in one response until a new user boundary', () =>
+  {
+    const user = {
+      id: 'user-entry',
+      kind: 'message' as const,
+      createdAt: '2026-01-01T00:00:00Z',
+      message: {
+        id: 'user' as never,
+        role: 'user' as const,
+        text: 'continue',
+        turnId: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        streaming: false,
+      },
+    }
+    const oldResponse = {
+      id: 'old-entry',
+      kind: 'message' as const,
+      createdAt: '2026-01-01T00:00:10Z',
+      message: {
+        id: 'old' as never,
+        role: 'assistant' as const,
+        text: 'continuing',
+        turnId: 'old-turn' as never,
+        createdAt: '2026-01-01T00:00:10Z',
+        updatedAt: '2026-01-01T00:00:10Z',
+        streaming: false,
+      },
+    }
+    const work = {
+      id: 'new-work-entry',
+      kind: 'work' as const,
+      createdAt: '2026-01-01T00:01:10Z',
+      entry: {
+        id: 'new-work',
+        turnId: 'new-turn' as never,
+        createdAt: '2026-01-01T00:01:10Z',
+        label: 'Running tests',
+        tone: 'tool' as const,
+        toolLifecycleStatus: 'inProgress' as const,
+      },
+    }
+    const common = {
+      latestTurn: {
+        turnId: 'new-turn' as never,
+        state: 'running' as const,
+        startedAt: '2026-01-01T00:01:00Z',
+        completedAt: null,
+      },
+      isWorking: true,
+      activeTurnStartedAt: '2026-01-01T00:01:00Z',
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    }
+    const rows = deriveMessagesTimelineRows({
+      ...common,
+      timelineEntries: [user, oldResponse, work],
+    })
+    expect(rows.find((row) => row.id === 'old-entry')).toMatchObject({
+      showAssistantMeta: false,
+      assistantCopyStreaming: true,
+    })
+    expect(rows.find((row) => row.kind === 'working')).toMatchObject({ createdAt: user.createdAt })
+    expect(rows.some((row) => row.kind === 'turn-fold')).toBe(false)
+    const steered = deriveMessagesTimelineRows({
+      ...common,
+      timelineEntries: [
+        user,
+        oldResponse,
+        {
+          ...user,
+          id: 'steer-entry',
+          createdAt: '2026-01-01T00:00:30Z',
+          message: { ...user.message, id: 'steer' as never, createdAt: '2026-01-01T00:00:30Z' },
+        },
+        work,
+      ],
+    })
+    expect(steered.find((row) => row.id === 'old-entry')).toMatchObject({
+      showAssistantMeta: true,
+      assistantCopyStreaming: false,
+    })
+  })
+
   it('preserves Claude insight formatting without changing regular markdown', () =>
   {
     expect(

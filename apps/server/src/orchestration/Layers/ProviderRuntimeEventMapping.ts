@@ -324,6 +324,7 @@ export function runtimeEventToActivities(
           payload: {
             ...(event.requestId ? { requestId: event.requestId } : {}),
             questions: event.payload.questions,
+            ...(event.payload.responseMode ? { responseMode: event.payload.responseMode } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -578,6 +579,7 @@ export function runtimeEventToActivities(
           payload: {
             state: event.payload.state,
             ...(compaction !== undefined ? { compaction } : {}),
+            ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
             ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,

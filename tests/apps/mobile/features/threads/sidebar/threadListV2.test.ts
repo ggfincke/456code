@@ -137,6 +137,37 @@ describe('sortThreadsForListV2', () =>
 
 describe('buildThreadListV2Items', () =>
 {
+  it('keeps server-managed automatic settlement out of the client partition', () =>
+  {
+    const oldInactive = makeThread({
+      id: ThreadId.make('server-managed-inactive'),
+      title: 'Inactive',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    const explicitlySettled = makeThread({
+      id: ThreadId.make('server-managed-settled'),
+      title: 'Settled',
+      settledOverride: 'settled',
+      settledAt: '2026-01-02T00:00:00.000Z',
+    })
+    const environmentId = oldInactive.environmentId
+
+    const { items } = buildThreadListV2Items({
+      threads: [oldInactive, explicitlySettled],
+      environmentId: null,
+      searchQuery: '',
+      now: NOW,
+      settlementEnvironmentIds: new Set([environmentId]),
+      clientAutoSettlementEnvironmentIds: new Set(),
+    })
+
+    expect(items.map((item) => [item.thread.id, item.variant])).toEqual([
+      ['server-managed-inactive', 'card'],
+      ['server-managed-settled', 'slim'],
+    ])
+  })
+
   it('adds scoped content matches without duplicates or changing reentry and settled order', () =>
   {
     const title = makeThread({

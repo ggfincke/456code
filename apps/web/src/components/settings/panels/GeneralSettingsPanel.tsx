@@ -27,7 +27,13 @@ import {
   resolveDesktopUpdateButtonAction,
 } from '../../../components/desktopUpdate.logic'
 import { isElectron } from '../../../env'
-import { usePrimarySettings, useUpdatePrimarySettings } from '../../../hooks/useSettings'
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdateClientSettings,
+  useUpdatePrimarySettings,
+} from '../../../hooks/useSettings'
+import { resolveAutoSettlementPreferences } from '../../../lib/threadAutoSettlement'
 import { useTheme } from '../../../hooks/useTheme'
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from '../../../hostedPairing'
 import { ensureLocalApi, readLocalApi } from '../../../localApi'
@@ -41,7 +47,11 @@ import {
   sortProviderInstanceEntries,
 } from '../../../providerInstances'
 import { useDesktopUpdateState } from '../../../state/desktopUpdate'
-import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from '../../../state/server'
+import {
+  primaryServerConfigAtom,
+  primaryServerObservabilityAtom,
+  primaryServerProvidersAtom,
+} from '../../../state/server'
 import { ProviderModelPicker } from '../../chat/ProviderModelPicker'
 import { TraitsPicker } from '../../chat/composer/TraitsPicker'
 import { Button } from '../../ui/button'
@@ -335,6 +345,18 @@ export function useSettingsRestore(onRestored?: () => void)
   const { theme, setTheme } = useTheme()
   const settings = usePrimarySettings()
   const updateSettings = useUpdatePrimarySettings()
+  const updateClientSettings = useUpdateClientSettings()
+  const serverConfig = useAtomValue(primaryServerConfigAtom)
+  const legacyAutoSettleAfterDays = useClientSettings(
+    (clientSettings) => clientSettings.sidebarAutoSettleAfterDays,
+  )
+  const legacyAutoSettleOnMerge = useClientSettings(
+    (clientSettings) => clientSettings.sidebarAutoSettleOnMerge,
+  )
+  const autoSettlement = resolveAutoSettlementPreferences(serverConfig, {
+    autoSettleAfterDays: legacyAutoSettleAfterDays,
+    autoSettleOnMerge: legacyAutoSettleOnMerge,
+  })
 
   const isTextGenerationModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
@@ -358,11 +380,10 @@ export function useSettingsRestore(onRestored?: () => void)
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ['Project Grouping']
         : []),
-      ...(settings.sidebarAutoSettleAfterDays !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
+      ...(autoSettlement.autoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
         ? ['Auto-settle inactive threads']
         : []),
-      ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
+      ...(autoSettlement.autoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
         ? ['Auto-settle merged threads']
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ['Word wrap'] : []),
@@ -436,8 +457,8 @@ export function useSettingsRestore(onRestored?: () => void)
       settings.browserDefaultZoomFactor,
       settings.browserDefaultAppearance,
       settings.browserAutoShowFloatingPreview,
-      settings.sidebarAutoSettleAfterDays,
-      settings.sidebarAutoSettleOnMerge,
+      autoSettlement.autoSettleAfterDays,
+      autoSettlement.autoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.providerUsageDisplayMode,
@@ -459,6 +480,18 @@ export function useSettingsRestore(onRestored?: () => void)
     if (!confirmed) return
 
     setTheme('system')
+    const resetAutoSettlement = {
+      sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
+      sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
+    }
+    if (autoSettlement.serverManaged)
+    {
+      updateSettings(resetAutoSettlement)
+    }
+    else
+    {
+      updateClientSettings(resetAutoSettlement)
+    }
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       providerUsageDisplayMode: DEFAULT_UNIFIED_SETTINGS.providerUsageDisplayMode,
@@ -467,8 +500,6 @@ export function useSettingsRestore(onRestored?: () => void)
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
-      sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
-      sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       desktopNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.desktopNotificationsEnabled,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
@@ -489,7 +520,14 @@ export function useSettingsRestore(onRestored?: () => void)
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
     })
     onRestored?.()
-  }, [changedSettingLabels, onRestored, setTheme, updateSettings])
+  }, [
+    autoSettlement.serverManaged,
+    changedSettingLabels,
+    onRestored,
+    setTheme,
+    updateClientSettings,
+    updateSettings,
+  ])
 
   return {
     changedSettingLabels,

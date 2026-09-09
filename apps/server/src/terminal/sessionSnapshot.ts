@@ -19,7 +19,7 @@ export type TerminalSessionSnapshotSource = {
   readonly worktreePath: string | null
   readonly status: TerminalSessionStatus
   readonly pid: number | null
-  readonly history: string
+  readonly history: string | { readonly value: () => string }
   readonly exitCode: number | null
   readonly exitSignal: number | null
   readonly updatedAt: string
@@ -76,7 +76,7 @@ export function snapshot(session: TerminalSessionSnapshotSource): TerminalSessio
     worktreePath: session.worktreePath,
     status: session.status,
     pid: session.pid,
-    history: session.history,
+    history: typeof session.history === 'string' ? session.history : session.history.value(),
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
     label: terminalWireLabel(session),

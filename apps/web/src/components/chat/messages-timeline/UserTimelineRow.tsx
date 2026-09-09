@@ -2,6 +2,7 @@
 // render user message timeline rows and collapsible bodies
 
 import { FileDiff } from '@pierre/diffs/react'
+import { DiffWorkerPoolProvider } from '../../DiffWorkerPoolProvider'
 import {
   type EnvironmentId,
   type MessageId,
@@ -763,15 +764,16 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
       )}
       {renderablePatch?.kind === 'files' &&
         renderablePatch.files.map((fileDiff) => (
-          <FileDiff
-            key={resolveFileDiffPath(fileDiff)}
-            fileDiff={fileDiff}
-            options={{
-              collapsed: false,
-              diffStyle: 'unified',
-              theme: syntaxThemeName,
-            }}
-          />
+          <DiffWorkerPoolProvider key={resolveFileDiffPath(fileDiff)}>
+            <FileDiff
+              fileDiff={fileDiff}
+              options={{
+                collapsed: false,
+                diffStyle: 'unified',
+                theme: syntaxThemeName,
+              }}
+            />
+          </DiffWorkerPoolProvider>
         ))}
       {renderablePatch?.kind === 'raw' && (
         <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">

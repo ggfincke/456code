@@ -58,14 +58,25 @@ const makeHttpClientLayer = (bytes: Uint8Array) =>
     ),
   )
 
-const makeSpawnerLayer = (commands: Array<string>) =>
+const makeSpawnerLayer = (
+  commands: Array<ReadonlyArray<string>>,
+  options: { readonly requireVersionSubcommand?: boolean } = {},
+) =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) =>
       Effect.sync(() =>
       {
-        commands.push(ChildProcess.isStandardCommand(command) ? command.command : 'piped-command')
-        return makeHandle()
+        if (!ChildProcess.isStandardCommand(command))
+        {
+          commands.push(['piped-command'])
+          return makeHandle(1)
+        }
+        const invocation = [command.command, ...command.args]
+        commands.push(invocation)
+        return makeHandle(
+          options.requireVersionSubcommand && command.args.join('\0') !== 'version' ? 1 : 0,
+        )
       }),
     ),
   )
@@ -114,64 +125,74 @@ describe('RelayClient', () =>
     ),
   )
 
-  it.effect('downloads, verifies, validates, and atomically installs the managed executable', () =>
-    Effect.gen(function* ()
+  it.effect(
+    'downloads, verifies, validates, and atomically installs the managed executable',
+    () =>
     {
-      const fileSystem = yield* FileSystem.FileSystem
-      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: 't3-cloudflared-test-',
-      })
-      const bytes = new TextEncoder().encode('test-cloudflared-binary')
-      const manager = yield* makeCloudflaredRelayClient({
-        baseDir,
-        releaseAsset: {
-          url: 'https://example.test/cloudflared',
-          sha256: Encoding.encodeHex(sha256(bytes)),
-          archive: 'binary',
-        },
-      })
+      const commands: Array<ReadonlyArray<string>> = []
+      return Effect.gen(function* ()
+      {
+        const fileSystem = yield* FileSystem.FileSystem
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: 't3-cloudflared-test-',
+        })
+        const bytes = new TextEncoder().encode('test-cloudflared-binary')
+        const manager = yield* makeCloudflaredRelayClient({
+          baseDir,
+          releaseAsset: {
+            url: 'https://example.test/cloudflared',
+            sha256: Encoding.encodeHex(sha256(bytes)),
+            archive: 'binary',
+          },
+        })
 
-      const progress: Array<string> = []
-      const installed = yield* manager.installWithProgress((event) =>
-        Effect.sync(() =>
-        {
-          if (event.type === 'progress')
+        const progress: Array<string> = []
+        const installed = yield* manager.installWithProgress((event) =>
+          Effect.sync(() =>
           {
-            progress.push(event.stage)
-          }
-        }),
-      )
-      const managedPath = `${baseDir}/tools/cloudflared/${CLOUDFLARED_VERSION}/linux-x64/cloudflared`
-      expect(installed).toEqual({
-        status: 'available',
-        executablePath: managedPath,
-        source: 'managed',
-        version: CLOUDFLARED_VERSION,
-      })
-      expect(new TextDecoder().decode(yield* fileSystem.readFile(managedPath))).toBe(
-        'test-cloudflared-binary',
-      )
-      expect(progress).toEqual([
-        'checking',
-        'waiting_for_lock',
-        'downloading',
-        'verifying',
-        'installing',
-        'validating',
-        'activating',
-      ])
-      expect(yield* manager.resolve).toEqual(installed)
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(
-          NodeServices.layer,
-          makeHttpClientLayer(new TextEncoder().encode('test-cloudflared-binary')),
-          makeSpawnerLayer([]),
-          hostRuntimeLayer(),
+            if (event.type === 'progress')
+            {
+              progress.push(event.stage)
+            }
+          }),
+        )
+        const managedPath = `${baseDir}/tools/cloudflared/${CLOUDFLARED_VERSION}/linux-x64/cloudflared`
+        expect(installed).toEqual({
+          status: 'available',
+          executablePath: managedPath,
+          source: 'managed',
+          version: CLOUDFLARED_VERSION,
+        })
+        expect(new TextDecoder().decode(yield* fileSystem.readFile(managedPath))).toBe(
+          'test-cloudflared-binary',
+        )
+        expect(progress).toEqual([
+          'checking',
+          'waiting_for_lock',
+          'downloading',
+          'verifying',
+          'installing',
+          'validating',
+          'activating',
+        ])
+        expect(commands).toHaveLength(1)
+        const [validationPath, command] = commands[0]!
+        expect(command).toBe('version')
+        expect(validationPath).toMatch(/\/\.install-[^/]+\/cloudflared$/)
+        expect(validationPath?.startsWith(managedPath.slice(0, -'cloudflared'.length))).toBe(true)
+        expect(yield* manager.resolve).toEqual(installed)
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            NodeServices.layer,
+            makeHttpClientLayer(new TextEncoder().encode('test-cloudflared-binary')),
+            makeSpawnerLayer(commands, { requireVersionSubcommand: true }),
+            hostRuntimeLayer(),
+          ),
         ),
-      ),
-    ),
+      )
+    },
   )
 
   it.effect('rejects downloads whose checksum does not match the pinned manifest', () =>
@@ -208,7 +229,7 @@ describe('RelayClient', () =>
 
   it.effect('serializes concurrent installs within one runtime', () =>
   {
-    const commands: Array<string> = []
+    const commands: Array<ReadonlyArray<string>> = []
     const bytes = new TextEncoder().encode('test-cloudflared-binary')
     return Effect.gen(function* ()
     {

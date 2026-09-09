@@ -133,6 +133,7 @@ function unwrapCodexRuntimeEvents(adapter: CodexAdapterShape): Stream.Stream<Pro
 
 class FakeCodexRuntime implements CodexSessionRuntimeShape
 {
+  public readonly compactThread = Effect.void
   private readonly eventQueue = Effect.runSync(Queue.unbounded<ProviderEvent>())
   private readonly now = '2026-01-01T00:00:00.000Z'
 
@@ -940,6 +941,121 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
       NodeAssert.equal(firstEvent.value.itemId, 'msg_1')
       NodeAssert.equal(firstEvent.value.turnId, 'turn-1')
       NodeAssert.equal(firstEvent.value.payload.itemType, 'assistant_message')
+    }),
+  )
+
+  it.effect('maps completed async agent questions to non-blocking user input', () =>
+    Effect.gen(function* ()
+    {
+      const { adapter, runtime } = yield* startLifecycleRuntime()
+      const firstEventFiber = yield* Stream.runHead(unwrapCodexRuntimeEvents(adapter)).pipe(
+        Effect.forkChild,
+      )
+
+      yield* runtime.emit({
+        id: asEventId('evt-async-question-complete'),
+        kind: 'notification',
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: '2026-01-01T00:00:00.000Z',
+        method: 'item/completed',
+        threadId: asThreadId('thread-1'),
+        turnId: asTurnId('turn-1'),
+        itemId: asItemId('async-question-1'),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          item: {
+            type: 'agentMessage',
+            id: 'async-question-1',
+            text: '',
+            delivery: 'async',
+            questions: [
+              {
+                title: 'Which branch?',
+                options: ['main', 'feature/reconciliation'],
+              },
+              { title: 'Any constraints?' },
+            ],
+          },
+        },
+      } satisfies ProviderEvent)
+
+      const firstEvent = yield* Fiber.join(firstEventFiber)
+      NodeAssert.equal(firstEvent._tag, 'Some')
+      if (firstEvent._tag !== 'Some') return
+      NodeAssert.equal(firstEvent.value.type, 'user-input.requested')
+      if (firstEvent.value.type !== 'user-input.requested') return
+      NodeAssert.equal(firstEvent.value.requestId, 'codex-async:thread-1:async-question-1')
+      NodeAssert.equal(firstEvent.value.payload.responseMode, 'message')
+      NodeAssert.deepEqual(firstEvent.value.payload.questions, [
+        {
+          id: '0',
+          header: 'Question',
+          question: 'Which branch?',
+          options: [
+            { label: 'main', description: '' },
+            { label: 'feature/reconciliation', description: '' },
+          ],
+          allowCustomAnswer: true,
+          multiSelect: false,
+        },
+        {
+          id: '1',
+          header: 'Question',
+          question: 'Any constraints?',
+          options: [],
+          allowCustomAnswer: true,
+          multiSelect: false,
+        },
+      ])
+    }),
+  )
+
+  it.effect('keeps unknown or malformed async metadata as ordinary assistant messages', () =>
+    Effect.gen(function* ()
+    {
+      const { adapter, runtime } = yield* startLifecycleRuntime()
+      const eventsFiber = yield* Stream.runCollect(
+        Stream.take(unwrapCodexRuntimeEvents(adapter), 3),
+      ).pipe(Effect.forkChild)
+      for (const [index, metadata] of [
+        { delivery: 'notification', questions: { future: true } },
+        { delivery: 'async', questions: [{ title: 42, options: 'free-form' }] },
+        { delivery: 'async', questions: [{ title: 'Valid' }, { title: 'Invalid', options: [42] }] },
+      ].entries())
+      {
+        yield* runtime.emit({
+          id: asEventId(`evt-ordinary-agent-message-${index}`),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          method: 'item/completed',
+          threadId: asThreadId('thread-1'),
+          turnId: asTurnId('turn-1'),
+          itemId: asItemId(`ordinary-agent-message-${index}`),
+          payload: {
+            completedAtMs: 1_778_000_000_000,
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            item: {
+              type: 'agentMessage',
+              id: `ordinary-agent-message-${index}`,
+              text: `ordinary assistant text ${index}`,
+              ...metadata,
+            },
+          },
+        } satisfies ProviderEvent)
+      }
+      const events = Array.from(yield* Fiber.join(eventsFiber))
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ['item.completed', 'item.completed', 'item.completed'],
+      )
+      NodeAssert.deepEqual(
+        events.map((event) => (event.type === 'item.completed' ? event.payload.detail : undefined)),
+        ['ordinary assistant text 0', 'ordinary assistant text 1', 'ordinary assistant text 2'],
+      )
     }),
   )
 

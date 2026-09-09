@@ -416,6 +416,47 @@ function stripNullDefaults(value: Schema.Json): Schema.Json
   ) as Schema.Json
 }
 
+// the pinned protocol ref predates async questions; preserve raw optional metadata
+// in every history namespace so malformed/new forms still decode as ordinary messages.
+function addAsyncQuestionFields(value: Schema.Json): Schema.Json
+{
+  if (Array.isArray(value))
+  {
+    return value.map(addAsyncQuestionFields)
+  }
+  if (value === null || typeof value !== 'object')
+  {
+    return value
+  }
+  const properties = 'properties' in value ? value.properties : undefined
+  const itemType =
+    properties && typeof properties === 'object' && 'type' in properties
+      ? properties.type
+      : undefined
+  if (
+    properties &&
+    typeof properties === 'object' &&
+    itemType &&
+    typeof itemType === 'object' &&
+    'enum' in itemType &&
+    Array.isArray(itemType.enum) &&
+    itemType.enum.includes('agentMessage')
+  )
+  {
+    return {
+      ...value,
+      properties: {
+        ...properties,
+        delivery: {},
+        questions: {},
+      },
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, addAsyncQuestionFields(child)]),
+  )
+}
+
 function toPascalCaseMethod(method: string)
 {
   return method
@@ -777,7 +818,7 @@ const generateFiles = Effect.fn('generateFiles')(function* ()
     left.localeCompare(right),
   ))
   {
-    generator.addSchema(name, schema as never)
+    generator.addSchema(name, addAsyncQuestionFields(schema) as never)
   }
 
   const generatedEntries = new Map<string, string>()

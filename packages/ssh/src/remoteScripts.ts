@@ -254,20 +254,24 @@ if command -v 456code >/dev/null 2>&1; then
 fi
 # npm can extract a package before a native dependency build fails, leaving no executable
 require_installed_456code_cli() {
-  CODE456_CLI_PATH="$("$@" -- sh -c 'command -v 456code' || true)"
+  if ! CODE456_CLI_PATH="$("$@" -- sh -c 'command -v 456code')"; then
+    printf 'Remote host could not install %s. See npm output above for the cause.\\n' @@T3_PACKAGE_SPEC@@ >&2
+    return 1
+  fi
   if [ -n "$CODE456_CLI_PATH" ]; then
     return 0
   fi
   printf 'Remote host installed %s but npm produced no 456code executable, which usually means a native dependency (node-pty) failed to build. Install a C toolchain on the remote host (Debian/Ubuntu: build-essential, Fedora/RHEL: gcc-c++ make, macOS: xcode-select --install) and try again.\\n' @@T3_PACKAGE_SPEC@@ >&2
   return 1
 }
+# the launcher records this pid, so exec the cli without an npm wrapper process
 if command -v npx >/dev/null 2>&1; then
   require_installed_456code_cli npx --yes --package @@T3_PACKAGE_SPEC@@ || exit 1
-  exec npx --yes @@T3_PACKAGE_SPEC@@ "$@"
+  exec "$CODE456_CLI_PATH" "$@"
 fi
 if command -v npm >/dev/null 2>&1; then
   require_installed_456code_cli npm exec --yes --package @@T3_PACKAGE_SPEC@@ || exit 1
-  exec npm exec --yes @@T3_PACKAGE_SPEC@@ -- "$@"
+  exec "$CODE456_CLI_PATH" "$@"
 fi
 printf 'Remote host is missing the 456code CLI and could not install @@T3_PACKAGE_SPEC@@ because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
 exit 1
@@ -457,6 +461,10 @@ if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMO
     WAIT_COUNT=$((WAIT_COUNT + 1))
     sleep 0.1
   done
+  if kill -0 "$REMOTE_PID" 2>/dev/null; then
+    printf 'Remote 456code server with PID %s did not stop within 2 seconds. Its ownership files were kept.\n' "$REMOTE_PID" >&2
+    exit 1
+  fi
 fi
 rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
 printf '{"stopped":true}\\n'

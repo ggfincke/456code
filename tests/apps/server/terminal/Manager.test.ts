@@ -238,6 +238,7 @@ const multiTerminalHistoryLogPath = (
 
 interface CreateManagerOptions
 {
+  historyByteLimit?: number
   shellResolver?: () => string
   env?: NodeJS.ProcessEnv
   subprocessInspector?: (terminalPid: number) => Effect.Effect<{
@@ -281,6 +282,9 @@ const createManager = (
       const manager = yield* TerminalManager.makeWithOptions({
         logsDir,
         historyLineLimit,
+        ...(options.historyByteLimit !== undefined
+          ? { historyByteLimit: options.historyByteLimit }
+          : {}),
         ptyAdapter,
         threadArchiveLifecyclePermit: options.threadArchiveLifecyclePermit ?? {
           withPermit: (_threadId, effect) => effect,
@@ -317,6 +321,67 @@ const createManager = (
   )
 
 const withHostPlatform = (platform: NodeJS.Platform) => Layer.succeed(HostProcessPlatform, platform)
+
+function retainedHistory(text: string, maxLines: number, maxBytes = Infinity): string
+{
+  const terminated = text.endsWith('\n')
+  const lines = text.split('\n')
+  if (terminated) lines.pop()
+  const retained = lines.slice(Math.max(0, lines.length - maxLines)).join('\n')
+  const capped = terminated ? `${retained}\n` : retained
+  if (Buffer.byteLength(capped) <= maxBytes) return capped
+  const points = Array.from(capped)
+  let start = points.length
+  let bytes = 0
+  while (start > 0)
+  {
+    const next = Buffer.byteLength(points[start - 1]!)
+    if (bytes + next > maxBytes) break
+    bytes += next
+    start -= 1
+  }
+  return points.slice(start).join('')
+}
+
+it('preserves line and byte limits across incremental Unicode and ANSI chunks', () =>
+{
+  let expected = retainedHistory('before\ninitial\n', 3, 64)
+  const history = new TerminalManager.BoundedTerminalHistory(3, 'before\ninitial\n', 64)
+  for (const chunk of [
+    'café',
+    '\n\u001b[31mred\u001b[0m\n',
+    '名',
+    '\ud83d',
+    '\ude80',
+    '\nlast line',
+  ])
+  {
+    history.append(chunk)
+    expected = retainedHistory(expected + chunk, 3, 64)
+    expect(history.value()).toBe(expected)
+  }
+  history.clear()
+  expect(history.value()).toBe('')
+})
+
+it('bounds long partial lines and joins surrogate pairs across chunk boundaries', () =>
+{
+  const maxBytes = 65_539
+  let expected = ''
+  const history = new TerminalManager.BoundedTerminalHistory(5_000, '', maxBytes)
+  for (const text of [
+    `${'a'.repeat(16_383)}😀${'b'.repeat(70_000)}`,
+    `\r${'c'.repeat(70_000)}\ud83d`,
+    `\ude80${'d'.repeat(100)}`,
+    `\uFEFF${'名'.repeat(30_000)}`,
+  ])
+  {
+    history.append(text)
+    expected = retainedHistory(expected + text, 5_000, maxBytes)
+    expect(history.value()).toBe(expected)
+    expect(Buffer.byteLength(history.value())).toBeLessThanOrEqual(maxBytes)
+  }
+})
 
 it.layer(
   Layer.mergeAll(
@@ -1103,6 +1168,29 @@ it.layer(
     }),
   )
 
+  it.effect('bounds persisted history by bytes without truncating live output events', () =>
+    Effect.gen(function* ()
+    {
+      const { manager, ptyAdapter, logsDir, getEvents } = yield* createManager(5, {
+        historyByteLimit: 10,
+      })
+      yield* manager.open(openInput())
+      const writes = ['a'.repeat(32), '😀\rEND']
+      const process = ptyAdapter.processes[0]
+      expect(process).toBeDefined()
+      if (!process) return
+      for (const text of writes) process.emitData(text)
+      yield* manager.close({ threadId: 'thread-1' })
+
+      const fs = yield* FileSystem.FileSystem
+      expect(yield* fs.readFileString(yield* historyLogPath(logsDir))).toBe('aa😀\rEND')
+      expect(
+        (yield* getEvents).filter((event) => event.type === 'output').map((event) => event.data),
+      ).toEqual(writes)
+      expect((yield* manager.open(openInput())).history).toBe('aa😀\rEND')
+    }),
+  )
+
   it.effect('strips replay-unsafe terminal query and reply sequences from persisted history', () =>
     Effect.gen(function* ()
     {
@@ -1610,6 +1698,33 @@ it.layer(
       expect(ptyAdapter.spawnInputs[1]?.args).toEqual(['-NoLogo'])
       expect(ptyAdapter.spawnInputs[2]?.args).toEqual(['-NoLogo'])
     }),
+  )
+
+  it.effect.each(['linux', 'darwin', 'win32'] as const)(
+    'advertises truecolor on %s without replacing explicit values',
+    (platform) =>
+      Effect.gen(function* ()
+      {
+        for (const [parentColor, runtimeColor, expected] of [
+          [undefined, undefined, 'truecolor'],
+          ['', undefined, 'truecolor'],
+          ['24bit', undefined, '24bit'],
+          ['24bit', '', 'truecolor'],
+          ['24bit', 'custom', 'custom'],
+        ] as const)
+        {
+          const env = Object.freeze({ COLORTERM: parentColor })
+          const { manager, ptyAdapter } = yield* createManager(5, {
+            shellResolver: () => '/bin/sh',
+            env,
+          }).pipe(Effect.provide(withHostPlatform(platform)))
+          yield* manager.open(
+            openInput({ env: runtimeColor === undefined ? {} : { COLORTERM: runtimeColor } }),
+          )
+          expect(ptyAdapter.spawnInputs[0]?.env.COLORTERM).toBe(expected)
+          expect(env.COLORTERM).toBe(parentColor)
+        }
+      }),
   )
 
   it.effect('strips AppImage and app-runtime env from terminal sessions', () =>

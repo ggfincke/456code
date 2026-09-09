@@ -19,19 +19,21 @@ import {
 } from './lib/windowControlsOverlay'
 import { AppRoot } from './AppRoot'
 
-// electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-const history = isElectron ? createHashHistory() : createBrowserHistory()
-
-const router = getRouter(history)
-
-if (isElectron)
+export const startup = Promise.resolve().then(() =>
 {
-  syncDocumentElectronPlatformClasses(navigator.platform)
-  syncDocumentWindowControlsOverlayClass()
-}
+  // electron loads from a file-backed shell, so hash history avoids path resolution issues
+  const history = isElectron ? createHashHistory() : createBrowserHistory()
+  const router = getRouter(history)
 
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
-  <React.StrictMode>
-    <AppRoot router={router} />
-  </React.StrictMode>,
-)
+  if (isElectron)
+  {
+    syncDocumentElectronPlatformClasses(navigator.platform)
+    syncDocumentWindowControlsOverlayClass()
+  }
+
+  ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+    <React.StrictMode>
+      <AppRoot router={router} />
+    </React.StrictMode>,
+  )
+})

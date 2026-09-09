@@ -54,6 +54,7 @@ export interface DiffCheckpointsInput
   readonly toCheckpointRef: CheckpointRef
   readonly fallbackFromToHead?: boolean
   readonly ignoreWhitespace: boolean
+  readonly format?: 'patch' | 'numstat'
 }
 
 export interface DeleteCheckpointRefsInput
@@ -130,7 +131,7 @@ export class CheckpointStore extends Context.Service<
       input: VerifyCheckpointRestorePreconditionsInput,
     ) => Effect.Effect<ExactGitTreeVerification, CheckpointStoreError>
 
-    // compute a patch diff between two checkpoint refs.
+    // compute a patch or compact numstat diff between two checkpoint refs.
     //
     // can optionally treat a missing "from" ref as `HEAD`.
     readonly diffCheckpoints: (

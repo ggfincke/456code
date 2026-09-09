@@ -23,7 +23,10 @@ export class GitStatusReader extends Context.Service<
     ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>
     readonly remoteStatus: (
       input: VcsStatusInput,
-      options?: { readonly refreshUpstream?: boolean },
+      options?: {
+        readonly refreshUpstream?: boolean
+        readonly refreshMissingPullRequest?: boolean
+      },
     ) => Effect.Effect<VcsStatusRemoteResult | null, GitManagerServiceError>
     readonly invalidateLocalStatus: (cwd: string) => Effect.Effect<void, never>
     readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>

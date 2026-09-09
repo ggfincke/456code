@@ -27,6 +27,7 @@ export interface PullRequestInfo extends OpenPrInfo, PullRequestHeadRemoteInfo
 {
   state: 'open' | 'closed' | 'merged'
   updatedAt: Option.Option<DateTime.Utc>
+  terminalAt?: string | null
 }
 
 export const pullRequestUpdatedAtDescOrder: Order.Order<PullRequestInfo> = Order.mapInput(
@@ -59,6 +60,7 @@ export interface BranchHeadContext
   preferredHeadSelector: string
   remoteName: string | null
   headRemoteUrlKey: string | null
+  targetRemoteUrlKey: string | null
   headRepositoryNameWithOwner: string | null
   headRepositoryOwnerLogin: string | null
   isCrossRepository: boolean
@@ -276,6 +278,7 @@ export function toPullRequestInfo(summary: ChangeRequest): PullRequestInfo
     headRefName: summary.headRefName,
     state: summary.state ?? 'open',
     updatedAt: summary.updatedAt,
+    ...(summary.terminalAt !== undefined ? { terminalAt: summary.terminalAt } : {}),
     ...(summary.isCrossRepository !== undefined
       ? { isCrossRepository: summary.isCrossRepository }
       : {}),

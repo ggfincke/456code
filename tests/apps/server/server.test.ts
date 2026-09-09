@@ -1732,6 +1732,76 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
+  it.effect(
+    'streams manifest assets with immutable cache metadata and revalidates mutable files',
+    () =>
+      Effect.gen(function* ()
+      {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: 't3-static-cache-' })
+        yield* fileSystem.makeDirectory(path.join(staticDir, 'assets'))
+        yield* fileSystem.makeDirectory(path.join(staticDir, '.vite'))
+        yield* fileSystem.writeFileString(
+          path.join(staticDir, '.vite', 'manifest.json'),
+          '{"index.html":{"file":"assets/index-AbCd0123.js","isEntry":true}}',
+        )
+        yield* fileSystem.writeFileString(path.join(staticDir, 'index.html'), '<html>app</html>')
+        const assetContents = 'export const bundled = true;\n'.repeat(8_192)
+        yield* fileSystem.writeFileString(
+          path.join(staticDir, 'assets', 'index-AbCd0123.js'),
+          assetContents,
+        )
+
+        yield* buildAppUnderTest({ config: { staticDir } })
+
+        const asset = yield* HttpClient.get('/assets/index-AbCd0123.js', {
+          headers: { 'accept-encoding': 'identity' },
+        })
+        assert.equal(asset.status, 200)
+        assert.equal(asset.headers['cache-control'], 'public, max-age=31536000, immutable')
+        assert.equal(yield* asset.text, assetContents)
+
+        const index = yield* HttpClient.get('/')
+        assert.equal(index.headers['cache-control'], 'no-cache')
+        assert.isDefined(index.headers.etag)
+        const unchanged = yield* HttpClient.get('/', {
+          headers: { 'if-none-match': index.headers.etag! },
+        })
+        assert.equal(unchanged.status, 304)
+        assert.equal(unchanged.headers['cache-control'], 'no-cache')
+        assert.equal(yield* unchanged.text, '')
+      }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
+  it.effect('never serves a static file through a symlink outside the configured root', () =>
+    Effect.gen(function* ()
+    {
+      if ((yield* HostProcessPlatform) === 'win32') return
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: 't3-static-root-' })
+      const outsideDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: 't3-static-outside-' })
+      yield* fileSystem.makeDirectory(path.join(staticDir, 'assets'))
+      yield* fileSystem.makeDirectory(path.join(staticDir, '.vite'))
+      yield* fileSystem.writeFileString(path.join(staticDir, 'index.html'), '<html>safe app</html>')
+      yield* fileSystem.writeFileString(
+        path.join(staticDir, '.vite', 'manifest.json'),
+        '{"leaked.js":{"file":"assets/leaked-AbCd0123.js"}}',
+      )
+      const secretPath = path.join(outsideDir, 'secret.txt')
+      yield* fileSystem.writeFileString(secretPath, 'outside secret')
+      yield* fileSystem.symlink(secretPath, path.join(staticDir, 'assets', 'leaked-AbCd0123.js'))
+
+      yield* buildAppUnderTest({ config: { staticDir } })
+
+      const response = yield* HttpClient.get('/assets/leaked-AbCd0123.js')
+      assert.equal(response.status, 200)
+      assert.equal(response.headers['cache-control'], 'no-cache')
+      assert.equal(yield* response.text, '<html>safe app</html>')
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
   it.effect('redirects to dev URL when configured', () =>
     Effect.gen(function* ()
     {

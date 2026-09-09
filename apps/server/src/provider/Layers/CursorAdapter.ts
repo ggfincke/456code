@@ -1241,6 +1241,15 @@ export function makeCursorAdapter(
             Effect.sync(() =>
             {
               ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1)
+              if (
+                ctx.promptsInFlight === 0 &&
+                sessions.get(input.threadId) === ctx &&
+                ctx.activeTurnId === turnId
+              )
+              {
+                ctx.activeTurnId = undefined
+                ctx.session = { ...ctx.session, activeTurnId: undefined }
+              }
             }),
           ),
         )
@@ -1350,6 +1359,7 @@ export function makeCursorAdapter(
       capabilities: CURSOR_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
+      compaction: { type: 'slash-command', command: '/compress' },
       interruptTurn,
       readThread,
       rollbackThread,

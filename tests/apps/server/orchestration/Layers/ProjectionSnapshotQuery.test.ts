@@ -2,6 +2,7 @@
 // verifies orchestration projection snapshot loading
 
 import {
+  ApprovalRequestId,
   CheckpointRef,
   CommandId,
   EventId,
@@ -15,6 +16,7 @@ import { assert, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Tracer from 'effect/Tracer'
@@ -2051,7 +2053,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           NULL,
           NULL,
           1,
-          1,
+          0,
           0,
           '2026-08-16T00:00:02.000Z',
           '2026-08-16T00:00:03.000Z',
@@ -2120,7 +2122,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
             'info',
             'user-input.requested',
             'User input requested',
-            '{"requestId":"input-bounded-detail"}',
+            '{"requestId":"input-bounded-detail","responseMode":"message","questions":[]}',
             2,
             '2026-08-16T00:00:06.000Z'
           )
@@ -2332,6 +2334,41 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
             assert.notInclude(completedPayloadJson, 'yyyyyyyyyy')
           }
         }
+
+        const requestedActivity = yield* snapshotQuery.getUserInputActivity({
+          threadId: ThreadId.make('thread-bounded-detail'),
+          requestId: ApprovalRequestId.make('input-bounded-detail'),
+        })
+        assert.equal(requestedActivity._tag, 'Some')
+        assert.equal(
+          requestedActivity.pipe(
+            Option.map((activity) => activity.kind),
+            Option.getOrNull,
+          ),
+          'user-input.requested',
+        )
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json, sequence, created_at
+          ) VALUES (
+            'activity-bounded-user-input-resolved', 'thread-bounded-detail', NULL, 'info',
+            'user-input.resolved', 'User input dismissed',
+            '{"requestId":"input-bounded-detail","responseMode":"message"}', 504,
+            '2026-08-16T02:00:00.000Z'
+          )
+        `
+        const resolvedActivity = yield* snapshotQuery.getUserInputActivity({
+          threadId: ThreadId.make('thread-bounded-detail'),
+          requestId: ApprovalRequestId.make('input-bounded-detail'),
+        })
+        assert.equal(resolvedActivity._tag, 'Some')
+        assert.equal(
+          resolvedActivity.pipe(
+            Option.map((activity) => activity.kind),
+            Option.getOrNull,
+          ),
+          'user-input.resolved',
+        )
       }),
   )
 

@@ -29,7 +29,8 @@ import * as Schema from 'effect/Schema'
 import { DeepMutable } from 'effect/Types'
 import { getLocalStorageItem } from '../hooks/useLocalStorage'
 import { type ElementContextDraft } from '../lib/elementContext'
-import { createDebouncedStorage, createMemoryStorage } from '../lib/storage'
+import { createDeferredStorage, createMemoryStorage } from '../lib/storage'
+import type { PersistStorage, StorageValue } from 'zustand/middleware'
 import {
   type TerminalContextDraft,
   ensureInlineTerminalContextPlaceholders,
@@ -80,10 +81,31 @@ export type DraftId = typeof DraftId.Type
 
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300
 
-export const composerDebouncedStorage = createDebouncedStorage(
+export type ComposerPersistState =
+  { capturedState: ComposerDraftStoreState } | PersistedComposerDraftStoreState
+
+export const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPersistState>>(
   typeof localStorage !== 'undefined' ? localStorage : createMemoryStorage(),
+  (value) =>
+    JSON.stringify({
+      state:
+        'capturedState' in value.state
+          ? partializeComposerDraftStoreState(value.state.capturedState)
+          : value.state,
+      version: value.version,
+    }),
   COMPOSER_PERSIST_DEBOUNCE_MS,
 )
+
+export const composerPersistStorage: PersistStorage<ComposerPersistState> = {
+  getItem: (name) =>
+  {
+    const raw = composerDebouncedStorage.getItem(name)
+    return typeof raw === 'string' ? (JSON.parse(raw) as StorageValue<ComposerPersistState>) : null
+  },
+  setItem: (name, value) => composerDebouncedStorage.setItem(name, value),
+  removeItem: (name) => composerDebouncedStorage.removeItem(name),
+}
 
 export const PersistedComposerImageAttachment = Schema.Struct({
   id: Schema.String,
@@ -957,6 +979,7 @@ export function removeDraftThreadReferences(
     | 'logicalProjectDraftThreadKeyByLogicalProjectKey'
   >,
   threadKey: string,
+  composerDestination?: ScopedThreadRef,
 ): Pick<
   ComposerDraftStoreState,
   | 'draftThreadsByThreadKey'
@@ -964,6 +987,39 @@ export function removeDraftThreadReferences(
   | 'logicalProjectDraftThreadKeyByLogicalProjectKey'
 >
 {
+  const sourceDraft = state.draftsByThreadKey[threadKey]
+  const sourceThread = state.draftThreadsByThreadKey[threadKey]
+  const destinationKey = composerDestination ? composerTargetKey(composerDestination) : null
+  const destinationDraft = destinationKey ? state.draftsByThreadKey[destinationKey] : undefined
+  const hasDestinationContent =
+    destinationDraft &&
+    (destinationDraft.prompt.length > 0 ||
+      destinationDraft.images.length > 0 ||
+      destinationDraft.files.length > 0 ||
+      destinationDraft.persistedAttachments.length > 0 ||
+      destinationDraft.terminalContexts.length > 0 ||
+      destinationDraft.elementContexts.length > 0 ||
+      destinationDraft.previewAnnotations.length > 0 ||
+      destinationDraft.architectureContexts.length > 0 ||
+      destinationDraft.reviewComments.length > 0 ||
+      destinationDraft.modelSelectionExplicit === true)
+  if (
+    sourceDraft &&
+    sourceThread &&
+    composerDestination &&
+    (sourceThread.environmentId !== composerDestination.environmentId ||
+      (destinationKey !== threadKey && hasDestinationContent))
+  )
+  {
+    // keep a conflicting draft discoverable instead of overwriting user content or upload ownership.
+    return {
+      ...state,
+      draftThreadsByThreadKey: {
+        ...state.draftThreadsByThreadKey,
+        [threadKey]: { ...sourceThread, promotedTo: null },
+      },
+    }
+  }
   const nextLogicalMappings = Object.fromEntries(
     Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(
       ([, draftThreadKey]) => draftThreadKey !== threadKey,
@@ -972,7 +1028,14 @@ export function removeDraftThreadReferences(
   const { [threadKey]: _removedDraftThread, ...restDraftThreadsByThreadKey } =
     state.draftThreadsByThreadKey
   const { [threadKey]: removedComposerDraft, ...restDraftsByThreadKey } = state.draftsByThreadKey
-  revokeDraftThreadPreviewUrls(removedComposerDraft)
+  if (destinationKey && removedComposerDraft)
+  {
+    restDraftsByThreadKey[destinationKey] = removedComposerDraft
+  }
+  else
+  {
+    revokeDraftThreadPreviewUrls(removedComposerDraft)
+  }
   return {
     draftsByThreadKey: restDraftsByThreadKey,
     draftThreadsByThreadKey: restDraftThreadsByThreadKey,

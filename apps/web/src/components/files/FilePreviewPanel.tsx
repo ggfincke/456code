@@ -9,6 +9,7 @@ import type {
 } from '@t3tools/contracts'
 import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
 import { File, Virtualizer } from '@pierre/diffs/react'
+import { DiffWorkerPoolProvider } from '../DiffWorkerPoolProvider'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -519,31 +520,33 @@ export default function FilePreviewPanel({
                 onOpenFile={onOpenFile}
               />
             ) : file.data.truncated ? (
-              <Virtualizer
-                key={`${relativePath}:${syntaxThemeName}:${file.data.byteLength}`}
-                className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
-                config={{
-                  overscrollSize: 600,
-                  intersectionObserverMargin: 1200,
-                }}
-              >
-                <File
-                  file={{
-                    name: relativePath,
-                    contents: file.data.contents,
-                    cacheKey: projectFileCacheKey(cwd, relativePath, file.data.contents),
+              <DiffWorkerPoolProvider>
+                <Virtualizer
+                  key={`${relativePath}:${syntaxThemeName}:${file.data.byteLength}`}
+                  className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+                  config={{
+                    overscrollSize: 600,
+                    intersectionObserverMargin: 1200,
                   }}
-                  options={{
-                    disableFileHeader: true,
-                    overflow: wordWrap ? 'wrap' : 'scroll',
-                    theme: syntaxThemeName,
-                    themeType: resolvedTheme,
-                    unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
-                    onPostRender: onFilePostRender,
-                  }}
-                  className="min-h-full"
-                />
-              </Virtualizer>
+                >
+                  <File
+                    file={{
+                      name: relativePath,
+                      contents: file.data.contents,
+                      cacheKey: projectFileCacheKey(cwd, relativePath, file.data.contents),
+                    }}
+                    options={{
+                      disableFileHeader: true,
+                      overflow: wordWrap ? 'wrap' : 'scroll',
+                      theme: syntaxThemeName,
+                      themeType: resolvedTheme,
+                      unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
+                      onPostRender: onFilePostRender,
+                    }}
+                    className="min-h-full"
+                  />
+                </Virtualizer>
+              </DiffWorkerPoolProvider>
             ) : (
               <div
                 key={`${relativePath}:${resolvedTheme}`}

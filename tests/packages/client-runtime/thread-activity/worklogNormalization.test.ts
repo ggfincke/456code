@@ -30,6 +30,37 @@ function makeCompletedActivity(id: string, sequence: number): OrchestrationThrea
 
 describe('deriveNormalizedWorkLogEntries caching', () =>
 {
+  it('maps active and stopped task states without marking resumable idle tasks terminal', () =>
+  {
+    const entries = deriveNormalizedWorkLogEntries(
+      [
+        ['pending', 'background'],
+        ['running', 'background'],
+        ['waiting', 'background'],
+        ['cancelled', 'background'],
+        ['interrupted', 'background'],
+        ['idle', 'subagent_batch'],
+        ['idle', 'background'],
+      ].map(([status, taskType], index) => ({
+        ...makeCompletedActivity(`task-state-${index}`, index),
+        kind: 'task.progress' as const,
+        summary: 'Task status changed',
+        payload: { status, taskType },
+      })),
+      { requestKindFromRequestType: () => null },
+    )
+
+    expect(entries.map((entry) => entry.toolLifecycleStatus)).toEqual([
+      'inProgress',
+      'inProgress',
+      'inProgress',
+      'stopped',
+      'stopped',
+      'stopped',
+      undefined,
+    ])
+  })
+
   it('filters wire-only warnings without dropping actionable warnings or errors', () =>
   {
     const base = makeCompletedActivity('warning-noise', 1)

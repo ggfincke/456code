@@ -5,6 +5,7 @@ import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it as effectIt } from '@effect/vitest'
 import { HostProcessEnvironment, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import {
@@ -427,6 +428,29 @@ effectIt.layer(NodeServices.layer)('isCommandAvailable', (it) =>
 
 effectIt.layer(NodeServices.layer)('resolveCommandPath', (it) =>
 {
+  const recordProbes = (env: NodeJS.ProcessEnv) =>
+    Effect.gen(function* ()
+    {
+      const probed: Array<string> = []
+      const result = yield* resolveCommandPath('definitely-not-installed', { env }).pipe(
+        Effect.provideService(HostProcessPlatform, 'win32'),
+        Effect.provide(
+          FileSystem.layerNoop({
+            stat: (filePath) =>
+              Effect.sync(() =>
+              {
+                probed.push(filePath)
+                return { type: 'Directory' } as FileSystem.File.Info
+              }),
+          }),
+        ),
+        Effect.result,
+      )
+
+      expect(result._tag).toBe('Failure')
+      return probed
+    })
+
   it.effect('fails when PATH is empty', () =>
     Effect.gen(function* ()
     {
@@ -435,6 +459,24 @@ effectIt.layer(NodeServices.layer)('resolveCommandPath', (it) =>
       }).pipe(Effect.provideService(HostProcessPlatform, 'win32'), Effect.result)
 
       expect(result._tag).toBe('Failure')
+    }),
+  )
+
+  it.effect('deduplicates exact PATH entries but preserves case variants', () =>
+    Effect.gen(function* ()
+    {
+      const repeated = yield* recordProbes({
+        PATH: 'C:\\bin;C:\\other;C:\\bin;C:\\other',
+        PATHEXT: '.COM;.EXE',
+      })
+      expect(repeated).toHaveLength(8)
+      expect(new Set(repeated).size).toBe(repeated.length)
+
+      const caseVariants = yield* recordProbes({
+        PATH: 'C:\\bin;C:\\BIN',
+        PATHEXT: '.COM;.EXE',
+      })
+      expect(caseVariants).toHaveLength(8)
     }),
   )
 })

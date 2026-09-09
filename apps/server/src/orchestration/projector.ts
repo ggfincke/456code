@@ -15,6 +15,7 @@ import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifi
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
 import { isAdjacentProviderSwitchActivity } from '@t3tools/shared/providerSwitchActivity'
 import * as Effect from 'effect/Effect'
+import * as Predicate from 'effect/Predicate'
 import * as Schema from 'effect/Schema'
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from './Errors.ts'
@@ -151,7 +152,7 @@ function approvalOutcomeFromActivity(
 function checkpointStatusToLatestTurnState(status: 'ready' | 'missing' | 'error')
 {
   if (status === 'error') return 'error' as const
-  if (status === 'missing') return 'interrupted' as const
+  // a missing git ref alone does not mean the provider turn was interrupted.
   return 'completed' as const
 }
 
@@ -429,9 +430,27 @@ function retainThreadActivities(
 ): ReadonlyArray<OrchestrationThread['activities'][number]>
 {
   const latestImportContinuation = activities.findLast(isImportContinuationActivity)
-  const retainedActivities = activities
-    .filter((activity) => !isImportContinuationActivity(activity))
-    .slice(-500)
+  const pendingAsyncQuestions = new Map<string, OrchestrationThread['activities'][number]>()
+  for (const activity of activities)
+  {
+    if (!Predicate.isObject(activity.payload)) continue
+    const requestId = activity.payload.requestId
+    if (typeof requestId !== 'string') continue
+    if (activity.kind === 'user-input.requested' && activity.payload.responseMode === 'message')
+    {
+      pendingAsyncQuestions.set(requestId, activity)
+    }
+    else if (activity.kind === 'user-input.resolved')
+    {
+      pendingAsyncQuestions.delete(requestId)
+    }
+  }
+  const retainedAsyncQuestions = new Set(pendingAsyncQuestions.values())
+  const retainedActivities = activities.filter(
+    (activity, index) =>
+      !isImportContinuationActivity(activity) &&
+      (index >= activities.length - 500 || retainedAsyncQuestions.has(activity)),
+  )
   if (latestImportContinuation === undefined)
   {
     return retainedActivities
@@ -1435,7 +1454,11 @@ export function projectEvent(
               ? thread.latestTurn
               : {
                   turnId: payload.turnId,
-                  state: checkpointStatusToLatestTurnState(payload.status),
+                  state:
+                    thread.latestTurn?.turnId === payload.turnId &&
+                    thread.latestTurn.state === 'interrupted'
+                      ? 'interrupted'
+                      : checkpointStatusToLatestTurnState(payload.status),
                   requestedAt:
                     thread.latestTurn?.turnId === payload.turnId
                       ? thread.latestTurn.requestedAt

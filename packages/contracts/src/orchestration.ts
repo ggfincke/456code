@@ -1013,6 +1013,16 @@ const ThreadSettleCommand = Schema.Struct({
   threadId: ThreadId,
 })
 
+const ThreadAutoSettleCommand = Schema.Struct({
+  type: Schema.Literal('thread.auto-settle'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  snapshotSequence: NonNegativeInt,
+  settledAt: IsoDateTime,
+  autoSettleAfterDays: Schema.NullOr(Schema.Finite),
+  autoSettleOnMerge: Schema.Boolean,
+})
+
 const ThreadUnsettleCommand = Schema.Struct({
   type: Schema.Literal('thread.unsettle'),
   commandId: CommandId,
@@ -1217,6 +1227,15 @@ const ThreadUserInputRespondCommand = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+// closes an async question without messaging the agent.
+const ThreadUserInputDismissCommand = Schema.Struct({
+  type: Schema.Literal('thread.user-input.dismiss'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: ApprovalRequestId,
+  createdAt: IsoDateTime,
+})
+
 export const OrchestratePlanDecision = Schema.Literals(['approve', 'reject', 'discuss'])
 export type OrchestratePlanDecision = typeof OrchestratePlanDecision.Type
 
@@ -1285,6 +1304,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
+  ThreadUserInputDismissCommand,
   ThreadOrchestratePlanRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
@@ -1315,6 +1335,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
+  ThreadUserInputDismissCommand,
   ThreadOrchestratePlanRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
@@ -1511,6 +1532,7 @@ const ThreadRevertCompleteCommand = Schema.Struct({
 })
 
 const InternalOrchestrationCommand = Schema.Union([
+  ThreadAutoSettleCommand,
   ThreadSessionSetCommand,
   ThreadProviderSwitchProgressCommand,
   ThreadProviderSwitchFailCommand,

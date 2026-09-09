@@ -527,6 +527,16 @@ export async function drainExistingQueuedThreadMessage(
   }
 
   const message = input.message
+  if (message.text.trim().toLowerCase() === '/compact')
+  {
+    return persistQueuedThreadFailure({
+      message,
+      update: input.update,
+      warn,
+      reason:
+        'Compaction cannot run from the queue. Discard this queued command and confirm /compact while connected and idle.',
+    })
+  }
   const current = await resolveExistingThreadState({
     message,
     state: input.readState(),

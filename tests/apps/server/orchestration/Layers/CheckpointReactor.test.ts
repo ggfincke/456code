@@ -27,6 +27,7 @@ import {
 } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Clock from 'effect/Clock'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
@@ -89,6 +90,7 @@ import {
   type BeginImplementationAttemptInput,
 } from '../../../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
+import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
 import * as WorkspaceEntries from '../../../../../apps/server/src/workspace/WorkspaceEntries.ts'
 import * as WorkspacePaths from '../../../../../apps/server/src/workspace/WorkspacePaths.ts'
 import { ProviderRuntimeInbox } from '../../../../../apps/server/src/persistence/Services/ProviderRuntimeInbox.ts'
@@ -213,6 +215,7 @@ function createProviderServiceHarness(
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
+    compactThread: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
@@ -554,6 +557,10 @@ describe('CheckpointReactor', () =>
     readonly rollbackCapability?: 'exact' | 'unsupported'
     readonly rollbackFailure?: string
     readonly gitStatusRefreshCalls?: Array<string>
+    readonly pullRequestRefreshCalls?: Array<string>
+    readonly beforePullRequestRefresh?: Effect.Effect<void>
+    readonly threadBranch?: string
+    readonly localStatusRefName?: string
     readonly threadOrigin?: ThreadOrigin
     readonly checkpointStoreCalls?: Array<string>
     readonly rollbackFails?: boolean
@@ -567,6 +574,7 @@ describe('CheckpointReactor', () =>
     }
     readonly startReactor?: boolean
     readonly advanceRuntimeIngestion?: boolean
+    readonly drainAfterAdmission?: boolean
   })
   {
     const cwd = createGitRepository()
@@ -613,13 +621,19 @@ describe('CheckpointReactor', () =>
           Effect.as({
             isRepo: true,
             hasPrimaryRemote: false,
-            isDefaultRef: true,
-            refName: 'main',
+            isDefaultRef:
+              options?.localStatusRefName === undefined || options.localStatusRefName === 'main',
+            refName: options?.localStatusRefName ?? 'main',
             hasWorkingTreeChanges: false,
             workingTree: { files: [], insertions: 0, deletions: 0 },
           }),
         ),
       refreshStatus: () => Effect.die('refreshStatus should not be called in this test'),
+      refreshPullRequestStatus: (cwd: string) =>
+        Effect.sync(() =>
+        {
+          options?.pullRequestRefreshCalls?.push(cwd)
+        }).pipe(Effect.andThen(options?.beforePullRequestRefresh ?? Effect.void), Effect.as(null)),
       streamStatus: () => Stream.empty,
     })
     const liveCheckpointStoreLayer = CheckpointStore.layer.pipe(
@@ -732,6 +746,7 @@ describe('CheckpointReactor', () =>
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(implementationAttemptLayer),
+      Layer.provideMerge(ServerSettings.layerTest()),
     )
 
     runtime = ManagedRuntime.make(layer)
@@ -806,7 +821,11 @@ describe('CheckpointReactor', () =>
             (options?.advanceRuntimeIngestion ?? true)
               ? advanceRuntimeIngestionEffect.pipe(
                   Effect.andThen(
-                    Effect.suspend(() => (reactorStarted ? reactor.drain : Effect.void)),
+                    Effect.suspend(() =>
+                      reactorStarted && (options?.drainAfterAdmission ?? true)
+                        ? reactor.drain
+                        : Effect.void,
+                    ),
                   ),
                 )
               : Effect.void,
@@ -906,7 +925,7 @@ describe('CheckpointReactor', () =>
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: 'approval-required',
-        branch: null,
+        branch: options?.threadBranch ?? null,
         worktreePath: options?.threadWorktreePath ?? cwd,
         ...(options?.threadOrigin === undefined ? {} : { origin: options.threadOrigin }),
         createdAt,
@@ -1159,6 +1178,70 @@ describe('CheckpointReactor', () =>
     ).toBe('v2\n')
   })
 
+  it('captures later turns while a pull request refresh is held, then drains the refresh', async () =>
+  {
+    const refreshStarted = Effect.runSync(Deferred.make<void>())
+    const releaseRefresh = Effect.runSync(Deferred.make<void>())
+    const pullRequestRefreshCalls: string[] = []
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: 'feature/checkpoints',
+      drainAfterAdmission: false,
+      localStatusRefName: 'feature/checkpoints',
+      pullRequestRefreshCalls,
+      beforePullRequestRefresh: Deferred.succeed(refreshStarted, undefined).pipe(
+        Effect.andThen(Deferred.await(releaseRefresh)),
+      ),
+    })
+
+    for (const turnNumber of [1, 2])
+    {
+      harness.provider.emit({
+        type: 'turn.started',
+        eventId: EventId.make(`held-refresh-start-${turnNumber}`),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: `2026-01-01T00:0${turnNumber}:00.000Z`,
+        threadId: ThreadId.make('thread-1'),
+        turnId: asTurnId(`turn-${turnNumber}`),
+        payload: {},
+      })
+      await waitForGitRefExists(
+        harness.cwd,
+        checkpointRefForThreadTurn(ThreadId.make('thread-1'), turnNumber - 1),
+      )
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, 'README.md'), `turn-${turnNumber}\n`, 'utf8')
+      harness.provider.emit({
+        type: 'turn.completed',
+        eventId: EventId.make(`held-refresh-complete-${turnNumber}`),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: `2026-01-01T00:0${turnNumber}:01.000Z`,
+        threadId: ThreadId.make('thread-1'),
+        turnId: asTurnId(`turn-${turnNumber}`),
+        payload: { state: 'completed' },
+      })
+      await waitForGitRefExists(
+        harness.cwd,
+        checkpointRefForThreadTurn(ThreadId.make('thread-1'), turnNumber),
+      )
+      if (turnNumber === 1)
+      {
+        await Effect.runPromise(Deferred.await(refreshStarted).pipe(Effect.timeout('5 seconds')))
+      }
+    }
+
+    expect(pullRequestRefreshCalls).toEqual([harness.cwd])
+    expect(
+      gitShowFileAtRef(
+        harness.cwd,
+        checkpointRefForThreadTurn(ThreadId.make('thread-1'), 2),
+        'README.md',
+      ),
+    ).toBe('turn-2\n')
+    await Effect.runPromise(Deferred.succeed(releaseRefresh, undefined))
+    await harness.drain()
+    expect(pullRequestRefreshCalls).toEqual([harness.cwd, harness.cwd])
+  })
+
   it('binds implementation revision selection to the user request time', async () =>
   {
     const requestedAt = '2026-01-01T00:01:00.000Z'
@@ -1283,6 +1366,114 @@ describe('CheckpointReactor', () =>
     expect(gitStatusRefreshCalls).toEqual([harness.cwd])
   })
 
+  it('follows a dedicated placeholder checkout before refreshing its missing pull request', async () =>
+  {
+    const pullRequestRefreshCalls: string[] = []
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: '456code/1234abcd',
+      localStatusRefName: 'feature/turn-refresh',
+      pullRequestRefreshCalls,
+    })
+
+    harness.provider.emit({
+      type: 'turn.completed',
+      eventId: EventId.make('evt-turn-completed-refresh-pr'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-refresh-pr'),
+      payload: { state: 'completed' },
+    })
+
+    await harness.drain()
+
+    expect(pullRequestRefreshCalls).toEqual([harness.cwd])
+    expect(
+      (await harness.readModel()).threads.find((thread) => thread.id === 'thread-1')?.branch,
+    ).toBe('feature/turn-refresh')
+  })
+
+  it('does not adopt a checkout belonging to a shared worktree', async () =>
+  {
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: '456code/1234abcd',
+      localStatusRefName: 'feature/shared',
+    })
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.create',
+        commandId: CommandId.make('shared-checkout-thread'),
+        threadId: ThreadId.make('thread-2'),
+        projectId: asProjectId('project-1'),
+        title: 'Shared worktree',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5-codex' },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        branch: 'feature/shared',
+        worktreePath: harness.cwd,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+    harness.provider.emit({
+      type: 'turn.completed',
+      eventId: EventId.make('shared-checkout-completed'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt: '2026-01-01T00:00:01.000Z',
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-shared'),
+      payload: { state: 'completed' },
+    })
+    await harness.drain()
+    expect(
+      (await harness.readModel()).threads.find((thread) => thread.id === 'thread-1')?.branch,
+    ).toBe('456code/1234abcd')
+  })
+
+  it('does not refresh pull request state for an auxiliary completion', async () =>
+  {
+    const pullRequestRefreshCalls: string[] = []
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      threadBranch: 'feature/recorded',
+      localStatusRefName: 'feature/recorded',
+      pullRequestRefreshCalls,
+    })
+    const createdAt = '2026-01-01T00:00:00.000Z'
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-set-pr-refresh-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'running',
+          providerName: 'codex',
+          runtimeMode: 'approval-required',
+          activeTurnId: asTurnId('turn-main'),
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    )
+
+    harness.provider.emit({
+      type: 'turn.completed',
+      eventId: EventId.make('evt-turn-completed-pr-refresh-aux'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt,
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-aux'),
+      payload: { state: 'completed' },
+    })
+    await harness.drain()
+
+    expect(pullRequestRefreshCalls).toEqual([])
+  })
+
   it('ignores auxiliary thread turn completion while primary turn is active', async () =>
   {
     const harness = await createHarness({ seedFilesystemCheckpoints: false })
@@ -1354,7 +1545,7 @@ describe('CheckpointReactor', () =>
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1)
   })
 
-  it('appends capture failure activity when turn diff summary cannot be derived', async () =>
+  it('retains a new repository endpoint without a false failure when its baseline is absent', async () =>
   {
     const harness = await createHarness({ seedFilesystemCheckpoints: false })
     const createdAt = '2026-01-01T00:00:00.000Z'
@@ -1389,16 +1580,14 @@ describe('CheckpointReactor', () =>
     })
 
     await waitForEvent(harness.engine, (event) => event.type === 'thread.turn-diff-completed')
-    const thread = await waitForThread(
-      harness.readModel,
-      (entry) =>
-        entry.checkpoints.length === 1 &&
-        entry.activities.some((activity) => activity.kind === 'checkpoint.capture.failed'),
-    )
+    const thread = await waitForThread(harness.readModel, (entry) => entry.checkpoints.length === 1)
 
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1)
     expect(
       thread.activities.some((activity) => activity.kind === 'checkpoint.capture.failed'),
+    ).toBe(false)
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1)),
     ).toBe(true)
   })
 
@@ -1806,7 +1995,7 @@ describe('CheckpointReactor', () =>
     await harness.drain()
   })
 
-  it('replays a placeholder capture event appended before start', async () =>
+  it('replays a placeholder event without capturing files before a terminal runtime event', async () =>
   {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
@@ -1842,15 +2031,87 @@ describe('CheckpointReactor', () =>
     await harness.startReactor()
     await harness.drain()
 
-    expect(gitRefExists(harness.cwd, checkpointRef)).toBe(true)
+    expect(gitRefExists(harness.cwd, checkpointRef)).toBe(false)
     const durable = await harness.readDurableState()
     expect(
       durable.actions.some(
         (action) =>
           action.effectKind === 'checkpoint.placeholder.capture' && action.status === 'succeeded',
       ),
-    ).toBe(true)
+    ).toBe(false)
   })
+
+  it.each(['completed', 'aborted'] as const)(
+    'captures final files after a mid-turn placeholder when the turn is %s',
+    async (terminal) =>
+    {
+      const harness = await createHarness({ seedFilesystemCheckpoints: false })
+      const threadId = ThreadId.make('thread-1')
+      const turnId = asTurnId(`turn-final-${terminal}`)
+      const checkpointRef = checkpointRefForThreadTurn(threadId, 1)
+      harness.provider.emit({
+        type: 'turn.started',
+        eventId: EventId.make(`final-${terminal}-started`),
+        provider: ProviderDriverKind.make('codex'),
+        threadId,
+        turnId,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        payload: {},
+      })
+      await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 0))
+      await harness.drain()
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, 'README.md'), 'intermediate edit\n', 'utf8')
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: 'thread.turn.diff.complete',
+          commandId: CommandId.make(`final-${terminal}-placeholder`),
+          threadId,
+          turnId,
+          completedAt: '2026-01-01T00:00:01.000Z',
+          checkpointRef: checkpointRefForThreadTurn(threadId, 0),
+          status: 'missing',
+          files: [],
+          assistantMessageId: MessageId.make(`assistant:${turnId}`),
+          checkpointTurnCount: 1,
+          createdAt: '2026-01-01T00:00:01.000Z',
+        }),
+      )
+      await harness.drain()
+      expect(gitRefExists(harness.cwd, checkpointRef)).toBe(false)
+      NodeFS.writeFileSync(NodePath.join(harness.cwd, 'README.md'), 'final edit\n', 'utf8')
+      if (terminal === 'aborted')
+      {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: 'thread.turn.interrupt',
+            commandId: CommandId.make(`final-${terminal}-interrupt`),
+            threadId,
+            turnId,
+            createdAt: '2026-01-01T00:00:01.500Z',
+          }),
+        )
+      }
+      harness.provider.emit({
+        ...(terminal === 'aborted'
+          ? { type: 'turn.aborted' as const, payload: { reason: 'user interrupted the turn' } }
+          : { type: 'turn.completed' as const, payload: { state: 'completed' as const } }),
+        eventId: EventId.make(`final-${terminal}-finished`),
+        provider: ProviderDriverKind.make('codex'),
+        threadId,
+        turnId,
+        createdAt: '2026-01-01T00:00:02.000Z',
+      })
+      await waitForGitRefExists(harness.cwd, checkpointRef)
+      await harness.drain()
+      const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)!
+      expect(gitShowFileAtRef(harness.cwd, checkpointRef, 'README.md')).toBe('final edit\n')
+      expect(thread.checkpoints.filter((checkpoint) => checkpoint.turnId === turnId)).toHaveLength(
+        1,
+      )
+      expect(thread.checkpoints[0]?.assistantMessageId).toBe(`assistant:${turnId}`)
+      expect(thread.latestTurn?.state).toBe(terminal === 'aborted' ? 'interrupted' : 'completed')
+    },
+  )
 
   it('uses the provider-native turn count and settled checkpoint refs for revert', async () =>
   {

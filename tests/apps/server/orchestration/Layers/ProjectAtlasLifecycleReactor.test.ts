@@ -18,6 +18,7 @@ import { ProjectArchitectureLifecycleService } from '../../../../../apps/server/
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ProjectAtlasLifecycleReactorLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectAtlasLifecycleReactor.ts'
 import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
+import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationEngineService } from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
@@ -41,6 +42,7 @@ function makeLayer(
 {
   const configLayer = ServerConfig.layerTest(process.cwd(), { prefix: 't3-project-atlas-life-' })
   const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),

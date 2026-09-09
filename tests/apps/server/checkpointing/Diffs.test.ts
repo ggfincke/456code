@@ -1,73 +1,45 @@
 // tests/apps/server/checkpointing/Diffs.test.ts
-// verify parse turn diff files from unified diff behavior
+// verify git numstat parsing for checkpoint file summaries
 
 import { describe, expect, it } from 'vite-plus/test'
 
-import { parseTurnDiffFilesFromUnifiedDiff } from '../../../../apps/server/src/checkpointing/Diffs.ts'
+import { parseTurnDiffFilesFromNumstat } from '../../../../apps/server/src/checkpointing/Diffs.ts'
 
-describe('parseTurnDiffFilesFromUnifiedDiff', () =>
+describe('parseTurnDiffFilesFromNumstat', () =>
 {
-  it('parses per-file additions and deletions', () =>
+  it('sorts files and preserves text and binary counts', () =>
   {
-    expect(parseTurnDiffFilesFromUnifiedDiff('')).toEqual([])
-
-    const diff = [
-      'diff --git a/a.txt b/a.txt',
-      'index 1111111..2222222 100644',
-      '--- a/a.txt',
-      '+++ b/a.txt',
-      '@@ -1,2 +1,3 @@',
-      ' one',
-      '-two',
-      '+two updated',
-      '+three',
-      'diff --git a/src/b.ts b/src/b.ts',
-      'index 3333333..4444444 100644',
-      '--- a/src/b.ts',
-      '+++ b/src/b.ts',
-      '@@ -3,2 +3,0 @@',
-      '-old',
-      '-stale',
-      '',
-    ].join('\n')
-
-    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
+    const numstat = ['0\t2\tsrc/b.ts', '2\t1\ta.txt', '-\t-\timage.png', ''].join('\0')
+    expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
       { path: 'a.txt', additions: 2, deletions: 1 },
+      { path: 'image.png', additions: 0, deletions: 0 },
       { path: 'src/b.ts', additions: 0, deletions: 2 },
     ])
   })
 
-  it('parses rename-only diffs with zero line changes', () =>
+  it('uses destination paths for NUL-delimited renames and copies', () =>
   {
-    const diff = [
-      'diff --git a/src/old.ts b/src/new.ts',
-      'similarity index 100%',
-      'rename from src/old.ts',
-      'rename to src/new.ts',
+    const numstat = [
+      '0\t0\t',
+      'src/old.ts',
+      'src/new.ts',
+      '2\t1\t',
+      'src/source.ts',
+      'src/copied.ts',
       '',
-    ].join('\n')
+    ].join('\0')
 
-    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
+    expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+      { path: 'src/copied.ts', additions: 2, deletions: 1 },
       { path: 'src/new.ts', additions: 0, deletions: 0 },
     ])
   })
 
-  it('normalizes CRLF input before parsing', () =>
+  it('preserves Unicode, tabs, line endings, and spaces in paths', () =>
   {
-    const diff = [
-      'diff --git a/a.txt b/a.txt',
-      'index 1111111..2222222 100644',
-      '--- a/a.txt',
-      '+++ b/a.txt',
-      '@@ -1 +1,2 @@',
-      '-one',
-      '+one updated',
-      '+two',
-      '',
-    ].join('\r\n')
-
-    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
-      { path: 'a.txt', additions: 2, deletions: 1 },
+    const path = ' café\tline\r\nname.txt '
+    expect(parseTurnDiffFilesFromNumstat(`3\t2\t\0old\tname\n.txt\0${path}\0`)).toEqual([
+      { path, additions: 3, deletions: 2 },
     ])
   })
 })

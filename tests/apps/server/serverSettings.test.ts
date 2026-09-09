@@ -417,6 +417,33 @@ it.layer(NodeServices.layer)('server settings', (it) =>
       }).pipe(Effect.provide(makeServerSettingsLayer())),
   )
 
+  it.effect('skips explicitly disabled instances when selecting a fallback writer', () =>
+    Effect.gen(function* ()
+    {
+      const settings = yield* ServerSettingsModule.ServerSettingsService
+      const next = yield* settings.updateSettings({
+        providerInstances: {
+          [ProviderInstanceId.make('codex')]: {
+            driver: ProviderDriverKind.make('codex'),
+            enabled: false,
+            config: {},
+          },
+          [ProviderInstanceId.make('claudeAgent')]: {
+            driver: ProviderDriverKind.make('claudeAgent'),
+            enabled: true,
+            config: {},
+          },
+        },
+        providers: { codex: { enabled: true }, claudeAgent: { enabled: false } },
+        textGenerationModelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5.5',
+        },
+      })
+      assert.equal(next.textGenerationModelSelection.instanceId, 'claudeAgent')
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
   it.effect('preserves enabled text generation selections for non-built-in drivers', () =>
     Effect.gen(function* ()
     {

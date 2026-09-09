@@ -192,6 +192,7 @@ interface ClaudeTurnState
   authenticationFailureMessage: string | undefined
   readonly announcedUsageLimitKeys: Set<string>
   readonly rejectedRateLimitTypes: Set<string>
+  latestAssistantRateLimited: boolean
 }
 
 interface AssistantTextBlockState
@@ -2511,6 +2512,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         authenticationFailureMessage: undefined,
         announcedUsageLimitKeys: new Set(),
         rejectedRateLimitTypes: new Set(),
+        latestAssistantRateLimited: false,
       }
       context.session = {
         ...context.session,
@@ -2575,6 +2577,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (context.turnState)
     {
+      // retries may carry only an assistant error without another limit event
+      context.turnState.latestAssistantRateLimited = message.error === 'rate_limit'
       if (message.error === 'authentication_failed')
       {
         context.turnState.authenticationFailureMessage = assistantFailureMessage
@@ -2617,7 +2621,9 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     const rawError = message.subtype === 'success' ? undefined : message.errors[0]
     const turnFailureHint =
       context.turnState?.authenticationFailureMessage ??
-      (context.turnState && context.turnState.rejectedRateLimitTypes.size > 0
+      (context.turnState &&
+      (context.turnState.rejectedRateLimitTypes.size > 0 ||
+        context.turnState.latestAssistantRateLimited)
         ? 'Claude usage limit reached. The turn stopped before it finished; check your plan usage for when it resets.'
         : undefined)
     const errorMessage =
@@ -4406,6 +4412,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         authenticationFailureMessage: undefined,
         announcedUsageLimitKeys: new Set(),
         rejectedRateLimitTypes: new Set(),
+        latestAssistantRateLimited: false,
       }
 
       const updatedAt = yield* nowIso
@@ -4600,6 +4607,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     capabilities: CLAUDE_PROVIDER_CAPABILITIES,
     startSession,
     sendTurn,
+    compaction: { type: 'slash-command', command: '/compact' },
     interruptTurn,
     readThread,
     rollbackThread,

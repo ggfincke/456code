@@ -81,6 +81,17 @@ type RawThreadFeedActivityEntry = Extract<RawThreadFeedEntry, { readonly type: '
 type RawThreadFeedMessageEntry = Extract<RawThreadFeedEntry, { readonly type: 'message' }>
 type DerivedWorkLogEntry = ReturnType<typeof deriveWorkLogEntries>[number]
 
+export function isContextCompactionActivityGroup(
+  entry: Extract<ThreadFeedEntry, { readonly type: 'activity-group' }>,
+): boolean
+{
+  return (
+    entry.activities.length === 1 &&
+    (entry.activities[0]?.activityKind === 'context-compaction' ||
+      entry.activities[0]?.activityKind === 'context-compaction.started')
+  )
+}
+
 // weak caches retain only immutable source owners and the presentation inputs
 // that can change the corresponding row
 const activityEntriesCache = new WeakMap<
@@ -298,6 +309,17 @@ function deriveThreadFeedTurnFolds(
         .map((entry) => entry.id),
     )
     if (hiddenEntryIds.size === 0)
+    {
+      continue
+    }
+    // a lone compaction marker is useful context on its own. Fold it only
+    // when the same settled turn already has other hidden work.
+    const hidesNonCompactionWork = entries.some(
+      (entry) =>
+        hiddenEntryIds.has(entry.id) &&
+        !(entry.type === 'activity-group' && isContextCompactionActivityGroup(entry)),
+    )
+    if (!hidesNonCompactionWork)
     {
       continue
     }
@@ -577,6 +599,7 @@ function toThreadFeedActivityEntry(entry: DerivedWorkLogEntry): RawThreadFeedAct
       id: entry.id,
       createdAt: entry.createdAt,
       turnId: entry.turnId,
+      activityKind: entry.activityKind,
       summary,
       detail,
       canExpand: workEntryHasExpandedBody(entry),

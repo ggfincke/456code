@@ -2,7 +2,7 @@
 // verify vcs process run behavior
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
@@ -289,6 +289,25 @@ describe('VcsProcess.run', () =>
       {
         expect(result.stdout).not.toContain('[truncated]')
       }
+    }).pipe(provideLive),
+  )
+
+  it.effect('fails with measured byte counts when output must not be truncated', () =>
+    Effect.gen(function* ()
+    {
+      const error = yield* run({
+        operation: 'test.output-limit',
+        command: 'node',
+        args: ['-e', "process.stdout.write('x'.repeat(2048))"],
+        cwd: process.cwd(),
+        maxOutputBytes: 128,
+        outputMode: 'error',
+      }).pipe(Effect.flip)
+
+      assert(error._tag === 'VcsProcessOutputLimitError')
+      expect(error.stream).toBe('stdout')
+      expect(error.maxBytes).toBe(128)
+      expect(error.observedBytes).toBeGreaterThan(error.maxBytes)
     }).pipe(provideLive),
   )
 

@@ -5,19 +5,23 @@ import {
   normalizeCollaborationMode,
   type CollaborationMode,
   type EnvironmentId,
-  type MessageId,
+  MessageId,
   type ModelSelection,
   type OrchestrationThreadShell,
   type RuntimeMode,
   type ServerConfig,
 } from '@t3tools/contracts'
 import { memo, useCallback, useMemo, useRef, useState, type RefObject } from 'react'
-import { ActivityIndicator, Image, Pressable, useColorScheme, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, Pressable, useColorScheme, View } from 'react-native'
 import ImageViewing from 'react-native-image-viewing'
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native-reanimated'
 import { useThemeColor } from '../../../lib/useThemeColor'
 import { armAgentAwarenessLiveActivityForLocalWork } from '../../agent-awareness/remoteRegistration'
 import { scopedThreadKey } from '../../../lib/scopedEntities'
+import { resolveProviderSlashCommandsForCwd } from '@t3tools/client-runtime/providerSkills'
+import { uuidv4 } from '../../../lib/uuid'
+import { threadEnvironment } from '../../../state/threads'
+import { useAtomCommand } from '../../../state/use-atom-command'
 
 import { AppText as Text } from '../../../components/AppText'
 import { ComposerAttachmentStrip } from '../../../components/ComposerAttachmentStrip'
@@ -56,7 +60,7 @@ import { ComposerCommandPopover } from './ComposerCommandPopover'
 import { useComposerCommandMenu } from './use-composer-command-menu'
 import { REFRESH_MODELS_ACTION, useProviderCatalogRefresh } from './provider-catalog-refresh'
 import { composerConnectionStatus, type ComposerStatusPillState } from './threadComposerStatus'
-import { resolveComposerSubmitHandler } from './threadComposerSubmit'
+import { canSubmitManualCompaction, resolveComposerSubmitHandler } from './threadComposerSubmit'
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from './composerSurface'
 export { ComposerSurface } from './composerSurface'
 
@@ -247,6 +251,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const fallbackInputRef = useRef<ComposerEditorHandle>(null)
   const inputRef = props.editorRef ?? fallbackInputRef
   const [isFocused, setIsFocused] = useState(false)
+  const [compactionPending, setCompactionPending] = useState(false)
   const wasExpandedBeforePreviewRef = useRef(false)
   const inFlightThreadIdsRef = useRef(new Set<string>())
   const { onExpandedChange } = props
@@ -340,6 +345,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const hasUnsupportedAttachments = !supportsImageAttachments && props.draftAttachments.length > 0
   const canSend =
     hasContent &&
+    !compactionPending &&
     props.sendBlockedReason === null &&
     !providerRejectsActiveInput &&
     !hasUnsupportedAttachments
@@ -370,9 +376,104 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     onUpdateModelSelection: props.onUpdateModelSelection,
   })
   const { onSendMessage } = props
+  const startImmediateTurn = useAtomCommand(threadEnvironment.startTurn, 'compact thread context')
+  const compactStateRef = useRef(props)
+  compactStateRef.current = props
 
   const handleSend = useCallback(async () =>
   {
+    if (props.draftMessage.trim().toLowerCase() === '/compact')
+    {
+      const canCompact = (current: ThreadComposerProps) =>
+      {
+        const provider = current.serverConfig?.providers.find(
+          (candidate) => candidate.instanceId === current.selectedThread.modelSelection.instanceId,
+        )
+        return canSubmitManualCompaction({
+          text: current.draftMessage,
+          attachmentCount: current.draftAttachments.length,
+          connected: current.connectionState === 'connected',
+          busy:
+            current.activeThreadBusy ||
+            current.providerSwitchActive ||
+            current.selectedThread.session?.activeTurnId != null,
+          queuedCount: current.queueCount,
+          blocked: current.sendBlockedReason !== null,
+          hasSession: current.selectedThread.session !== null,
+          supported:
+            provider?.enabled === true &&
+            provider.status === 'ready' &&
+            resolveProviderSlashCommandsForCwd(provider, current.projectCwd).some(
+              (command) => command.name === 'compact',
+            ),
+        })
+      }
+      if (compactionPending) return
+      if (!canCompact(props))
+      {
+        Alert.alert(
+          'Cannot compact now',
+          'Use an idle connected task with no queued messages or attachments and a provider that supports /compact.',
+        )
+        return
+      }
+      const targetKey = scopedThreadKey(props.environmentId, props.selectedThread.id)
+      Alert.alert(
+        'Compact context?',
+        'Replace the current context with a summary. Conversation history remains available.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Compact',
+            onPress: () =>
+            {
+              const current = compactStateRef.current
+              if (
+                !canCompact(current) ||
+                scopedThreadKey(current.environmentId, current.selectedThread.id) !== targetKey ||
+                inFlightThreadIdsRef.current.has(targetKey)
+              )
+                return
+              inFlightThreadIdsRef.current.add(targetKey)
+              setCompactionPending(true)
+              void startImmediateTurn({
+                environmentId: current.environmentId,
+                input: {
+                  threadId: current.selectedThread.id,
+                  message: {
+                    messageId: MessageId.make(uuidv4()),
+                    role: 'user',
+                    text: '/compact',
+                    attachments: [],
+                  },
+                  modelSelection: current.selectedThread.modelSelection,
+                  runtimeMode: current.selectedThread.runtimeMode,
+                  interactionMode: current.selectedThread.interactionMode,
+                },
+              })
+                .then((result) =>
+                {
+                  const latest = compactStateRef.current
+                  if (
+                    result._tag === 'Success' &&
+                    latest.draftMessage === '/compact' &&
+                    scopedThreadKey(latest.environmentId, latest.selectedThread.id) === targetKey
+                  )
+                  {
+                    latest.onChangeDraftMessage('')
+                  }
+                })
+                .finally(() =>
+                {
+                  inFlightThreadIdsRef.current.delete(targetKey)
+                  setCompactionPending(false)
+                })
+            },
+          },
+        ],
+      )
+      return
+    }
     if (props.sendBlockedReason !== null || providerRejectsActiveInput)
     {
       return
@@ -397,12 +498,24 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
   }, [
     onSendMessage,
+    props.draftAttachments.length,
+    props.draftMessage,
     props.environmentId,
     props.environmentLabel,
     props.sendBlockedReason,
+    props.serverConfig,
+    props.onChangeDraftMessage,
     props.selectedThread.id,
     props.selectedThread.title,
     providerRejectsActiveInput,
+    compactionPending,
+    startImmediateTurn,
+    props.activeThreadBusy,
+    props.connectionState,
+    props.projectCwd,
+    props.providerSwitchActive,
+    props.queueCount,
+    props.selectedThread,
   ])
   // ── Model menu ───────────────────────────────────────────
   const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions])

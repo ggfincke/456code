@@ -3,15 +3,18 @@
 
 import {
   EventId,
+  MessageId,
   MAX_SCRIPT_ID_LENGTH,
   normalizeCollaborationMode,
   SCRIPT_RUN_COMMAND_PATTERN,
+  UserInputRequestedPayload,
   type OrchestrateRunExecution,
   type OrchestrateRunExecutionJob,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
+  type OrchestrationThreadActivity,
   type ThreadOrchestratePlanResponseRequestedPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
   ThreadImportContinuationActivityPayload,
@@ -22,7 +25,9 @@ import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifi
 import * as DateTime from 'effect/DateTime'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
 import type * as PlatformError from 'effect/PlatformError'
+import * as Predicate from 'effect/Predicate'
 import * as Schema from 'effect/Schema'
 
 import { OrchestrationCommandInvariantError } from './Errors.ts'
@@ -48,6 +53,7 @@ import { projectEvent } from './projector.ts'
 
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN)
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
+const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload)
 
 function sameRunExecutionJob(
   left: OrchestrateRunExecutionJob,
@@ -281,6 +287,7 @@ function hasOpenBlockingRequest(thread: {
     if (requestId === null) continue
     if (isBlockingRequestActivityKind(activity.kind))
     {
+      if (activity.kind === 'user-input.requested' && payload?.responseMode === 'message') continue
       openRequestIds.add(requestId)
     }
     else if (isBlockingRequestResolutionActivityKind(activity.kind))
@@ -475,9 +482,11 @@ const decideCommandSequence = Effect.fn('decideCommandSequence')(function* ({
 export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand')(function* ({
   command,
   readModel,
+  userInputActivity,
 }: {
   readonly command: OrchestrationCommand
   readonly readModel: OrchestrationReadModel
+  readonly userInputActivity?: OrchestrationThreadActivity
 }): Effect.fn.Return<
   DecideOrchestrationCommandResult,
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
@@ -752,6 +761,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
     }
 
+    case 'thread.auto-settle':
     case 'thread.settle':
     {
       const thread = yield* requireThreadNotArchived({
@@ -759,10 +769,22 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
+      const automatic = command.type === 'thread.auto-settle'
+      if (automatic && (thread.settledOverride !== null || thread.providerSwitch !== null))
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} is no longer eligible for automatic settlement`,
+        })
+      }
       // server-side twin of the client's canSettle session check: a stale
       // or raced client must not settle a thread whose session is coming
       // alive or working.
-      if (thread.session?.status === 'starting' || thread.session?.status === 'running')
+      if (
+        thread.session?.status === 'starting' ||
+        thread.session?.status === 'running' ||
+        thread.session?.activeTurnId != null
+      )
       {
         return yield* Effect.fail(
           new OrchestrationCommandInvariantError({
@@ -808,15 +830,15 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         type: 'thread.settled',
         payload: {
           threadId: command.threadId,
-          settledAt: alreadySettled ? thread.settledAt : occurredAt,
+          settledAt: automatic ? command.settledAt : alreadySettled ? thread.settledAt : occurredAt,
           // a re-emission is a projected no-op: keep the existing updatedAt
           // so duplicate settles neither rewind nor churn ordering. A fresh
           // settle stamps the command time.
-          updatedAt: alreadySettled ? thread.updatedAt : occurredAt,
+          updatedAt: automatic || alreadySettled ? thread.updatedAt : occurredAt,
         },
       } satisfies PlannedOrchestrationEvent
       const lifecycleEvents: Array<PlannedOrchestrationEvent> = [settledEvent]
-      if (thread.snoozedUntil != null)
+      if (!automatic && thread.snoozedUntil != null)
       {
         // settling is an immediate "done" action, so stale snooze state must
         // not keep the row parked until its former wake time
@@ -837,7 +859,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
       // settling is "I'm done with this": it clears a pin the same way it
       // parks the thread, while retaining the fork's snooze reset above.
-      if (thread.pinnedAt != null)
+      if (!automatic && thread.pinnedAt != null)
       {
         lifecycleEvents.push({
           ...(yield* withEventBase({
@@ -1950,11 +1972,78 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
 
     case 'thread.user-input.respond':
     {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       })
+      const request = userInputActivity
+      if (
+        request &&
+        Predicate.isObject(request.payload) &&
+        request.payload.responseMode === 'message'
+      )
+      {
+        const payload = decodeUserInputRequestedPayload(request.payload)
+        if (request.kind !== 'user-input.requested' || Option.isNone(payload))
+        {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: 'This question has already been answered.',
+          })
+        }
+        const replies: string[] = []
+        for (const question of payload.value.questions)
+        {
+          const answer = command.answers[question.id]
+          if (typeof answer !== 'string' || answer.trim().length === 0)
+          {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: 'Answer each question before sending.',
+            })
+          }
+          replies.push(`${question.question}\n${answer.trim()}`)
+        }
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            {
+              type: 'thread.activity.append',
+              commandId: command.commandId,
+              threadId: command.threadId,
+              createdAt: command.createdAt,
+              activity: {
+                id: EventId.make(`async-answer:${command.requestId}`),
+                kind: 'user-input.resolved',
+                summary: 'User input submitted',
+                tone: 'info',
+                turnId: request.turnId,
+                createdAt: command.createdAt,
+                payload: {
+                  requestId: command.requestId,
+                  responseMode: 'message',
+                  answers: command.answers,
+                },
+              },
+            },
+            {
+              type: 'thread.turn.start',
+              commandId: command.commandId,
+              threadId: command.threadId,
+              createdAt: command.createdAt,
+              runtimeMode: thread.runtimeMode,
+              interactionMode: thread.interactionMode,
+              message: {
+                messageId: MessageId.make(`async-answer:${command.requestId}`),
+                role: 'user',
+                text: replies.join('\n\n'),
+                attachments: [],
+              },
+            },
+          ],
+        })
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: 'thread',
@@ -1971,6 +2060,51 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           requestId: command.requestId,
           answers: command.answers,
           createdAt: command.createdAt,
+        },
+      }
+    }
+
+    case 'thread.user-input.dismiss':
+    {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      const request = userInputActivity
+      if (request === undefined || request.kind !== 'user-input.requested')
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: 'This question has already been answered.',
+        })
+      }
+      if (!Predicate.isObject(request.payload) || request.payload.responseMode !== 'message')
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: 'This question needs an answer. Answer it or stop the turn.',
+        })
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.activity-appended',
+        payload: {
+          threadId: command.threadId,
+          activity: {
+            id: EventId.make(`async-dismiss:${command.requestId}`),
+            kind: 'user-input.resolved',
+            summary: 'User input dismissed',
+            tone: 'info',
+            turnId: request.turnId,
+            createdAt: command.createdAt,
+            payload: { requestId: command.requestId, responseMode: 'message' },
+          },
         },
       }
     }

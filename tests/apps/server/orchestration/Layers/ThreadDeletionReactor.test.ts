@@ -30,6 +30,7 @@ import { OrchestrationEngineWithArchivePermitLive } from '../../../../../apps/se
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import { ThreadArchiveLifecyclePermitLive } from '../../../../../apps/server/src/orchestration/Layers/ThreadArchiveLifecyclePermit.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
+import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { OrchestrationEngineService } from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
 import { ThreadDeletionReactor } from '../../../../../apps/server/src/orchestration/Services/ThreadDeletionReactor.ts'
@@ -126,6 +127,7 @@ function makeLayer(state: HarnessState)
   const persistence = Layer.fresh(SqlitePersistenceMemory)
   const archiveLifecyclePermit = Layer.fresh(ThreadArchiveLifecyclePermitLive)
   const orchestrationLayer = OrchestrationEngineWithArchivePermitLive.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     // provideMerge so the reactor can also read the snapshot sequence when it
     // seeds its durable cursor
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
@@ -143,6 +145,7 @@ function makeLayer(state: HarnessState)
   const providerService: ProviderServiceShape = {
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
+    compactThread: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),

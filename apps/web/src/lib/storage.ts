@@ -10,10 +10,15 @@ export interface StateStorage<R = unknown>
   removeItem: (name: string) => R
 }
 
-export interface DebouncedStorage<R = unknown> extends StateStorage<R>
+export interface DeferredStorage<TValue>
 {
+  getItem: StateStorage['getItem']
+  setItem: (name: string, value: TValue) => void
+  removeItem: (name: string) => void
   flush: () => void
 }
+
+export type DebouncedStorage = DeferredStorage<string>
 
 export function createMemoryStorage(): StateStorage
 {
@@ -54,8 +59,18 @@ export function createDebouncedStorage(
   debounceMs: number = 300,
 ): DebouncedStorage
 {
+  return createDeferredStorage(baseStorage, (value: string) => value, debounceMs)
+}
+
+// retain immutable values until flush so expensive serialization stays off the typing path.
+export function createDeferredStorage<TValue>(
+  baseStorage: Partial<StateStorage> | null | undefined,
+  serialize: (value: TValue) => string,
+  debounceMs: number = 300,
+): DeferredStorage<TValue>
+{
   const resolvedStorage = resolveStorage(baseStorage)
-  const debouncedSetItems = new Map<string, Debouncer<(value: string) => void>>()
+  const debouncedSetItems = new Map<string, Debouncer<(value: TValue) => void>>()
   const getDebouncedSetItem = (name: string) =>
   {
     const existing = debouncedSetItems.get(name)
@@ -63,10 +78,10 @@ export function createDebouncedStorage(
     {
       return existing
     }
-    const created: Debouncer<(value: string) => void> = new Debouncer(
-      (value: string) =>
+    const created: Debouncer<(value: TValue) => void> = new Debouncer(
+      (value: TValue) =>
       {
-        resolvedStorage.setItem(name, value)
+        resolvedStorage.setItem(name, serialize(value))
         if (debouncedSetItems.get(name) === created)
         {
           debouncedSetItems.delete(name)
@@ -87,6 +102,7 @@ export function createDebouncedStorage(
     removeItem: (name) =>
     {
       debouncedSetItems.get(name)?.cancel()
+      debouncedSetItems.get(name)?.reset()
       debouncedSetItems.delete(name)
       resolvedStorage.removeItem(name)
     },

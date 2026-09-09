@@ -517,10 +517,11 @@ export function applyThreadDetailEvent(
         thread.session?.status === 'running' &&
         thread.session.activeTurnId === event.payload.turnId
       const settlesTurn = !event.payload.streaming && !turnStillRunning
-      const latestTurn: OrchestrationThread['latestTurn'] =
+      const latestTurn = reuseLatestTurn(
+        thread.latestTurn,
         event.payload.role === 'assistant' &&
-        event.payload.turnId !== null &&
-        (thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId)
+          event.payload.turnId !== null &&
+          (thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId)
           ? {
               turnId: event.payload.turnId,
               state: settlesTurn
@@ -545,7 +546,8 @@ export function applyThreadDetailEvent(
                   : null,
               assistantMessageId: event.payload.messageId,
             }
-          : thread.latestTurn
+          : thread.latestTurn,
+      )
 
       // rebind checkpoint assistant message IDs for assistant messages.
       const checkpoints =
@@ -575,7 +577,8 @@ export function applyThreadDetailEvent(
       // leaving the "running" session status is the turn-end signal: settle a
       // still-running latest turn so its duration reflects the whole turn.
       const settledTurnState = settledTurnStateForSessionStatus(event.payload.session.status)
-      const latestTurn: OrchestrationLatestTurn | null =
+      const latestTurn = reuseLatestTurn(
+        thread.latestTurn,
         event.payload.session.status === 'running' && event.payload.session.activeTurnId !== null
           ? {
               turnId: event.payload.session.activeTurnId,
@@ -605,7 +608,8 @@ export function applyThreadDetailEvent(
                 // "running" is the authoritative turn end.
                 completedAt: event.payload.session.updatedAt,
               }
-            : thread.latestTurn
+            : thread.latestTurn,
+      )
 
       return {
         kind: 'updated',
@@ -675,7 +679,10 @@ export function applyThreadDetailEvent(
         (thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId)
           ? {
               turnId: event.payload.turnId,
-              state: checkpointStatusToTurnState(event.payload.status),
+              state:
+                thread.latestTurn?.state === 'interrupted'
+                  ? 'interrupted'
+                  : checkpointStatusToTurnState(event.payload.status),
               requestedAt: thread.latestTurn?.requestedAt ?? event.payload.completedAt,
               startedAt: thread.latestTurn?.startedAt ?? event.payload.completedAt,
               completedAt: event.payload.completedAt,
@@ -1000,12 +1007,35 @@ function checkpointStatusToTurnState(
   }
 }
 
+// keep selectors stable when streaming recomputes an unchanged turn.
+function reuseLatestTurn(
+  previous: OrchestrationLatestTurn | null,
+  next: OrchestrationLatestTurn | null,
+): OrchestrationLatestTurn | null
+{
+  if (previous === null || next === null) return next
+  return previous.turnId === next.turnId &&
+    previous.state === next.state &&
+    previous.requestedAt === next.requestedAt &&
+    previous.startedAt === next.startedAt &&
+    previous.completedAt === next.completedAt &&
+    previous.assistantMessageId === next.assistantMessageId &&
+    previous.sourceProposedPlan?.threadId === next.sourceProposedPlan?.threadId &&
+    previous.sourceProposedPlan?.planId === next.sourceProposedPlan?.planId
+    ? previous
+    : next
+}
+
 function rebindCheckpointAssistantMessage(
   checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
   turnId: TurnId,
   messageId: MessageId,
-): OrchestrationCheckpointSummary[]
+): ReadonlyArray<OrchestrationCheckpointSummary>
 {
+  const needsRebind = checkpoints.some(
+    (entry) => entry.turnId === turnId && entry.assistantMessageId !== messageId,
+  )
+  if (!needsRebind) return checkpoints
   return Arr.map(checkpoints, (entry) =>
     entry.turnId === turnId ? { ...entry, assistantMessageId: messageId } : entry,
   )

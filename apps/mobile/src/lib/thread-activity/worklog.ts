@@ -21,6 +21,7 @@ export interface ThreadFeedActivity
   readonly id: string
   readonly createdAt: string
   readonly turnId: TurnId | null
+  readonly activityKind: OrchestrationThreadActivity['kind']
   readonly summary: string
   readonly detail: string | null
   readonly canExpand: boolean

@@ -62,6 +62,10 @@ export function derivePendingUserInputCountFromActivities(
 
     if (activity.kind === 'user-input.requested')
     {
+      if (payload?.responseMode === 'message')
+      {
+        continue
+      }
       openRequestIds.add(requestId)
       continue
     }

@@ -33,6 +33,7 @@ export const ChangeRequest = Schema.Struct({
   headRefName: GitRefString,
   state: ChangeRequestState,
   updatedAt: Schema.Option(Schema.DateTimeUtc),
+  terminalAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   isCrossRepository: Schema.optional(Schema.Boolean),
   headRepositoryNameWithOwner: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   headRepositoryOwnerLogin: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

@@ -30,6 +30,8 @@ export interface PendingUserInput
   readonly requestId: ApprovalRequestId
   readonly createdAt: string
   readonly questions: ReadonlyArray<UserInputQuestion>
+  readonly responseMode?: 'message'
+  readonly dismissible: boolean
 }
 
 export function requestKindFromRequestType(
@@ -142,7 +144,7 @@ function parseUserInputQuestions(
           }
         })
         .filter((option): option is UserInputQuestion['options'][number] => option !== null)
-      if (options.length === 0)
+      if (options.length === 0 && question.allowCustomAnswer === false)
       {
         return null
       }
@@ -151,6 +153,7 @@ function parseUserInputQuestions(
         header: question.header,
         question: question.question,
         options,
+        ...(question.allowCustomAnswer === true ? { allowCustomAnswer: true } : {}),
         multiSelect: question.multiSelect === true,
       }
     })
@@ -269,6 +272,8 @@ export function derivePendingUserInputs(
         requestId,
         createdAt: activity.createdAt,
         questions,
+        ...(payload?.responseMode === 'message' ? { responseMode: 'message' as const } : {}),
+        dismissible: payload?.responseMode === 'message',
       })
       continue
     }

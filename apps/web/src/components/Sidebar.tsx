@@ -124,6 +124,7 @@ import { useNewThreadHandler } from '../hooks/useHandleNewThread'
 import { useTerminalFocus } from '../hooks/useTerminalFocus'
 import { useNowMinute } from '../hooks/useNowMinute'
 import { useDesktopUpdateState } from '../state/desktopUpdate'
+import { resolveClientAutoSettlementEvaluation } from '../lib/threadAutoSettlement'
 
 import { useThreadActions } from '../hooks/useThreadActions'
 import { projectEnvironment } from '../state/projects'
@@ -1249,8 +1250,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   )
-  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays)
-  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const legacyAutoSettleAfterDays = useClientSettings(
+    (settings) => settings.sidebarAutoSettleAfterDays,
+  )
+  const legacyAutoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
   const serverConfigs = useServerConfigs()
   const nowMinute = useNowMinute()
   const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
@@ -1460,7 +1463,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       sortedProjectThreads,
       (thread) =>
       {
-        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities
+        const serverConfig = serverConfigs.get(thread.environmentId)
+        const capabilities = serverConfig?.environment.capabilities
+        const { autoSettleAfterDays, autoSettleOnMerge } = resolveClientAutoSettlementEvaluation(
+          serverConfig,
+          {
+            autoSettleAfterDays: legacyAutoSettleAfterDays,
+            autoSettleOnMerge: legacyAutoSettleOnMerge,
+          },
+        )
         const snapshot = changeRequestSnapshotByKey.get(
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
         )
@@ -1496,9 +1507,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       visibleProjectThreads,
     }
   }, [
-    autoSettleAfterDays,
-    autoSettleOnMerge,
     changeRequestSnapshotByKey,
+    legacyAutoSettleAfterDays,
+    legacyAutoSettleOnMerge,
     nowMinute,
     projectThreads,
     serverConfigs,

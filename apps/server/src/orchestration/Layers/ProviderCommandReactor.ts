@@ -54,6 +54,7 @@ import {
   ProviderSessionNotFoundError,
   ProviderUnsupportedError,
   ProviderValidationError,
+  ProviderWorkspaceMissingError,
 } from '../../provider/Errors.ts'
 import type { ProviderServiceError } from '../../provider/Errors.ts'
 import {
@@ -112,6 +113,7 @@ const isProviderInstanceNotFoundError = Schema.is(ProviderInstanceNotFoundError)
 const isProviderSessionNotFoundError = Schema.is(ProviderSessionNotFoundError)
 const isProviderUnsupportedError = Schema.is(ProviderUnsupportedError)
 const isProviderValidationError = Schema.is(ProviderValidationError)
+const isProviderWorkspaceMissingError = Schema.is(ProviderWorkspaceMissingError)
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -304,6 +306,13 @@ function mapProviderSessionStatusToOrchestrationStatus(
   }
 }
 
+const isCompactCommandMessage = (message: {
+  readonly role: string
+  readonly text: string
+  readonly attachments?: ReadonlyArray<unknown> | undefined
+}): boolean =>
+  message.role === 'user' && (message.attachments?.length ?? 0) === 0 && message.text === '/compact'
+
 const DEFAULT_RUNTIME_MODE: RuntimeMode = 'full-access'
 const REACTOR_ID = 'provider-command' as const
 const OPERATION_VERSION = 1
@@ -330,6 +339,7 @@ interface PlannedProviderSnapshot
 {
   readonly instanceId: ProviderInstanceId
   readonly models: ReadonlyArray<{ readonly slug: string }>
+  readonly slashCommands?: ReadonlyArray<{ readonly name: string }>
   readonly requiresNewThreadForModelChange?: boolean | undefined
 }
 
@@ -354,6 +364,7 @@ const ProviderActionPayloadSchema = Schema.fromJsonString(
           Schema.Struct({
             instanceId: ProviderInstanceId,
             models: Schema.Array(Schema.Struct({ slug: Schema.String })),
+            slashCommands: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.String }))),
             requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
           }),
         ),
@@ -549,6 +560,7 @@ const make = Effect.gen(function* ()
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make))
 
   const threadModelSelections = new Map<string, ModelSelection>()
+  const compactingThreadIds = new Set<ThreadId>()
 
   const requireActiveEnvironment = (): PlannedProviderEnvironment =>
   {
@@ -594,6 +606,7 @@ const make = Effect.gen(function* ()
     const failure = cause.reasons.find(Cause.isFailReason)?.error
     if (
       isProviderValidationError(failure) ||
+      isProviderWorkspaceMissingError(failure) ||
       isProviderAdapterValidationError(failure) ||
       isProviderSessionNotFoundError(failure) ||
       isProviderAdapterSessionNotFoundError(failure) ||
@@ -831,6 +844,14 @@ const make = Effect.gen(function* ()
     {
       return providerError.detail
     }
+    if (isProviderWorkspaceMissingError(failReason?.error))
+    {
+      return failReason.error.message
+    }
+    if (isProviderValidationError(failReason?.error))
+    {
+      return failReason.error.issue
+    }
     return Cause.pretty(cause)
   }
 
@@ -961,6 +982,7 @@ const make = Effect.gen(function* ()
     readonly threadId: ThreadId
     readonly detail: string
     readonly createdAt: string
+    readonly requestId?: string
   })
   {
     yield* setThreadSessionErrorOnTurnStartFailure(input)
@@ -969,6 +991,7 @@ const make = Effect.gen(function* ()
       kind: 'provider.turn.start.failed',
       summary: 'Provider turn start failed',
       turnId: null,
+      ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
     })
   })
 
@@ -1727,6 +1750,146 @@ const make = Effect.gen(function* ()
         detail: `User message '${event.payload.messageId}' was not found for turn start request.`,
         turnId: null,
         createdAt: event.payload.createdAt,
+      })
+      return
+    }
+
+    const compactCommand =
+      isCompactCommandMessage(message) && event.payload.sourceProposedPlan === undefined
+    const nonCompactUserMessageCount = thread.messages.filter(
+      (entry) => entry.role === 'user' && !isCompactCommandMessage(entry),
+    ).length
+
+    const appendCompactionFailure = (detail: string) =>
+      appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: 'provider.turn.start.failed',
+        summary: 'Context compaction failed',
+        detail,
+        turnId: null,
+        createdAt: event.payload.createdAt,
+        requestId: String(event.payload.messageId),
+      })
+
+    const restoreCompactionSession = Effect.fnUntraced(function* ()
+    {
+      const latest = yield* resolveLatestThreadShell(event.payload.threadId)
+      const session = latest?.session
+      if (session === null || session === undefined || session.status !== 'starting')
+      {
+        return
+      }
+      yield* setThreadSession({
+        threadId: event.payload.threadId,
+        session: {
+          ...session,
+          status: 'ready',
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: event.payload.createdAt,
+        },
+        createdAt: event.payload.createdAt,
+      })
+    })
+
+    if (compactCommand)
+    {
+      const provider = requireActiveEnvironment().providerSnapshots.find(
+        (candidate) =>
+          candidate.instanceId ===
+          (event.payload.modelSelection ?? thread.modelSelection).instanceId,
+      )
+      if (!provider?.slashCommands?.some((command) => command.name === 'compact'))
+      {
+        yield* appendCompactionFailure(
+          'The selected provider does not advertise context compaction.',
+        )
+        return
+      }
+      if (nonCompactUserMessageCount === 0)
+      {
+        yield* appendCompactionFailure('Context compaction requires an existing conversation.')
+        return
+      }
+      if (
+        compactingThreadIds.has(event.payload.threadId) ||
+        requireActiveEnvironment().hiddenTurnPending ||
+        thread.session?.status === 'starting' ||
+        thread.session?.status === 'running' ||
+        thread.session?.activeTurnId != null
+      )
+      {
+        yield* appendCompactionFailure(
+          'Context compaction is unavailable while a provider turn is running.',
+        )
+        return
+      }
+
+      compactingThreadIds.add(event.payload.threadId)
+      let sessionEnsured = false
+      return yield* Effect.gen(function* ()
+      {
+        yield* ensureThreadWorktree(thread)
+        yield* ensureSessionForThread(event.payload.threadId, event.payload.createdAt, {
+          ...(event.payload.importContinuationAuthority === undefined
+            ? {}
+            : { importContinuationAuthority: event.payload.importContinuationAuthority }),
+          ...(event.payload.modelSelection === undefined
+            ? {}
+            : { modelSelection: event.payload.modelSelection }),
+          ...(event.payload.runtimeModeAcknowledgements === undefined
+            ? {}
+            : { runtimeModeAcknowledgements: event.payload.runtimeModeAcknowledgements }),
+          pendingTurnStart: true,
+        })
+        sessionEnsured = true
+        yield* invokeProvider(
+          providerService.compactThread(
+            event.payload.threadId,
+            event.payload.modelSelection,
+            event.payload.messageId,
+            activeEffectContext,
+          ),
+        )
+        yield* restoreCompactionSession()
+      }).pipe(
+        Effect.catchCause((cause) =>
+        {
+          if (Cause.hasInterruptsOnly(cause)) return Effect.void
+          const detail = formatFailureDetail(cause)
+          return (
+            sessionEnsured
+              ? appendCompactionFailure(detail).pipe(Effect.andThen(restoreCompactionSession()))
+              : reportTurnStartFailure({
+                  threadId: event.payload.threadId,
+                  detail,
+                  createdAt: event.payload.createdAt,
+                  requestId: String(event.payload.messageId),
+                })
+          ).pipe(
+            Effect.catchCause((recoveryCause) =>
+              Effect.logWarning('provider command reactor failed to recover compaction failure', {
+                threadId: event.payload.threadId,
+                cause: Cause.pretty(recoveryCause),
+                originalCause: Cause.pretty(cause),
+              }),
+            ),
+          )
+        }),
+        Effect.ensuring(Effect.sync(() => void compactingThreadIds.delete(event.payload.threadId))),
+      )
+    }
+
+    if (compactingThreadIds.has(event.payload.threadId))
+    {
+      yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: 'provider.turn.start.failed',
+        summary: 'Provider turn start failed',
+        detail: 'Wait for context compaction to finish before sending another message.',
+        turnId: null,
+        createdAt: event.payload.createdAt,
+        requestId: String(event.payload.messageId),
       })
       return
     }

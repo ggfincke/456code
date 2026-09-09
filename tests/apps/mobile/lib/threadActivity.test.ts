@@ -774,6 +774,7 @@ describe('buildThreadFeed', () =>
       createdAt: string,
       status: ThreadFeedActivity['status'] = 'success',
     ): ThreadFeedActivity => ({
+      activityKind: 'tool.completed',
       id,
       createdAt,
       turnId: null,

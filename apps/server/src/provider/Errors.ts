@@ -98,6 +98,21 @@ export class ProviderAdapterProcessError extends Schema.TaggedError<ProviderAdap
   }
 }
 
+/** The thread workspace is unavailable, so a provider process cannot start there. */
+export class ProviderWorkspaceMissingError extends Schema.TaggedError<ProviderWorkspaceMissingError>()(
+  'ProviderWorkspaceMissingError',
+  {
+    threadId: Schema.String,
+    cwd: Schema.String,
+  },
+)
+{
+  override get message(): string
+  {
+    return `This thread's workspace folder no longer exists or is not a directory: ${this.cwd}. Restore the folder at this path before retrying.`
+  }
+}
+
 /**
  * ProviderValidationError - Invalid provider API input.
  */
@@ -222,6 +237,7 @@ export type ProviderAdapterError =
 export type ProviderServiceError =
   | ProviderValidationError
   | ProviderUnsupportedError
+  | ProviderWorkspaceMissingError
   | ProviderInstanceNotFoundError
   | ProviderSessionNotFoundError
   | ProviderSessionDirectoryPersistenceError

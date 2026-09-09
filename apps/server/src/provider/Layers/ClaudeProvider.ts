@@ -38,6 +38,7 @@ import {
   buildBooleanOptionDescriptor,
   buildSelectOptionDescriptor,
   buildServerProvider,
+  COMPACT_SLASH_COMMAND,
   DEFAULT_TIMEOUT_MS,
   isCommandMissingCause,
   parseGenericCliVersion,
@@ -1176,7 +1177,7 @@ export const checkClaudeProviderStatus = Effect.fn('checkClaudeProviderStatus')(
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
     : undefined
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment)
-  const slashCommands = capabilities?.slashCommands ?? []
+  const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])]
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands)
 
   if (!capabilities)

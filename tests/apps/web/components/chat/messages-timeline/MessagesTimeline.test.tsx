@@ -127,8 +127,13 @@ function MockFileDiff(props: {
 
 vi.mock('@pierre/diffs/react', () =>
 {
-  return { FileDiff: MockFileDiff }
+  return {
+    FileDiff: MockFileDiff,
+    WorkerPoolContextProvider: ({ children }: { children: ReactNode }) => children,
+    useWorkerPool: () => undefined,
+  }
 })
+vi.mock('@pierre/diffs/worker/worker.js?worker', () => ({ default: vi.fn() }))
 
 function matchMedia()
 {

@@ -6,6 +6,7 @@
 //
 // @module ProjectionSnapshotQuery
 import type {
+  ApprovalRequestId,
   CheckpointRef,
   OrchestrationCheckpointSummary,
   OrchestrationProject,
@@ -17,6 +18,7 @@ import type {
   OrchestrateRunExecutionIdentity,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  OrchestrationThreadActivity,
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
   ModelSelection,
@@ -104,6 +106,12 @@ export interface ProjectionImportReconciliationContext
  */
 export interface ProjectionSnapshotQueryShape
 {
+  // read the latest durable request or resolution without loading thread history.
+  readonly getUserInputActivity: (input: {
+    readonly threadId: ThreadId
+    readonly requestId: ApprovalRequestId
+  }) => Effect.Effect<Option.Option<OrchestrationThreadActivity>, ProjectionRepositoryError>
+
   readonly searchThreads: (
     input: OrchestrationSearchThreadsInput,
   ) => Effect.Effect<OrchestrationSearchThreadsResult, ProjectionRepositoryError>

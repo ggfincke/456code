@@ -2047,6 +2047,80 @@ describe('ClaudeAdapterLive', () =>
     )
   })
 
+  it.effect.each([
+    {
+      name: 'when the retry ends after the limited assistant frame',
+      recoverBeforeResult: false,
+      expected:
+        'Claude usage limit reached. The turn stopped before it finished; check your plan usage for when it resets.',
+    },
+    {
+      name: 'until a later parent assistant frame proves recovery',
+      recoverBeforeResult: true,
+      expected: 'Claude ended the turn early (api_error).',
+    },
+  ])('retains retry-only Claude usage evidence $name', ({ recoverBeforeResult, expected }) =>
+  {
+    const harness = makeHarness()
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      const runtimeEventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.takeUntil((event) => event.type === 'turn.completed'),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+      const assistant = {
+        type: 'assistant',
+        error: 'rate_limit',
+        message: { content: [] },
+        parent_tool_use_id: null,
+        session_id: 'sdk-session-retry-limit',
+        uuid: 'assistant-retry-limit',
+      } as unknown as SDKMessage
+      harness.query.emit(assistant)
+      if (recoverBeforeResult)
+      {
+        harness.query.emit({
+          ...assistant,
+          error: undefined,
+          uuid: '11111111-1111-4111-8111-111111111111',
+        } as unknown as SDKMessage)
+      }
+      harness.query.emit({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        terminal_reason: 'api_error',
+        session_id: 'sdk-session-retry-limit',
+        uuid: 'result-retry-limit',
+      } as unknown as SDKMessage)
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber))
+      const completed = runtimeEvents.find((event) => event.type === 'turn.completed')
+      assert.equal(completed?.type, 'turn.completed')
+      if (completed?.type === 'turn.completed')
+      {
+        assert.equal(completed.payload.state, 'failed')
+        assert.equal(completed.payload.errorMessage, expected)
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
   it.effect('keeps HTTP 429 Claude success frames failed', () =>
   {
     const harness = makeHarness()

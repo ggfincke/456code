@@ -7,6 +7,7 @@ import {
   createEmptyThreadDraft,
   useComposerDraftStore,
 } from '../../../../apps/web/src/composerDraftStore'
+import { partializeComposerDraftStoreState } from '../../../../apps/web/src/composer-drafts/persistence'
 
 describe('composer draft persistence', () =>
 {
@@ -17,11 +18,10 @@ describe('composer draft persistence', () =>
     const persistApi = useComposerDraftStore.persist as unknown as {
       getOptions: () => {
         merge: (persistedState: unknown, currentState: typeof initialState) => typeof initialState
-        partialize: (state: typeof initialState) => unknown
       }
     }
-    const { merge, partialize } = persistApi.getOptions()
-    const persistedState = partialize({
+    const { merge } = persistApi.getOptions()
+    const persistedState = partializeComposerDraftStoreState({
       ...initialState,
       draftsByThreadKey: {
         [threadKey]: {

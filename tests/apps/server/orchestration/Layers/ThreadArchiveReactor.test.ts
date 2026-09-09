@@ -24,6 +24,7 @@ import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect } from 'vite-plus/test'
 
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
+import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
 import { OrchestrationEngineWithArchivePermitLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
@@ -160,6 +161,7 @@ function makeLayer(state: HarnessState)
   const persistence = Layer.fresh(SqlitePersistenceMemory)
   const archiveLifecyclePermit = Layer.fresh(ThreadArchiveLifecyclePermitLive)
   const orchestrationLayer = OrchestrationEngineWithArchivePermitLive.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
@@ -175,6 +177,7 @@ function makeLayer(state: HarnessState)
   const providerService: ProviderServiceShape = {
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
+    compactThread: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),

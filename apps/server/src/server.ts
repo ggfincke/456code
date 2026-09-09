@@ -465,22 +465,25 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // no longer transitively provides it. Exposing it at the runtime level
   // keeps a single Live for all opencode consumers.
   Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
-  Layer.provideMerge(ServerSettingsLayerLive),
-  Layer.provideMerge(WorkspaceLayerLive),
-  Layer.provideMerge(ProjectFaviconResolverLayerLive),
-  Layer.provideMerge(RepositoryIdentityResolver.layer),
-  Layer.provideMerge(ArchitectureAdmissionLayerLive),
-  Layer.provideMerge(ProposalPreviewLayerLive),
-  Layer.provideMerge(DiffAnalysisLayerLive),
-  Layer.provideMerge(ServerEnvironmentLayerLive),
-).pipe(
-  Layer.provideMerge(ArchitectureQueryLayerLive),
-  Layer.provideMerge(ArchitectureProjectionLayerLive),
-  Layer.provideMerge(CurrentWorktreeArchitectureLayerLive),
-  Layer.provideMerge(ProjectArchitectureLifecycleLayerLive),
-  Layer.provideMerge(AuthLayerLive),
-  Layer.provideMerge(ServerSecretStore.layer),
 )
+  .pipe(
+    Layer.provideMerge(WorkspaceLayerLive),
+    Layer.provideMerge(ProjectFaviconResolverLayerLive),
+    Layer.provideMerge(RepositoryIdentityResolver.layer),
+    Layer.provideMerge(ArchitectureAdmissionLayerLive),
+    Layer.provideMerge(ProposalPreviewLayerLive),
+    Layer.provideMerge(DiffAnalysisLayerLive),
+    Layer.provideMerge(ServerEnvironmentLayerLive),
+  )
+  .pipe(
+    Layer.provideMerge(ArchitectureQueryLayerLive),
+    Layer.provideMerge(ArchitectureProjectionLayerLive),
+    Layer.provideMerge(CurrentWorktreeArchitectureLayerLive),
+    Layer.provideMerge(ProjectArchitectureLifecycleLayerLive),
+    Layer.provideMerge(AuthLayerLive),
+    Layer.provideMerge(ServerSecretStore.layer),
+    Layer.provideMerge(ServerSettingsLayerLive),
+  )
 
 export const makeSourceControlDiscoveryLayer = <ROut, E, RIn>(
   runtimeCoreDependencies: Layer.Layer<ROut, E, RIn>,
@@ -653,6 +656,7 @@ export const makeServerLayer = Layer.unwrap(
     return serverApplicationLayer.pipe(
       Layer.provide(SourceControlDiscoveryLayerLive),
       Layer.provideMerge(RuntimeServicesLive),
+      Layer.provide(ServerSettingsLayerLive),
       Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),

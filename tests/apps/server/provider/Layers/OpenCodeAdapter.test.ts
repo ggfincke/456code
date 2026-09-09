@@ -135,6 +135,7 @@ const runtimeMock = {
     sessionChildrenCalls: [] as string[],
     sessionChildrenById: new Map<string, Array<{ id: string }>>(),
     closeCalls: [] as string[],
+    revertMessageID: undefined as string | undefined,
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     messageCalls: [] as Array<{ sessionID: string; messageID: string }>,
     messageFailures: 0,
@@ -203,6 +204,7 @@ const runtimeMock = {
     this.state.sessionChildrenCalls.length = 0
     this.state.sessionChildrenById.clear()
     this.state.closeCalls.length = 0
+    this.state.revertMessageID = undefined
     this.state.revertCalls.length = 0
     this.state.messageCalls.length = 0
     this.state.messageFailures = 0
@@ -352,6 +354,9 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           return {
             data: {
               id: sessionID,
+              ...(runtimeMock.state.revertMessageID
+                ? { revert: { messageID: runtimeMock.state.revertMessageID } }
+                : {}),
               ...(directory ? { directory } : {}),
               ...(parentID ? { parentID } : {}),
             },
@@ -471,17 +476,18 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           })
           if (!messageID)
           {
-            runtimeMock.state.messages = []
-            return
+            throw new Error('Expected messageID')
           }
-
-          const targetIndex = runtimeMock.state.messages.findIndex(
-            (entry) => entry.info.id === messageID,
-          )
-          runtimeMock.state.messages =
-            targetIndex >= 0
-              ? runtimeMock.state.messages.slice(0, targetIndex + 1)
-              : runtimeMock.state.messages
+          let lastUserID: string | undefined
+          for (const entry of runtimeMock.state.messages)
+          {
+            if (entry.info.role === 'user') lastUserID = entry.info.id
+            if (entry.info.id === messageID && entry.parts.length > 0)
+            {
+              runtimeMock.state.revertMessageID = lastUserID ?? messageID
+              break
+            }
+          }
         },
       },
       event: {
@@ -3170,35 +3176,60 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     }).pipe(Effect.provide(adapterLayer))
   })
 
-  it.effect('reverts the full thread when rollback removes every assistant turn', () =>
-    Effect.gen(function* ()
-    {
-      const adapter = yield* OpenCodeAdapter
-      const threadId = asThreadId('thread-rollback-all')
-      yield* startOpenCodeTestSession(adapter, {
-        provider: ProviderDriverKind.make('opencode'),
-        threadId,
-        runtimeMode: 'full-access',
-      })
+  it.effect(
+    'rolls back from the first removed assistant and respects native revert boundaries',
+    () =>
+      Effect.gen(function* ()
+      {
+        const adapter = yield* OpenCodeAdapter
+        const threadId = asThreadId('thread-rollback-all')
+        yield* startOpenCodeTestSession(adapter, {
+          provider: ProviderDriverKind.make('opencode'),
+          threadId,
+          runtimeMode: 'full-access',
+        })
 
-      runtimeMock.state.messages = [
+        runtimeMock.state.messages = [
+          { info: { id: 'user-1', role: 'user' }, parts: [] },
+          {
+            info: { id: 'assistant-1', role: 'assistant' },
+            parts: [{ id: 'part-1', type: 'text', text: 'first answer' }],
+          },
+          { info: { id: 'user-2', role: 'user' }, parts: [] },
+          {
+            info: { id: 'assistant-2', role: 'assistant' },
+            parts: [{ id: 'part-2', type: 'text', text: 'second answer' }],
+          },
+        ]
+
+        const unchanged = yield* adapter.rollbackThread(threadId, 0)
+        NodeAssert.deepEqual(
+          unchanged.turns.map((turn) => turn.id),
+          ['assistant-1', 'assistant-2'],
+        )
+        NodeAssert.deepEqual(runtimeMock.state.revertCalls, [])
+        for (const remaining of [1, 0])
         {
-          info: { id: 'assistant-1', role: 'assistant' },
-          parts: [],
-        },
-        {
-          info: { id: 'assistant-2', role: 'assistant' },
-          parts: [],
-        },
-      ]
+          const snapshot = yield* adapter.rollbackThread(threadId, 1)
+          NodeAssert.equal(snapshot.turns.length, remaining)
+          NodeAssert.deepEqual((yield* adapter.readThread(threadId)).turns, snapshot.turns)
+        }
+        NodeAssert.deepEqual(runtimeMock.state.revertCalls, [
+          { sessionID: 'http://127.0.0.1:9999/session', messageID: 'assistant-2' },
+          { sessionID: 'http://127.0.0.1:9999/session', messageID: 'assistant-1' },
+        ])
+        yield* adapter.rollbackThread(threadId, 1)
+        NodeAssert.equal(runtimeMock.state.revertCalls.length, 2)
 
-      const snapshot = yield* adapter.rollbackThread(threadId, 2)
-
-      NodeAssert.deepEqual(runtimeMock.state.revertCalls, [
-        { sessionID: 'http://127.0.0.1:9999/session' },
-      ])
-      NodeAssert.deepEqual(snapshot.turns, [])
-    }),
+        runtimeMock.state.revertMessageID = undefined
+        runtimeMock.state.messages = runtimeMock.state.messages.filter(
+          (entry) => entry.info.id !== 'user-2',
+        )
+        const sharedUserSnapshot = yield* adapter.rollbackThread(threadId, 1)
+        NodeAssert.equal(runtimeMock.state.revertMessageID, 'user-1')
+        NodeAssert.deepEqual(sharedUserSnapshot.turns, [])
+        NodeAssert.deepEqual((yield* adapter.readThread(threadId)).turns, [])
+      }),
   )
 
   it.effect('classifies a confirmed not-found across the shapes the SDK/runtime can produce', () =>

@@ -1,5 +1,5 @@
 // apps/server/src/http.ts
-// determine whether loopback hostname
+// serve authenticated api routes and bounded static web assets
 
 import Mime from '@effect/platform-node/Mime'
 import {
@@ -14,6 +14,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { cast } from 'effect/Function'
 import {
@@ -309,10 +310,91 @@ export const attachmentUploadRouteLayer = HttpRouter.add(
   }),
 )
 
-export const staticAndDevRouteLayer = HttpRouter.add(
-  'GET',
-  '*',
-  Effect.gen(function* ()
+const decodeBuildManifest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        file: Schema.String,
+        css: Schema.optional(Schema.Array(Schema.String)),
+        assets: Schema.optional(Schema.Array(Schema.String)),
+      }),
+    ),
+  ),
+)
+
+const loadImmutableBuildAssets = Effect.gen(function* ()
+{
+  const config = yield* ServerConfig.ServerConfig
+  const staticDir =
+    config.staticDir ?? (config.devUrl ? yield* ServerConfig.resolveStaticDir() : undefined)
+  if (!staticDir) return new Set<string>()
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  return yield* fileSystem.readFileString(path.join(staticDir, '.vite', 'manifest.json')).pipe(
+    Effect.flatMap(decodeBuildManifest),
+    Effect.map(
+      (manifest) =>
+        new Set(
+          Object.values(manifest).flatMap((entry) => [
+            entry.file,
+            ...(entry.css ?? []),
+            ...(entry.assets ?? []),
+          ]),
+        ),
+    ),
+    Effect.orElseSucceed(() => new Set<string>()),
+  )
+})
+
+const openStaticFile = Effect.fn('openStaticFile')(function* (
+  staticRoot: string,
+  canonicalStaticRoot: string,
+  filePath: string,
+)
+{
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const relativePath = path.relative(staticRoot, filePath)
+  const expectedCanonicalPath = path.resolve(canonicalStaticRoot, relativePath)
+  const canonicalPath = yield* fileSystem.realPath(filePath).pipe(Effect.orElseSucceed(() => null))
+  if (canonicalPath !== expectedCanonicalPath)
+  {
+    return null
+  }
+
+  const pathInfo = yield* fileSystem.stat(filePath).pipe(Effect.orElseSucceed(() => null))
+  if (pathInfo?.type !== 'File') return null
+  const file = yield* fileSystem.open(filePath, { flag: 'r' })
+  const info = yield* file.stat
+  const openedPath = yield* fileSystem.realPath(filePath)
+  if (
+    info.type !== 'File' ||
+    openedPath !== canonicalPath ||
+    info.dev !== pathInfo.dev ||
+    Option.getOrUndefined(info.ino) !== Option.getOrUndefined(pathInfo.ino)
+  )
+  {
+    return null
+  }
+  return { file, info }
+})
+
+const streamStaticFile = (file: FileSystem.File, size: bigint) =>
+  Stream.unfold(
+    0n,
+    Effect.fnUntraced(function* (offset: bigint)
+    {
+      if (offset >= size) return
+      const remaining = size - offset
+      const bytes = yield* file.readAlloc(remaining < 65_536n ? remaining : 65_536n)
+      if (Option.isNone(bytes)) return
+      return [bytes.value, offset + BigInt(bytes.value.byteLength)] as const
+    }),
+  )
+
+const handleStaticAndDevRequest = Effect.fn('handleStaticAndDevRequest')(
+  function* (immutableBuildAssets: ReadonlySet<string>)
   {
     const request = yield* HttpServerRequest.HttpServerRequest
     const url = HttpServerRequest.toURL(request)
@@ -342,6 +424,13 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const staticRoot = path.resolve(staticDir)
+    const canonicalStaticRoot = yield* fileSystem
+      .realPath(staticRoot)
+      .pipe(Effect.orElseSucceed(() => null))
+    if (!canonicalStaticRoot)
+    {
+      return HttpServerResponse.text('Not Found', { status: 404 })
+    }
     const staticRequestPath = url.value.pathname === '/' ? '/index.html' : url.value.pathname
     const rawStaticRelativePath = staticRequestPath.replace(/^[/\\]+/, '')
     const hasRawLeadingParentSegment = rawStaticRelativePath.startsWith('..')
@@ -377,31 +466,79 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       }
     }
 
-    const fileInfo = yield* fileSystem.stat(filePath).pipe(Effect.orElseSucceed(() => null))
-    if (!fileInfo || fileInfo.type !== 'File')
+    let opened = yield* openStaticFile(staticRoot, canonicalStaticRoot, filePath)
+    if (!opened)
     {
-      const indexPath = path.resolve(staticRoot, 'index.html')
-      const indexData = yield* fileSystem.readFile(indexPath).pipe(Effect.orElseSucceed(() => null))
-      if (!indexData)
+      filePath = path.resolve(staticRoot, 'index.html')
+      opened = yield* openStaticFile(staticRoot, canonicalStaticRoot, filePath)
+      if (!opened)
       {
         return HttpServerResponse.text('Not Found', { status: 404 })
       }
-      return HttpServerResponse.uint8Array(indexData, {
-        status: 200,
-        contentType: 'text/html; charset=utf-8',
-      })
     }
-
-    const contentType = staticFileContentType(filePath)
-    const data = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null))
-    if (!data)
+    const fileInfo = opened.info
+    if (fileInfo.size > BigInt(Number.MAX_SAFE_INTEGER))
     {
       return HttpServerResponse.text('Internal Server Error', { status: 500 })
     }
 
-    return HttpServerResponse.uint8Array(data, {
-      status: 200,
-      contentType,
+    // a hash-like name alone does not prove that a custom static file is immutable
+    const relativePath = path.relative(staticRoot, filePath).replaceAll('\\', '/')
+    const immutable =
+      /^assets\/.+-[\w-]{8}\.[^/]+$/.test(relativePath) && immutableBuildAssets.has(relativePath)
+    const headers: Record<string, string> = {
+      'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+    }
+    const modifiedAt = Option.getOrUndefined(fileInfo.mtime)
+    const etag = modifiedAt
+      ? `W/"${fileInfo.size.toString(16)}-${modifiedAt.getTime().toString(16)}"`
+      : undefined
+    if (etag !== undefined && modifiedAt !== undefined)
+    {
+      headers.ETag = etag
+      headers['Last-Modified'] = modifiedAt.toUTCString()
+    }
+
+    // if-none-match takes precedence and uses weak comparison for get/head
+    const ifNoneMatch = request.headers['if-none-match']
+    const ifModifiedSince = request.headers['if-modified-since']
+    const unchanged =
+      ifNoneMatch !== undefined
+        ? ifNoneMatch.split(',').some((value) =>
+          {
+            const candidate = value.trim()
+            return (
+              candidate === '*' ||
+              (etag !== undefined && candidate.replace(/^W\//i, '') === etag.slice(2))
+            )
+          })
+        : ifModifiedSince !== undefined &&
+          modifiedAt !== undefined &&
+          Date.parse(modifiedAt.toUTCString()) <= Date.parse(ifModifiedSince)
+    if (unchanged)
+    {
+      return HttpServerResponse.empty({
+        status: 304,
+        headers: { ...headers, Vary: 'Accept-Encoding' },
+      })
+    }
+
+    // the request scope closes the handle after body completion, errors, or cancellation
+    return HttpServerResponse.stream(streamStaticFile(opened.file, fileInfo.size), {
+      headers,
+      contentType: staticFileContentType(filePath),
+      contentLength: Number(fileInfo.size),
     })
+  },
+  Effect.catchTags({
+    PlatformError: () =>
+      Effect.succeed(HttpServerResponse.text('Internal Server Error', { status: 500 })),
   }),
+)
+
+// read the installed build manifest once; unknown files must revalidate
+export const staticAndDevRouteLayer = Layer.unwrap(
+  loadImmutableBuildAssets.pipe(
+    Effect.map((assets) => HttpRouter.add('GET', '*', handleStaticAndDevRequest(assets))),
+  ),
 )

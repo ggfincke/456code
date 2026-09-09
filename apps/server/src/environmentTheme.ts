@@ -58,9 +58,15 @@ export const readThemeFileGuarded = (filePath: string, maxBytes: number): string
   let fd: number
   try
   {
+    if (NodeFS.constants.O_NOFOLLOW === undefined && NodeFS.lstatSync(filePath).isSymbolicLink())
+    {
+      return null
+    }
     fd = NodeFS.openSync(
       filePath,
-      NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK,
+      NodeFS.constants.O_RDONLY |
+        (NodeFS.constants.O_NOFOLLOW ?? 0) |
+        (NodeFS.constants.O_NONBLOCK ?? 0),
     )
   }
   catch

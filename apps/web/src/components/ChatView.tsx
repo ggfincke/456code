@@ -150,7 +150,6 @@ import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
 import { makeWorkspaceFileDropHandlers } from './chat/workspaceFileDrop'
 import { resolveAutoVisitTimestamp } from './Sidebar.logic'
 import { RightPanelTabs } from './RightPanelTabs'
-import { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
 import { BranchToolbar } from './BranchToolbar'
 import { resolveShortcutCommand, shortcutLabelForCommand } from '../keybindings'
 import PlanSidebar from './PlanSidebar'
@@ -188,6 +187,7 @@ import {
 } from '../providerSwitchPresentation'
 import { useClientSettings, useEnvironmentSettings } from '../hooks/useSettings'
 import { useNowMinute } from '../hooks/useNowMinute'
+import { resolveClientAutoSettlementEvaluation } from '../lib/threadAutoSettlement'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
 import { useThreadActions } from '../hooks/useThreadActions'
 import { type AppModelOption, getAppModelOptionsForInstance } from '../modelSelection'
@@ -704,6 +704,9 @@ function ChatViewContent(props: ChatViewProps)
     reportFailure: false,
   })
   const respondToThreadUserInput = useAtomCommand(threadEnvironment.respondToUserInput, {
+    reportFailure: false,
+  })
+  const dismissThreadUserInput = useAtomCommand(threadEnvironment.dismissUserInput, {
     reportFailure: false,
   })
   const dispatchOrchestratePlanResponse = useAtomCommand(respondToOrchestratePlanCommand, {
@@ -3927,8 +3930,17 @@ function ChatViewContent(props: ChatViewProps)
   // partition (same shell, same capability gate, same PR auto-settle input)
   // so the banner and the sidebar row never disagree.
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null)
-  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays)
-  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const legacyAutoSettleAfterDays = useClientSettings(
+    (settings) => settings.sidebarAutoSettleAfterDays,
+  )
+  const legacyAutoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge)
+  const { autoSettleAfterDays, autoSettleOnMerge } = resolveClientAutoSettlementEvaluation(
+    serverConfig,
+    {
+      autoSettleAfterDays: legacyAutoSettleAfterDays,
+      autoSettleOnMerge: legacyAutoSettleOnMerge,
+    },
+  )
   const activeThreadChangeRequestSnapshot =
     activeThreadKey === null ? undefined : changeRequestSnapshotByKey.get(activeThreadKey)
   const retainActiveTerminalPr = canRetainTerminalThreadPr({
@@ -4970,6 +4982,36 @@ function ChatViewContent(props: ChatViewProps)
       return result
     },
     [activeThreadId, environmentId, respondToThreadUserInput, setThreadError],
+  )
+
+  // closes an async question without sending another message to the agent
+  const onDismissUserInput = useCallback(
+    async (requestId: ApprovalRequestId) =>
+    {
+      if (!activeThreadId) return
+
+      setRespondingUserInputRequestIds((existing) =>
+        existing.includes(requestId) ? existing : [...existing, requestId],
+      )
+      const result = await dismissThreadUserInput({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          requestId,
+        },
+      })
+      if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+      {
+        const error = squashAtomCommandFailure(result)
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : 'Failed to dismiss the question.',
+        )
+      }
+      setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId))
+      return result
+    },
+    [activeThreadId, dismissThreadUserInput, environmentId, setThreadError],
   )
 
   const setActivePendingUserInputQuestionIndex = useCallback(
@@ -6090,15 +6132,6 @@ function ChatViewContent(props: ChatViewProps)
           />
         </header>
 
-        <ThreadErrorBanner
-          error={promotedProviderAuthError ? null : visibleThreadError}
-          onDismiss={() =>
-          {
-            setThreadError(activeThread.id, null)
-            dismissThreadErrorBannerForSession(threadErrorBannerKey)
-            setThreadErrorBannerDismissTick((tick) => tick + 1)
-          }}
-        />
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
@@ -6124,13 +6157,22 @@ function ChatViewContent(props: ChatViewProps)
                 </div>
               </div>
             ) : null}
-            {/* Provider status overlays the timeline without changing its content height. */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+            {/* banners overlay the timeline without changing its content height. */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col">
               <ProviderStatusBanner
                 status={visibleProviderStatus}
                 reAuthRequired={providerReAuthRequired}
                 reAuthDetail={providerReAuthRequired ? visibleThreadError : null}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
+              />
+              <ThreadErrorBanner
+                error={promotedProviderAuthError ? null : visibleThreadError}
+                onDismiss={() =>
+                {
+                  setThreadError(activeThread.id, null)
+                  dismissThreadErrorBannerForSession(threadErrorBannerKey)
+                  setThreadErrorBannerDismissTick((tick) => tick + 1)
+                }}
               />
             </div>
             {/* Messages Wrapper */}
@@ -6370,6 +6412,7 @@ function ChatViewContent(props: ChatViewProps)
                               onSelectActivePendingUserInputOption
                             }
                             onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
+                            onDismissActivePendingUserInput={onDismissUserInput}
                             onPreviousActivePendingUserInputQuestion={
                               onPreviousActivePendingUserInputQuestion
                             }
@@ -6655,9 +6698,5 @@ function ChatViewContent(props: ChatViewProps)
 
 export default function ChatView(props: ChatViewProps)
 {
-  return (
-    <DiffWorkerPoolProvider>
-      <ChatViewContent {...props} />
-    </DiffWorkerPoolProvider>
-  )
+  return <ChatViewContent {...props} />
 }
