@@ -16,6 +16,7 @@ import {
   createEmptyThreadDraft,
   useComposerDraftStore,
 } from '../../../../apps/web/src/composerDraftStore'
+import { partializeComposerDraftStoreState } from '../../../../apps/web/src/composer-drafts/persistence'
 import { appendPreviewAnnotationPrompt } from '../../../../apps/web/src/lib/previewAnnotation'
 import {
   appendReviewCommentsToPrompt,
@@ -198,12 +199,11 @@ describe('architecture concern context', () =>
     const persistApi = useComposerDraftStore.persist as unknown as {
       getOptions: () => {
         merge: (persistedState: unknown, currentState: typeof initialState) => typeof initialState
-        partialize: (state: typeof initialState) => unknown
       }
     }
-    const { merge, partialize } = persistApi.getOptions()
+    const { merge } = persistApi.getOptions()
     const threadKey = scopedThreadKey(threadRef)
-    const persisted = partialize({
+    const persisted = partializeComposerDraftStoreState({
       ...initialState,
       draftsByThreadKey: {
         [threadKey]: {
@@ -212,15 +212,24 @@ describe('architecture concern context', () =>
           architectureContexts: [architectureContext],
         },
       },
-    }) as {
-      draftsByThreadKey: Record<string, { architectureContexts?: unknown[] }>
-    }
-    persisted.draftsByThreadKey[threadKey]?.architectureContexts?.push({
-      ...architectureContext,
-      authority: 'planned',
     })
-
-    const hydrated = merge(persisted, initialState)
+    const persistedDraft = persisted.draftsByThreadKey[threadKey]
+    const hydrated = merge(
+      {
+        ...persisted,
+        draftsByThreadKey: {
+          ...persisted.draftsByThreadKey,
+          [threadKey]: {
+            ...persistedDraft,
+            architectureContexts: [
+              ...(persistedDraft?.architectureContexts ?? []),
+              { ...architectureContext, authority: 'planned' },
+            ],
+          },
+        },
+      },
+      initialState,
+    )
     expect(hydrated.draftsByThreadKey[threadKey]?.prompt).toBe('Preserve this draft.')
     expect(hydrated.draftsByThreadKey[threadKey]?.architectureContexts).toEqual([
       architectureContext,

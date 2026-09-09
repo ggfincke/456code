@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   confirm: vi.fn(async () => true),
   updateSettings: vi.fn(),
   setTheme: vi.fn(),
+  setClientSettings: vi.fn(async () => undefined),
 }))
 
 vi.mock('../../../../../../apps/web/src/hooks/useSettings', async (importOriginal) => ({
@@ -25,7 +26,10 @@ vi.mock('../../../../../../apps/web/src/hooks/useTheme', () => ({
 }))
 vi.mock('../../../../../../apps/web/src/localApi', () => ({
   readLocalApi: () => ({ dialogs: { confirm: state.confirm } }),
-  ensureLocalApi: () => ({ dialogs: { confirm: state.confirm } }),
+  ensureLocalApi: () => ({
+    dialogs: { confirm: state.confirm },
+    persistence: { setClientSettings: state.setClientSettings },
+  }),
 }))
 
 import { useSettingsRestore } from '../../../../../../apps/web/src/components/settings/panels/GeneralSettingsPanel'
