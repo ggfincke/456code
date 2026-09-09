@@ -143,6 +143,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void
   readonly onPinThread: (thread: EnvironmentThreadShell) => void
   readonly onUnpinThread: (thread: EnvironmentThreadShell) => void
+  readonly onMoveThread?: (
+    thread: EnvironmentThreadShell,
+    direction: 'up' | 'down',
+  ) => Promise<void>
+  readonly onOpenArrangement?: (thread: EnvironmentThreadShell) => void
   // false on environments whose server predates thread.settle/unsettle:
   // swipe + menu fall back to Archive instead of failing on use.
   readonly settlementSupported: boolean
@@ -235,8 +240,19 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [props.pinningSupported, thread.pinnedAt],
   )
   const cardMenuActions = useMemo<MenuAction[]>(
-    () => [CARD_MENU_ACTIONS[0]!, ...pinMenuItem, ...CARD_MENU_ACTIONS.slice(1)],
-    [pinMenuItem],
+    () => [
+      ...(props.onMoveThread && !props.pinned
+        ? [
+            { id: 'arrange', title: 'Arrange tasks…', image: 'line.3.horizontal' },
+            { id: 'move-up', title: 'Move up', image: 'arrow.up' },
+            { id: 'move-down', title: 'Move down', image: 'arrow.down' },
+          ]
+        : []),
+      CARD_MENU_ACTIONS[0]!,
+      ...pinMenuItem,
+      ...CARD_MENU_ACTIONS.slice(1),
+    ],
+    [pinMenuItem, props.onMoveThread, props.pinned],
   )
   const slimMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -255,8 +271,21 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === 'unpin') handleUnpin()
       if (nativeEvent.event === 'archive') handleArchive()
       if (nativeEvent.event === 'delete') handleDelete()
+      if (nativeEvent.event === 'arrange') props.onOpenArrangement?.(thread)
+      if (nativeEvent.event === 'move-up') void props.onMoveThread?.(thread, 'up')
+      if (nativeEvent.event === 'move-down') void props.onMoveThread?.(thread, 'down')
     },
-    [handleArchive, handleDelete, handlePin, handleSettle, handleUnpin, handleUnsettle],
+    [
+      handleArchive,
+      handleDelete,
+      handlePin,
+      handleSettle,
+      handleUnpin,
+      handleUnsettle,
+      props.onMoveThread,
+      props.onOpenArrangement,
+      thread,
+    ],
   )
 
   // swipe: the v2 primary action is the lifecycle transition. Every settled

@@ -844,6 +844,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               displayName: undefined,
               enabled: true,
               snapshot: {
+                applyUsageLimits: () => Effect.void,
+                invalidateUsageLimits: () => Effect.void,
                 resolveMaintenance: resolveManualMaintenance(driver),
                 getSnapshot: Effect.succeed(provider),
                 refresh: Effect.succeed(provider),
@@ -1039,6 +1041,45 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
 
         assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, refreshedProvider).models, [
           ...previousProvider.models,
+        ])
+      })
+
+      it('does not resurrect a custom model removed from current settings', () =>
+      {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make('claudeAgent'),
+          driver: ProviderDriverKind.make('claudeAgent'),
+          status: 'ready',
+          enabled: true,
+          installed: true,
+          auth: { status: 'authenticated' },
+          checkedAt: '2026-04-14T00:00:00.000Z',
+          version: '2.1.0',
+          models: [
+            {
+              slug: 'claude-sonnet-4-6',
+              name: 'Sonnet 4.6',
+              isCustom: false,
+              capabilities: null,
+            },
+            {
+              slug: 'removed-custom',
+              name: 'Removed custom',
+              isCustom: true,
+              capabilities: null,
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider
+        const refreshedProvider = {
+          ...previousProvider,
+          checkedAt: '2026-04-14T00:01:00.000Z',
+          models: [previousProvider.models[0]],
+        } satisfies ServerProvider
+
+        assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, refreshedProvider).models, [
+          previousProvider.models[0],
         ])
       })
 
@@ -1394,6 +1435,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
+              invalidateUsageLimits: () => Effect.void,
               resolveMaintenance: (options) =>
                 Ref.update(maintenanceResolutions, (requests) => [...requests, options]).pipe(
                   Effect.as(maintenanceCapabilities),
@@ -1485,6 +1528,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
+              invalidateUsageLimits: () => Effect.void,
               resolveMaintenance: resolveManualMaintenance(codexDriver),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Effect.succeed(initialProvider),
@@ -1653,6 +1698,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
+              invalidateUsageLimits: () => Effect.void,
               resolveMaintenance: resolveManualMaintenance(cursorDriver),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Effect.succeed(refreshedProvider),
@@ -1785,6 +1832,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               displayName: undefined,
               enabled: true,
               snapshot: {
+                applyUsageLimits: () => Effect.void,
+                invalidateUsageLimits: () => Effect.void,
                 resolveMaintenance: resolveManualMaintenance(openCodeDriver),
                 getSnapshot: Effect.succeed(initialProvider),
                 refresh: Effect.succeed(authoritativeProvider),
@@ -1927,6 +1976,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: 'Codex Personal',
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
+              invalidateUsageLimits: () => Effect.void,
               resolveMaintenance: resolveManualMaintenance(codexDriver),
               getSnapshot: Effect.succeed(pendingProvider),
               refresh: Ref.get(nextProvider),
@@ -2019,6 +2070,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
+              invalidateUsageLimits: () => Effect.void,
               resolveMaintenance: resolveManualMaintenance(codexDriver),
               getSnapshot: Effect.succeed(cachedProvider),
               refresh: Effect.die(new Error('simulated refresh failure')),
@@ -2116,6 +2169,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
+              invalidateUsageLimits: () => Effect.void,
               resolveMaintenance: resolveManualMaintenance(provider.driver),
               getSnapshot: Effect.succeed(provider),
               refresh: Effect.succeed(provider),

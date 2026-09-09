@@ -126,6 +126,7 @@ import {
   type ProviderInstanceRegistryMutatorShape,
 } from '../Services/ProviderInstanceRegistryMutator.ts'
 import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
+import { resolveProjectAgentBrowserAccess } from '@t3tools/shared/serverSettings'
 const isModelSelection = Schema.is(ModelSelection)
 const isProviderContinuationIdentity = Schema.is(ProviderContinuationIdentity)
 const isProviderRuntimeInboxAdmissionError = Schema.is(ProviderRuntimeInboxAdmissionError)
@@ -544,8 +545,14 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   ) =>
     Effect.gen(function* ()
     {
-      const browserAccessEnabled = yield* serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.enableAgentBrowserAccess),
+      const browserAccessEnabled = yield* Effect.gen(function* ()
+      {
+        const settings = yield* serverSettings.getSettings
+        const thread = yield* projectionSnapshotQuery.getThreadShellById(threadId)
+        return Option.isSome(thread) && thread.value !== null
+          ? resolveProjectAgentBrowserAccess(settings, thread.value.projectId)
+          : settings.enableAgentBrowserAccess
+      }).pipe(
         Effect.catch((cause) =>
           Effect.logWarning('Could not read settings; withholding agent browser access.', {
             cause,

@@ -67,3 +67,27 @@ it.effect('requires read scope for both content searches before invoking the que
     expect(reads).toBe(2)
   }),
 )
+
+it.effect('requires read scope before accessing host capacity or local transcript usage', () =>
+  Effect.gen(function* ()
+  {
+    let reads = 0
+    const session: AuthenticatedSession = {
+      sessionId: AuthSessionId.make('capacity-session'),
+      subject: 'capacity-test',
+      method: 'browser-session-cookie',
+      scopes: [AuthOrchestrationOperateScope],
+    }
+    for (const method of [WS_METHODS.serverGetHostResources, WS_METHODS.serverGetUsageSummary])
+    {
+      const error = yield* makeRpcAuthorization(session)
+        .observeRpcEffect(
+          method,
+          Effect.sync(() => ++reads),
+        )
+        .pipe(Effect.flip)
+      expect(error).toMatchObject({ requiredScope: AuthOrchestrationReadScope })
+    }
+    expect(reads).toBe(0)
+  }),
+)

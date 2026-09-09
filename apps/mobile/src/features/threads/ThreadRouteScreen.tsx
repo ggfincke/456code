@@ -9,8 +9,17 @@ import {
 } from '@react-navigation/native'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Option from 'effect/Option'
-import { EnvironmentId, ThreadId, type ProjectScript } from '@t3tools/contracts'
-import { projectScriptCwd, projectScriptRuntimeEnv } from '@t3tools/shared/projectScripts'
+import {
+  DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
+  ThreadId,
+  type ProjectScript,
+} from '@t3tools/contracts'
+import {
+  projectScriptCwd,
+  projectScriptRuntimeEnv,
+  resolveProjectScripts,
+} from '@t3tools/shared/projectScripts'
 import { ScrollView, View } from 'react-native'
 import { useWorkspaceState } from '../../state/workspace'
 import { useEnvironmentQuery } from '../../state/query'
@@ -206,6 +215,10 @@ function ThreadRouteContent(
   const requests = useThreadRequests()
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, 'thread interrupt')
   const navigation = useNavigation()
+  const handleUsageLimitsCommand = useCallback(() =>
+  {
+    navigation.navigate('SettingsSheet', { screen: 'SettingsUsage' })
+  }, [navigation])
   const params = props.route.params
   const environmentIdRaw = firstRouteParam(params.environmentId)
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null
@@ -636,7 +649,12 @@ function ThreadRouteContent(
     gitOperationLabel: gitState.gitOperationLabel,
     canOpenTerminal: Boolean(selectedThreadProject?.workspaceRoot),
     canOpenFiles: Boolean(selectedThreadProject?.workspaceRoot),
-    projectScripts: selectedThreadProject?.scripts ?? [],
+    projectScripts: selectedThreadProject
+      ? resolveProjectScripts(
+          routeEnvironmentRuntime?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+          selectedThreadProject,
+        )
+      : [],
     terminalSessions: terminalMenuSessions,
     showDirectFileControl: layout.usesSplitView,
     onOpenTerminal: handleOpenTerminal,
@@ -768,6 +786,7 @@ function ThreadRouteContent(
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
+          onUsageLimitsCommand={handleUsageLimitsCommand}
           onDiscardQueuedMessage={composer.onDiscardFailedQueuedMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}

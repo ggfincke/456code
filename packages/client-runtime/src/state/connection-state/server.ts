@@ -148,7 +148,10 @@ function withoutEnvironmentThemes(config: ServerConfig): ServerConfig
 // config carries the provider/model catalogue used by task creation, so it is
 // useful—and safe—to retain after a transport session ends.
 export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConfigState.make')(
-  function* (environmentThemes?: boolean)
+  function* (options?: {
+    readonly environmentThemes?: boolean
+    readonly usageLimitsCommand?: boolean
+  })
   {
     const supervisor = yield* EnvironmentSupervisor
     const cache = yield* EnvironmentCacheStore
@@ -211,10 +214,10 @@ export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConf
       Effect.forkScoped,
     )
 
-    yield* subscribe(
-      WS_METHODS.subscribeServerConfig,
-      environmentThemes === true ? { environmentThemes: true } : {},
-    ).pipe(
+    yield* subscribe(WS_METHODS.subscribeServerConfig, {
+      ...(options?.environmentThemes === true ? { environmentThemes: true } : {}),
+      ...(options?.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
+    }).pipe(
       Stream.runForEach((event) =>
         Effect.gen(function* ()
         {
@@ -248,13 +251,13 @@ export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConf
 
 export function serverConfigStateChanges(
   environmentId: EnvironmentId,
-  environmentThemes?: boolean,
+  options?: { readonly environmentThemes?: boolean; readonly usageLimitsCommand?: boolean },
 )
 {
   return followStreamInEnvironment(
     environmentId,
     Stream.unwrap(
-      makeEnvironmentServerConfigState(environmentThemes).pipe(
+      makeEnvironmentServerConfigState(options).pipe(
         Effect.map((state) =>
           SubscriptionRef.changes(state).pipe(
             Stream.filterMap((projection) =>
@@ -305,6 +308,7 @@ export function createServerEnvironmentAtoms<R, E>(
       environmentId: EnvironmentId,
     ) => Atom.Atom<ServerConfig | null>
     readonly environmentThemes?: boolean
+    readonly usageLimitsCommand?: boolean
   },
 )
 {
@@ -315,7 +319,16 @@ export function createServerEnvironmentAtoms<R, E>(
   }
   const configProjectionFamily = Atom.family((environmentId: EnvironmentId) =>
     runtime
-      .atom(serverConfigStateChanges(environmentId, options.environmentThemes))
+      .atom(
+        serverConfigStateChanges(environmentId, {
+          ...(options.environmentThemes !== undefined
+            ? { environmentThemes: options.environmentThemes }
+            : {}),
+          ...(options.usageLimitsCommand !== undefined
+            ? { usageLimitsCommand: options.usageLimitsCommand }
+            : {}),
+        }),
+      )
       .pipe(
         Atom.setIdleTTL(5 * 60_000),
         Atom.withLabel(`environment-data:server:config-projection:${environmentId}`),
@@ -367,6 +380,14 @@ export function createServerEnvironmentAtoms<R, E>(
     processDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:server:process-diagnostics',
       tag: WS_METHODS.serverGetProcessDiagnostics,
+    }),
+    hostResources: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: 'environment-data:server:host-resources',
+      tag: WS_METHODS.serverGetHostResources,
+    }),
+    readHostResources: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:read-host-resources',
+      tag: WS_METHODS.serverGetHostResources,
     }),
     processResourceHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: 'environment-data:server:process-resource-history',

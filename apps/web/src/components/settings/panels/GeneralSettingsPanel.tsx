@@ -53,6 +53,7 @@ import {
   primaryServerProvidersAtom,
 } from '../../../state/server'
 import { ProviderModelPicker } from '../../chat/ProviderModelPicker'
+import { ProjectDefaultsSettingsSection } from '../ProjectDefaultsSettingsSection'
 import { TraitsPicker } from '../../chat/composer/TraitsPicker'
 import { Button } from '../../ui/button'
 import { DraftInput } from '../../ui/draft-input'
@@ -1237,6 +1238,7 @@ export function GeneralSettingsPanel()
         />
       </SettingsSection>
 
+      <ProjectDefaultsSettingsSection />
       <SettingsSection id="settings-about" title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />

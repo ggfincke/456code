@@ -349,7 +349,7 @@ describe('server state projection', () =>
       yield* Effect.scoped(
         Effect.gen(function* ()
         {
-          const state = yield* makeEnvironmentServerConfigState(true).pipe(
+          const state = yield* makeEnvironmentServerConfigState({ environmentThemes: true }).pipe(
             Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
             Effect.provideService(Persistence.EnvironmentCacheStore, cache),
           )

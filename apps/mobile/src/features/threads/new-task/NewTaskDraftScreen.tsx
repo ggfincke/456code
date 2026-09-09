@@ -10,6 +10,7 @@ import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-co
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { EnvironmentId, normalizeCollaborationMode } from '@t3tools/contracts'
+import { hasProviderUsageLimits, isUsageLimitsCommand } from '@t3tools/shared/usageLimits'
 
 import { ComposerEditor, type ComposerEditorHandle } from '../../../components/ComposerEditor'
 import {
@@ -672,6 +673,20 @@ export function NewTaskDraftScreen(props: {
     modelOptions: flow.modelOptions,
     interactionMode: effectiveInteractionMode,
     hasThread: false,
+    onUsageLimits:
+      flow.selectedProviderStatus !== null &&
+      hasProviderUsageLimits(
+        flow.selectedProviderStatus.driver,
+        selectedServerConfig?.providers ?? [],
+      )
+        ? () =>
+          {
+            Alert.alert(
+              'Usage limits',
+              'Open Settings, then Usage, to view limits before starting a task.',
+            )
+          }
+        : undefined,
     enabled: isComposerFocused && !isIncomingShareTransferPending,
     onChangeDraftMessage: flow.setPrompt,
     onUpdateInteractionMode: flow.setInteractionMode,
@@ -1008,6 +1023,21 @@ export function NewTaskDraftScreen(props: {
       (workspaceMode === 'worktree' && !selectedBranchName)
     )
     {
+      return
+    }
+
+    if (
+      draft.attachments.length === 0 &&
+      flow.selectedProviderStatus !== null &&
+      hasProviderUsageLimits(
+        flow.selectedProviderStatus.driver,
+        selectedServerConfig?.providers ?? [],
+      ) &&
+      isUsageLimitsCommand(initialMessageText)
+    )
+    {
+      flow.setPrompt('')
+      Alert.alert('Usage limits', 'Open Settings, then Usage, to view provider limits.')
       return
     }
 

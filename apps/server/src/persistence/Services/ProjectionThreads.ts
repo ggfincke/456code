@@ -55,6 +55,7 @@ export const ProjectionThread = Schema.Struct({
   snoozedUntil: Schema.NullOr(IsoDateTime),
   snoozedAt: Schema.NullOr(IsoDateTime),
   pinnedAt: Schema.NullOr(IsoDateTime),
+  activeOrderKey: Schema.NullOr(Schema.String),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,

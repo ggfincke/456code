@@ -92,6 +92,7 @@ export interface ThreadDetailScreenProps
   readonly onRemoveDraftImage: (imageId: string) => void
   readonly onStopThread: () => void
   readonly onSendMessage: () => Promise<MessageId | null>
+  readonly onUsageLimitsCommand: () => void
   readonly onDiscardQueuedMessage: () => void
   readonly onReconnectEnvironment: () => void
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void
@@ -548,6 +549,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               onRemoveDraftImage={props.onRemoveDraftImage}
               onStopThread={props.onStopThread}
               onSendMessage={handleSendMessage}
+              onUsageLimitsCommand={props.onUsageLimitsCommand}
               onDiscardQueuedMessage={props.onDiscardQueuedMessage}
               onReconnectEnvironment={props.onReconnectEnvironment}
               onUpdateModelSelection={props.onUpdateThreadModelSelection}

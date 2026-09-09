@@ -668,10 +668,15 @@ export const makeCursorModelDiscovery = Effect.fn('makeCursorModelDiscovery')(fu
 })
 
 export function getCursorFallbackModels(
-  cursorSettings: Pick<CursorSettings, 'customModels'>,
+  cursorSettings: Pick<CursorSettings, 'customModels' | 'customModelMetadata'>,
 ): ReadonlyArray<ServerProviderModel>
 {
-  return providerModelsFromSettings([], cursorSettings.customModels, EMPTY_CAPABILITIES)
+  return providerModelsFromSettings(
+    [],
+    cursorSettings.customModels,
+    EMPTY_CAPABILITIES,
+    cursorSettings.customModelMetadata,
+  )
 }
 
 // timeout for `agent about` — it's slower than a simple `--version` probe.
@@ -741,6 +746,7 @@ export function buildCursorProviderSnapshot(input: {
       input.discoveredModels ?? [],
       input.cursorSettings.customModels,
       EMPTY_CAPABILITIES,
+      input.cursorSettings.customModelMetadata,
     ),
     slashCommands: [COMPACT_SLASH_COMMAND],
     probe: {

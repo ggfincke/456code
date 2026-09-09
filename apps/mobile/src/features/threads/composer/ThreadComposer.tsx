@@ -19,6 +19,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native
 import { useThemeColor } from '../../../lib/useThemeColor'
 import { armAgentAwarenessLiveActivityForLocalWork } from '../../agent-awareness/remoteRegistration'
 import { scopedThreadKey } from '../../../lib/scopedEntities'
+import { hasProviderUsageLimits, isUsageLimitsCommand } from '@t3tools/shared/usageLimits'
 import { resolveProviderSlashCommandsForCwd } from '@t3tools/client-runtime/providerSkills'
 import { uuidv4 } from '../../../lib/uuid'
 import { threadEnvironment } from '../../../state/threads'
@@ -109,6 +110,7 @@ export interface ThreadComposerProps
   readonly onRemoveDraftImage: (imageId: string) => void
   readonly onStopThread: () => void
   readonly onSendMessage: () => Promise<MessageId | null>
+  readonly onUsageLimitsCommand: () => void
   readonly onDiscardQueuedMessage: () => void
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void
   readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void
@@ -397,6 +399,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode: props.onUpdateInteractionMode,
     onUpdateModelSelection: props.onUpdateModelSelection,
+    onUsageLimits:
+      props.draftAttachments.length === 0 &&
+      selectedProviderStatus !== null &&
+      hasProviderUsageLimits(selectedProviderStatus.driver, props.serverConfig?.providers ?? [])
+        ? props.onUsageLimitsCommand
+        : undefined,
   })
   const { onSendMessage } = props
   const startImmediateTurn = useAtomCommand(threadEnvironment.startTurn, 'compact thread context')
@@ -497,6 +505,17 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       )
       return
     }
+    if (
+      props.draftAttachments.length === 0 &&
+      selectedProviderStatus !== null &&
+      hasProviderUsageLimits(selectedProviderStatus.driver, props.serverConfig?.providers ?? []) &&
+      isUsageLimitsCommand(props.draftMessage)
+    )
+    {
+      props.onChangeDraftMessage('')
+      props.onUsageLimitsCommand()
+      return
+    }
     if (props.sendBlockedReason !== null || providerRejectsActiveInput)
     {
       return
@@ -528,9 +547,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.sendBlockedReason,
     props.serverConfig,
     props.onChangeDraftMessage,
+    props.onUsageLimitsCommand,
     props.selectedThread.id,
     props.selectedThread.title,
     providerRejectsActiveInput,
+    selectedProviderStatus,
     compactionPending,
     startImmediateTurn,
     props.activeThreadBusy,

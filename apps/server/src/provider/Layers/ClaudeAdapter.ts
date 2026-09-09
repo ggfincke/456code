@@ -60,6 +60,7 @@ import * as Ref from 'effect/Ref'
 import * as Semaphore from 'effect/Semaphore'
 import * as Stream from 'effect/Stream'
 import { CLAUDE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
+import { type ClaudeScopedLimitNames, claudeRateLimitEventToUpdate } from './claudeUsageLimits.ts'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
@@ -301,6 +302,7 @@ interface ClaudeSessionContext
 {
   session: ProviderSession
   readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
+  readonly usageAccountIdentity: string | undefined
   promptQueue: Queue.Queue<PromptQueueItem>
   query: ClaudeQueryRuntime
   readonly baseQueryOptions: ClaudeQueryOptions
@@ -351,6 +353,8 @@ export interface ClaudeAdapterLiveOptions
   readonly createQuery?: ClaudeQueryFactory
   readonly nativeEventLogPath?: string
   readonly nativeEventLogger?: EventNdjsonLogger
+  readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>
+  readonly usageAccountIdentity?: () => string | undefined
 }
 
 function isUuid(value: string): boolean
@@ -3112,27 +3116,42 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       {
         return
       }
+      const names = options?.scopedLimitNames
+        ? yield* Ref.get(options.scopedLimitNames)
+        : { overageIncluded: undefined }
+      const limits = claudeRateLimitEventToUpdate(
+        info,
+        names,
+        base.createdAt,
+        context.usageAccountIdentity,
+      )
       // the SDK re-streams this frame on every tick. keying on the transition, not the
       // percentage, keeps a slowly-climbing window from writing a row per tick
       const key = `${info.status}:${info.rateLimitType ?? ''}`
-      if (context.lastRateLimitKey !== key)
+      const transitionChanged = context.lastRateLimitKey !== key
+      if (transitionChanged)
       {
         context.lastRateLimitKey = key
-        const resetsAt =
-          typeof info.resetsAt === 'number' ? claudeResetsAtToIso(info.resetsAt) : undefined
+      }
+      const resetsAt =
+        typeof info.resetsAt === 'number' ? claudeResetsAtToIso(info.resetsAt) : undefined
+      if (limits || transitionChanged)
+      {
         yield* offerRuntimeEvent(context, {
           ...base,
           type: 'account.rate-limits.updated',
           payload: {
-            snapshot: {
-              status: info.status,
-              ...(info.rateLimitType ? { windowId: info.rateLimitType } : {}),
-              ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
-              ...(resetsAt !== undefined ? { resetsAt } : {}),
-            },
-            // the snapshot, not the envelope. the envelope is already carried verbatim by
-            // base.raw.payload, so wrapping it again lost the shape a consumer could read
-            rateLimits: info,
+            ...(limits ? { limits } : {}),
+            ...(transitionChanged
+              ? {
+                  snapshot: {
+                    status: info.status,
+                    ...(info.rateLimitType ? { windowId: info.rateLimitType } : {}),
+                    ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
+                    ...(resetsAt !== undefined ? { resetsAt } : {}),
+                  },
+                }
+              : {}),
           },
         })
       }
@@ -3630,6 +3649,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         })
       }
 
+      const usageAccountIdentity = options?.usageAccountIdentity?.()
       const startedAt = yield* nowIso
       const threadId = input.threadId
       const existingResumeSessionId = resumeState?.resume
@@ -4243,6 +4263,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       const context: ClaudeSessionContext = {
         session,
         runtimeSessionBinding: input.runtimeSessionBinding,
+        usageAccountIdentity,
         promptQueue,
         query: queryRuntime,
         baseQueryOptions,

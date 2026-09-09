@@ -18,6 +18,8 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProviderModel,
+  type CustomModelMetadata,
+  type CustomModelMetadataEntry,
 } from '@t3tools/contracts'
 import { normalizeCustomModelSlug } from '@t3tools/shared/model'
 
@@ -27,6 +29,7 @@ import { MAX_CUSTOM_MODEL_LENGTH } from '../../modelSelection'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
+import { CustomModelMetadataEditor } from './CustomModelMetadataEditor'
 
 // placeholder text for the "add a custom model" input, keyed by driver
 // kind. Mirrors the prior hardcoded switch in `SettingsPanels.tsx` so the
@@ -52,6 +55,11 @@ interface ProviderModelsSectionProps
   // and is the array we hand back verbatim (with the new slug appended /
   // removed) via `onChange`.
   readonly customModels: ReadonlyArray<string>
+  readonly customModelMetadata?: CustomModelMetadata
+  readonly onCustomModelMetadataChange?: (
+    slug: string,
+    metadata: CustomModelMetadataEntry | null,
+  ) => void
   // server-returned model slugs hidden from the model picker.
   readonly hiddenModels: ReadonlyArray<string>
   // model slugs favorited for this provider instance.
@@ -81,6 +89,8 @@ export function ProviderModelsSection({
   driverKind,
   models,
   customModels,
+  customModelMetadata,
+  onCustomModelMetadataChange,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -389,6 +399,18 @@ export function ProviderModelsSection({
                   </Tooltip>
                 ) : null}
               </div>
+              {model.isCustom && onCustomModelMetadataChange ? (
+                <CustomModelMetadataEditor
+                  key={`${model.slug}:${JSON.stringify(customModelMetadata?.[model.slug] ?? null)}`}
+                  slug={model.slug}
+                  metadata={
+                    customModelMetadata && Object.hasOwn(customModelMetadata, model.slug)
+                      ? customModelMetadata[model.slug]
+                      : undefined
+                  }
+                  onChange={(metadata) => onCustomModelMetadataChange(model.slug, metadata)}
+                />
+              ) : null}
             </div>
           )
         })}

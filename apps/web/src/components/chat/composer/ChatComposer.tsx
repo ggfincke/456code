@@ -209,7 +209,9 @@ import { buildComposerSlashMenuItems, composerSkillInsertionText } from './compo
 import {
   blockUnknownComposerSlashCommand,
   shouldConfirmCompactComposerSlashCommand,
+  shouldOpenUsageSettings,
 } from './composerSlashCommandValidation'
+import { USAGE_LIMITS_COMMAND } from '@t3tools/shared/usageLimits'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { useEnvironmentQuery } from '../../../state/query'
 import { serverEnvironment } from '../../../state/server'
@@ -318,6 +320,7 @@ export interface ChatComposerProps
   // callbacks
   onSend: (e?: { preventDefault: () => void }) => void
   onSendProviderSlashCommand: (command: string) => void
+  onUsageLimitsCommand: () => void
   onInterrupt: () => void
   onImplementPlanWithOrchestrate: () => void
   onImplementPlanInNewThread: (variant?: PlanImplementVariant) => void
@@ -407,6 +410,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef,
     onSend,
     onSendProviderSlashCommand,
+    onUsageLimitsCommand,
     onInterrupt,
     onImplementPlanWithOrchestrate,
     onImplementPlanInNewThread,
@@ -468,6 +472,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerArchitectureContexts = composerDraft.architectureContexts
   const composerReviewComments = composerDraft.reviewComments
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds
+  const composerHasNonPromptContent =
+    composerImages.length > 0 ||
+    composerFiles.length > 0 ||
+    composerTerminalContexts.length > 0 ||
+    composerElementContexts.length > 0 ||
+    composerPreviewAnnotations.length > 0 ||
+    composerArchitectureContexts.length > 0 ||
+    composerReviewComments.length > 0
 
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt)
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage)
@@ -1835,6 +1847,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (item.type === 'provider-slash-command')
       {
+        if (
+          item.command.name === USAGE_LIMITS_COMMAND.name &&
+          !composerHasNonPromptContent &&
+          pendingUserInputs.length === 0 &&
+          !activePendingApproval
+        )
+        {
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, '', {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+            focusEditorAfterReplace: false,
+          })
+          if (applied)
+          {
+            setComposerHighlightedItemId(null)
+            onUsageLimitsCommand()
+          }
+          return
+        }
         const replacement = `/${item.command.name} `
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
@@ -1875,10 +1905,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
     },
     [
+      activePendingApproval,
       applyPromptReplacement,
       collaborationMode,
+      composerHasNonPromptContent,
       composerProviderControls,
       handleInteractionModeChange,
+      onUsageLimitsCommand,
+      pendingUserInputs.length,
       resolveActiveComposerTrigger,
     ],
   )
@@ -1963,6 +1997,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }) =>
     {
+      if (
+        pendingUserInputs.length === 0 &&
+        !activePendingApproval &&
+        shouldOpenUsageSettings({
+          text: prompt,
+          providerSlashCommands: selectedProviderSlashCommands,
+          hasNonPromptContent: composerHasNonPromptContent,
+        })
+      )
+      {
+        event?.preventDefault()
+        promptRef.current = ''
+        setPrompt('')
+        setComposerCursor(0)
+        setComposerTrigger(null)
+        setComposerHighlightedItemId(null)
+        onUsageLimitsCommand()
+        return
+      }
       if ((noProviderAvailable && !importContinuationSendBlocked) || isSendDisabled)
       {
         event?.preventDefault()
@@ -2016,6 +2069,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [
       activeThreadId,
+      activePendingApproval,
       blurMobileComposerAfterSend,
       importContinuationSendBlocked,
       composerElementContexts.length,
@@ -2025,11 +2079,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerPreviewAnnotations.length,
       composerReviewComments.length,
       composerSendState.sendableTerminalContexts.length,
+      composerHasNonPromptContent,
       isSendDisabled,
       noProviderAvailable,
       onSend,
+      onUsageLimitsCommand,
+      pendingUserInputs.length,
       prompt,
       selectedProviderSlashCommands,
+      setPrompt,
       shouldBlurMobileComposerOnSubmit,
     ],
   )

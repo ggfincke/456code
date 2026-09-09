@@ -98,6 +98,7 @@ async function hydrateClientSettings(): Promise<void>
       if (hydrationGeneration === clientSettingsHydrationGeneration)
       {
         clientSettingsHydrated = true
+        emitClientSettingsChange()
       }
     }
   })()
@@ -209,6 +210,15 @@ export function useClientSettings<T = ClientSettings>(
 {
   const settings = useClientSettingsValue()
   return useMemo(() => (selector ? selector(settings) : (settings as T)), [selector, settings])
+}
+
+export function useClientSettingsHydrated(): boolean
+{
+  return useSyncExternalStore(
+    subscribeClientSettings,
+    () => clientSettingsHydrated,
+    () => false,
+  )
 }
 
 // read current settings for one environment, merged with client-local preferences.

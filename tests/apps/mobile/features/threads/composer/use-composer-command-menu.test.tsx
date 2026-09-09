@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   onChangeDraftMessage: vi.fn(),
   onUpdateInteractionMode: vi.fn(),
   onUpdateModelSelection: vi.fn(),
+  onUsageLimits: vi.fn(),
   refreshProvidersAtom: {},
   refreshProviders: vi.fn(async () => ({ _tag: 'Failure' as const })),
 }))
@@ -91,6 +92,7 @@ function Probe(props: {
   readonly enabled?: boolean
   readonly environmentId?: EnvironmentId | null
   readonly cwd?: string | null
+  readonly onUsageLimits?: () => void
 })
 {
   menu = useComposerCommandMenu({
@@ -105,6 +107,7 @@ function Probe(props: {
     onChangeDraftMessage: mocks.onChangeDraftMessage,
     onUpdateInteractionMode: mocks.onUpdateInteractionMode,
     onUpdateModelSelection: mocks.onUpdateModelSelection,
+    onUsageLimits: props.onUsageLimits,
   })
   return null
 }
@@ -120,6 +123,37 @@ afterEach(() =>
 {
   act(() => root.unmount())
   vi.useRealTimers()
+})
+
+it('runs the local usage action without leaving its slash command in the draft', () =>
+{
+  const usageProvider = {
+    ...provider,
+    slashCommands: [{ name: 'usage-limits', description: 'Show usage limits' }],
+  }
+  function UsageProbe()
+  {
+    menu = useComposerCommandMenu({
+      draftMessage: '/usage-limits',
+      environmentId,
+      projectCwd: '/project-one',
+      selectedProviderStatus: usageProvider,
+      interactionMode: { baseMode: 'default', orchestrate: false },
+      modelOptions,
+      hasThread: true,
+      onChangeDraftMessage: mocks.onChangeDraftMessage,
+      onUpdateInteractionMode: mocks.onUpdateInteractionMode,
+      onUpdateModelSelection: mocks.onUpdateModelSelection,
+      onUsageLimits: mocks.onUsageLimits,
+    })
+    return null
+  }
+
+  act(() => root.render(<UsageProbe />))
+  const usage = menu.items.find((item) => item.id === 'pcmd:usage-limits')!
+  act(() => menu.onSelect(usage))
+  expect(mocks.onChangeDraftMessage).toHaveBeenLastCalledWith('')
+  expect(mocks.onUsageLimits).toHaveBeenCalledOnce()
 })
 
 it('locks command mutations during incoming-share transfer and retains mode state and model routing', () =>

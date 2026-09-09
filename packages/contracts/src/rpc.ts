@@ -164,6 +164,7 @@ import {
   ServerSelfUpdateInput,
   ServerSelfUpdateResult,
   ServerTraceDiagnosticsResult,
+  HostResourcesSnapshot,
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
@@ -173,6 +174,7 @@ import {
   ServerUpsertKeybindingResult,
 } from './server.ts'
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from './settings.ts'
+import { UsageReadError, UsageSummary, UsageSummaryInput } from './usage.ts'
 import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
@@ -321,9 +323,11 @@ export const WS_METHODS = {
   serverRemoveKeybinding: 'server.removeKeybinding',
   serverGetSettings: 'server.getSettings',
   serverUpdateSettings: 'server.updateSettings',
+  serverGetUsageSummary: 'server.getUsageSummary',
   serverDiscoverSourceControl: 'server.discoverSourceControl',
   serverGetTraceDiagnostics: 'server.getTraceDiagnostics',
   serverGetProcessDiagnostics: 'server.getProcessDiagnostics',
+  serverGetHostResources: 'server.getHostResources',
   serverGetProcessResourceHistory: 'server.getProcessResourceHistory',
   serverSignalProcess: 'server.signalProcess',
 
@@ -419,6 +423,12 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
 })
 
+export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
+  payload: UsageSummaryInput,
+  success: UsageSummary,
+  error: Schema.Union([UsageReadError, EnvironmentAuthorizationError]),
+})
+
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
   success: SourceControlDiscoveryResult,
@@ -434,6 +444,12 @@ export const WsServerGetTraceDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetTrace
 export const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetProcessDiagnostics, {
   payload: Schema.Struct({}),
   success: ServerProcessDiagnosticsResult,
+  error: EnvironmentAuthorizationError,
+})
+
+export const WsServerGetHostResourcesRpc = Rpc.make(WS_METHODS.serverGetHostResources, {
+  payload: Schema.Struct({}),
+  success: HostResourcesSnapshot,
   error: EnvironmentAuthorizationError,
 })
 
@@ -998,6 +1014,8 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
   payload: Schema.Struct({
     // older clients cannot decode the new event union member.
     environmentThemes: Schema.optionalKey(Schema.Boolean),
+    // clients opt in before the server advertises its locally-handled command
+    usageLimitsCommand: Schema.optionalKey(Schema.Boolean),
   }),
   success: ServerConfigStreamEvent,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
@@ -1074,9 +1092,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerGetUsageSummaryRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetHostResourcesRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
   WsCloudGetRelayClientStatusRpc,

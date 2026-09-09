@@ -67,7 +67,10 @@ export function buildInitialGrokProviderSnapshot(
   return Effect.gen(function* ()
   {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso)
-    const models = grokModelsFromSettings(grokSettings.customModels)
+    const models = grokModelsFromSettings(
+      grokSettings.customModels,
+      grokSettings.customModelMetadata,
+    )
 
     if (!grokSettings.enabled)
     {
@@ -104,10 +107,16 @@ export function buildInitialGrokProviderSnapshot(
 
 function grokModelsFromSettings(
   customModels: ReadonlyArray<string> | undefined,
+  customModelMetadata: GrokSettings['customModelMetadata'],
   builtInModels: ReadonlyArray<ServerProviderModel> = GROK_BUILT_IN_MODELS,
 ): ReadonlyArray<ServerProviderModel>
 {
-  return providerModelsFromSettings(builtInModels, customModels ?? [], EMPTY_CAPABILITIES)
+  return providerModelsFromSettings(
+    builtInModels,
+    customModels ?? [],
+    EMPTY_CAPABILITIES,
+    customModelMetadata,
+  )
 }
 
 function buildGrokDiscoveredModelsFromSessionModelState(
@@ -185,7 +194,10 @@ export const checkGrokProviderStatus = Effect.fn('checkGrokProviderStatus')(func
 >
 {
   const checkedAt = DateTime.formatIso(yield* DateTime.now)
-  const fallbackModels = grokModelsFromSettings(grokSettings.customModels)
+  const fallbackModels = grokModelsFromSettings(
+    grokSettings.customModels,
+    grokSettings.customModelMetadata,
+  )
 
   if (!grokSettings.enabled)
   {
@@ -318,7 +330,11 @@ export const checkGrokProviderStatus = Effect.fn('checkGrokProviderStatus')(func
   const discoveredModels = discoveryExit.value.value
   const models =
     discoveredModels.length > 0
-      ? grokModelsFromSettings(grokSettings.customModels, discoveredModels)
+      ? grokModelsFromSettings(
+          grokSettings.customModels,
+          grokSettings.customModelMetadata,
+          discoveredModels,
+        )
       : fallbackModels
   const skills = yield* discoverGrokSkills(grokSettings, environment).pipe(
     Effect.tapError((cause) => Effect.logDebug('Grok skill discovery failed.', { cause })),

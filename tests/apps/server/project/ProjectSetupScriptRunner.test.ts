@@ -11,6 +11,7 @@ import * as Schema from 'effect/Schema'
 import * as ProjectionSnapshotQuery from '../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import * as TerminalManager from '../../../../apps/server/src/terminal/Manager.ts'
 import * as ProjectSetupScriptRunner from '../../../../apps/server/src/project/ProjectSetupScriptRunner.ts'
+import * as ServerSettings from '../../../../apps/server/src/serverSettings.ts'
 import { makeProjectionSnapshotQueryStub } from '../projectionSnapshotQueryTestHelpers.ts'
 
 const isProjectSetupScriptOperationError = Schema.is(
@@ -60,10 +61,12 @@ const makeTerminalManagerLayer = (
 const testLayer = (
   project: OrchestrationProject,
   terminal: Pick<TerminalManager.TerminalManager['Service'], 'open' | 'write'>,
+  settings: Parameters<typeof ServerSettings.layerTest>[0] = {},
 ) =>
   ProjectSetupScriptRunner.layer.pipe(
     Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
     Layer.provideMerge(makeTerminalManagerLayer(terminal)),
+    Layer.provideMerge(ServerSettings.layerTest(settings)),
   )
 
 describe('ProjectSetupScriptRunner', () =>
@@ -153,6 +156,72 @@ describe('ProjectSetupScriptRunner', () =>
       }).pipe(Effect.provide(testLayer(project, { open, write })))
     },
   )
+
+  it.effect('uses an explicit inherited default setup script without rewriting the project', () =>
+  {
+    const open = vi.fn(() =>
+      Effect.succeed({
+        threadId: 'thread-1',
+        terminalId: 'setup-default-setup',
+        cwd: '/repo/worktrees/a',
+        worktreePath: '/repo/worktrees/a',
+        status: 'running' as const,
+        pid: 123,
+        history: '',
+        exitCode: null,
+        exitSignal: null,
+        label: 'setup-default-setup',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+    const write = vi.fn(() => Effect.void)
+    const project = makeProject([
+      {
+        id: 'legacy-setup',
+        name: 'Legacy setup',
+        command: 'legacy install',
+        icon: 'configure',
+        runOnWorktreeCreate: true,
+      },
+    ])
+
+    return Effect.gen(function* ()
+    {
+      const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner
+      const result = yield* runner.runForThread({
+        threadId: 'thread-1',
+        projectId: 'project-1',
+        worktreePath: '/repo/worktrees/a',
+      })
+
+      expect(result).toMatchObject({ scriptId: 'default-setup' })
+      expect(write).toHaveBeenCalledWith({
+        threadId: 'thread-1',
+        terminalId: 'setup-default-setup',
+        data: 'pnpm install\r',
+      })
+      expect(project.scripts[0]?.id).toBe('legacy-setup')
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          project,
+          { open, write },
+          {
+            defaultProjectScripts: [
+              {
+                id: 'default-setup',
+                name: 'Default setup',
+                command: 'pnpm install',
+                icon: 'configure',
+                runOnWorktreeCreate: true,
+              },
+            ],
+            projectScriptOverrides: { [project.id]: null },
+          },
+        ),
+      ),
+    )
+  })
 
   it.effect('keeps terminal failures as the exact cause of a structured operation error', () =>
   {

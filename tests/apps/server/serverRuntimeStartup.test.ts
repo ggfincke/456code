@@ -22,6 +22,7 @@ import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Ser
 import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import * as AnalyticsService from '../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
 import * as ServerRuntimeStartup from '../../../apps/server/src/serverRuntimeStartup.ts'
+import * as ServerSettings from '../../../apps/server/src/serverSettings.ts'
 import { makeProjectionSnapshotQueryStub } from './projectionSnapshotQueryTestHelpers.ts'
 
 it.effect('enqueueCommand waits for readiness and then drains queued work', () =>
@@ -303,6 +304,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets returns existing project and threa
   {
     const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([])
     const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+      Effect.provide(ServerSettings.layerTest()),
       Effect.provideService(ServerConfig.ServerConfig, {
         cwd: '/tmp/startup-project',
         autoBootstrapProjectFromCwd: true,
@@ -356,6 +358,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets creates a project and thread when 
   {
     const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([])
     const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+      Effect.provide(ServerSettings.layerTest()),
       Effect.provideService(ServerConfig.ServerConfig, {
         cwd: '/tmp/startup-project',
         autoBootstrapProjectFromCwd: true,
@@ -403,6 +406,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
     const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([])
 
     const error = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+      Effect.provide(ServerSettings.layerTest()),
       Effect.provideService(ServerConfig.ServerConfig, {
         cwd: '/tmp/startup-project',
         autoBootstrapProjectFromCwd: true,

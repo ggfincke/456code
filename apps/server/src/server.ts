@@ -26,6 +26,7 @@ import { fixPath } from './os-jank.ts'
 import { websocketRpcRouteLayer } from './ws.ts'
 import { ImportContinuationLive } from './import/continuation/continuation.ts'
 import * as ImportRuntime from './import/importRuntime.ts'
+import * as UsageSummary from './usage/UsageSummaryService.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import * as RemoteOpenTargets from './environment/RemoteOpenTargets.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from './persistence/Layers/Sqlite.ts'
@@ -66,6 +67,7 @@ import * as ServerRuntimeStartup from './serverRuntimeStartup.ts'
 import { OrchestrationReactorLive } from './orchestration/Layers/OrchestrationReactor.ts'
 import { RuntimeReceiptBusLive } from './orchestration/Layers/RuntimeReceiptBus.ts'
 import { ProviderRuntimeIngestionLive } from './orchestration/Layers/ProviderRuntimeIngestion.ts'
+import { ProviderUsageLimitsIngestionLive } from './provider/Layers/ProviderUsageLimitsIngestion.ts'
 import { ProviderCommandReactorLive } from './orchestration/Layers/ProviderCommandReactor.ts'
 import { CheckpointReactorLive } from './orchestration/Layers/CheckpointReactor.ts'
 import { ArchitectureAutoAnalysisReactorLive } from './orchestration/Layers/ArchitectureAutoAnalysisReactor.ts'
@@ -101,6 +103,7 @@ import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from './auth/http
 import * as ServerSecretStore from './auth/ServerSecretStore.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import * as ProcessDiagnostics from './diagnostics/ProcessDiagnostics.ts'
+import * as HostResources from './diagnostics/HostResources.ts'
 import * as ProcessResourceMonitor from './diagnostics/ProcessResourceMonitor.ts'
 import * as TraceDiagnostics from './diagnostics/TraceDiagnostics.ts'
 import * as WorkerBrokerStore from './workers/WorkerBrokerStore.ts'
@@ -203,6 +206,7 @@ const PlatformServicesLive = Layer.unwrap(
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
+  Layer.provideMerge(ProviderUsageLimitsIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ArchitectureAutoAnalysisReactorLive),
@@ -512,8 +516,16 @@ const RuntimeDependenciesLive = ImportRuntimeLayerLive.pipe(
   Layer.provide(NetService.layer),
 )
 
-const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
+const RuntimeDependenciesWithUsageLive = UsageSummary.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
+)
+
+const RuntimeDependenciesWithCapacityLive = HostResources.layer.pipe(
+  Layer.provideMerge(RuntimeDependenciesWithUsageLive),
+)
+
+const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
+  Layer.provideMerge(RuntimeDependenciesWithCapacityLive),
   Layer.provideMerge(McpCredentialBrokerLayerLive),
 )
 

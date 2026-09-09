@@ -2,6 +2,7 @@
 // starts draft threads with project and machine defaults
 
 import { useAtomValue } from '@effect/atom-react'
+import { chooseLoadBalancedEnvironment } from '@t3tools/client-runtime/load-balancing'
 import {
   scopedProjectKey,
   scopeProjectRef,
@@ -13,7 +14,7 @@ import {
   type ScopedProjectRef,
 } from '@t3tools/contracts'
 import { useParams, useRouter } from '@tanstack/react-router'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import {
   markPromotedDraftThreadByRef,
   type ComposerThreadDraftState,
@@ -31,7 +32,9 @@ import {
 } from '../logicalProject'
 import { readThreadShell, useProjects, useThread } from '../state/entities'
 import { resolveNewDraftStartFromOrigin } from '../lib/chatThreadActions'
-import { primaryServerSettingsAtom } from '../state/server'
+import { primaryServerSettingsAtom, serverEnvironment } from '../state/server'
+import { useEnvironments } from '../state/environments'
+import { useAtomCommand } from '../state/use-atom-command'
 import { resolveThreadRouteTarget } from '../threadRoutes'
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from '../uiStateStore'
 import { useClientSettings } from './useSettings'
@@ -64,7 +67,28 @@ export function useNewThreadHandler()
   // the decoded defaults ("local" mode, current branch), since nothing can
   // set those values on a remote server.
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom)
+  const loadBalancingEnabled = useClientSettings((settings) => settings.loadBalancingEnabled)
+  const loadBalancingWeights = useClientSettings((settings) => settings.loadBalancingWeights)
+  const { environments } = useEnvironments()
+  const readHostResources = useAtomCommand(serverEnvironment.readHostResources, {
+    reportFailure: false,
+  })
+  const newThreadRequestRef = useRef(0)
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings)
+  const balancingStateRef = useRef({
+    environments,
+    projects,
+    projectGroupingSettings,
+    loadBalancingEnabled,
+    loadBalancingWeights,
+  })
+  balancingStateRef.current = {
+    environments,
+    projects,
+    projectGroupingSettings,
+    loadBalancingEnabled,
+    loadBalancingWeights,
+  }
   const router = useRouter()
   const getCurrentRouteTarget = useCallback(() =>
   {
@@ -86,6 +110,8 @@ export function useNewThreadHandler()
       },
     ): Promise<void> =>
     {
+      const requestId = ++newThreadRequestRef.current
+      const initialLocation = router.state.location.href
       const {
         getComposerDraft,
         getDraftSessionByLogicalProjectKey,
@@ -148,6 +174,11 @@ export function useNewThreadHandler()
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       )
+      const projectDefaultModelSelection =
+        project?.defaultModelSelection ??
+        environments.find((environment) => environment.environmentId === projectRef.environmentId)
+          ?.serverConfig?.settings.defaultModelSelection ??
+        null
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef)
@@ -286,7 +317,134 @@ export function useNewThreadHandler()
       const initialEnvMode = options?.envMode ?? primaryServerSettings.defaultThreadEnvMode
       return (async () =>
       {
-        setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
+        let targetProject = project
+        if (
+          loadBalancingEnabled &&
+          project &&
+          !hasBranchOption &&
+          !hasWorktreePathOption &&
+          !hasEnvModeOption &&
+          !hasStartFromOriginOption &&
+          !options?.carryComposerContent
+        )
+        {
+          const modelSelection = projectDefaultModelSelection
+          const sourceProvider = environments
+            .find((environment) => environment.environmentId === project.environmentId)
+            ?.serverConfig?.providers.find(
+              (provider) => provider.instanceId === modelSelection?.instanceId,
+            )
+          const candidates =
+            modelSelection && sourceProvider
+              ? projects.filter((candidate) =>
+                {
+                  if (
+                    deriveLogicalProjectKeyFromSettings(candidate, projectGroupingSettings) !==
+                    logicalProjectKey
+                  )
+                    return false
+                  const environment = environments.find(
+                    (entry) => entry.environmentId === candidate.environmentId,
+                  )
+                  if (
+                    environment?.connection.phase !== 'connected' ||
+                    environment.serverConfig?.environment.capabilities.hostResources !== true
+                  )
+                    return false
+                  const provider = environment.serverConfig.providers.find(
+                    (entry) => entry.instanceId === modelSelection.instanceId,
+                  )
+                  return (
+                    provider?.enabled === true &&
+                    provider.status === 'ready' &&
+                    provider.driver === sourceProvider.driver &&
+                    provider.models.some((model) => model.slug === modelSelection.model)
+                  )
+                })
+              : []
+          if (candidates.length > 1)
+          {
+            const measurements = await Promise.all(
+              candidates.map(async (candidate) =>
+              {
+                const requestedAt = Date.now()
+                let timeout: ReturnType<typeof setTimeout> | undefined
+                try
+                {
+                  const result = await Promise.race([
+                    readHostResources({ environmentId: candidate.environmentId, input: {} }),
+                    new Promise<null>((resolve) =>
+                    {
+                      timeout = setTimeout(() => resolve(null), 15_000)
+                    }),
+                  ])
+                  return {
+                    environmentId: candidate.environmentId,
+                    resources: result?._tag === 'Success' ? result.value : null,
+                    requestedAt,
+                    receivedAt: Date.now(),
+                  }
+                }
+                finally
+                {
+                  if (timeout !== undefined) clearTimeout(timeout)
+                }
+              }),
+            )
+            const currentState = balancingStateRef.current
+            const selectedEnvironment = currentState.loadBalancingEnabled
+              ? chooseLoadBalancedEnvironment(
+                  measurements.map((measurement) => ({
+                    ...measurement,
+                    weight: currentState.loadBalancingWeights[measurement.environmentId] ?? 100,
+                  })),
+                  Date.now(),
+                )
+              : null
+            const selectedProject = candidates.find(
+              (candidate) => candidate.environmentId === selectedEnvironment,
+            )
+            const currentEnvironment = currentState.environments.find(
+              (candidate) => candidate.environmentId === selectedEnvironment,
+            )
+            const currentProject =
+              selectedProject &&
+              currentState.projects.find(
+                (candidate) =>
+                  candidate.id === selectedProject.id &&
+                  candidate.environmentId === selectedEnvironment,
+              )
+            const currentProvider = currentEnvironment?.serverConfig?.providers.find(
+              (candidate) => candidate.instanceId === modelSelection?.instanceId,
+            )
+            // a host or project may disappear while its resource request is in flight
+            if (
+              currentProject &&
+              currentEnvironment?.connection.phase === 'connected' &&
+              currentEnvironment.serverConfig?.environment.capabilities.hostResources === true &&
+              deriveLogicalProjectKeyFromSettings(
+                currentProject,
+                currentState.projectGroupingSettings,
+              ) === logicalProjectKey &&
+              currentProvider?.enabled === true &&
+              currentProvider.status === 'ready' &&
+              currentProvider.driver === sourceProvider?.driver &&
+              currentProvider.models.some((model) => model.slug === modelSelection?.model)
+            )
+            {
+              targetProject = currentProject
+            }
+          }
+        }
+        if (
+          requestId !== newThreadRequestRef.current ||
+          router.state.location.href !== initialLocation
+        )
+          return
+        const targetProjectRef = targetProject
+          ? scopeProjectRef(targetProject.environmentId, targetProject.id)
+          : projectRef
+        setLogicalProjectDraftThreadId(logicalProjectKey, targetProjectRef, draftId, {
           threadId,
           createdAt,
           branch: options?.branch ?? null,
@@ -301,7 +459,7 @@ export function useNewThreadHandler()
           runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
           ...(carryCollaborationMode ? { collaborationMode: carryCollaborationMode } : {}),
         })
-        applyStickyState(draftId, project?.defaultModelSelection)
+        applyStickyState(draftId, projectDefaultModelSelection)
         carryComposerContentTo(draftId)
 
         await router.navigate({
@@ -311,7 +469,17 @@ export function useNewThreadHandler()
         })
       })()
     },
-    [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, projects, router],
+    [
+      environments,
+      getCurrentRouteTarget,
+      loadBalancingEnabled,
+      loadBalancingWeights,
+      primaryServerSettings,
+      projectGroupingSettings,
+      projects,
+      readHostResources,
+      router,
+    ],
   )
 }
 

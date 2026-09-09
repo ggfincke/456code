@@ -143,6 +143,7 @@ export function mergeEnvironmentThread(
     snoozedUntil: shell.snoozedUntil,
     snoozedAt: shell.snoozedAt,
     pinnedAt: shell.pinnedAt,
+    activeOrderKey: shell.activeOrderKey,
     session: shell.session,
     approvalOutcomes: mergeApprovalOutcomes(detail.approvalOutcomes, shell.approvalOutcomes),
   }

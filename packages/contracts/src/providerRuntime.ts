@@ -18,6 +18,7 @@ import {
 } from './baseSchemas.ts'
 import { ProviderInstanceId, ProviderDriverKind } from './providerInstance.ts'
 import { ProviderApprovalOption } from './orchestration.ts'
+import { ProviderUsageLimitsUpdate } from './providerUsageLimits.ts'
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown)
@@ -611,7 +612,7 @@ export type RateLimitWindowSnapshot = typeof RateLimitWindowSnapshot.Type
 // pre-failure warning was received and discarded. `snapshot` is the readable half
 const AccountRateLimitsUpdatedPayload = Schema.Struct({
   snapshot: Schema.optional(RateLimitWindowSnapshot),
-  rateLimits: Schema.Unknown,
+  limits: Schema.optional(ProviderUsageLimitsUpdate),
 })
 export type AccountRateLimitsUpdatedPayload = typeof AccountRateLimitsUpdatedPayload.Type
 

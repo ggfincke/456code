@@ -43,6 +43,8 @@ export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
+  // whole-host capacity can be read by an already-authorized connected client.
+  hostResources: Schema.optionalKey(Schema.Boolean),
   attachmentUploads: Schema.optionalKey(Schema.Boolean),
   environmentThemes: Schema.optionalKey(Schema.Boolean),
   fileAttachments: Schema.optionalKey(
@@ -62,6 +64,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   // server understands thread.pin / thread.unpin commands. Same
   // version-skew contract as threadSettlement.
   threadPinning: Schema.optionalKey(Schema.Boolean),
+  // server persists a manual active-list position through thread.active.reorder.
+  threadActiveReorder: Schema.optionalKey(Schema.Boolean),
   // the update path clients should offer for this server. Absent on
   // servers that must be relaunched manually (dev checkouts, Windows
   // foreground runs, pre-update servers).

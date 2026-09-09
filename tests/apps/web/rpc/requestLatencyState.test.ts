@@ -81,17 +81,16 @@ describe('requestLatencyState', () =>
     expect(getSlowRpcAckRequests()).toEqual([])
   })
 
-  it('keeps ignoring untracked methods when a display tag is supplied', () =>
-  {
-    trackRpcRequestSent(
-      '1',
-      WS_METHODS.previewAutomationConnect,
-      `${WS_METHODS.previewAutomationConnect} · environment-primary`,
-    )
-    vi.advanceTimersByTime(SLOW_RPC_ACK_THRESHOLD_MS * 2)
+  it.each([WS_METHODS.previewAutomationConnect, WS_METHODS.serverGetUsageSummary])(
+    'keeps ignoring %s when a display tag is supplied',
+    (method) =>
+    {
+      trackRpcRequestSent('1', method, `${method} · environment-primary`)
+      vi.advanceTimersByTime(SLOW_RPC_ACK_THRESHOLD_MS * 2)
 
-    expect(getSlowRpcAckRequests()).toEqual([])
-  })
+      expect(getSlowRpcAckRequests()).toEqual([])
+    },
+  )
 
   it('gives provider updates a longer threshold before warning', () =>
   {

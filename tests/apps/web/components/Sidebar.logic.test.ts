@@ -105,6 +105,21 @@ describe('sidebar project scope combobox', () =>
 
 describe('sortThreadsForSidebarV2', () =>
 {
+  it('retains persisted arrangement while fresh tasks lead after reopening', () =>
+  {
+    const tasks = [
+      { id: 'later', createdAt: '2026-03-09T12:00:00.000Z', activeOrderKey: 't' },
+      { id: 'first', createdAt: '2026-03-09T08:00:00.000Z', activeOrderKey: 'h' },
+      { id: 'fresh', createdAt: '2026-03-09T13:00:00.000Z', activeOrderKey: null },
+    ]
+    expect(sortThreadsForSidebarV2(tasks).map((task) => task.id)).toEqual([
+      'fresh',
+      'first',
+      'later',
+    ])
+    expect(tasks.map((task) => task.id)).toEqual(['later', 'first', 'fresh'])
+  })
+
   it('surfaces a reactivated thread without using malformed timestamps', () =>
   {
     const sorted = sortThreadsForSidebarV2([

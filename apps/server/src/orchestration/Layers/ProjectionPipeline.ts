@@ -1048,6 +1048,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             snoozedUntil: null,
             snoozedAt: null,
             pinnedAt: null,
+            activeOrderKey: null,
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
@@ -1105,6 +1106,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             settledOverride: 'settled',
             settledAt: event.payload.settledAt,
             unsettledAt: null,
+            activeOrderKey: null,
             updatedAt: event.payload.updatedAt,
           })
           return
@@ -1221,6 +1223,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
+              : {}),
+            ...(event.payload.activeOrderKey !== undefined
+              ? { activeOrderKey: event.payload.activeOrderKey }
               : {}),
             updatedAt: event.payload.updatedAt,
           })

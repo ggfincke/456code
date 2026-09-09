@@ -226,6 +226,34 @@ it.layer(NodeServices.layer)('providerStatusCache', (it) =>
     )
   })
 
+  it('does not hydrate custom models removed from current settings', () =>
+  {
+    const builtIn = {
+      slug: 'gpt-5.4',
+      name: 'GPT-5.4',
+      isCustom: false,
+      capabilities: emptyCapabilities,
+    } as const
+    const cachedCodex = makeProvider(CODEX_DRIVER, {
+      models: [
+        builtIn,
+        {
+          slug: 'removed-custom',
+          name: 'Removed custom',
+          isCustom: true,
+          capabilities: emptyCapabilities,
+        },
+      ],
+    })
+    const fallbackCodex = makeProvider(CODEX_DRIVER, { models: [builtIn] })
+
+    assert.deepStrictEqual(
+      hydrateCachedProvider({ cachedProvider: cachedCodex, fallbackProvider: fallbackCodex })
+        .models,
+      [builtIn],
+    )
+  })
+
   it('ignores stale cached enabled state when the provider is now disabled', () =>
   {
     const cachedCodex = makeProvider(CODEX_DRIVER, {

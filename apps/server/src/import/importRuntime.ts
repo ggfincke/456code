@@ -26,6 +26,7 @@ import * as ProjectionSnapshotQuery from '../orchestration/Services/ProjectionSn
 import { AttachmentLifecycleRepository } from '../persistence/Services/AttachmentLifecycle.ts'
 import { ImportReplacementIntentRepository } from '../persistence/Services/ImportReplacementIntents.ts'
 import * as ProviderRegistry from '../provider/Services/ProviderRegistry.ts'
+import * as RepositoryIdentityResolver from '../project/RepositoryIdentityResolver.ts'
 import * as ServerSettings from '../serverSettings.ts'
 import * as WorkspacePaths from '../workspace/WorkspacePaths.ts'
 import * as ImportDiscovery from './discovery/discovery.ts'
@@ -153,6 +154,7 @@ export const make = Effect.gen(function* ()
   const projectionPipeline = yield* OrchestrationProjectionPipeline
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry
+  const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver
   const replacementIntents = yield* ImportReplacementIntentRepository
   const serverSettings = yield* ServerSettings.ServerSettingsService
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths
@@ -416,6 +418,7 @@ export const make = Effect.gen(function* ()
         .getActiveProjectByWorkspaceRoot(normalizedRoot)
         .pipe(Effect.map(Option.match({ onNone: () => null, onSome: (project) => project.id }))),
     normalizeWorkspaceRoot: (workspaceRoot) => workspacePaths.normalizeWorkspaceRoot(workspaceRoot),
+    resolveRepositoryIdentity: repositoryIdentityResolver.resolve,
     scanAcpSource: (descriptor) =>
       scanAcpImportCatalog(descriptor.connection).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),

@@ -35,7 +35,14 @@ describe('deriveProviderModelsForDisplay', () =>
       deriveProviderModelsForDisplay({
         liveModels,
         customModels: ['kept-custom'],
-      }).map((model) => model.slug),
-    ).toEqual(['server-model', 'kept-custom'])
+        customModelMetadata: {
+          'kept-custom': { name: 'Current configured name' },
+          orphan: { name: 'Orphan' },
+        },
+      }).map((model) => ({ slug: model.slug, name: model.name })),
+    ).toEqual([
+      { slug: 'server-model', name: 'Server Model' },
+      { slug: 'kept-custom', name: 'Current configured name' },
+    ])
   })
 })

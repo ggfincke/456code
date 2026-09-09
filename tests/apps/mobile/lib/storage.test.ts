@@ -207,6 +207,31 @@ describe('mobile connection storage', () =>
     await expect(loadPreferences()).resolves.toEqual({ baseFontSize: 17 })
   })
 
+  it('persists usage selection across reloads without losing explicit none or other preferences', async () =>
+  {
+    const remote = EnvironmentId.make('remote')
+    await savePreferencesPatch({ baseFontSize: 19, usageEnvironmentIds: [remote] })
+    await expect(loadPreferences()).resolves.toMatchObject({
+      baseFontSize: 19,
+      usageEnvironmentIds: [remote],
+    })
+    await savePreferencesPatch({ usageEnvironmentIds: [] })
+    await expect(loadPreferences()).resolves.toMatchObject({
+      baseFontSize: 19,
+      usageEnvironmentIds: [],
+    })
+    await savePreferencesPatch({ usageEnvironmentIds: null })
+    await expect(loadPreferences()).resolves.toMatchObject({
+      baseFontSize: 19,
+      usageEnvironmentIds: null,
+    })
+    mocks.setPreferencesJson(
+      JSON.stringify({ usageEnvironmentIds: [remote, remote, 42, ''] }),
+      Date.now() + 1,
+    )
+    await expect(loadPreferences()).resolves.toMatchObject({ usageEnvironmentIds: [remote] })
+  })
+
   it('falls back to secure storage when SQLite cannot save preferences', async () =>
   {
     mocks.setDatabaseFailures(true, true)

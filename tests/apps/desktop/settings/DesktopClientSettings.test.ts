@@ -16,6 +16,9 @@ import * as DesktopEnvironment from '../../../../apps/desktop/src/app/DesktopEnv
 import * as DesktopClientSettings from '../../../../apps/desktop/src/settings/DesktopClientSettings.ts'
 
 const clientSettings: ClientSettings = {
+  loadBalancingEnabled: false,
+  loadBalancingWeights: {},
+  onboardingCompletedAt: null,
   autoOpenPlanSidebar: false,
   browserDefaultViewport: {
     _tag: 'preset',

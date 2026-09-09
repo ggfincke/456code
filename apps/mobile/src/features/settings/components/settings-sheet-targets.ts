@@ -2,4 +2,8 @@
 // define settings sheet target
 
 export type SettingsSheetTarget =
-  'SettingsEnvironments' | 'SettingsArchive' | 'SettingsAppearance' | 'SettingsClientStorage'
+  | 'SettingsEnvironments'
+  | 'SettingsUsage'
+  | 'SettingsArchive'
+  | 'SettingsAppearance'
+  | 'SettingsClientStorage'

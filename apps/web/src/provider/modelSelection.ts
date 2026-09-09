@@ -2,7 +2,6 @@
 // resolves provider model selection state
 import {
   DEFAULT_TEXT_GENERATION_MODEL,
-  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   type ModelSelection,
   ProviderDriverKind,
@@ -12,6 +11,8 @@ import {
 import {
   createModelSelection,
   normalizeCustomModelSlug,
+  readCustomModelEntries,
+  type CustomModelDefinition,
   resolveSelectableModel,
 } from '@t3tools/shared/model'
 import { UnifiedSettings } from '@t3tools/contracts/settings'
@@ -45,7 +46,7 @@ function readInstanceCustomModels(
   settings: UnifiedSettings,
   instanceId: ProviderInstanceId,
   driverKind: ProviderDriverKind,
-): ReadonlyArray<string>
+): ReadonlyArray<CustomModelDefinition>
 {
   const instance = settings.providerInstances?.[instanceId]
   const config = instance?.config
@@ -54,7 +55,7 @@ function readInstanceCustomModels(
     const value = (config as Record<string, unknown>).customModels
     if (Array.isArray(value))
     {
-      return value.filter((entry): entry is string => typeof entry === 'string')
+      return readCustomModelEntries(value, (config as Record<string, unknown>).customModelMetadata)
     }
   }
   const defaultInstanceId = defaultInstanceIdForDriver(driverKind)
@@ -68,7 +69,10 @@ function readInstanceCustomModels(
     const customModels = (legacyConfig as Record<string, unknown>).customModels
     if (Array.isArray(customModels))
     {
-      return customModels.filter((entry): entry is string => typeof entry === 'string')
+      return readCustomModelEntries(
+        customModels,
+        (legacyConfig as Record<string, unknown>).customModelMetadata,
+      )
     }
   }
   return []
@@ -188,7 +192,9 @@ export function getAppModelOptions(
 ): AppModelOption[]
 {
   const rawModels = getProviderModels(providers, provider)
-  const options: AppModelOption[] = rawModels.map(toAppModelOption)
+  const options: AppModelOption[] = rawModels
+    .filter((model) => !model.isCustom)
+    .map(toAppModelOption)
   const seen = new Set(options.map((option) => option.slug))
   const builtInModelSlugs = new Set(
     Arr.filterMap(getProviderModels(providers, provider), (model) =>
@@ -202,7 +208,11 @@ export function getAppModelOptions(
   // see the user's authored custom models.
   const defaultInstanceId = defaultInstanceIdForDriver(provider)
   const customModels = readInstanceCustomModels(settings, defaultInstanceId, provider)
-  for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs))
+  const customBySlug = new Map(customModels.map((model) => [model.slug, model]))
+  for (const slug of normalizeCustomModelSlugs(
+    customModels.map((model) => model.slug),
+    builtInModelSlugs,
+  ))
   {
     if (seen.has(slug))
     {
@@ -212,7 +222,7 @@ export function getAppModelOptions(
     seen.add(slug)
     options.push({
       slug,
-      name: slug,
+      name: customBySlug.get(slug)?.name ?? slug,
       isCustom: true,
     })
   }
@@ -242,7 +252,9 @@ export function getAppModelOptionsForInstance(
   selectedModel?: string | null,
 ): AppModelOption[]
 {
-  const options: AppModelOption[] = entry.models.map(toAppModelOption)
+  const options: AppModelOption[] = entry.models
+    .filter((model) => !model.isCustom)
+    .map(toAppModelOption)
   const seen = new Set(options.map((option) => option.slug))
   const builtInModelSlugs = new Set(
     Arr.filterMap(entry.models, (model) =>
@@ -251,7 +263,11 @@ export function getAppModelOptionsForInstance(
   )
 
   const customModels = readInstanceCustomModels(settings, entry.instanceId, entry.driverKind)
-  for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs))
+  const customBySlug = new Map(customModels.map((model) => [model.slug, model]))
+  for (const slug of normalizeCustomModelSlugs(
+    customModels.map((model) => model.slug),
+    builtInModelSlugs,
+  ))
   {
     if (seen.has(slug))
     {
@@ -259,7 +275,7 @@ export function getAppModelOptionsForInstance(
     }
 
     seen.add(slug)
-    options.push({ slug, name: slug, isCustom: true })
+    options.push({ slug, name: customBySlug.get(slug)?.name ?? slug, isCustom: true })
   }
 
   const preferences = readInstanceModelPreferences(settings, entry.instanceId)
@@ -358,49 +374,16 @@ export function resolveAppModelSelectionState(
     instanceId: DEFAULT_TEXT_GENERATION_INSTANCE_ID,
     model: DEFAULT_TEXT_GENERATION_MODEL,
   }
-  const entries = deriveProviderInstanceEntries(providers)
-  const selectedEntry = entries.find(
-    (entry) => entry.instanceId === selection.instanceId && entry.enabled && entry.isAvailable,
+  const entry = deriveProviderInstanceEntries(providers).find(
+    (candidate) => candidate.instanceId === selection.instanceId,
   )
-  const entry =
-    selectedEntry ?? entries.find((candidate) => candidate.enabled && candidate.isAvailable)
-  if (entry)
-  {
-    // when the instance changed due to fallback (e.g. selected instance was disabled),
-    // don't carry over the old instance's model — use the fallback instance's default.
-    const selectedModel = selectedEntry ? selection.model : null
-    const model =
-      resolveAppModelSelectionForInstance(entry.instanceId, settings, providers, selectedModel) ??
-      entry.models[0]?.slug ??
-      DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[entry.driverKind]
-    if (!model)
-    {
-      return createModelSelection(entry.instanceId, '', [])
-    }
-    const provider = entry.driverKind
-    const { modelOptionsForDispatch } = getComposerProviderState({
-      provider,
-      model,
-      models: entry.models,
-      modelOptions: selectedEntry ? selection.options : undefined,
-    })
-
-    return createModelSelection(entry.instanceId, model, modelOptionsForDispatch)
-  }
-
-  const provider = resolveSelectableProvider(providers, null)
-  const keptSelectedProvider = false
-
-  // when the provider changed due to fallback (e.g. selected provider was disabled),
-  // don't carry over the old provider's model — use the fallback provider's default.
-  const selectedModel = keptSelectedProvider ? selection.model : null
-  const model = resolveAppModelSelection(provider, settings, providers, selectedModel)
+  // settings show the persisted routing target even when its provider is unavailable
+  if (!entry || !entry.enabled || !entry.isAvailable) return selection
   const { modelOptionsForDispatch } = getComposerProviderState({
-    provider,
-    model,
-    models: getProviderModels(providers, provider),
-    modelOptions: keptSelectedProvider ? selection.options : undefined,
+    provider: entry.driverKind,
+    model: selection.model,
+    models: entry.models,
+    modelOptions: selection.options,
   })
-
-  return createModelSelection(defaultInstanceIdForDriver(provider), model, modelOptionsForDispatch)
+  return createModelSelection(selection.instanceId, selection.model, modelOptionsForDispatch)
 }

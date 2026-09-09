@@ -6,6 +6,7 @@ import type { ChatSendPorts } from '../../../../../apps/web/src/components/chat/
 import { resolveComposerDispatchMode } from '../../../../../apps/web/src/composer-logic'
 import {
   blockUnknownComposerSlashCommand,
+  shouldOpenUsageSettings,
   shouldConfirmCompactComposerSlashCommand,
 } from '../../../../../apps/web/src/components/chat/composer/composerSlashCommandValidation'
 import { toastManager } from '../../../../../apps/web/src/components/ui/toast'
@@ -152,6 +153,36 @@ describe('blockUnknownComposerSlashCommand', () =>
       expect(addToast).not.toHaveBeenCalled()
     },
   )
+})
+
+describe('shouldOpenUsageSettings', () =>
+{
+  const providerCommands = [{ name: 'compact' }, { name: 'usage-limits' }]
+
+  it('handles the exact local command only when the provider offers it and the draft is otherwise empty', () =>
+  {
+    expect(
+      shouldOpenUsageSettings({
+        text: ' /usage-limits ',
+        providerSlashCommands: providerCommands,
+        hasNonPromptContent: false,
+      }),
+    ).toBe(true)
+    expect(
+      shouldOpenUsageSettings({
+        text: '/usage-limits',
+        providerSlashCommands: [{ name: 'compact' }],
+        hasNonPromptContent: false,
+      }),
+    ).toBe(false)
+    expect(
+      shouldOpenUsageSettings({
+        text: '/usage-limits',
+        providerSlashCommands: providerCommands,
+        hasNonPromptContent: true,
+      }),
+    ).toBe(false)
+  })
 })
 
 describe('shouldConfirmCompactComposerSlashCommand', () =>

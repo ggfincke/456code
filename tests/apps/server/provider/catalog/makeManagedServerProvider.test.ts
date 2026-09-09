@@ -352,4 +352,97 @@ describe('makeManagedServerProvider', () =>
       }),
     ),
   )
+
+  it.effect('fences runtime usage updates to the current authenticated account', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const accountSnapshot: ServerProvider = {
+          ...refreshedSnapshot,
+          auth: {
+            status: 'authenticated',
+            type: 'chatgpt',
+            email: 'user@example.com',
+          },
+          accountUsage: {
+            status: 'available',
+            observedAt: '2026-04-10T00:00:01.000Z',
+            windows: [
+              {
+                id: 'account:primary',
+                label: '5h',
+                usedPercent: 20,
+                resetsAt: '2026-04-10T05:00:00.000Z',
+              },
+            ],
+            resetCredits: { availableCount: 2 },
+          },
+        }
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          refreshOnInterval: false,
+          initialSnapshot: () => Effect.succeed(accountSnapshot),
+          checkProvider: Effect.never,
+        })
+
+        yield* provider.applyUsageLimits({
+          accountIdentity: 'codex:chatgpt:user@example.com',
+          observedAt: '2026-04-10T00:01:00.000Z',
+          windows: [
+            {
+              id: 'account:primary',
+              label: '5h',
+              usedPercent: 25,
+              resetsAt: '2026-04-10T05:00:00.000Z',
+            },
+          ],
+        })
+        const current = yield* provider.getSnapshot
+        assert.strictEqual(
+          current.accountUsage?.status === 'available'
+            ? current.accountUsage.windows[0]?.usedPercent
+            : undefined,
+          25,
+        )
+        assert.deepStrictEqual(
+          current.accountUsage?.status === 'available'
+            ? current.accountUsage.resetCredits
+            : undefined,
+          { availableCount: 2 },
+        )
+
+        yield* provider.applyUsageLimits({
+          accountIdentity: 'codex:chatgpt:other@example.com',
+          observedAt: '2026-04-10T00:02:00.000Z',
+          windows: [
+            {
+              id: 'account:primary',
+              label: '5h',
+              usedPercent: 90,
+              resetsAt: '2026-04-10T05:00:00.000Z',
+            },
+          ],
+        })
+        assert.deepStrictEqual(yield* provider.getSnapshot, current)
+
+        yield* provider.invalidateUsageLimits('2026-04-10T00:03:00.000Z')
+        yield* provider.applyUsageLimits({
+          accountIdentity: 'codex:chatgpt:user@example.com',
+          observedAt: '2026-04-10T00:04:00.000Z',
+          windows: [
+            {
+              id: 'account:primary',
+              label: '5h',
+              usedPercent: 30,
+              resetsAt: '2026-04-10T05:00:00.000Z',
+            },
+          ],
+        })
+        assert.strictEqual((yield* provider.getSnapshot).accountUsage?.status, 'unavailable')
+      }),
+    ),
+  )
 })

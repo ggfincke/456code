@@ -96,9 +96,15 @@ export function overlayGeminiSessionModels<
 
 function geminiModelsFromSettings(
   customModels: ReadonlyArray<string> | undefined,
+  customModelMetadata: GeminiSettings['customModelMetadata'],
 ): ReadonlyArray<ServerProviderModel>
 {
-  return providerModelsFromSettings(GEMINI_BUILT_IN_MODELS, customModels ?? [], EMPTY_CAPABILITIES)
+  return providerModelsFromSettings(
+    GEMINI_BUILT_IN_MODELS,
+    customModels ?? [],
+    EMPTY_CAPABILITIES,
+    customModelMetadata,
+  )
 }
 
 export function buildInitialGeminiProviderSnapshot(
@@ -108,7 +114,10 @@ export function buildInitialGeminiProviderSnapshot(
   return Effect.gen(function* ()
   {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso)
-    const models = geminiModelsFromSettings(geminiSettings.customModels)
+    const models = geminiModelsFromSettings(
+      geminiSettings.customModels,
+      geminiSettings.customModelMetadata,
+    )
 
     if (!geminiSettings.enabled)
     {
@@ -195,7 +204,10 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
       presentation: GEMINI_PRESENTATION,
       enabled: true,
       checkedAt,
-      models: geminiModelsFromSettings(geminiSettings.customModels),
+      models: geminiModelsFromSettings(
+        geminiSettings.customModels,
+        geminiSettings.customModelMetadata,
+      ),
       accountUsage: GEMINI_ACCOUNT_USAGE,
       probe: {
         installed: !isCommandMissingCause(error),
@@ -215,7 +227,10 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
       presentation: GEMINI_PRESENTATION,
       enabled: true,
       checkedAt,
-      models: geminiModelsFromSettings(geminiSettings.customModels),
+      models: geminiModelsFromSettings(
+        geminiSettings.customModels,
+        geminiSettings.customModelMetadata,
+      ),
       accountUsage: GEMINI_ACCOUNT_USAGE,
       probe: {
         installed: true,
@@ -240,7 +255,10 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
       presentation: GEMINI_PRESENTATION,
       enabled: true,
       checkedAt,
-      models: geminiModelsFromSettings(geminiSettings.customModels),
+      models: geminiModelsFromSettings(
+        geminiSettings.customModels,
+        geminiSettings.customModelMetadata,
+      ),
       accountUsage: GEMINI_ACCOUNT_USAGE,
       probe: {
         installed: true,
@@ -256,7 +274,10 @@ export const checkGeminiProviderStatus = Effect.fn('checkGeminiProviderStatus')(
     presentation: GEMINI_PRESENTATION,
     enabled: true,
     checkedAt,
-    models: geminiModelsFromSettings(geminiSettings.customModels),
+    models: geminiModelsFromSettings(
+      geminiSettings.customModels,
+      geminiSettings.customModelMetadata,
+    ),
     accountUsage: GEMINI_ACCOUNT_USAGE,
     probe: {
       installed: true,

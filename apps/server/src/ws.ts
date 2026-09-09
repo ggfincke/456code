@@ -1,6 +1,7 @@
 // apps/server/src/ws.ts
 // serves authenticated websocket rpc handlers for server capabilities
 
+import { withUsageLimitsCommands } from '@t3tools/shared/usageLimits'
 import { collectAssistantCitations } from '@t3tools/shared/assistantCitations'
 import * as Cause from 'effect/Cause'
 import * as Crypto from 'effect/Crypto'
@@ -96,6 +97,7 @@ import * as ProviderMaintenanceRunner from './provider/maintenance/providerMaint
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
 import * as ServerRuntimeStartup from './serverRuntimeStartup.ts'
 import * as ServerSettings from './serverSettings.ts'
+import * as UsageSummary from './usage/UsageSummaryService.ts'
 import * as TerminalManager from './terminal/Manager.ts'
 import * as PreviewAutomationBroker from './mcp/PreviewAutomationBroker.ts'
 import * as PreviewManager from './preview/Manager.ts'
@@ -112,6 +114,7 @@ import * as ProjectSetupScriptRunner from './project/ProjectSetupScriptRunner.ts
 import * as ServerEnvironment from './environment/ServerEnvironment.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import * as ProcessDiagnostics from './diagnostics/ProcessDiagnostics.ts'
+import * as HostResources from './diagnostics/HostResources.ts'
 import * as ProcessResourceMonitor from './diagnostics/ProcessResourceMonitor.ts'
 import * as TraceDiagnostics from './diagnostics/TraceDiagnostics.ts'
 import * as WorkerBrokerStore from './workers/WorkerBrokerStore.ts'
@@ -238,6 +241,8 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents
       const serverSettings = yield* ServerSettings.ServerSettingsService
+      const usageSummary = yield* UsageSummary.UsageSummaryService
+      const hostResources = yield* HostResources.HostResources
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem
@@ -770,45 +775,51 @@ const makeWsRpcLayer = (
           })
         })
 
-      const loadServerConfig = Effect.gen(function* ()
-      {
-        const keybindingsConfig = yield* keybindings.loadConfigState
-        const providers = yield* providerRegistry.getProviders
-        const settings = ServerSettings.redactServerSettingsForClient(
-          yield* serverSettings.getSettings,
-        )
-        const environment = yield* serverEnvironment.getDescriptor
-        const auth = yield* serverAuth.getDescriptor()
+      const loadServerConfig = (options: { readonly usageLimitsCommand: boolean }) =>
+        Effect.gen(function* ()
+        {
+          const keybindingsConfig = yield* keybindings.loadConfigState
+          const currentProviders = yield* providerRegistry.getProviders
+          const providers = options.usageLimitsCommand
+            ? withUsageLimitsCommands(currentProviders)
+            : currentProviders
+          const settings = ServerSettings.redactServerSettingsForClient(
+            yield* serverSettings.getSettings,
+          )
+          const environment = yield* serverEnvironment.getDescriptor
+          const auth = yield* serverAuth.getDescriptor()
 
-        return {
-          environment,
-          auth,
-          cwd: config.cwd,
-          keybindingsConfigPath: config.keybindingsConfigPath,
-          keybindings: keybindingsConfig.keybindings,
-          issues: keybindingsConfig.issues,
-          providers,
-          availableEditors: yield* resolveAvailableEditorsForConfig(
-            externalLauncher.resolveAvailableEditors(),
-          ),
-          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
-            remoteOpenTargets.resolveTargets(),
-          ),
-          observability: {
-            logsDirectoryPath: config.logsDir,
-            localTracingEnabled: true,
-            ...(config.otlpTracesUrl !== undefined ? { otlpTracesUrl: config.otlpTracesUrl } : {}),
-            otlpTracesEnabled: config.otlpTracesUrl !== undefined,
-            ...(config.otlpMetricsUrl !== undefined
-              ? { otlpMetricsUrl: config.otlpMetricsUrl }
-              : {}),
-            otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
-          },
-          settings,
-          shellResumeCompletionMarker: true,
-          threadResumeCompletionMarker: true,
-        }
-      })
+          return {
+            environment,
+            auth,
+            cwd: config.cwd,
+            keybindingsConfigPath: config.keybindingsConfigPath,
+            keybindings: keybindingsConfig.keybindings,
+            issues: keybindingsConfig.issues,
+            providers,
+            availableEditors: yield* resolveAvailableEditorsForConfig(
+              externalLauncher.resolveAvailableEditors(),
+            ),
+            remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
+              remoteOpenTargets.resolveTargets(),
+            ),
+            observability: {
+              logsDirectoryPath: config.logsDir,
+              localTracingEnabled: true,
+              ...(config.otlpTracesUrl !== undefined
+                ? { otlpTracesUrl: config.otlpTracesUrl }
+                : {}),
+              otlpTracesEnabled: config.otlpTracesUrl !== undefined,
+              ...(config.otlpMetricsUrl !== undefined
+                ? { otlpMetricsUrl: config.otlpMetricsUrl }
+                : {}),
+              otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
+            },
+            settings,
+            shellResumeCompletionMarker: true,
+            threadResumeCompletionMarker: true,
+          }
+        })
 
       const refreshGitStatus = (cwd: string) =>
         vcsStatusBroadcaster
@@ -908,9 +919,13 @@ const makeWsRpcLayer = (
             'rpc.aggregate': 'server',
           }),
         [WS_METHODS.serverGetConfig]: (_input) =>
-          observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
-            'rpc.aggregate': 'server',
-          }),
+          observeRpcEffect(
+            WS_METHODS.serverGetConfig,
+            loadServerConfig({ usageLimitsCommand: false }),
+            {
+              'rpc.aggregate': 'server',
+            },
+          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
@@ -1017,6 +1032,10 @@ const makeWsRpcLayer = (
               'rpc.aggregate': 'server',
             },
           ),
+        [WS_METHODS.serverGetUsageSummary]: (input) =>
+          observeRpcEffect(WS_METHODS.serverGetUsageSummary, usageSummary.getSummary(input), {
+            'rpc.aggregate': 'server',
+          }),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverDiscoverSourceControl,
@@ -1038,6 +1057,10 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.serverGetProcessDiagnostics]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
+            'rpc.aggregate': 'server',
+          }),
+        [WS_METHODS.serverGetHostResources]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetHostResources, hostResources.read, {
             'rpc.aggregate': 'server',
           }),
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
@@ -1395,6 +1418,7 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeServerConfig,
             Effect.gen(function* ()
             {
+              const usageLimitsCommand = input.usageLimitsCommand === true
               const keybindingsUpdates = keybindings.streamChanges.pipe(
                 Stream.map((event) => ({
                   version: 1 as const,
@@ -1406,6 +1430,9 @@ const makeWsRpcLayer = (
                 })),
               )
               const providerStatuses = providerRegistry.streamChanges.pipe(
+                Stream.map((providers) =>
+                  usageLimitsCommand ? withUsageLimitsCommands(providers) : providers,
+                ),
                 Stream.map((providers) => ({
                   version: 1 as const,
                   type: 'providerStatuses' as const,
@@ -1428,7 +1455,7 @@ const makeWsRpcLayer = (
                 .refresh()
                 .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped)
 
-              const initialConfig = yield* loadServerConfig
+              const initialConfig = yield* loadServerConfig({ usageLimitsCommand })
               const settingsUpdates = Stream.concat(
                 Stream.succeed(initialConfig.settings),
                 serverSettings.streamCurrentAndChanges.pipe(

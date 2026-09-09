@@ -296,21 +296,27 @@ it('normalizes and de-duplicates Codex account usage windows', () =>
       {
         id: 'account:primary',
         label: '5h',
+        kind: 'session',
         usedPercent: 62,
         resetsAt: '2027-01-15T08:00:00.000Z',
+        windowDurationMins: 300,
       },
       {
         id: 'account:secondary',
         label: 'Week',
+        kind: 'weekly',
         usedPercent: 84,
         resetsAt: '2027-01-21T02:53:20.000Z',
+        windowDurationMins: 10_080,
       },
       {
         id: 'reviews:primary',
         label: '1d',
         scopeLabel: 'Code reviews',
+        kind: 'session',
         usedPercent: 100,
         resetsAt: null,
+        windowDurationMins: 1_440,
       },
     ],
   })

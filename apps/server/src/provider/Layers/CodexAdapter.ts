@@ -73,6 +73,12 @@ import {
 } from './CodexSessionRuntime.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
 import { resolveCodexLaunchArgs } from './codexLaunchArgs.ts'
+import {
+  type CodexRateLimitSnapshot,
+  codexRateLimitsToUpdate,
+  codexUsageLimitMessage,
+  mergeCodexRateLimits,
+} from './codexUsageLimits.ts'
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError)
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError)
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(CodexSessionRuntimeThreadIdMissingError)
@@ -93,12 +99,14 @@ export interface CodexAdapterLiveOptions
   >
   readonly nativeEventLogPath?: string
   readonly nativeEventLogger?: EventNdjsonLogger
+  readonly usageAccountIdentity?: () => string | undefined
 }
 
 interface CodexAdapterSessionContext
 {
   readonly threadId: ThreadId
   readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
+  readonly usageAccountIdentity: string | undefined
   readonly scope: Scope.Closeable
   readonly runtime: CodexSessionRuntimeShape
   readonly eventFiber: Fiber.Fiber<void, never>
@@ -716,6 +724,7 @@ function mapToRuntimeEvents(
   // per-session holder for the last rate-limit transition. passed in rather than kept module-side
   // so two concurrent Codex sessions cannot silence each other's warning
   rateLimitDedup?: { lastKey: string | undefined },
+  usageAccountIdentity?: string,
 ): ReadonlyArray<ProviderRuntimeEvent>
 {
   if (event.kind === 'error')
@@ -1493,27 +1502,31 @@ function mapToRuntimeEvents(
       return []
     }
     const snapshot = codexRateLimitSnapshot(notification.rateLimits)
+    const limits = codexRateLimitsToUpdate(
+      notification.rateLimits,
+      event.createdAt,
+      usageAccountIdentity,
+    )
     // the provider sends a rolling update with no transition concept, so without this every
     // sparse refresh past the warning line would append another identical row
     const key = `${snapshot.status}:${snapshot.windowId ?? ''}`
+    let transitionChanged = true
     if (rateLimitDedup !== undefined)
     {
       if (rateLimitDedup.lastKey === key)
       {
-        return []
+        transitionChanged = false
       }
       rateLimitDedup.lastKey = key
     }
+    if (!limits && !transitionChanged) return []
     return [
       {
         type: 'account.rate-limits.updated',
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          snapshot,
-          // the validated snapshot, not the notification envelope. `event.payload` wrapped the
-          // whole `{ rateLimits: ... }` bag in another `rateLimits` key, so the shape a reader
-          // would have to unwrap did not match the one the contract names
-          rateLimits: notification.rateLimits,
+          ...(limits ? { limits } : {}),
+          ...(transitionChanged ? { snapshot } : {}),
         },
       },
     ]
@@ -1800,6 +1813,8 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing))
         }
 
+        const usageAccountIdentity = options?.usageAccountIdentity?.()
+
         const serviceTier =
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
@@ -1862,12 +1877,70 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
         )
 
         const rateLimitDedup: { lastKey: string | undefined } = { lastKey: undefined }
+        let rateLimits: CodexRateLimitSnapshot | undefined
         const terminalPublished = yield* Ref.make(false)
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* ()
           {
             yield* writeNativeEvent(event)
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId, rateLimitDedup)
+            if (event.method === 'account/rateLimits/updated')
+            {
+              const limitsPayload = readPayload(
+                EffectCodexSchema.V2AccountRateLimitsUpdatedNotification,
+                event.payload,
+              )
+              if (limitsPayload)
+              {
+                rateLimits = mergeCodexRateLimits(rateLimits, limitsPayload.rateLimits)
+              }
+            }
+            else if (event.method === 'error')
+            {
+              const errorPayload = readPayload(EffectCodexSchema.V2ErrorNotification, event.payload)
+              if (errorPayload?.error.codexErrorInfo === 'usageLimitExceeded') return
+            }
+
+            let usageLimitMessage: string | undefined
+            let usageLimitError: ProviderRuntimeEvent | undefined
+            if (event.method === 'turn/completed')
+            {
+              const completedPayload = readPayload(
+                EffectCodexSchema.V2TurnCompletedNotification,
+                event.payload,
+              )
+              const turnError =
+                completedPayload?.turn.status === 'failed' ? completedPayload.turn.error : undefined
+              if (turnError?.codexErrorInfo === 'usageLimitExceeded')
+              {
+                usageLimitMessage = codexUsageLimitMessage(rateLimits, event.createdAt)
+                usageLimitError = {
+                  ...runtimeEventBase(event, event.threadId),
+                  type: 'runtime.error',
+                  payload: {
+                    message: usageLimitMessage,
+                    class: 'provider_error',
+                    ...(turnError.message ? { detail: turnError.message } : {}),
+                  },
+                }
+              }
+            }
+
+            const mappedEvents = mapToRuntimeEvents(
+              event,
+              event.threadId,
+              rateLimitDedup,
+              usageAccountIdentity,
+            ).map((runtimeEvent) =>
+              runtimeEvent.type === 'turn.completed' && usageLimitMessage
+                ? {
+                    ...runtimeEvent,
+                    payload: { ...runtimeEvent.payload, errorMessage: usageLimitMessage },
+                  }
+                : runtimeEvent,
+            )
+            const runtimeEvents = usageLimitError
+              ? [usageLimitError, ...mappedEvents]
+              : mappedEvents
             if (runtimeEvents.length === 0)
             {
               yield* Effect.logDebug('ignoring unhandled Codex provider event', {
@@ -1927,6 +2000,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
         sessions.set(input.threadId, {
           threadId: input.threadId,
           runtimeSessionBinding: input.runtimeSessionBinding,
+          usageAccountIdentity,
           scope: sessionScope,
           runtime,
           eventFiber,

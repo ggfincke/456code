@@ -138,6 +138,73 @@ afterEach(async () =>
 
 describe('ImportDiscovery', () =>
 {
+  it.effect(
+    'resolves each normalized workspace once per scan including null and failed lookups',
+    () =>
+      Effect.gen(function* ()
+      {
+        const homePath = yield* Effect.promise(() => temporaryHome())
+        const directory = NodePath.join(homePath, '.codex', 'sessions', '2026', '02', '03')
+        yield* Effect.promise(async () =>
+        {
+          await NodeFSP.mkdir(directory, { recursive: true })
+          await Promise.all(
+            ['one', 'two', 'three'].map((id, index) =>
+              NodeFSP.writeFile(
+                NodePath.join(directory, `rollout-${id}.jsonl`),
+                codexSessionContent(id).replaceAll(
+                  '/workspace/catalog',
+                  `/workspace/catalog/${index}`,
+                ),
+              ),
+            ),
+          )
+        })
+        let lookups = 0
+        let mode: 'known' | 'missing' | 'failed' = 'known'
+        const identity = {
+          canonicalKey: 'github.com/example/repository',
+          locator: {
+            source: 'git-remote' as const,
+            remoteName: 'origin',
+            remoteUrl: 'https://github.com/example/repository.git',
+          },
+        }
+        const discovery = yield* make.pipe(
+          Effect.provideService(
+            ImportDiscoveryDeps,
+            defaultDeps({
+              normalizeWorkspaceRoot: () => Effect.succeed('/workspace/catalog'),
+              resolveRepositoryIdentity: (root) =>
+                Effect.suspend(() =>
+                {
+                  expect(root).toBe('/workspace/catalog')
+                  lookups += 1
+                  return mode === 'failed'
+                    ? Effect.fail(new Error('repository unavailable'))
+                    : Effect.succeed(mode === 'known' ? identity : null)
+                }),
+            }),
+          ),
+        )
+        for (const nextMode of ['known', 'missing', 'failed'] as const)
+        {
+          mode = nextMode
+          const previousLookups = lookups
+          const result = yield* discovery.scan(DEFAULT_SERVER_SETTINGS, {
+            environment: { PATH: DISCOVERY_PATH },
+            homePath,
+            cwd: homePath,
+          })
+          expect(result.candidates).toHaveLength(3)
+          expect(lookups - previousLookups).toBe(1)
+          expect(result.candidates.map((candidate) => candidate.repositoryIdentity)).toEqual(
+            Array(3).fill(nextMode === 'known' ? identity : null),
+          )
+        }
+      }),
+  )
+
   it.effect('catalogs metadata and exactly counts a bounded unresolved tail', () =>
     Effect.gen(function* ()
     {

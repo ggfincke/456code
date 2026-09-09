@@ -8,6 +8,7 @@ import * as Option from 'effect/Option'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
 import * as Semaphore from 'effect/Semaphore'
+import { EnvironmentId } from '@t3tools/contracts'
 
 import * as MobileDatabase from './mobile-database'
 import * as MobileSecureStorage from './mobile-secure-storage'
@@ -15,6 +16,7 @@ import { MobileStorageDecodeError, MobileStorageEncodeError } from './mobile-sto
 
 const PREFERENCES_KEY = 'code456.preferences'
 const PREFERENCES_FALLBACK_KEY = 'code456.preferences.fallback'
+const isEnvironmentId = Schema.is(EnvironmentId)
 
 export interface Preferences
 {
@@ -32,6 +34,7 @@ export interface Preferences
   // device.
   readonly threadListV2Enabled?: boolean
   readonly sidebarAutoSettleOnMerge?: boolean
+  readonly usageEnvironmentIds?: readonly EnvironmentId[] | null
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedError<MobilePreferencesLoadError>()(
@@ -91,6 +94,7 @@ function sanitizePreferences(parsed: Preferences): Preferences
     projectGroupingEnabled?: boolean
     threadListV2Enabled?: boolean
     sidebarAutoSettleOnMerge?: boolean
+    usageEnvironmentIds?: readonly EnvironmentId[] | null
   } = {}
 
   if (typeof parsed.liveActivitiesEnabled === 'boolean')
@@ -134,6 +138,16 @@ function sanitizePreferences(parsed: Preferences): Preferences
   if (typeof parsed.sidebarAutoSettleOnMerge === 'boolean')
   {
     preferences.sidebarAutoSettleOnMerge = parsed.sidebarAutoSettleOnMerge
+  }
+  if (parsed.usageEnvironmentIds === null)
+  {
+    preferences.usageEnvironmentIds = null
+  }
+  else if (Array.isArray(parsed.usageEnvironmentIds))
+  {
+    preferences.usageEnvironmentIds = [
+      ...new Set(parsed.usageEnvironmentIds.filter(isEnvironmentId)),
+    ]
   }
   return preferences
 }

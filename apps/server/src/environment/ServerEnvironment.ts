@@ -187,6 +187,8 @@ export const make = Effect.gen(function* ()
       threadAutoSettlement: true,
       threadSnooze: true,
       threadPinning: true,
+      threadActiveReorder: true,
+      hostResources: true,
       attachmentUploads: true,
       environmentThemes: true,
       fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },

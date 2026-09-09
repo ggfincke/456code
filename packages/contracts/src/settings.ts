@@ -4,9 +4,13 @@ import * as Effect from 'effect/Effect'
 import * as Duration from 'effect/Duration'
 import * as Schema from 'effect/Schema'
 import * as SchemaTransformation from 'effect/SchemaTransformation'
-import { TrimmedNonEmptyString, TrimmedString } from './baseSchemas.ts'
-import { DEFAULT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from './model.ts'
-import { ModelSelection } from './orchestration.ts'
+import { ProjectId, TrimmedNonEmptyString, TrimmedString } from './baseSchemas.ts'
+import {
+  CustomModelMetadata,
+  DEFAULT_TEXT_GENERATION_MODEL,
+  ProviderOptionSelections,
+} from './model.ts'
+import { ModelSelection, ProjectScript } from './orchestration.ts'
 import {
   DEFAULT_PREVIEW_APPEARANCE,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
@@ -20,6 +24,7 @@ import {
   ProviderInstanceId,
   type ProviderDriverKind,
 } from './providerInstance.ts'
+import { UsageModelPriceOverride } from './usage.ts'
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -79,7 +84,14 @@ export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80
 export const DEFAULT_BROWSER_VIEWPORT: PreviewViewportSetting = FILL_PREVIEW_VIEWPORT
 export const DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW = true
 
+export const LoadBalancingWeights = Schema.Record(
+  TrimmedNonEmptyString,
+  Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+)
+
 export const ClientSettingsSchema = Schema.Struct({
+  loadBalancingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  loadBalancingWeights: LoadBalancingWeights.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   browserDefaultViewport: PreviewViewportSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_VIEWPORT)),
@@ -108,6 +120,9 @@ export const ClientSettingsSchema = Schema.Struct({
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
+  ),
+  onboardingCompletedAt: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   // model favorites. Historically keyed by provider kind, now
   // widened to `ProviderInstanceId` so users can favorite a specific model
@@ -279,6 +294,9 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
   },
   {
     order: ['binaryPath', 'homePath', 'shadowHomePath', 'launchArgs'],
@@ -311,6 +329,9 @@ export const ClaudeSettings = makeProviderSettingsSchema(
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
     launchArgs: Schema.String.pipe(
       Schema.withDecodingDefault(Effect.succeed('')),
@@ -359,6 +380,9 @@ export const CursorSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
   },
   {
     order: ['binaryPath', 'apiEndpoint'],
@@ -382,6 +406,9 @@ export const GrokSettings = makeProviderSettingsSchema(
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
   {
@@ -449,6 +476,9 @@ export const GeminiSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
   },
   {
     order: ['binaryPath'],
@@ -488,6 +518,9 @@ export const AntigravitySettings = makeProviderSettingsSchema(
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
     ),
   },
   {
@@ -539,6 +572,9 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    customModelMetadata: Schema.optionalKey(
+      CustomModelMetadata.pipe(Schema.annotateKey({ providerSettingsForm: { hidden: true } })),
+    ),
   },
   {
     order: ['binaryPath', 'serverUrl', 'serverPassword'],
@@ -588,6 +624,9 @@ export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -607,6 +646,15 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(''))),
+  defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  defaultProjectScripts: Schema.Array(ProjectScript).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  projectScriptOverrides: Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -644,6 +692,9 @@ export const ServerSettings = Schema.Struct({
   // (forks, downgrades, in-flight PR branches) round-trip without loss.
   // see providerInstance.ts for the forward/backward compatibility invariant.
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
@@ -743,6 +794,7 @@ const CodexSettingsPatch = Schema.Struct({
   shadowHomePath: Schema.optionalKey(TrimmedString),
   launchArgs: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const ClaudeSettingsPatch = Schema.Struct({
@@ -750,6 +802,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   homePath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
   launchArgs: Schema.optionalKey(TrimmedString),
 })
 
@@ -758,12 +811,14 @@ const CursorSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   apiEndpoint: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const GrokSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const CoralSettingsPatch = Schema.Struct({
@@ -777,6 +832,7 @@ const GeminiSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const AntigravitySettingsPatch = Schema.Struct({
@@ -785,6 +841,7 @@ const AntigravitySettingsPatch = Schema.Struct({
   agent: Schema.optionalKey(TrimmedString),
   sandbox: Schema.optionalKey(Schema.Boolean),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 const OpenCodeSettingsPatch = Schema.Struct({
@@ -793,6 +850,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
   serverUrl: Schema.optionalKey(TrimmedString),
   serverPassword: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  customModelMetadata: Schema.optionalKey(CustomModelMetadata),
 })
 
 export const ServerSettingsPatch = Schema.Struct({
@@ -800,6 +858,9 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  projectAgentBrowserAccessOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
+  ),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
@@ -807,6 +868,11 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
+  defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
+  projectScriptOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))),
+  ),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({
@@ -839,10 +905,15 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // the web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  usagePriceOverrides: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),
+  ),
 })
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type
 
 export const ClientSettingsPatch = Schema.Struct({
+  loadBalancingEnabled: Schema.optionalKey(Schema.Boolean),
+  loadBalancingWeights: Schema.optionalKey(LoadBalancingWeights),
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
@@ -854,6 +925,7 @@ export const ClientSettingsPatch = Schema.Struct({
   desktopNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   glassOpacity: Schema.optionalKey(GlassOpacity),
+  onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   favorites: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({

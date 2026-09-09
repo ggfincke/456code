@@ -29,6 +29,7 @@ import { ServerConfig } from '../../config.ts'
 import { ServerSettingsService } from '../../serverSettings.ts'
 import { ProviderDriverError } from '../Errors.ts'
 import { makeClaudeAdapter } from '../Layers/ClaudeAdapter.ts'
+import { makeClaudeScopedLimitNames } from '../Layers/claudeUsageLimits.ts'
 import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
@@ -39,6 +40,7 @@ import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.
 import { type ProviderDriver, type ProviderInstance } from '../catalog/ProviderDriver.ts'
 import type { ServerProviderDraft } from '../providerSnapshot.ts'
 import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
+import { providerUsageAccountIdentity } from '../providerUsageLimits.ts'
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
@@ -134,6 +136,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           Effect.provideService(Path.Path, path),
         ),
       )
+      const usageAccountFence: { current: string | undefined } = { current: undefined }
       const resolveContinuationIdentity = makeClaudeContinuationGroupKey(
         effectiveConfig,
         processEnv,
@@ -154,10 +157,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         continuationGroupKey,
       })
 
+      const scopedLimitNames = yield* makeClaudeScopedLimitNames
       const adapterOptions = {
         instanceId,
         environment: processEnv,
         sourceCwd: cwd,
+        scopedLimitNames,
+        usageAccountIdentity: () => usageAccountFence.current,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       }
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions)
@@ -175,13 +181,26 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       })
       const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(effectiveConfig, cwd)
 
-      const checkProvider = checkClaudeProviderStatus(
-        effectiveConfig,
-        () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
-        processEnv,
-        cwd,
-      ).pipe(
+      const checkProvider = Effect.sync(() =>
+      {
+        usageAccountFence.current = undefined
+      }).pipe(
+        Effect.andThen(
+          checkClaudeProviderStatus(
+            effectiveConfig,
+            () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
+            processEnv,
+            cwd,
+            scopedLimitNames,
+          ),
+        ),
         Effect.map(stampIdentity),
+        Effect.tap((snapshot) =>
+          Effect.sync(() =>
+          {
+            usageAccountFence.current = providerUsageAccountIdentity(snapshot)
+          }),
+        ),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),

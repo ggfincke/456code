@@ -45,7 +45,11 @@ import {
   scopeThreadRef,
 } from '@t3tools/client-runtime/environment'
 import { CHAT_LIST_ANCHOR_OFFSET } from '@t3tools/shared/chatList'
-import { projectScriptCwd, projectScriptRuntimeEnv } from '@t3tools/shared/projectScripts'
+import {
+  projectScriptCwd,
+  projectScriptRuntimeEnv,
+  resolveProjectScripts,
+} from '@t3tools/shared/projectScripts'
 import { truncate } from '@t3tools/shared/String'
 import {
   getTerminalLabel,
@@ -219,7 +223,6 @@ import { environmentCatalog } from '../connection/catalog'
 import { connectionAtomRuntime } from '../connection/runtime'
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from '../terminalUiStateStore'
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from '../state/terminalSessions'
-import { projectEnvironment } from '../state/projects'
 import { useEnvironmentQuery } from '../state/query'
 import {
   primaryServerAvailableEditorsAtom,
@@ -680,7 +683,9 @@ function ChatViewContent(props: ChatViewProps)
     [environmentId, threadId],
   )
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef])
-  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false })
+  const updateProjectScriptSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: false,
+  })
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   })
@@ -1210,6 +1215,10 @@ function ChatViewContent(props: ChatViewProps)
     [activeThread?.environmentId, activeThread?.projectId],
   )
   const activeProject = useProject(activeProjectRef)
+  const activeProjectScripts = useMemo(
+    () => (activeProject ? resolveProjectScripts(settings, activeProject) : []),
+    [activeProject, settings],
+  )
   useEffect(() =>
   {
     if (
@@ -1277,8 +1286,8 @@ function ChatViewContent(props: ChatViewProps)
     [activeProjectKey],
   )
   const configuredPreviewUrls = useMemo(
-    () => getConfiguredPreviewUrls(activeProject?.scripts),
-    [activeProject?.scripts],
+    () => getConfiguredPreviewUrls(activeProjectScripts),
+    [activeProjectScripts],
   )
 
   useEffect(() =>
@@ -2740,6 +2749,15 @@ function ChatViewContent(props: ChatViewProps)
     ) =>
     {
       if (!activeThreadId || !activeProject || !activeThread) return
+      if (isLocalDraftThread)
+      {
+        toastManager.add({
+          type: 'info',
+          title: 'Start the thread before running a project action',
+          description: 'Send a message first so the server can create this thread’s terminal.',
+        })
+        return
+      }
       if (options?.rememberAsLastInvoked !== false)
       {
         setLastInvokedScriptByProjectId((current) =>
@@ -2842,6 +2860,7 @@ function ChatViewContent(props: ChatViewProps)
       activeThreadId,
       activeThreadRef,
       gitCwd,
+      isLocalDraftThread,
       setTerminalOpen,
       setThreadError,
       storeNewTerminal,
@@ -2867,11 +2886,10 @@ function ChatViewContent(props: ChatViewProps)
     }): Promise<AtomCommandResult<void, unknown>> =>
     {
       const updateResult = mapAtomCommandResult(
-        await updateProject({
+        await updateProjectScriptSettings({
           environmentId,
           input: {
-            projectId: input.projectId,
-            scripts: input.nextScripts,
+            patch: { projectScriptOverrides: { [input.projectId]: input.nextScripts } },
           },
         }),
         () => undefined,
@@ -2898,7 +2916,7 @@ function ChatViewContent(props: ChatViewProps)
       }
       return updateResult
     },
-    [environmentId, updateProject, upsertKeybinding],
+    [environmentId, updateProjectScriptSettings, upsertKeybinding],
   )
   const saveProjectScript = useCallback(
     async (input: NewProjectScriptInput): Promise<AtomCommandResult<void, unknown>> =>
@@ -2909,28 +2927,28 @@ function ChatViewContent(props: ChatViewProps)
       }
       const nextId = nextProjectScriptId(
         input.name,
-        activeProject.scripts.map((script) => script.id),
+        activeProjectScripts.map((script) => script.id),
       )
       const nextScript = buildProjectScript(nextId, input)
       const nextScripts = input.runOnWorktreeCreate
         ? [
-            ...activeProject.scripts.map((script) =>
+            ...activeProjectScripts.map((script) =>
               script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
             ),
             nextScript,
           ]
-        : [...activeProject.scripts, nextScript]
+        : [...activeProjectScripts, nextScript]
 
       return persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(nextId),
       })
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   )
   const updateProjectScript = useCallback(
     async (
@@ -2942,14 +2960,14 @@ function ChatViewContent(props: ChatViewProps)
       {
         return AsyncResult.success(undefined)
       }
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId)
+      const existingScript = activeProjectScripts.find((script) => script.id === scriptId)
       if (!existingScript)
       {
         return AsyncResult.failure(Cause.fail(new Error('Script not found.')))
       }
 
       const updatedScript = buildProjectScript(existingScript.id, input)
-      const nextScripts = activeProject.scripts.map((script) =>
+      const nextScripts = activeProjectScripts.map((script) =>
         script.id === scriptId
           ? updatedScript
           : input.runOnWorktreeCreate
@@ -2960,13 +2978,13 @@ function ChatViewContent(props: ChatViewProps)
       return persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(scriptId),
       })
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   )
   const deleteProjectScript = useCallback(
     async (scriptId: string): Promise<AtomCommandResult<void, unknown>> =>
@@ -2975,14 +2993,14 @@ function ChatViewContent(props: ChatViewProps)
       {
         return AsyncResult.success(undefined)
       }
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId)
+      const nextScripts = activeProjectScripts.filter((script) => script.id !== scriptId)
 
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name
+      const deletedName = activeProjectScripts.find((s) => s.id === scriptId)?.name
 
       const result = await persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: null,
         keybindingCommand: commandForProjectScript(scriptId),
@@ -3007,7 +3025,7 @@ function ChatViewContent(props: ChatViewProps)
       }
       return result
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   )
 
   const handleRuntimeModeChange = useCallback(
@@ -4240,6 +4258,7 @@ function ChatViewContent(props: ChatViewProps)
   }, [
     activeProjectCwd,
     activeThread,
+    isLocalDraftThread,
     environmentId,
     gitStatusQuery,
     isRestoringThreadBranch,
@@ -4746,7 +4765,7 @@ function ChatViewContent(props: ChatViewProps)
 
       const scriptId = projectScriptIdFromCommand(command)
       if (!scriptId || !activeProject) return
-      const script = activeProject.scripts.find((entry) => entry.id === scriptId)
+      const script = activeProjectScripts.find((entry) => entry.id === scriptId)
       if (!script) return
       event.preventDefault()
       event.stopPropagation()
@@ -4757,6 +4776,7 @@ function ChatViewContent(props: ChatViewProps)
   }, [
     activeProject,
     activeRightPanelSurface,
+    activeProjectScripts,
     addTerminalSurface,
     terminalUiState.terminalOpen,
     terminalUiState.activeTerminalId,
@@ -5740,6 +5760,10 @@ function ChatViewContent(props: ChatViewProps)
     },
     [dispatchSend],
   )
+  const onUsageLimitsCommand = useCallback(() =>
+  {
+    void navigate({ to: '/settings/usage' })
+  }, [navigate])
 
   // the workers panel reads a host-global broker, so this thread's own plan
   // revisions supply the durable run association that scopes it
@@ -6154,7 +6178,7 @@ function ChatViewContent(props: ChatViewProps)
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
             openInCwd={gitCwd}
-            activeProjectScripts={activeProject?.scripts}
+            activeProjectScripts={activeProjectScripts}
             preferredScriptId={
               activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
             }
@@ -6450,6 +6474,7 @@ function ChatViewContent(props: ChatViewProps)
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
                             onSendProviderSlashCommand={onSendProviderSlashCommand}
+                            onUsageLimitsCommand={onUsageLimitsCommand}
                             onInterrupt={onInterrupt}
                             onImplementPlanWithOrchestrate={onImplementPlanWithOrchestrate}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
