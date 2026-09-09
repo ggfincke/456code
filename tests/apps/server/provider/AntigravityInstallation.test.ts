@@ -263,4 +263,246 @@ it.layer(NodeServices.layer)('AntigravityInstallation', (it) =>
       )
     }),
   )
+
+  it.effect.each([
+    { name: 'checksum mismatch', asset: { ...releaseAsset(), sha256: '2'.repeat(64) } },
+    {
+      name: 'short archive body',
+      archive: completeArchive.subarray(0, -1),
+      asset: releaseAsset(),
+    },
+    {
+      name: 'oversized archive body',
+      archive: Buffer.concat([completeArchive, Buffer.from('extra')]),
+      asset: releaseAsset(),
+    },
+    { name: 'missing pair member', archive: Buffer.from(zipFixtures.missingHarness, 'base64') },
+    { name: 'duplicate pair member', archive: Buffer.from(zipFixtures.duplicate, 'base64') },
+    { name: 'path traversal', archive: Buffer.from(zipFixtures.traversal, 'base64') },
+    { name: 'symbolic link', archive: Buffer.from(zipFixtures.symlink, 'base64') },
+    {
+      name: 'incorrect extracted size',
+      archive: Buffer.from(zipFixtures.oversizedMember, 'base64'),
+    },
+  ])('rejects $name before validation and preserves the active release', (options) =>
+    Effect.gen(function* ()
+    {
+      const { installation, validations, stagingReleased, fs, path } = yield* makeHarness({
+        ...options,
+        previous: true,
+      })
+      yield* installation.start
+      expect((yield* terminalState(installation)).phase).toBe('failed')
+      expect(validations).toEqual([])
+      yield* Deferred.await(stagingReleased)
+      yield* expectPreviousRelease(installation)
+      expect(yield* fs.readDirectory(path.join(installation.managedDirectory, 'versions'))).toEqual(
+        [previousReleaseId],
+      )
+    }),
+  )
+
+  it.effect('preserves the active release when ACP validation rejects the new pair', () =>
+    Effect.gen(function* ()
+    {
+      const { installation, stagingReleased } = yield* makeHarness({
+        previous: true,
+        validate: () =>
+          Effect.fail(
+            new AntigravityInstallationError({
+              operation: 'verify',
+              detail: 'The runtime identity did not match.',
+            }),
+          ),
+      })
+      yield* installation.start
+      expect(yield* terminalState(installation)).toMatchObject({
+        phase: 'failed',
+        message: 'The runtime identity did not match.',
+      })
+      yield* Deferred.await(stagingReleased)
+      yield* expectPreviousRelease(installation)
+    }),
+  )
+
+  it.effect('leaves the prior pointer active when atomic pointer replacement fails', () =>
+    Effect.gen(function* ()
+    {
+      const fs = yield* FileSystem.FileSystem
+      const replacementDenied = PlatformError.systemError({
+        _tag: 'PermissionDenied',
+        module: 'FileSystem',
+        method: 'rename',
+        description: 'EPERM: active pointer is in use',
+      })
+      const { installation, stagingReleased } = yield* makeHarness({
+        previous: true,
+        fileSystem: FileSystem.FileSystem.of({
+          ...fs,
+          rename: (source, target) =>
+            target.endsWith('active.json')
+              ? Effect.fail(replacementDenied)
+              : fs.rename(source, target),
+        }),
+      })
+      yield* installation.start
+      expect((yield* terminalState(installation)).phase).toBe('failed')
+      yield* Deferred.await(stagingReleased)
+      yield* expectPreviousRelease(installation)
+    }),
+  )
+
+  it.effect('cancels owned staging during a streaming download', () =>
+    Effect.gen(function* ()
+    {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const interrupted = yield* Deferred.make<void>()
+      const barrier = Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+      )
+      const { installation, stagingReleased, fs, path } = yield* makeHarness({
+        previous: true,
+        body: Stream.concat(
+          Stream.make(completeArchive.subarray(0, 31)),
+          Stream.fromEffect(barrier.pipe(Effect.as(completeArchive.subarray(31)))),
+        ),
+      })
+      const started = yield* installation.start
+      yield* Deferred.await(entered)
+      expect((yield* installation.state).phase).toBe('downloading')
+      expect((yield* installation.cancel(started.operationId ?? 'missing')).phase).toBe('cancelled')
+      yield* Deferred.await(interrupted)
+      yield* Deferred.await(stagingReleased)
+      yield* expectPreviousRelease(installation)
+      expect(
+        (yield* fs.readDirectory(path.join(installation.managedDirectory, 'versions'))).some(
+          (name) => name.startsWith('.install-'),
+        ),
+      ).toBe(false)
+      yield* Deferred.succeed(release, undefined)
+    }),
+  )
+
+  it.effect('shares one in-flight install across concurrent callers', () =>
+    Effect.gen(function* ()
+    {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { installation, requests, stagingReleased } = yield* makeHarness({
+        body: Stream.fromEffect(
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as(completeArchive),
+          ),
+        ),
+      })
+      const started = yield* installation.start
+      yield* Deferred.await(entered)
+      const concurrent = yield* Effect.all([installation.start, installation.start], {
+        concurrency: 'unbounded',
+      })
+      expect(concurrent.map((state) => state.operationId)).toEqual([
+        started.operationId,
+        started.operationId,
+      ])
+      yield* Deferred.succeed(release, undefined)
+      expect((yield* terminalState(installation)).phase).toBe('succeeded')
+      yield* Deferred.await(stagingReleased)
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect('resolves only managed-by-default or an exact custom executable pair', () =>
+    Effect.gen(function* ()
+    {
+      const { installation, fs, path, baseDir } = yield* makeHarness({ previous: true })
+      expect(yield* installation.resolve()).toMatchObject({
+        source: 'managed',
+        version: previousVersion,
+      })
+
+      const externalDirectory = path.join(baseDir, 'external')
+      const customExecutable = path.join(externalDirectory, executableName)
+      const customHarness = path.join(externalDirectory, harnessName)
+      yield* fs.makeDirectory(externalDirectory)
+      yield* fs.writeFileString(customExecutable, 'external server', { mode: 0o755 })
+      yield* fs.writeFileString(customHarness, 'external harness', { mode: 0o755 })
+      const resolvedCustomExecutable = yield* fs.realPath(customExecutable)
+      const resolvedCustomHarness = yield* fs.realPath(customHarness)
+      expect(
+        yield* installation.resolve({ mode: 'custom', executablePath: customExecutable }),
+      ).toMatchObject({
+        executablePath: resolvedCustomExecutable,
+        harnessPath: resolvedCustomHarness,
+        source: 'custom',
+        version: null,
+      })
+
+      yield* fs.remove(customHarness)
+      expect(
+        yield* installation
+          .resolve({ mode: 'custom', executablePath: customExecutable })
+          .pipe(Effect.flip),
+      ).toMatchObject({ operation: 'resolve' })
+      const managed = yield* installation.resolve()
+      expect(
+        yield* installation
+          .resolve({ mode: 'custom', executablePath: managed.executablePath })
+          .pipe(Effect.flip),
+      ).toMatchObject({ operation: 'resolve' })
+    }),
+  )
+
+  it.effect('holds a managed lease for the process scope and never removes custom bytes', () =>
+    Effect.gen(function* ()
+    {
+      const { installation, fs, path, baseDir } = yield* makeHarness({ previous: true })
+      const managedScope = yield* Scope.make()
+      yield* installation.acquire().pipe(Scope.provide(managedScope))
+      const removeWhileLeased = yield* installation.remove().pipe(Effect.flip)
+      expect(removeWhileLeased).toMatchObject({ operation: 'remove' })
+      yield* Scope.close(managedScope, Exit.void)
+
+      const externalDirectory = path.join(baseDir, 'external')
+      const customExecutable = path.join(externalDirectory, executableName)
+      const customHarness = path.join(externalDirectory, harnessName)
+      yield* fs.makeDirectory(externalDirectory)
+      yield* fs.writeFileString(customExecutable, 'external server', { mode: 0o755 })
+      yield* fs.writeFileString(customHarness, 'external harness', { mode: 0o755 })
+      const customScope = yield* Scope.make()
+      yield* installation
+        .acquire({ mode: 'custom', executablePath: customExecutable })
+        .pipe(Scope.provide(customScope))
+      yield* installation.remove()
+      expect(yield* fs.exists(installation.managedDirectory)).toBe(false)
+      expect(yield* fs.readFileString(customExecutable)).toBe('external server')
+      expect(yield* fs.readFileString(customHarness)).toBe('external harness')
+      yield* Scope.close(customScope, Exit.void)
+    }),
+  )
+
+  it.effect('cancels during extracted-pair validation without publishing it', () =>
+    Effect.gen(function* ()
+    {
+      const entered = yield* Deferred.make<void>()
+      const interrupted = yield* Deferred.make<void>()
+      const { installation, stagingReleased } = yield* makeHarness({
+        previous: true,
+        validate: () =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+          ),
+      })
+      const started = yield* installation.start
+      yield* Deferred.await(entered)
+      expect((yield* installation.state).phase).toBe('verifying')
+      expect((yield* installation.cancel(started.operationId ?? 'missing')).phase).toBe('cancelled')
+      yield* Deferred.await(interrupted)
+      yield* Deferred.await(stagingReleased)
+      yield* expectPreviousRelease(installation)
+    }),
+  )
 })
