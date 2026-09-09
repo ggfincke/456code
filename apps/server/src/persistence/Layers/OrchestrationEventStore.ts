@@ -19,6 +19,7 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 
@@ -363,11 +364,9 @@ const makeEventStore = Effect.gen(function* ()
     {
       return Stream.empty
     }
-    const readPage = (
-      cursor: number,
-      remaining: number,
-    ): Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError> =>
-      Stream.fromEffect(
+    return Stream.paginate(
+      { cursor: sequenceExclusive, remaining: normalizedLimit },
+      ({ cursor, remaining }) =>
         readEventRowsFromSequence({
           sequenceExclusive: cursor,
           limit: Math.min(remaining, READ_PAGE_SIZE),
@@ -387,27 +386,19 @@ const makeEventStore = Effect.gen(function* ()
               ),
             ),
           ),
+          Effect.map((events) =>
+          {
+            const last = events.at(-1)
+            const nextRemaining = remaining - events.length
+            return [
+              events,
+              last === undefined || nextRemaining <= 0
+                ? Option.none()
+                : Option.some({ cursor: last.sequence, remaining: nextRemaining }),
+            ] as const
+          }),
         ),
-      ).pipe(
-        Stream.flatMap((events) =>
-        {
-          if (events.length === 0)
-          {
-            return Stream.empty
-          }
-          const nextRemaining = remaining - events.length
-          if (nextRemaining <= 0)
-          {
-            return Stream.fromIterable(events)
-          }
-          return Stream.concat(
-            Stream.fromIterable(events),
-            readPage(events[events.length - 1]!.sequence, nextRemaining),
-          )
-        }),
-      )
-
-    return readPage(sequenceExclusive, normalizedLimit)
+    )
   }
 
   const readAggregateRange: OrchestrationEventStoreShape['readAggregateRange'] = (input) =>
@@ -417,11 +408,9 @@ const makeEventStore = Effect.gen(function* ()
     {
       return Stream.empty
     }
-    const readPage = (
-      cursor: number,
-      remaining: number,
-    ): Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError> =>
-      Stream.fromEffect(
+    return Stream.paginate(
+      { cursor: input.fromSequenceExclusive, remaining: limit },
+      ({ cursor, remaining }) =>
         readAggregateEventRows({
           ...input,
           fromSequenceExclusive: cursor,
@@ -442,29 +431,22 @@ const makeEventStore = Effect.gen(function* ()
               ),
             ),
           ),
+          Effect.map((events) =>
+          {
+            const last = events.at(-1)
+            const nextRemaining = remaining - events.length
+            return [
+              events,
+              last === undefined ||
+              events.length < READ_PAGE_SIZE ||
+              nextRemaining === 0 ||
+              last.sequence >= input.toSequenceInclusive
+                ? Option.none()
+                : Option.some({ cursor: last.sequence, remaining: nextRemaining }),
+            ] as const
+          }),
         ),
-      ).pipe(
-        Stream.flatMap((events) =>
-        {
-          const last = events.at(-1)
-          if (last === undefined)
-          {
-            return Stream.empty
-          }
-          const nextRemaining = remaining - events.length
-          if (
-            events.length < READ_PAGE_SIZE ||
-            nextRemaining === 0 ||
-            last.sequence >= input.toSequenceInclusive
-          )
-          {
-            return Stream.fromIterable(events)
-          }
-          return Stream.concat(Stream.fromIterable(events), readPage(last.sequence, nextRemaining))
-        }),
-      )
-
-    return readPage(input.fromSequenceExclusive, limit)
+    )
   }
 
   const getAggregateReplayStats: OrchestrationEventStoreShape['getAggregateReplayStats'] = (
