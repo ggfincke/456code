@@ -1738,6 +1738,7 @@ describe('PreviewManager', () =>
 
         expect(rejectedResult).toEqual({
           ...TEST_ANNOTATION,
+          id: expect.stringMatching(/^annotation_[0-9a-f-]{36}$/),
           screenshot: null,
           screenshotFailed: true,
         })
@@ -1750,21 +1751,17 @@ describe('PreviewManager', () =>
         const timedOutSession = preview.send.mock.calls.findLast(
           ([channel]) => channel === 'preview:start-pick',
         )?.[1]
-        preview.emitIpc(
-          'preview:element-picked',
-          timedOutSession,
-          { ...TEST_ANNOTATION, id: 'annotation_2' },
-          null,
-        )
+        preview.emitIpc('preview:element-picked', timedOutSession, TEST_ANNOTATION, null)
         yield* TestClock.adjust('6 seconds')
         const timedOutResult = yield* Fiber.join(timedOutPick)
 
         expect(timedOutResult).toMatchObject({
-          id: 'annotation_2',
+          id: expect.stringMatching(/^annotation_[0-9a-f-]{36}$/),
           screenshot: null,
           screenshotFailed: true,
         })
         expect(preview.send).toHaveBeenCalledWith('preview:annotation-captured', timedOutSession)
+        expect(timedOutResult?.id).not.toBe(rejectedResult?.id)
         expect(capturePage).toHaveBeenCalledTimes(2)
       }),
     ),
@@ -1820,7 +1817,7 @@ describe('PreviewManager', () =>
         const secondResult = yield* Fiber.join(secondPick)
 
         expect(secondResult).toMatchObject({
-          id: 'annotation_2',
+          id: expect.stringMatching(/^annotation_[0-9a-f-]{36}$/),
           screenshot: {
             dataUrl: TEST_ANNOTATION_IMAGE.toDataURL(),
             width: 20,
@@ -1854,7 +1851,7 @@ describe('PreviewManager', () =>
         const result = yield* manager.pickElement('tab_synchronous_pick')
 
         expect(result).toMatchObject({
-          id: TEST_ANNOTATION.id,
+          id: expect.stringMatching(/^annotation_[0-9a-f-]{36}$/),
           screenshot: { dataUrl: TEST_ANNOTATION_IMAGE.toDataURL() },
         })
         expect(preview.ipcListenerCount('preview:element-picked')).toBe(0)

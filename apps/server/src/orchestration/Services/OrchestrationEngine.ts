@@ -76,6 +76,7 @@ export interface OrchestrationEngineShape
   // command receipts.
   readonly dispatch: (
     command: OrchestrationCommand,
+    options?: { readonly assistantCitationAccess: 'allow' | 'deny' },
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>
 
   // dispatch owner-internal metadata settlement that is causally older than a

@@ -808,5 +808,3 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
     </div>
   )
 }
-
-// pure helpers

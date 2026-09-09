@@ -1692,12 +1692,26 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...annotation,
               screenshot: annotation.screenshot ? { ...annotation.screenshot, dataUrl: '' } : null,
             }
+            const replacingWithoutScreenshot =
+              annotation.screenshot === null &&
+              existing.previewAnnotations.some((entry) => entry.id === annotation.id)
             return {
               draftsByThreadKey: {
                 ...state.draftsByThreadKey,
                 [threadKey]: {
                   ...existing,
                   previewAnnotations: [...nextAnnotations, compactAnnotation],
+                  ...(replacingWithoutScreenshot
+                    ? {
+                        images: existing.images.filter((image) => image.id !== annotation.id),
+                        persistedAttachments: existing.persistedAttachments.filter(
+                          (image) => image.id !== annotation.id,
+                        ),
+                        nonPersistedImageIds: existing.nonPersistedImageIds.filter(
+                          (id) => id !== annotation.id,
+                        ),
+                      }
+                    : {}),
                 },
               },
             }

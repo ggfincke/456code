@@ -363,6 +363,7 @@ export function TerminalViewport({
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
+    if (mount.contains(document.activeElement)) terminal.focus()
     previousSessionRef.current = {
       buffer: '',
       status: 'closed',
@@ -971,6 +972,7 @@ export function TerminalViewport({
 
     return () =>
     {
+      const hadFocus = mount.contains(document.activeElement)
       clipboardRequestId += 1
       clearSelectionAction()
       openSelectionMenuRequestIdRef.current = null
@@ -996,9 +998,8 @@ export function TerminalViewport({
       terminalRef.current = null
       fitAddonRef.current = null
       terminal.dispose()
+      if (hadFocus && mount.isConnected) mount.focus({ preventScroll: true })
     }
-    // autoFocus is intentionally omitted;
-    // it is only read at mount time and must not trigger terminal teardown/recreation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, environmentId, runtimeEnvKey, terminalId, threadId, worktreePath])
 
@@ -1065,29 +1066,15 @@ export function TerminalViewport({
       }, 0)
     }
 
-    if (previous.version === 0 && autoFocus)
-    {
-      window.requestAnimationFrame(() =>
-      {
-        terminal.focus()
-      })
-    }
     previousSessionRef.current = current
-  }, [autoFocus, terminalBuffer, terminalError, terminalStatus, terminalVersion])
+  }, [terminalBuffer, terminalError, terminalStatus, terminalVersion])
 
   useEffect(() =>
   {
     if (!autoFocus) return
-    const terminal = terminalRef.current
-    if (!terminal) return
-    const frame = window.requestAnimationFrame(() =>
-    {
-      terminal.focus()
-    })
-    return () =>
-    {
-      window.cancelAnimationFrame(frame)
-    }
+    // claim focus now; a replacement mount retains it only while it remains owner
+    const focusTarget = terminalRef.current ?? containerRef.current
+    focusTarget?.focus()
   }, [autoFocus, focusRequestId])
 
   useEffect(() =>
@@ -1113,6 +1100,7 @@ export function TerminalViewport({
   return (
     <div
       ref={containerRef}
+      tabIndex={-1}
       className="relative h-full w-full overflow-hidden bg-[var(--terminal-background)]"
     />
   )

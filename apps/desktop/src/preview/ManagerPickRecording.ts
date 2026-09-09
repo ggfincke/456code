@@ -1,12 +1,15 @@
 // apps/desktop/src/preview/ManagerPickRecording.ts
 // owns desktop preview element picking, screenshots, and recording artifacts
 
+// @effect-diagnostics nodeBuiltinImport:off
+
 import type {
   DesktopPreviewAnnotationTheme,
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
 } from '@t3tools/contracts'
 import { webContents } from 'electron'
+import * as NodeCrypto from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import type * as Fiber from 'effect/Fiber'
 import type * as FileSystem from 'effect/FileSystem'
@@ -128,6 +131,10 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
   const pickElement = Effect.fn('PreviewManager.pickElement')(function* (tabId: string)
   {
     const wc = yield* requireWebContents(tabId)
+    const annotationId = yield* attempt(
+      { operation: 'pickElement.annotationId', tabId, webContentsId: wc.id },
+      () => `annotation_${NodeCrypto.randomUUID()}`,
+    )
     const annotationTheme = yield* Ref.get(annotationThemeRef)
     const pickSequence = yield* nextCounter(pickSequenceRef)
     const sessionId = `${tabId}:${pickSequence.toString(36)}`
@@ -227,23 +234,24 @@ export const createPickRecordingOperations = (deps: ManagerPickRecordingDeps) =>
           }
           if (captureStarted) return
           captureStarted = true
+          const annotation = { ...payload, id: annotationId }
           const cropRect = normalizeCaptureRect(args[2])
           runFork(
             captureAnnotationScreenshot(tabId, wc, cropRect).pipe(
               Effect.match({
                 onFailure: () => ({
-                  ...payload,
+                  ...annotation,
                   screenshot: null,
                   screenshotFailed: true,
                 }),
                 onSuccess: (screenshot) =>
                   screenshot === null
                     ? {
-                        ...payload,
+                        ...annotation,
                         screenshot: null,
                         screenshotFailed: true,
                       }
-                    : { ...payload, screenshot },
+                    : { ...annotation, screenshot },
               }),
               Effect.flatMap((result) =>
                 claimCurrentSession().pipe(

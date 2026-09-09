@@ -17,6 +17,7 @@ const harness = vi.hoisted(() => ({
   showContextMenu: vi.fn(),
   closeContextMenu: vi.fn(),
   runAtomCommand: vi.fn(),
+  session: { buffer: '', error: null, status: 'closed', version: 0 },
 }))
 
 vi.mock('@t3tools/client-runtime/state/runtime', () => ({
@@ -42,12 +43,7 @@ vi.mock('~/localApi', () => ({
 }))
 
 vi.mock('../../../../../apps/web/src/state/terminalSessions', () => ({
-  useAttachedTerminalSession: () => ({
-    buffer: '',
-    error: null,
-    status: 'closed',
-    version: 0,
-  }),
+  useAttachedTerminalSession: () => harness.session,
 }))
 
 vi.mock('../../../../../apps/web/src/state/server', async () =>
@@ -125,6 +121,7 @@ beforeEach(async () =>
   harness.terminal = null
   harness.keyHandler = null
   harness.linkProvider = null
+  harness.session = { buffer: '', error: null, status: 'closed', version: 0 }
   harness.writeText.mockReset().mockResolvedValue(true)
   harness.showContextMenu.mockReset().mockResolvedValue(null)
   harness.closeContextMenu.mockReset().mockResolvedValue(undefined)
@@ -189,6 +186,63 @@ afterEach(async () =>
 
 describe('TerminalViewport clipboard and context menu runtime', () =>
 {
+  it('retains focus through replacement only while owned and honors explicit focus requests', async () =>
+  {
+    const composer = document.createElement('input')
+    document.body.append(composer)
+    const renderViewport = async (cwd: string, focusRequestId: number) =>
+    {
+      await act(async () =>
+      {
+        root.render(
+          <TerminalViewport
+            threadRef={
+              { environmentId: 'local', threadId: 'thread-1' } as unknown as ScopedThreadRef
+            }
+            threadId={'thread-1' as ThreadId}
+            terminalId="terminal-1"
+            terminalLabel="Terminal 1"
+            cwd={cwd}
+            onSessionExited={vi.fn()}
+            onAddTerminalContext={vi.fn()}
+            focusRequestId={focusRequestId}
+            autoFocus
+            resizeEpoch={0}
+            drawerHeight={240}
+            keybindings={[] as unknown as ResolvedKeybindingsConfig}
+          />,
+        )
+      })
+    }
+    try
+    {
+      await renderViewport('/tmp/project', 0)
+      expect(document.activeElement).toBe(activeTerminal().textarea)
+
+      composer.focus()
+      harness.session = { ...harness.session, buffer: 'new output', version: 1 }
+      await renderViewport('/tmp/project', 0)
+      expect(document.activeElement).toBe(composer)
+
+      const retired = activeTerminal()
+      await renderViewport('/tmp/replacement', 0)
+      expect(activeTerminal()).not.toBe(retired)
+      expect(document.activeElement).toBe(composer)
+
+      activeTerminal().focus()
+      await renderViewport('/tmp/owned-replacement', 0)
+      expect(document.activeElement).toBe(activeTerminal().textarea)
+
+      composer.focus()
+      await renderViewport('/tmp/owned-replacement', 1)
+      expect(document.activeElement).toBe(activeTerminal().textarea)
+    }
+    finally
+    {
+      composer.remove()
+    }
+  })
+
   it('shows link decorations only with the activation modifier and clears their lifecycle', async () =>
   {
     const terminal = activeTerminal()
