@@ -131,3 +131,28 @@ retained solely for a fast new acceptance attempt when the user is ready; no per
 credential was removed. OAuth URLs and credentials are intentionally absent from this record.
 The dirty integration branch remains at its original baseline: private object preparation and
 remote publication do not authorize resetting that checkout or updating its local ref/index.
+
+## Live question repair and verification stop
+
+The authenticated disposable run displayed 11 account-advertised models, returned a real response,
+and completed a supervised file write after Allow once. A real native question exposed a durable
+delivery deadlock: question replies were excluded from the existing approval/interrupt live-control
+lane. Cancelling removed the native question; replay then classified its exact no-longer-pending
+error as unknown and blocked later commands. These were application failures, not proof of an
+official ACP resume failure.
+
+The fork repair routes question answers through that existing ahead-of-cursor lane with per-action
+context, and classifies only the typed Antigravity permission-method no-longer-pending response as
+terminal stale input. It preserves unknown-failure fencing for other failures. Two major existing-
+fixture regressions first failed, then passed: held-turn answer delivery with rejection, duplicate
+command handling and isolated action identity; and cancelled-question retirement without false
+resolution or blockage of later turns.
+
+Before the user's instruction to stop testing, the full reactor suite passed 84/84, server type
+checking exited zero, and two-path formatting, comment checks, lint and diff checks passed (lint
+retained six existing unused-parameter warnings; type checking retained informational suggestions).
+No verification was running when that instruction was reconciled. Per the user's direction,
+remaining local and live checks are waived and no further tests, type checks, builds, linters or
+acceptance scripts are run. The repaired code is not claimed as live-retested. Hosted CI remains
+unchanged and authoritative; earlier mandatory local/live gate language in this checkpoint records
+the prior acceptance plan, superseded by this explicit stop instruction.
