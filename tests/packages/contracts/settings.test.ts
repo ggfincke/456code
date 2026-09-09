@@ -135,13 +135,16 @@ describe('ClientSettings sidebar v2', () =>
     expect(() => decodeClientSettingsPatch({ confirmThreadUnpin: 'yes' })).toThrow()
   })
 
-  it('defaults the beta off with a three-day threshold and merged-PR settling on', () =>
+  it('defaults the beta off while settlement policy remains server-owned', () =>
   {
-    const settings = decodeClientSettings({})
-    expect(settings.sidebarV2Enabled).toBe(false)
+    const legacyClientSettings = decodeClientSettings({})
+    expect(legacyClientSettings.sidebarV2Enabled).toBe(false)
+    expect(legacyClientSettings.sidebarAutoSettleAfterDays).toBe(3)
+    expect(legacyClientSettings.sidebarAutoSettleOnMerge).toBe(true)
+    const settings = decodeServerSettings({})
     expect(settings.sidebarAutoSettleAfterDays).toBe(3)
     expect(settings.sidebarAutoSettleOnMerge).toBe(true)
-    expect(decodeClientSettingsPatch({ sidebarAutoSettleOnMerge: false })).toEqual({
+    expect(decodeServerSettingsPatch({ sidebarAutoSettleOnMerge: false })).toEqual({
       sidebarAutoSettleOnMerge: false,
     })
   })
@@ -170,12 +173,12 @@ describe('ClientSettings sidebar v2', () =>
     if (expectValid)
     {
       expect(
-        decodeClientSettings({ sidebarAutoSettleAfterDays: value }).sidebarAutoSettleAfterDays,
+        decodeServerSettings({ sidebarAutoSettleAfterDays: value }).sidebarAutoSettleAfterDays,
       ).toBe(expected)
       return
     }
-    expect(() => decodeClientSettings({ sidebarAutoSettleAfterDays: value })).toThrow()
-    expect(() => decodeClientSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow()
+    expect(() => decodeServerSettings({ sidebarAutoSettleAfterDays: value })).toThrow()
+    expect(() => decodeServerSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow()
   })
 })
 

@@ -250,6 +250,7 @@ function makeHarness(config?: {
   readonly claudeConfig?: Partial<ClaudeSettings>
   readonly instanceId?: ProviderInstanceId
   readonly crypto?: Crypto.Crypto
+  readonly usageAccountIdentity?: () => string | undefined
 })
 {
   const queries: Array<FakeClaudeQuery> = []
@@ -277,6 +278,7 @@ function makeHarness(config?: {
           nativeEventLogPath: config.nativeEventLogPath,
         }
       : {}),
+    ...(config?.usageAccountIdentity ? { usageAccountIdentity: config.usageAccountIdentity } : {}),
   }
   const nodeServicesLayer = config?.crypto
     ? Layer.merge(NodeServices.layer, Layer.succeed(Crypto.Crypto, config.crypto))
@@ -2030,6 +2032,55 @@ describe('ClaudeAdapterLive', () =>
         runtimeEvents.filter((event) => event.type === 'account.rate-limits.updated').length,
         1,
       )
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    )
+  })
+
+  it.effect('keeps a running session fenced to the account that started it', () =>
+  {
+    let currentIdentity = 'claudeAgent:oauth:first@example.com'
+    const harness = makeHarness({ usageAccountIdentity: () => currentIdentity })
+    return Effect.gen(function* ()
+    {
+      const adapter = yield* ClaudeAdapter
+      yield* startClaudeTestSession(adapter, {
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make('claudeAgent'),
+        runtimeMode: 'full-access',
+      })
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: 'hello',
+        attachments: [],
+      })
+
+      currentIdentity = 'claudeAgent:oauth:second@example.com'
+      const updateFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+        Stream.filter((event) => event.type === 'account.rate-limits.updated'),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      )
+      harness.query.emit({
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'allowed_warning',
+          rateLimitType: 'seven_day',
+          utilization: 0.5,
+        },
+        uuid: 'rate-limit-after-account-switch',
+        session_id: 'sdk-session-account-switch',
+      } as unknown as SDKMessage)
+
+      const updates = Array.from(yield* Fiber.join(updateFiber))
+      const update = updates[0]
+      assert.equal(update?.type, 'account.rate-limits.updated')
+      if (update?.type === 'account.rate-limits.updated')
+      {
+        assert.equal(update.payload.limits?.accountIdentity, 'claudeAgent:oauth:first@example.com')
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

@@ -132,6 +132,8 @@ const makeFakeInstance = (
     displayName: undefined,
     enabled: true,
     snapshot: {
+      applyUsageLimits: () => Effect.void,
+      invalidateUsageLimits: () => Effect.void,
       resolveMaintenance: () =>
         Effect.succeed(
           makeManualOnlyProviderMaintenanceCapabilities({
