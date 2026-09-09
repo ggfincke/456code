@@ -3,6 +3,9 @@
 import { parsePatchFiles } from '@pierre/diffs/utils/parsePatchFiles'
 import type { FileDiffMetadata } from '@pierre/diffs/types'
 
+// every creation path must choose wasm before pierre's shared singleton initializes.
+export const PREFERRED_HIGHLIGHTER = 'shiki-wasm' as const
+
 // shiki's bundled material-theme-ocean carries token colors byte-identical to
 // t3dotgg/vsc-material-but-i-wont-sue-you's Material Theme Ocean High Contrast;
 // the HC-only deltas are UI chrome keys the diff surface never reads, and the
@@ -180,6 +183,72 @@ export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string
 export function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string
 {
   return fileDiff.cacheKey ?? `${fileDiff.prevName ?? 'none'}:${fileDiff.name}`
+}
+
+export function buildFileDiffIdentityKey(fileDiff: FileDiffMetadata): string
+{
+  // parser-normalized names retain real top-level a/ and b/ directories
+  return JSON.stringify([fileDiff.prevName ?? fileDiff.name, fileDiff.name])
+}
+
+function hashFileDiffPart(hash: number, value: string | number | boolean | undefined): number
+{
+  const serialized = value === undefined ? 'undefined' : String(value)
+  const withLength = fnv1a32(`${typeof value}:${serialized.length}:`, hash)
+  return fnv1a32(serialized, withLength)
+}
+
+// content versions repaint changed files without resetting surviving interaction state
+export function buildFileDiffContentVersion(fileDiff: FileDiffMetadata): number
+{
+  let hash = FNV_OFFSET_BASIS_32
+  const append = (value: string | number | boolean | undefined) =>
+  {
+    hash = hashFileDiffPart(hash, value)
+  }
+
+  append(fileDiff.name)
+  append(fileDiff.prevName)
+  append(fileDiff.lang)
+  append(fileDiff.newObjectId)
+  append(fileDiff.prevObjectId)
+  append(fileDiff.mode)
+  append(fileDiff.prevMode)
+  append(fileDiff.type)
+  append(fileDiff.isPartial)
+  append(fileDiff.splitLineCount)
+  append(fileDiff.unifiedLineCount)
+  for (const line of fileDiff.additionLines) append(line)
+  for (const line of fileDiff.deletionLines) append(line)
+  for (const hunk of fileDiff.hunks)
+  {
+    append(hunk.collapsedBefore)
+    append(hunk.additionStart)
+    append(hunk.additionCount)
+    append(hunk.additionLines)
+    append(hunk.additionLineIndex)
+    append(hunk.deletionStart)
+    append(hunk.deletionCount)
+    append(hunk.deletionLines)
+    append(hunk.deletionLineIndex)
+    append(hunk.hunkContext)
+    append(hunk.hunkSpecs)
+    append(hunk.splitLineStart)
+    append(hunk.splitLineCount)
+    append(hunk.unifiedLineStart)
+    append(hunk.unifiedLineCount)
+    append(hunk.noEOFCRAdditions)
+    append(hunk.noEOFCRDeletions)
+    for (const content of hunk.hunkContent)
+    {
+      append(content.type)
+      append(content.additionLineIndex)
+      append(content.deletionLineIndex)
+      append(content.type === 'change' ? content.additions : content.lines)
+      append(content.type === 'change' ? content.deletions : undefined)
+    }
+  }
+  return hash
 }
 
 export function getDiffCollapseIconClassName(fileDiff: FileDiffMetadata): string

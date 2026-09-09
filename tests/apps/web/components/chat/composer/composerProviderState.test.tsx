@@ -15,6 +15,7 @@ import {
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
+  withImplicitFastModeDefault,
 } from '../../../../../../apps/web/src/lib/composerProviderState'
 
 // everything in composerProviderState is now data-driven by the model's
@@ -43,9 +44,17 @@ function selectDescriptor(
   }
 }
 
-function booleanDescriptor(id: string): Extract<ProviderOptionDescriptor, { type: 'boolean' }>
+function booleanDescriptor(
+  id: string,
+  currentValue?: boolean,
+): Extract<ProviderOptionDescriptor, { type: 'boolean' }>
 {
-  return { id, label: id, type: 'boolean' }
+  return {
+    id,
+    label: id,
+    type: 'boolean',
+    ...(typeof currentValue === 'boolean' ? { currentValue } : {}),
+  }
 }
 
 function modelWith(
@@ -72,6 +81,37 @@ const ULTRATHINK_FRAME_CLASSES = {
 
 describe('getComposerProviderState', () =>
 {
+  it('defaults reported Fast mode to Normal until the user explicitly selects Fast', () =>
+  {
+    const models = modelWith([booleanDescriptor('fastMode', true)])
+    expect(
+      getComposerProviderState({
+        provider: PROVIDER,
+        model: MODEL,
+        models,
+        modelOptions: undefined,
+      }).modelOptionsForDispatch,
+    ).toEqual(selections(['fastMode', false]))
+    expect(
+      getComposerProviderState({
+        provider: PROVIDER,
+        model: MODEL,
+        models,
+        modelOptions: selections(['fastMode', true]),
+      }).modelOptionsForDispatch,
+    ).toEqual(selections(['fastMode', true]))
+  })
+
+  it('does not invent Fast mode for models that do not expose it', () =>
+  {
+    expect(
+      withImplicitFastModeDefault(
+        { optionDescriptors: [booleanDescriptor('thinking', true)] },
+        undefined,
+      ),
+    ).toBeUndefined()
+  })
+
   it('preserves unavailable OpenCode options but resumes catalog normalization on recovery', () =>
   {
     const saved = selections(['variant', 'high'], ['thinking', true])

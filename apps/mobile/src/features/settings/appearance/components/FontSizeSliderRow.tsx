@@ -113,13 +113,18 @@ export function FontSizeSliderRow(props: {
         const f = fractionAt(event.x)
         progress.value = f
       })
-      .onFinalize(() =>
+      .onFinalize((_event, success) =>
       {
         if (!dragging.value)
         {
           return
         }
         dragging.value = false
+        if (!success)
+        {
+          progress.value = withTiming(fractionOfValue(value), SNAP_ANIMATION)
+          return
+        }
         const next = valueAtFraction(progress.value)
         progress.value = withTiming(fractionOfValue(next), SNAP_ANIMATION)
         runOnJS(commit)(next)
@@ -135,7 +140,7 @@ export function FontSizeSliderRow(props: {
       })
 
     return Gesture.Race(pan, tap)
-  }, [commit, disabled, dragging, max, min, progress, step, trackWidth])
+  }, [commit, disabled, dragging, max, min, progress, step, trackWidth, value])
 
   const fillStyle = useAnimatedStyle(() => ({
     width: THUMB_SIZE / 2 + progress.value * Math.max(0, trackWidth.value - THUMB_SIZE),

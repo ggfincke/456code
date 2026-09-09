@@ -33,6 +33,7 @@ export interface ResizableWidthHandlers
   readonly onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void
   readonly onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void
   readonly onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void
+  readonly onLostPointerCapture: (event: ReactPointerEvent<HTMLElement>) => void
 }
 
 // width state for a side-anchored panel resized via a drag handle on the
@@ -89,6 +90,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
   {
     const state = dragStateRef.current
     if (!state) return
+    dragStateRef.current = null
     if (state.rafId !== null)
     {
       cancelAnimationFrame(state.rafId)
@@ -106,25 +108,40 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     }
     document.body.style.removeProperty('cursor')
     document.body.style.removeProperty('user-select')
-    dragStateRef.current = null
   }, [])
 
-  useEffect(
-    () => () =>
+  const cancelDrag = useCallback(() =>
+  {
+    const state = dragStateRef.current
+    if (!state) return
+    releasePointer(state.pointerId)
+    setWidth(state.startWidth)
+  }, [releasePointer])
+
+  useEffect(() =>
+  {
+    const onVisibilityChange = () =>
     {
+      if (document.visibilityState === 'hidden') cancelDrag()
+    }
+    window.addEventListener('blur', cancelDrag)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () =>
+    {
+      window.removeEventListener('blur', cancelDrag)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       const state = dragStateRef.current
       if (state !== null)
       {
         releasePointer(state.pointerId)
       }
-    },
-    [releasePointer],
-  )
+    }
+  }, [cancelDrag, releasePointer])
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) =>
     {
-      if (event.button !== 0) return
+      if (event.button !== 0 || dragStateRef.current !== null) return
       event.preventDefault()
       event.stopPropagation()
       const target = event.currentTarget
@@ -197,14 +214,19 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
       const state = dragStateRef.current
       if (!state || state.pointerId !== event.pointerId) return
       // don't persist a cancelled drag; revert to the start width.
-      releasePointer(event.pointerId)
-      setWidth(state.startWidth)
+      cancelDrag()
     },
-    [releasePointer],
+    [cancelDrag],
   )
 
   return {
     width: clampedWidth,
-    handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel },
+    handlers: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp,
+      onPointerCancel,
+      onLostPointerCapture: onPointerCancel,
+    },
   }
 }

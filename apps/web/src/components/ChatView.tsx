@@ -2,7 +2,7 @@
 // renders thread timelines, composer state, and guarded provider dispatch
 import {
   type ApprovalRequestId,
-  type AssetResource,
+  type AssistantCitation,
   type ArchitectureGraphProjection,
   type ArchitectureStandingAnchor,
   type CollaborationMode,
@@ -31,6 +31,7 @@ import {
   connectionStatusTitle,
   type EnvironmentConnectionPresentation,
 } from '@t3tools/client-runtime/connection'
+import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 import {
   type RespondToThreadOrchestratePlanInput,
   respondToThreadOrchestratePlan,
@@ -64,7 +65,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import { useShallow } from 'zustand/react/shallow'
 import {
   isAtomCommandInterrupted,
@@ -81,6 +82,7 @@ import { useDiffPanelStore } from '../diffPanelStore'
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
+  createMessageAttachmentPreviewProjector,
   derivePhase,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
@@ -90,6 +92,7 @@ import {
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   isLatestTurnSettled,
+  selectHandoffImageResources,
 } from '../session-logic'
 import { deriveWorkerVerdictMap } from '../session/worklog'
 import { type LegendListRef } from '@legendapp/list/react'
@@ -106,6 +109,10 @@ import {
 } from '../pendingUserInput'
 import { useUiStateStore } from '../uiStateStore'
 import {
+  latestWorkspaceMutationId,
+  useWorkspaceMutationRefresh,
+} from '../hooks/useWorkspaceMutationRefresh'
+import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
   ORCHESTRATE_PLAN_IMPLEMENTATION_PROMPT,
@@ -118,7 +125,6 @@ import {
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
   isImageAttachment,
-  isFileAttachment,
   type SessionPhase,
   type Thread,
   type TurnDiffSummary,
@@ -239,6 +245,9 @@ import { DraftHeroHeadline } from './chat/DraftHeroHeadline'
 import { ExpandedImageDialog } from './chat/ExpandedImageDialog'
 import { PullRequestThreadDialog } from './PullRequestThreadDialog'
 import { MessagesTimeline } from './chat/messages-timeline/MessagesTimeline'
+import type { AssistantCitationRequest } from './chat/AssistantCitationSource'
+import { assistantCitationFromLocation } from '../lib/assistantCitationNavigation'
+import type { AssistantCitationSourceAnchor } from '../lib/assistantTextSelection'
 import type { OrchestratePlanResponse } from './chat/orchestrate-plan/OrchestratePlanCard'
 import { ChatHeader } from './chat/ChatHeader'
 import {
@@ -319,6 +328,7 @@ import {
   shouldWriteThreadErrorToCurrentServerThread,
   shouldSuppressTransientEnvironmentReconnectWarning,
   startNewThreadForProject,
+  codexArtifactTemplatePromptToAppend,
   threadHasStarted,
   waitForStartedServerThread,
 } from './ChatView.logic'
@@ -762,6 +772,19 @@ function ChatViewContent(props: ChatViewProps)
   const timestampFormat = settings.timestampFormat
   const autoOpenPlanSidebar = settings.autoOpenPlanSidebar
   const navigate = useNavigate()
+  const citationLocation = useLocation({
+    select: (location) => ({
+      href: location.href,
+      key: location.state.assistantCitationActivation ?? location.state.__TSR_key,
+    }),
+  })
+  const citationRequest = useMemo<AssistantCitationRequest | null>(() =>
+  {
+    const citation = assistantCitationFromLocation(citationLocation.href)
+    return citation && citation.environmentId === environmentId && citation.threadId === threadId
+      ? { citation, key: citationLocation.key ?? citationLocation.href }
+      : null
+  }, [citationLocation.href, citationLocation.key, environmentId, threadId])
   const { resolvedTheme } = useTheme()
   // granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -818,6 +841,23 @@ function ChatViewContent(props: ChatViewProps)
   const composerElementContextsRef = useRef<ElementContextDraft[]>([])
   const localComposerRef = useRef<ChatComposerHandle | null>(null)
   const composerRef = useComposerHandleContext() ?? localComposerRef
+  const citeAssistantText = useCallback(
+    (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) =>
+    {
+      const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false
+      if (!inserted)
+      {
+        toastManager.add({
+          type: 'warning',
+          title: 'The composer is not ready',
+          description:
+            'Try citing the selection after the connection or pending input is resolved.',
+        })
+      }
+      return inserted
+    },
+    [composerRef],
+  )
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null)
@@ -1757,6 +1797,14 @@ function ChatViewContent(props: ChatViewProps)
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider
   const phase = derivePhase(activeThread?.session ?? null)
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES
+  const latestCheckpointCompletedAt = activeThread?.checkpoints.at(-1)?.completedAt ?? null
+  const workspaceMutationId = useMemo(() =>
+  {
+    const activityId = latestWorkspaceMutationId(threadActivities)
+    return activityId === null && latestCheckpointCompletedAt === null
+      ? null
+      : JSON.stringify([activityId, latestCheckpointCompletedAt])
+  }, [latestCheckpointCompletedAt, threadActivities])
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities])
   const workerVerdicts = useMemo(() => deriveWorkerVerdictMap(threadActivities), [threadActivities])
   const providerSwitchTimelineEvents = useMemo(
@@ -1969,67 +2017,32 @@ function ChatViewContent(props: ChatViewProps)
     })
   }, [])
   const serverMessages = activeThread?.messages
-  const serverAttachmentResources = useMemo(() =>
-  {
-    const resources = new Map<string, Extract<AssetResource, { _tag: 'attachment' }>>()
-    for (const message of serverMessages ?? [])
-    {
-      for (const attachment of message.attachments ?? [])
-      {
-        if (!isImageAttachment(attachment) && !isFileAttachment(attachment)) continue
-        resources.set(attachment.id, {
-          _tag: 'attachment',
-          attachmentId: attachment.id,
-          ...(isFileAttachment(attachment)
-            ? { fileName: attachment.name, mimeType: attachment.mimeType }
-            : {}),
-        })
-      }
-    }
-    return [...resources.values()]
-  }, [serverMessages])
-  const serverAttachmentIds = useMemo(
-    () => serverAttachmentResources.map((resource) => resource.attachmentId),
-    [serverAttachmentResources],
+  const serverAttachmentResources = useMemo(
+    () => selectHandoffImageResources(serverMessages, attachmentPreviewHandoffByMessageId),
+    [attachmentPreviewHandoffByMessageId, serverMessages],
   )
   const serverAttachmentUrls = useAssetUrls(environmentId, serverAttachmentResources)
   const serverAttachmentUrlById = useMemo(
     () =>
       new Map(
-        serverAttachmentIds.flatMap((attachmentId, index) =>
+        serverAttachmentResources.flatMap((resource, index) =>
         {
           const url = serverAttachmentUrls[index]
-          return url ? [[attachmentId, url] as const] : []
+          return url ? [[resource.attachmentId, url] as const] : []
         }),
       ),
-    [serverAttachmentIds, serverAttachmentUrls],
+    [serverAttachmentResources, serverAttachmentUrls],
   )
+  const [projectServerMessagePreviews] = useState(createMessageAttachmentPreviewProjector)
   const displayServerMessages = useMemo<ReadonlyArray<ChatMessage>>(() =>
   {
     if (!serverMessages) return []
     return serverMessages.map((message) =>
-    {
-      if (!message.attachments || message.attachments.length === 0)
-      {
-        return message
-      }
-      return {
-        ...message,
-        attachments: message.attachments.map((attachment) =>
-        {
-          if (!isImageAttachment(attachment) && !isFileAttachment(attachment)) return attachment
-          const previewUrl = serverAttachmentUrlById.get(attachment.id)
-          return previewUrl
-            ? {
-                ...attachment,
-                previewUrl,
-                ...(isFileAttachment(attachment) ? { downloadable: true } : {}),
-              }
-            : attachment
-        }),
-      }
-    })
-  }, [serverAttachmentUrlById, serverMessages])
+      projectServerMessagePreviews(message, (attachment) =>
+        serverAttachmentUrlById.get(attachment.id),
+      ),
+    )
+  }, [projectServerMessagePreviews, serverAttachmentUrlById, serverMessages])
   useEffect(() =>
   {
     if (typeof Image === 'undefined' || displayServerMessages.length === 0)
@@ -2319,6 +2332,12 @@ function ChatViewContent(props: ChatViewProps)
         }),
   )
   const keybindings = useAtomValue(primaryServerKeybindingsAtom)
+  useWorkspaceMutationRefresh({
+    enabled: gitStatusCwd !== null,
+    mutationId: workspaceMutationId,
+    refresh: gitStatusQuery.refresh,
+    resourceKey: JSON.stringify(['git-status', activeThreadKey, gitStatusCwd]),
+  })
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom)
   // prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
@@ -2501,6 +2520,26 @@ function ChatViewContent(props: ChatViewProps)
       focusComposer()
     })
   }, [focusComposer])
+  const useArtifactTemplate = useCallback(
+    (template: CodexArtifactTemplate) =>
+    {
+      const composer = composerRef.current
+      if (!composer) return
+      const currentDraft = composer.getSendContext().prompt
+      const prompt = codexArtifactTemplatePromptToAppend(currentDraft, template)
+      if (prompt !== null && !composer.insertTextAtEnd(prompt, { ensureLeadingBoundary: true }))
+      {
+        toastManager.add({
+          type: 'error',
+          title: 'Unable to add to chat',
+          description: 'The composer is busy; try again once it is ready.',
+        })
+        return
+      }
+      scheduleComposerFocus()
+    },
+    [composerRef, scheduleComposerFocus],
+  )
   const addTerminalContextToDraft = useCallback(
     (selection: TerminalContextSelection) =>
     {
@@ -3871,7 +3910,8 @@ function ChatViewContent(props: ChatViewProps)
   const closeExpandedImage = useCallback(() =>
   {
     setExpandedImage(null)
-  }, [])
+    scheduleComposerFocus()
+  }, [scheduleComposerFocus])
 
   const activeWorktreePath = activeThread?.worktreePath ?? null
   const derivedEnvMode: DraftThreadEnvMode = resolveEffectiveEnvMode({
@@ -5923,6 +5963,7 @@ function ChatViewContent(props: ChatViewProps)
           mode="embedded"
           composerDraftTarget={composerDraftTarget}
           initialGitScope={initialDiffPanelGitScope}
+          workspaceMutationId={workspaceMutationId}
           onAddArchitectureConcern={addArchitectureConcernToComposer}
           onViewInRepositoryMap={viewArchitectureStandingAnchor}
         />
@@ -6067,6 +6108,7 @@ function ChatViewContent(props: ChatViewProps)
           revealRequestId={activeFileSurface?.revealRequestId ?? 0}
           onOpenFile={openFileSurface}
           onPendingChange={handleFilePendingChange}
+          workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
     ) : null
@@ -6179,6 +6221,9 @@ function ChatViewContent(props: ChatViewProps)
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                citationRequest={citationRequest}
+                citationHistoryLoading={threadDetailLoading}
+                onCiteAssistantText={citeAssistantText}
                 key={activeThread.id}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
@@ -6196,6 +6241,7 @@ function ChatViewContent(props: ChatViewProps)
                   activeProviderStatus?.capabilities?.conversationRollback !== 'unsupported'
                 }
                 onRevertUserMessage={onRevertUserMessage}
+                onUseArtifactTemplate={useArtifactTemplate}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}

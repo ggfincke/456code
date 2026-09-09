@@ -47,6 +47,7 @@ import {
   useDeferredValue,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
 } from 'react'
@@ -191,7 +192,13 @@ export function OpenCommandPaletteDialog(props: {
   const navigate = useNavigate()
   const { clearOpenIntent, openIntent, setOpen } = props
   const composerHandleRef = useComposerHandleContext()
+  const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
+  // direct-open flows replace the initial view after focus has already moved
+  useLayoutEffect(() =>
+  {
+    inputRef.current?.focus()
+  }, [])
   const deferredQuery = useDeferredValue(query)
   const isActionsOnly = deferredQuery.startsWith('>')
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null)
@@ -1716,16 +1723,16 @@ export function OpenCommandPaletteDialog(props: {
     })
     if (threadJumpIndexFromCommand(command ?? '') !== null)
     {
+      event.preventDefault()
+      event.stopPropagation()
       const matchingItem = displayedGroups
         .flatMap((group) => group.items)
         .find((item) => item.shortcutCommand === command)
       if (matchingItem)
       {
-        event.preventDefault()
-        event.stopPropagation()
         executeItem(matchingItem)
-        return
       }
+      return
     }
 
     if (addProjectCloneFlow?.step === 'repository' && event.key === 'Enter')
@@ -1946,6 +1953,7 @@ export function OpenCommandPaletteDialog(props: {
       >
         <div className="relative">
           <CommandInput
+            ref={inputRef}
             // the overlaid submit action needs space inside the actual input.
             className={
               addProjectCloneFlow?.step === 'repository'

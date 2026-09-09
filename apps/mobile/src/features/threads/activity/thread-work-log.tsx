@@ -10,6 +10,7 @@ import { cn } from '../../../lib/cn'
 import type { ThreadFeedActivity } from '../../../lib/threadActivity'
 import { MOBILE_TYPOGRAPHY } from '../../../lib/typography'
 import Animated, { FadeIn } from 'react-native-reanimated'
+import type { MarkdownImageRenderer } from '../../../native/SelectableMarkdownText'
 
 const WORK_LOG_LAYOUT_ANIMATION = {
   duration: 180,
@@ -151,6 +152,7 @@ export function ThreadWorkLog(props: {
   readonly iconSubtleColor: import('react-native').ColorValue
   readonly onCopyRow: (rowId: string, value: string) => void
   readonly onToggleRow: (rowId: string) => void
+  readonly renderImage: MarkdownImageRenderer
 })
 {
   const colorScheme = useColorScheme()
@@ -268,21 +270,28 @@ export function ThreadWorkLog(props: {
                 </View>
               </Pressable>
 
-              {fullDetail ? (
+              {expanded && (fullDetail || row.viewedImagePath) ? (
                 <View className="ml-7 border-l border-adaptive-neutral-300-a60-white-a12 pb-1 pl-3 pt-0.5">
-                  <ScrollView
-                    directionalLockEnabled
-                    showsVerticalScrollIndicator
-                    className="max-h-60"
-                    contentContainerStyle={{ paddingRight: 8 }}
-                  >
-                    <Text
-                      selectable
-                      className="font-mono text-2xs leading-normal text-foreground-muted"
+                  {row.viewedImagePath ? (
+                    <View className="pb-1.5">
+                      {props.renderImage({ href: row.viewedImagePath, alt: null, title: null })}
+                    </View>
+                  ) : null}
+                  {fullDetail ? (
+                    <ScrollView
+                      directionalLockEnabled
+                      showsVerticalScrollIndicator
+                      className="max-h-60"
+                      contentContainerStyle={{ paddingRight: 8 }}
                     >
-                      {fullDetail}
-                    </Text>
-                  </ScrollView>
+                      <Text
+                        selectable
+                        className="font-mono text-2xs leading-normal text-foreground-muted"
+                      >
+                        {fullDetail}
+                      </Text>
+                    </ScrollView>
+                  ) : null}
                 </View>
               ) : null}
             </Animated.View>

@@ -25,8 +25,18 @@ const EMPTY_PREPARED_CONNECTION_ATOM = Atom.make(
 export type AssetUrlState =
   | { readonly _tag: 'Idle'; readonly retry: () => void }
   | { readonly _tag: 'Loading'; readonly retry: () => void }
-  | { readonly _tag: 'Failure'; readonly error: string; readonly retry: () => void }
-  | { readonly _tag: 'Success'; readonly url: string; readonly retry: () => void }
+  | {
+      readonly _tag: 'Failure'
+      readonly reason: 'disconnected' | 'failed'
+      readonly error: string
+      readonly retry: () => void
+    }
+  | {
+      readonly _tag: 'Success'
+      readonly url: string
+      readonly retry: () => void
+      readonly imageDimensions?: AssetCreateUrlResult['imageDimensions']
+    }
 
 function formatAssetUrlError(cause: Cause.Cause<unknown>): string
 {
@@ -65,15 +75,16 @@ export function useAssetUrl(
   {
     return { _tag: 'Idle', retry }
   }
-  if (result._tag === 'Failure')
-  {
-    return { _tag: 'Failure', error: formatAssetUrlError(result.cause), retry }
-  }
   if (preparedResult._tag === 'Failure')
   {
-    return { _tag: 'Failure', error: formatAssetUrlError(preparedResult.cause), retry }
+    return {
+      _tag: 'Failure',
+      reason: 'disconnected',
+      error: formatAssetUrlError(preparedResult.cause),
+      retry,
+    }
   }
-  if (result._tag !== 'Success' || preparedResult._tag !== 'Success')
+  if (preparedResult._tag !== 'Success')
   {
     return { _tag: 'Loading', retry }
   }
@@ -82,12 +93,26 @@ export function useAssetUrl(
   {
     return {
       _tag: 'Failure',
+      reason: 'disconnected',
       error: 'The environment connection is unavailable. Reconnect and try again.',
       retry,
     }
   }
+  if (result._tag === 'Failure')
+  {
+    return { _tag: 'Failure', reason: 'failed', error: formatAssetUrlError(result.cause), retry }
+  }
+  if (result._tag !== 'Success')
+  {
+    return { _tag: 'Loading', retry }
+  }
   const url = resolveAssetUrl(preparedConnection.httpBaseUrl, result.value.relativeUrl)
   return url === null
-    ? { _tag: 'Failure', error: 'The preview URL returned by the environment is invalid.', retry }
-    : { _tag: 'Success', url, retry }
+    ? {
+        _tag: 'Failure',
+        reason: 'failed',
+        error: 'The preview URL returned by the environment is invalid.',
+        retry,
+      }
+    : { _tag: 'Success', url, retry, imageDimensions: result.value.imageDimensions }
 }

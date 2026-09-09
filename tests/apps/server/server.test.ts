@@ -5205,6 +5205,53 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
   )
 
+  it.effect('serves absolute host media without a local thread and rejects relative media', () =>
+    Effect.gen(function* ()
+    {
+      yield* buildAppUnderTest()
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: 't3-host-media-' })
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const threadId = ThreadId.make('thread-on-another-environment')
+
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* ()
+          {
+            for (const [name, mimeType] of [
+              ['screenshot.png', 'image/png'],
+              ['recording.mp4', 'video/mp4'],
+            ] as const)
+            {
+              const filePath = path.join(directory, name)
+              yield* fileSystem.writeFileString(filePath, 'host media bytes')
+              const issued = yield* client[WS_METHODS.assetsCreateUrl]({
+                resource: { _tag: 'workspace-file', threadId, path: filePath },
+              })
+              const response = yield* HttpClient.get(issued.relativeUrl)
+              assert.equal(response.status, 200)
+              assert.equal(response.headers['content-type'], mimeType)
+              assert.equal(yield* response.text, 'host media bytes')
+
+              const error = yield* client[WS_METHODS.assetsCreateUrl]({
+                resource: { _tag: 'workspace-file', threadId, path: name },
+              }).pipe(Effect.flip)
+              assert.equal(error._tag, 'AssetWorkspaceContextNotFoundError')
+            }
+
+            const nonMediaPath = path.join(directory, 'page.html')
+            yield* fileSystem.writeFileString(nonMediaPath, '<p>not media</p>')
+            const nonMedia = yield* client[WS_METHODS.assetsCreateUrl]({
+              resource: { _tag: 'workspace-file', threadId, path: nonMediaPath },
+            }).pipe(Effect.flip)
+            assert.equal(nonMedia._tag, 'AssetPreviewTypeValidationError')
+          }),
+        ),
+      )
+    }).pipe(Effect.provide(loopbackHttpServerTestLayer)),
+  )
+
   it.effect('routes websocket rpc shell.openInEditor errors', () =>
     Effect.gen(function* ()
     {

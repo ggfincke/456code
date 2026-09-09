@@ -35,6 +35,10 @@ import {
 } from '../../lib/providerRuntimeModeWarnings'
 import { buildThreadFeed } from '../../lib/threadActivity'
 import { appAtomRegistry } from '../atom-registry'
+import {
+  acknowledgedThreadMessagesAtom,
+  forgetAcknowledgedThreadMessages,
+} from './acknowledged-thread-messages'
 import { useEnvironmentServerConfig } from '../entities'
 import {
   appendComposerDraftAttachments,
@@ -189,6 +193,7 @@ export function useThreadComposerState()
   const serverConfig = useEnvironmentServerConfig(selectedThreadShell?.environmentId ?? null)
   const composerDrafts = useAtomValue(composerDraftsAtom)
   const queuedMessagesByThreadKey = useThreadOutboxMessages()
+  const acknowledgedMessages = useAtomValue(acknowledgedThreadMessagesAtom)
   const providerSwitch = useThreadProviderSwitch()
 
   useEffect(() =>
@@ -203,6 +208,17 @@ export function useThreadComposerState()
     () => (selectedThreadKey ? (queuedMessagesByThreadKey[selectedThreadKey] ?? []) : []),
     [queuedMessagesByThreadKey, selectedThreadKey],
   )
+  const selectedThreadAcknowledgedMessages = useMemo(
+    () =>
+      selectedThreadShell
+        ? acknowledgedMessages.filter(
+            (message) =>
+              message.environmentId === selectedThreadShell.environmentId &&
+              message.threadId === selectedThreadShell.id,
+          )
+        : [],
+    [acknowledgedMessages, selectedThreadShell],
+  )
   const selectedThreadMessages = selectedThreadDetail?.messages
   const selectedThreadActivities = selectedThreadDetail?.activities
   const selectedThreadFeed = useMemo(
@@ -215,6 +231,29 @@ export function useThreadComposerState()
         : [],
     [selectedThreadActivities, selectedThreadMessages],
   )
+  useEffect(() =>
+  {
+    const deliveredIds = new Set(
+      selectedThreadFeed.flatMap((entry) => (entry.type === 'message' ? [entry.message.id] : [])),
+    )
+    forgetAcknowledgedThreadMessages(deliveredIds)
+  }, [selectedThreadFeed])
+  const selectedThreadPendingMessages = useMemo(() =>
+  {
+    const acknowledgedIds = new Set(
+      selectedThreadAcknowledgedMessages.map((message) => message.messageId),
+    )
+    const queuedIds = new Set(selectedThreadQueuedMessages.map((message) => message.messageId))
+    return [
+      ...selectedThreadQueuedMessages.map((message) => ({
+        message,
+        acknowledged: acknowledgedIds.has(message.messageId),
+      })),
+      ...selectedThreadAcknowledgedMessages
+        .filter((message) => !queuedIds.has(message.messageId))
+        .map((message) => ({ message, acknowledged: true })),
+    ]
+  }, [selectedThreadAcknowledgedMessages, selectedThreadQueuedMessages])
 
   const selectedDraft = selectedThreadKey ? composerDrafts[selectedThreadKey] : null
   const draftMessage = selectedDraft?.text ?? ''
@@ -620,6 +659,7 @@ export function useThreadComposerState()
 
   return {
     selectedThreadFeed,
+    selectedThreadPendingMessages,
     selectedThreadQueueCount,
     selectedThreadQueueFailureReason: selectedThreadFailedQueuedMessage?.failure?.reason ?? null,
     activeWorkStartedAt,

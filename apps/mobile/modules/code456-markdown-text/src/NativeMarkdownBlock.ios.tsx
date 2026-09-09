@@ -1,7 +1,7 @@
 // apps/mobile/modules/code456-markdown-text/src/NativeMarkdownBlock.ios.tsx
 // render native markdown block ios
 
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { Image, ScrollView, Text, useColorScheme, View } from 'react-native'
 import type { MarkdownNode } from 'react-native-nitro-markdown/headless'
 
@@ -16,8 +16,11 @@ import { NativeMarkdownSelectableText } from './NativeMarkdownSelectableText.ios
 import type {
   MarkdownCodeHighlighter,
   MarkdownHighlightedToken,
+  MarkdownImageRenderer,
   NativeMarkdownTextStyle,
 } from './SelectableMarkdownText.types'
+
+export const MarkdownImageRendererContext = createContext<MarkdownImageRenderer | null>(null)
 
 type HighlightedCode = ReadonlyArray<ReadonlyArray<MarkdownHighlightedToken>>
 
@@ -418,6 +421,7 @@ function NativeMarkdownImage(props: {
   readonly onLinkPress?: (href: string) => void
 })
 {
+  const renderImage = useContext(MarkdownImageRendererContext)
   const href = props.node.href
   if (!href)
   {
@@ -428,6 +432,19 @@ function NativeMarkdownImage(props: {
         onLinkPress={props.onLinkPress}
       />
     )
+  }
+
+  if (renderImage)
+  {
+    const rendered = renderImage({
+      href,
+      alt: props.node.alt ?? null,
+      title: props.node.title ?? null,
+    })
+    if (rendered !== null && rendered !== undefined)
+    {
+      return <>{rendered}</>
+    }
   }
 
   return (

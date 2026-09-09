@@ -90,6 +90,9 @@ export function RenderedMarkdownSurface({
   | 'onPostRender'
 >)
 {
+  const lastSeparator = Math.max(relativePath.lastIndexOf('/'), relativePath.lastIndexOf('\\'))
+  const imageBaseDir =
+    lastSeparator >= 0 ? resolvePathLinkTarget(relativePath.slice(0, lastSeparator), cwd) : cwd
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
     cwd,
@@ -103,6 +106,7 @@ export function RenderedMarkdownSurface({
       <ChatMarkdown
         text={contents}
         cwd={cwd}
+        imageBaseDir={imageBaseDir}
         threadRef={threadRef}
         className="mx-auto max-w-4xl px-6 py-5"
         onTaskListChange={({ markerOffset, checked }) =>

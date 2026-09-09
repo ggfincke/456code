@@ -27,6 +27,7 @@ import {
   type ThreadImportContinuationAuthority,
   type TurnId,
 } from '@t3tools/contracts'
+import { assistantCitationsToPlainText } from '@t3tools/shared/assistantCitations'
 import { isTemporaryWorktreeBranch } from '@t3tools/shared/git'
 import { buildGeneratedWorktreeBranchName } from './ProviderCommandWorktree.ts'
 import { stableStringify } from '@t3tools/shared/relaySigning'
@@ -3399,7 +3400,7 @@ const make = Effect.gen(function* ()
             sourceSequence: providerEvent.sequence,
             branch: thread.branch,
             worktreePath: thread.worktreePath,
-            messageText: message.text,
+            messageText: assistantCitationsToPlainText(message.text),
             ...(message.attachments === undefined ? {} : { attachments: message.attachments }),
           })
         }
@@ -3407,7 +3408,7 @@ const make = Effect.gen(function* ()
           threadId: thread.id,
           sourceSequence: providerEvent.sequence,
           cwd: activeEnvironment.titleGenerationCwd,
-          messageText: message.text,
+          messageText: assistantCitationsToPlainText(message.text),
           ...(message.attachments === undefined ? {} : { attachments: message.attachments }),
           ...(providerEvent.payload.titleSeed === undefined
             ? {}

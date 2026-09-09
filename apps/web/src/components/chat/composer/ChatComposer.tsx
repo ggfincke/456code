@@ -2,6 +2,7 @@
 // renders composer input, provider controls, and guarded submission actions
 import type {
   ApprovalRequestId,
+  AssistantCitation,
   CollaborationMode,
   EnvironmentId,
   ModelSelection,
@@ -48,6 +49,7 @@ import {
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  formatAssistantCitationForComposer,
   replaceTextRange,
   resolveComposerSlashCommandMode,
   shouldSubmitComposerOnEnter,
@@ -103,6 +105,7 @@ import {
 import { compressImageForStash, prepareImageForAttachment } from '../../../lib/imageCompression'
 import { isCommandPaletteOpen } from '../../../commandPaletteBus'
 import { getTerminalFocusOwner } from '../../../lib/terminalFocus'
+import type { AssistantCitationSourceAnchor } from '../../../lib/assistantTextSelection'
 import { resolveShortcutCommand, shortcutLabelForCommand } from '../../../keybindings'
 import {
   type TerminalContextDraft,
@@ -1668,7 +1671,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       rangeStart: number,
       rangeEnd: number,
       replacement: string,
-      options?: { expectedText?: string; focusEditorAfterReplace?: boolean },
+      options?: {
+        expectedText?: string
+        focusEditorAfterReplace?: boolean
+        citationComment?: { start: number; sourceAnchor: AssistantCitationSourceAnchor }
+      },
     ): boolean =>
     {
       const currentText = promptRef.current
@@ -1684,6 +1691,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const next = replaceTextRange(promptRef.current, rangeStart, rangeEnd, replacement)
       const nextCursor = collapseExpandedComposerCursor(next.text, next.cursor)
       const nextExpandedCursor = expandCollapsedComposerCursor(next.text, nextCursor)
+      if (options?.citationComment)
+      {
+        composerEditorRef.current?.requestCitationComment({
+          previousValue: currentText,
+          value: next.text,
+          citationStart: options.citationComment.start,
+          sourceAnchor: options.citationComment.sourceAnchor,
+        })
+      }
       promptRef.current = next.text
       const activePendingQuestion = activePendingProgress?.activeQuestion
       if (activePendingQuestion && activePendingUserInput)
@@ -2379,7 +2395,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (prompt.length === 0 && images.length === 0 && files.length === 0)
     {
-      setIsStashMenuOpen((open) => !open)
+      const entries =
+        usePromptStashStore.getState().queuesByScopeKey[stashScope] ?? EMPTY_PROMPT_STASH_QUEUE
+      const entry = entries.length === 1 ? entries[0] : undefined
+      if (entry && !entry.pendingImageCount)
+      {
+        await restoreStashEntry(entry)
+      }
+      else
+      {
+        setIsStashMenuOpen((open) => !open)
+      }
       return
     }
     // a repeat ⌘S on the *same* still-unencoded snapshot would stash it
@@ -2546,9 +2572,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable,
     promptRef,
     pulseStashBadge,
+    restoreStashEntry,
     selectedModelSelection,
     stashEntryToQueue,
     stashProviderLabel,
+    stashScope,
     stashScopeInstanceId,
   ])
 
@@ -2794,30 +2822,64 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     void addComposerAttachments(files)
   }
 
-  const insertComposerTextAtEnd = (
-    text: string,
-    options?: { ensureLeadingBoundary?: boolean },
-  ): boolean =>
-  {
-    if (
-      text.length === 0 ||
-      isConnecting ||
-      isComposerApprovalState ||
-      pendingUserInputs.length > 0 ||
-      projectSelectionRequired
-    )
+  const insertComposerText = useCallback(
+    (
+      text: string,
+      position: 'cursor' | 'end',
+      options?: {
+        ensureLeadingBoundary?: boolean
+        citationCommentAnchor?: AssistantCitationSourceAnchor
+      },
+    ): boolean =>
     {
-      return false
-    }
-    const prompt = promptRef.current
-    const needsLeadingSpace =
-      (options?.ensureLeadingBoundary ?? false) && prompt.length > 0 && !/\s$/.test(prompt)
-    return applyPromptReplacement(
-      prompt.length,
-      prompt.length,
-      needsLeadingSpace ? ` ${text}` : text,
-    )
-  }
+      if (
+        text.length === 0 ||
+        isConnecting ||
+        isComposerApprovalState ||
+        pendingUserInputs.length > 0 ||
+        projectSelectionRequired ||
+        (options?.citationCommentAnchor && !composerEditorRef.current)
+      )
+      {
+        return false
+      }
+      const prompt = promptRef.current
+      const cursor = position === 'cursor' ? readComposerSnapshot().expandedCursor : prompt.length
+      const needsLeadingSpace =
+        (options?.ensureLeadingBoundary ?? false) &&
+        cursor > 0 &&
+        !/\s/.test(prompt[cursor - 1] ?? '')
+      const rangeEnd = extendReplacementRangeForTrailingSpace(prompt, cursor, text)
+      return applyPromptReplacement(
+        cursor,
+        rangeEnd,
+        needsLeadingSpace ? ` ${text}` : text,
+        options?.citationCommentAnchor
+          ? {
+              citationComment: {
+                start: cursor + (needsLeadingSpace ? 1 : 0),
+                sourceAnchor: options.citationCommentAnchor,
+              },
+              focusEditorAfterReplace: false,
+            }
+          : undefined,
+      )
+    },
+    [
+      applyPromptReplacement,
+      isComposerApprovalState,
+      isConnecting,
+      pendingUserInputs.length,
+      projectSelectionRequired,
+      promptRef,
+      readComposerSnapshot,
+    ],
+  )
+
+  const insertComposerTextAtEnd = useCallback<ChatComposerHandle['insertTextAtEnd']>(
+    (text, options) => insertComposerText(text, 'end', options),
+    [insertComposerText],
+  )
 
   // file-tree drags land as mentions. Handled in the capture phase so the
   // editor never sees the drop; the load-bearing rules (native stop, "move"
@@ -2951,6 +3013,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         focusComposer()
       },
       insertTextAtEnd: insertComposerTextAtEnd,
+      citeAssistantText: (
+        citation: AssistantCitation,
+        sourceAnchor: AssistantCitationSourceAnchor,
+      ) =>
+        insertComposerText(
+          formatAssistantCitationForComposer(citation, citation.comment),
+          'cursor',
+          { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
+        ),
       openModelPicker: () =>
       {
         setIsComposerModelPickerOpen(true)
@@ -3060,6 +3131,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerCursor,
       composerTerminalContexts,
       focusComposer,
+      insertComposerText,
+      insertComposerTextAtEnd,
       insertComposerDraftTerminalContext,
       isSendBusy,
       promptRef,
@@ -3623,6 +3696,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 onChange={onPromptChange}
                 onCommandKeyDown={onComposerCommandKey}
                 onPaste={onComposerPaste}
+                onCitationSubmitAndSend={submitComposer}
                 placeholder={
                   isComposerApprovalState
                     ? (activePendingApproval?.detail ?? 'Resolve this approval request to continue')

@@ -15,12 +15,14 @@ import { toastManager } from '~/components/ui/toast'
 import { useComposerHandleContext } from '~/composerHandleContext'
 import { writeTextToClipboard } from '~/hooks/useCopyToClipboard'
 import { useTheme } from '~/hooks/useTheme'
+import { useWorkspaceMutationRefresh } from '~/hooks/useWorkspaceMutationRefresh'
 import { cn } from '~/lib/utils'
 import { readLocalApi } from '~/localApi'
 import { PIERRE_ICONS } from '~/pierre-icons'
 
 import { createFileTreeDragMentionController } from './fileTreeDragMention'
 import { useProjectEntriesQuery } from './projectFilesQueryState'
+import { buildFileTreePathUpdates } from './fileTreePathReconciliation'
 
 interface FileBrowserPanelProps
 {
@@ -29,6 +31,7 @@ interface FileBrowserPanelProps
   projectName: string
   onOpenFile: (relativePath: string) => void
   onRefreshSelectedFile?: () => void
+  workspaceMutationId: string | null
 }
 
 const TREE_UNSAFE_CSS = `
@@ -54,6 +57,7 @@ export default function FileBrowserPanel({
   projectName,
   onOpenFile,
   onRefreshSelectedFile,
+  workspaceMutationId,
 }: FileBrowserPanelProps)
 {
   const { resolvedTheme } = useTheme()
@@ -66,12 +70,17 @@ export default function FileBrowserPanel({
   )
   const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry['kind']>>(entryKinds)
   const treePaths = useMemo(() => entries.map(treePath), [entries])
-  const previousTreePathsRef = useRef<readonly string[]>([])
+  const previousTreePathsRef = useRef<readonly string[] | null>(null)
   const handleRefresh = () =>
   {
     entriesQuery.refresh()
     onRefreshSelectedFile?.()
   }
+  useWorkspaceMutationRefresh({
+    mutationId: workspaceMutationId,
+    refresh: entriesQuery.refresh,
+    resourceKey: JSON.stringify(['files', environmentId, cwd]),
+  })
 
   // the tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed
@@ -214,11 +223,19 @@ export default function FileBrowserPanel({
 
   useEffect(() =>
   {
+    if (entriesQuery.data === null) return
     if (previousTreePathsRef.current === treePaths) return
     entryKindsRef.current = entryKinds
+    const previousTreePaths = previousTreePathsRef.current
     previousTreePathsRef.current = treePaths
-    model.resetPaths(treePaths)
-  }, [entryKinds, model, treePaths])
+    if (previousTreePaths === null)
+    {
+      model.resetPaths(treePaths)
+      return
+    }
+    const updates = buildFileTreePathUpdates(previousTreePaths, treePaths)
+    if (updates.length > 0) model.batch(updates)
+  }, [entriesQuery.data, entryKinds, model, treePaths])
 
   const fileCount = useMemo(
     () => entries.reduce((count, entry) => count + (entry.kind === 'file' ? 1 : 0), 0),

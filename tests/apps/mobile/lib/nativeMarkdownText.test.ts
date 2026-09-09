@@ -1,7 +1,7 @@
 // tests/apps/mobile/lib/nativeMarkdownText.test.ts
 // verifies native markdown text conversion behavior
 
-import { createElement, type ReactNode } from 'react'
+import { createContext, createElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { MarkdownNode } from 'react-native-nitro-markdown/headless'
@@ -26,11 +26,17 @@ vi.mock('react-native', () => ({
 }))
 vi.mock(
   '../../../../apps/mobile/modules/code456-markdown-text/src/NativeMarkdownSelectableText.ios',
-  () => ({ NativeMarkdownSelectableText: renderSelectableText }),
+  () => ({
+    NativeMarkdownSelectableText: renderSelectableText,
+    MarkdownFileActionsContext: createContext({}),
+  }),
 )
 vi.mock(
   '../../../../apps/mobile/modules/code456-markdown-text/src/NativeMarkdownBlock.ios',
-  () => ({ NativeMarkdownBlock: () => null }),
+  () => ({
+    MarkdownImageRendererContext: createContext(null),
+    NativeMarkdownBlock: () => null,
+  }),
 )
 
 import { SelectableMarkdownText } from '../../../../apps/mobile/modules/code456-markdown-text/src/SelectableMarkdownText.ios'

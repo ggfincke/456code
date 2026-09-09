@@ -83,3 +83,8 @@ export {
   type LatestProposedPlanState,
   type TimelineEntry,
 } from './session/timeline'
+export {
+  createMessageAttachmentPreviewProjector,
+  selectHandoffImageResources,
+  selectMessageAttachmentResources,
+} from './session/attachmentPreviews'

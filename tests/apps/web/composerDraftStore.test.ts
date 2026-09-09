@@ -1861,6 +1861,26 @@ describe('composerDraftStore sticky composer settings', () =>
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe('codex')
   })
 
+  it('preserves sticky provider options when a model change omits options', () =>
+  {
+    const store = useComposerDraftStore.getState()
+
+    store.setStickyModelSelection(
+      modelSelection(CURSOR_DRIVER, 'composer-2', {
+        fastMode: false,
+      }),
+    )
+    store.setStickyModelSelection(modelSelection(CURSOR_DRIVER, 'composer-2.5'))
+
+    expect(
+      useComposerDraftStore.getState().stickyModelSelectionByProvider[CURSOR_INSTANCE],
+    ).toEqual(
+      modelSelection(CURSOR_DRIVER, 'composer-2.5', {
+        fastMode: false,
+      }),
+    )
+  })
+
   it('normalizes empty sticky model options by dropping selection options', () =>
   {
     const store = useComposerDraftStore.getState()
@@ -2223,6 +2243,78 @@ describe('composerDraftStore runtime and interaction settings', () =>
       baseMode: 'plan',
       orchestrate: true,
     })
+  })
+
+  it('drops only a replaced crop-free annotation screenshot and its persisted attachment markers', () =>
+  {
+    const store = useComposerDraftStore.getState()
+    const annotation: PreviewAnnotationPayload = {
+      id: 'annotation_2',
+      pageUrl: 'http://localhost:3000',
+      pageTitle: 'Dashboard',
+      comment: 'Old note',
+      elements: [],
+      regions: [],
+      strokes: [],
+      styleChanges: [],
+      createdAt: '2026-09-09T12:00:00.000Z',
+      screenshot: {
+        dataUrl: 'data:image/png;base64,YWJj',
+        width: 20,
+        height: 30,
+        cropRect: { x: 0, y: 0, width: 20, height: 30 },
+      },
+    }
+    store.setPrompt(threadRef, 'Preserve my prompt')
+    store.addPreviewAnnotation(threadRef, annotation)
+    store.addPreviewAnnotation(threadRef, { ...annotation, id: 'unrelated-note', screenshot: null })
+    store.addImages(threadRef, [
+      makeImage({
+        id: annotation.id,
+        name: 'old-crop.png',
+        previewUrl: annotation.screenshot!.dataUrl,
+      }),
+      makeImage({
+        id: 'unrelated-image',
+        name: 'user.png',
+        previewUrl: 'data:image/png;base64,ZGVm',
+      }),
+    ])
+    const key = scopedThreadKey(threadRef)
+    const draft = useComposerDraftStore.getState().draftsByThreadKey[key]!
+    useComposerDraftStore.setState({
+      draftsByThreadKey: {
+        ...useComposerDraftStore.getState().draftsByThreadKey,
+        [key]: {
+          ...draft,
+          persistedAttachments: draft.images.map(
+            ({ id, name, mimeType, sizeBytes, previewUrl }) => ({
+              id,
+              name,
+              mimeType,
+              sizeBytes,
+              dataUrl: previewUrl,
+            }),
+          ),
+          nonPersistedImageIds: [annotation.id, 'unrelated-image'],
+        },
+      },
+    })
+    store.addPreviewAnnotation(threadRef, {
+      ...annotation,
+      comment: 'New note without crop',
+      screenshot: null,
+      screenshotFailed: true,
+    })
+    const replaced = useComposerDraftStore.getState().draftsByThreadKey[key]!
+    expect(replaced.prompt).toBe('Preserve my prompt')
+    expect(replaced.previewAnnotations.map(({ id, comment }) => ({ id, comment }))).toEqual([
+      { id: 'unrelated-note', comment: 'Old note' },
+      { id: annotation.id, comment: 'New note without crop' },
+    ])
+    expect(replaced.images.map(({ id }) => id)).toEqual(['unrelated-image'])
+    expect(replaced.persistedAttachments.map(({ id }) => id)).toEqual(['unrelated-image'])
+    expect(replaced.nonPersistedImageIds).toEqual(['unrelated-image'])
   })
 
   it('round-trips legacy orchestrate mode with preview annotations', () =>

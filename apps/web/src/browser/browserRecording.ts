@@ -114,10 +114,13 @@ interface ActiveRecording
   readonly canvas: HTMLCanvasElement
   readonly context: CanvasRenderingContext2D
   readonly recorder: MediaRecorder
+  stream: MediaStream | null
   readonly chunks: Blob[]
   readonly mimeType: string
   readonly startedAt: string
   readonly startupSettled: Promise<void>
+  savedBlob?: Blob
+  uploadPromise?: Promise<string>
   nextFrameSequence: number
   lastDrawnFrameSequence: number
   lifecycle: BrowserRecordingLifecycle
@@ -172,10 +175,29 @@ export function findActiveBrowserRecordingRuntimeTabId(
   )
 }
 
-const preferredMimeType = (): string =>
+const preferredMimeType = (): string | undefined =>
 {
-  const candidates = ['video/mp4;codecs=avc1.42E01E', 'video/webm;codecs=vp9', 'video/webm']
-  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? 'video/webm'
+  const candidates = [
+    'video/mp4;codecs=avc1',
+    'video/mp4;codecs=avc1.640028',
+    'video/mp4;codecs=avc1.42e01e',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ]
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate))
+}
+
+const stopMediaStream = (stream: MediaStream | null): void =>
+{
+  for (const track of stream?.getTracks() ?? []) track.stop()
+}
+
+const releaseRecordingStream = (recording: ActiveRecording): void =>
+{
+  const stream = recording.stream
+  recording.stream = null
+  stopMediaStream(stream)
 }
 
 const drawFrame = (frame: DesktopPreviewRecordingFrame): void =>
@@ -209,6 +231,7 @@ const stopMediaRecorder = async (recorder: MediaRecorder): Promise<void> =>
 
 const clearActiveRecording = (recording: ActiveRecording): void =>
 {
+  releaseRecordingStream(recording)
   if (active !== recording) return
   active = null
   unsubscribeFrames?.()
@@ -298,16 +321,34 @@ export async function startBrowserRecording(
   }
   let mimeType: string
   let recorder: MediaRecorder
+  let stream: MediaStream | null = null
   try
   {
-    mimeType = preferredMimeType()
-    recorder = new MediaRecorder(canvas.captureStream(12), {
-      mimeType,
-      videoBitsPerSecond: 4_000_000,
+    stream = canvas.captureStream(12)
+    const requestedMimeType = preferredMimeType()
+    const settings = stream.getVideoTracks()[0]?.getSettings()
+    // bound encoder work to captured pixels and the existing canvas frame rate
+    const videoBitsPerSecond = Math.round(
+      Math.min(
+        50_000_000,
+        Math.max(
+          2_500_000,
+          (settings?.width ?? canvas.width) *
+            (settings?.height ?? canvas.height) *
+            (settings?.frameRate ?? 12) *
+            0.05,
+        ),
+      ),
+    )
+    recorder = new MediaRecorder(stream, {
+      ...(requestedMimeType ? { mimeType: requestedMimeType } : {}),
+      videoBitsPerSecond,
     })
+    mimeType = recorder.mimeType || requestedMimeType || 'video/webm'
   }
   catch (cause)
   {
+    stopMediaStream(stream)
     throw new BrowserRecordingOperationError({
       operation: 'initialize-media-recorder',
       tabId,
@@ -332,6 +373,7 @@ export async function startBrowserRecording(
     canvas,
     context,
     recorder,
+    stream,
     chunks,
     mimeType,
     startedAt,
@@ -478,12 +520,18 @@ const finalizeBrowserRecording = async (
     }
     try
     {
-      const blob = new Blob(recording.chunks, { type: recording.mimeType })
+      releaseRecordingStream(recording)
+      const mimeType =
+        recording.recorder.mimeType ||
+        recording.chunks.find((chunk) => chunk.type.length > 0)?.type ||
+        recording.mimeType
+      const blob = new Blob(recording.chunks, { type: mimeType })
       const artifact = await bridge.recording.save(
         tabId,
-        recording.mimeType,
+        mimeType,
         new Uint8Array(await blob.arrayBuffer()),
       )
+      recording.savedBlob = blob
       result = { _tag: 'Success', artifact }
     }
     catch (cause)
@@ -502,6 +550,7 @@ const finalizeBrowserRecording = async (
 
   if (result._tag === 'Failure' && isStartupWaitTimeout(result.error))
   {
+    releaseRecordingStream(recording)
     // do not clear `active` yet. The renderer-side start promise can still
     // resolve later, and its cancellation path will call `stopScreencast`.
     // keeping the slot reserved prevents a newer recording for this tab from
@@ -589,4 +638,18 @@ export function stopBrowserRecording(
     })
   recording.lifecycle = { phase: 'stopping', stopPromise }
   return stopPromise
+}
+
+// join the local stop and share one transfer among concurrent automation callers
+export async function stopBrowserRecordingForUpload(
+  tabId: string,
+  upload: (artifact: DesktopPreviewRecordingArtifact, blob: Blob) => Promise<string>,
+): Promise<(DesktopPreviewRecordingArtifact & { uploadedAttachmentId: string }) | null>
+{
+  const recording = active
+  if (!recording || recording.tabId !== tabId) return null
+  const artifact = await stopBrowserRecording(tabId)
+  if (!artifact || !recording.savedBlob) return null
+  recording.uploadPromise ??= upload(artifact, recording.savedBlob)
+  return { ...artifact, uploadedAttachmentId: await recording.uploadPromise }
 }

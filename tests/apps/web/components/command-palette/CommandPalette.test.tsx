@@ -77,8 +77,10 @@ it('switches between file, content, and command searches without leaving closed 
     expect(
       container.querySelector('[data-search-surface]')?.getAttribute('data-search-surface'),
     ).toBe('commands')
+    expect(container.querySelector('p')?.parentElement?.inert).toBe(true)
     await shortcut('k')
     expect(container.querySelector('[data-search-surface]')).toBeNull()
+    expect(container.querySelector('p')?.parentElement?.inert).toBe(false)
   }
   finally
   {

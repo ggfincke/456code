@@ -2,7 +2,9 @@
 // renders virtualized thread timeline rows and shared row interactions
 import { LegendList, type LegendListRef } from '@legendapp/list/react'
 import { parseScopedThreadKey } from '@t3tools/client-runtime/environment'
+import type { CodexArtifactTemplate } from '@t3tools/client-runtime/codex-artifact-templates'
 import {
+  type AssistantCitation,
   type EnvironmentId,
   type MessageId,
   type ServerProviderSkill,
@@ -40,16 +42,29 @@ import {
   type TimelineLatestTurn,
 } from './MessagesTimeline.logic'
 import { shouldKeepTimelineEndVisibleAfterOverlayGrowth } from './timelineScrollAnchoring'
+import { AssistantSelectionToolbar } from '../AssistantSelectionToolbar'
+import type { AssistantCitationSourceAnchor } from '~/lib/assistantTextSelection'
+import type { AssistantCitationRequest } from '../AssistantCitationSource'
+import { useAssistantCitationTarget, type CitationHistoryPage } from '../useAssistantCitationTarget'
 
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />
 const TIMELINE_LIST_FADE_HEADER = <div className="h-10 sm:h-12" />
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, 'name' | 'displayName'>> = []
+const NOOP_USE_ARTIFACT_TEMPLATE = () =>
+{}
 
 // props (public API)
 
 interface MessagesTimelineProps
 {
+  citationRequest?: AssistantCitationRequest | null
+  citationHistoryLoading?: boolean
+  loadEarlier?: CitationHistoryPage | null
+  onCiteAssistantText?: (
+    citation: AssistantCitation,
+    sourceAnchor: AssistantCitationSourceAnchor,
+  ) => boolean
   isWorking: boolean
   activeTurnInProgress: boolean
   activeTurnStartedAt: string | null
@@ -63,6 +78,7 @@ interface MessagesTimelineProps
   revertTurnCountByUserMessageId: Map<MessageId, number>
   canRevertConversation: boolean
   onRevertUserMessage: (messageId: MessageId) => void
+  onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void
   isRevertingCheckpoint: boolean
   onImageExpand: (preview: ExpandedImagePreview) => void
   activeThreadEnvironmentId: EnvironmentId
@@ -86,6 +102,10 @@ interface MessagesTimelineProps
 // MessagesTimeline — list owner
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  citationRequest = null,
+  citationHistoryLoading = false,
+  loadEarlier = null,
+  onCiteAssistantText,
   isWorking,
   activeTurnInProgress,
   activeTurnStartedAt,
@@ -99,6 +119,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   revertTurnCountByUserMessageId,
   canRevertConversation,
   onRevertUserMessage,
+  onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -120,6 +141,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps)
 {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set())
+  const expandCitedTurn = useCallback((turnId: TurnId) =>
+  {
+    setExpandedTurnIds((current) => (current.has(turnId) ? current : new Set([...current, turnId])))
+  }, [])
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set())
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>())
 
@@ -248,6 +273,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   )
+  const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey])
+  const {
+    target: readyCitationRequest,
+    positioning: citationPositioning,
+    onListLoad: onCitationListLoad,
+    alwaysRender: citationAlwaysRender,
+  } = useAssistantCitationTarget({
+    request: citationRequest,
+    entries: timelineEntries,
+    rows,
+    listRef,
+    viewport: timelineViewportElement,
+    historyLoading: citationHistoryLoading,
+    loadEarlier,
+    onExpandTurn: expandCitedTurn,
+    onManualNavigation,
+  })
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false)
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0)
   const handleAnchorReady = useCallback(
@@ -288,19 +330,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       shouldKeepTimelineEndVisibleAfterOverlayGrowth({
         previousOverlayHeight,
         overlayHeight: contentInsetEndAdjustment,
-        followingEnd,
+        followingEnd: followingEnd && !citationPositioning,
       })
     )
     {
       void listRef.current?.scrollToEnd?.({ animated: false })
     }
-  }, [contentInsetEndAdjustment, followingEnd, listRef])
+  }, [citationPositioning, contentInsetEndAdjustment, followingEnd, listRef])
 
   const handleScroll = useCallback(() =>
   {
     const state = listRef.current?.getState?.()
     const isAtEnd = resolveTimelineIsAtEnd(state)
-    if (isAtEnd !== undefined)
+    if (isAtEnd !== undefined && !citationPositioning)
     {
       onIsAtEndChange(isAtEnd)
     }
@@ -327,7 +369,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? 'true' : 'false'
     }
-  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange])
+  }, [citationPositioning, listRef, minimapItems, minimapStripMap, onIsAtEndChange])
 
   useEffect(() =>
   {
@@ -364,9 +406,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
   }, [timelineViewportElement, rows.length])
 
-  const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey])
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
+      citationRequest: readyCitationRequest,
+      listRef,
       timestampFormat,
       routeThreadKey,
       threadRef: citationThreadRef,
@@ -377,6 +420,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       canRevertConversation,
       onRevertUserMessage,
+      onUseArtifactTemplate,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -384,6 +428,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       orchestratePlanActions,
     }),
     [
+      readyCitationRequest,
+      listRef,
       timestampFormat,
       routeThreadKey,
       citationThreadRef,
@@ -394,6 +440,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       canRevertConversation,
       onRevertUserMessage,
+      onUseArtifactTemplate,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -445,7 +492,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <div ref={setTimelineViewportElement} className="@container relative h-full min-h-0">
+        <div
+          ref={setTimelineViewportElement}
+          className="@container relative h-full min-h-0"
+          data-assistant-citation-viewport="true"
+        >
+          {onCiteAssistantText && citationThreadRef ? (
+            <AssistantSelectionToolbar
+              viewport={timelineViewportElement}
+              threadRef={citationThreadRef}
+              onCite={onCiteAssistantText}
+            />
+          ) : null}
           <LegendList<MessagesTimelineRow>
             ref={listRef}
             data={rows}
@@ -453,11 +511,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             getItemType={getItemType}
             renderItem={renderItem}
             estimatedItemSize={90}
-            initialScrollAtEnd
+            initialScrollAtEnd={citationRequest === null}
+            {...(readyCitationRequest ? { dataVersion: readyCitationRequest.key } : {})}
+            {...(citationAlwaysRender ? { alwaysRender: citationAlwaysRender } : {})}
+            onLoad={onCitationListLoad}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
             contentInsetEndAdjustment={contentInsetEndAdjustment}
             maintainScrollAtEnd={
-              anchoredEndSpace
+              citationPositioning || anchoredEndSpace
                 ? false
                 : {
                     animated: false,
@@ -468,10 +529,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     },
                   }
             }
-            maintainVisibleContentPosition={{
-              data: true,
-              size: false,
-            }}
+            maintainVisibleContentPosition={
+              citationPositioning ? false : { data: true, size: false }
+            }
             onScroll={handleScroll}
             className={cn(
               'scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5',

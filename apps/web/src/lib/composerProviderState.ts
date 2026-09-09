@@ -2,6 +2,7 @@
 // derive composer provider selection state
 
 import {
+  type ModelCapabilities,
   type ProviderDriverKind,
   type ProviderOptionSelection,
   type ServerProviderModel,
@@ -40,6 +41,37 @@ export function getComposerPromptInjectionState(prompt: string): ComposerPromptI
   return isClaudeUltrathinkPrompt(prompt) ? 'ultrathink' : 'none'
 }
 
+// fast mode is sticky only after an explicit user choice
+export function withImplicitFastModeDefault(
+  caps: ModelCapabilities,
+  modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): ReadonlyArray<ProviderOptionSelection> | undefined
+{
+  if (modelOptions?.some((selection) => selection.id === 'fastMode'))
+  {
+    return modelOptions
+  }
+  const hasFastModeDescriptor = caps.optionDescriptors?.some(
+    (descriptor) => descriptor.type === 'boolean' && descriptor.id === 'fastMode',
+  )
+  if (!hasFastModeDescriptor) return modelOptions ?? undefined
+  return [...(modelOptions ?? []), { id: 'fastMode', value: false }]
+}
+
+export function resolveComposerOptionSelections(
+  models: ReadonlyArray<ServerProviderModel>,
+  model: string,
+  provider: ProviderDriverKind,
+  modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): {
+  caps: ModelCapabilities
+  selections: ReadonlyArray<ProviderOptionSelection> | undefined
+}
+{
+  const caps = getProviderModelCapabilities(models, model, provider)
+  return { caps, selections: withImplicitFastModeDefault(caps, modelOptions) }
+}
+
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState
 {
   const { provider, model, models, modelOptions, promptInjectionState = 'none' } = input
@@ -54,8 +86,13 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
       modelOptionsForDispatch: modelOptions?.length ? modelOptions : undefined,
     }
   }
-  const caps = getProviderModelCapabilities(models, model, provider)
-  const descriptors = getProviderOptionDescriptors({ caps, selections: modelOptions })
+  const { caps, selections } = resolveComposerOptionSelections(
+    models,
+    model,
+    provider,
+    modelOptions,
+  )
+  const descriptors = getProviderOptionDescriptors({ caps, selections })
   const primarySelectDescriptor = descriptors.find(
     (descriptor): descriptor is Extract<(typeof descriptors)[number], { type: 'select' }> =>
       descriptor.type === 'select',

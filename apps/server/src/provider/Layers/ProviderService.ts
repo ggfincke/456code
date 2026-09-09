@@ -30,6 +30,7 @@ import {
   TurnId,
   type ProviderDriverKind,
   type ProviderContinuationIdentity as ProviderContinuationIdentityType,
+  type OrchestrationMessage,
   type ProviderRuntimeEvent,
   type ProviderRuntimeModeWarning,
   type RuntimeMode,
@@ -58,10 +59,16 @@ import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
 
 import {
+  assistantCitationMatchesSource,
+  collectAssistantCitations,
+  expandAssistantCitationsForProvider,
+} from '@t3tools/shared/assistantCitations'
+import {
   inspectManagedAttachmentFile,
   parsePendingAttachmentId,
 } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
+import * as ServerEnvironment from '../../environment/ServerEnvironment.ts'
 import {
   increment,
   providerMetricAttributes,
@@ -3074,8 +3081,89 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       payload: rawInput,
     })
 
+    const citations = parsed.input === undefined ? [] : collectAssistantCitations(parsed.input)
+    if (citations.length > 0)
+    {
+      const serverEnvironment = yield* Effect.serviceOption(ServerEnvironment.ServerEnvironment)
+      if (Option.isNone(serverEnvironment))
+      {
+        return yield* toValidationError(
+          'ProviderService.sendTurn',
+          'Assistant citation provenance could not be verified in this environment.',
+        )
+      }
+      const environmentId = yield* serverEnvironment.value.getEnvironmentId
+      const sourceMessages = new Map<string, OrchestrationMessage>()
+      for (const { citation } of citations)
+      {
+        if (citation.environmentId !== environmentId)
+        {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            'An assistant citation belongs to a different environment.',
+          )
+        }
+        const sourceKey = `${citation.threadId}\u0000${citation.messageId}`
+        let sourceMessage = sourceMessages.get(sourceKey)
+        if (sourceMessage === undefined)
+        {
+          sourceMessage = Option.getOrUndefined(
+            yield* projectionSnapshotQuery
+              .getAssistantCitationSource({
+                threadId: citation.threadId,
+                messageId: citation.messageId,
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  toValidationError(
+                    'ProviderService.sendTurn',
+                    'Assistant citation provenance could not be loaded.',
+                    cause,
+                  ),
+                ),
+              ),
+          )
+          if (sourceMessage === undefined)
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              'An assistant citation refers to an unavailable source response.',
+            )
+          }
+          sourceMessages.set(sourceKey, sourceMessage)
+        }
+        if (
+          sourceMessage.role !== 'assistant' ||
+          sourceMessage.streaming ||
+          !assistantCitationMatchesSource(citation, {
+            environmentId,
+            threadId: citation.threadId,
+            messageId: citation.messageId,
+            text: sourceMessage.text,
+          })
+        )
+        {
+          return yield* toValidationError(
+            'ProviderService.sendTurn',
+            'An assistant citation does not match its completed source response.',
+          )
+        }
+      }
+    }
+
+    const expandedInput =
+      parsed.input === undefined ? undefined : expandAssistantCitationsForProvider(parsed.input)
+    if (expandedInput !== parsed.input)
+    {
+      yield* decodeInputOrValidationError({
+        operation: 'ProviderService.sendTurn',
+        schema: ProviderSendTurnInput.fields.input,
+        payload: expandedInput,
+      })
+    }
     const input = {
       ...parsed,
+      ...(expandedInput === undefined ? {} : { input: expandedInput }),
       attachments: parsed.attachments ?? [],
     }
     if (!input.input && input.attachments.length === 0)

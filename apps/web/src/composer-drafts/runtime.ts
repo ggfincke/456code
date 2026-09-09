@@ -686,9 +686,15 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             {
               return state
             }
+            const current = state.stickyModelSelectionByProvider[normalized.instanceId]
+            // model-only updates retain the last explicit trait selection
+            const nextSelection =
+              normalized.options !== undefined
+                ? normalized
+                : createModelSelection(normalized.instanceId, normalized.model, current?.options)
             const nextMap: Partial<Record<ProviderInstanceId, ModelSelection>> = {
               ...state.stickyModelSelectionByProvider,
-              [normalized.instanceId]: normalized,
+              [normalized.instanceId]: nextSelection,
             }
             if (Equal.equals(state.stickyModelSelectionByProvider, nextMap))
             {
@@ -1686,12 +1692,26 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...annotation,
               screenshot: annotation.screenshot ? { ...annotation.screenshot, dataUrl: '' } : null,
             }
+            const replacingWithoutScreenshot =
+              annotation.screenshot === null &&
+              existing.previewAnnotations.some((entry) => entry.id === annotation.id)
             return {
               draftsByThreadKey: {
                 ...state.draftsByThreadKey,
                 [threadKey]: {
                   ...existing,
                   previewAnnotations: [...nextAnnotations, compactAnnotation],
+                  ...(replacingWithoutScreenshot
+                    ? {
+                        images: existing.images.filter((image) => image.id !== annotation.id),
+                        persistedAttachments: existing.persistedAttachments.filter(
+                          (image) => image.id !== annotation.id,
+                        ),
+                        nonPersistedImageIds: existing.nonPersistedImageIds.filter(
+                          (id) => id !== annotation.id,
+                        ),
+                      }
+                    : {}),
                 },
               },
             }

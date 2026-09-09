@@ -13,6 +13,9 @@ import * as Option from 'effect/Option'
 import { useProject, useThreadShell } from '../entities'
 import { useEnvironmentThread } from './threads'
 import { threadDetailToShell } from './thread-shell-fallback'
+import { flattenQueuedThreadMessages } from './thread-outbox-model'
+import { useThreadOutboxMessages } from './use-thread-outbox'
+import { pendingThreadCreationShell } from './pending-thread-creation'
 import {
   useRemoteEnvironmentRuntime,
   useSavedRemoteConnection,
@@ -62,13 +65,28 @@ function useResolvedThreadSelection(params: ThreadSelectionRouteParams | undefin
     selectedThreadRef?.threadId ?? null,
   )
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data)
+  const queuedMessagesByThreadKey = useThreadOutboxMessages()
+  const pendingCreation = useMemo(() =>
+  {
+    if (!selectedThreadRef)
+    {
+      return null
+    }
+    const message = flattenQueuedThreadMessages(queuedMessagesByThreadKey).find(
+      (candidate) =>
+        candidate.creation !== undefined &&
+        candidate.environmentId === selectedThreadRef.environmentId &&
+        candidate.threadId === selectedThreadRef.threadId,
+    )
+    return message ? pendingThreadCreationShell(message) : null
+  }, [queuedMessagesByThreadKey, selectedThreadRef])
   const selectedThread = useMemo(
     () =>
       selectedThreadShell ??
       (selectedThreadRef !== null && selectedThreadDetail !== null
         ? threadDetailToShell(selectedThreadRef.environmentId, selectedThreadDetail)
-        : null),
-    [selectedThreadDetail, selectedThreadRef, selectedThreadShell],
+        : pendingCreation),
+    [pendingCreation, selectedThreadDetail, selectedThreadRef, selectedThreadShell],
   )
   const selectedProjectRef = useMemo<ScopedProjectRef | null>(
     () =>

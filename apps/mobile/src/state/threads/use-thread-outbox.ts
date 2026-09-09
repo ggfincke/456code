@@ -86,6 +86,25 @@ export function useThreadOutboxFailureReason(
   )
 }
 
+const threadOutboxPendingCountByThreadKeyAtom = Atom.family((threadKey: string) =>
+  Atom.make(
+    (get): number =>
+      (get(threadOutboxManager.queuedMessagesByThreadKeyAtom)[threadKey] ?? []).filter(
+        (message) => message.creation === undefined && message.failure === undefined,
+      ).length,
+  ).pipe(Atom.withLabel(`mobile:thread-outbox:pending-count:${threadKey}`)),
+)
+
+export function useThreadOutboxPendingCount(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): number
+{
+  return useAtomValue(
+    threadOutboxPendingCountByThreadKeyAtom(scopedThreadKey(environmentId, threadId)),
+  )
+}
+
 export function useThreadOutboxMessages()
 {
   return useAtomValue(threadOutboxManager.queuedMessagesByThreadKeyAtom)

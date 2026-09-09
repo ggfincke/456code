@@ -6,6 +6,7 @@ import type {
   OrchestrationThreadActivity,
   OrchestrationThreadDetailSnapshot,
 } from '@t3tools/contracts'
+import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
 
 function asRecord(value: unknown): Record<string, unknown> | null
 {
@@ -198,6 +199,18 @@ function projectImageViewData(data: Record<string, unknown>): Record<string, unk
     projectedItem.savedPath = item.savedPath
   }
   return Object.keys(projectedItem).length > 1 ? projectedItem : undefined
+}
+
+function projectViewedImagePath(data: Record<string, unknown>): string | undefined
+{
+  const directPath = asTrimmedString(data.imagePath)
+  if (directPath && !/[\r\n]/.test(directPath) && isWorkspaceImagePreviewPath(directPath))
+    return directPath
+  const toolName = asTrimmedString(data.toolName)?.toLowerCase()
+  if (toolName !== 'read' && toolName !== 'read file') return undefined
+  const input = asRecord(data.input)
+  const path = asTrimmedString(input?.file_path) ?? asTrimmedString(input?.path)
+  return path && !/[\r\n]/.test(path) && isWorkspaceImagePreviewPath(path) ? path : undefined
 }
 
 function summarizeToolTextOutput(value: string): string | null
@@ -445,6 +458,8 @@ export function projectActivityPayload(
   {
     projectedData.command = command
   }
+  const imagePath = projectViewedImagePath(data)
+  if (imagePath) projectedData.imagePath = imagePath
 
   const changedFiles: string[] = []
   collectChangedFiles(data, changedFiles, new Set<string>(), 0)

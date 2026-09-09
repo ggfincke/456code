@@ -4,15 +4,25 @@
 import { ChatImageAttachment, type EnvironmentId, type TurnId } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 import { formatElapsed } from '@t3tools/shared/orchestrationTiming'
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, View } from 'react-native'
 import { TouchableOpacity } from 'react-native-gesture-handler'
 import { Markdown } from 'react-native-nitro-markdown'
 import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated'
-import { SymbolView } from '../../../components/AppSymbol'
+import { SymbolView, type AppSymbolName } from '../../../components/AppSymbol'
+import {
+  codexArtifactTemplatePresentationLabel,
+  type CodexArtifactTemplate,
+} from '@t3tools/client-runtime/codex-artifact-templates'
+import {
+  renderCodexFileCitationsAsMarkdown,
+  splitCodexArtifactTemplateMarkdown,
+} from '@t3tools/client-runtime/codex-markdown-directives'
+import { renderAssistantCitationsAsText } from '@t3tools/shared/assistantCitations'
 import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
+  type MarkdownImageRenderer,
   type SelectableMarkdownSkill,
 } from '../../../native/SelectableMarkdownText'
 
@@ -20,11 +30,12 @@ import { AppText as Text } from '../../../components/AppText'
 import { CopyTextButton } from '../../../components/CopyTextButton'
 import { cn } from '../../../lib/cn'
 import { type ThreadFeedEntry } from '../../../lib/threadActivity'
+import type { PendingThreadFeedEntry } from '../pending-thread-feed'
 import { useAssetUrl } from '../../../state/assets'
 import { parseReviewCommentMessageSegments } from '../../review/reviewCommentSelection'
 import { ThreadWorkGroupToggle, ThreadWorkLog } from '../thread-work-log'
 
-import type { ThreadFeedProps } from '../ThreadFeed'
+import type { MarkdownLinkHandlers, ThreadFeedProps } from '../ThreadFeed'
 import { type MarkdownStyleSets, type ReviewCommentColors } from './feedMarkdown'
 import { ReviewCommentCard } from './feedReviewCommentCard'
 
@@ -98,9 +109,122 @@ function MessageAttachmentImage(props: {
   )
 }
 
+const ARTIFACT_TEMPLATE_SYMBOL_BY_KIND: Record<
+  CodexArtifactTemplate['artifactKind'],
+  AppSymbolName
+> = {
+  document: 'doc.text',
+  presentation: 'chart.bar.xaxis',
+  spreadsheet: 'chart.bar.xaxis',
+  site: 'safari',
+  'google-docs': 'doc.text',
+  'google-slides': 'chart.bar.xaxis',
+  'google-sheets': 'chart.bar.xaxis',
+  image: 'camera',
+  email: 'text.bubble',
+  slack: 'text.bubble',
+}
+
+function ArtifactTemplateCard(props: {
+  readonly template: CodexArtifactTemplate
+  readonly onUse?: ((template: CodexArtifactTemplate) => void) | undefined
+})
+{
+  return (
+    <View className="my-2 min-w-0 flex-row items-center gap-3 rounded-2xl border border-border bg-card px-3 py-3">
+      <View className="relative h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-subtle">
+        <SymbolView
+          name={ARTIFACT_TEMPLATE_SYMBOL_BY_KIND[props.template.artifactKind]}
+          size={20}
+          tintColorClassName="accent-foreground-muted"
+          type="monochrome"
+        />
+      </View>
+      <View className="min-w-0 flex-1">
+        <Text className="font-t3-bold text-sm text-foreground" numberOfLines={1}>
+          {props.template.displayName}
+        </Text>
+        <Text className="text-xs text-foreground-muted">
+          {codexArtifactTemplatePresentationLabel(props.template.artifactKind)}
+        </Text>
+      </View>
+      {props.onUse ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Use ${props.template.displayName} template`}
+          className="min-h-9 justify-center rounded-lg border border-border bg-subtle px-3 active:opacity-65"
+          onPress={() => props.onUse?.(props.template)}
+        >
+          <Text className="font-t3-bold text-xs text-foreground">Use template</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  )
+}
+
+const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
+  readonly markdown: string
+  readonly markdownStyles: MarkdownStyleSets['assistant']
+  readonly markdownLinkHandlers: MarkdownLinkHandlers
+  readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined
+  readonly renderImage: MarkdownImageRenderer
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined
+})
+{
+  const segments = useMemo(
+    () => splitCodexArtifactTemplateMarkdown(props.markdown),
+    [props.markdown],
+  )
+  return segments.map((segment) =>
+  {
+    if (segment.kind === 'artifact-template')
+    {
+      return (
+        <ArtifactTemplateCard
+          key={`artifact-template:${segment.sourceOffset}`}
+          template={segment.template}
+          onUse={props.onUseArtifactTemplate}
+        />
+      )
+    }
+    if (segment.markdown.trim().length === 0) return null
+    const markdown = renderCodexFileCitationsAsMarkdown(segment.markdown)
+    return hasNativeSelectableMarkdownText() ? (
+      <SelectableMarkdownText
+        key={`markdown:${segment.sourceOffset}`}
+        markdown={markdown}
+        skills={props.skills}
+        textStyle={props.markdownStyles.nativeTextStyle}
+        renderImage={props.renderImage}
+        {...props.markdownLinkHandlers}
+      />
+    ) : (
+      <Markdown
+        key={`markdown:${segment.sourceOffset}`}
+        options={{ gfm: true }}
+        renderers={{
+          ...props.markdownStyles.renderers,
+          image: ({ node }) =>
+            node.href
+              ? (props.renderImage({
+                  href: node.href,
+                  alt: node.alt ?? null,
+                  title: node.title ?? null,
+                }) ?? undefined)
+              : undefined,
+        }}
+        styles={props.markdownStyles.styles}
+        theme={props.markdownStyles.theme}
+      >
+        {markdown}
+      </Markdown>
+    )
+  })
+})
+
 export function renderFeedEntry(
-  info: { item: ThreadFeedEntry; index: number },
-  props: Pick<ThreadFeedProps, 'environmentId' | 'skills'> & {
+  info: { item: PendingThreadFeedEntry; index: number },
+  props: Pick<ThreadFeedProps, 'environmentId' | 'onUseArtifactTemplate' | 'skills'> & {
     readonly copiedRowId: string | null
     readonly expandedWorkRows: Record<string, boolean>
     readonly terminalAssistantMessageIds: ReadonlySet<string>
@@ -110,7 +234,8 @@ export function renderFeedEntry(
     readonly onToggleWorkRow: (rowId: string) => void
     readonly onToggleTurnFold: (turnId: TurnId) => void
     readonly onPressImage: (uri: string, headers?: Record<string, string>) => void
-    readonly onMarkdownLinkPress: (href: string) => void
+    readonly renderImage: MarkdownImageRenderer
+    readonly markdownLinkHandlers: MarkdownLinkHandlers
     readonly iconSubtleColor: string | import('react-native').ColorValue
     readonly userBubbleColor: string | import('react-native').ColorValue
     readonly markdownStyles: MarkdownStyleSets
@@ -168,6 +293,7 @@ export function renderFeedEntry(
   {
     const { message } = entry
     const isUser = message.role === 'user'
+    const renderedText = renderAssistantCitationsAsText(message.text)
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant
     const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt)
     const attachments = (message.attachments ?? []).filter(isImageAttachment)
@@ -200,13 +326,21 @@ export function renderFeedEntry(
           >
             {message.text.trim().length > 0 ? (
               <UserMessageContent
-                text={message.text}
+                text={renderedText}
                 markdownStyles={styles}
                 reviewCommentColors={props.reviewCommentColors}
                 skills={props.skills}
-                onLinkPress={props.onMarkdownLinkPress}
+                markdownLinkHandlers={props.markdownLinkHandlers}
               />
             ) : null}
+            {entry.pendingMessage?.attachments.map((attachment) => (
+              <Image
+                key={attachment.id}
+                source={{ uri: attachment.previewUri }}
+                accessibilityLabel={attachment.name}
+                className="h-[140px] w-[180px] rounded-[14px]"
+              />
+            ))}
             {attachments.map((attachment) =>
             {
               return (
@@ -222,7 +356,7 @@ export function renderFeedEntry(
           </View>
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
             <Text className="font-sans-medium text-xs tabular-nums text-adaptive-neutral-600-400">
-              {timestampLabel}
+              {entry.pendingMessage && !entry.acknowledged ? 'Pending' : timestampLabel}
             </Text>
             {message.text.trim().length > 0 ? (
               <CopyTextButton
@@ -240,7 +374,7 @@ export function renderFeedEntry(
 
     // skip empty assistant messages (no text, no attachments) — they would
     // render as an orphaned timestamp and break adjacent activity-group merging.
-    if (message.text.trim().length === 0 && attachments.length === 0)
+    if (renderedText.trim().length === 0 && attachments.length === 0)
     {
       return null
     }
@@ -251,24 +385,15 @@ export function renderFeedEntry(
         className={cn(showAssistantMeta ? 'mb-5 px-1' : 'mb-2 px-1')}
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
-        {message.text.trim().length > 0 ? (
-          hasNativeSelectableMarkdownText() ? (
-            <SelectableMarkdownText
-              markdown={message.text}
-              skills={props.skills}
-              textStyle={styles.nativeTextStyle}
-              onLinkPress={props.onMarkdownLinkPress}
-            />
-          ) : (
-            <Markdown
-              options={{ gfm: true }}
-              renderers={styles.renderers}
-              styles={styles.styles}
-              theme={styles.theme}
-            >
-              {message.text}
-            </Markdown>
-          )
+        {renderedText.trim().length > 0 ? (
+          <AssistantMarkdownContent
+            markdown={renderedText}
+            markdownStyles={styles}
+            markdownLinkHandlers={props.markdownLinkHandlers}
+            onUseArtifactTemplate={props.onUseArtifactTemplate}
+            renderImage={props.renderImage}
+            skills={props.skills}
+          />
         ) : null}
         {attachments.map((attachment) =>
         {
@@ -286,7 +411,7 @@ export function renderFeedEntry(
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton
               accessibilityLabel="Copy message"
-              text={message.text}
+              text={renderedText}
               tintColor={iconSubtleColor}
               buttonSize={28}
               iconSize={13}
@@ -308,6 +433,7 @@ export function renderFeedEntry(
       iconSubtleColor={iconSubtleColor}
       onCopyRow={props.onCopyWorkRow}
       onToggleRow={props.onToggleWorkRow}
+      renderImage={props.renderImage}
     />
   )
 }
@@ -346,7 +472,7 @@ function UserMessageContent(props: {
   readonly markdownStyles: MarkdownStyleSets['user']
   readonly reviewCommentColors: ReviewCommentColors
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>
-  readonly onLinkPress: (href: string) => void
+  readonly markdownLinkHandlers: MarkdownLinkHandlers
 })
 {
   const segments = parseReviewCommentMessageSegments(props.text)
@@ -361,7 +487,7 @@ function UserMessageContent(props: {
           skills={props.skills}
           textStyle={props.markdownStyles.nativeTextStyle}
           preserveSoftBreaks
-          onLinkPress={props.onLinkPress}
+          {...props.markdownLinkHandlers}
         />
       )
     }
@@ -405,7 +531,7 @@ function UserMessageContent(props: {
             skills={props.skills}
             textStyle={props.markdownStyles.nativeTextStyle}
             preserveSoftBreaks
-            onLinkPress={props.onLinkPress}
+            {...props.markdownLinkHandlers}
           />
         ) : (
           <Markdown

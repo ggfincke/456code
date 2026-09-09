@@ -1,7 +1,11 @@
 // tests/apps/web/components/diffs/NativeDiffSurface.test.tsx
 // verifies checkpoint and proposal diffs share one exact native renderer
+
+// @vitest-environment happy-dom
+
 import type { ArchitectureProposalSource, ScopedThreadRef } from '@t3tools/contracts'
-import type { ReactNode } from 'react'
+import { act, useEffect, type ReactNode } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
@@ -141,6 +145,64 @@ function CurrentDiffSurface()
 
 describe('NativeDiffSurface', () =>
 {
+  it('preserves collapsed file identity while workspace refreshes update only changed content', () =>
+  {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    const root = createRoot(document.createElement('div'))
+    let latest: ReturnType<typeof useNativeDiffSurfaceController> | undefined
+    function Harness(props: { patch: string; scope: string })
+    {
+      const controller = useNativeDiffSurfaceController({
+        source: { patch: props.patch, cacheScope: props.scope },
+        collapseScopeKey: props.scope,
+      })
+      useEffect(() =>
+      {
+        latest = controller
+      }, [controller])
+      return null
+    }
+    const current = () =>
+    {
+      if (!latest) throw new Error('expected committed diff controller')
+      return latest
+    }
+    const render = (patch: string, scope = 'env-a:thread:working-tree') =>
+      act(() => root.render(<Harness {...{ patch, scope }} />))
+    try
+    {
+      render(`${currentPatch}\n${proposalPatch}`)
+      const original = current().files[0]!
+      act(() => current().toggleFile(original.fileKey))
+      expect(current().files[0]?.collapsed).toBe(true)
+
+      const changedNeighborPatch = proposalPatch.replace('existing = true', 'existing = false')
+      render(`${currentPatch}\n${changedNeighborPatch}`)
+      const unchanged = current().files.find((file) => file.filePath === original.filePath)!
+      expect(unchanged.fileKey).toBe(original.fileKey)
+      expect(unchanged.collapsed).toBe(true)
+      expect(unchanged.fileVersion).toBe(original.fileVersion)
+      const neighbor = current().files.find((file) => file.filePath === 'src/existing.ts')!
+
+      render(`${currentPatch.replace('"after"', '"newer"')}\n${changedNeighborPatch}`)
+      const changed = current().files.find((file) => file.filePath === original.filePath)!
+      expect(changed.fileKey).toBe(original.fileKey)
+      expect(changed.collapsed).toBe(true)
+      expect(changed.fileVersion).not.toBe(original.fileVersion)
+      expect(current().files.find((file) => file.filePath === neighbor.filePath)?.fileVersion).toBe(
+        neighbor.fileVersion,
+      )
+
+      render(currentPatch, 'env-b:thread:working-tree')
+      expect(current().files[0]?.collapsed).toBe(false)
+    }
+    finally
+    {
+      act(() => root.unmount())
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders checkpoint and immutable proposal sources through the same exact surface', () =>
   {
     const markup = renderToStaticMarkup(

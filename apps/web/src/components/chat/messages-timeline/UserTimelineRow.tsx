@@ -63,16 +63,23 @@ import {
 import { cn } from '~/lib/utils'
 import { useUiStateStore } from '~/uiStateStore'
 import { useSyntaxThemeName } from '../../../hooks/useSyntaxThemeName'
-import { getRenderablePatch, resolveFileDiffPath } from '../../../lib/diffRendering'
+import {
+  getRenderablePatch,
+  PREFERRED_HIGHLIGHTER,
+  resolveFileDiffPath,
+} from '../../../lib/diffRendering'
 import { type ProviderSwitchTimelineParty } from '../../../providerSwitchPresentation'
 import {
+  createMessageAttachmentPreviewProjector,
   deriveTimelineEntries,
   formatDuration,
+  selectMessageAttachmentResources,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
 } from '../../../session-logic'
+import { useAssetUrls } from '../../../assets/assetUrls'
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from '../../../timestampFormat'
 import {
   isImageAttachment,
@@ -152,7 +159,24 @@ function splitTrailingReviewComments(value: string): {
 export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'message' }> })
 {
   const ctx = use(TimelineRowCtx)
-  const attachments = row.message.attachments ?? []
+  const resources = useMemo(
+    () => selectMessageAttachmentResources(row.message.attachments),
+    [row.message.attachments],
+  )
+  const previewUrls = useAssetUrls(ctx.activeThreadEnvironmentId, resources)
+  const [projectPreviews] = useState(createMessageAttachmentPreviewProjector)
+  const messageWithPreviews = useMemo(() =>
+  {
+    const urlsById = new Map(
+      resources.flatMap((resource, index) =>
+      {
+        const url = previewUrls[index]
+        return url ? [[resource.attachmentId, url] as const] : []
+      }),
+    )
+    return projectPreviews(row.message, (attachment) => urlsById.get(attachment.id))
+  }, [previewUrls, projectPreviews, resources, row.message])
+  const attachments = messageWithPreviews.attachments ?? []
   const userImages = attachments.filter(isImageAttachment)
   const userFiles = attachments.filter(isFileAttachment)
   const unknownAttachments = attachments.filter(
@@ -234,7 +258,7 @@ export function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'me
           <div className="mb-2 flex flex-col gap-1.5">
             {userFiles.map((file) => (
               <div key={file.id} className="rounded-lg border border-border/80 px-3 py-2 text-sm">
-                {file.downloadable && file.previewUrl ? (
+                {file.previewUrl ? (
                   <a
                     href={file.previewUrl}
                     download={file.name}
@@ -768,6 +792,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
             <FileDiff
               fileDiff={fileDiff}
               options={{
+                preferredHighlighter: PREFERRED_HIGHLIGHTER,
                 collapsed: false,
                 diffStyle: 'unified',
                 theme: syntaxThemeName,
@@ -783,5 +808,3 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
     </div>
   )
 }
-
-// pure helpers

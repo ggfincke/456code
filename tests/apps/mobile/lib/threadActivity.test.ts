@@ -64,6 +64,35 @@ function makeThread(
 
 describe('buildThreadFeed', () =>
 {
+  it('preserves a viewed workspace image path for the authenticated expanded work renderer', () =>
+  {
+    const thread = makeThread({
+      id: ThreadId.make('viewed-image'),
+      projectId: ProjectId.make('project'),
+      title: 'Viewed image',
+      activities: [
+        makeActivity({
+          id: EventId.make('image-view-completed'),
+          kind: 'tool.completed',
+          tone: 'tool',
+          summary: 'Viewed image',
+          createdAt: '2026-04-01T00:00:02.000Z',
+          payload: {
+            title: 'Viewed image',
+            itemType: 'image_view',
+            detail: '/workspace/outputs/chart.png',
+            status: 'completed',
+          },
+        }),
+      ],
+    })
+    const group = buildThreadFeed(thread)[0]
+    expect(group).toMatchObject({
+      type: 'activity-group',
+      activities: [{ viewedImagePath: '/workspace/outputs/chart.png', canExpand: true }],
+    })
+  })
+
   it('reuses unchanged feed and presentation rows during an assistant text update', () =>
   {
     const completedTurnId = TurnId.make('completed-turn')

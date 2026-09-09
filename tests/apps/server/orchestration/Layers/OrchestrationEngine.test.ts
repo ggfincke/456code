@@ -6,6 +6,7 @@ import {
   CheckpointRef,
   CommandId,
   EventId,
+  EnvironmentId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   ProjectId,
@@ -14,6 +15,7 @@ import {
   type OrchestrationEvent,
   ProviderInstanceId,
 } from '@t3tools/contracts'
+import { serializeAssistantCitation } from '@t3tools/shared/assistantCitations'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -433,6 +435,132 @@ describe('OrchestrationEngine', () =>
       ),
     ).rejects.toThrow('already been answered')
     await system.dispose()
+  })
+
+  it('authorizes citations in the exact async prompt without blocking plain operate-only answers', async () =>
+  {
+    const system = await createOrchestrationSystem()
+    const { engine } = system
+    const projectId = asProjectId('project-async-citation-auth')
+    const threadId = ThreadId.make('thread-async-citation-auth')
+    const modelSelection = {
+      instanceId: ProviderInstanceId.make('codex'),
+      model: 'gpt-5-codex',
+    }
+    try
+    {
+      await system.run(
+        engine.dispatch({
+          type: 'project.create',
+          commandId: CommandId.make('cmd-project-async-citation-auth'),
+          projectId,
+          title: 'Citation authorization',
+          workspaceRoot: '/tmp/project-async-citation-auth',
+          defaultModelSelection: modelSelection,
+          createdAt: now(),
+        }),
+      )
+      await system.run(
+        engine.dispatch({
+          type: 'thread.create',
+          commandId: CommandId.make('cmd-thread-async-citation-auth'),
+          threadId,
+          projectId,
+          title: 'Citation authorization',
+          modelSelection,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      )
+      const citation = serializeAssistantCitation({
+        version: 1,
+        environmentId: EnvironmentId.make('environment-citation-source'),
+        threadId: ThreadId.make('thread-citation-source'),
+        messageId: MessageId.make('message-citation-source'),
+        text: 'private',
+        start: 0,
+        end: 7,
+        prefix: '',
+        suffix: '',
+      })
+      for (const [id, question, answer] of [
+        ['answer-citation', 'Which branch?', citation],
+        ['question-citation', citation, 'feature/reconciliation'],
+        ['plain', 'Which branch?', 'feature/reconciliation'],
+      ] as const)
+      {
+        const requestId = ApprovalRequestId.make(id)
+        await system.run(
+          engine.dispatch({
+            type: 'thread.activity.append',
+            commandId: CommandId.make(`cmd-request-${id}`),
+            threadId,
+            createdAt: now(),
+            activity: {
+              id: EventId.make(`activity-${id}`),
+              createdAt: now(),
+              tone: 'info',
+              kind: 'user-input.requested',
+              summary: 'User input requested',
+              turnId: null,
+              payload: {
+                requestId,
+                responseMode: 'message',
+                questions: [
+                  {
+                    id: '0',
+                    header: 'Question',
+                    question,
+                    options: [],
+                    allowCustomAnswer: true,
+                    multiSelect: false,
+                  },
+                ],
+              },
+            },
+          }),
+        )
+        const response = engine.dispatch(
+          {
+            type: 'thread.user-input.respond',
+            commandId: CommandId.make(`cmd-answer-${id}`),
+            threadId,
+            requestId,
+            answers: { '0': answer },
+            createdAt: now(),
+          },
+          { assistantCitationAccess: 'deny' },
+        )
+        if (id === 'plain')
+        {
+          await system.run(response)
+        }
+        else
+        {
+          const result = await system.run(response.pipe(Effect.flip))
+          expect(result).toMatchObject({ code: 'unauthorized-citation-source' })
+          const thread = (await system.readModel()).threads.find((entry) => entry.id === threadId)
+          expect(thread?.messages).toEqual([])
+          expect(
+            thread?.activities.some((activity) => activity.kind === 'user-input.resolved'),
+          ).toBe(false)
+        }
+      }
+      const thread = (await system.readModel()).threads.find((entry) => entry.id === threadId)
+      expect(thread?.messages.map((message) => message.text)).toEqual([
+        'Which branch?\nfeature/reconciliation',
+      ])
+      expect(
+        thread?.activities.filter((activity) => activity.kind === 'user-input.resolved'),
+      ).toHaveLength(1)
+    }
+    finally
+    {
+      await system.dispose()
+    }
   })
 
   it('gates provider and target lifecycle mutations until a checkpoint revert finishes cleanup', async () =>

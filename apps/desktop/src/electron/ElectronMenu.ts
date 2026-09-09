@@ -28,6 +28,7 @@ export interface ElectronMenuTemplateInput
 {
   readonly window: Electron.BrowserWindow
   readonly template: readonly Electron.MenuItemConstructorOptions[]
+  readonly frame?: Electron.WebFrameMain
 }
 
 const ElectronMenuOperation = Schema.Literals([
@@ -240,6 +241,7 @@ export const make = Effect.gen(function* ()
             try: () =>
               Electron.Menu.buildFromTemplate([...input.template]).popup({
                 window: input.window,
+                ...(input.frame ? { frame: input.frame } : {}),
               }),
             catch: (cause) =>
               new ElectronMenuOperationError({

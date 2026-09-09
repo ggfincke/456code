@@ -17,6 +17,7 @@ import {
   ProjectId,
   ThreadId,
   IsoDateTime,
+  MessageId,
   THREAD_SEARCH_MAX_RESULTS,
   THREAD_SEARCH_SNIPPET_MAX_CHARS,
   type ApprovalOutcome,
@@ -106,6 +107,7 @@ import {
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel)
 const ThreadSearchRequest = Schema.Struct({ pattern: Schema.String, limit: Schema.Int })
+const AssistantCitationSourceRequest = Schema.Struct({ threadId: ThreadId, messageId: MessageId })
 const ThreadSearchRow = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
@@ -1443,6 +1445,32 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         FROM projection_thread_messages
         WHERE thread_id = ${threadId}
         ORDER BY created_at ASC, message_id ASC
+      `,
+  })
+
+  const getAssistantCitationSourceRow = SqlSchema.findOneOption({
+    Request: AssistantCitationSourceRequest,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: ({ threadId, messageId }) =>
+      sql`
+        SELECT
+          message.message_id AS "messageId",
+          message.thread_id AS "threadId",
+          message.turn_id AS "turnId",
+          message.role,
+          message.text,
+          message.attachments_json AS "attachments",
+          message.is_streaming AS "isStreaming",
+          message.created_at AS "createdAt",
+          message.updated_at AS "updatedAt"
+        FROM projection_thread_messages AS message
+        INNER JOIN projection_threads AS thread
+          ON thread.thread_id = message.thread_id
+        WHERE message.thread_id = ${threadId}
+          AND message.message_id = ${messageId}
+          AND message.role = 'assistant'
+          AND thread.deleted_at IS NULL
+        LIMIT 1
       `,
   })
 
@@ -3411,6 +3439,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
       ),
     )
 
+  const getAssistantCitationSource: ProjectionSnapshotQueryShape['getAssistantCitationSource'] = (
+    input,
+  ) =>
+    getAssistantCitationSourceRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          'ProjectionSnapshotQuery.getAssistantCitationSource:query',
+          'ProjectionSnapshotQuery.getAssistantCitationSource:decodeRow',
+        ),
+      ),
+      Effect.map(
+        Option.map((row) => ({
+          id: row.messageId,
+          role: row.role,
+          text: row.text,
+          ...(row.attachments === null ? {} : { attachments: row.attachments }),
+          turnId: row.turnId,
+          streaming: row.isStreaming === 1,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        })),
+      ),
+    )
+
   const listProjectedThreadActivities = Effect.fn(
     'ProjectionSnapshotQuery.listProjectedThreadActivities',
   )(function* (threadId: ThreadId)
@@ -3716,6 +3768,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
     getThreadShellById,
     getThreadRuntimeContext,
     isThreadImportFinalized,
+    getAssistantCitationSource,
     getThreadDetailById,
     getThreadDetailSnapshot,
   } satisfies ProjectionSnapshotQueryShape

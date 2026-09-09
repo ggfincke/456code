@@ -18,7 +18,22 @@ import {
   XIcon,
   ZapIcon,
 } from 'lucide-react'
-import { memo, use, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  memo,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react'
+import {
+  resolveViewedImageAsset,
+  workEntryViewedImagePath,
+  type ViewedImageAsset,
+} from '@t3tools/client-runtime/thread-activity'
+import type { EnvironmentId } from '@t3tools/contracts'
 import { cn } from '~/lib/utils'
 import {
   formatDuration,
@@ -36,6 +51,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
 import { normalizeCompactToolLabel, type MessagesTimelineRow } from './MessagesTimeline.logic'
 import { toolGroupAction, workEntryIsVisibleInGroup } from './grouping'
 import { formatWorkspaceRelativePath } from '../../../lib/filePathDisplay'
+import { useAssetUrlState } from '../../../assets/assetUrls'
 import {
   TimelineRowActivityCtx,
   TimelineRowCtx,
@@ -638,6 +654,7 @@ function liveWorkEntryLabel(
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
+  viewedImagePath?: string | null,
 ): string | null
 {
   const blocks: string[] = []
@@ -654,7 +671,7 @@ function buildToolCallExpandedBody(
   {
     blocks.push(workEntry.command.trim())
   }
-  if (workEntry.detail?.trim())
+  if (workEntry.detail?.trim() && workEntry.detail.trim() !== viewedImagePath)
   {
     blocks.push(workEntry.detail.trim())
   }
@@ -770,12 +787,58 @@ export function subagentMetadataLabel(workEntry: TimelineWorkEntry): string | nu
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation()
 
+const ViewedWorkImage = memo(function ViewedWorkImage(props: {
+  readonly environmentId: EnvironmentId
+  readonly image: ViewedImageAsset
+  readonly onExpand: (src: string, name: string) => void
+})
+{
+  const assetUrl = useAssetUrlState(props.environmentId, props.image.resource)
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
+
+  if (assetUrl._tag === 'Failure' || (assetUrl._tag === 'Success' && failedUrl === assetUrl.url))
+  {
+    return <p className="text-[11px] text-muted-foreground">Image unavailable</p>
+  }
+  if (assetUrl._tag !== 'Success')
+  {
+    return <div className="aspect-video w-64 max-w-full rounded-md bg-muted/60" role="status" />
+  }
+
+  const src = assetUrl.url + props.image.srcFragment
+  const open = (event: MouseEvent<HTMLImageElement> | KeyboardEvent<HTMLImageElement>) =>
+  {
+    event.preventDefault()
+    event.stopPropagation()
+    props.onExpand(src, props.image.alt)
+  }
+  return (
+    <img
+      src={src}
+      alt={props.image.alt}
+      loading="lazy"
+      draggable={false}
+      role="button"
+      tabIndex={0}
+      aria-label={`Preview ${props.image.alt}`}
+      className="max-h-72 max-w-full cursor-zoom-in rounded-md border border-border/45 object-contain"
+      onClick={open}
+      onKeyDown={(event) =>
+      {
+        if (event.key === 'Enter' || event.key === ' ') open(event)
+      }}
+      onError={() => setFailedUrl(assetUrl.url)}
+    />
+  )
+})
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry
   workspaceRoot: string | undefined
 })
 {
   const { workEntry, workspaceRoot } = props
+  const { threadRef, onImageExpand } = use(TimelineRowCtx)
   const activity = use(TimelineRowActivityCtx)
   const [expanded, setExpanded] = useState(false)
   const iconConfig = workToneIcon(workEntry.tone)
@@ -794,8 +857,16 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : rawPreview
   const displayText = preview ? `${heading} - ${preview}` : heading
   const metadataLabel = subagentMetadataLabel(workEntry)
-  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot)
-  const canExpand = expandedBody !== null
+  const viewedImagePath = workEntryViewedImagePath(workEntry)
+  const viewedImage =
+    viewedImagePath && threadRef
+      ? resolveViewedImageAsset(viewedImagePath, {
+          threadId: threadRef.threadId,
+          workspaceRoot,
+        })
+      : null
+  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot, viewedImagePath)
+  const canExpand = expandedBody !== null || viewedImage !== null
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry)
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -959,15 +1030,24 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </div>
         </div>
       </div>
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
-            {expandedBody}
-          </pre>
+          {viewedImage && threadRef ? (
+            <ViewedWorkImage
+              environmentId={threadRef.environmentId}
+              image={viewedImage}
+              onExpand={(src, name) => onImageExpand({ images: [{ src, name }], index: 0 })}
+            />
+          ) : null}
+          {expandedBody ? (
+            <pre className="mt-2 max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+              {expandedBody}
+            </pre>
+          ) : null}
         </div>
       ) : null}
     </div>

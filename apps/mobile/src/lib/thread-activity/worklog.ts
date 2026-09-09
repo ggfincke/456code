@@ -24,6 +24,7 @@ export interface ThreadFeedActivity
   readonly activityKind: OrchestrationThreadActivity['kind']
   readonly summary: string
   readonly detail: string | null
+  readonly viewedImagePath?: string | null
   readonly canExpand: boolean
   readonly getFullDetail: () => string | null
   readonly getCopyText: () => string

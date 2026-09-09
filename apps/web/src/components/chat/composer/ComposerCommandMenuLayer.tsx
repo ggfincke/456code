@@ -56,7 +56,7 @@ export function ComposerCommandMenuLayer(props: {
 
   return createPortal(
     <div
-      className="pointer-events-auto fixed z-[70]"
+      className="pointer-events-auto fixed z-40"
       style={{
         bottom: position.bottom,
         left: position.left,

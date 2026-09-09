@@ -1,6 +1,9 @@
 // apps/server/src/assets/AssetAccess.ts
 // validates and serves attachment preview and project favicon assets
 
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from 'node:fs'
+import * as NodeFSP from 'node:fs/promises'
 import type { AssetResource } from '@t3tools/contracts'
 import {
   AssetAttachmentNotFoundError,
@@ -23,8 +26,14 @@ import {
   WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
 } from '@t3tools/shared/filePreview'
 import { PROJECT_FAVICON_FALLBACK_MARKER } from '@t3tools/shared/projectFavicon'
+import {
+  IMAGE_DIMENSIONS_HEADER_BYTES,
+  readImageDimensions,
+  type ImageDimensions,
+} from '@t3tools/shared/imageDimensions'
 import * as Clock from 'effect/Clock'
 import * as Crypto from 'effect/Crypto'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Encoding from 'effect/Encoding'
 import * as FileSystem from 'effect/FileSystem'
@@ -64,6 +73,21 @@ const PREVIEW_ASSET_EXTENSIONS = new Set([
   '.ttf',
   '.woff',
   '.woff2',
+])
+const HOST_MEDIA_EXTENSIONS = new Set([
+  '.avif',
+  '.bmp',
+  '.gif',
+  '.ico',
+  '.jpeg',
+  '.jpg',
+  '.m4v',
+  '.mov',
+  '.mp4',
+  '.png',
+  '.svg',
+  '.webm',
+  '.webp',
 ])
 
 const AssetClaimsSchema = Schema.Union([
@@ -190,6 +214,48 @@ const resolveCanonicalWorkspaceFileForRequest = (input: {
     Effect.orElseSucceed(() => null),
   )
 
+class AssetImageHeaderError extends Data.TaggedError('AssetImageHeaderError')<{
+  readonly cause: unknown
+}>
+{}
+
+// optional metadata must not follow a replaced symlink, block on a fifo, or decode image pixels
+const readAssetImageDimensions = (filePath: string) =>
+  Effect.tryPromise({
+    try: async () =>
+    {
+      const before = await NodeFSP.lstat(filePath)
+      if (!before.isFile()) return null
+      const handle = await NodeFSP.open(
+        filePath,
+        NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK,
+      )
+      try
+      {
+        const opened = await handle.stat()
+        if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) return null
+        const bytes = new Uint8Array(Math.min(opened.size, IMAGE_DIMENSIONS_HEADER_BYTES))
+        const result = await handle.read(bytes, 0, bytes.length, 0)
+        const after = await handle.stat()
+        const current = await NodeFSP.lstat(filePath)
+        if (
+          after.size !== opened.size ||
+          after.mtimeMs !== opened.mtimeMs ||
+          current.dev !== opened.dev ||
+          current.ino !== opened.ino ||
+          !current.isFile()
+        )
+          return null
+        return readImageDimensions(bytes.subarray(0, result.bytesRead))
+      }
+      finally
+      {
+        await handle.close()
+      }
+    },
+    catch: (cause) => new AssetImageHeaderError({ cause }),
+  }).pipe(Effect.orElseSucceed((): ImageDimensions | null => null))
+
 export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (input: {
   readonly resource: AssetResource
   readonly workspaceRoot?: string
@@ -201,26 +267,34 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
   let expiresAt = (yield* Clock.currentTimeMillis) + ASSET_TOKEN_TTL_MS
   let claims: AssetClaims
   let fileName: string
+  let imageDimensions: ImageDimensions | null = null
 
   switch (input.resource._tag)
   {
     case 'workspace-file':
     {
-      if (!input.workspaceRoot)
+      const hostAbsolutePath =
+        input.workspaceRoot === undefined && path.isAbsolute(input.resource.path)
+      if (input.workspaceRoot === undefined && !hostAbsolutePath)
       {
         return yield* new AssetWorkspaceContextNotFoundError({
           resource: input.resource,
         })
       }
-      const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.workspaceRoot).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AssetWorkspaceRootNormalizationError({
-              resource: input.resource,
-              cause,
-            }),
-        ),
-      )
+      const requestedWorkspaceRoot = hostAbsolutePath
+        ? path.dirname(input.resource.path)
+        : input.workspaceRoot!
+      const workspaceRoot = yield* workspacePaths
+        .normalizeWorkspaceRoot(requestedWorkspaceRoot)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new AssetWorkspaceRootNormalizationError({
+                resource: input.resource,
+                cause,
+              }),
+          ),
+        )
       const relativePath = path.isAbsolute(input.resource.path)
         ? path.relative(workspaceRoot, input.resource.path)
         : input.resource.path
@@ -235,7 +309,11 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
               }),
           ),
         )
-      if (!isWorkspacePreviewEntryPath(resolved.relativePath))
+      if (
+        hostAbsolutePath
+          ? !HOST_MEDIA_EXTENSIONS.has(path.extname(resolved.relativePath).toLowerCase())
+          : !isWorkspacePreviewEntryPath(resolved.relativePath)
+      )
       {
         return yield* new AssetPreviewTypeValidationError({
           resource: input.resource,
@@ -268,22 +346,31 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
             }),
         ),
       )
-      claims = isWorkspaceImagePreviewPath(resolved.relativePath)
-        ? {
-            version: 1,
-            kind: 'workspace-file-exact',
-            workspaceRoot: canonicalWorkspaceRoot,
-            relativePath: resolved.relativePath,
-            expiresAt,
-          }
-        : {
-            version: 1,
-            kind: 'workspace-file',
-            workspaceRoot: canonicalWorkspaceRoot,
-            baseRelativePath: path.dirname(resolved.relativePath),
-            expiresAt,
-          }
+      claims =
+        hostAbsolutePath || isWorkspaceImagePreviewPath(resolved.relativePath)
+          ? {
+              version: 1,
+              kind: 'workspace-file-exact',
+              workspaceRoot: canonicalWorkspaceRoot,
+              relativePath: resolved.relativePath,
+              expiresAt,
+            }
+          : {
+              version: 1,
+              kind: 'workspace-file',
+              workspaceRoot: canonicalWorkspaceRoot,
+              baseRelativePath: path.dirname(resolved.relativePath),
+              expiresAt,
+            }
       fileName = path.basename(resolved.relativePath)
+      if (
+        ['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(
+          path.extname(canonicalFile).toLowerCase(),
+        )
+      )
+      {
+        imageDimensions = yield* readAssetImageDimensions(canonicalFile)
+      }
       break
     }
     case 'attachment':
@@ -309,6 +396,7 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
         expiresAt,
       }
       fileName = path.basename(attachmentPath)
+      imageDimensions = yield* readAssetImageDimensions(attachmentPath)
       break
     }
     case 'project-favicon':
@@ -419,6 +507,7 @@ export const issueAssetUrl = Effect.fn('AssetAccess.issueAssetUrl')(function* (i
   return {
     relativeUrl: `${ASSET_ROUTE_PREFIX}/${token}/${encodeURIComponent(fileName)}`,
     expiresAt,
+    ...(imageDimensions === null ? {} : { imageDimensions }),
   }
 })
 

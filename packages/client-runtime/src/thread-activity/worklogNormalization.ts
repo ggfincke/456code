@@ -2,7 +2,9 @@
 // normalizes provider thread activity payloads into work log fields shared by web & mobile
 
 import type {
+  AssetResource,
   OrchestrationThreadActivity,
+  ThreadId,
   ToolLifecycleItemType,
   TurnId,
   UserInputQuestion,
@@ -10,6 +12,10 @@ import type {
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
 import { isToolLifecycleItemType } from '@t3tools/shared/toolActivity'
 import { collectToolMutationTargets } from '@t3tools/shared/toolMutationTargets'
+import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
+
+import { classifyMarkdownImageSource } from '../markdownImages.ts'
+import { resolveMediaSource } from '../mediaSource.ts'
 
 export type WorkLogRequestKind = 'command' | 'file-read' | 'file-change' | 'mcp-elicitation'
 
@@ -18,6 +24,7 @@ export type WorkLogToolLifecycleStatus =
 
 export interface NormalizedWorkLogEntry
 {
+  readonly viewedImagePath?: string
   readonly id: string
   readonly createdAt: string
   readonly turnId: TurnId | null
@@ -56,6 +63,61 @@ export interface NormalizeWorkLogOptions<T extends NormalizedWorkLogEntry>
 export interface WorkLogClassificationOptions
 {
   readonly thinkingIsToolLike?: boolean
+}
+
+export interface ViewedImageAsset
+{
+  readonly resource: Extract<AssetResource, { readonly _tag: 'workspace-file' }>
+  readonly alt: string
+  readonly srcFragment: string
+}
+
+export function workEntryViewedImagePath(
+  entry: Pick<
+    NormalizedWorkLogEntry,
+    'detail' | 'requestKind' | 'itemType' | 'toolTitle' | 'viewedImagePath'
+  >,
+): string | null
+{
+  const imagePath = entry.viewedImagePath?.trim()
+  if (imagePath && !/[\r\n]/.test(imagePath) && isWorkspaceImagePreviewPath(imagePath))
+    return imagePath
+  const detail = entry.detail?.trim()
+  const isReadEntry =
+    entry.requestKind === 'file-read' ||
+    entry.itemType === 'image_view' ||
+    (entry.itemType === 'dynamic_tool_call' &&
+      entry.toolTitle?.trim().toLowerCase() === 'read file')
+  return isReadEntry &&
+    detail !== undefined &&
+    !/[\r\n]/.test(detail) &&
+    isWorkspaceImagePreviewPath(detail)
+    ? detail
+    : null
+}
+
+export function resolveViewedImageAsset(
+  source: string,
+  input: {
+    readonly threadId: ThreadId
+    readonly workspaceRoot?: string | null | undefined
+  },
+): ViewedImageAsset | null
+{
+  // relative tool output still names a file in the thread workspace when its root is unknown
+  const imageSource = classifyMarkdownImageSource(source, input.workspaceRoot ?? '.')
+  if (imageSource._tag !== 'WorkspaceFile') return null
+  const resolvedFilePath =
+    input.workspaceRoot == null && imageSource.path.startsWith('./')
+      ? imageSource.path.slice(2)
+      : imageSource.path
+  const media = resolveMediaSource(source, {
+    threadId: input.threadId,
+    workspaceRoot: input.workspaceRoot,
+    resolvedFilePath,
+  })
+  if (media === null || media.access !== 'environment' || media.kind !== 'image') return null
+  return { resource: media.resource, alt: media.name, srcFragment: media.srcFragment }
 }
 
 export function asRecord(value: unknown): Record<string, unknown> | null
@@ -513,6 +575,7 @@ function toNormalizedWorkLogEntry(
   const commandPreview = extractToolCommand(payload)
   const changedFiles = extractChangedFiles(payload)
   const toolTitle = asTrimmedString(payload?.title)
+  const viewedImagePath = asTrimmedString(asRecord(payload?.data)?.imagePath)
   const isTaskActivity = activity.kind === 'task.progress' || activity.kind === 'task.completed'
   const taskSummary = isTaskActivity ? asNonEmptyString(payload?.summary) : null
   const taskDetailAsLabel =
@@ -549,6 +612,7 @@ function toNormalizedWorkLogEntry(
           : activity.tone,
     activityKind: activity.kind,
     ...(detail ? { detail } : {}),
+    ...(viewedImagePath ? { viewedImagePath } : {}),
     ...(commandPreview.command ? { command: commandPreview.command } : {}),
     ...(commandPreview.rawCommand ? { rawCommand: commandPreview.rawCommand } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),

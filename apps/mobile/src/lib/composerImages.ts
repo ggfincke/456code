@@ -4,6 +4,8 @@
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type ChatImageAttachment,
+  type EnvironmentId,
   type UploadChatImageAttachment,
 } from '@t3tools/contracts'
 import { estimateBase64ByteSize } from './base64'
@@ -13,20 +15,34 @@ export interface DraftComposerImageAttachment extends UploadChatImageAttachment
 {
   readonly id: string
   readonly previewUri: string
+  readonly uploadedAttachmentId?: string
+  readonly uploadEnvironmentId?: EnvironmentId
 }
 
 // wire shape for startTurn: pure uploads without client draft id / previewUri.
 export function toUploadChatImageAttachments(
   attachments: ReadonlyArray<DraftComposerImageAttachment>,
-): ReadonlyArray<UploadChatImageAttachment>
+  environmentId?: EnvironmentId,
+): ReadonlyArray<UploadChatImageAttachment | ChatImageAttachment>
 {
-  return attachments.map((attachment) => ({
-    type: attachment.type,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes,
-    dataUrl: attachment.dataUrl,
-  }))
+  return attachments.map((attachment) =>
+    attachment.uploadedAttachmentId &&
+    (environmentId === undefined || attachment.uploadEnvironmentId === environmentId)
+      ? {
+          type: attachment.type,
+          id: attachment.uploadedAttachmentId,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+        }
+      : {
+          type: attachment.type,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          dataUrl: attachment.dataUrl,
+        },
+  )
 }
 
 const OWNED_PASTED_IMAGE_DIRECTORY = 'code456-composer-paste'

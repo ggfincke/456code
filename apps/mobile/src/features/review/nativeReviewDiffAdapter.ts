@@ -113,9 +113,27 @@ export interface BuildNativeReviewDiffDataInput
 
 interface CachedNativeReviewDiffData
 {
+  readonly prepared: PreparedNativeReviewDiffData
   readonly commentsKey: string
   readonly revealedLargeFileIdsKey: string
   readonly data: NativeReviewDiffData
+}
+
+interface PreparedNativeReviewFileRows
+{
+  readonly fileId: string
+  readonly filePath: string
+  readonly lineCount: number
+  readonly rows: ReadonlyArray<NativeReviewDiffRow>
+  commentedRows: {
+    readonly commentsKey: string
+    readonly rows: ReadonlyArray<NativeReviewDiffRow>
+  } | null
+}
+
+interface PreparedNativeReviewDiffData extends Omit<NativeReviewDiffData, 'rows'>
+{
+  readonly fileRows: ReadonlyArray<PreparedNativeReviewFileRows>
 }
 
 const nativeReviewDiffDataCache = new WeakMap<ReviewParsedDiff, CachedNativeReviewDiffData>()
@@ -127,19 +145,18 @@ function buildReviewCommentsCacheKey(comments: ReadonlyArray<ReviewInlineComment
     return 'none'
   }
 
-  return comments
-    .map((comment) =>
-      [
-        comment.id,
-        comment.sectionId,
-        comment.filePath,
-        comment.startIndex,
-        comment.endIndex,
-        comment.rangeLabel,
-        comment.text,
-      ].join('\u001f'),
-    )
-    .join('\u001e')
+  return JSON.stringify(
+    comments.map((comment) => [
+      comment.id,
+      comment.sectionId,
+      comment.sectionTitle,
+      comment.filePath,
+      comment.startIndex,
+      comment.endIndex,
+      comment.rangeLabel,
+      comment.text,
+    ]),
+  )
 }
 
 export function createNativeReviewDiffTheme(
@@ -418,13 +435,12 @@ function mapLineRow(
   }
 }
 
-function mapFileRows(
+function prepareFileRows(
   file: ReviewRenderableFile,
-  comments: ReadonlyArray<ReviewInlineComment>,
   commentTargetsByRowId: Map<string, NativeReviewDiffCommentTarget>,
   rowIdByCommentLineId: Map<string, string>,
   revealedLargeFileIds: ReadonlySet<string>,
-): ReadonlyArray<NativeReviewDiffRow>
+): PreparedNativeReviewFileRows
 {
   const rows: NativeReviewDiffRow[] = [
     {
@@ -447,30 +463,16 @@ function mapFileRows(
   )
   {
     rows.push(createNoticeRow(file.id, 'large', previewState.message))
-    return rows
+    return {
+      fileId: file.id,
+      filePath: file.path,
+      lineCount: 0,
+      rows,
+      commentedRows: null,
+    }
   }
 
   const lineRows = file.rows.filter((row): row is ReviewRenderableLineRow => row.kind === 'line')
-  const commentsByEndIndex = new Map<number, ReviewInlineComment[]>()
-  comments.forEach((comment) =>
-  {
-    if (comment.filePath !== file.path)
-    {
-      return
-    }
-    const endIndex = Math.min(comment.endIndex, lineRows.length - 1)
-    if (endIndex < 0)
-    {
-      return
-    }
-    const existing = commentsByEndIndex.get(endIndex)
-    if (existing)
-    {
-      existing.push(comment)
-      return
-    }
-    commentsByEndIndex.set(endIndex, [comment])
-  })
   let lineIndex = 0
   file.rows.forEach((row, rowIndex) =>
   {
@@ -493,43 +495,75 @@ function mapFileRows(
       lines: lineRows,
       lineIndex,
     })
-    const commentsForLine = commentsByEndIndex.get(lineIndex) ?? []
-    for (const comment of commentsForLine)
+    lineIndex += 1
+  })
+
+  rows.push(...noticeRowsForFile(file))
+  return {
+    fileId: file.id,
+    filePath: file.path,
+    lineCount: lineRows.length,
+    rows: addNativeWordDiffRanges(rows),
+    commentedRows: null,
+  }
+}
+
+function insertFileComments(
+  file: PreparedNativeReviewFileRows,
+  comments: ReadonlyArray<ReviewInlineComment>,
+): ReadonlyArray<NativeReviewDiffRow>
+{
+  if (comments.length === 0)
+  {
+    file.commentedRows = null
+    return file.rows
+  }
+  const commentsKey = buildReviewCommentsCacheKey(comments)
+  if (file.commentedRows?.commentsKey === commentsKey) return file.commentedRows.rows
+
+  const commentsByEndIndex = new Map<number, ReviewInlineComment[]>()
+  for (const comment of comments)
+  {
+    const endIndex = Math.min(comment.endIndex, file.lineCount - 1)
+    if (endIndex < 0) continue
+    const existing = commentsByEndIndex.get(endIndex)
+    if (existing) existing.push(comment)
+    else commentsByEndIndex.set(endIndex, [comment])
+  }
+
+  const rows: NativeReviewDiffRow[] = []
+  let lineIndex = 0
+  for (const row of file.rows)
+  {
+    rows.push(row)
+    if (row.kind !== 'line') continue
+    for (const comment of commentsByEndIndex.get(lineIndex) ?? [])
     {
       rows.push({
         kind: 'comment',
         id: comment.id,
-        fileId: file.id,
-        filePath: file.path,
+        fileId: file.fileId,
+        filePath: file.filePath,
         commentText: comment.text,
         commentRangeLabel: comment.rangeLabel,
         commentSectionTitle: comment.sectionTitle,
       })
     }
     lineIndex += 1
-  })
-
-  rows.push(...noticeRowsForFile(file))
+  }
+  file.commentedRows = { commentsKey, rows }
   return rows
 }
 
-export function buildNativeReviewDiffData(
-  input: BuildNativeReviewDiffDataInput,
-): NativeReviewDiffData
-export function buildNativeReviewDiffData(parsedDiff: ReviewParsedDiff): NativeReviewDiffData
-export function buildNativeReviewDiffData(
-  input: ReviewParsedDiff | BuildNativeReviewDiffDataInput,
-): NativeReviewDiffData
+function prepareNativeReviewDiffData(
+  parsedDiff: ReviewParsedDiff,
+  revealedLargeFileIds: ReadonlySet<string>,
+): PreparedNativeReviewDiffData
 {
-  const parsedDiff = 'parsedDiff' in input ? input.parsedDiff : input
-  const comments = 'parsedDiff' in input ? (input.comments ?? []) : []
-  const revealedLargeFileIds = new Set(
-    'parsedDiff' in input ? (input.revealedLargeFileIds ?? []) : [],
-  )
   if (parsedDiff.kind !== 'files')
   {
     return {
-      rows: [],
+      fileRows: [],
       files: [],
       commentTargetsByRowId: new Map(),
       rowIdByCommentLineId: new Map(),
@@ -547,26 +581,60 @@ export function buildNativeReviewDiffData(
   }))
   const commentTargetsByRowId = new Map<string, NativeReviewDiffCommentTarget>()
   const rowIdByCommentLineId = new Map<string, string>()
-  const rows = addNativeWordDiffRanges(
-    Arr.flatMap(parsedDiff.files, (file) =>
-      mapFileRows(
-        file,
-        comments,
-        commentTargetsByRowId,
-        rowIdByCommentLineId,
-        revealedLargeFileIds,
-      ),
-    ),
+  const fileRows = parsedDiff.files.map((file) =>
+    prepareFileRows(file, commentTargetsByRowId, rowIdByCommentLineId, revealedLargeFileIds),
   )
-
   return {
-    rows,
+    fileRows,
     files,
     commentTargetsByRowId,
     rowIdByCommentLineId,
     additions: parsedDiff.additions,
     deletions: parsedDiff.deletions,
   }
+}
+
+function buildCommentedNativeReviewDiffData(
+  prepared: PreparedNativeReviewDiffData,
+  comments: ReadonlyArray<ReviewInlineComment>,
+): NativeReviewDiffData
+{
+  const commentsByFilePath = new Map<string, ReviewInlineComment[]>()
+  for (const comment of comments)
+  {
+    const existing = commentsByFilePath.get(comment.filePath)
+    if (existing) existing.push(comment)
+    else commentsByFilePath.set(comment.filePath, [comment])
+  }
+  return {
+    rows: Arr.flatMap(prepared.fileRows, (file) =>
+      insertFileComments(file, commentsByFilePath.get(file.filePath) ?? []),
+    ),
+    files: prepared.files,
+    commentTargetsByRowId: prepared.commentTargetsByRowId,
+    rowIdByCommentLineId: prepared.rowIdByCommentLineId,
+    additions: prepared.additions,
+    deletions: prepared.deletions,
+  }
+}
+
+export function buildNativeReviewDiffData(
+  input: BuildNativeReviewDiffDataInput,
+): NativeReviewDiffData
+export function buildNativeReviewDiffData(parsedDiff: ReviewParsedDiff): NativeReviewDiffData
+export function buildNativeReviewDiffData(
+  input: ReviewParsedDiff | BuildNativeReviewDiffDataInput,
+): NativeReviewDiffData
+{
+  const parsedDiff = 'parsedDiff' in input ? input.parsedDiff : input
+  const comments = 'parsedDiff' in input ? (input.comments ?? []) : []
+  const revealedLargeFileIds = new Set(
+    'parsedDiff' in input ? (input.revealedLargeFileIds ?? []) : [],
+  )
+  return buildCommentedNativeReviewDiffData(
+    prepareNativeReviewDiffData(parsedDiff, revealedLargeFileIds),
+    comments,
+  )
 }
 
 // reuses the expensive flattened native row model across React development
@@ -588,12 +656,13 @@ export function getCachedNativeReviewDiffData(
     return cached.data
   }
 
-  const data = buildNativeReviewDiffData({
-    parsedDiff: input.parsedDiff,
-    comments,
-    revealedLargeFileIds: input.revealedLargeFileIds,
-  })
+  const prepared =
+    cached?.revealedLargeFileIdsKey === revealedLargeFileIdsKey
+      ? cached.prepared
+      : prepareNativeReviewDiffData(input.parsedDiff, new Set(input.revealedLargeFileIds ?? []))
+  const data = buildCommentedNativeReviewDiffData(prepared, comments)
   nativeReviewDiffDataCache.set(input.parsedDiff, {
+    prepared,
     commentsKey,
     revealedLargeFileIdsKey,
     data,

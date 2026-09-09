@@ -332,6 +332,30 @@ const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal =>
   )
 }
 
+export const isPreviewEditingShortcut = (
+  input: Electron.Input,
+  platform: NodeJS.Platform,
+): boolean =>
+{
+  const isMac = platform === 'darwin'
+  if (isMac ? !input.meta || input.control : !input.control || input.meta) return false
+
+  const key = input.key.toLowerCase()
+  // option changes the DOM key for macOS Paste and Match Style
+  if (isMac && input.alt && input.shift && input.code === 'KeyV') return true
+  if (key === 'v' && input.shift) return input.alt === isMac
+  if (input.alt) return false
+  if (key === 'z') return !input.shift || platform !== 'win32'
+  if (input.shift) return false
+  return (
+    key === 'a' ||
+    key === 'c' ||
+    key === 'v' ||
+    key === 'x' ||
+    (key === 'y' && platform === 'win32')
+  )
+}
+
 const inputSignalsMatch = (left: PreviewInputSignal, right: PreviewInputSignal): boolean =>
 {
   if (left.kind !== right.kind) return false
@@ -1596,11 +1620,28 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         }).pipe(Effect.ignore),
       )
     }
+    const syncMenuShortcuts = (contents: Electron.WebContents, input: Electron.Input): void =>
+    {
+      if (input.type !== 'keyDown') return
+      // native editing roles stay available only for the focused browser contents
+      contents.setIgnoreMenuShortcuts(
+        !isPreviewEditingShortcut(input, hostPlatform) ||
+          webContents.getFocusedWebContents() !== contents,
+      )
+    }
     const windowCreated = (window: BrowserWindow): void =>
     {
       if (!isCurrentAttachment()) return
       window.webContents.setIgnoreMenuShortcuts(true)
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      window.webContents.on('before-input-event', (_event, input) =>
+      {
+        syncMenuShortcuts(window.webContents, input)
+      })
+    }
+    const beforeInput = (_event: Electron.Event, input: Electron.Input): void =>
+    {
+      syncMenuShortcuts(wc, input)
     }
     yield* Scope.addFinalizer(
       scope,
@@ -1622,6 +1663,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           wc.off('did-fail-load', failed as never)
           wc.off('audio-state-changed', audioStateChanged)
           wc.off('did-create-window', windowCreated)
+          wc.off('before-input-event', beforeInput)
           wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput)
           wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
         }).pipe(Effect.ignore)
@@ -1661,7 +1703,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       yield* attempt({ operation: 'attachListeners', tabId, webContentsId: wc.id }, () =>
       {
-        // preview input belongs to the guest, not host menu accelerators
+        // preview input belongs to the guest, except focused native editing roles
         wc.setIgnoreMenuShortcuts(true)
         wc.on('did-start-navigation', navigationStarted)
         wc.on('did-navigate', syncNavigation)
@@ -1672,6 +1714,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         wc.on('did-stop-loading', sync)
         wc.on('did-fail-load', failed as never)
         wc.on('audio-state-changed', audioStateChanged)
+        wc.on('before-input-event', beforeInput)
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput)
         wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate)
         wc.on('did-create-window', windowCreated)

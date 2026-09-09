@@ -2,12 +2,17 @@
 // determines composer submit, slash-command, and dispatch behavior
 
 import {
+  type AssistantCitation,
   type CollaborationMode,
   normalizeCollaborationMode,
   type ProviderInteractionMode,
   toWireInteractionMode,
 } from '@t3tools/contracts'
-import { splitPromptIntoComposerSegments } from './editor-mentions'
+import { splitPromptIntoComposerSegments, type ComposerPromptSegment } from './editor-mentions'
+import {
+  serializeAssistantCitation,
+  withAssistantCitationComment,
+} from '@t3tools/shared/assistantCitations'
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from '../lib/terminalContext'
 
 export type ComposerTriggerKind = 'path' | 'slash-command' | 'skill'
@@ -21,6 +26,11 @@ export interface ComposerTrigger
   rangeEnd: number
 }
 
+export function formatAssistantCitationForComposer(citation: AssistantCitation, comment = '')
+{
+  return `${serializeAssistantCitation(withAssistantCitationComment(citation, comment))} `
+}
+
 export function shouldSubmitComposerOnEnter(input: {
   isMobileViewport: boolean
   shiftKey: boolean
@@ -29,13 +39,7 @@ export function shouldSubmitComposerOnEnter(input: {
   return !input.isMobileViewport && !input.shiftKey
 }
 
-const isInlineTokenSegment = (
-  segment:
-    | { type: 'text'; text: string }
-    | { type: 'mention' }
-    | { type: 'skill' }
-    | { type: 'terminal-context' },
-): boolean => segment.type !== 'text'
+const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== 'text'
 
 function clampCursor(text: string, cursor: number): number
 {
@@ -78,7 +82,7 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
 
   for (const segment of segments)
   {
-    if (segment.type === 'mention')
+    if (segment.type === 'mention' || segment.type === 'citation')
     {
       const expandedLength = segment.source.length
       if (remaining <= 1)
@@ -123,13 +127,7 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
   return expandedCursor
 }
 
-function collapsedSegmentLength(
-  segment:
-    | { type: 'text'; text: string }
-    | { type: 'mention' }
-    | { type: 'skill' }
-    | { type: 'terminal-context' },
-): number
+function collapsedSegmentLength(segment: ComposerPromptSegment): number
 {
   if (segment.type === 'text')
   {
@@ -139,12 +137,7 @@ function collapsedSegmentLength(
 }
 
 function clampCollapsedComposerCursorForSegments(
-  segments: ReadonlyArray<
-    | { type: 'text'; text: string }
-    | { type: 'mention' }
-    | { type: 'skill' }
-    | { type: 'terminal-context' }
-  >,
+  segments: ReadonlyArray<ComposerPromptSegment>,
   cursorInput: number,
 ): number
 {
@@ -178,7 +171,7 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
 
   for (const segment of segments)
   {
-    if (segment.type === 'mention')
+    if (segment.type === 'mention' || segment.type === 'citation')
     {
       const expandedLength = segment.source.length
       if (remaining === 0)

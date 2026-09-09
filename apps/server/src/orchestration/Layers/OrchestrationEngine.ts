@@ -8,6 +8,7 @@ import type {
   ThreadId,
 } from '@t3tools/contracts'
 import { OrchestrationCommand } from '@t3tools/contracts'
+import { collectAssistantCitations } from '@t3tools/shared/assistantCitations'
 import * as Cause from 'effect/Cause'
 import * as Clock from 'effect/Clock'
 import * as Crypto from 'effect/Crypto'
@@ -102,6 +103,7 @@ interface CommandEnvelope
 {
   command: OrchestrationCommand
   causalSettlementAuthority: OrchestrationCausalSettlementAuthority | null
+  assistantCitationAccess: 'allow' | 'deny'
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>
   startedAtMs: number
 }
@@ -424,6 +426,24 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 ),
               )
               const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
+              // async answers incorporate stored questions; authorize the exact derived prompt
+              // inside the serialized transaction before resolving the question or starting a turn
+              if (
+                envelope.assistantCitationAccess === 'deny' &&
+                eventBases.some(
+                  (event) =>
+                    event.type === 'thread.message-sent' &&
+                    event.payload.role === 'user' &&
+                    collectAssistantCitations(event.payload.text).length > 0,
+                )
+              )
+              {
+                return yield* new OrchestrationCommandInvariantError({
+                  commandType: envelope.command.type,
+                  code: 'unauthorized-citation-source',
+                  detail: 'Assistant citations require orchestration read access to their sources.',
+                })
+              }
               if (envelope.command.type === 'thread.checkpoint.revert')
               {
                 const pendingTurn = yield* projectionTurns.getPendingTurnStartByThreadId({
@@ -657,6 +677,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const dispatchCommand = (
     command: OrchestrationCommand,
     causalSettlementAuthority: OrchestrationCausalSettlementAuthority | null,
+    assistantCitationAccess: 'allow' | 'deny' = 'allow',
   ) =>
     Effect.gen(function* ()
     {
@@ -664,16 +685,20 @@ const makeOrchestrationEngine = Effect.gen(function* ()
       yield* Queue.offer(commandQueue, {
         command,
         causalSettlementAuthority,
+        assistantCitationAccess,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
       })
       return yield* Deferred.await(result)
     })
 
-  const dispatch: OrchestrationEngineShape['dispatch'] = (command) =>
+  const dispatch: OrchestrationEngineShape['dispatch'] = (command, options) =>
     command.type === 'thread.archive' || command.type === 'thread.unarchive'
-      ? threadArchiveLifecyclePermit.withPermit(command.threadId, dispatchCommand(command, null))
-      : dispatchCommand(command, null)
+      ? threadArchiveLifecyclePermit.withPermit(
+          command.threadId,
+          dispatchCommand(command, null, options?.assistantCitationAccess),
+        )
+      : dispatchCommand(command, null, options?.assistantCitationAccess)
 
   const dispatchInternal: OrchestrationEngineShape['dispatchInternal'] = (command, authority) =>
     dispatchCommand(command, authority)

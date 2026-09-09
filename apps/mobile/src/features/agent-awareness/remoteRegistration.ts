@@ -282,10 +282,6 @@ function nativePushTokenRegistration(observedPushToken?: string)
     {
       return { notificationsEnabled: false, pushToken: null }
     }
-    if (observedPushToken)
-    {
-      return { notificationsEnabled: true, pushToken: observedPushToken }
-    }
     const permissions = yield* Effect.tryPromise({
       try: () => Notifications.getPermissionsAsync(),
       catch: (cause) =>
@@ -297,6 +293,10 @@ function nativePushTokenRegistration(observedPushToken?: string)
     if (!permissions.granted)
     {
       return { notificationsEnabled: false, pushToken: null }
+    }
+    if (observedPushToken)
+    {
+      return { notificationsEnabled: true, pushToken: observedPushToken }
     }
     const token = yield* Effect.tryPromise({
       try: () => Notifications.getDevicePushTokenAsync(),

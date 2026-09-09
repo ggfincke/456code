@@ -308,7 +308,7 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
                state.scroll = maxScroll;
                state.scrollPending = maxScroll;
                diff = 0;
-@@ -2398,8 +2417,121 @@
+@@ -2398,8 +2417,122 @@
  }
  
  // src/core/initialScroll.ts
@@ -372,12 +372,13 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
 +    const scrollLength = state.scrollLength;
 +    if (insetStartAdjustment > 0 && scrollLength > 0 && Number.isFinite(contentSize) && contentSize > scrollLength && !state.scrollingTo && !state.maintainingScrollAtEnd) {
 +      const endOffset = Math.max(-insetStartAdjustment, contentSize - scrollLength);
-+      const distance = endOffset - state.scroll;
++      const nativeScroll = state.lastNativeScroll;
++      const distance = endOffset - (nativeScroll ?? state.scroll);
 +      // Estimated row sizes converging to measured ones can strand the initial
 +      // end landing when the library's own end-anchor bookkeeping gives up.
 +      // While still near the end (never fighting a user who scrolled away),
 +      // re-pin to the current true end until sizes stop changing.
-+      if (Math.abs(distance) > 2 && Math.abs(distance) <= scrollLength * 0.5) {
++      if (nativeScroll === undefined || (Math.abs(distance) > 2 && Math.abs(distance) <= scrollLength * 0.5)) {
 +        settledFrames = 0;
 +        revealStableFrames = 0;
 +        const scroller = state.refScroller.current;
@@ -430,18 +431,18 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
    const requestedIndex = target.index;
    const index = requestedIndex !== void 0 ? clampScrollIndex(requestedIndex, ctx.state.props.data.length) : void 0;
    const itemSize = getItemSizeAtIndex(ctx, index);
-@@ -2825,7 +2957,9 @@
+@@ -2825,7 +2958,9 @@
      return;
    }
    if (didFinishedInitialScrollMoveAwayFromTarget(ctx, initialScroll)) {
 -    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && peek$(ctx, "isAtEnd");
 +    const endTargetDistanceFromEnd = getContentSize(ctx) - state.scroll - state.scrollLength - getContentInsetEnd(ctx);
 +    const isNearEndForInsetList = getContentInsetStartAdjustment(ctx) > 0 && Number.isFinite(endTargetDistanceFromEnd) && endTargetDistanceFromEnd <= state.scrollLength * 0.5;
-+    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || isNearEndForInsetList);
++    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || !state.didUserDrag && isNearEndForInsetList);
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {
-@@ -4756,7 +4890,8 @@
+@@ -4756,7 +4891,8 @@
        contentBelowAnchor = Math.max(0, contentBelowAnchor - ctx.scrollAxisGap);
        contentBelowAnchor += (ctx.values.get("footerSize") || 0) + getStylePaddingEnd(state.props);
        isReady = !hasUnknownTailSize;
@@ -451,7 +452,7 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
      } else if (anchorIndex >= 0) {
        isReady = false;
      }
-@@ -4776,6 +4911,11 @@
+@@ -4776,6 +4912,11 @@
        updateScroll(ctx, state.scroll, true, { markHasScrolled: false });
      }
      (_b = anchoredEndSpace == null ? void 0 : anchoredEndSpace.onReady) == null ? void 0 : _b.call(anchoredEndSpace, { anchorIndex: nextAnchorIndex, anchorKey: nextAnchorKey, size: nextSize });
@@ -463,7 +464,16 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
    }
    return nextSize;
  }
-@@ -7239,6 +7379,7 @@
+@@ -6163,7 +6304,7 @@
+       ],
+       contentOffset: initialContentOffset !== void 0 ? horizontal ? { x: initialContentOffset, y: 0 } : { x: 0, y: initialContentOffset } : void 0,
+       horizontal,
+-      maintainVisibleContentPosition: maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
++      maintainVisibleContentPosition: Platform.OS === "ios" || maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
+       onLayout,
+       onScroll: onScroll2,
+       ref: refScrollView,
+@@ -7239,6 +7380,7 @@
      dataVersion,
      drawDistance = 250,
      contentInsetEndAdjustment,
@@ -471,7 +481,7 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
      estimatedItemSize = 100,
      estimatedListSize,
      extraData,
-@@ -7515,6 +7656,7 @@
+@@ -7515,6 +7657,7 @@
      contentContainerAlignItems: contentContainerStyle.alignItems,
      contentInset,
      contentInsetEndAdjustment: contentInsetEndAdjustmentResolved,
@@ -479,7 +489,7 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
      data: dataProp,
      dataKey,
      dataVersion,
-@@ -7601,6 +7743,13 @@
+@@ -7601,6 +7744,13 @@
        return void 0;
      }
      const resolvedOffset = (_a4 = initialScroll.contentOffset) != null ? _a4 : resolveInitialScrollOffset(ctx, initialScroll);
@@ -493,7 +503,7 @@ index cd82bc6e3c5a40d7d69926ecd2538fe543779f0d..c85b073349752efec0093b0b9b158b6d
      return usesBootstrapInitialScroll && ((_b2 = state.initialScrollSession) == null ? void 0 : _b2.kind) === "bootstrap" && Platform.OS === "web" ? void 0 : resolvedOffset;
    }, [usesBootstrapInitialScroll]);
    React2.useLayoutEffect(() => {
-@@ -7833,6 +7982,7 @@
+@@ -7833,6 +7983,7 @@
        onScroll: (event) => onScroll(ctx, event),
        onScrollBeginDrag: (event) => {
          var _a4, _b2;
@@ -614,7 +624,7 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
                state.scroll = maxScroll;
                state.scrollPending = maxScroll;
                diff = 0;
-@@ -2377,8 +2396,121 @@
+@@ -2377,8 +2396,122 @@
  }
  
  // src/core/initialScroll.ts
@@ -678,12 +688,13 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
 +    const scrollLength = state.scrollLength;
 +    if (insetStartAdjustment > 0 && scrollLength > 0 && Number.isFinite(contentSize) && contentSize > scrollLength && !state.scrollingTo && !state.maintainingScrollAtEnd) {
 +      const endOffset = Math.max(-insetStartAdjustment, contentSize - scrollLength);
-+      const distance = endOffset - state.scroll;
++      const nativeScroll = state.lastNativeScroll;
++      const distance = endOffset - (nativeScroll ?? state.scroll);
 +      // Estimated row sizes converging to measured ones can strand the initial
 +      // end landing when the library's own end-anchor bookkeeping gives up.
 +      // While still near the end (never fighting a user who scrolled away),
 +      // re-pin to the current true end until sizes stop changing.
-+      if (Math.abs(distance) > 2 && Math.abs(distance) <= scrollLength * 0.5) {
++      if (nativeScroll === undefined || (Math.abs(distance) > 2 && Math.abs(distance) <= scrollLength * 0.5)) {
 +        settledFrames = 0;
 +        revealStableFrames = 0;
 +        const scroller = state.refScroller.current;
@@ -736,18 +747,18 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
    const requestedIndex = target.index;
    const index = requestedIndex !== void 0 ? clampScrollIndex(requestedIndex, ctx.state.props.data.length) : void 0;
    const itemSize = getItemSizeAtIndex(ctx, index);
-@@ -2804,7 +2936,9 @@
+@@ -2804,7 +2937,9 @@
      return;
    }
    if (didFinishedInitialScrollMoveAwayFromTarget(ctx, initialScroll)) {
 -    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && peek$(ctx, "isAtEnd");
 +    const endTargetDistanceFromEnd = getContentSize(ctx) - state.scroll - state.scrollLength - getContentInsetEnd(ctx);
 +    const isNearEndForInsetList = getContentInsetStartAdjustment(ctx) > 0 && Number.isFinite(endTargetDistanceFromEnd) && endTargetDistanceFromEnd <= state.scrollLength * 0.5;
-+    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || isNearEndForInsetList);
++    const shouldKeepEndTargetAlive = isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && (peek$(ctx, "isAtEnd") || !state.didUserDrag && isNearEndForInsetList);
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {
-@@ -4735,7 +4869,8 @@
+@@ -4735,7 +4870,8 @@
        contentBelowAnchor = Math.max(0, contentBelowAnchor - ctx.scrollAxisGap);
        contentBelowAnchor += (ctx.values.get("footerSize") || 0) + getStylePaddingEnd(state.props);
        isReady = !hasUnknownTailSize;
@@ -757,7 +768,7 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
      } else if (anchorIndex >= 0) {
        isReady = false;
      }
-@@ -4755,6 +4890,11 @@
+@@ -4755,6 +4891,11 @@
        updateScroll(ctx, state.scroll, true, { markHasScrolled: false });
      }
      (_b = anchoredEndSpace == null ? void 0 : anchoredEndSpace.onReady) == null ? void 0 : _b.call(anchoredEndSpace, { anchorIndex: nextAnchorIndex, anchorKey: nextAnchorKey, size: nextSize });
@@ -769,7 +780,16 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
    }
    return nextSize;
  }
-@@ -7218,6 +7358,7 @@
+@@ -6142,7 +6283,7 @@
+       ],
+       contentOffset: initialContentOffset !== void 0 ? horizontal ? { x: initialContentOffset, y: 0 } : { x: 0, y: initialContentOffset } : void 0,
+       horizontal,
+-      maintainVisibleContentPosition: maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
++      maintainVisibleContentPosition: Platform.OS === "ios" || maintainVisibleContentPosition.size || maintainVisibleContentPosition.data ? { minIndexForVisible: 0 } : void 0,
+       onLayout,
+       onScroll: onScroll2,
+       ref: refScrollView,
+@@ -7218,6 +7359,7 @@
      dataVersion,
      drawDistance = 250,
      contentInsetEndAdjustment,
@@ -777,7 +797,7 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
      estimatedItemSize = 100,
      estimatedListSize,
      extraData,
-@@ -7494,6 +7635,7 @@
+@@ -7494,6 +7636,7 @@
      contentContainerAlignItems: contentContainerStyle.alignItems,
      contentInset,
      contentInsetEndAdjustment: contentInsetEndAdjustmentResolved,
@@ -785,7 +805,7 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
      data: dataProp,
      dataKey,
      dataVersion,
-@@ -7580,6 +7722,13 @@
+@@ -7580,6 +7723,13 @@
        return void 0;
      }
      const resolvedOffset = (_a4 = initialScroll.contentOffset) != null ? _a4 : resolveInitialScrollOffset(ctx, initialScroll);
@@ -799,7 +819,7 @@ index 0752a4d5f616a4e16b963cf55b9ad39bba20b02b..dffce16650aa27381a69fedb3ac905cb
      return usesBootstrapInitialScroll && ((_b2 = state.initialScrollSession) == null ? void 0 : _b2.kind) === "bootstrap" && Platform.OS === "web" ? void 0 : resolvedOffset;
    }, [usesBootstrapInitialScroll]);
    useLayoutEffect(() => {
-@@ -7812,6 +7961,7 @@
+@@ -7812,6 +7962,7 @@
        onScroll: (event) => onScroll(ctx, event),
        onScrollBeginDrag: (event) => {
          var _a4, _b2;

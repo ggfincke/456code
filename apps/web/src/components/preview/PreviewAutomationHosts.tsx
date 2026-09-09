@@ -40,8 +40,10 @@ import {
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
   stopBrowserRecording,
+  stopBrowserRecordingForUpload,
 } from '~/browser/browserRecording'
 import { resolveBrowserRecordingStopTarget } from '~/browser/browserRecordingScope'
+import { uploadBrowserRecording } from '~/browser/browserRecordingUpload'
 import {
   acquireBrowserSurfaceActivity,
   useBrowserSurfaceStore,
@@ -722,9 +724,19 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               recordingTarget?.serverTabId ?? null,
               request.tabIdExplicit ? request.tabId : undefined,
             )
+            const transferToEnvironment =
+              typeof request.input === 'object' &&
+              request.input !== null &&
+              'transferToEnvironment' in request.input &&
+              request.input.transferToEnvironment === true
             const artifact =
               stopTabId && recordingTarget
-                ? await stopBrowserRecording(recordingTarget.runtimeTabId)
+                ? transferToEnvironment
+                  ? await stopBrowserRecordingForUpload(
+                      recordingTarget.runtimeTabId,
+                      (saved, blob) => uploadBrowserRecording(threadRef, saved, blob, deadline),
+                    )
+                  : await stopBrowserRecording(recordingTarget.runtimeTabId)
                 : null
             if (!artifact || !stopTabId)
             {

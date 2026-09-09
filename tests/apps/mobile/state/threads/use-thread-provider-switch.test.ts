@@ -11,6 +11,7 @@ vi.mock('../../../../../apps/mobile/src/state/use-remote-environment-registry', 
 vi.mock('../../../../../apps/mobile/src/state/threads/use-thread-detail', () => ({}))
 vi.mock('../../../../../apps/mobile/src/state/threads/use-thread-selection', () => ({}))
 vi.mock('../../../../../apps/mobile/src/state/threads/threads', () => ({}))
+vi.mock('../../../../../apps/mobile/src/state/threads/use-composer-drafts', () => ({}))
 
 import { resolveConfirmedProviderSwitchDraftSettings } from '../../../../../apps/mobile/src/state/threads/use-thread-provider-switch'
 

@@ -2,6 +2,8 @@
 // expose scoped project key
 
 import {
+  parseScopedProjectKey as runtimeParseScopedProjectKey,
+  parseScopedThreadKey as runtimeParseScopedThreadKey,
   scopedProjectKey as runtimeScopedProjectKey,
   scopedThreadKey as runtimeScopedThreadKey,
   scopeProjectRef,
@@ -17,6 +19,15 @@ export function scopedProjectKey(environmentId: EnvironmentId, projectId: Projec
 export function scopedThreadKey(environmentId: EnvironmentId, threadId: ThreadId): string
 {
   return runtimeScopedThreadKey(scopeThreadRef(environmentId, threadId))
+}
+
+export function scopedKeyEnvironmentId(key: string): EnvironmentId | null
+{
+  return (
+    runtimeParseScopedThreadKey(key)?.environmentId ??
+    runtimeParseScopedProjectKey(key)?.environmentId ??
+    null
+  )
 }
 
 export function scopedRequestKey(

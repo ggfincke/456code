@@ -11,6 +11,7 @@ import type {
 
 import { encodeJsonStringForDiagnostics } from './ClaudeSdkMessages.ts'
 import { finiteNonNegativeInteger } from './ClaudeTokenUsage.ts'
+import { isWorkspaceImagePreviewPath } from '@t3tools/shared/filePreview'
 
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -22,8 +23,25 @@ export type PlanStep = {
   readonly status: 'pending' | 'inProgress' | 'completed'
 }
 
-export function classifyToolItemType(toolName: string): CanonicalItemType
+function readToolImagePath(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+): string | undefined
 {
+  const normalized = toolName.trim().toLowerCase()
+  if (normalized !== 'read' && normalized !== 'read file') return undefined
+  const value = input.file_path ?? input.path
+  if (typeof value !== 'string') return undefined
+  const path = value.trim()
+  return path && !/[\r\n]/.test(path) && isWorkspaceImagePreviewPath(path) ? path : undefined
+}
+
+export function classifyToolItemType(
+  toolName: string,
+  input: Readonly<Record<string, unknown>> = {},
+): CanonicalItemType
+{
+  if (readToolImagePath(toolName, input)) return 'image_view'
   const normalized = toolName.toLowerCase()
   if (normalized.includes('mcp'))
   {
@@ -218,6 +236,8 @@ export function summarizeToolRequest(
   input: Readonly<Record<string, unknown>>,
 ): string
 {
+  const imagePath = readToolImagePath(toolName, input)
+  if (imagePath) return imagePath
   const commandValue = input.command ?? input.cmd
   const command = typeof commandValue === 'string' ? commandValue : undefined
   if (command && command.trim().length > 0)

@@ -335,6 +335,48 @@ describe('environment grouping', () =>
     expect(entries[1]?.group.displayName).toBe('separate')
   })
 
+  it('keeps the current environment when selecting a different grouped repository', () =>
+  {
+    const current = makeProject({
+      environmentId: remoteEnvironmentId,
+      repositoryIdentity,
+    })
+    const otherIdentity = { ...repositoryIdentity, canonicalKey: 'github.com/example/other' }
+    const primaryTarget = makeProject({
+      id: ProjectId.make('other-primary'),
+      workspaceRoot: '/tmp/other',
+      repositoryIdentity: otherIdentity,
+    })
+    const remoteTarget = makeProject({
+      id: ProjectId.make('other-remote'),
+      environmentId: remoteEnvironmentId,
+      workspaceRoot: '/tmp/other',
+      repositoryIdentity: otherIdentity,
+    })
+    const primaryOnly = makeProject({
+      id: ProjectId.make('primary-only'),
+      workspaceRoot: '/tmp/primary-only',
+    })
+    const entries = buildSidebarProjectPickerEntries({
+      groups: buildSidebarProjectSnapshots({
+        projects: [primaryTarget, remoteTarget, current, primaryOnly],
+        settings: defaultGroupingSettings,
+        primaryEnvironmentId,
+        resolveEnvironmentLabel: () => null,
+      }),
+      preferredProjectRef: { environmentId: remoteEnvironmentId, projectId: current.id },
+    })
+
+    expect(entries[0]?.targetProject.id).toBe(current.id)
+    expect(
+      entries.find((entry) => entry.group.projectKey === otherIdentity.canonicalKey),
+    ).toMatchObject({ targetProject: remoteTarget, isPreferred: false })
+    expect(entries.find((entry) => entry.targetProject.id === primaryOnly.id)).toMatchObject({
+      targetProject: primaryOnly,
+      isPreferred: false,
+    })
+  })
+
   it('keeps manual project order when building grouped sidebar entries', () =>
   {
     const primary = makeProject({ repositoryIdentity })

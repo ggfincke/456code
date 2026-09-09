@@ -15,7 +15,7 @@ import type { ScopedThreadRef } from '@t3tools/contracts'
 import { useCallback, useMemo, useState, type ReactNode, type Ref } from 'react'
 
 import { type DraftId, useComposerDraftStore } from '~/composerDraftStore'
-import { fnv1a32 } from '~/lib/diffRendering'
+import { fnv1a32, PREFERRED_HIGHLIGHTER } from '~/lib/diffRendering'
 import {
   buildDiffReviewComment,
   restoreDiffReviewCommentRange,
@@ -85,6 +85,7 @@ interface AnnotatableCodeViewProps
     fileDiff: FileDiffMetadata
     filePath: string
     fileKey: string
+    fileVersion: number
     collapsed: boolean
   }>
   sectionId: string
@@ -129,7 +130,7 @@ export function AnnotatableCodeView({
   const filesByKey = useMemo(() => new Map(files.map((file) => [file.fileKey, file])), [files])
   const items = useMemo<CodeViewDiffItem<DiffCommentAnnotationGroup>[]>(
     () =>
-      files.map(({ fileDiff, filePath, fileKey, collapsed }) =>
+      files.map(({ fileDiff, filePath, fileKey, fileVersion, collapsed }) =>
       {
         const persisted = reviewComments
           .filter(
@@ -159,7 +160,7 @@ export function AnnotatableCodeView({
           annotations,
           collapsed,
           version: fnv1a32(
-            `${collapsed ? '1' : '0'}:${annotations
+            `${fileVersion}:${collapsed ? '1' : '0'}:${annotations
               .flatMap((annotation) =>
                 annotation.metadata.entries.map(
                   (entry) => `${entry.id}:${entry.rangeLabel}:${entry.text}`,
@@ -254,6 +255,7 @@ export function AnnotatableCodeView({
         onSelectedLinesChange={setSelectedLines}
         options={{
           ...options,
+          preferredHighlighter: PREFERRED_HIGHLIGHTER,
           enableGutterUtility: !hasOpenComment,
           enableLineSelection: !hasOpenComment,
           onLineSelectionEnd: beginComment,

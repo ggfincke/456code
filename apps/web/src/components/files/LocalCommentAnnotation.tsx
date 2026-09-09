@@ -2,7 +2,7 @@
 // render local comment annotation
 
 import { MessageCircle, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 
 import { Button } from '~/components/ui/button'
 import { Textarea } from '~/components/ui/textarea'
@@ -27,6 +27,14 @@ export function LocalCommentAnnotation({
 }: LocalCommentAnnotationProps)
 {
   const [text, setText] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() =>
+  {
+    if (kind !== 'draft') return
+    const frame = requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }))
+    return () => cancelAnimationFrame(frame)
+  }, [kind])
 
   if (kind === 'comment')
   {
@@ -65,6 +73,7 @@ export function LocalCommentAnnotation({
       </div>
       <div className="mt-1 text-xs text-muted-foreground">Comment on lines {rangeLabel}</div>
       <Textarea
+        ref={textareaRef}
         autoFocus
         className="mt-3"
         size="sm"

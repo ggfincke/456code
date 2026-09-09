@@ -25,6 +25,10 @@ import {
   ThreadId,
   ProviderInstanceId,
 } from '@t3tools/contracts'
+import {
+  deriveNormalizedWorkLogEntries,
+  workEntryViewedImagePath,
+} from '@t3tools/client-runtime/thread-activity'
 import { createModelSelection } from '@t3tools/shared/model'
 import { assert, describe, it } from '@effect/vitest'
 import * as Context from 'effect/Context'
@@ -52,12 +56,16 @@ import {
 } from '../../../../../apps/server/src/provider/Layers/ClaudeAdapter.ts'
 import { ORCHESTRATE_MODE_INSTRUCTIONS } from '../../../../../apps/server/src/provider/CollaborationModeInstructions.ts'
 import { classifyToolItemType } from '../../../../../apps/server/src/provider/claude/ClaudeToolProjection.ts'
+import { runtimeEventToActivities } from '../../../../../apps/server/src/orchestration/Layers/ProviderRuntimeEventMapping.ts'
 import {
   makeTestMcpProviderSession,
   TEST_MCP_AUTHORIZATION,
   TEST_MCP_ENDPOINT,
 } from './mcpProviderSessionTestHelpers.ts'
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings)
+const encodeImageReadInput = Schema.encodeEffect(
+  Schema.fromJsonString(Schema.Struct({ file_path: Schema.String })),
+)
 
 // test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
@@ -1572,6 +1580,99 @@ describe('ClaudeAdapterLive', () =>
       Effect.provide(harness.layer),
     )
   })
+
+  it.effect(
+    'preserves Claude image read paths through streamed input and client projection',
+    () =>
+    {
+      const harness = makeHarness()
+      return Effect.gen(function* ()
+      {
+        const adapter = yield* ClaudeAdapter
+        const eventsFiber = yield* unwrapClaudeRuntimeEvents(adapter).pipe(
+          Stream.takeUntil((event) => event.type === 'turn.completed'),
+          Stream.runCollect,
+          Effect.forkChild,
+        )
+        const session = yield* startClaudeTestSession(adapter, {
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make('claudeAgent'),
+          runtimeMode: 'full-access',
+        })
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: 'read image',
+          attachments: [],
+        })
+        const imagePath = `/workspace/${'nested/'.repeat(70)}chart.png`
+        const partialJson = yield* encodeImageReadInput({ file_path: imagePath })
+        assert.equal(classifyToolItemType('Read', { file_path: imagePath }), 'image_view')
+        assert.equal(
+          classifyToolItemType('Read', { file_path: '/workspace/readme.md' }),
+          'dynamic_tool_call',
+        )
+        const envelope = {
+          type: 'stream_event',
+          session_id: 'image-read',
+          parent_tool_use_id: null,
+        }
+        harness.query.emit({
+          ...envelope,
+          uuid: 'image-start',
+          event: {
+            type: 'content_block_start',
+            index: 1,
+            content_block: { type: 'tool_use', id: 'image-tool', name: 'Read', input: {} },
+          },
+        } as unknown as SDKMessage)
+        harness.query.emit({
+          ...envelope,
+          uuid: 'image-input',
+          event: {
+            type: 'content_block_delta',
+            index: 1,
+            delta: {
+              type: 'input_json_delta',
+              partial_json: partialJson,
+            },
+          },
+        } as unknown as SDKMessage)
+        harness.query.emit({
+          ...envelope,
+          uuid: 'image-stop',
+          event: { type: 'content_block_stop', index: 1 },
+        } as unknown as SDKMessage)
+        harness.query.emit({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          errors: [],
+          session_id: 'image-read',
+          uuid: 'image-result',
+        } as unknown as SDKMessage)
+        const events = Array.from(yield* Fiber.join(eventsFiber))
+        const updated = events.find((event) => event.type === 'item.updated')
+        assert.equal(updated?.type, 'item.updated')
+        if (updated?.type !== 'item.updated') return
+        assert.equal(updated.payload.itemType, 'image_view')
+        assert.equal(updated.payload.detail, imagePath)
+        const projected = runtimeEventToActivities(updated)[0]!
+        assert.notEqual((projected.payload as { detail: string }).detail, imagePath)
+        const entries = deriveNormalizedWorkLogEntries([projected], {
+          requestKindFromRequestType: () => null,
+        })
+        assert.equal(entries.length, 1)
+        assert.equal(workEntryViewedImagePath(entries[0]!), imagePath)
+        assert.deepEqual((projected.payload as { data: unknown }).data, {
+          imagePath,
+          toolCallId: updated.itemId,
+        })
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      )
+    },
+  )
 
   it.effect('falls back to a default plan step label for blank TodoWrite content', () =>
   {

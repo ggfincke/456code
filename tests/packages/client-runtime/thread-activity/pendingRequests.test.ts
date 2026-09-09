@@ -11,6 +11,39 @@ import {
 
 describe('derivePendingApprovals', () =>
 {
+  it('keeps terminal approvals closed after replay while ordinary reply failures stay retryable', () =>
+  {
+    const requested: OrchestrationThreadActivity = {
+      id: EventId.make('approval-replay'),
+      tone: 'approval',
+      kind: 'approval.requested',
+      summary: 'Approval requested',
+      payload: { requestId: 'approval-1', requestKind: 'command' },
+      turnId: null,
+      sequence: 43,
+      createdAt: '2026-09-09T00:00:00.000Z',
+    }
+    const resolved = {
+      ...requested,
+      id: EventId.make('approval-resolved'),
+      sequence: 42,
+      kind: 'approval.resolved',
+    }
+    expect(derivePendingApprovals([resolved, requested])).toEqual([])
+    const failed = {
+      ...resolved,
+      kind: 'provider.approval.respond.failed',
+      payload: { requestId: 'approval-1', detail: 'Unknown pending codex approval request' },
+    }
+    expect(derivePendingApprovals([requested, failed])).toEqual([])
+    expect(
+      derivePendingApprovals([
+        requested,
+        { ...failed, payload: { requestId: 'approval-1', detail: 'Connection unavailable' } },
+      ]),
+    ).toHaveLength(1)
+  })
+
   it('keeps MCP elicitation approvals pending with their canonical request kind', () =>
   {
     const activity = {
@@ -90,5 +123,20 @@ describe('derivePendingUserInputs', () =>
       createdAt: '2026-08-24T00:00:01.000Z',
     } satisfies OrchestrationThreadActivity
     expect(derivePendingUserInputs([requested, resolved])).toEqual([])
+    const replay = { ...requested, id: EventId.make('question-replay'), turnId: null, sequence: 43 }
+    const terminal = { ...resolved, turnId: null, sequence: 42 }
+    expect(derivePendingUserInputs([terminal, replay])).toEqual([])
+    const failed = {
+      ...terminal,
+      kind: 'provider.user-input.respond.failed',
+      payload: { requestId: 'async-question', detail: 'Unknown pending user input request' },
+    }
+    expect(derivePendingUserInputs([replay, failed])).toEqual([])
+    expect(
+      derivePendingUserInputs([
+        replay,
+        { ...failed, payload: { requestId: 'async-question', detail: 'Connection unavailable' } },
+      ]),
+    ).toHaveLength(1)
   })
 })

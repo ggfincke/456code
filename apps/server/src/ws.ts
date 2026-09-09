@@ -1,6 +1,7 @@
 // apps/server/src/ws.ts
 // serves authenticated websocket rpc handlers for server capabilities
 
+import { collectAssistantCitations } from '@t3tools/shared/assistantCitations'
 import * as Cause from 'effect/Cause'
 import * as Crypto from 'effect/Crypto'
 import * as DateTime from 'effect/DateTime'
@@ -694,19 +695,40 @@ const makeWsRpcLayer = (
         normalizedCommand: OrchestrationCommand,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> =>
       {
+        if (
+          normalizedCommand.type === 'thread.turn.start' &&
+          collectAssistantCitations(normalizedCommand.message.text).length > 0 &&
+          !currentSession.scopes.includes(AuthOrchestrationReadScope)
+        )
+        {
+          return Effect.fail(
+            new OrchestrationDispatchCommandError({
+              message: 'Assistant citations require orchestration read access to their sources.',
+              code: 'unauthorized-citation-source',
+            }),
+          )
+        }
         const dispatchEffect =
           normalizedCommand.type === 'thread.turn.start' && normalizedCommand.bootstrap
             ? dispatchBootstrapTurnStart(normalizedCommand)
-            : orchestrationEngine.dispatch(normalizedCommand).pipe(
-                Effect.tap(({ sequence }) =>
-                  normalizedCommand.type === 'thread.create'
-                    ? threadDeletionReactor.drainThrough(sequence)
-                    : Effect.void,
-                ),
-                Effect.mapError((cause) =>
-                  toDispatchCommandError(cause, 'Failed to dispatch orchestration command'),
-                ),
-              )
+            : orchestrationEngine
+                .dispatch(normalizedCommand, {
+                  assistantCitationAccess: currentSession.scopes.includes(
+                    AuthOrchestrationReadScope,
+                  )
+                    ? 'allow'
+                    : 'deny',
+                })
+                .pipe(
+                  Effect.tap(({ sequence }) =>
+                    normalizedCommand.type === 'thread.create'
+                      ? threadDeletionReactor.drainThrough(sequence)
+                      : Effect.void,
+                  ),
+                  Effect.mapError((cause) =>
+                    toDispatchCommandError(cause, 'Failed to dispatch orchestration command'),
+                  ),
+                )
 
         return dispatchWithAttachmentLifecycle(
           normalizedCommand,

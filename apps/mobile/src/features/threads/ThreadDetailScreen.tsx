@@ -1,6 +1,10 @@
 // apps/mobile/src/features/threads/ThreadDetailScreen.tsx
 // renders the mobile thread timeline and composer surface
 import { type EnvironmentConnectionPhase } from '@t3tools/client-runtime/connection'
+import {
+  appendCodexArtifactTemplateUsePrompt,
+  type CodexArtifactTemplate,
+} from '@t3tools/client-runtime/codex-artifact-templates'
 import { resolveProviderSkillsForCwd } from '@t3tools/client-runtime/providerSkills'
 import type { EnvironmentThreadStatus } from '@t3tools/client-runtime/state/threads'
 import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from '@legendapp/list/keyboard'
@@ -31,6 +35,7 @@ import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from '../../lib/layout'
 import { scopedThreadKey } from '../../lib/scopedEntities'
 import type { PendingApproval, PendingUserInput, ThreadFeedEntry } from '../../lib/threadActivity'
 import type { ThreadProviderSwitchNotice } from '../../lib/thread-activity/provider-switch'
+import type { QueuedThreadMessage } from '../../state/thread-outbox-model'
 import { PendingApprovalCard } from './PendingApprovalCard'
 import { PendingUserInputCard } from './PendingUserInputCard'
 import {
@@ -51,6 +56,10 @@ export interface ThreadDetailScreenProps
   readonly connectionError: string | null
   readonly environmentLabel: string | null
   readonly selectedThreadFeed: ReadonlyArray<ThreadFeedEntry>
+  readonly pendingMessages: ReadonlyArray<{
+    readonly message: QueuedThreadMessage
+    readonly acknowledged: boolean
+  }>
   readonly activeWorkStartedAt: string | null
   readonly activePendingApproval: PendingApproval | null
   readonly respondingApprovalId: ApprovalRequestId | null
@@ -197,6 +206,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`
   const selectedThreadKey = scopedThreadKey(props.environmentId, props.selectedThread.id)
   const composerEditorRef = useRef<ComposerEditorHandle>(null)
+  const draftMessageRef = useRef(props.draftMessage)
+  draftMessageRef.current = props.draftMessage
   const composerOverlayRef = useRef<View>(null)
   const listRef = useRef<LegendListRef>(null)
   const feedTouchStartRef = useRef<{ pageX: number; pageY: number } | null>(null)
@@ -412,6 +423,25 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     feedTouchStartRef.current = null
   }, [])
 
+  const handleUseArtifactTemplate = useCallback(
+    (template: CodexArtifactTemplate) =>
+    {
+      const currentDraft = draftMessageRef.current
+      const nextDraft = appendCodexArtifactTemplateUsePrompt(currentDraft, template)
+      if (nextDraft !== currentDraft)
+      {
+        draftMessageRef.current = nextDraft
+        props.onChangeDraftMessage(nextDraft)
+      }
+      requestAnimationFrame(() =>
+      {
+        composerEditorRef.current?.focus()
+        composerEditorRef.current?.setSelection({ start: nextDraft.length, end: nextDraft.length })
+      })
+    },
+    [props.onChangeDraftMessage],
+  )
+
   return (
     <View className="flex-1">
       {showContent ? (
@@ -428,6 +458,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             threadId={props.selectedThread.id}
             workspaceRoot={props.threadCwd}
             feed={props.selectedThreadFeed}
+            pendingMessages={props.pendingMessages}
             contentPresentation={props.contentPresentation}
             agentLabel={agentLabel}
             latestTurn={props.selectedThread.latestTurn}
@@ -443,6 +474,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             usesAutomaticContentInsets={props.usesAutomaticContentInsets}
             onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
             skills={selectedProviderSkills}
+            onUseArtifactTemplate={handleUseArtifactTemplate}
           />
         </View>
       ) : (

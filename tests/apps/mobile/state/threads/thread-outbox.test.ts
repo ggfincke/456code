@@ -20,6 +20,8 @@ import {
 } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult, AtomRegistry } from 'effect/unstable/reactivity'
+import * as RpcClientError from 'effect/unstable/rpc/RpcClientError'
+import * as Socket from 'effect/unstable/socket/Socket'
 import { vi } from 'vite-plus/test'
 
 import type { DraftComposerImageAttachment } from '../../../../../apps/mobile/src/lib/composerImages'
@@ -1282,6 +1284,33 @@ describe('thread outbox', () =>
     registry.dispose()
   })
 
+  it('keeps a claimed message visible until durable removal completes', async () =>
+  {
+    const registry = AtomRegistry.make()
+    const manager = createThreadOutboxManager({
+      registry,
+      storage: {
+        load: async () => [],
+        write: async () => undefined,
+        remove: async () => undefined,
+      },
+    })
+    const message = queuedMessage({
+      messageId: 'message-claimed',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+
+    await manager.enqueue(message)
+    await expect(manager.claimDelivery(message, () => true)).resolves.toBe(true)
+    expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({
+      'environment-1:thread-1': [message],
+    })
+
+    await manager.remove(message)
+    expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({})
+    registry.dispose()
+  })
+
   it('rolls an enqueued message back out when the durable write fails', async () =>
   {
     const registry = AtomRegistry.make()
@@ -1576,6 +1605,22 @@ describe('thread outbox', () =>
       }),
     ).toBe(true)
     expect(shouldRetryThreadOutboxDelivery(new Error('Thread no longer exists'))).toBe(false)
+    for (const tag of [
+      'RpcClientError',
+      'EnvironmentRpcUnavailableError',
+      'EnvironmentNotRegisteredError',
+    ])
+    {
+      expect(
+        shouldRetryThreadOutboxDelivery({ _tag: tag, message: 'An error occurred during Read' }),
+      ).toBe(true)
+    }
+    for (const tag of ['OrchestrationDispatchCommandError', 'EnvironmentAuthorizationError'])
+    {
+      expect(
+        shouldRetryThreadOutboxDelivery({ _tag: tag, message: 'Socket is not connected' }),
+      ).toBe(false)
+    }
   })
 
   it('bounds settings synchronization retries before retaining a failed queued message', () =>
@@ -1661,7 +1706,7 @@ describe('thread outbox', () =>
     expect(persisted.failure?.reason).toBe('Thread no longer exists')
   })
 
-  it('persists and bounds transport failures into the durable visible failure state', async () =>
+  it('retains in-flight socket failures and bounds retries into the durable visible failure state', async () =>
   {
     let persisted: QueuedThreadMessage = queuedMessage({
       messageId: 'message-1',
@@ -1669,7 +1714,9 @@ describe('thread outbox', () =>
     })
     const thread = threadShell()
     let removeCount = 0
-    const transientError = { _tag: 'ConnectionTransientError', message: 'offline' }
+    const transientError = new RpcClientError.RpcClientError({
+      reason: new Socket.SocketReadError({ cause: new Error('Network connection was lost') }),
+    })
 
     for (let attempt = 1; attempt <= 3; attempt += 1)
     {
@@ -1701,7 +1748,7 @@ describe('thread outbox', () =>
 
     expect(removeCount).toBe(0)
     expect(persisted.deliveryAttemptCount).toBe(3)
-    expect(persisted.failure?.reason).toBe('offline')
+    expect(persisted.failure?.reason).toBe(transientError.message)
   })
 
   it('persists settings attempts across restarts and stops before starting a turn', async () =>

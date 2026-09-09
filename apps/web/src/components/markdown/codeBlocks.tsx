@@ -35,7 +35,7 @@ import { Button } from '../ui/button'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '../ui/collapsible'
 import { ScrollArea } from '../ui/scroll-area'
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../ui/menu'
-import { DIFF_THEME_NAMES } from '../../lib/diffRendering'
+import { DIFF_THEME_NAMES, PREFERRED_HIGHLIGHTER } from '../../lib/diffRendering'
 import { fnv1a32 } from '../../lib/diffRendering'
 import { LRUCache } from '../../lib/lruCache'
 import { getClientSettings } from '../../hooks/useSettings'
@@ -194,12 +194,12 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter>
   const promise = getSharedHighlighter({
     themes: Object.values(DIFF_THEME_NAMES),
     langs: [language as SupportedLanguages],
-    preferredHighlighter: 'shiki-js',
+    preferredHighlighter: PREFERRED_HIGHLIGHTER,
   }).catch((err) =>
   {
-    highlighterPromiseCache.delete(language)
     if (language === 'text')
     {
+      highlighterPromiseCache.delete(language)
       // "text" itself failed — Shiki cannot initialize at all, surface the error
       throw err
     }
@@ -304,12 +304,7 @@ export function MarkdownTable({ children, ...props }: React.ComponentProps<'tabl
       className="chat-markdown-table-container"
       data-expanded={expanded ? 'true' : 'false'}
     >
-      <ScrollArea
-        chainVerticalScroll
-        scrollFade
-        hideScrollbars
-        className="w-full max-w-full rounded-none"
-      >
+      <ScrollArea chainVerticalScroll scrollFade className="w-full max-w-full rounded-none">
         <table ref={tableRef} {...props}>
           {children}
         </table>

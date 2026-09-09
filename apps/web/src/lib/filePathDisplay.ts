@@ -1,6 +1,8 @@
 // apps/web/src/lib/filePathDisplay.ts
 // format workspace relative path
 
+import { isWindowsAbsolutePath } from '@t3tools/shared/path'
+
 import { splitPathAndPosition } from './terminal-links'
 
 function normalizePathSeparators(path: string): string
@@ -44,10 +46,13 @@ export function formatWorkspaceRelativePath(
       normalizePathSeparators(trimTrailingPathSeparators(workspaceRoot)),
     )
     const workspaceLabel = basenameOfPath(normalizedWorkspaceRoot)
-    const pathForCompare = normalizedPath.toLowerCase()
-    const workspaceForCompare = normalizedWorkspaceRoot.toLowerCase()
+    const caseInsensitive = isWindowsAbsolutePath(canonicalizeWindowsDrivePath(workspaceRoot))
+    const pathForCompare = caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath
+    const workspaceForCompare = caseInsensitive
+      ? normalizedWorkspaceRoot.toLowerCase()
+      : normalizedWorkspaceRoot
     const workspaceWithSeparator = `${workspaceForCompare}/`
-    const workspaceLabelWithSeparator = `${workspaceLabel.toLowerCase()}/`
+    const workspaceLabelWithSeparator = `${caseInsensitive ? workspaceLabel.toLowerCase() : workspaceLabel}/`
 
     if (pathForCompare === workspaceForCompare)
     {

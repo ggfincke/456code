@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/ios/Code456MarkdownText.mm
+// renders selectable attributed markdown with native layout and file attachments
+
 #import "Code456MarkdownText.h"
 #import "Code456MarkdownTextShadowNode.h"
 #import "Code456MarkdownTextComponentDescriptor.h"
@@ -550,6 +553,10 @@ Code456MarkdownOutsideTapCoordinatorForWindow(UIWindow *window)
 
 - (void)handleLongPressIfNecessary:(UILongPressGestureRecognizer*)sender
 {
+  if (sender.state != UIGestureRecognizerStateBegan) {
+    return;
+  }
+
   const auto location = [self getLocationOfPress:sender];
   const auto child = [self getTouchChild:location];
 

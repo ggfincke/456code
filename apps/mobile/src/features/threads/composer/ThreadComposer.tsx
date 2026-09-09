@@ -11,6 +11,7 @@ import {
   type RuntimeMode,
   type ServerConfig,
 } from '@t3tools/contracts'
+import { useAtomValue } from '@effect/atom-react'
 import { memo, useCallback, useMemo, useRef, useState, type RefObject } from 'react'
 import { ActivityIndicator, Alert, Image, Pressable, useColorScheme, View } from 'react-native'
 import ImageViewing from 'react-native-image-viewing'
@@ -60,6 +61,11 @@ import { ComposerCommandPopover } from './ComposerCommandPopover'
 import { useComposerCommandMenu } from './use-composer-command-menu'
 import { REFRESH_MODELS_ACTION, useProviderCatalogRefresh } from './provider-catalog-refresh'
 import { composerConnectionStatus, type ComposerStatusPillState } from './threadComposerStatus'
+import {
+  composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
+  composerAttachmentUploadsAtom,
+} from '../../../state/composer-attachment-uploads'
 import { canSubmitManualCompaction, resolveComposerSubmitHandler } from './threadComposerSubmit'
 import { COMPOSER_LAYOUT_TRANSITION, ComposerSurface } from './composerSurface'
 export { ComposerSurface } from './composerSurface'
@@ -343,20 +349,37 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const providerRejectsActiveInput =
     props.activeThreadBusy && providerCapabilities.activeTurnInput === 'unsupported'
   const hasUnsupportedAttachments = !supportsImageAttachments && props.draftAttachments.length > 0
+  const uploadStates = useAtomValue(composerAttachmentUploadsAtom)
+  const uploadBlockReason = composerAttachmentUploadBlockReason({
+    environmentId: props.environmentId,
+    attachments: props.draftAttachments,
+    serverConfig: props.serverConfig,
+    states: uploadStates,
+  })
+  const attachmentsUploading = composerAttachmentsStillUploading({
+    environmentId: props.environmentId,
+    attachments: props.draftAttachments,
+    serverConfig: props.serverConfig,
+    states: uploadStates,
+  })
   const canSend =
     hasContent &&
     !compactionPending &&
     props.sendBlockedReason === null &&
+    uploadBlockReason === null &&
     !providerRejectsActiveInput &&
     !hasUnsupportedAttachments
   const sendLabel =
-    props.sendBlockedReason !== null
+    props.sendBlockedReason !== null || uploadBlockReason !== null
       ? 'Sending blocked'
       : providerRejectsActiveInput
         ? 'Wait for the current turn'
         : hasUnsupportedAttachments
           ? 'Remove unsupported attachments'
-          : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
+          : props.connectionState !== 'connected' ||
+              props.activeThreadBusy ||
+              props.queueCount > 0 ||
+              attachmentsUploading
             ? 'Queue'
             : 'Send'
   const modelOptions = useMemo(
@@ -755,6 +778,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             >
               <ComposerAttachmentStrip
                 attachments={props.draftAttachments}
+                environmentId={props.environmentId}
                 onRemove={props.onRemoveDraftImage}
                 onPressImage={onPressImage}
               />

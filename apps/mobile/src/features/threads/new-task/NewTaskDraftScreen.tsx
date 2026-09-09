@@ -2,6 +2,7 @@
 // renders and routes new mobile task drafts
 
 import { NativeStackScreenOptions } from '../../../native/StackHeader'
+import { useAtomValue } from '@effect/atom-react'
 import { StackActions, useNavigation, usePreventRemove } from '@react-navigation/native'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, InteractionManager, View, useColorScheme } from 'react-native'
@@ -9,10 +10,6 @@ import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-co
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { EnvironmentId, normalizeCollaborationMode } from '@t3tools/contracts'
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from '@t3tools/client-runtime/state/runtime'
 
 import { ComposerEditor, type ComposerEditorHandle } from '../../../components/ComposerEditor'
 import {
@@ -43,13 +40,18 @@ import {
   type ComposerDraft,
 } from '../../../state/use-composer-drafts'
 import { useProjects } from '../../../state/entities'
+import { useServerConfigs } from '../../../state/entities'
+import {
+  composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
+  composerAttachmentUploadsAtom,
+} from '../../../state/composer-attachment-uploads'
 import { deriveThreadTitleFromPrompt } from '../../../lib/projectThreadStartTurn'
 import { confirmProviderRuntimeModeWarnings } from '../../../lib/providerRuntimeModeWarnings'
 import { armAgentAwarenessLiveActivityForLocalWork } from '../../agent-awareness/remoteRegistration'
-import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from '../../../state/thread-outbox'
+import { enqueueThreadOutboxMessage } from '../../../state/thread-outbox'
 import { useRemoteConnectionStatus } from '../../../state/use-remote-environment-registry'
 import { branchBadgeLabel, useNewTaskFlow } from './new-task-flow-provider'
-import { useCreateProjectThread } from '../use-project-actions'
 import { useIncomingShare } from '../../sharing/IncomingShareProvider'
 import { ComposerCommandPopover } from '../composer/ComposerCommandPopover'
 import { useComposerCommandMenu } from '../composer/use-composer-command-menu'
@@ -84,7 +86,7 @@ export function NewTaskDraftScreen(props: {
 })
 {
   const projects = useProjects()
-  const createProjectThread = useCreateProjectThread()
+  const serverConfigs = useServerConfigs()
   const flow = useNewTaskFlow()
   const navigation = useNavigation()
   const {
@@ -105,6 +107,28 @@ export function NewTaskDraftScreen(props: {
     connectedEnvironments.find(
       (environment) => environment.environmentId === selectedProject.environmentId,
     )?.connectionState === 'connected'
+  const uploadStates = useAtomValue(composerAttachmentUploadsAtom)
+  const selectedServerConfig = selectedProject
+    ? serverConfigs.get(selectedProject.environmentId)
+    : null
+  const attachmentUploadBlockReason = selectedProject
+    ? composerAttachmentUploadBlockReason({
+        environmentId: selectedProject.environmentId,
+        attachments: flow.attachments,
+        serverConfig: selectedServerConfig,
+        states: uploadStates,
+      })
+    : null
+  const attachmentsUploading =
+    environmentConnected &&
+    selectedProject !== null &&
+    composerAttachmentsStillUploading({
+      environmentId: selectedProject.environmentId,
+      attachments: flow.attachments,
+      serverConfig: selectedServerConfig,
+      states: uploadStates,
+    })
+  const queuesInsteadOfStarting = !environmentConnected || attachmentsUploading
   const promptInputRef = useRef<ComposerEditorHandle>(null)
   const [isComposerFocused, setIsComposerFocused] = useState(false)
   const loadedBranchesProjectKeyRef = useRef<string | null>(null)
@@ -969,26 +993,12 @@ export function NewTaskDraftScreen(props: {
     const modelSelection = draft.modelSelection ?? flow.selectedModel
     const workspaceMode = draft.workspaceSelection?.mode ?? flow.workspaceMode
     const selectedBranchName = draft.workspaceSelection?.branch ?? flow.selectedBranchName
-    const selectedWorktreePath = draft.workspaceSelection?.worktreePath ?? flow.selectedWorktreePath
-    const startFromOrigin = draft.workspaceSelection?.startFromOrigin ?? flow.startFromOrigin
     const requestedRuntimeMode = draft.runtimeMode ?? flow.runtimeMode
     const runtimeMode = selectedProviderRuntimeCapabilities.supportedRuntimeModes.includes(
       requestedRuntimeMode,
     )
       ? requestedRuntimeMode
       : (selectedProviderRuntimeCapabilities.supportedRuntimeModes[0] ?? 'approval-required')
-    const requestedInteractionMode = normalizeCollaborationMode(
-      draft.interactionMode ?? flow.interactionMode.baseMode,
-      draft.orchestrate ?? flow.interactionMode.orchestrate,
-    )
-    const interactionMode = normalizeCollaborationMode(
-      selectedProviderRuntimeCapabilities.supportedInteractionModes.includes(
-        requestedInteractionMode.baseMode,
-      )
-        ? requestedInteractionMode.baseMode
-        : 'default',
-      requestedInteractionMode.orchestrate && showOrchestrate,
-    )
     const initialMessageText = draft.text.trim()
 
     if (
@@ -1019,54 +1029,17 @@ export function NewTaskDraftScreen(props: {
     }
 
     const editingPendingTask = flow.editingPendingTask
-
-    if (!environmentConnected)
+    const metadata = editingPendingTask
+      ? {
+          threadId: editingPendingTask.threadId,
+          commandId: editingPendingTask.commandId,
+          messageId: editingPendingTask.messageId,
+          createdAt: editingPendingTask.createdAt,
+        }
+      : makeTurnCommandMetadata()
+    const message = flow.buildPendingTaskMessage(metadata, runtimeModeAcknowledgements)
+    if (!message)
     {
-      // offline: park the task in the outbox; the drain sends it when the
-      // environment reconnects. Editing an existing pending task re-queues it
-      // under its original identifiers.
-      const metadata = editingPendingTask
-        ? {
-            threadId: editingPendingTask.threadId,
-            commandId: editingPendingTask.commandId,
-            messageId: editingPendingTask.messageId,
-            createdAt: editingPendingTask.createdAt,
-          }
-        : makeTurnCommandMetadata()
-      const message = flow.buildPendingTaskMessage(metadata, runtimeModeAcknowledgements)
-      if (!message)
-      {
-        return
-      }
-      flow.setSubmitting(true)
-      try
-      {
-        await enqueueThreadOutboxMessage(message)
-      }
-      catch (error)
-      {
-        Alert.alert(
-          'Could not queue task',
-          error instanceof Error ? error.message : 'The task could not be saved to the outbox.',
-        )
-        return
-      }
-      finally
-      {
-        flow.setSubmitting(false)
-      }
-      if (editingPendingTask)
-      {
-        flow.finishEditingPendingTask()
-      }
-      else
-      {
-        clearComposerDraftContent(draftKey, {
-          clearModelSelection: true,
-          clearWorkspaceSelection: true,
-        })
-      }
-      navigation.getParent()?.goBack()
       return
     }
 
@@ -1079,56 +1052,23 @@ export function NewTaskDraftScreen(props: {
       threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
       projectTitle: selectedProject.title,
     })
-    const result = await createProjectThread({
-      project: selectedProject,
-      modelSelection,
-      envMode: workspaceMode,
-      branch: selectedBranchName,
-      worktreePath: workspaceMode === 'worktree' ? null : selectedWorktreePath,
-      startFromOrigin,
-      runtimeMode,
-      runtimeModeAcknowledgements,
-      interactionMode,
-      initialMessageText,
-      initialAttachments: draft.attachments,
-      ...(editingPendingTask
-        ? {
-            turnMetadata: {
-              threadId: editingPendingTask.threadId,
-              commandId: editingPendingTask.commandId,
-              messageId: editingPendingTask.messageId,
-              createdAt: editingPendingTask.createdAt,
-            },
-          }
-        : {}),
-    })
-    flow.setSubmitting(false)
-
-    if (result._tag === 'Failure')
+    try
     {
-      if (!isAtomCommandInterrupted(result))
-      {
-        const error = squashAtomCommandFailure(result)
-        Alert.alert(
-          'Could not start task',
-          error instanceof Error ? error.message : 'The task could not be started.',
-        )
-      }
+      await enqueueThreadOutboxMessage(message)
+    }
+    catch (error)
+    {
+      Alert.alert(
+        queuesInsteadOfStarting ? 'Could not queue task' : 'Could not start task',
+        error instanceof Error ? error.message : 'The task could not be saved to the outbox.',
+      )
       return
     }
-
-    if (editingPendingTask)
+    finally
     {
-      try
-      {
-        await removeThreadOutboxMessage(editingPendingTask)
-      }
-      catch (error)
-      {
-        console.warn('[new-task] failed to remove delivered pending task', error)
-      }
-      flow.finishEditingPendingTask()
+      flow.setSubmitting(false)
     }
+    if (editingPendingTask) flow.finishEditingPendingTask()
     else
     {
       clearComposerDraftContent(draftKey, {
@@ -1138,8 +1078,8 @@ export function NewTaskDraftScreen(props: {
     }
     navigation.dispatch(
       StackActions.replace('Thread', {
-        environmentId: String(result.value.environmentId),
-        threadId: String(result.value.threadId),
+        environmentId: String(message.environmentId),
+        threadId: String(message.threadId),
       }),
     )
   }
@@ -1160,6 +1100,7 @@ export function NewTaskDraftScreen(props: {
     isIncomingShareReady &&
     !isImportingShare &&
     !flow.submitting &&
+    attachmentUploadBlockReason === null &&
     (supportsImageAttachments || flow.attachments.length === 0) &&
     !(flow.workspaceMode === 'worktree' && !flow.selectedBranchName)
   const promptEditor = (
@@ -1250,9 +1191,17 @@ export function NewTaskDraftScreen(props: {
   const startButton = (
     <ComposerToolbarButton
       accessibilityLabel={
-        flow.submitting ? 'Starting task' : environmentConnected ? 'Start task' : 'Queue task'
+        attachmentUploadBlockReason !== null
+          ? attachmentUploadBlockReason
+          : flow.submitting
+            ? 'Starting task'
+            : attachmentsUploading
+              ? 'Queue task, sends when uploads finish'
+              : environmentConnected
+                ? 'Start task'
+                : 'Queue task'
       }
-      icon={environmentConnected ? 'arrow.up' : 'tray.and.arrow.up'}
+      icon={queuesInsteadOfStarting ? 'tray.and.arrow.up' : 'arrow.up'}
       onPress={() => void handleStart()}
       variant="primary"
       showChevron={false}
@@ -1282,6 +1231,7 @@ export function NewTaskDraftScreen(props: {
             <View className="px-4 pt-3">
               <ComposerAttachmentStrip
                 attachments={flow.attachments}
+                environmentId={selectedProject.environmentId}
                 onRemove={isIncomingShareTransferPending ? () => undefined : flow.removeAttachment}
                 imageSize={88}
                 imageBorderRadius={20}

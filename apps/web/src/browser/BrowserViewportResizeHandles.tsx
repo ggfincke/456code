@@ -120,6 +120,37 @@ export function BrowserViewportResizeHandles({
   return (
     <>
       <ResizeHandle
+        direction="north"
+        label="Resize browser viewport from top edge"
+        kind="horizontal"
+        cursorClassName="cursor-ns-resize"
+        style={{ left, top: top - railSize, width: layout.viewportWidth, height: railSize }}
+        active={shared.activeDirection === 'north'}
+        onPointerDown={shared.onPointerDown}
+        onKeyDown={shared.onKeyDown}
+      />
+      <ResizeHandle
+        direction="northwest"
+        label="Resize browser viewport from top-left corner"
+        kind="corner"
+        cursorClassName="cursor-nwse-resize"
+        style={{ left: left - railSize, top: top - railSize, width: railSize, height: railSize }}
+        active={shared.activeDirection === 'northwest'}
+        onPointerDown={shared.onPointerDown}
+        onKeyDown={shared.onKeyDown}
+      />
+      <ResizeHandle
+        direction="northeast"
+        label="Resize browser viewport from top-right corner"
+        kind="corner"
+        cursorClassName="cursor-nesw-resize"
+        style={{ left: right, top: top - railSize, width: railSize, height: railSize }}
+        active={shared.activeDirection === 'northeast'}
+        mirrorCorner
+        onPointerDown={shared.onPointerDown}
+        onKeyDown={shared.onKeyDown}
+      />
+      <ResizeHandle
         direction="west"
         label="Resize browser viewport from left edge"
         kind="vertical"

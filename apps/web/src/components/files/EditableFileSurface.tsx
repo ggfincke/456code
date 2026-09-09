@@ -23,6 +23,7 @@ import { isBrowserPreviewFile, openFileInPreview } from '~/browser/openFileInPre
 import { useAssetUrlState } from '~/assets/assetUrls'
 import ChatMarkdown from '~/components/ChatMarkdown'
 import { DiffWorkerPoolProvider } from '../DiffWorkerPoolProvider'
+import { PREFERRED_HIGHLIGHTER } from '../../lib/diffRendering'
 import { OpenInPicker } from '~/components/chat/OpenInPicker'
 import { useClientSettings } from '~/hooks/useSettings'
 import { useTheme } from '~/hooks/useTheme'
@@ -123,7 +124,11 @@ export function useFileSaveCoordinator({
 >): Pick<FileSaveCoordinator, 'change'>
 {
   const writeFile = useAtomCommand(projectEnvironment.writeFile)
-  const coordinatorRef = useRef<FileSaveCoordinator | null>(null)
+  // retire each file's callback with its own ref; effect replay may reuse only that file's ref
+  const coordinatorRef = useMemo<{ current: FileSaveCoordinator | null }>(
+    () => ({ current: null }),
+    [cwd, environmentId, onPendingChange, relativePath, threadRef.threadId, writeFile],
+  )
   useLayoutEffect(() =>
   {
     const owner = Symbol('file-save-coordinator')
@@ -157,13 +162,21 @@ export function useFileSaveCoordinator({
       coordinatorRef.current = null
       coordinator.dispose()
     }
-  }, [cwd, environmentId, onPendingChange, relativePath, threadRef.threadId, writeFile])
+  }, [
+    coordinatorRef,
+    cwd,
+    environmentId,
+    onPendingChange,
+    relativePath,
+    threadRef.threadId,
+    writeFile,
+  ])
 
   return useMemo(
     () => ({
       change: (nextContents: string) => coordinatorRef.current?.change(nextContents),
     }),
-    [],
+    [coordinatorRef],
   )
 }
 
@@ -197,7 +210,7 @@ export function EditableFileSurface({
   )
   const surfaceRef = useRef<HTMLDivElement>(null)
   const selectionFrameRef = useRef<number | null>(null)
-  const editorRef = useRef<Pick<Editor, 'setSelections'> | null>(null)
+  const editorRef = useRef<Pick<Editor, 'setSelections' | 'blur'> | null>(null)
   const createEditor = useCallback<EditorFactory<FileCommentAnnotationGroup, undefined>>(
     (type, options, editStateKey) =>
     {
@@ -312,6 +325,8 @@ export function EditableFileSurface({
 
   const beginComment = useCallback((range: SelectedLineRange) =>
   {
+    editorRef.current?.setSelections([])
+    editorRef.current?.blur()
     const { startLine, endLine } = normalizeFileCommentRange(range)
     const draftEntry: FileCommentAnnotationEntry = {
       id: nextFileCommentId(),
@@ -416,6 +431,7 @@ export function EditableFileSurface({
                 cacheKey: projectFileCacheKey(cwd, relativePath, contents),
               }}
               options={{
+                preferredHighlighter: PREFERRED_HIGHLIGHTER,
                 disableFileHeader: true,
                 enableGutterUtility: !hasOpenCommentForm,
                 enableLineSelection: !hasOpenCommentForm,

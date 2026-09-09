@@ -13,6 +13,40 @@ export function pendingTaskDraftKey(messageId: string): string
   return `pending-task:${messageId}`
 }
 
+export function resolveEnvironmentProjectMatch(
+  projectsOnTarget: ReadonlyArray<EnvironmentProject>,
+  selectedProject: EnvironmentProject | null,
+): EnvironmentProject | null
+{
+  const repositoryKey = selectedProject?.repositoryIdentity?.canonicalKey ?? null
+  const basename = selectedProject?.workspaceRoot.split('/').at(-1) || null
+  const isKnownMismatch = (project: EnvironmentProject) =>
+  {
+    const targetKey = project.repositoryIdentity?.canonicalKey ?? null
+    return repositoryKey !== null && targetKey !== null && targetKey !== repositoryKey
+  }
+  return (
+    (repositoryKey !== null
+      ? projectsOnTarget.find(
+          (project) => project.repositoryIdentity?.canonicalKey === repositoryKey,
+        )
+      : undefined) ??
+    (basename !== null
+      ? projectsOnTarget.find(
+          (project) =>
+            !isKnownMismatch(project) && project.workspaceRoot.split('/').at(-1) === basename,
+        )
+      : undefined) ??
+    (selectedProject !== null
+      ? projectsOnTarget.find(
+          (project) => !isKnownMismatch(project) && project.title === selectedProject.title,
+        )
+      : undefined) ??
+    projectsOnTarget[0] ??
+    null
+  )
+}
+
 export function normalizeSelectedWorktreePath(
   project: EnvironmentProject,
   branch: VcsRef,

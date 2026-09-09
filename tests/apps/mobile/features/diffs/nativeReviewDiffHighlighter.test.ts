@@ -1,11 +1,44 @@
 // tests/apps/mobile/features/diffs/nativeReviewDiffHighlighter.test.ts
 // verify highlight native review diff visible rows behavior
 
-import { describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import type { NativeReviewDiffRow } from '../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface'
 import type { NativeReviewDiffFile } from '../../../../../apps/mobile/src/features/diffs/nativeReviewDiffTypes'
 import { highlightNativeReviewDiffVisibleRows } from '../../../../../apps/mobile/src/features/diffs/nativeReviewDiffHighlighter'
+
+const tokenization = vi.hoisted(() => ({
+  calls: [] as string[],
+  afterCall: undefined as (() => void) | undefined,
+}))
+
+vi.mock('@shikijs/core', async (importOriginal) =>
+{
+  const original = await importOriginal<typeof import('@shikijs/core')>()
+  return {
+    ...original,
+    createHighlighterCore: async (...args: Parameters<typeof original.createHighlighterCore>) =>
+    {
+      const highlighter = await original.createHighlighterCore(...args)
+      return {
+        ...highlighter,
+        codeToTokensBase: (...input: Parameters<typeof highlighter.codeToTokensBase>) =>
+        {
+          tokenization.calls.push(input[0])
+          const result = highlighter.codeToTokensBase(...input)
+          tokenization.afterCall?.()
+          return result
+        },
+      }
+    },
+  }
+})
+
+afterEach(() =>
+{
+  tokenization.calls = []
+  tokenization.afterCall = undefined
+})
 
 const TYPESCRIPT_FILE: NativeReviewDiffFile = {
   id: 'file-1',
@@ -193,5 +226,123 @@ describe('highlightNativeReviewDiffVisibleRows', () =>
     expect(highlighted.tokensByRowId[additionRow.id]).toEqual(
       standalone.tokensByRowId[additionRow.id],
     )
+  })
+
+  it('keeps oversized lines and unknown following syntax plain until the next hunk', async () =>
+  {
+    const longLine = `${'x'.repeat(1_001)} /*`
+    const rows = [
+      makeLine({
+        id: 'before',
+        content: 'export const before = 1;',
+        change: 'add',
+        oldLineNumber: null,
+        newLineNumber: 1,
+      }),
+      makeLine({
+        id: 'long',
+        content: longLine,
+        change: 'add',
+        oldLineNumber: null,
+        newLineNumber: 2,
+      }),
+      makeLine({
+        id: 'unknown',
+        content: 'inside the comment */',
+        change: 'add',
+        oldLineNumber: null,
+        newLineNumber: 3,
+      }),
+      makeHunk('next-hunk'),
+      makeLine({
+        id: 'after',
+        content: 'export const after = 2;',
+        change: 'add',
+        oldLineNumber: null,
+        newLineNumber: 100,
+      }),
+    ] satisfies ReadonlyArray<NativeReviewDiffRow>
+
+    const result = await highlight(rows)
+
+    expect(result.tokensByRowId.long).toEqual([{ content: longLine, color: null, fontStyle: null }])
+    expect(result.tokensByRowId.unknown).toEqual([
+      { content: 'inside the comment */', color: null, fontStyle: null },
+    ])
+    expect(result.tokensByRowId.after?.some((token) => token.color !== null)).toBe(true)
+    expect(tokenization.calls.some((code) => code.includes(longLine))).toBe(false)
+  })
+
+  it('bounds tokenization batches while preserving multiline grammar and row mapping', async () =>
+  {
+    const opening = makeLine({
+      id: 'opening',
+      content: 'const message = `open',
+      change: 'add',
+      oldLineNumber: null,
+      newLineNumber: 1,
+    })
+    const body = Array.from({ length: 40 }, (_, index) =>
+      makeLine({
+        id: `body-${index}`,
+        content: 'inside '.repeat(45),
+        change: 'add',
+        oldLineNumber: null,
+        newLineNumber: index + 2,
+      }),
+    )
+    const closing = makeLine({
+      id: 'closing',
+      content: 'closed`; ',
+      change: 'add',
+      oldLineNumber: null,
+      newLineNumber: 42,
+    })
+    const trailing = makeLine({
+      id: 'trailing',
+      content: 'export const after = 2;',
+      change: 'add',
+      oldLineNumber: null,
+      newLineNumber: 43,
+    })
+
+    const result = await highlight([opening, ...body, closing, trailing])
+
+    expect(tokenization.calls.length).toBeGreaterThan(1)
+    expect(tokenization.calls.every((code) => code.length <= 8_000)).toBe(true)
+    expect(result.rowCount).toBe(43)
+    for (const row of [opening, ...body, closing, trailing])
+    {
+      expect(result.tokensByRowId[row.id]?.map((token) => token.content).join('')).toBe(row.content)
+    }
+  })
+
+  it('publishes no partial highlight result after cancellation', async () =>
+  {
+    const controller = new AbortController()
+    tokenization.afterCall = () => controller.abort()
+    const rows = Array.from({ length: 30 }, (_, index) =>
+      makeLine({
+        id: `line-${index}`,
+        content: `// ${'x'.repeat(400)}`,
+        change: 'add',
+        oldLineNumber: null,
+        newLineNumber: index + 1,
+      }),
+    )
+
+    const result = await highlightNativeReviewDiffVisibleRows({
+      rows,
+      files: [TYPESCRIPT_FILE],
+      scheme: 'dark',
+      engine: 'javascript',
+      firstRowIndex: 0,
+      lastRowIndex: rows.length - 1,
+      overscanRows: 0,
+      signal: controller.signal,
+    })
+
+    expect(tokenization.calls).toHaveLength(1)
+    expect(result).toMatchObject({ rowCount: 0, tokensByRowId: {} })
   })
 })

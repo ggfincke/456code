@@ -1,13 +1,54 @@
 // tests/packages/client-runtime/thread-activity/worklogNormalization.test.ts
 // verifies work log filtering, caller-owned caches, and child metadata
 
-import { EventId, TurnId, type OrchestrationThreadActivity } from '@t3tools/contracts'
+import { EventId, ThreadId, TurnId, type OrchestrationThreadActivity } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
   deriveNormalizedWorkLogEntries,
+  resolveViewedImageAsset,
+  workEntryViewedImagePath,
   type NormalizedWorkLogEntry,
 } from '@t3tools/client-runtime/thread-activity'
+
+describe('viewed work images', () =>
+{
+  it('accepts single-line image read details and rejects unrelated or multiline output', () =>
+  {
+    const base: NormalizedWorkLogEntry = {
+      id: 'view-image',
+      createdAt: '2026-09-03T00:00:00.000Z',
+      turnId: null,
+      label: 'Viewed image',
+      tone: 'tool',
+      activityKind: 'tool.completed',
+      itemType: 'image_view',
+    }
+    expect(workEntryViewedImagePath({ ...base, detail: 'outputs/chart.png' })).toBe(
+      'outputs/chart.png',
+    )
+    expect(workEntryViewedImagePath({ ...base, detail: 'outputs/chart.png\nmetadata' })).toBeNull()
+    expect(workEntryViewedImagePath({ ...base, detail: 'outputs/report.txt' })).toBeNull()
+  })
+
+  it('resolves authenticated workspace image resources with fragments', () =>
+  {
+    expect(
+      resolveViewedImageAsset('outputs/chart.svg#page=2', {
+        threadId: ThreadId.make('thread-image'),
+        workspaceRoot: '/workspace',
+      }),
+    ).toEqual({
+      resource: {
+        _tag: 'workspace-file',
+        threadId: ThreadId.make('thread-image'),
+        path: '/workspace/outputs/chart.svg',
+      },
+      alt: 'chart.svg',
+      srcFragment: '#page=2',
+    })
+  })
+})
 
 function makeCompletedActivity(id: string, sequence: number): OrchestrationThreadActivity
 {
