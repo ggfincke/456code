@@ -16,6 +16,7 @@ vi.mock('../../../../../apps/mobile/src/state/threads/use-thread-provider-switch
 vi.mock('../../../../../apps/mobile/src/state/threads/use-thread-selection', () => ({}))
 vi.mock('../../../../../apps/mobile/src/state/threads/threads', () => ({}))
 vi.mock('../../../../../apps/mobile/src/state/threads/use-thread-outbox', () => ({}))
+vi.mock('../../../../../apps/mobile/src/state/threads/use-composer-drafts', () => ({}))
 
 import {
   modelSelectionChangeBlockedByCapabilities,
