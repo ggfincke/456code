@@ -2,8 +2,10 @@
 // verifies orchestration engine command handling and replay
 
 import {
+  ApprovalRequestId,
   CheckpointRef,
   CommandId,
+  EventId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   ProjectId,
@@ -59,6 +61,7 @@ import {
 } from '../../../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts'
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
+import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
 import { makeProjectionSnapshotQueryStub } from '../../projectionSnapshotQueryTestHelpers.ts'
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value)
@@ -97,6 +100,7 @@ function makeEngineAuxiliaryLayer(
     Layer.succeed(CheckpointRevertOperations, checkpointReverts),
     ProjectionTurnRepositoryLive,
     ProviderRuntimeInboxLive,
+    ServerSettings.layerTest(),
   )
 }
 
@@ -137,6 +141,14 @@ async function createOrchestrationSystem(
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     attachmentLifecycle: () => runtime.runPromise(Effect.service(AttachmentLifecycleRepository)),
+    updateSettings: (
+      patch: Parameters<ServerSettings.ServerSettingsService['Service']['updateSettings']>[0],
+    ) =>
+      runtime.runPromise(
+        Effect.flatMap(ServerSettings.ServerSettingsService, (settings) =>
+          settings.updateSettings(patch),
+        ),
+      ),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   }
@@ -160,6 +172,269 @@ const hasMetricSnapshot = (
 
 describe('OrchestrationEngine', () =>
 {
+  it('fences stale automatic settlement and preserves pins and activity timestamps', async () =>
+  {
+    const system = await createOrchestrationSystem()
+    try
+    {
+      const threadId = ThreadId.make('thread-auto-settlement')
+      const projectId = ProjectId.make('project-auto-settlement')
+      await system.run(
+        system.engine.dispatch({
+          type: 'project.create',
+          commandId: CommandId.make('cmd-settlement-project'),
+          projectId,
+          title: 'Settlement',
+          workspaceRoot: '/tmp/settlement',
+          createdAt: now(),
+        }),
+      )
+      await system.run(
+        system.engine.dispatch({
+          type: 'thread.create',
+          commandId: CommandId.make('cmd-settlement-thread'),
+          threadId,
+          projectId,
+          title: 'Settlement',
+          modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
+          runtimeMode: 'full-access',
+          interactionMode: 'default',
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      )
+      const stale = await system.readModel()
+      await system.run(
+        system.engine.dispatch({
+          type: 'thread.pin',
+          commandId: CommandId.make('cmd-settlement-pin'),
+          threadId,
+        }),
+      )
+      const policy = { autoSettleAfterDays: 3, autoSettleOnMerge: true }
+      await expect(
+        system.run(
+          system.engine.dispatch({
+            type: 'thread.auto-settle',
+            commandId: CommandId.make('cmd-stale-auto-settlement'),
+            threadId,
+            snapshotSequence: stale.snapshotSequence,
+            settledAt: now(),
+            ...policy,
+          }),
+        ),
+      ).rejects.toThrow('snapshot is stale')
+      await system.run(
+        system.engine.dispatch({
+          type: 'thread.activity.append',
+          commandId: CommandId.make('cmd-settlement-async-activity'),
+          threadId,
+          createdAt: now(),
+          activity: {
+            id: EventId.make('evt-settlement-async'),
+            createdAt: now(),
+            tone: 'info',
+            kind: 'user-input.requested',
+            summary: 'Non-blocking question',
+            payload: {
+              requestId: 'settlement-async-question',
+              responseMode: 'message',
+              questions: [],
+            },
+            turnId: null,
+          },
+        }),
+      )
+      const fresh = await system.readModel()
+      const before = fresh.threads.find((thread) => thread.id === threadId)!
+      await system.updateSettings({
+        sidebarAutoSettleAfterDays: null,
+        sidebarAutoSettleOnMerge: false,
+      })
+      await expect(
+        system.run(
+          system.engine.dispatch({
+            type: 'thread.auto-settle',
+            commandId: CommandId.make('cmd-stale-policy-auto-settlement'),
+            threadId,
+            snapshotSequence: fresh.snapshotSequence,
+            settledAt: now(),
+            ...policy,
+          }),
+        ),
+      ).rejects.toThrow('policy changed')
+      expect(
+        (await system.readModel()).threads.find((thread) => thread.id === threadId)
+          ?.settledOverride,
+      ).toBeNull()
+      await system.updateSettings({ sidebarAutoSettleAfterDays: 3, sidebarAutoSettleOnMerge: true })
+      await system.run(
+        system.engine.dispatch({
+          type: 'thread.auto-settle',
+          commandId: CommandId.make('cmd-fresh-auto-settlement'),
+          threadId,
+          snapshotSequence: fresh.snapshotSequence,
+          settledAt: now(),
+          ...policy,
+        }),
+      )
+      const after = (await system.readModel()).threads.find((thread) => thread.id === threadId)!
+      expect(after.settledOverride).toBe('settled')
+      expect(after.settledAt).toBe(now())
+      expect(after.updatedAt).toBe(before.updatedAt)
+      expect(after.pinnedAt).toBe(before.pinnedAt)
+      expect(after.pinnedAt).not.toBeNull()
+    }
+    finally
+    {
+      await system.dispose()
+    }
+  })
+
+  it('answers or dismisses async questions from durable lifecycle state', async () =>
+  {
+    const system = await createOrchestrationSystem()
+    const { engine } = system
+    const projectId = asProjectId('project-async-questions')
+    const threadId = ThreadId.make('thread-async-questions')
+    await system.run(
+      engine.dispatch({
+        type: 'project.create',
+        commandId: CommandId.make('cmd-project-async-questions'),
+        projectId,
+        title: 'Async questions',
+        workspaceRoot: '/tmp/project-async-questions',
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5-codex',
+        },
+        createdAt: now(),
+      }),
+    )
+    await system.run(
+      engine.dispatch({
+        type: 'thread.create',
+        commandId: CommandId.make('cmd-thread-async-questions'),
+        threadId,
+        projectId,
+        title: 'Async questions',
+        modelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5-codex',
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        branch: null,
+        worktreePath: null,
+        createdAt: now(),
+      }),
+    )
+
+    const firstRequestId = ApprovalRequestId.make('async-question-answer')
+    await system.run(
+      engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-async-question-request'),
+        threadId,
+        activity: {
+          id: EventId.make('activity-async-question-request'),
+          createdAt: now(),
+          tone: 'info',
+          kind: 'user-input.requested',
+          summary: 'User input requested',
+          payload: {
+            requestId: firstRequestId,
+            responseMode: 'message',
+            questions: [
+              {
+                id: '0',
+                header: 'Question',
+                question: 'Which branch?',
+                options: [],
+                allowCustomAnswer: true,
+                multiSelect: false,
+              },
+            ],
+          },
+          turnId: null,
+        },
+        createdAt: now(),
+      }),
+    )
+    const answers = await Promise.allSettled(
+      ['first', 'concurrent'].map((suffix) =>
+        system.run(
+          engine.dispatch({
+            type: 'thread.user-input.respond',
+            commandId: CommandId.make(`cmd-async-question-answer-${suffix}`),
+            threadId,
+            requestId: firstRequestId,
+            answers: { '0': 'feature/reconciliation' },
+            createdAt: now(),
+          }),
+        ),
+      ),
+    )
+    expect(answers.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(answers.filter((result) => result.status === 'rejected')).toHaveLength(1)
+
+    const secondRequestId = ApprovalRequestId.make('async-question-dismiss')
+    await system.run(
+      engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-async-question-request-dismiss'),
+        threadId,
+        activity: {
+          id: EventId.make('activity-async-question-request-dismiss'),
+          createdAt: now(),
+          tone: 'info',
+          kind: 'user-input.requested',
+          summary: 'User input requested',
+          payload: {
+            requestId: secondRequestId,
+            responseMode: 'message',
+            questions: [],
+          },
+          turnId: null,
+        },
+        createdAt: now(),
+      }),
+    )
+    await system.run(
+      engine.dispatch({
+        type: 'thread.user-input.dismiss',
+        commandId: CommandId.make('cmd-async-question-dismiss'),
+        threadId,
+        requestId: secondRequestId,
+        createdAt: now(),
+      }),
+    )
+
+    const thread = (await system.readModel()).threads.find((entry) => entry.id === threadId)
+    expect(
+      thread?.messages.filter((message) => message.id === `async-answer:${firstRequestId}`),
+    ).toHaveLength(1)
+    expect(thread?.messages.at(-1)?.text).toBe('Which branch?\nfeature/reconciliation')
+    expect(
+      thread?.activities
+        .filter((activity) => activity.kind === 'user-input.resolved')
+        .map((activity) => activity.summary),
+    ).toEqual(['User input submitted', 'User input dismissed'])
+    await expect(
+      system.run(
+        engine.dispatch({
+          type: 'thread.user-input.dismiss',
+          commandId: CommandId.make('cmd-async-question-dismiss-again'),
+          threadId,
+          requestId: secondRequestId,
+          createdAt: now(),
+        }),
+      ),
+    ).rejects.toThrow('already been answered')
+    await system.dispose()
+  })
+
   it('gates provider and target lifecycle mutations until a checkpoint revert finishes cleanup', async () =>
   {
     const phases = new Map<string, CheckpointRevertOperation['phase']>([

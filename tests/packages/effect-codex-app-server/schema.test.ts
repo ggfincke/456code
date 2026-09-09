@@ -79,6 +79,54 @@ const namespaces = [
   'V2TurnStartResponse',
 ] as const
 
+it('keeps async questions in live notifications and thread history', () =>
+{
+  const item = {
+    type: 'agentMessage',
+    id: 'question-1',
+    text: 'Which package?\n- pnpm\n- npm\n\nWhat should it be named?',
+    phase: 'final_answer',
+    delivery: 'async',
+    questions: [
+      { title: 'Which package manager?', options: ['pnpm', 'npm'] },
+      { title: 'What should it be named?' },
+    ],
+  } as const
+  for (const schema of [
+    CodexSchema.ServerNotification__ThreadItem,
+    CodexSchema.V2ItemStartedNotification__ThreadItem,
+    CodexSchema.V2ItemCompletedNotification__ThreadItem,
+    CodexSchema.V2ThreadReadResponse__ThreadItem,
+    CodexSchema.V2ThreadResumeResponse__ThreadItem,
+  ])
+  {
+    assert.deepStrictEqual(Schema.decodeUnknownSync(schema)(item), item)
+  }
+})
+
+it('preserves unknown or malformed async metadata on otherwise valid agent messages', () =>
+{
+  for (const metadata of [
+    { delivery: 'notification', questions: { future: true } },
+    { delivery: 'async', questions: [{ title: 42, options: 'free-form' }] },
+  ])
+  {
+    const item = {
+      type: 'agentMessage' as const,
+      id: `ordinary-${metadata.delivery}`,
+      text: 'ordinary assistant text',
+      ...metadata,
+    }
+    for (const schema of [
+      CodexSchema.V2ItemCompletedNotification__ThreadItem,
+      CodexSchema.V2ThreadReadResponse__ThreadItem,
+    ])
+    {
+      assert.deepStrictEqual(Schema.decodeUnknownSync(schema)(item), item)
+    }
+  }
+})
+
 it.each(namespaces)('accepts existing and Codex 0.150 multi-agent values in %s', (namespace) =>
 {
   for (const tool of [

@@ -59,6 +59,7 @@ import {
 } from '../../../apps/server/src/serverRuntimeState.ts'
 import * as WorkspacePaths from '../../../apps/server/src/workspace/WorkspacePaths.ts'
 import * as ServerSecretStore from '../../../apps/server/src/auth/ServerSecretStore.ts'
+import * as ServerSettings from '../../../apps/server/src/serverSettings.ts'
 import * as EnvironmentAuth from '../../../apps/server/src/auth/EnvironmentAuth.ts'
 import { environmentAuthenticatedAuthLayer } from '../../../apps/server/src/auth/http.ts'
 
@@ -154,6 +155,7 @@ const makeProjectPersistenceLayer = (
 ) =>
   Layer.mergeAll(
     OrchestrationLayerLive.pipe(
+      Layer.provide(ServerSettings.layer.pipe(Layer.provide(ServerSecretStore.layer))),
       Layer.provideMerge(RepositoryIdentityResolver.layer),
       Layer.provideMerge(SqlitePersistenceLayerLive),
     ),

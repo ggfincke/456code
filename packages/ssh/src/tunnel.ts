@@ -14,6 +14,7 @@ import * as FiberMap from 'effect/FiberMap'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
 import * as Scope from 'effect/Scope'
+import * as Semaphore from 'effect/Semaphore'
 import { ChildProcessSpawner } from 'effect/unstable/process'
 
 import { resolveSshTarget, targetConnectionKey } from './command.ts'
@@ -139,7 +140,22 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
   >()
   const cancellingTunnelKeys = new Set<string>()
   const activeDisconnects = new Map<string, Deferred.Deferred<void, SshEnvironmentEffectError>>()
+  const remoteRuntimeLocks = new Map<string, Semaphore.Semaphore>()
   const authSecrets = new Map<string, string>()
+
+  const withRemoteRuntimeLock = Effect.fn('ssh/tunnel.withRemoteRuntimeLock')(function* <A, E, R>(
+    runtimeKey: string,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.fn.Return<A, E, R>
+  {
+    let lock = remoteRuntimeLocks.get(runtimeKey)
+    if (lock === undefined)
+    {
+      lock = Semaphore.makeUnsafe(1)
+      remoteRuntimeLocks.set(runtimeKey, lock)
+    }
+    return yield* lock.withPermits(1)(effect)
+  })
 
   const closeTunnelEntry = Effect.fn('ssh/tunnel.closeTunnelEntry')(function* (
     entry: SshTunnelEntry,
@@ -194,6 +210,11 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
     {
       return
     }
+    // explicit disconnect reports stop failures and retains ownership for retry
+    if (activeDisconnects.has(tunnelKey))
+    {
+      return
+    }
     remoteRuntimeLeases.delete(runtimeKey)
     if (lease.ownerTarget === null || lease.ownerTunnelKey === null)
     {
@@ -230,6 +251,36 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
   )
 
   const { runWithSshAuth } = makeSshAuthRunner(authSecrets)
+
+  const stopReleasedRemoteRuntime = Effect.fn('ssh/tunnel.stopReleasedRemoteRuntime')(function* (
+    runtimeKey: string,
+    tunnelKey: string,
+    fallbackTarget: DesktopSshEnvironmentTarget,
+  )
+  {
+    const lease = remoteRuntimeLeases.get(runtimeKey)
+    if (lease?.tunnelKeys.size)
+    {
+      return
+    }
+    if (lease && (lease.ownerTarget === null || lease.ownerTunnelKey === null))
+    {
+      remoteRuntimeLeases.delete(runtimeKey)
+      return
+    }
+
+    const stopKey = lease?.ownerTunnelKey ?? tunnelKey
+    const stopTarget = lease?.ownerTarget ?? fallbackTarget
+    yield* runWithSshAuth({
+      key: stopKey,
+      target: stopTarget,
+      operation: (authOptions) => stopRemoteServer(stopTarget, authOptions),
+    })
+    if (lease && remoteRuntimeLeases.get(runtimeKey) === lease && lease.tunnelKeys.size === 0)
+    {
+      remoteRuntimeLeases.delete(runtimeKey)
+    }
+  })
 
   const launchSharedRemoteRuntime = Effect.fn('ssh/tunnel.launchSharedRemoteRuntime')(
     function* (input: {
@@ -535,42 +586,54 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       ...sshRunnerLogFields(runner),
       key,
     })
+    const runtimeKey = resolvedRemoteRuntimeKey(resolvedTarget)
     const activeDisconnect = activeDisconnects.get(key)
     if (activeDisconnect)
     {
       yield* Deferred.await(activeDisconnect)
     }
-    const entry = yield* ensureTunnelEntry(key, resolvedTarget, runner)
+    return yield* withRemoteRuntimeLock(
+      runtimeKey,
+      Effect.gen(function* ()
+      {
+        if (activeDisconnects.has(key))
+        {
+          return yield* makeSshTunnelCancelledError(resolvedTarget)
+        }
+        const entry = yield* ensureTunnelEntry(key, resolvedTarget, runner)
 
-    const pairingResult = requestOptions?.issuePairingToken
-      ? yield* runWithSshAuth({
+        const pairingResult = requestOptions?.issuePairingToken
+          ? yield* runWithSshAuth({
+              key,
+              target: entry.target,
+              operation: (authOptions) =>
+                issueRemotePairingToken(entry.target, authOptions, runner),
+            })
+          : null
+        const pairingToken = pairingResult?.credential ?? null
+
+        yield* Effect.logInfo('ssh.environment.ensure.succeeded', {
+          ...sshTargetLogFields(entry.target),
           key,
-          target: entry.target,
-          operation: (authOptions) => issueRemotePairingToken(entry.target, authOptions, runner),
+          localPort: entry.localPort,
+          remotePort: entry.remotePort,
+          remoteServerKind: entry.remoteServerKind,
+          issuedPairingToken: pairingToken !== null,
         })
-      : null
-    const pairingToken = pairingResult?.credential ?? null
-
-    yield* Effect.logInfo('ssh.environment.ensure.succeeded', {
-      ...sshTargetLogFields(entry.target),
-      key,
-      localPort: entry.localPort,
-      remotePort: entry.remotePort,
-      remoteServerKind: entry.remoteServerKind,
-      issuedPairingToken: pairingToken !== null,
-    })
-    if (tunnels.get(key) !== entry || activeDisconnects.has(key))
-    {
-      return yield* makeSshTunnelCancelledError(resolvedTarget)
-    }
-    return {
-      target: entry.target,
-      httpBaseUrl: entry.httpBaseUrl,
-      wsBaseUrl: entry.wsBaseUrl,
-      pairingToken,
-      remotePort: entry.remotePort,
-      ...(entry.remoteServerKind ? { remoteServerKind: entry.remoteServerKind } : {}),
-    }
+        if (tunnels.get(key) !== entry || activeDisconnects.has(key))
+        {
+          return yield* makeSshTunnelCancelledError(resolvedTarget)
+        }
+        return {
+          target: entry.target,
+          httpBaseUrl: entry.httpBaseUrl,
+          wsBaseUrl: entry.wsBaseUrl,
+          pairingToken,
+          remotePort: entry.remotePort,
+          ...(entry.remoteServerKind ? { remoteServerKind: entry.remoteServerKind } : {}),
+        }
+      }),
+    )
   })
 
   const disconnectEnvironment = Effect.fn('ssh/tunnel.disconnectEnvironment')(function* (
@@ -585,6 +648,7 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       ...(target.port !== null ? { port: target.port } : {}),
     }
     const key = targetConnectionKey(resolvedTarget)
+    const runtimeKey = resolvedRemoteRuntimeKey(resolvedTarget)
     const existingDisconnect = activeDisconnects.get(key)
     if (existingDisconnect)
     {
@@ -592,45 +656,55 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
     }
     const disconnect = Deferred.makeUnsafe<void, SshEnvironmentEffectError>()
     activeDisconnects.set(key, disconnect)
-    return yield* Effect.gen(function* ()
-    {
-      const entry = tunnels.get(key) ?? null
-      const hadPendingTunnel = pendingTunnelEntries.has(key)
-      yield* Effect.logDebug('ssh.environment.disconnect.targetResolved', {
-        ...sshTargetLogFields(resolvedTarget),
-        key,
-        hasTunnel: entry !== null,
-        hasPendingTunnel: hadPendingTunnel,
-      })
-      if (entry !== null)
+    const closeAndCancelTarget = Effect.fn('ssh/tunnel.disconnectEnvironment.closeAndCancel')(
+      function* ()
       {
-        yield* closeTunnelEntry(entry)
-      }
-      yield* cancelPendingTunnelEntry(key, resolvedTarget)
-      if (entry === null && !hadPendingTunnel)
-      {
-        yield* runWithSshAuth({
+        const entry = tunnels.get(key) ?? null
+        const hadPendingTunnel = pendingTunnelEntries.has(key)
+        yield* Effect.logDebug('ssh.environment.disconnect.targetResolved', {
+          ...sshTargetLogFields(resolvedTarget),
           key,
-          target: resolvedTarget,
-          operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
+          hasTunnel: entry !== null,
+          hasPendingTunnel: hadPendingTunnel,
         })
-      }
-      yield* Effect.logInfo('ssh.environment.disconnect.succeeded', {
-        ...sshTargetLogFields(resolvedTarget),
-        key,
-      })
-    }).pipe(
-      Effect.onExit((exit) =>
-        Effect.sync(() =>
+        if (entry !== null)
         {
-          if (activeDisconnects.get(key) === disconnect)
-          {
-            activeDisconnects.delete(key)
-          }
-          Deferred.doneUnsafe(disconnect, exit)
-        }),
-      ),
+          yield* closeTunnelEntry(entry)
+        }
+        yield* cancelPendingTunnelEntry(key, resolvedTarget)
+      },
     )
+    return yield* closeAndCancelTarget()
+      .pipe(
+        Effect.andThen(
+          withRemoteRuntimeLock(
+            runtimeKey,
+            Effect.gen(function* ()
+            {
+              // an ensure that passed its disconnect check before the first cancellation
+              // can publish while the runtime lock is pending, so drain it again under the lock
+              yield* closeAndCancelTarget()
+              yield* stopReleasedRemoteRuntime(runtimeKey, key, resolvedTarget)
+              yield* Effect.logInfo('ssh.environment.disconnect.succeeded', {
+                ...sshTargetLogFields(resolvedTarget),
+                key,
+              })
+            }),
+          ),
+        ),
+      )
+      .pipe(
+        Effect.onExit((exit) =>
+          Effect.sync(() =>
+          {
+            if (activeDisconnects.get(key) === disconnect)
+            {
+              activeDisconnects.delete(key)
+            }
+            Deferred.doneUnsafe(disconnect, exit)
+          }),
+        ),
+      )
   })
 
   return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment })

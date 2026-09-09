@@ -404,6 +404,7 @@ export const makeOrchestrationIntegrationHarness = (
               workingTree: { files: [], insertions: 0, deletions: 0 },
             }),
           refreshStatus: () => Effect.die('refreshStatus should not be called in this test'),
+          refreshPullRequestStatus: () => Effect.succeed(null),
           streamStatus: () => Stream.empty,
         }),
       ),

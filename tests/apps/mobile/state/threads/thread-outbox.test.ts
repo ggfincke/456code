@@ -379,6 +379,40 @@ describe('thread outbox', () =>
     expect(modelSelectionsEqual(settings.modelSelection, currentModelSelection)).toBe(true)
   })
 
+  it('retains queued compaction as a visible failure without dispatching it later', async () =>
+  {
+    const message = {
+      ...queuedMessage({ messageId: 'compact', createdAt: '2026-09-09T12:00:00.000Z' }),
+      text: '/compact',
+    }
+    const thread = threadShell({ started: true })
+    const startTurn = vi.fn(async () => AsyncResult.success({ sequence: 1 }))
+    const update = vi.fn(async (_message: QueuedThreadMessage) => true)
+    const remove = vi.fn(async () => undefined)
+    const outcome = await drainExistingQueuedThreadMessage({
+      message,
+      initialState: { thread, shellStatus: 'live', environmentConnected: true },
+      confirmQueued: async () => true,
+      readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+      update,
+      remove,
+      now: () => '2026-09-09T13:00:00.000Z',
+      updateThreadMetadata: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+      startTurn,
+    })
+    expect(outcome).toEqual({ kind: 'complete' })
+    expect(startTurn).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '/compact',
+        failure: { reason: expect.stringContaining('cannot run from the queue') },
+      }),
+    )
+  })
+
   it('omits model selection for a started thread and persists a fresh turn timestamp', async () =>
   {
     const message = {

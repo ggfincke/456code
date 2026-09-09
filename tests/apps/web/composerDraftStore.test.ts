@@ -85,6 +85,10 @@ import {
   setLocalStorageItem,
 } from '../../../apps/web/src/hooks/useLocalStorage'
 import {
+  partializeComposerDraftStoreState,
+  composerDebouncedStorage,
+} from '../../../apps/web/src/composer-drafts/persistence'
+import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   insertInlineTerminalContextPlaceholder,
   type TerminalContextDraft,
@@ -217,8 +221,8 @@ describe('composerDraftStore files', () =>
       { instanceId: CODEX_INSTANCE, model: 'custom/model' },
       { explicit: true },
     )
-    const { partialize, merge } = useComposerDraftStore.persist.getOptions()
-    const persisted = partialize!(useComposerDraftStore.getState())
+    const { merge } = useComposerDraftStore.persist.getOptions()
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState())
     expect(JSON.stringify(persisted)).not.toContain('"file":')
     const restored = merge!(persisted, useComposerDraftStore.getInitialState())
     const draft = restored.draftsByThreadKey[scopedThreadKey(target)]!
@@ -405,6 +409,34 @@ describe('composerDraftStore clearComposerContent', () =>
 
 describe('composerDraftStore moveComposerPromptAndImages', () =>
 {
+  it('defers draft traversal and serialization until the latest captured state flushes', () =>
+  {
+    composerDebouncedStorage.flush()
+    resetComposerDraftStore()
+    const store = useComposerDraftStore.getState()
+    const target = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make('deferred-draft'))
+    const serialize = vi.spyOn(JSON, 'stringify')
+    try
+    {
+      store.setPrompt(target, 'first')
+      store.setPrompt(target, 'latest')
+      expect(serialize).not.toHaveBeenCalled()
+      const captured = useComposerDraftStore.persist.getOptions().partialize!(
+        useComposerDraftStore.getState(),
+      )
+      expect(captured).toEqual({ capturedState: useComposerDraftStore.getState() })
+      composerDebouncedStorage.flush()
+      expect(serialize).toHaveBeenCalledTimes(1)
+      expect(serialize.mock.calls[0]?.[0]).toMatchObject({
+        state: { draftsByThreadKey: { [scopedThreadKey(target)]: { prompt: 'latest' } } },
+      })
+    }
+    finally
+    {
+      serialize.mockRestore()
+    }
+  })
+
   const sourceDraftId = DraftId.make('draft-move-source')
   const destinationDraftId = DraftId.make('draft-move-destination')
   let originalRevokeObjectUrl: typeof URL.revokeObjectURL
@@ -606,14 +638,7 @@ describe('composerDraftStore terminal contexts', () =>
       .getState()
       .addTerminalContext(threadRef, makeTerminalContext({ id: 'ctx-persist' }))
 
-    const persistApi = useComposerDraftStore.persist as unknown as {
-      getOptions: () => {
-        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
-      }
-    }
-    const persistedState = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
-      draftsByThreadKey?: Record<string, { terminalContexts?: Array<Record<string, unknown>> }>
-    }
+    const persistedState = partializeComposerDraftStoreState(useComposerDraftStore.getState())
 
     expect(
       persistedState.draftsByThreadKey?.[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]
@@ -628,8 +653,8 @@ describe('composerDraftStore terminal contexts', () =>
     })
     expect(
       persistedState.draftsByThreadKey?.[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]
-        ?.terminalContexts?.[0]?.text,
-    ).toBeUndefined()
+        ?.terminalContexts?.[0],
+    ).not.toHaveProperty('text')
   })
 
   it('hydrates persisted terminal contexts without in-memory snapshot text', () =>
@@ -789,14 +814,7 @@ describe('composerDraftStore element contexts', () =>
   it('persists element contexts via the partializer (round-trippable)', () =>
   {
     useComposerDraftStore.getState().addElementContext(threadRef, baseSelection)
-    const persistApi = useComposerDraftStore.persist as unknown as {
-      getOptions: () => {
-        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
-      }
-    }
-    const persisted = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
-      draftsByThreadKey?: Record<string, { elementContexts?: Array<Record<string, unknown>> }>
-    }
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState())
     const entry =
       persisted.draftsByThreadKey?.[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]
         ?.elementContexts?.[0]
@@ -851,14 +869,7 @@ describe('composerDraftStore review comments', () =>
   {
     const store = useComposerDraftStore.getState()
     store.addReviewComment(threadRef, comment)
-    const persistApi = useComposerDraftStore.persist as unknown as {
-      getOptions: () => {
-        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
-      }
-    }
-    const persisted = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
-      draftsByThreadKey?: Record<string, { reviewComments?: Array<Record<string, unknown>> }>
-    }
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState())
 
     expect(
       persisted.draftsByThreadKey?.[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]
@@ -1024,7 +1035,8 @@ describe('composerDraftStore project draft thread mapping', () =>
         partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
       }
     }
-    const { merge, partialize } = persistApi.getOptions()
+    const { merge } = persistApi.getOptions()
+    const partialize = partializeComposerDraftStoreState
     useComposerDraftStore.getState().setProjectDraftThreadId(projectRef, draftId, {
       threadId,
       collaborationMode: { baseMode: 'plan', orchestrate: true },
@@ -1253,18 +1265,50 @@ describe('composerDraftStore project draft thread mapping', () =>
     expect(draftByKey(draftId)?.prompt).toBe('promote me')
   })
 
-  it('finalizes a promoted draft after the canonical thread route is active', () =>
+  it('moves a promoted draft without revoking images and preserves conflicting or foreign drafts', () =>
   {
     const store = useComposerDraftStore.getState()
+    const destination = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId)
+    const revoke = vi.spyOn(URL, 'revokeObjectURL')
     store.setProjectDraftThreadId(projectRef, draftId, { threadId })
-    store.setPrompt(draftId, 'promote me')
+    store.setPrompt(draftId, 'next prompt during setup')
+    store.addImage(draftId, makeImage({ id: 'promotion-image', previewUrl: 'blob:promotion' }))
+    store.setModelSelection(
+      destination,
+      { instanceId: CODEX_INSTANCE, model: 'seed' },
+      { explicit: false },
+    )
+    const source = draftByKey(draftId)
     markPromotedDraftThread(threadId)
 
-    finalizePromotedDraftThreadByRef(scopeThreadRef(TEST_ENVIRONMENT_ID, threadId))
+    finalizePromotedDraftThreadByRef(destination)
 
     expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)).toBeNull()
     expect(useComposerDraftStore.getState().getDraftThread(draftId)).toBeNull()
     expect(draftByKey(draftId)).toBeUndefined()
+    expect(useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(destination)]).toBe(
+      source,
+    )
+    expect(revoke).not.toHaveBeenCalled()
+
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId })
+    store.setPrompt(draftId, 'keep this conflicting prompt')
+    finalizePromotedDraftThreadByRef(destination)
+    expect(draftByKey(draftId)?.prompt).toBe('keep this conflicting prompt')
+    expect(useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(destination)]).toBe(
+      source,
+    )
+    expect(store.getDraftThreadByProjectRef(projectRef)?.promotedTo).toBeNull()
+
+    const remoteDestination = scopeThreadRef(OTHER_TEST_ENVIRONMENT_ID, threadId)
+    store.markDraftThreadPromoting(draftId, remoteDestination)
+    store.finalizePromotedDraftThread(draftId)
+    expect(draftByKey(draftId)?.prompt).toBe('keep this conflicting prompt')
+    expect(store.getDraftThreadByProjectRef(projectRef)?.promotedTo).toBeNull()
+    expect(
+      useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(remoteDestination)],
+    ).toBeUndefined()
+    revoke.mockRestore()
   })
 
   it('finalizes a matching materialized draft even when promotion was not pre-marked', () =>
@@ -2018,7 +2062,8 @@ describe('composerDraftStore sticky composer settings', () =>
         partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
       }
     }
-    const { merge, partialize, version } = persistApi.getOptions()
+    const { merge, version } = persistApi.getOptions()
+    const partialize = partializeComposerDraftStoreState
     expect(version).toBe(11)
     const hydrated = merge(partialize(useComposerDraftStore.getState()), store)
     expect(hydrated.draftsByThreadKey[draftId]?.modelSelectionExplicit).toBe(true)
@@ -2064,7 +2109,8 @@ describe('composerDraftStore sticky composer settings', () =>
           partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
         }
       }
-      const { merge, partialize } = persistApi.getOptions()
+      const { merge } = persistApi.getOptions()
+      const partialize = partializeComposerDraftStoreState
       const hydrated = merge(partialize(useComposerDraftStore.getState()), store)
       expect(hydrated.draftThreadsByThreadKey[draftId]).toEqual(before)
       expect(hydrated.logicalProjectDraftThreadKeyByLogicalProjectKey[logicalProjectKey]).toBe(
@@ -2202,7 +2248,8 @@ describe('composerDraftStore runtime and interaction settings', () =>
         partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
       }
     }
-    const { merge, partialize } = persistApi.getOptions()
+    const { merge } = persistApi.getOptions()
+    const partialize = partializeComposerDraftStoreState
     const hydratedLegacyState = merge(
       {
         draftsByThreadId: {
@@ -2240,7 +2287,8 @@ describe('composerDraftStore runtime and interaction settings', () =>
         partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown
       }
     }
-    const { merge, partialize } = persistApi.getOptions()
+    const { merge } = persistApi.getOptions()
+    const partialize = partializeComposerDraftStoreState
     const store = useComposerDraftStore.getState()
     store.setInteractionMode(threadRef, { baseMode: 'plan', orchestrate: true })
 

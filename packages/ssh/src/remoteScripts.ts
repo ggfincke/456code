@@ -458,6 +458,10 @@ if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMO
     WAIT_COUNT=$((WAIT_COUNT + 1))
     sleep 0.1
   done
+  if kill -0 "$REMOTE_PID" 2>/dev/null; then
+    printf 'Remote 456code server with PID %s did not stop within 2 seconds. Its ownership files were kept.\n' "$REMOTE_PID" >&2
+    exit 1
+  fi
 fi
 rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
 printf '{"stopped":true}\\n'

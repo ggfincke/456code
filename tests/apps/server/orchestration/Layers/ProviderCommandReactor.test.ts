@@ -47,7 +47,11 @@ import { TextGenerationError } from '@t3tools/contracts'
 import * as CheckpointStore from '../../../../../apps/server/src/checkpointing/CheckpointStore.ts'
 import * as CheckpointIdentity from '../../../../../apps/server/src/checkpointing/CheckpointIdentity.ts'
 import { checkpointRefForThreadTurn } from '../../../../../apps/server/src/checkpointing/Utils.ts'
-import { ProviderAdapterRequestError } from '../../../../../apps/server/src/provider/Errors.ts'
+import {
+  ProviderAdapterRequestError,
+  ProviderWorkspaceMissingError,
+  type ProviderServiceError,
+} from '../../../../../apps/server/src/provider/Errors.ts'
 import {
   HiddenTurnAwaitError,
   observeHiddenTurnRuntimeEvent,
@@ -244,12 +248,13 @@ describe('ProviderCommandReactor', () =>
     readonly supportedRuntimeModes?: readonly [RuntimeMode, ...RuntimeMode[]]
     readonly runtimeModeWarnings?: ReadonlyArray<ProviderRuntimeModeWarning>
     readonly requiresNewThreadForModelChange?: boolean
+    readonly advertiseCompact?: boolean
     readonly withRuntimeIngestion?: boolean
     readonly startReactor?: boolean
     readonly interruptTurnEffect?: () => Effect.Effect<void, ProviderAdapterRequestError>
     readonly startSessionEffect?: (
       session: ProviderSession,
-    ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>
+    ) => Effect.Effect<ProviderSession, ProviderServiceError>
     readonly stopSessionEffect?: (
       input: unknown,
       context?: unknown,
@@ -342,6 +347,7 @@ describe('ProviderCommandReactor', () =>
         turnId: asTurnId(`turn-${nextTurnIndex++}`),
       }),
     )
+    const compactThread = vi.fn<ProviderServiceShape['compactThread']>(() => Effect.void)
     const interruptTurn = vi.fn<ProviderServiceShape['interruptTurn']>(
       (_input, _context) => input?.interruptTurnEffect?.() ?? Effect.void,
     )
@@ -449,6 +455,7 @@ describe('ProviderCommandReactor', () =>
     const providerSnapshots = [
       {
         instanceId: modelSelection.instanceId,
+        slashCommands: input?.advertiseCompact ? [{ name: 'compact' }] : [],
         models: modelSelection.model ? [{ slug: modelSelection.model }] : [],
         ...(input?.requiresNewThreadForModelChange === true
           ? { requiresNewThreadForModelChange: true }
@@ -460,6 +467,7 @@ describe('ProviderCommandReactor', () =>
     const service: ProviderServiceShape = {
       startSession: startSession as ProviderServiceShape['startSession'],
       sendTurn: sendTurn as ProviderServiceShape['sendTurn'],
+      compactThread,
       interruptTurn: interruptTurn as ProviderServiceShape['interruptTurn'],
       respondToRequest: respondToRequest as ProviderServiceShape['respondToRequest'],
       respondToUserInput: respondToUserInput as ProviderServiceShape['respondToUserInput'],
@@ -580,6 +588,8 @@ describe('ProviderCommandReactor', () =>
           refreshLocalStatus: () =>
             Effect.die('refreshLocalStatus should not be called in this test'),
           refreshStatus,
+          refreshPullRequestStatus: () =>
+            Effect.die('refreshPullRequestStatus should not be called in this test'),
           streamStatus: () => Stream.die('streamStatus should not be called in this test'),
         }),
       ),
@@ -660,6 +670,7 @@ describe('ProviderCommandReactor', () =>
       run: runTest,
       startSession,
       sendTurn,
+      compactThread,
       interruptTurn,
       respondToRequest,
       respondToUserInput,
@@ -688,6 +699,80 @@ describe('ProviderCommandReactor', () =>
         ),
     }
   }
+
+  it('intercepts only an exact advertised bare compaction command', async () =>
+  {
+    for (const advertised of [true, false])
+    {
+      const harness = await createHarness({ advertiseCompact: advertised })
+      const threadId = ThreadId.make('thread-1')
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make('cmd-literal-compact'),
+          threadId,
+          message: {
+            messageId: asMessageId('message-literal-compact'),
+            role: 'user',
+            text: '/compact ',
+            attachments: [],
+          },
+          interactionMode: 'default',
+          runtimeMode: 'approval-required',
+          createdAt,
+        }),
+      )
+      await harness.drain()
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1)
+      expect(harness.compactThread).not.toHaveBeenCalled()
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.session.set',
+          commandId: CommandId.make('cmd-compact-ready'),
+          threadId,
+          session: {
+            threadId,
+            status: 'ready',
+            providerName: 'codex',
+            providerInstanceId: ProviderInstanceId.make('codex'),
+            runtimeMode: 'approval-required',
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: createdAt,
+          },
+          createdAt,
+        }),
+      )
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make('cmd-bare-compact'),
+          threadId,
+          message: {
+            messageId: asMessageId('message-bare-compact'),
+            role: 'user',
+            text: '/compact',
+            attachments: [],
+          },
+          interactionMode: 'default',
+          runtimeMode: 'approval-required',
+          createdAt,
+        }),
+      )
+      await harness.drain()
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1)
+      expect(harness.compactThread).toHaveBeenCalledTimes(advertised ? 1 : 0)
+      const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)
+      expect(thread?.session?.status).toBe('ready')
+      if (!advertised)
+      {
+        expect(
+          thread?.activities.some((activity) => activity.summary === 'Context compaction failed'),
+        ).toBe(true)
+      }
+    }
+  })
 
   it('reacts to thread.turn.start by ensuring session and sending provider turn', async () =>
   {
@@ -2677,6 +2762,58 @@ describe('ProviderCommandReactor', () =>
 
       yield* Deferred.succeed(releaseStart, undefined)
       yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1))
+    }),
+  )
+
+  effectIt.effect('shows a missing workspace message without a provider stack trace', () =>
+    Effect.gen(function* ()
+    {
+      const attempted = yield* Deferred.make<void>()
+      const missingCwd = '/missing/project/worktree'
+      const missingWorkspace = new ProviderWorkspaceMissingError({
+        threadId: ThreadId.make('thread-1'),
+        cwd: missingCwd,
+      })
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          startSessionEffect: () =>
+            Deferred.succeed(attempted, undefined).pipe(
+              Effect.andThen(Effect.fail(missingWorkspace)),
+            ),
+        }),
+      )
+
+      yield* harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-missing-workspace'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-missing-workspace'),
+          role: 'user',
+          text: 'continue',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      })
+      yield* Deferred.await(attempted)
+      yield* Effect.promise(() => harness.drain())
+
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === ThreadId.make('thread-1'),
+      )
+      expect(thread?.session).toMatchObject({
+        status: 'error',
+        activeTurnId: null,
+        lastError: missingWorkspace.message,
+      })
+      const failure = thread?.activities.find(
+        (activity) => activity.kind === 'provider.turn.start.failed',
+      )
+      expect(failure?.payload).toMatchObject({ detail: missingWorkspace.message })
+      expect(harness.runtimeSessions).toEqual([])
+      expect(harness.sendTurn).not.toHaveBeenCalled()
     }),
   )
 

@@ -160,6 +160,7 @@ function createProviderServiceHarness()
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
+    compactThread: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
@@ -628,6 +629,37 @@ describe('ProviderRuntimeIngestion', () =>
     )
 
     harness.emit({
+      type: 'user-input.requested',
+      eventId: asEventId('evt-native-input-before-turn-completed'),
+      provider: ProviderDriverKind.make('codex'),
+      threadId: asThreadId('thread-1'),
+      createdAt: now,
+      turnId: asTurnId('turn-1'),
+      requestId: ApprovalRequestId.make('request-native-before-turn-completed'),
+      payload: { questions: [] },
+    })
+    harness.emit({
+      type: 'user-input.requested',
+      eventId: asEventId('evt-async-input-before-turn-completed'),
+      provider: ProviderDriverKind.make('codex'),
+      threadId: asThreadId('thread-1'),
+      createdAt: now,
+      turnId: asTurnId('turn-1'),
+      requestId: ApprovalRequestId.make('request-async-before-turn-completed'),
+      payload: { questions: [], responseMode: 'message' },
+    })
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.activities.some(
+          (activity) => activity.id === 'evt-native-input-before-turn-completed',
+        ) &&
+        thread.activities.some(
+          (activity) => activity.id === 'evt-async-input-before-turn-completed',
+        ),
+    )
+
+    harness.emit({
       type: 'turn.completed',
       eventId: asEventId('evt-turn-completed'),
       provider: ProviderDriverKind.make('codex'),
@@ -645,10 +677,38 @@ describe('ProviderRuntimeIngestion', () =>
       (entry) =>
         entry.session?.status === 'error' &&
         entry.session?.activeTurnId === null &&
-        entry.session?.lastError === 'turn failed',
+        entry.session?.lastError === 'turn failed' &&
+        entry.activities.some(
+          (activity) =>
+            activity.kind === 'user-input.resolved' &&
+            typeof activity.payload === 'object' &&
+            activity.payload !== null &&
+            'requestId' in activity.payload &&
+            activity.payload.requestId === 'request-native-before-turn-completed',
+        ),
     )
     expect(thread.session?.status).toBe('error')
     expect(thread.session?.lastError).toBe('turn failed')
+    const terminalResolutions = thread.activities.filter(
+      (activity) => activity.kind === 'user-input.resolved',
+    )
+    expect(terminalResolutions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          summary: 'User input dismissed',
+          payload: { requestId: 'request-native-before-turn-completed' },
+        }),
+      ]),
+    )
+    expect(terminalResolutions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            requestId: 'request-async-before-turn-completed',
+          }),
+        }),
+      ]),
+    )
   })
 
   it('finalizes accepted OpenCode abort text without letting a late abort stop a newer turn', async () =>

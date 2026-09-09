@@ -13,6 +13,7 @@ import { ComposerPendingUserInputPanel } from '../../../../../../apps/web/src/co
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 const prompt = {
+  dismissible: false,
   requestId: ApprovalRequestId.make('request-1'),
   createdAt: '2026-08-15T00:00:00.000Z',
   questions: [
@@ -60,6 +61,7 @@ describe('ComposerPendingUserInputPanel', () =>
             questionIndex={questionIndex}
             onToggleOption={onToggleOption}
             onAdvance={onAdvance}
+            onDismiss={vi.fn()}
           />,
         )
       })
@@ -105,6 +107,51 @@ describe('ComposerPendingUserInputPanel', () =>
       expect(reopenedToggle?.getAttribute('aria-expanded')).toBe('true')
       expect(container.textContent).toContain('How should the migration be verified?')
       expect(container.textContent).toContain('Focused tests')
+    }
+    finally
+    {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('dismisses only dismissible questions without toggling the disclosure', async () =>
+  {
+    const onDismiss = vi.fn()
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    try
+    {
+      await act(async () =>
+      {
+        root.render(
+          <ComposerPendingUserInputPanel
+            pendingUserInputs={[{ ...prompt, responseMode: 'message', dismissible: true }]}
+            respondingRequestIds={[]}
+            answers={{}}
+            questionIndex={0}
+            onToggleOption={vi.fn()}
+            onAdvance={vi.fn()}
+            onDismiss={onDismiss}
+          />,
+        )
+      })
+
+      const toggle = container.querySelector<HTMLButtonElement>(
+        '[data-pending-user-input-toggle="expanded"]',
+      )
+      const dismiss = container.querySelector<HTMLElement>('[data-pending-user-input-dismiss]')
+      expect(dismiss?.getAttribute('role')).toBe('button')
+
+      await act(async () =>
+      {
+        dismiss?.click()
+      })
+
+      expect(onDismiss).toHaveBeenCalledWith(prompt.requestId)
+      expect(toggle?.getAttribute('aria-expanded')).toBe('true')
     }
     finally
     {

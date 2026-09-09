@@ -147,6 +147,7 @@ it.effect('uses gh json listing for non-open change request state queries', () =
                 baseRefName: 'main',
                 headRefName: 'feature/merged',
                 state: 'merged',
+                mergedAt: '2025-12-31T00:00:00.000Z',
                 updatedAt: '2026-01-02T00:00:00.000Z',
               },
             ]),
@@ -172,10 +173,11 @@ it.effect('uses gh json listing for non-open change request state queries', () =
       '--limit',
       '10',
       '--json',
-      'number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner',
+      'number,title,url,baseRefName,headRefName,state,mergedAt,closedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner',
     ])
     assert.strictEqual(changeRequests[0]?.provider, 'github')
     assert.strictEqual(changeRequests[0]?.state, 'merged')
+    assert.strictEqual(changeRequests[0]?.terminalAt, '2025-12-31T00:00:00.000Z')
     assert.deepStrictEqual(
       changeRequests[0]?.updatedAt,
       Option.some(DateTime.makeUnsafe('2026-01-02T00:00:00.000Z')),

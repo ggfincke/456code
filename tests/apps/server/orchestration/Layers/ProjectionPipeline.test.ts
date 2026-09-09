@@ -47,6 +47,7 @@ import {
 import { ProjectionStateRepository } from '../../../../../apps/server/src/persistence/Services/ProjectionState.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
+import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
 import {
   ORCHESTRATION_PROJECTOR_NAMES,
   OrchestrationProjectionPipelineLive,
@@ -4249,6 +4250,7 @@ it.effect('restores pending turn-start metadata across projection pipeline resta
 
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),

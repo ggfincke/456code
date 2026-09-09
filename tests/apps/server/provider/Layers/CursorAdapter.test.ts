@@ -687,6 +687,11 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       })
       const firstTurn = yield* Fiber.join(firstTurnFiber)
       assert.equal(String(steeredTurn.turnId), String(firstTurn.turnId))
+      const settledSession = (yield* adapter.listSessions()).find(
+        (entry) => entry.threadId === threadId,
+      )
+      assert.isDefined(settledSession)
+      assert.isUndefined(settledSession?.activeTurnId)
 
       yield* adapter.stopSession(threadId)
     }),

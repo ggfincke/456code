@@ -1182,6 +1182,122 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
     }),
   )
 
+  it.effect('turn-end refresh finds a new PR and keeps known PRs cached', () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const remoteDir = yield* createBareRemote()
+      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+      yield* runGit(repoDir, ['push', '-u', 'origin', 'main'])
+      yield* runGit(repoDir, ['checkout', '-b', 'feature/turn-refresh', 'origin/main'])
+      yield* runGit(repoDir, ['push', 'origin', 'feature/turn-refresh'])
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            '[]',
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 114,
+                title: 'Opened during the turn',
+                url: 'https://github.com/pingdotgg/codething-mvp/pull/114',
+                baseRefName: 'main',
+                headRefName: 'feature/turn-refresh',
+              },
+            ]),
+          ],
+        },
+      })
+
+      expect((yield* manager.remoteStatus({ cwd: repoDir }))?.pr).toBeNull()
+      expect(
+        (yield* manager.remoteStatus({ cwd: repoDir }, { refreshUpstream: false }))?.pr,
+      ).toBeNull()
+
+      const refreshed = yield* manager.remoteStatus(
+        { cwd: repoDir },
+        { refreshUpstream: false, refreshMissingPullRequest: true },
+      )
+      expect(refreshed?.pr?.number).toBe(114)
+      yield* manager.remoteStatus(
+        { cwd: repoDir },
+        { refreshUpstream: false, refreshMissingPullRequest: true },
+      )
+      expect(ghCalls.filter((call) => call.startsWith('pr list '))).toHaveLength(2)
+    }),
+  )
+
+  it.effect('turn-end refresh preserves failed PR lookup backoff', () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const remoteDir = yield* createBareRemote()
+      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+      yield* runGit(repoDir, ['checkout', '-b', 'feature/rate-limited'])
+      yield* runGit(repoDir, ['push', '-u', 'origin', 'feature/rate-limited'])
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          failWith: new GitHubCli.GitHubCliUnavailableError({
+            command: 'gh',
+            cwd: repoDir,
+            cause: new Error('rate limited'),
+          }),
+        },
+      })
+
+      yield* manager.remoteStatus({ cwd: repoDir })
+      const callsAfterFailure = ghCalls.length
+      yield* manager.remoteStatus(
+        { cwd: repoDir },
+        { refreshUpstream: false, refreshMissingPullRequest: true },
+      )
+
+      expect(callsAfterFailure).toBeGreaterThan(0)
+      expect(ghCalls).toHaveLength(callsAfterFailure)
+    }),
+  )
+
+  it.effect("status finds a PR pushed under the branch's own name despite a default upstream", () =>
+    Effect.gen(function* ()
+    {
+      const repoDir = yield* makeTempDir('t3code-git-manager-')
+      yield* initRepo(repoDir)
+      const remoteDir = yield* createBareRemote()
+      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+      yield* runGit(repoDir, ['push', '-u', 'origin', 'main'])
+      yield* runGit(repoDir, ['remote', 'set-head', 'origin', 'main'])
+      yield* runGit(repoDir, ['checkout', '-b', 'feature/pushed-plain', 'origin/main'])
+      yield* runGit(repoDir, ['push', 'origin', 'feature/pushed-plain'])
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListByHeadSelector: {
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            'feature/pushed-plain': JSON.stringify([
+              {
+                number: 88,
+                title: 'Pushed without -u',
+                url: 'https://github.com/pingdotgg/codething-mvp/pull/88',
+                baseRefName: 'main',
+                headRefName: 'feature/pushed-plain',
+                state: 'OPEN',
+                updatedAt: '2026-05-01T10:00:00Z',
+              },
+            ]),
+          },
+        },
+      })
+
+      const status = yield* manager.status({ cwd: repoDir })
+      expect(status.refName).toBe('feature/pushed-plain')
+      expect(status.pr?.number).toBe(88)
+      expect(ghCalls.some((call) => call.includes('--head main'))).toBe(false)
+    }),
+  )
+
   it.effect(
     'status detects cross-repo PRs from the upstream remote URL owner',
     () =>
@@ -1247,7 +1363,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
           updatedAt: '2026-03-10T07:00:00.000Z',
         })
         expect(ghCalls).toContain(
-          'pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner',
+          'pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,closedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner',
         )
       }),
     20_000,

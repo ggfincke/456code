@@ -68,6 +68,49 @@ it('normalizes empty successful notification responses to accepted', () =>
   expect(resultResponse.status).toBe(200)
 })
 
+it('bounds snapshot text without changing locator-bearing structured data', () =>
+{
+  const repeated = 'workspace row '.repeat(4_000)
+  const accessibilityTree = { nodes: Array.from({ length: 2_000 }, (_, index) => ({ index })) }
+  const result = McpHttpServer.boundSnapshotMetadata({
+    url: 'http://example.test/',
+    title: 'Example',
+    loading: false,
+    visibleText: repeated,
+    interactiveElements: [
+      {
+        tag: 'button',
+        role: 'button',
+        name: repeated,
+        selector: '#continue',
+      },
+    ],
+    accessibilityTree,
+    consoleEntries: Array.from({ length: 100 }, (_, index) => ({
+      level: 'log',
+      text: `entry ${index}`,
+    })),
+    networkEntries: [],
+    actionTimeline: [],
+  })
+  const parsed = JSON.parse(result.text) as {
+    readonly accessibilityTree?: unknown
+    readonly visibleText: string
+    readonly interactiveElements: ReadonlyArray<{ readonly name: string }>
+    readonly consoleEntries: ReadonlyArray<{ readonly text: string }>
+  }
+
+  expect(Buffer.byteLength(result.text, 'utf8')).toBeLessThanOrEqual(
+    McpHttpServer.MAX_SNAPSHOT_TEXT_BYTES,
+  )
+  expect(parsed.accessibilityTree).toBeUndefined()
+  expect(parsed.visibleText.length).toBeLessThanOrEqual(8_001)
+  expect(parsed.interactiveElements[0]?.name.length).toBeLessThanOrEqual(201)
+  expect(parsed.consoleEntries).toHaveLength(40)
+  expect(parsed.consoleEntries[0]?.text).toBe('entry 60')
+  expect(result.omitted.join('; ')).toContain('accessibilityTree')
+})
+
 it.effect('bounds MCP HTTP request bodies before JSON decoding', () =>
   Effect.scoped(
     Effect.gen(function* ()
@@ -248,16 +291,18 @@ it.effect('registers annotated tools and preserves authenticated request context
                     height: 5,
                   },
                 }
-              : event.request.operation === 'press'
-                ? undefined
-                : {
-                    available: true,
-                    visible: true,
-                    tabId,
-                    url: 'http://example.test/',
-                    title: 'Example',
-                    loading: false,
-                  },
+              : event.request.operation === 'evaluate'
+                ? ['Connect', 'Continue']
+                : event.request.operation === 'press'
+                  ? undefined
+                  : {
+                      available: true,
+                      visible: true,
+                      tabId,
+                      url: 'http://example.test/',
+                      title: 'Example',
+                      loading: false,
+                    },
         })
       }).pipe(Effect.forkScoped)
       yield* Effect.yieldNow
@@ -326,13 +371,27 @@ it.effect('registers annotated tools and preserves authenticated request context
           Effect.provideService(McpSchema.McpServerClient, client),
         )
       expect(metadataOnlySnapshot.isError).toBe(false)
-      expect(metadataOnlySnapshot.content.map((content) => content.type)).toEqual(['text'])
+      expect(metadataOnlySnapshot.content.map((content) => content.type)).toEqual(['text', 'text'])
       expect(metadataOnlySnapshot.structuredContent).toMatchObject({
         screenshot: { mimeType: 'image/png', width: 10, height: 5 },
       })
       const snapshotRequests = routedRequests.filter(({ operation }) => operation === 'snapshot')
       expect(snapshotRequests).toHaveLength(2)
       expect(snapshotRequests[1]?.input).toEqual({})
+
+      const evaluateTool = server.tools.find(({ tool }) => tool.name === 'preview_evaluate')
+      expect(evaluateTool?.tool.outputSchema).toMatchObject({ type: 'object' })
+      const evaluated = yield* server
+        .callTool({ name: 'preview_evaluate', arguments: { expression: 'buttons()' } })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        )
+      expect(evaluated.isError).toBe(false)
+      expect(evaluated.structuredContent).toEqual({ value: ['Connect', 'Continue'] })
+      expect(evaluated.content).toEqual([
+        { type: 'text', text: '{"value":["Connect","Continue"]}' },
+      ])
 
       const actionRequests = [
         { name: 'preview_click', arguments: { x: 10, y: 10 } },
