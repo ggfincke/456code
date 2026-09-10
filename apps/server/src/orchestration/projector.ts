@@ -1198,6 +1198,9 @@ export function projectEvent(
       })
     }
 
+    case 'thread.provider-continuation-clear-requested':
+      return Effect.succeed(nextBase)
+
     case 'thread.session-set':
       return Effect.gen(function* ()
       {

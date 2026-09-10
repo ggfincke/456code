@@ -94,6 +94,7 @@ const checkpointRevertBlockedCommandTypes: ReadonlySet<OrchestrationCommand['typ
   'thread.orchestrate-plan.respond',
   'thread.checkpoint.revert',
   'thread.session.stop',
+  'thread.provider-continuation.clear',
   'thread.orchestrate-run-execution.admit',
   'thread.orchestrate-run-execution.update',
   'thread.messages.import',

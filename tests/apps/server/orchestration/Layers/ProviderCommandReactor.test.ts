@@ -49,6 +49,7 @@ import * as CheckpointIdentity from '../../../../../apps/server/src/checkpointin
 import { checkpointRefForThreadTurn } from '../../../../../apps/server/src/checkpointing/Utils.ts'
 import {
   ProviderAdapterRequestError,
+  ProviderAdapterValidationError,
   ProviderWorkspaceMissingError,
   type ProviderServiceError,
 } from '../../../../../apps/server/src/provider/Errors.ts'
@@ -468,6 +469,7 @@ describe('ProviderCommandReactor', () =>
       startSession: startSession as ProviderServiceShape['startSession'],
       sendTurn: sendTurn as ProviderServiceShape['sendTurn'],
       compactThread,
+      clearContinuationIfExact: () => unsupported(),
       interruptTurn: interruptTurn as ProviderServiceShape['interruptTurn'],
       respondToRequest: respondToRequest as ProviderServiceShape['respondToRequest'],
       respondToUserInput: respondToUserInput as ProviderServiceShape['respondToUserInput'],
@@ -1404,6 +1406,226 @@ describe('ProviderCommandReactor', () =>
       actionId: approvalAction?.actionId,
       idempotencyKey: approvalAction?.actionId,
     })
+  })
+
+  it('delivers durable question answers ahead of their pending turn with isolated action context', async () =>
+  {
+    const harness = await createHarness()
+    const releaseTurn = await harness.run(Deferred.make<void>())
+    const now = '2026-01-01T00:00:00.000Z'
+    const threadId = ThreadId.make('thread-1')
+    const requestId = asApprovalRequestId('question-while-turn-pending')
+    harness.sendTurn.mockImplementation(() =>
+      Deferred.await(releaseTurn).pipe(
+        Effect.as({ threadId, turnId: asTurnId('turn-awaiting-question') }),
+      ),
+    )
+    harness.respondToUserInput.mockImplementation(({ answers }) =>
+      answers.color === 'Blue'
+        ? Deferred.succeed(releaseTurn, undefined).pipe(Effect.asVoid)
+        : Effect.fail(
+            new ProviderAdapterValidationError({
+              provider: ProviderDriverKind.make('antigravity'),
+              operation: 'respondToUserInput',
+              issue: 'Select one of the offered answers.',
+            }),
+          ),
+    )
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-awaiting-question'),
+        threadId,
+        message: {
+          messageId: asMessageId('message-awaiting-question'),
+          role: 'user',
+          text: 'wait for a native question answer',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: now,
+      }),
+    )
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.activity.append',
+        commandId: CommandId.make('cmd-provider-requested-question'),
+        threadId,
+        activity: {
+          id: EventId.make('activity-provider-requested-question'),
+          tone: 'info',
+          kind: 'user-input.requested',
+          summary: 'Choose a color',
+          payload: {
+            requestId,
+            questions: [
+              {
+                id: 'color',
+                header: 'Question',
+                question: 'Which test color?',
+                multiSelect: false,
+                allowCustomAnswer: false,
+                options: [{ label: 'Blue', value: '1', description: 'Blue' }],
+              },
+            ],
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.user-input.respond',
+        commandId: CommandId.make('cmd-question-invalid-answer'),
+        threadId,
+        requestId,
+        answers: { color: 'not-offered' },
+        createdAt: now,
+      }),
+    )
+    await waitFor(
+      async () =>
+        (await harness.readModel()).threads[0]?.activities.some(
+          (activity) => activity.kind === 'provider.user-input.respond.failed',
+        ) === true,
+    )
+    expect(await harness.run(Deferred.isDone(releaseTurn))).toBe(false)
+
+    const answerCommand = {
+      type: 'thread.user-input.respond' as const,
+      commandId: CommandId.make('cmd-question-valid-answer'),
+      threadId,
+      requestId,
+      answers: { color: 'Blue' },
+      createdAt: now,
+    }
+    await harness.run(harness.engine.dispatch(answerCommand))
+    await harness.run(harness.engine.dispatch(answerCommand))
+    await waitFor(() => harness.respondToUserInput.mock.calls.length === 2)
+    await harness.drain()
+    await harness.drain()
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1)
+    expect(harness.respondToUserInput).toHaveBeenCalledTimes(2)
+    const actions = await harness.run(harness.sql<{
+      readonly actionId: string
+      readonly effectKind: string
+      readonly status: string
+    }>`
+      SELECT action_id AS "actionId", effect_kind AS "effectKind", status
+      FROM orchestration_reactor_actions
+      WHERE reactor_id = 'provider-command'
+        AND effect_kind IN ('thread.turn-start-requested', 'thread.user-input-response-requested')
+      ORDER BY source_sequence
+    `)
+    expect(actions).toHaveLength(3)
+    expect(actions.map((action) => action.status)).toEqual(['succeeded', 'succeeded', 'succeeded'])
+    const [turnAction, rejectedAnswerAction, answerAction] = actions
+    expect(harness.sendTurn.mock.calls[0]?.[2]).toMatchObject({
+      actionId: turnAction?.actionId,
+      idempotencyKey: turnAction?.actionId,
+    })
+    expect(harness.respondToUserInput.mock.calls.map((call) => call[1])).toMatchObject([
+      { actionId: rejectedAnswerAction?.actionId, idempotencyKey: rejectedAnswerAction?.actionId },
+      { actionId: answerAction?.actionId, idempotencyKey: answerAction?.actionId },
+    ])
+    const failures = await harness.run(harness.sql<{ readonly commandId: string }>`
+      SELECT command_id AS "commandId"
+      FROM orchestration_events
+      WHERE event_type = 'thread.activity-appended'
+        AND payload_json LIKE '%provider.user-input.respond.failed%'
+    `)
+    expect(failures).toEqual([
+      {
+        commandId: `server:provider-failure-activity:0:reactor-action:${rejectedAnswerAction?.actionId}`,
+      },
+    ])
+  })
+
+  it('terminalizes a cancelled Antigravity question without blocking later turns', async () =>
+  {
+    const harness = await createHarness()
+    const now = '2026-01-01T00:00:00.000Z'
+    const threadId = ThreadId.make('thread-1')
+    harness.respondToUserInput.mockImplementation(() =>
+      Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: ProviderDriverKind.make('antigravity'),
+          method: 'session/request_permission',
+          detail: 'This question is no longer pending.',
+        }),
+      ),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-before-cancelled-question'),
+        threadId,
+        session: {
+          threadId,
+          status: 'idle',
+          providerName: 'antigravity',
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.user-input.respond',
+        commandId: CommandId.make('cmd-answer-cancelled-question'),
+        threadId,
+        requestId: asApprovalRequestId('cancelled-native-question'),
+        answers: { color: 'Blue' },
+        createdAt: now,
+      }),
+    )
+    await waitFor(
+      async () =>
+        (await harness.readModel()).threads[0]?.activities.some(
+          (activity) => activity.kind === 'provider.user-input.respond.failed',
+        ) === true,
+    )
+    const thread = (await harness.readModel()).threads[0]
+    expect(
+      thread?.activities.find((activity) => activity.kind === 'provider.user-input.respond.failed')
+        ?.payload,
+    ).toMatchObject({
+      requestId: 'cancelled-native-question',
+      detail: expect.stringContaining('Stale pending user-input request:'),
+    })
+    expect(thread?.activities.some((activity) => activity.kind === 'user-input.resolved')).toBe(
+      false,
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-after-cancelled-question'),
+        threadId,
+        message: {
+          messageId: asMessageId('message-after-cancelled-question'),
+          role: 'user',
+          text: 'continue after the cancelled question',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: now,
+      }),
+    )
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+    await harness.drain()
+    expect(harness.respondToUserInput).toHaveBeenCalledTimes(1)
+    const progress = await harness.run(harness.delivery.getProgress('provider-command'))
+    expect(progress._tag).toBe('Some')
+    expect(progress._tag === 'Some' ? progress.value.blockedSequence : null).toBeNull()
   })
 
   it('delivers a durable interrupt while its provider turn is pending', async () =>

@@ -7,6 +7,7 @@ import {
   type MessageId,
   ProjectId,
   type ModelSelection,
+  type OrchestrationSession,
   type ProviderContinuationIdentity,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -64,6 +65,30 @@ export function codexArtifactTemplatePromptToAppend(
   return appendCodexArtifactTemplateUsePrompt(currentDraft, template) === currentDraft
     ? null
     : codexArtifactTemplateUsePrompt(template)
+}
+
+export interface LegacyAntigravityTransitionPresentation
+{
+  readonly bindingGeneration: string
+  readonly title: string
+  readonly description: string
+  readonly actionLabel: string
+}
+
+export function resolveLegacyAntigravityTransitionPresentation(
+  session: OrchestrationSession | null | undefined,
+): LegacyAntigravityTransitionPresentation | null
+{
+  const incompatibility = session?.continuationIncompatibility
+  if (!incompatibility) return null
+
+  return {
+    bindingGeneration: incompatibility.bindingGeneration,
+    title: 'This thread uses the legacy Antigravity runtime',
+    description:
+      'Start fresh with official Antigravity to continue. Thread history, files, attachments, and the selected provider stay unchanged.',
+    actionLabel: 'Start fresh with official Antigravity',
+  }
 }
 
 export function shouldReleaseTimelineAnchorForToolActivity(input: {

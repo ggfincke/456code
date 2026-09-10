@@ -92,6 +92,8 @@ import {
 import { makeWorkspaceRpcHandlers } from './ws/handlers/workspaceHandlers.ts'
 import { makeRpcAuthorization, toAuthAccessStreamEvent } from './ws/rpcAuthorization.ts'
 import * as ProviderRegistry from './provider/Services/ProviderRegistry.ts'
+import { ProviderAuthService } from './provider/Services/ProviderAuthService.ts'
+import { makeProviderInstallation } from './provider/providerInstallation.ts'
 import { resolveAuthorizedProviderWorkspaceCwd } from './provider/workspaceAuthorization.ts'
 import * as ProviderMaintenanceRunner from './provider/maintenance/providerMaintenanceRunner.ts'
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
@@ -238,6 +240,8 @@ const makeWsRpcLayer = (
       const portDiscovery = yield* PortScanner.PortDiscovery
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner
+      const providerAuth = yield* ProviderAuthService
+      const providerInstallation = yield* makeProviderInstallation()
       const config = yield* ServerConfig.ServerConfig
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents
       const serverSettings = yield* ServerSettings.ServerSettingsService
@@ -984,6 +988,52 @@ const makeWsRpcLayer = (
               'rpc.aggregate': 'server',
             },
           ),
+        [WS_METHODS.providerAuthStart]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.providerAuthStart,
+            providerAuth.start(input, currentSessionId),
+            { 'rpc.aggregate': 'provider' },
+          ),
+        [WS_METHODS.providerAuthComplete]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.providerAuthComplete,
+            providerAuth.complete(input, currentSessionId),
+            { 'rpc.aggregate': 'provider' },
+          ),
+        [WS_METHODS.providerAuthCancel]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.providerAuthCancel,
+            providerAuth.cancel(input, currentSessionId),
+            { 'rpc.aggregate': 'provider' },
+          ),
+        [WS_METHODS.providerAuthLogout]: (input) =>
+          observeRpcEffect(WS_METHODS.providerAuthLogout, providerAuth.logout(input), {
+            'rpc.aggregate': 'provider',
+          }),
+        [WS_METHODS.providerAuthSubscribe]: (input) =>
+          observeRpcStream(
+            WS_METHODS.providerAuthSubscribe,
+            providerAuth.subscribe(input, currentSessionId),
+            { 'rpc.aggregate': 'provider' },
+          ),
+        [WS_METHODS.providerInstallStart]: (input) =>
+          observeRpcEffect(WS_METHODS.providerInstallStart, providerInstallation.start(input), {
+            'rpc.aggregate': 'provider',
+          }),
+        [WS_METHODS.providerInstallCancel]: (input) =>
+          observeRpcEffect(WS_METHODS.providerInstallCancel, providerInstallation.cancel(input), {
+            'rpc.aggregate': 'provider',
+          }),
+        [WS_METHODS.providerInstallSubscribe]: (input) =>
+          observeRpcStream(
+            WS_METHODS.providerInstallSubscribe,
+            providerInstallation.subscribe(input),
+            { 'rpc.aggregate': 'provider' },
+          ),
+        [WS_METHODS.providerInstallRemove]: (input) =>
+          observeRpcEffect(WS_METHODS.providerInstallRemove, providerInstallation.remove(input), {
+            'rpc.aggregate': 'provider',
+          }),
         [WS_METHODS.serverUpdateServer]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateServer,

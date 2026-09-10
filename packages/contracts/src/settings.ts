@@ -486,32 +486,46 @@ export const GeminiSettings = makeProviderSettingsSchema(
 )
 export type GeminiSettings = typeof GeminiSettings.Type
 
+export const AntigravityOfficialRuntime = Schema.Union([
+  Schema.Struct({ mode: Schema.Literal('managed') }),
+  Schema.Struct({
+    mode: Schema.Literal('custom'),
+    executablePath: TrimmedNonEmptyString,
+  }),
+])
+export type AntigravityOfficialRuntime = typeof AntigravityOfficialRuntime.Type
+
 export const AntigravitySettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
       Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    officialRuntime: Schema.optionalKey(
+      AntigravityOfficialRuntime.pipe(
+        Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+      ),
+    ),
     binaryPath: makeBinaryPathSetting('agy').pipe(
       Schema.annotateKey({
-        title: 'Binary path',
-        description: 'Path to the Antigravity CLI binary.',
+        title: 'Legacy CLI binary path',
+        description: 'Preserved for older agy sessions. Official Antigravity does not use it.',
         providerSettingsForm: { placeholder: 'agy', clearWhenEmpty: 'omit' },
       }),
     ),
     agent: TrimmedString.pipe(
       Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: 'Agent',
-        description: 'Optional Antigravity agent name from `agy agents`.',
+        title: 'Legacy CLI agent',
+        description: 'Preserved for older agy sessions. Official Antigravity does not use it.',
         providerSettingsForm: { placeholder: 'Use Antigravity default', clearWhenEmpty: 'omit' },
       }),
     ),
     sandbox: Schema.Boolean.pipe(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({
-        title: 'Terminal sandbox',
-        description: 'Run Antigravity terminal commands with its native sandbox enabled.',
+        title: 'Legacy CLI terminal sandbox',
+        description: 'Preserved for older agy sessions. Official Antigravity does not use it.',
         providerSettingsForm: { control: 'switch', clearWhenEmpty: 'omit' },
       }),
     ),
@@ -524,7 +538,7 @@ export const AntigravitySettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ['binaryPath', 'agent', 'sandbox'],
+    order: ['officialRuntime', 'binaryPath', 'agent', 'sandbox'],
   },
 )
 export type AntigravitySettings = typeof AntigravitySettings.Type
@@ -837,6 +851,7 @@ const GeminiSettingsPatch = Schema.Struct({
 
 const AntigravitySettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
+  officialRuntime: Schema.optionalKey(AntigravityOfficialRuntime),
   binaryPath: Schema.optionalKey(TrimmedString),
   agent: Schema.optionalKey(TrimmedString),
   sandbox: Schema.optionalKey(Schema.Boolean),

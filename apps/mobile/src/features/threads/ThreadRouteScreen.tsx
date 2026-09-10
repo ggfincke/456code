@@ -16,11 +16,15 @@ import {
   type ProjectScript,
 } from '@t3tools/contracts'
 import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from '@t3tools/client-runtime/state/runtime'
+import {
   projectScriptCwd,
   projectScriptRuntimeEnv,
   resolveProjectScripts,
 } from '@t3tools/shared/projectScripts'
-import { ScrollView, View } from 'react-native'
+import { Alert, ScrollView, View } from 'react-native'
 import { useWorkspaceState } from '../../state/workspace'
 import { useEnvironmentQuery } from '../../state/query'
 import { dismissGitActionResult, useGitActionProgress } from '../../state/use-vcs-action-state'
@@ -77,6 +81,7 @@ import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
 } from './thread-inspector-content-stack'
+import { resolveLegacyAntigravityTransition } from '../settings/provider-setup-state'
 
 interface ThreadInspectorSelection
 {
@@ -214,6 +219,9 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions()
   const requests = useThreadRequests()
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, 'thread interrupt')
+  const clearProviderContinuation = useAtomCommand(threadEnvironment.clearProviderContinuation, {
+    reportFailure: false,
+  })
   const navigation = useNavigation()
   const handleUsageLimitsCommand = useCallback(() =>
   {
@@ -228,6 +236,7 @@ function ThreadRouteContent(
   const [inspectorSelection, setInspectorSelection] = useState<ThreadInspectorSelection | null>(
     () => (props.renderInspector ? { routeThreadIdentity, mode: 'route' } : null),
   )
+  const [isClearingLegacyContinuation, setIsClearingLegacyContinuation] = useState(false)
   const inspectorMode = (() =>
   {
     if (inspectorSelection?.routeThreadIdentity === routeThreadIdentity)
@@ -513,6 +522,54 @@ function ThreadRouteContent(
       },
     })
   }, [interruptThreadTurn, selectedThread])
+  const legacyAntigravityTransition = resolveLegacyAntigravityTransition(selectedThread?.session)
+  const handleStartFreshWithOfficialAntigravity = useCallback(() =>
+  {
+    if (!selectedThread || !legacyAntigravityTransition || isClearingLegacyContinuation) return
+    Alert.alert(
+      'Start fresh with official Antigravity?',
+      'Thread history, files, attachments, and the selected provider will stay unchanged.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start fresh',
+          onPress: () =>
+          {
+            setIsClearingLegacyContinuation(true)
+            void clearProviderContinuation({
+              environmentId: selectedThread.environmentId,
+              input: {
+                threadId: selectedThread.id,
+                expectedProviderInstanceId:
+                  selectedThread.session?.providerInstanceId ??
+                  selectedThread.modelSelection.instanceId,
+                expectedBindingGeneration: legacyAntigravityTransition.bindingGeneration,
+                expectedSource: 'antigravity.stream-json',
+              },
+            }).then((result) =>
+            {
+              setIsClearingLegacyContinuation(false)
+              if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+              {
+                const failure = squashAtomCommandFailure(result)
+                Alert.alert(
+                  'Could not start fresh',
+                  failure instanceof Error
+                    ? failure.message
+                    : 'Official Antigravity could not be prepared.',
+                )
+              }
+            })
+          },
+        },
+      ],
+    )
+  }, [
+    clearProviderContinuation,
+    isClearingLegacyContinuation,
+    legacyAntigravityTransition,
+    selectedThread,
+  ])
 
   const handleOpenTerminal = useCallback(
     (nextTerminalId?: string | null) =>
@@ -771,6 +828,8 @@ function ThreadRouteContent(
           sendBlockedReason={composer.sendBlockedReason}
           providerSwitchActive={composer.providerSwitchActive}
           providerSwitchNotice={composer.providerSwitchNotice}
+          legacyAntigravityTransitionRequired={legacyAntigravityTransition !== null}
+          isClearingLegacyContinuation={isClearingLegacyContinuation}
           environmentId={selectedThread.environmentId}
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}
@@ -794,6 +853,7 @@ function ThreadRouteContent(
           onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}
           onRetryProviderSwitch={composer.onRetryProviderSwitch}
           onDismissProviderSwitchNotice={composer.onDismissProviderSwitchNotice}
+          onStartFreshWithOfficialAntigravity={handleStartFreshWithOfficialAntigravity}
           onRespondToApproval={requests.onRespondToApproval}
           onSelectUserInputOption={requests.onSelectUserInputOption}
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}

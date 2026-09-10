@@ -36,6 +36,7 @@ import type * as Scope from 'effect/Scope'
 import type * as TextGeneration from '../../textGeneration/TextGeneration.ts'
 import type { ProviderAdapterError, ProviderDriverError } from '../Errors.ts'
 import type { ProviderAdapterShape } from '../Services/ProviderAdapter.ts'
+import type { ProviderAuthController } from '../Services/ProviderAuthService.ts'
 import type { ServerProviderShape } from '../Services/ServerProvider.ts'
 
 /**
@@ -77,6 +78,8 @@ export interface ProviderInstance
   readonly snapshotForCwd?: (cwd: string) => Effect.Effect<ServerProvider, ProviderDriverError>
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>
   readonly textGeneration: TextGeneration.TextGeneration['Service']
+  readonly auth?: ProviderAuthController
+  readonly refreshModels?: Effect.Effect<void, ProviderDriverError>
 }
 
 /**

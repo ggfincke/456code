@@ -49,6 +49,18 @@ export function getProviderStatusBannerKey(
   {
     return null
   }
+  // saved google credentials are checked when a session starts; keep other diagnostics visible.
+  if (
+    !reAuthRequired &&
+    status.driver === 'antigravity' &&
+    status.installed &&
+    status.status === 'warning' &&
+    status.auth.status === 'unknown' &&
+    status.message === 'Antigravity is installed. Google account access is not checked yet.'
+  )
+  {
+    return null
+  }
   return [
     status.instanceId,
     status.status,
@@ -84,7 +96,7 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   status: ServerProvider | null
 })
 {
-  if (!status || (!reAuthRequired && (status.status === 'ready' || status.status === 'disabled')))
+  if (!status || getProviderStatusBannerKey(status, reAuthRequired) === null)
   {
     return null
   }

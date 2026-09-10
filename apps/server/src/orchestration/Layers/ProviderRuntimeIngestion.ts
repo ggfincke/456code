@@ -91,7 +91,12 @@ export { runtimeEventToActivities }
 
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== '0'
 const PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION = 1
-const TASK_METADATA_ACTIVITY_KINDS = ['task.started', 'task.progress', 'task.completed'] as const
+const TASK_METADATA_ACTIVITY_KINDS = [
+  'task.started',
+  'task.progress',
+  'task.updated',
+  'task.completed',
+] as const
 
 const ProviderRuntimeIngestionBufferV1 = Schema.Struct({
   version: Schema.Literal(PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION),
@@ -195,8 +200,7 @@ const make = Effect.gen(function* ()
     lookup: () => Effect.succeed({ text: '', createdAt: '' }),
   })
 
-  // task names arrive on task.started/task.progress but not on task.completed,
-  // so remember them per task to title the completion activity.
+  // task names arrive before completion, so remember them for terminal rows.
   const taskDescriptionByTaskKey = yield* Cache.make<string, string>({
     capacity: TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY,
     timeToLive: TASK_DESCRIPTION_BY_TASK_TTL,
@@ -1587,7 +1591,11 @@ const make = Effect.gen(function* ()
         }
       }
 
-      if (event.type === 'task.started' || event.type === 'task.progress')
+      if (
+        event.type === 'task.started' ||
+        event.type === 'task.progress' ||
+        event.type === 'task.updated'
+      )
       {
         const description = event.payload.description?.trim()
         if (description)
@@ -1598,6 +1606,7 @@ const make = Effect.gen(function* ()
       if (
         (event.type === 'task.started' ||
           event.type === 'task.progress' ||
+          event.type === 'task.updated' ||
           event.type === 'task.completed') &&
         event.payload.toolUseId
       )

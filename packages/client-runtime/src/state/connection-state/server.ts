@@ -312,6 +312,14 @@ export function createServerEnvironmentAtoms<R, E>(
   },
 )
 {
+  const providerSetupScheduler = createAtomCommandScheduler()
+  const providerSetupConcurrency = {
+    mode: 'serial' as const,
+    key: (target: {
+      readonly environmentId: EnvironmentId
+      readonly input: { readonly instanceId: ProviderInstanceId }
+    }) => JSON.stringify([target.environmentId, target.input.instanceId]),
+  }
   const configScheduler = createAtomCommandScheduler()
   const configConcurrency = {
     mode: 'serial' as const,
@@ -415,6 +423,56 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverUpdateProvider,
       scheduler: configScheduler,
       concurrency: configConcurrency,
+    }),
+    providerAuthFlow: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: 'environment-data:server:provider-auth-flow',
+      tag: WS_METHODS.providerAuthSubscribe,
+    }),
+    providerInstallState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: 'environment-data:server:provider-install-state',
+      tag: WS_METHODS.providerInstallSubscribe,
+    }),
+    startProviderAuth: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:start-provider-auth',
+      tag: WS_METHODS.providerAuthStart,
+      scheduler: providerSetupScheduler,
+      concurrency: providerSetupConcurrency,
+    }),
+    completeProviderAuth: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:complete-provider-auth',
+      tag: WS_METHODS.providerAuthComplete,
+      scheduler: providerSetupScheduler,
+      concurrency: providerSetupConcurrency,
+    }),
+    cancelProviderAuth: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:cancel-provider-auth',
+      tag: WS_METHODS.providerAuthCancel,
+      scheduler: providerSetupScheduler,
+      concurrency: providerSetupConcurrency,
+    }),
+    logoutProviderAuth: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:logout-provider-auth',
+      tag: WS_METHODS.providerAuthLogout,
+      scheduler: providerSetupScheduler,
+      concurrency: providerSetupConcurrency,
+    }),
+    startProviderInstall: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:start-provider-install',
+      tag: WS_METHODS.providerInstallStart,
+      scheduler: providerSetupScheduler,
+      concurrency: providerSetupConcurrency,
+    }),
+    cancelProviderInstall: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:cancel-provider-install',
+      tag: WS_METHODS.providerInstallCancel,
+      scheduler: providerSetupScheduler,
+      concurrency: providerSetupConcurrency,
+    }),
+    removeProviderInstall: createEnvironmentRpcCommand(runtime, {
+      label: 'environment-data:server:remove-provider-install',
+      tag: WS_METHODS.providerInstallRemove,
+      scheduler: providerSetupScheduler,
+      concurrency: providerSetupConcurrency,
     }),
     updateServer: createEnvironmentRpcCommand(runtime, {
       label: 'environment-data:server:update-server',

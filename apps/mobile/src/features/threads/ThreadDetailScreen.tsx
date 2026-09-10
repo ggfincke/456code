@@ -23,12 +23,13 @@ import type {
 } from '@t3tools/contracts'
 import * as Haptics from 'expo-haptics'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { View, type GestureResponderEvent } from 'react-native'
+import { Pressable, View, type GestureResponderEvent } from 'react-native'
 import { KeyboardController, KeyboardStickyView } from 'react-native-keyboard-controller'
 import Animated, { FadeInDown, FadeOut } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { ComposerEditorHandle } from '../../components/ComposerEditor'
+import { AppText as Text } from '../../components/AppText'
 import type { StatusTone } from '../../components/StatusPill'
 import type { DraftComposerImageAttachment } from '../../lib/composerImages'
 import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from '../../lib/layout'
@@ -76,6 +77,8 @@ export interface ThreadDetailScreenProps
   readonly sendBlockedReason: string | null
   readonly providerSwitchActive: boolean
   readonly providerSwitchNotice: ThreadProviderSwitchNotice | null
+  readonly legacyAntigravityTransitionRequired: boolean
+  readonly isClearingLegacyContinuation: boolean
   readonly environmentId: EnvironmentId
   readonly projectWorkspaceRoot: string | null
   readonly threadCwd: string | null
@@ -100,6 +103,7 @@ export interface ThreadDetailScreenProps
   readonly onUpdateThreadInteractionMode: (interactionMode: CollaborationMode) => void
   readonly onRetryProviderSwitch: () => void
   readonly onDismissProviderSwitchNotice: () => void
+  readonly onStartFreshWithOfficialAntigravity: () => void
   readonly onRespondToApproval: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -493,6 +497,29 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               pushes the resting content floor up by the same amount. */}
           <View ref={composerOverlayRef} onLayout={onComposerLayout} className="w-full">
             <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
+              {props.legacyAntigravityTransitionRequired ? (
+                <View className="mx-4 mb-3 gap-2 rounded-[18px] border border-adaptive-amber-500-400/35 bg-card p-4">
+                  <Text className="text-base font-sans-bold text-foreground">
+                    This thread uses the legacy Antigravity runtime
+                  </Text>
+                  <Text className="text-sm text-foreground-muted">
+                    Start fresh with official Antigravity to continue. Thread history, files,
+                    attachments, and the selected provider stay unchanged.
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={props.isClearingLegacyContinuation}
+                    onPress={props.onStartFreshWithOfficialAntigravity}
+                    className="self-start rounded-full bg-primary px-4 py-2 active:opacity-70 disabled:opacity-40"
+                  >
+                    <Text className="text-sm font-sans-bold text-primary-foreground">
+                      {props.isClearingLegacyContinuation
+                        ? 'Starting fresh...'
+                        : 'Start fresh with official Antigravity'}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
               {props.activePendingApproval || props.activePendingUserInput ? (
                 <Animated.View
                   className="shrink-0 gap-3 px-4 pb-3"

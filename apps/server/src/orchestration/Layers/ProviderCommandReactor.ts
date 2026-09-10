@@ -51,6 +51,7 @@ import {
   ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
+  ProviderContinuationIncompatibleError,
   ProviderInstanceNotFoundError,
   ProviderSessionNotFoundError,
   ProviderUnsupportedError,
@@ -109,6 +110,7 @@ const isProviderRequestNotDispatched = Schema.is(
   Schema.TaggedStruct('ProviderRequestNotDispatched', {}),
 )
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError)
+const isProviderContinuationIncompatibleError = Schema.is(ProviderContinuationIncompatibleError)
 const isProviderDriverKind = Schema.is(ProviderDriverKind)
 const isProviderInstanceNotFoundError = Schema.is(ProviderInstanceNotFoundError)
 const isProviderSessionNotFoundError = Schema.is(ProviderSessionNotFoundError)
@@ -128,13 +130,17 @@ type ProviderIntentEvent = Extract<
       | 'thread.user-input-response-requested'
       | 'thread.orchestrate-plan-response-requested'
       | 'thread.session-stop-requested'
+      | 'thread.provider-continuation-clear-requested'
   }
 >
 
 type ProviderControlEvent = Extract<
   ProviderIntentEvent,
   {
-    type: 'thread.turn-interrupt-requested' | 'thread.approval-response-requested'
+    type:
+      | 'thread.turn-interrupt-requested'
+      | 'thread.approval-response-requested'
+      | 'thread.user-input-response-requested'
   }
 >
 type ProviderOrderedEvent = Exclude<ProviderIntentEvent, ProviderControlEvent>
@@ -430,7 +436,8 @@ function isProviderIntentEvent(event: OrchestrationEvent): event is ProviderInte
     event.type === 'thread.approval-response-requested' ||
     event.type === 'thread.user-input-response-requested' ||
     event.type === 'thread.orchestrate-plan-response-requested' ||
-    event.type === 'thread.session-stop-requested'
+    event.type === 'thread.session-stop-requested' ||
+    event.type === 'thread.provider-continuation-clear-requested'
   )
 }
 
@@ -438,7 +445,8 @@ function isProviderControlEvent(event: ProviderIntentEvent): event is ProviderCo
 {
   return (
     event.type === 'thread.turn-interrupt-requested' ||
-    event.type === 'thread.approval-response-requested'
+    event.type === 'thread.approval-response-requested' ||
+    event.type === 'thread.user-input-response-requested'
   )
 }
 
@@ -502,6 +510,14 @@ function isUnknownPendingUserInputRequestError(cause: Cause.Cause<unknown>): boo
   const error = findProviderAdapterRequestError(cause)
   if (error)
   {
+    if (
+      error.provider === 'antigravity' &&
+      error.method === 'session/request_permission' &&
+      error.detail === 'This question is no longer pending.'
+    )
+    {
+      return true
+    }
     const detail = error.detail.toLowerCase()
     return (
       detail.includes('unknown pending user-input request') ||
@@ -953,6 +969,7 @@ const make = Effect.gen(function* ()
     readonly threadId: ThreadId
     readonly detail: string
     readonly createdAt: string
+    readonly continuationIncompatibility?: OrchestrationSession['continuationIncompatibility']
   })
   {
     const thread = yield* resolveLatestThreadShell(input.threadId)
@@ -973,6 +990,9 @@ const make = Effect.gen(function* ()
         status: session?.status === 'stopped' ? 'stopped' : 'error',
         activeTurnId: null,
         lastError: input.detail,
+        ...(input.continuationIncompatibility === undefined
+          ? {}
+          : { continuationIncompatibility: input.continuationIncompatibility }),
         updatedAt: input.createdAt,
       },
       createdAt: input.createdAt,
@@ -984,6 +1004,7 @@ const make = Effect.gen(function* ()
     readonly detail: string
     readonly createdAt: string
     readonly requestId?: string
+    readonly continuationIncompatibility?: OrchestrationSession['continuationIncompatibility']
   })
   {
     yield* setThreadSessionErrorOnTurnStartFailure(input)
@@ -1904,10 +1925,20 @@ const make = Effect.gen(function* ()
         return Effect.void
       }
       const detail = formatFailureDetail(cause)
+      const failure = Cause.findErrorOption(cause)
+      const incompatibility =
+        Option.isSome(failure) && isProviderContinuationIncompatibleError(failure.value)
+          ? {
+              currentSource: failure.value.currentSource,
+              requiredSource: failure.value.requiredSource,
+              bindingGeneration: failure.value.bindingGeneration,
+            }
+          : undefined
       return reportTurnStartFailure({
         threadId: event.payload.threadId,
         detail,
         createdAt: event.payload.createdAt,
+        ...(incompatibility === undefined ? {} : { continuationIncompatibility: incompatibility }),
       })
     }
 
@@ -2525,7 +2556,9 @@ const make = Effect.gen(function* ()
     const execution = yield* Effect.exit(
       event.type === 'thread.turn-interrupt-requested'
         ? processTurnInterruptRequested(event, state)
-        : processApprovalResponseRequested(event, state),
+        : event.type === 'thread.approval-response-requested'
+          ? processApprovalResponseRequested(event, state)
+          : processUserInputResponseRequested(event, state),
     )
     if (state.unknownProviderFailureDetail !== undefined)
     {
@@ -2564,9 +2597,10 @@ const make = Effect.gen(function* ()
   const processUserInputResponseRequested = Effect.fn('processUserInputResponseRequested')(
     function* (
       event: Extract<ProviderIntentEvent, { type: 'thread.user-input-response-requested' }>,
+      controlState: ProviderControlExecutionState,
     )
     {
-      const thread = yield* resolveThread(event.payload.threadId)
+      const thread = yield* resolveLatestThreadShell(event.payload.threadId)
       if (!thread)
       {
         return
@@ -2574,39 +2608,46 @@ const make = Effect.gen(function* ()
       const hasSession = thread.session && thread.session.status !== 'stopped'
       if (!hasSession)
       {
-        return yield* appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: 'provider.user-input.respond.failed',
-          summary: 'Provider user input response failed',
-          detail: 'No active provider session is bound to this thread.',
-          turnId: null,
-          createdAt: event.payload.createdAt,
-          requestId: event.payload.requestId,
-        })
+        return yield* appendProviderFailureActivity(
+          {
+            threadId: event.payload.threadId,
+            kind: 'provider.user-input.respond.failed',
+            summary: 'Provider user input response failed',
+            detail: 'No active provider session is bound to this thread.',
+            turnId: null,
+            createdAt: event.payload.createdAt,
+            requestId: event.payload.requestId,
+          },
+          controlState,
+        )
       }
 
-      yield* invokeProvider(
+      yield* invokeControlProvider(
+        controlState,
         providerService.respondToUserInput(
           {
             threadId: event.payload.threadId,
             requestId: event.payload.requestId,
             answers: event.payload.answers,
           },
-          activeEffectContext,
+          controlState.effectContext,
         ),
       ).pipe(
         Effect.catchCause((cause) =>
-          appendProviderFailureActivity({
-            threadId: event.payload.threadId,
-            kind: 'provider.user-input.respond.failed',
-            summary: 'Provider user input response failed',
-            detail: isUnknownPendingUserInputRequestError(cause)
-              ? stalePendingRequestDetail('user-input', event.payload.requestId)
-              : Cause.pretty(cause),
-            turnId: null,
-            createdAt: event.payload.createdAt,
-            requestId: event.payload.requestId,
-          }),
+          appendProviderFailureActivity(
+            {
+              threadId: event.payload.threadId,
+              kind: 'provider.user-input.respond.failed',
+              summary: 'Provider user input response failed',
+              detail: isUnknownPendingUserInputRequestError(cause)
+                ? stalePendingRequestDetail('user-input', event.payload.requestId)
+                : Cause.pretty(cause),
+              turnId: null,
+              createdAt: event.payload.createdAt,
+              requestId: event.payload.requestId,
+            },
+            controlState,
+          ),
         ),
       )
     },
@@ -2747,6 +2788,44 @@ const make = Effect.gen(function* ()
     })
   })
 
+  const processProviderContinuationClearRequested = Effect.fn(
+    'processProviderContinuationClearRequested',
+  )(function* (
+    event: Extract<ProviderIntentEvent, { type: 'thread.provider-continuation-clear-requested' }>,
+  )
+  {
+    const thread = yield* resolveLatestThreadShell(event.payload.threadId)
+    const incompatibility = thread?.session?.continuationIncompatibility
+    if (
+      !thread?.session ||
+      thread.session.providerInstanceId !== event.payload.expectedProviderInstanceId ||
+      incompatibility?.bindingGeneration !== event.payload.expectedBindingGeneration ||
+      incompatibility.currentSource !== event.payload.expectedSource
+    )
+    {
+      return
+    }
+    const cleared = yield* providerService.clearContinuationIfExact({
+      threadId: event.payload.threadId,
+      expectedProviderInstanceId: event.payload.expectedProviderInstanceId,
+      expectedBindingGeneration: event.payload.expectedBindingGeneration,
+      expectedSource: event.payload.expectedSource,
+    })
+    if (!cleared) return
+    const { continuationIncompatibility: _cleared, ...session } = thread.session
+    yield* setThreadSession({
+      threadId: thread.id,
+      session: {
+        ...session,
+        status: 'stopped',
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: event.payload.createdAt,
+      },
+      createdAt: event.payload.createdAt,
+    })
+  })
+
   const processDomainEvent = Effect.fn('processDomainEvent')(function* (
     event: ProviderOrderedEvent,
   )
@@ -2798,14 +2877,14 @@ const make = Effect.gen(function* ()
       case 'thread.provider-switch-requested':
         yield* processProviderSwitchRequested(event)
         return
-      case 'thread.user-input-response-requested':
-        yield* processUserInputResponseRequested(event)
-        return
       case 'thread.orchestrate-plan-response-requested':
         yield* processOrchestratePlanResponseRequested(event)
         return
       case 'thread.session-stop-requested':
         yield* processSessionStopRequested(event)
+        return
+      case 'thread.provider-continuation-clear-requested':
+        yield* processProviderContinuationClearRequested(event)
         return
     }
   })
@@ -3133,7 +3212,11 @@ const make = Effect.gen(function* ()
     operationVersion: OPERATION_VERSION,
     aheadOfCursor: {
       blockerEffectKind: 'thread.turn-start-requested',
-      effectKinds: ['thread.approval-response-requested', 'thread.turn-interrupt-requested'],
+      effectKinds: [
+        'thread.approval-response-requested',
+        'thread.turn-interrupt-requested',
+        'thread.user-input-response-requested',
+      ],
       plan: planControlAhead,
     },
     plan: (event) =>

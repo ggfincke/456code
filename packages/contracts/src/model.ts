@@ -162,6 +162,8 @@ export const PREFERRED_DEFAULT_CODEX_MODELS: ReadonlyArray<string> = [
   'gpt-5.6-terra',
 ]
 export const DEFAULT_TEXT_GENERATION_MODEL = 'gpt-5.6-luna'
+// product alias for the official session's account-selected current model.
+export const ANTIGRAVITY_DEFAULT_MODEL = 'antigravity-default'
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
@@ -170,7 +172,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [GROK_DRIVER_KIND]: 'grok-build',
   [CORAL_DRIVER_KIND]: 'qwen3.8:27b-mlx',
   [GEMINI_DRIVER_KIND]: 'auto',
-  [ANTIGRAVITY_DRIVER_KIND]: 'default',
+  [ANTIGRAVITY_DRIVER_KIND]: ANTIGRAVITY_DEFAULT_MODEL,
   [OPENCODE_DRIVER_KIND]: 'openai/gpt-5',
 }
 
@@ -183,7 +185,7 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CURSOR_DRIVER_KIND]: 'composer-2',
   [CORAL_DRIVER_KIND]: 'qwen3.8:27b-mlx',
   [GEMINI_DRIVER_KIND]: 'auto',
-  [ANTIGRAVITY_DRIVER_KIND]: 'default',
+  [ANTIGRAVITY_DRIVER_KIND]: ANTIGRAVITY_DEFAULT_MODEL,
   [OPENCODE_DRIVER_KIND]: 'openai/gpt-5',
 }
 

@@ -1,260 +1,213 @@
 // tests/apps/server/textGeneration/AntigravityTextGeneration.test.ts
-// verify isolated Antigravity one-shot JSON generation
+// verifies isolated official antigravity helpers and fail-closed tool boundaries
 
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
-import * as NodeFS from 'node:fs'
-import * as NodeOS from 'node:os'
-import * as NodePath from 'node:path'
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
-import { it } from '@effect/vitest'
-import { AntigravitySettings, ProviderInstanceId } from '@t3tools/contracts'
+import { expect, it } from '@effect/vitest'
+import { ProviderInstanceId } from '@t3tools/contracts'
 import { createModelSelection } from '@t3tools/shared/model'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
-import { expect } from 'vite-plus/test'
+import * as Stream from 'effect/Stream'
 
-import { makeAntigravityTextGeneration } from '../../../../apps/server/src/textGeneration/AntigravityTextGeneration.ts'
+import {
+  makeAntigravityTextGeneration,
+  type AntigravityTextGenerationOptions,
+} from '../../../../apps/server/src/textGeneration/AntigravityTextGeneration.ts'
 
-const decodeAntigravitySettings = Schema.decodeSync(AntigravitySettings)
+type Runtime = Effect.Success<ReturnType<AntigravityTextGenerationOptions['makeRuntime']>>
+const sessionId = '123e4567-e89b-42d3-a456-426614174000'
+const modelSelection = createModelSelection(ProviderInstanceId.make('antigravity'), 'test-model')
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-function shellSingleQuote(value: string): string
+const makeHarness = Effect.fn('AntigravityTextGenerationTest.makeHarness')(function* (
+  mode: 'success' | 'tool' | 'oversized' = 'success',
+)
 {
-  return `'${value.replaceAll("'", `'"'"'`)}'`
-}
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const profileDirectory = yield* fs.makeTempDirectoryScoped({
+    prefix: '456code-agy-text-profile-',
+  })
+  const launches: string[] = []
+  const prompts: string[] = []
+  let closed = 0
+  let onUpdate: Parameters<Runtime['handleSessionUpdate']>[0] | undefined
+  let onRead: Parameters<Runtime['handleReadTextFile']>[0] | undefined
+  const runtime: Runtime = {
+    start: () =>
+      Effect.succeed({
+        sessionId,
+        initializeResult: { protocolVersion: 1 },
+        sessionSetupResult: { sessionId },
+        modelConfigId: 'model',
+      }),
+    setMode: () => Effect.succeed({}),
+    getConfigOptions: Effect.succeed([
+      {
+        id: 'model',
+        name: 'Model',
+        type: 'select',
+        category: 'model',
+        currentValue: 'test-model',
+        options: [{ value: 'test-model', name: 'Test model' }],
+      },
+    ]),
+    setModel: () => Effect.void,
+    getEvents: () => Stream.empty,
+    cancel: Effect.void,
+    handleSessionUpdate: (handler) =>
+      Effect.sync(() =>
+      {
+        onUpdate = handler
+      }),
+    handleReadTextFile: (handler) =>
+      Effect.sync(() =>
+      {
+        onRead = handler
+      }),
+    handleWriteTextFile: () => Effect.void,
+    handleRequestPermission: () => Effect.void,
+    handleElicitation: () => Effect.void,
+    handleCreateTerminal: () => Effect.void,
+    handleTerminalOutput: () => Effect.void,
+    handleTerminalWaitForExit: () => Effect.void,
+    handleTerminalKill: () => Effect.void,
+    handleTerminalRelease: () => Effect.void,
+    handleUnknownExtRequest: () => Effect.void,
+    prompt: (input) =>
+      Effect.gen(function* ()
+      {
+        prompts.push(
+          input.prompt.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n'),
+        )
+        if (mode === 'tool')
+        {
+          if (onRead === undefined) return yield* Effect.die('Read guard was not installed')
+          yield* onRead({ sessionId, path: path.join(profileDirectory, 'secret') })
+        }
+        if (onUpdate === undefined) return yield* Effect.die('Update listener was not installed')
+        yield* onUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'text',
+              text:
+                mode === 'oversized'
+                  ? 'x'.repeat(128_001)
+                  : encodeJson({
+                      subject: 'Use isolated helpers',
+                      body: 'Keep the workspace untouched.',
+                    }),
+            },
+          },
+        })
+        return { stopReason: 'end_turn' as const }
+      }),
+  }
+  const service = yield* makeAntigravityTextGeneration({
+    profileDirectory,
+    makeRuntime: (cwd) =>
+      Effect.gen(function* ()
+      {
+        launches.push(cwd)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() =>
+          {
+            closed += 1
+          }),
+        )
+        return runtime
+      }),
+    withProcess: (_stop, task) => task,
+  })
+  return { service, profileDirectory, launches, prompts, closed: () => closed }
+})
 
-function makeAntigravityWrapper(input: {
-  readonly dir: string
-  readonly stdout: string
-  readonly stderr?: string
-  readonly exitCode?: number
-  readonly waitForStdinEof?: boolean
-}): { readonly argsPath: string; readonly binaryPath: string }
-{
-  const argsPath = NodePath.join(input.dir, 'args.json')
-  const runnerPath = NodePath.join(input.dir, 'runner.mjs')
-  const binaryPath = NodePath.join(input.dir, 'agy')
-  NodeFS.writeFileSync(
-    runnerPath,
-    [
-      '#!/usr/bin/env node',
-      "import * as NodeFS from 'node:fs'",
-      `NodeFS.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(process.argv.slice(2)))`,
-      ...(input.waitForStdinEof
-        ? [
-            'process.stdin.resume()',
-            "await new Promise((resolve) => process.stdin.once('end', resolve))",
-          ]
-        : []),
-      `process.stdout.write(${JSON.stringify(input.stdout)})`,
-      `process.stderr.write(${JSON.stringify(input.stderr ?? '')})`,
-      `process.exitCode = ${input.exitCode ?? 0}`,
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-  NodeFS.chmodSync(runnerPath, 0o755)
-  NodeFS.writeFileSync(
-    binaryPath,
-    [
-      '#!/bin/sh',
-      `exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(runnerPath)} "$@"`,
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-  NodeFS.chmodSync(binaryPath, 0o755)
-  return { argsPath, binaryPath }
-}
-
-function successEnvelope(response: { readonly subject: string; readonly body: string }): string
-{
-  return `${JSON.stringify({
-    conversation_id: 'antigravity-test-conversation',
-    status: 'SUCCESS',
-    response: JSON.stringify(response),
-  })}\n`
-}
-
-function commitInput(model: string)
+function commitInput()
 {
   return {
-    cwd: process.cwd(),
-    branch: 'feature/antigravity-text-generation',
-    stagedSummary: 'M apps/server/src/textGeneration/AntigravityTextGeneration.ts',
-    stagedPatch: 'diff --git a/AntigravityTextGeneration.ts b/AntigravityTextGeneration.ts',
-    modelSelection: createModelSelection(ProviderInstanceId.make('antigravity'), model),
+    cwd: '/never-provide-the-user-workspace',
+    branch: 'feature/antigravity',
+    stagedSummary: 'M example.ts',
+    stagedPatch: 'diff --git a/example.ts b/example.ts',
+    modelSelection,
   }
 }
 
 it.layer(NodeServices.layer)('AntigravityTextGeneration', (it) =>
 {
-  it.effect('invokes agy with the exact JSON one-shot flags and omits the default model', () =>
+  it.effect(
+    'runs a short-lived official helper outside the user workspace and decodes its JSON',
+    () =>
+      Effect.gen(function* ()
+      {
+        const fs = yield* FileSystem.FileSystem
+        const h = yield* makeHarness()
+        expect(yield* h.service.generateCommitMessage(commitInput())).toEqual({
+          subject: 'Use isolated helpers',
+          body: 'Keep the workspace untouched.',
+        })
+        expect(h.launches).toHaveLength(1)
+        expect(h.launches[0]).not.toBe(commitInput().cwd)
+        expect(h.prompts[0]).toContain('Do not use tools')
+        expect(h.prompts[0]).toContain('diff --git')
+        expect(h.closed()).toBe(1)
+        expect(yield* fs.exists(h.launches[0]!)).toBe(false)
+      }),
+  )
+
+  it.effect('fails closed for tool requests and oversized output while closing the helper', () =>
     Effect.gen(function* ()
     {
-      const tempDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), 'antigravity-text-generation-'),
-      )
-      const wrapper = makeAntigravityWrapper({
-        dir: tempDir,
-        stdout: successEnvelope({
-          subject: 'Use the Antigravity default',
-          body: 'The default model is selected by the CLI.',
-        }),
-        waitForStdinEof: true,
-      })
-      const textGeneration = yield* makeAntigravityTextGeneration(
-        decodeAntigravitySettings({ binaryPath: wrapper.binaryPath, sandbox: true }),
-        { PATH: process.env.PATH ?? '' },
-      )
-
-      const generated = yield* textGeneration.generateCommitMessage({
-        ...commitInput('default'),
-      })
-
-      expect(generated).toEqual({
-        subject: 'Use the Antigravity default',
-        body: 'The default model is selected by the CLI.',
-      })
-      const args = JSON.parse(
-        NodeFS.readFileSync(wrapper.argsPath, 'utf8'),
-      ) as ReadonlyArray<string>
-      expect(args[0]).toBe('-p')
-      expect(args[1]).toContain('Staged patch:')
-      expect(args.slice(2)).toEqual(['--output-format', 'json', '--sandbox'])
+      for (const mode of ['tool', 'oversized'] as const)
+      {
+        const h = yield* makeHarness(mode)
+        const error = yield* Effect.flip(h.service.generateCommitMessage(commitInput()))
+        expect(error._tag).toBe('TextGenerationError')
+        expect(error.detail).toMatch(mode === 'tool' ? /tool|user input/i : /output limit/i)
+        expect(h.closed()).toBe(1)
+      }
     }),
   )
 
-  it.effect('passes a non-default model and disables the native sandbox when configured', () =>
+  it.effect('does not launch helpers for unsafe global hooks, including attachment metadata', () =>
     Effect.gen(function* ()
     {
-      const tempDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), 'antigravity-text-generation-'),
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const h = yield* makeHarness()
+      yield* fs.makeDirectory(path.join(h.profileDirectory, 'config'), { recursive: true })
+      yield* fs.writeFileString(
+        path.join(h.profileDirectory, 'config', 'hooks.json'),
+        encodeJson({ hooks: { startup: 'command' } }),
       )
-      const wrapper = makeAntigravityWrapper({
-        dir: tempDir,
-        stdout: successEnvelope({
-          subject: 'Use the selected model',
-          body: 'The wrapper received the explicit model.',
-        }),
-      })
-      const textGeneration = yield* makeAntigravityTextGeneration(
-        decodeAntigravitySettings({ binaryPath: wrapper.binaryPath, sandbox: false }),
-        { PATH: process.env.PATH ?? '' },
+      expect((yield* Effect.flip(h.service.generateCommitMessage(commitInput()))).detail).toMatch(
+        /global hooks|MCP/i,
       )
-
-      yield* textGeneration.generateCommitMessage({
-        ...commitInput('gemini-3.5-flash'),
-      })
-
-      const args = JSON.parse(
-        NodeFS.readFileSync(wrapper.argsPath, 'utf8'),
-      ) as ReadonlyArray<string>
-      expect(args.slice(2)).toEqual(['--output-format', 'json', '--model', 'gemini-3.5-flash'])
-    }),
-  )
-
-  it.effect('decodes a successful terminal envelope and reports CLI terminal errors', () =>
-    Effect.gen(function* ()
-    {
-      const tempDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), 'antigravity-text-generation-'),
-      )
-      const wrapper = makeAntigravityWrapper({
-        dir: tempDir,
-        stdout: JSON.stringify({
-          conversation_id: 'antigravity-error-conversation',
-          status: 'ERROR',
-          response: '',
-          error: 'invalid model selection',
-        }),
-        exitCode: 1,
-      })
-      const textGeneration = yield* makeAntigravityTextGeneration(
-        decodeAntigravitySettings({ binaryPath: wrapper.binaryPath }),
-        { PATH: process.env.PATH ?? '' },
-      )
-
-      const error = yield* Effect.flip(
-        textGeneration.generateCommitMessage(commitInput('gemini-3.5-flash')),
-      )
-      expect(error._tag).toBe('TextGenerationError')
-      expect(error.detail).toContain('invalid model selection')
-    }),
-  )
-
-  it.effect('rejects malformed terminal envelopes', () =>
-    Effect.gen(function* ()
-    {
-      const tempDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), 'antigravity-text-generation-'),
-      )
-      const wrapper = makeAntigravityWrapper({
-        dir: tempDir,
-        stdout: JSON.stringify({
-          status: 'SUCCESS',
-          response: '{"subject":"missing envelope fields"}',
-        }),
-      })
-      const textGeneration = yield* makeAntigravityTextGeneration(
-        decodeAntigravitySettings({ binaryPath: wrapper.binaryPath }),
-        { PATH: process.env.PATH ?? '' },
-      )
-
-      const error = yield* Effect.flip(textGeneration.generateCommitMessage(commitInput('default')))
-      expect(error._tag).toBe('TextGenerationError')
-      expect(error.detail).toMatch(/invalid terminal JSON envelope/i)
-    }),
-  )
-
-  it.effect('rejects oversized stdout before decoding an envelope', () =>
-    Effect.gen(function* ()
-    {
-      const tempDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), 'antigravity-text-generation-'),
-      )
-      const wrapper = makeAntigravityWrapper({
-        dir: tempDir,
-        stdout: 'x'.repeat(2 * 1024 * 1024 + 1),
-      })
-      const textGeneration = yield* makeAntigravityTextGeneration(
-        decodeAntigravitySettings({ binaryPath: wrapper.binaryPath }),
-        { PATH: process.env.PATH ?? '' },
-      )
-
-      const error = yield* Effect.flip(textGeneration.generateCommitMessage(commitInput('default')))
-      expect(error._tag).toBe('TextGenerationError')
-      expect(error.detail).toMatch(/stdout exceeded the 2097152-byte limit/i)
-    }),
-  )
-
-  it.effect('rejects attachments before attempting to spawn agy', () =>
-    Effect.gen(function* ()
-    {
-      const textGeneration = yield* makeAntigravityTextGeneration(
-        decodeAntigravitySettings({ binaryPath: '/definitely/missing/agy' }),
-        { PATH: process.env.PATH ?? '' },
-      )
-
-      const error = yield* Effect.flip(
-        textGeneration.generateThreadTitle({
-          cwd: process.cwd(),
-          message: 'Name this thread from the screenshot.',
-          attachments: [
-            {
-              type: 'image',
-              id: 'antigravity-image-1',
-              name: 'screenshot.png',
-              mimeType: 'image/png',
-              sizeBytes: 42,
-            },
-          ],
-          modelSelection: createModelSelection(ProviderInstanceId.make('antigravity'), 'default'),
-        }),
-      )
-      expect(error._tag).toBe('TextGenerationError')
-      expect(error.operation).toBe('generateThreadTitle')
-      expect(error.detail).toMatch(/supports text input only/i)
+      expect(
+        (yield* Effect.flip(
+          h.service.generateThreadTitle({
+            cwd: commitInput().cwd,
+            message: 'Name this thread',
+            attachments: [
+              {
+                type: 'image',
+                id: 'image-1',
+                name: 'image.png',
+                mimeType: 'image/png',
+                sizeBytes: 42,
+              },
+            ],
+            modelSelection,
+          }),
+        )).detail,
+      ).toMatch(/global hooks|MCP/i)
+      expect(h.launches).toEqual([])
     }),
   )
 })

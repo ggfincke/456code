@@ -576,6 +576,13 @@ export const OrchestrationSessionStatus = Schema.Literals([
 ])
 export type OrchestrationSessionStatus = typeof OrchestrationSessionStatus.Type
 
+export const ProviderContinuationIncompatibility = Schema.Struct({
+  currentSource: Schema.Literal('antigravity.stream-json'),
+  requiredSource: Schema.Literal('antigravity.official-acp'),
+  bindingGeneration: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+})
+export type ProviderContinuationIncompatibility = typeof ProviderContinuationIncompatibility.Type
+
 export const OrchestrationSession = Schema.Struct({
   threadId: ThreadId,
   status: OrchestrationSessionStatus,
@@ -584,6 +591,7 @@ export const OrchestrationSession = Schema.Struct({
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   activeTurnId: Schema.NullOr(TurnId),
   lastError: Schema.NullOr(TrimmedNonEmptyString),
+  continuationIncompatibility: Schema.optionalKey(ProviderContinuationIncompatibility),
   updatedAt: IsoDateTime,
 })
 export type OrchestrationSession = typeof OrchestrationSession.Type
@@ -1290,6 +1298,16 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+const ThreadProviderContinuationClearCommand = Schema.Struct({
+  type: Schema.Literal('thread.provider-continuation.clear'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedProviderInstanceId: ProviderInstanceId,
+  expectedBindingGeneration: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  expectedSource: Schema.Literal('antigravity.stream-json'),
+  createdAt: IsoDateTime,
+})
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -1318,6 +1336,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadOrchestratePlanRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadProviderContinuationClearCommand,
 ])
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type
@@ -1350,6 +1369,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadOrchestratePlanRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadProviderContinuationClearCommand,
 ])
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type
 
@@ -1603,6 +1623,7 @@ export const OrchestrationEventType = Schema.Literals([
   'thread.checkpoint-revert-requested',
   'thread.reverted',
   'thread.session-stop-requested',
+  'thread.provider-continuation-clear-requested',
   'thread.session-set',
   'thread.proposed-plan-upserted',
   'thread.orchestrate-plan-upserted',
@@ -1903,6 +1924,14 @@ export const ThreadSessionStopRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+export const ThreadProviderContinuationClearRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  expectedProviderInstanceId: ProviderInstanceId,
+  expectedBindingGeneration: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  expectedSource: Schema.Literal('antigravity.stream-json'),
+  createdAt: IsoDateTime,
+})
+
 export const ThreadSessionSetPayload = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
@@ -2131,6 +2160,11 @@ const knownOrchestrationEventMembers = [
     ...EventBaseFields,
     type: Schema.Literal('thread.session-stop-requested'),
     payload: ThreadSessionStopRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.provider-continuation-clear-requested'),
+    payload: ThreadProviderContinuationClearRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

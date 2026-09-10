@@ -1,24 +1,58 @@
 <!-- .plans/t3-nightly-reconciliation-20260904.md -->
-<!-- maintain the frozen 805-commit t3 reconciliation and checkpoint record -->
+<!-- maintain the frozen 894-commit t3 reconciliation and checkpoint record -->
 
 # Revised T3 reconciliation, including official Antigravity ACP
 
 ## Status and authority
 
 This is the maintained implementation source of truth approved on 2026-09-04 and expanded on
-2026-09-07. Work proceeds one PR at a time. Each PR still receives a verified checkpoint and ledger
-receipt, but the user's continuation approval waives routine per-PR pauses and authorizes the planned
-source-attributed commit, PR, green-CI, merge, and exact merged-main verification sequence.
+2026-09-07 and 2026-09-09. The latest approval replaces the twelve remaining publication rounds with
+four concern groups while retaining every previously approved behavior and acceptance contract.
+Implementation remains in the existing integration worktree. The approved code-first phase has
+completed its source reconciliation and focused verification campaign. Groups 1-3 are merged;
+Group3 merged-main CI and Group4 publication/authenticated acceptance remain pending. The exact
+publication receipts below supersede the historical authoring checkpoints. Never merge a failing checkpoint.
 Work must still stop for a material scope or behavior change, unavailable required gate, external
-authority beyond this plan, or PR 5's human personal-Google OAuth actions. Approved integrated
+authority beyond this plan, or Group 4's human personal-Google OAuth acceptance. The OAuth gate does not
+block implementation of later approved groups. Approved integrated
 gates may issue and consume pairing credentials only inside their run-owned disposable state. Use
 only the plan's approved `fix/` or `sync/` branches; do not create `codex/` reconciliation branches.
 
 Current state:
 
-- Published `origin/main` baseline: `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`.
-- The original local `main` checkout is clean and synchronized at
-  `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`.
+- Current published `origin/main`: Product merge `2f07d1c6b6e1cd449223a6f8fe58e68006807aeb`;
+  exact merged-main CI `34414303985` is running, not yet green.
+- The last verified original local `main` fast-forward is clean at Clients merge
+  `46af8fce1425769464a0bcf9f6326fa5723efa81`, whose exact merged-main CI `34411782025` passed.
+  No later local-main fast-forward is claimed while Product's main gate is pending.
+- Core [PR #107](https://github.com/ggfincke/456code/pull/107): 51 source adaptations, final head
+  `84273419180046d2b9e65e1107df5b122d5e367e`, merge
+  `cae2cb796cda461f1e28212d9659b62c463cd7ce`; final PR checks and exact main CI `34401599862`
+  passed. Importer repair `98e5f9005ac4029d764f478d813acdd9cd7feca8` and final fixture repair
+  remain separate from source behavior.
+- Clients [PR #108](https://github.com/ggfincke/456code/pull/108): 73 source contributions across
+  69 unique rows, final head `b346a6275d54719eca676cf31b39b260bc9f81fd`, merge
+  `46af8fce1425769464a0bcf9f6326fa5723efa81`. Final PR checks passed/conditionally skipped;
+  targeted Windows rerun `34407537538` attempt2 and exact main CI `34411782025` passed.
+  The final head adds only two native fixture mocks; source contributions are unchanged.
+- Product [PR #109](https://github.com/ggfincke/456code/pull/109): 26 source contributions plus
+  separate fork integration/document units, head `139f13acaf110787875c082c30134e4829943699`,
+  merge `2f07d1c6b6e1cd449223a6f8fe58e68006807aeb`, exact tree
+  `083d17d3aa1390519c4667cfffc5aafde231eff6`. All applicable PR checks in `34412777145`
+  passed/conditionally skipped. Exact merged-main CI `34414303985` remains running.
+- Official Antigravity has 16 nonempty private source adaptations above the Product merge,
+  each mapped by exact source/adaptation SHA in the ledger. Selected code tree
+  `6dec0dca7733858abbe872ffc0b41e46504ff6d0` passed the selected local gates described below.
+  No Group4 PR, hosted CI, merge, or authenticated Google acceptance is claimed.
+- Final inventory: 894 unique contiguous rows and full SHAs; 72 historical published rows,
+  51 Core rows, 67 other Clients rows (two overlap Core), 26 Product rows, 16 private Group4
+  rows, 27 equivalent, 41 partial, 48 inapplicable, nine obsolete and 537 excluded/deferred.
+  These disjoint counts total894. No unreviewed row or approved source repair remains open.
+  Exact retained-owner/partial limits do not imply extra upstream commits.
+- This plan and the final ledger are approved for one separate final fork documentation unit
+  in Group4. Its eventual delivery head is an external PR receipt, not a circular self-reference.
+
+Historical predecessor receipts (unchanged):
 - Published predecessor: original Group 1, sources `c78ae50a5`, `2a7a449cc`, `f90e2f2bd`, and
   `d2042d288`, merged through PR #91. Its four source-attributed fork commits and the merge commit are
   recorded in the ledger; PR and merged-main CI were green.
@@ -85,22 +119,63 @@ Current state:
   successful and three intentional skipped checks. PR #105 merged through exact merge
   `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`, and exact merged-main CI run
   [34278388492](https://github.com/ggfincke/456code/actions/runs/34278388492) completed successfully.
-- Active delivery unit: **PR 4 — Skills / workspaces** on
-  `sync/t3-skills-workspaces-20260907`, based on exact green merged `main`
-  `7fba0c055a344e6eb2f61e45dd1fe9183dffcfbc`. Seven exact sources are allocated. Sources
-  `ea71a19d4181ce13b0e8f374f45ba9237ee4a9ce`,
-  `80a14b6588f0e856983e6d10002cde9e00e9d3e2`,
-  `15fea6c5f40331c8325f33bd08b2dcbf924e935a`,
-  `18573d60aab1344bf124a044b01445086e910c4c`,
-  `2152d44de2db30a6bae965b0afd30be080e5c872`,
-  `087cfb8ae262f344f7e409f5a8c0eda6f0ef12f9`, and
-  `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` are locally implemented and verified in coherent
-  source-attributed fork commits. Final combined gates and primary integrated web acceptance passed;
-  publication and hosted CI remain pending.
-- Active worktree: `/Users/ggfincke/Projects/Experiments/456code-t3-reconciliation-20260907`.
-- PRs 5-16 are approved plan scope but remain planned, not implemented. Each starts only from the
-  preceding green merged `main`.
-- The exact source inventory is [the 805-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
+- Published PR 4: [PR #106](https://github.com/ggfincke/456code/pull/106) published the seven
+  source-attributed Skills / workspaces adaptations at exact head
+  `e192efd4069a2801acebba88f59011d488f02221`, including the scoped mobile test-fixture repair.
+  Exact-head CI run
+  [34289294904](https://github.com/ggfincke/456code/actions/runs/34289294904) completed with 19
+  successful and three intentional skipped checks. PR #106 merged through exact merge
+  `380adafaf6fa30a481962ece4678d425bb9e94fb`, and exact merged-main CI run
+  [34290793175](https://github.com/ggfincke/456code/actions/runs/34290793175) completed successfully
+  with 15 successful jobs and one intentional skip.
+- Active worktree:
+  `/Users/ggfincke/Projects/Worktrees/456code/456code-t3-reconciliation-20260907` on
+  `sync/t3-antigravity-runtime-20260907`, based on exact green merged `main`
+  `380adafaf6fa30a481962ece4678d425bb9e94fb`.
+- The 2026-09-09 pre-implementation inventory found 138 changed tracked files and 46 untracked files,
+  with nothing staged or committed after the baseline. This is a shared integration tree; these
+  counts are a checkpoint, not an ownership claim.
+- Group 1's focused server/runtime, shared-package, CLI, compaction, asynchronous-question,
+  settlement, checkpoint, terminal and replay checks, affected typechecks and server bundle passed.
+  Its exact source partition is published in PR107 above. Mocked Cursor compaction routing/recovery
+  is not real Codex native-compaction or context-shrink proof.
+- Group 2, Clients and media, has passed affected web, mobile, desktop, and shared media/directive
+  tests, client typechecks, web/desktop builds, automated iOS export, and generic iOS Simulator SDK
+  compilation without launching a device. Primary web acceptance exercised authenticated images,
+  file navigation, citation persistence/edit/send, and supported failure recovery. Remaining client
+  acceptance limits remain explicit; source partition and hosted delivery are recorded in PR108 above.
+- Group 3, Product completion, has passed its focused backend and client checks. Primary web
+  acceptance exercised effective project actions, manual ordering across reload and compaction,
+  opt-in host balancing controls, pricing preparation, and onboarding behavior. This does not close
+  all defaults/eligible-host acceptance or the absent automatic-pull policy disposition.
+- Group 4's selected campaign passed 25 files/549 tests (server21/458, web2/74, mobile2/17), seven
+  affected-package typechecks, server bundle and scoped statics. These overlap the earlier13/196
+  AGY and4/71 ACP-neighbor receipts. Row350's later exact banner repair passed five banner tests
+  and web type/static checks; source `d487dfbf46be344e818725be70ee04be2436bfb4` owns only that
+  applicable web slice, not foundation239's native continuation or fork legacy-reset integration.
+  The primary installed the managed1.1.1 runtime and reached the Google account chooser, but the
+  sign-in attempt expired without completing personal OAuth. The post-restart diagnostic check
+  retained the real unauthenticated/sign-in message. Account/model/tool/permission/cancel/resume/
+  legacy-transition/logout acceptance remains required before Group4 merge.
+- Historical early Electron checkpoint: real Electron launched from the built desktop/server
+  bundles in disposable state. Empty-import
+  **Continue without importing** passed; further native UI verification was limited by intermittent
+  `noWindowsAvailable`/`elementHasNoFrame` and browser-discovery HTML parsing failures. The observed
+  disconnected composer remains unresolved: shared logs include repeated `/ws` 401 responses but
+  also an authenticated WebSocket session; the concurrently open browser prevents attributing every
+  failed handshake to Electron. No authentication defect or successful full Electron pass is claimed.
+- Later primary Electron acceptance passed normal capture, annotation/image attachment, popup
+  roundtrip and guest/popup edit/context menus. These later checks supersede the early connection
+  limitation as the final exercised flow receipt, without asserting every native UI interaction.
+- The consolidated campaign was focused, not a full local workspace suite. The shared integration
+  worktree remains preserved at baseline380ada; private source partitioning and remote publication
+  did not authorize resetting it. Group1-3 delivery and Group4's remaining acceptance are recorded
+  above, not inferred from an earlier local test pass. Run-owned integrated servers/watchers were
+  stopped after the completed checks; disposable Antigravity state remains for human acceptance.
+- The exact source inventory is [the 894-row ledger](./t3-nightly-reconciliation-20260904-ledger.md).
+- The self-contained [core publication partition](./t3-nightly-reconciliation-20260904-core-publication.md)
+  records exact shared-file boundaries, source attribution, dependencies and focused core receipts.
+  Its provisional extraction labels are historical; the exact PR107 receipt above is authoritative.
 
 ## Frozen upstream universe
 
@@ -116,36 +191,44 @@ The reconciliation universe is fixed and must not grow silently:
    `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` through inclusive
    `0d34579d674920cc47fc5c908494f51ed3895204`. They occupy rows 469-805; the first is
    `89ee69e4430b21ee14565abf5c34dae43f38c1d8` and the last is the new cutoff.
-4. Total: 805 distinct upstream commits. Official Antigravity foundation `06336460c` is row 239 in
+4. 89 additional non-merge commits, exclusive of
+   `0d34579d674920cc47fc5c908494f51ed3895204` through inclusive
+   `6c583620ff7ad3235b135af7107c0543467eecfa`. GitHub compare reported `ahead_by=89`, with first
+   commit `3bf74eb6dce3e1372cfafc2ca84825f4b13bae6a` and no merge commits.
+5. Total: 894 distinct upstream commits. Official Antigravity foundation `06336460c` is row 239 in
    the previously audited first range and is therefore included, not an extension.
 
 The first 468 ledger rows retain their exact API-derived commit order and metadata. Rows 469-805 use
 the locally available upstream objects to record chronological non-merge order, full SHA, first-line
 title, source author, original author date, and commit-local touched paths. A title is never evidence
-of equivalence, inapplicability, or implementation.
+of equivalence, inapplicability, or implementation. Rows 806-894 use the read-only GitHub commit API
+for the same metadata and commit-local path inventory. The latest approval assigns only its named
+additional fixes; every other new row is explicitly deferred without claiming equivalence or
+inapplicability.
 
 After Group 02's exact merged-main gate, the verified `upstream` URL fetched only frozen cutoff
 `82f64cd8d046ab4ee8588f7bcbc1e66a4a0c80fe` into `FETCH_HEAD` with `--no-tags` so later groups can
 inspect complete source objects. `upstream/main` remained exactly
 `fff33f9e851912363c5b1f3ac65598be35eb5f0d`; no upstream branch, tag, or newer intake moved.
 
-The refreshed local `upstream/main` is exactly the approved cutoff
-`0d34579d674920cc47fc5c908494f51ed3895204`. Anything after that commit is a separate unapproved
-range. Do not add it to this plan or ledger without a new decision.
+Published upstream `main` and nightly `v0.0.41-nightly.20260909.1439` both identify the approved audit
+ceiling `6c583620ff7ad3235b135af7107c0543467eecfa`. Do not expand implementation or ledger intake past
+that exact commit. Report later upstream changes separately.
 
 ## Working and preservation rules
 
-- Preserve the intentionally dirty original checkout, including its exact three-file checkpoint/VCS
-  source diff, plus all unrelated staged, untracked, ignored, credential-bearing, worktree, branch,
-  process, simulator, installation, and cache state.
+- Preserve the clean original checkout at the published baseline, plus all unrelated staged,
+  untracked, ignored, credential-bearing, worktree, branch, process, simulator, installation, and
+  cache state. The former three-file checkpoint/VCS source diff was published by PR #102 and is no
+  longer an outstanding dirty-state exception.
 - Use only worktree-local dependencies, caches, runtime state, and disposable fixtures. Never link
   dependencies or mutable cache state back to the original checkout.
 - Re-ground HEAD, source SHAs, status manifests, ignored state, process ownership, dependency/cache
   ownership, and applicable repository instructions before each group.
 - Manual adaptation is required. Do not wholesale merge or cherry-pick upstream architectures.
-- At most three non-overlapping implementation workers may be active. Sol owns implementation,
-  tests, and focused reviews: high reasoning for bounded work and xhigh for contracts, persistence,
-  provider lifecycles, authentication, and final integration. Luna may supply bounded source context.
+- At most three non-overlapping implementation workers may be active. The user's latest explicit
+  model instruction replaces the prior Sol/Luna assignment with Astra for the core, client, and
+  product/Official Antigravity workers. Existing edits and approvals carry across the handoff.
 - Read repository, Effect, React, and comment guidance before touching applicable owners. Effect work
   also requires `.repos/effect-smol/LLMS.md` and relevant vendored examples. Do not edit `.repos/`.
 - Tests remain under the mirrored root `tests/` tree. Add only the major regressions approved here.
@@ -154,7 +237,23 @@ range. Do not add it to this plan or ledger without a new decision.
 - Terminate only PR-owned processes and remove only run-owned disposable state. Never download or
   erase simulator runtimes.
 
-## Approved 17-PR delivery map
+## Approved four-PR delivery map
+
+This map supersedes the remaining plan-local PRs 5-16 as publication boundaries. The detailed
+historical source requirements and acceptance contracts below remain authoritative and are carried
+into their mapped concern group; this consolidation does not drop them.
+
+| Publication group | Branch | Carried-forward scope |
+| ---: | --- | --- |
+| **1 — Core reliability** | `sync/t3-core-reconciliation-20260909` | Former PRs 7, 9, 12, and 13: streaming/rendering foundations, asynchronous questions, compaction, runtime/tooling, settlement, and checkpoints. |
+| **2 — Clients and media** | `sync/t3-client-reconciliation-20260909` | Former PRs 8, 10, and 11: assistant media, citations/artifacts, iOS reliability, and web/desktop interactions. |
+| **3 — Product completion** | `sync/t3-product-reconciliation-20260909` | Former PRs 14-16: usage limits/pricing, project defaults, onboarding/import, manual ordering, opt-in balancing, and provider-independent custom-model metadata. |
+| **4 — Official Antigravity** | `sync/t3-antigravity-runtime-20260907` | Former PRs 5-6: managed ACP, personal OAuth, legacy transition, catalogs, workspace discovery, and subagents. |
+
+Antigravity-specific dependencies and acceptance do not enter or block Groups 1-3. Group 4 remains
+pinned to ACP 1.1.1 and retains its mandatory human personal-Google acceptance gate before merge.
+
+## Superseded 17-PR planning map
 
 This map supersedes the earlier 27-group delivery sequence for all work not already merged in
 PRs #91-#100. The older mapping and detailed contracts remain below as historical source-requirement
@@ -1341,7 +1440,7 @@ The fork-specific checkpoint-turn-start failure repair was published from
 `d9d513bf9e544f9324b94763c63dfe9fb09b6e12`, and exact merged-main CI run
 [34171682069](https://github.com/ggfincke/456code/actions/runs/34171682069) completed successfully.
 The original `main` checkout is clean and synchronized to that exact commit. PR 0 is fork-specific,
-has no upstream source SHA, and therefore consumes no row in the frozen 805-row ledger.
+has no upstream source SHA, and therefore consumes no row in the now-frozen894-row ledger.
 
 ## PR 1 implementation checkpoint
 
@@ -1763,8 +1862,7 @@ export bundled 3,330 modules in 16.371 seconds to the ignored disposable output
 `/tmp/t3code-pr4-ios-export.z1jRTH`; no native rebuild, simulator, or manual iOS gate ran. Final
 changed TypeScript/TSX Prettier, Vite+ lint, JS comments/header, committed-range diff, and worktree
 diff checks passed; lint reported only known React/compiler warnings and an existing unused Cursor
-test helper. Independent peer review found no actionable issue. Publication and hosted CI remain
-pending. A run-owned
+test helper. Independent peer review found no actionable issue. A run-owned
 success-only Cursor fixture is prepared under
 `/private/tmp/t3code-pr4-cursor-fixture.gwrHgf` with all legacy providers disabled before first boot,
 one isolated custom Cursor instance, an ACP-mock wrapper, a machine skill, and two distinct disposable
@@ -1778,34 +1876,281 @@ Global. Selecting Beta Review with Cursor's valid `default` model sent exact ACP
 stable, a full browser reload preserved the same exact-CWD catalogs and successful skill-send result;
 the implementation owner confirmed the subsequent source commit contained no behavior edits. The
 owned browser tab closed and dev session `22612` stopped with exit 130. Three inspected,
-secret-free screenshots remain in the fixture directory pending GitHub upload:
+secret-free screenshots were published in
+[PR comment 5593042686](https://github.com/ggfincke/456code/pull/106#issuecomment-5593042686):
 `pr4-failed-workspace-fallback.png` (31,543 bytes), `pr4-beta-recovered.png` (33,623 bytes), and
 `pr4-skill-send-reload.png` (43,223 bytes). No repository-owned PR assets were created.
+
+[PR #106](https://github.com/ggfincke/456code/pull/106) published the seven source-attributed commits
+and plan receipt. Its first hosted run, `34288542065`, exposed one test-environment import failure in
+the existing mobile composer-hook fixture after the new state boundary entered that fixture's module
+graph; 625 other mobile tests passed. Fork-only test repair
+`e192efd4069a2801acebba88f59011d488f02221` supplied the existing schema-valid provider catalog
+fields and mocked the new state boundary without changing production behavior or weakening either
+original assertion block. Its focused hook gate passed one file/two tests, the combined mobile gate
+passed three files/35 tests, mobile typecheck and scoped static checks passed, and replacement
+exact-head CI run [34289294904](https://github.com/ggfincke/456code/actions/runs/34289294904)
+completed with 19 successful and three intentional skipped checks. PR #106 merged as
+`380adafaf6fa30a481962ece4678d425bb9e94fb` at `2026-09-08T23:28:17Z`; exact merged-main CI run
+[34290793175](https://github.com/ggfincke/456code/actions/runs/34290793175) completed successfully
+with 15 successful jobs and one intentional skip.
+
+After the screenshots were published, the run-owned fixture and ignored iOS export were moved
+recoverably to Trash. The original clean `main` checkout and the integration worktree were advanced
+to exact merged-green `380adafaf6fa30a481962ece4678d425bb9e94fb`. The merged PR 4 local,
+live-origin, and origin-tracking refs at exact head
+`e192efd4069a2801acebba88f59011d488f02221` were compare-and-deleted after holder, identity,
+ancestry, and lease checks; all three reconciliation backup refs and unrelated worktrees remained
+untouched.
+
+## Historical PR 5 kickoff checkpoint
+
+This kickoff records an earlier authoring state. Current four-group publication and the16-source
+Group4 allocation at the top of this plan supersede its pending labels.
+
+PR 5 starts from exact green merged `main`
+`380adafaf6fa30a481962ece4678d425bb9e94fb` on
+`sync/t3-antigravity-runtime-20260907`. Nine sources are allocated to the
+Official Antigravity vertical slice: `06336460c9988f29c71e839c4c9c840c4552e077`,
+`e01c153c18a94a2aa33df7115c6cfee1eb09880f`,
+`f25e4428961982e3935300cfd3c78f7d0fac4ee9`,
+`eb334ca57448742139fb8ec38fb397c1e51c45c5`,
+`8ea52c8f2f4361e875d72ab30d72d37cfae4d87f`,
+`d487dfbf46be344e818725be70ee04be2436bfb4`, and
+`912276bcd9ca258ad9309727df8e279e5ab698f8`, plus expanded-intake corrections
+`6349a0e68a958cc51b7b5198683c1d1db88b8d28` and
+`c8872fd22aadb8d155f1bedc10576d8314f93e56`. Implementation is now underway across scoped owners;
+the web/iOS setup and explicit legacy-transition slice is code-ready but not yet part of the deferred
+consolidated verification, personal-Google OAuth acceptance, commit, push, or pull-request receipt.
+
+## Product code-written checkpoint, 2026-09-09
+
+This is a source-authoring receipt, not a verification or publication receipt. The shared integration
+branch remains based on `380adafaf6fa30a481962ece4678d425bb9e94fb`; no test, build, typecheck, lint,
+formatter, service launch, staging, commit, branch creation, or publication was performed by this
+worker during the Astra continuation. The primary still owns consolidated verification and final
+source-attributed publication. Existing usage, onboarding, and Official Antigravity edits were
+preserved rather than treated as newly verified behavior.
+
+| Exact source | Fork source/function ownership | Major mirrored regression ownership |
+| --- | --- | --- |
+| Row 130, `941acb4f919bcef337d4d9e1623101bdc30d3616` | `provider/Layers/ProviderRegistry.mergeProviderModels`, `provider/maintenance/providerStatusCache.mergeProviderModels`, web `provider/modelSelection.ts`: rebuild custom rows from current settings, retaining missing non-custom catalog rows only. | `tests/apps/server/provider/Layers/ProviderRegistry.test.ts`, `tests/apps/server/provider/maintenance/providerStatusCache.test.ts`, `tests/apps/web/modelSelection.test.ts`, and provider-card regression. |
+| Row 447, `5a433244d0b827176df8b76a05959cd1a7a98ce2` | Schema-only `CustomModelMetadata`, shared `readCustomModelEntries`, existing provider snapshot owners, web model selection and `CustomModelMetadataEditor`/provider settings cards. Legacy custom slug arrays remain compatible; orphan metadata cannot create rows. | `tests/packages/shared/model.test.ts`, `tests/apps/server/provider/providerSnapshot.test.ts`, `tests/apps/web/modelSelection.test.ts`, `tests/apps/web/components/settings/ProviderInstanceCard.test.ts`. |
+| Row 678, `9f40b2f563c662b43887b11ff99c466fe871c1af` | Shared sparse project-default resolvers, `ProjectSetupScriptRunner`, core-owned provider/startup consumers, primary-host `ProjectDefaultsSettingsSection`, and client-owned selected-environment new-task defaults. Existing drafts and stored scripts preserve their selections. | Shared `serverSettings.test.ts` covers own-property/prototype-key behavior; existing authored project-script and client new-task regressions cover inheritance. |
+| Row 679, `420fd76f60433fe05b8d2c76f4fbde430dc49968` | Server `diagnostics/HostResources`, authorized RPC and shared `serverEnvironment.readHostResources`, shared weighted chooser, client-owned opt-in settings and new-draft eligible-host selection. Sampling is on demand; only already-connected authorized matching project/provider candidates are considered. | `tests/apps/server/diagnostics/HostResources.test.ts`, `tests/apps/server/ws/rpcAuthorization.test.ts`, `tests/packages/contracts/settings.test.ts`, `tests/packages/client-runtime/load-balancing.test.ts`, and client-owned new-task regression. |
+| Row 715, `2d645df474f0af5e261edb56a79f7a2a9a2d442e` | Optional nullable `activeOrderKey`, reorder command/event path, migration 073, projection storage/query/reducers, shared commands and active sort/move helpers; client owns web/iOS menu mounts. Settlement is core-owned and clears the key; pin/snooze preserve their existing precedence. | Active-order decider, migration 073, projection repository, snapshot/projector fixture updates, and `tests/packages/client-runtime/state/threadSort.test.ts`; client owns the major surface-arrangement regressions. |
+
+The import discovery correction is also code-written: `resolveScanRepositoryIdentity` owns one
+deferred per normalized CWD within a bounded scan, so concurrent requests and missing/failed identity
+lookups do not repeat repository probing. A mirrored discovery regression covers known, missing, and
+failed lookups across fresh scans. The cache is not retained between scans.
+
+Automatic pull remains a specifically excluded source slice: upstream `VcsAutoPullPolicy` and its
+runtime workflow are absent from this fork. The authored helper/schema is not evidence of automatic
+pull behavior, and no live auto-pull switch is exposed. The final approved defaults adaptation excludes
+that separate workflow; it must not be silently inferred from shared defaults.
+
+This early authoring count is superseded by the final894-row disjoint inventory at the top of this
+plan and in the ledger. All rows now have semantic dispositions, with zero unreviewed or unallocated
+rows; local implementation, private source commits, hosted delivery and human acceptance stay distinct.
+
+Publication must split by function/test hunk where shared files span concerns. In particular,
+`server.ts`, `ws.ts`, contracts/settings, and server route fixtures contain both Product and Official
+Antigravity changes. `ProviderAuthService` and `AntigravityInstallation` test-layer mocks belong to
+Group 4, not the capacity/usage Group 3 slice. No Official Antigravity package or auth/install runtime
+dependency may enter Groups 1-3. Human personal-Google acceptance gates Group 4 only.
+
+## Client verification checkpoint, 2026-09-09
+
+The client owner resumed against unchanged baseline
+`380adafaf6fa30a481962ece4678d425bb9e94fb` and the shared unstaged integration tree.
+The changed-file web campaign passed 29 files/477 tests; the changed-file mobile campaign passed
+20 files/178 tests; the desktop campaign passed five files/92 tests. Mobile and desktop typechecks
+passed; web and mobile typechecks also passed after the integration fixes below. Client-runtime's
+five media/directive files passed 27 tests. These are focused affected-client checks, not the full
+workspace suite. The final web production build and automated iOS export passed (3,551 modules,
+18 MB Hermes bytecode); the real desktop bundle was rebuilt successfully after the latest desktop
+source changes. Final
+changed-client formatting, JS comments, and lint passed, with existing lint warnings only.
+
+The empty import step now retains an explicit **Continue without importing** action, using the
+existing completion owner. Its major regression enters the import step, observes an empty scan and
+disabled import action, then completes onboarding without issuing an import. Markdown regression
+assertions distinguish an actual image request from the deliberately retained authored-markdown
+copy metadata. The APNs permission-revocation fixture now binds Effect's HTTP transport to each
+test's current fetch stub and supplies an isolated default response; this removes earlier-test
+transport leakage without changing registration behavior or weakening notification assertions.
+
+Primary integration exposed two product-consumer gaps now repaired within approved defaults/model
+scope. Web action headers, keyboard dispatch, and configured preview URLs and the mobile action menu
+read the same effective script resolver as server startup. An explicit web action edit/add/delete
+materializes the effective list as a per-project settings override; unrelated inherited scripts and
+legacy stored project scripts remain intact. Writer settings retain their exact saved instance/model
+or backend default instead of displaying a silently substituted available provider; the common picker
+shows unavailable routing honestly. The major model-selection regression protects the missing and
+unavailable cases. Usage pricing now also offers exact Claude/Codex catalog model slugs, excluding
+auto/default aliases, so preparing a custom rate does not require a live transcript or provider run.
+The approved row 224 source `9f9359bd8132c425493720080149dcc0d3da9436` usage follow-up exempts
+`serverGetUsageSummary` from slow-RPC warnings,
+including environment-qualified display tags. Its existing request-latency suite passed nine tests;
+scoped formatting, comments and lint passed. The existing desktop quit-gesture suite also passed
+seven tests, including the immediate second-press fallback; this does not establish the separate
+source requirement to clear a first tap after another key is pressed following release.
+
+Primary-owned integrated browser acceptance has independently observed:
+
+- A synthetic Cursor ACP first send completed and rendered response text, code, source navigation,
+  and an authenticated SVG preview decoded at 480 by 180 pixels. Pointer expansion and Escape close
+  worked. The initial close returned focus to the image trigger; the approved composer-restoration
+  correction is now authored and awaits primary recheck.
+- Selecting assistant list text produced a citation chip; saving its comment and reloading retained
+  the chip and comment. Editing and using Command-Enter sent exactly once. The owned fixture saw
+  only the initial prompt and one citation prompt, with the explicit quoted-reference disclaimer and
+  exact environment/thread/message provenance, UTF-16 offsets, text, and comment. A disconnected
+  hot-reload attempt retained the draft without sending; acceptance came from the connected retry.
+- Authenticated image viewing and source-file navigation in the internal file panel succeeded.
+- Sidebar V2's explicit move-down action placed a newer task below the older task. The primary is
+  checking reload persistence separately. Host balancing was opt-in, showed weight 100 for the one
+  connected host without creating another environment, then was restored off. Pre-thread action
+  execution reported the intended start-a-thread guard; a persisted task's action ran through the
+  actual PTY and printed its deterministic output.
+
+Native prebuild completed in the ignored worktree-local iOS directory. CocoaPods installed 147 pods
+from 146 declared dependencies. Generic iOS Simulator SDK compilation passed without a device
+launch, runtime download, or signing; the Xcode MCP compile-only tool could not accept a generic
+destination without a specific simulator, so the native Apple CLI supplies this build-only gate.
+The native Apple build ended with `BUILD SUCCEEDED` for the development workspace, Debug, arm64,
+generic Simulator SDK, with signing disabled. The screens patch's trailing blank context line was
+removed with the hunk count adjusted; reverse-application dry-run passed against the installed
+source. Offline lockfile-only regeneration and a frozen offline lockfile check passed without
+reinstalling dependencies. The screens patch hash is
+`1e26033bf9b0e9cfba23875bc6f031a2bda6e0b9e6067cdd65c44f0c285138c5`.
+An ensuing package-command dependency reconciliation refreshed the installed links; direct local
+test commands subsequently passed and reverse-application dry-run passed against the refreshed
+screens installation. That reconciliation removed the unpacked Electron runtime. The official
+installer for the already-pinned Electron 44.2.0 restored its executable using package checksums
+and a worktree-local download cache; the executable is arm64 Mach-O and its version file is 44.2.0.
+No dependency version was changed or original-checkout installation touched by that restoration.
+No real Electron acceptance, screenshot publication, commit, or PR completion is claimed by this
+checkpoint. Remaining primary integration must be recorded before the client group can be called
+verified.
+
+[The client publication map](./t3-nightly-group2-client-publication-map.md) records shared-file
+hunk ownership and dependency closure. It explicitly does not claim independent split builds or
+promote historical source audit labels whose current owner behavior differs.
+
+## Product and Antigravity verification checkpoint, 2026-09-09
+
+This historical gate receipt superseded the earlier authoring-only receipt for the checks listed
+here. Its then-unstaged baseline was `380adafaf6fa30a481962ece4678d425bb9e94fb`; current publication
+and source-reconciliation state is at the top of this plan and in the final ledger. These automated
+checks do not themselves prove hosted delivery or Google authentication. Human personal-Google
+OAuth remains a mandatory Group4 merge gate.
+
+Focused tests ran from `apps/server` with Node `24.20.0` and
+`pnpm exec vp test run <listed files> --maxWorkers=1`. Test paths below are relative to the mirrored
+`tests/apps/server` tree; package test configuration resolves them without colocating tests.
+
+| Scoped gate | Files and result |
+| --- | --- |
+| Product backend | `usage/UsageSummaryService.test.ts`, `usage/usageTranscripts.test.ts`, `import/discovery.test.ts`, `provider/Layers/ProviderRegistry.test.ts`, `provider/maintenance/providerStatusCache.test.ts`, `provider/providerSnapshot.test.ts`, `provider/providerUsageLimits.test.ts`, `provider/Layers/providerUsageRuntime.test.ts`, `diagnostics/HostResources.test.ts`, `project/ProjectSetupScriptRunner.test.ts`: **10 files, 93 tests passed**. |
+| Official Antigravity | `provider/AntigravityAuth.test.ts`, `provider/AntigravityInstallation.test.ts`, `provider/Drivers/AntigravitySkills.test.ts`, `provider/Layers/ProviderAuthService.test.ts`, `provider/Layers/AntigravityProvider.test.ts`, `provider/Layers/AntigravityAdapter.test.ts`, `provider/acp/AntigravityAcpSupport.test.ts`, `provider/acp/AntigravityProtocol.test.ts`, `provider/antigravityAuthSupport.test.ts`, `provider/antigravityCallback.test.ts`, `provider/antigravityRelease.test.ts`, `provider/providerInstallation.test.ts`, `textGeneration/AntigravityTextGeneration.test.ts`: **13 files, 196 tests passed**. |
+| Shared ACP neighbors | `provider/acp/AcpCoreRuntimeEvents.test.ts`, `provider/acp/AcpRuntimeModel.test.ts`, `provider/Layers/GeminiAdapter.test.ts`, `provider/Layers/GrokAdapter.test.ts`: **four files, 71 tests passed** after the startup-metadata repair. |
+| Final repair/format regression | `provider/Layers/ClaudeAdapter.test.ts`, `usage/UsageSummaryService.test.ts`, `provider/AntigravityInstallation.test.ts`, `provider/Layers/AntigravityAdapter.test.ts`, `textGeneration/AntigravityTextGeneration.test.ts`: **five files, 143 tests passed**, including all 94 Claude adapter tests. This overlaps the earlier gates and is not an additional unique-test count. |
+
+The owned 61-file source/test scope passed targeted lint, JS comment checks, formatter check, and
+`git diff --check`. The core owner separately reported the final affected server typecheck passing;
+that is shared-owner evidence, not a duplicate typecheck claim. No full workspace suite ran here.
+
+The usage regression protects the actual empty-history boundary: absent standard Claude/Codex
+history directories are empty success, while a genuine unreadable/malformed directory remains a
+reported partial failure. Summary discovery now scopes its settings clone to Claude/Codex before
+scanning; enabled unrelated ACP providers cannot trigger external discovery or contaminate usage
+status. Price settings remain based on the original settings. The Claude adapter publishes a
+rejected usage-window warning once per active turn without republishing an unchanged account limit.
+
+Official ACP startup now serializes the start transition with native updates, retaining only the
+latest bounded command/config metadata per session and update type. Only exact-root metadata is
+replayed; foreign-session metadata and startup content remain excluded. The managed native command
+catalog is exercised through the opt-in ACP mock, including removal of `/logout` in favor of the
+existing authenticated setup operation. Native approval options and thought-stream identity survive
+normalization. Text-only generation still rejects tools and user-input requests with its original
+typed diagnostic, even when that rejection also causes the runtime prompt to fail.
+
+Publication is a hunk split, not a file split. The following ownership boundaries are required:
+
+| Shared owner | Group 3 Product hunks | Group 4 Official Antigravity hunks |
+| --- | --- | --- |
+| `packages/contracts/src/settings.ts`, `model.ts`, `index.ts`, WebSocket/RPC schemas | Usage/pricing, sparse project defaults and opt-in balancing, provider-independent custom-model metadata, usage/host-resource RPCs. Contracts remain schema-only. | `providerSetup.ts` and its exports/RPCs; official-runtime configuration, auth/install state, and explicit continuation reset. Preserve legacy settings for read compatibility. |
+| `apps/server/src/server.ts`, `ws.ts`, runtime startup, route fixtures | Usage summary/limit ingestion, authorized host-resource routes and layers, effective project defaults/startup consumers. | Auth/install layers, setup operation routes and initiating-client flow subscriptions, continuation invalidation, and their required test-layer mocks. |
+| Provider registry/catalog/snapshot/cache, `ServerProvider`, Claude/Codex layers | Current custom rows from settings, usage-limit application/invalidation and account snapshot fields, Claude/Codex usage mapping. | Antigravity installation/auth contexts and managed runtime driver integration; setup-aware catalog state and private auth forwarding. Keep registry fixture contexts with their corresponding production hunk. |
+| Shared ACP runtime, normalized event helpers, `acp-mock-agent.ts` | No new Product dependency on these AGY startup changes. Existing Core reliability changes retain their Group 1 provenance. | Bounded exact-root startup metadata, optional native approval options/thought stream helper seams, official Antigravity adapter and opt-in mock mode. |
+| Persistence, projections and shared commands | Active-order schema/migration/projector/sort/reorder; core-owned settlement clears the key. Client owner supplies web/iOS consumers. | Explicit Antigravity continuation reset command/event and durable handling only. |
+| Manifests and lockfile | No Antigravity archive/auth/install dependency. | Managed-runtime ZIP dependencies (`yauzl`, `@types/yauzl`) and corresponding package/lock entries; ACP remains pinned to 1.1.1. |
+
+The existing native Claude `compact` catalog fixture expectation belongs with its Group 1/core
+consumer, not Antigravity or Product usage merely because it shares `ProviderRegistry.test.ts`.
+Row 806's once-per-turn Claude warning is also Group 1: preserve its warning predicate against the
+legacy rate-limit event in that split, while normalized limit mapping/publication remains Group 3.
+The Group 1 warning must not depend on later Product usage-limit services or Antigravity layers.
+Client hunk ownership and integrated receipts are recorded above. The primary observed the
+pre-thread Run guard and a persisted task's real PTY action output; these are primary-attributed
+acceptance, not an assertion that every client gate is complete. No Group 1-3 publication may import
+an Antigravity setup/auth/installation implementation or rely on its dependency/layer fixture.
+
+### Exact-CWD Claude discovery follow-up
+
+The recovered source review for row 162 (`bc918e74ace5dbb4fe1ce73b59d06a9ca1be9ed3`)
+had called current project-skill discovery possibly equivalent. Current-code tracing disproved that:
+`ClaudeProvider` discovered only the server-config CWD, while `ClaudeDriver` lacked the per-project
+`snapshotForCwd` callback used by the registry. The primary confirmed this falls under the approved
+workspace-specific discovery requirement even though the SHA was not individually named.
+
+`ClaudeDriver.snapshotForCwd` now reuses `discoverClaudeSkills` for the exact requested CWD and merges
+only skills into the machine snapshot. Disabled instances return the existing snapshot unchanged.
+The registry remains the owner of the 20-second bound, 16-entry cache, probe deduplication, generation
+fence and failed-probe retention; no second cache or provider process was introduced. The callback
+and import belong in Group 1 independently of Product usage mapping or Antigravity setup layers.
+
+The focused `provider/Drivers/ClaudeDriver.test.ts`, `provider/Drivers/ClaudeSkills.test.ts`, and
+`provider/Layers/ProviderRegistry.test.ts` gate passed **three files / 61 tests**. The one major new
+regression covers two isolated project catalogs, shared user skills, untouched machine snapshots and
+disabled behavior. It runs without a real provider process or HTTP request. The two changed files
+passed formatting, comments, lint and whitespace checks, and the affected server `tsc --noEmit`
+passed after correcting the test fixture's required `displayName` field. These overlap earlier
+registry/skills receipts and are not additional unique-test totals.
+
+Recovered advisory deferrals were not treated as final merely because a SHA was absent from a
+named source list. The completed894-row semantic pass resolved those behavioral allocations;
+the final ledger preserves exact exclusions, equivalence limits and source-specific attribution
+without silent missing-SHA deferrals or empty adaptation commits.
 
 ## Verification policy for every PR
 
 1. **Preflight and ownership:** verify HEAD, exact source SHAs, dirty/staged/ignored manifests,
    dependency/cache ownership, processes, and applicable instructions; assign non-overlapping owners.
-2. **Focused gates:** run only relevant Vite+/Effect tests and affected-package typechecks/builds. Cover
-   meaningful auth, persistence, bounds, cancellation, replacement, and compatibility failures. Run
-   changed-file formatting/lint/header checks, dependency consistency, and `git diff --check`.
-3. **Integrated gates:** the primary agent alone uses `test-t3-app`, `test-t3-mobile`, and real Electron
-   for affected surfaces. Use disposable authenticated environments and one representative iPhone;
-   rebuild ignored native projects only when required.
+2. **Focused gates:** author only relevant Vite+/Effect tests alongside each implementation. Execute
+   those tests, affected-package typechecks/builds, changed-file formatting/lint/header checks,
+   dependency consistency, and `git diff --check` during the final verification campaign.
+3. **Integrated gates:** the primary agent alone runs one isolated `test-t3-app` web campaign and
+   real Electron verification. There is no manual iPhone or iPad walkthrough; iOS is covered through
+   focused tests, patch application, export, and native compilation. Rebuild ignored native projects
+   only when required.
 4. **Evidence:** record exact commands/results, adaptations, manifests/diff summary, visible evidence,
    risks, and unavailable gates. Performance candidates require profiling or behavioral evidence, not
    brittle wall-clock assertions.
 5. **Cleanup and continuation:** stop owned processes, remove only owned disposable state, update this
-   plan and ledger, preserve the checkpoint receipt, then publish and continue sequentially under the
-   standing approval. Stop only for the explicit material-scope, authority, required-gate, or human
-   OAuth conditions above.
+   plan and ledger, preserve the checkpoint receipt, then publish each preserved concern group with
+   its own merge commit during the final campaign. Stop only for the explicit material-scope,
+   authority, required-gate, or human OAuth acceptance conditions above.
 
 Do not run full local workspace suites or duplicate integrated environments across workers.
 
 ## Publication after each accepted checkpoint
 
 The published historical Group 01 receipt preserves its original approval, and standing approval
-covers the same sequence for each current PR after its scoped checkpoint is green:
+covers the same publication sequence for each current PR after the consolidated campaign verifies
+its scoped checkpoint green:
 
 1. Create coherent source-attributed commits preserving original Author, AuthorDate, subject/body, and
    trailers; append the full source SHA and fork adaptation notes. Keep fork-only repairs separate.
@@ -1829,8 +2174,10 @@ alter the existing `agy` installation.
 
 ## Completion definition
 
-Completion requires all accepted PRs merged and verified plus a final exact 805-row ledger. Every
+Completion requires all four accepted PRs merged and verified plus a final exact 894-row ledger. Every
 row must end with an evidence-backed disposition, fork counterpart, dependencies, verification, and
 associated fork commit/PR. Conditional rows must have a demonstrated outcome, never “probably
-equivalent.” The current inventory intentionally leaves non-grouped rows unreviewed; that is truthful
-checkpoint state, not final reconciliation.
+equivalent.” The inventory now has zero unreviewed or unallocated rows, and no approved source
+repair remains open. Group3 exact merged-main CI and Group4 publication, hosted CI, personal-Google
+acceptance and merge remain unfinished. Final delivery/merge metadata must be recorded from actual
+receipts; completed source classification does not replace those gates.

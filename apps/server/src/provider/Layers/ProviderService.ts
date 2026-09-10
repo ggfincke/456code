@@ -82,6 +82,7 @@ import {
 import {
   type ProviderAdapterError,
   ProviderAdapterRequestError,
+  ProviderContinuationIncompatibleError,
   ProviderValidationError,
   ProviderWorkspaceMissingError,
 } from '../Errors.ts'
@@ -305,6 +306,34 @@ interface RuntimeModeAcknowledgementState
 function isRecord(value: unknown): value is Record<string, unknown>
 {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isOfficialAntigravityCursor(value: unknown): boolean
+{
+  return (
+    isRecord(value) &&
+    value.source === 'antigravity.official-acp' &&
+    value.schemaVersion === 1 &&
+    typeof value.sessionId === 'string' &&
+    value.sessionId.length > 0
+  )
+}
+
+function providerBindingGeneration(
+  binding: ProviderSessionDirectory.ProviderRuntimeBindingWithMetadata,
+): string
+{
+  return NodeCrypto.createHash('sha256')
+    .update(
+      stableStringify({
+        threadId: binding.threadId,
+        provider: binding.provider,
+        providerInstanceId: binding.providerInstanceId ?? null,
+        lastSeenAt: binding.lastSeenAt,
+        resumeCursor: binding.resumeCursor ?? null,
+      }),
+    )
+    .digest('hex')
 }
 
 function readPersistedRuntimeModeAcknowledgements(
@@ -2863,6 +2892,22 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                   (persistedBinding?.providerInstanceId === resolvedInstanceId
                     ? persistedBinding.resumeCursor
                     : undefined)
+                if (
+                  resolvedProvider === 'antigravity' &&
+                  persistedBinding?.providerInstanceId === resolvedInstanceId &&
+                  persistedBinding.resumeCursor !== undefined &&
+                  persistedBinding.resumeCursor !== null &&
+                  !isOfficialAntigravityCursor(persistedBinding.resumeCursor)
+                )
+                {
+                  return yield* new ProviderContinuationIncompatibleError({
+                    threadId,
+                    providerInstanceId: resolvedInstanceId,
+                    currentSource: 'antigravity.stream-json',
+                    requiredSource: 'antigravity.official-acp',
+                    bindingGeneration: providerBindingGeneration(persistedBinding),
+                  })
+                }
                 const effectiveCwd =
                   input.cwd ??
                   (persistedBinding?.providerInstanceId === resolvedInstanceId
@@ -3074,6 +3119,46 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       )
     },
   )
+
+  const clearContinuationIfExact: ProviderServiceMethod<'clearContinuationIfExact'> = Effect.fn(
+    'clearContinuationIfExact',
+  )(function* (input)
+  {
+    return yield* sessionLifecycleLocks.withPermit(
+      input.threadId,
+      Effect.gen(function* ()
+      {
+        const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId))
+        if (
+          binding === undefined ||
+          binding.provider !== 'antigravity' ||
+          binding.providerInstanceId !== input.expectedProviderInstanceId ||
+          binding.resumeCursor === undefined ||
+          binding.resumeCursor === null ||
+          isOfficialAntigravityCursor(binding.resumeCursor) ||
+          providerBindingGeneration(binding) !== input.expectedBindingGeneration
+        )
+        {
+          return false
+        }
+        const route = yield* registry.getRoute(input.expectedProviderInstanceId)
+        if (yield* route.adapter.hasSession(input.threadId))
+        {
+          return false
+        }
+        yield* directory.upsert({
+          threadId: binding.threadId,
+          provider: binding.provider,
+          providerInstanceId: input.expectedProviderInstanceId,
+          ...(binding.adapterKey === undefined ? {} : { adapterKey: binding.adapterKey }),
+          status: 'stopped',
+          resumeCursor: null,
+          ...(binding.runtimeMode === undefined ? {} : { runtimeMode: binding.runtimeMode }),
+        })
+        return true
+      }),
+    )
+  })
 
   const sendTurnWithCompaction = Effect.fn('sendTurn')(function* (
     rawInput: Parameters<ProviderServiceMethod<'sendTurn'>>[0],
@@ -4695,6 +4780,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    clearContinuationIfExact,
     captureSessionIdentity,
     captureSessionIdentities,
     matchesSessionIdentity,

@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type OrchestrationSession,
   type ServerProvider,
   ThreadId,
   TurnId,
@@ -41,6 +42,7 @@ import {
   resolveImportContinuationBannerCopy,
   resolveImportContinuationGate,
   resolveImportContinuationProviderSnapshot,
+  resolveLegacyAntigravityTransitionPresentation,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   scheduleEnvironmentReconnectWarning,
@@ -57,6 +59,38 @@ const environmentId = EnvironmentId.make('environment-local')
 const projectId = ProjectId.make('project-1')
 const threadId = ThreadId.make('thread-1')
 const now = '2026-03-29T00:00:00.000Z'
+
+describe('legacy Antigravity transition', () =>
+{
+  it('offers a fresh transition only for an exact legacy continuation binding', () =>
+  {
+    const session = {
+      threadId,
+      status: 'idle',
+      providerName: 'Antigravity',
+      providerInstanceId: ProviderInstanceId.make('antigravity'),
+      runtimeMode: 'full-access',
+      activeTurnId: null,
+      lastError: null,
+      continuationIncompatibility: {
+        currentSource: 'antigravity.stream-json',
+        requiredSource: 'antigravity.official-acp',
+        bindingGeneration: 'binding-7',
+      },
+      updatedAt: now,
+    } satisfies OrchestrationSession
+
+    expect(resolveLegacyAntigravityTransitionPresentation(session)).toEqual({
+      bindingGeneration: 'binding-7',
+      title: 'This thread uses the legacy Antigravity runtime',
+      description:
+        'Start fresh with official Antigravity to continue. Thread history, files, attachments, and the selected provider stay unchanged.',
+      actionLabel: 'Start fresh with official Antigravity',
+    })
+    const { continuationIncompatibility: _, ...compatibleSession } = session
+    expect(resolveLegacyAntigravityTransitionPresentation(compatibleSession)).toBeNull()
+  })
+})
 
 describe('environment reconnect warning grace', () =>
 {

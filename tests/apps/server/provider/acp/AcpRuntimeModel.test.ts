@@ -164,6 +164,28 @@ describe('AcpRuntimeModel', () =>
     expect(response.modes?.availableModes).toHaveLength(2)
   })
 
+  it('publishes native config option replacements as catalog events', () =>
+  {
+    const configOptions = [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'gemini-new',
+        options: [{ value: 'gemini-new', name: 'Gemini New' }],
+      },
+    ] satisfies ReadonlyArray<EffectAcpSchema.SessionConfigOption>
+    const notification = {
+      sessionId: 'session-1',
+      update: { sessionUpdate: 'config_option_update', configOptions },
+    } satisfies EffectAcpSchema.SessionNotification
+
+    expect(parseSessionUpdateEvent(notification).events).toEqual([
+      { _tag: 'ConfigOptionsUpdated', configOptions, rawPayload: notification },
+    ])
+  })
+
   it('projects typed ACP tool call updates into runtime events', () =>
   {
     const created = parseSessionUpdateEvent({

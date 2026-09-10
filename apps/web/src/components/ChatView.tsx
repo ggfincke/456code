@@ -323,6 +323,7 @@ import {
   resolveImportContinuationBannerCopy,
   resolveImportContinuationGate,
   resolveImportContinuationProviderSnapshot,
+  resolveLegacyAntigravityTransitionPresentation,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   scheduleEnvironmentReconnectWarning,
@@ -710,6 +711,9 @@ function ChatViewContent(props: ChatViewProps)
   )
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false })
   const switchThreadProvider = useAtomCommand(threadEnvironment.switchProvider, {
+    reportFailure: false,
+  })
+  const clearProviderContinuation = useAtomCommand(threadEnvironment.clearProviderContinuation, {
     reportFailure: false,
   })
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
@@ -4147,6 +4151,7 @@ function ChatViewContent(props: ChatViewProps)
     }
   }, [activeThreadRef, unsnoozeThreadMutation])
   const [isRestoringThreadBranch, setIsRestoringThreadBranch] = useState(false)
+  const [isClearingLegacyContinuation, setIsClearingLegacyContinuation] = useState(false)
   const [branchRestoreConfirmOpen, setBranchRestoreConfirmOpen] = useState(false)
   // once revealed for a given mismatch, the banner stays mounted until the
   // mismatch changes or resolves, so clearing the draft doesn't flicker it.
@@ -4313,6 +4318,87 @@ function ChatViewContent(props: ChatViewProps)
     isUnsnoozing,
     isUnsettling,
   ])
+  const legacyAntigravityTransition = resolveLegacyAntigravityTransitionPresentation(
+    activeThread?.session,
+  )
+  const handleLegacyAntigravityTransition = useCallback(async () =>
+  {
+    if (!activeThread || !legacyAntigravityTransition || isClearingLegacyContinuation)
+    {
+      return
+    }
+    const confirmed =
+      (await readLocalApi()?.dialogs.confirm(
+        'Start fresh with official Antigravity? Thread history, files, attachments, and the selected provider will stay unchanged.',
+      )) ??
+      window.confirm(
+        'Start fresh with official Antigravity? Thread history, files, attachments, and the selected provider will stay unchanged.',
+      )
+    if (!confirmed) return
+
+    setIsClearingLegacyContinuation(true)
+    const result = await clearProviderContinuation({
+      environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedProviderInstanceId:
+          activeThread.session?.providerInstanceId ?? activeThread.modelSelection.instanceId,
+        expectedBindingGeneration: legacyAntigravityTransition.bindingGeneration,
+        expectedSource: 'antigravity.stream-json',
+      },
+    })
+    setIsClearingLegacyContinuation(false)
+    if (result._tag === 'Failure')
+    {
+      if (!isAtomCommandInterrupted(result))
+      {
+        toastManager.add(
+          stackedThreadToast({
+            type: 'error',
+            title: 'Could not start fresh with official Antigravity',
+            description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+          }),
+        )
+      }
+      return
+    }
+    scheduleComposerFocus()
+  }, [
+    activeThread,
+    clearProviderContinuation,
+    environmentId,
+    isClearingLegacyContinuation,
+    legacyAntigravityTransition,
+    scheduleComposerFocus,
+  ])
+  const legacyAntigravityBannerItem = useMemo<ComposerBannerStackItem | null>(() =>
+  {
+    if (!activeThread || !legacyAntigravityTransition) return null
+    return {
+      id: `legacy-antigravity:${activeThread.id}:${legacyAntigravityTransition.bindingGeneration}`,
+      variant: 'warning',
+      icon: <TriangleAlertIcon />,
+      title: legacyAntigravityTransition.title,
+      description: legacyAntigravityTransition.description,
+      actions: (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={isClearingLegacyContinuation}
+          onClick={() => void handleLegacyAntigravityTransition()}
+        >
+          {isClearingLegacyContinuation
+            ? 'Starting fresh...'
+            : legacyAntigravityTransition.actionLabel}
+        </Button>
+      ),
+    }
+  }, [
+    activeThread,
+    handleLegacyAntigravityTransition,
+    isClearingLegacyContinuation,
+    legacyAntigravityTransition,
+  ])
   // a started thread stays bound to the instance that owns its session. When
   // that instance is disabled or removed the composer silently falls back to
   // another instance and the send fails inside the provider layer, so name the
@@ -4431,6 +4517,8 @@ function ChatViewContent(props: ChatViewProps)
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() =>
   {
     const importConsentItems = importConsentBannerItem === null ? [] : [importConsentBannerItem]
+    const legacyAntigravityItems =
+      legacyAntigravityBannerItem === null ? [] : [legacyAntigravityBannerItem]
     const boundProviderItems =
       unavailableBoundProviderBannerItem === null ? [] : [unavailableBoundProviderBannerItem]
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem]
@@ -4438,6 +4526,7 @@ function ChatViewContent(props: ChatViewProps)
     {
       return [
         ...importConsentItems,
+        ...legacyAntigravityItems,
         ...boundProviderItems,
         ...systemComposerBannerItems,
         ...parkedThreadItems,
@@ -4445,6 +4534,7 @@ function ChatViewContent(props: ChatViewProps)
     }
     return [
       ...importConsentItems,
+      ...legacyAntigravityItems,
       ...boundProviderItems,
       ...systemComposerBannerItems,
       {
@@ -4493,6 +4583,7 @@ function ChatViewContent(props: ChatViewProps)
     activeBranchMismatchKey,
     handleRestoreThreadBranch,
     importConsentBannerItem,
+    legacyAntigravityBannerItem,
     isRestoringThreadBranch,
     localCheckoutBranchMismatch,
     parkedThreadBannerItem,

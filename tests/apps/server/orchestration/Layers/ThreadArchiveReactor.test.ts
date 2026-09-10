@@ -178,6 +178,7 @@ function makeLayer(state: HarnessState)
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
     compactThread: () => unsupported(),
+    clearContinuationIfExact: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),

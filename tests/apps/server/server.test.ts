@@ -137,6 +137,7 @@ import { OrchestrationEventStore } from '../../../apps/server/src/persistence/Se
 import { SqlitePersistenceMemory } from '../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import { PersistenceSqlError } from '../../../apps/server/src/persistence/Errors.ts'
 import * as ProviderRegistry from '../../../apps/server/src/provider/Services/ProviderRegistry.ts'
+import { ProviderInstanceRegistry } from '../../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts'
 import { makeManualOnlyProviderMaintenanceCapabilities } from '../../../apps/server/src/provider/maintenance/providerMaintenance.ts'
 import * as ServerLifecycleEvents from '../../../apps/server/src/serverLifecycleEvents.ts'
 import * as ServerRuntimeStartup from '../../../apps/server/src/serverRuntimeStartup.ts'
@@ -167,9 +168,11 @@ import * as SourceControlProviderRegistry from '../../../apps/server/src/sourceC
 import * as SourceControlRepositoryService from '../../../apps/server/src/sourceControl/SourceControlRepositoryService.ts'
 import * as ServerSecretStore from '../../../apps/server/src/auth/ServerSecretStore.ts'
 import * as EnvironmentAuth from '../../../apps/server/src/auth/EnvironmentAuth.ts'
+import * as ProcessDiagnostics from '../../../apps/server/src/diagnostics/ProcessDiagnostics.ts'
 import * as HostResources from '../../../apps/server/src/diagnostics/HostResources.ts'
 import * as UsageSummary from '../../../apps/server/src/usage/UsageSummaryService.ts'
-import * as ProcessDiagnostics from '../../../apps/server/src/diagnostics/ProcessDiagnostics.ts'
+import { ProviderAuthService } from '../../../apps/server/src/provider/Services/ProviderAuthService.ts'
+import { AntigravityInstallation } from '../../../apps/server/src/provider/AntigravityInstallation.ts'
 import * as ProcessResourceMonitor from '../../../apps/server/src/diagnostics/ProcessResourceMonitor.ts'
 import * as TraceDiagnostics from '../../../apps/server/src/diagnostics/TraceDiagnostics.ts'
 import * as WorkerBrokerStore from '../../../apps/server/src/workers/WorkerBrokerStore.ts'
@@ -726,32 +729,6 @@ const buildAppUnderTest = (options?: {
           ),
         ),
         Layer.provide(
-          Layer.succeed(HostResources.HostResources, {
-            read: Effect.succeed({
-              sampledAt: 0,
-              cpuUtilization: null,
-              cpuCount: 0,
-              availableMemoryBytes: 0,
-              totalMemoryBytes: 0,
-            }),
-          }),
-        ),
-        Layer.provide(
-          Layer.succeed(UsageSummary.UsageSummaryService, {
-            getSummary: (input) =>
-              Effect.succeed({
-                readAt: DateTime.formatIso(TEST_EPOCH),
-                since: input.since,
-                until: input.until,
-                buckets: [],
-                sources: [],
-                partial: false,
-              }),
-          }),
-        ),
-      )
-      .pipe(
-        Layer.provide(
           Layer.mock(ProviderRegistry.ProviderRegistry)({
             getProviders: Effect.succeed([]),
             refresh: () => Effect.succeed([]),
@@ -804,6 +781,42 @@ const buildAppUnderTest = (options?: {
                 signal: input.signal,
                 signaled: true,
                 message: Option.none(),
+              }),
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(HostResources.HostResources, {
+            read: Effect.succeed({
+              sampledAt: 0,
+              cpuUtilization: null,
+              cpuCount: 0,
+              availableMemoryBytes: 0,
+              totalMemoryBytes: 0,
+            }),
+          }),
+        ),
+        Layer.provide(Layer.mock(ProviderAuthService)({})),
+        Layer.provide(
+          Layer.mock(ProviderInstanceRegistry)({
+            getInstance: () => Effect.succeed(undefined),
+            listInstances: Effect.succeed([]),
+            listUnavailable: Effect.succeed([]),
+            streamChanges: Stream.empty,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(AntigravityInstallation)({ managedDirectory: '/unused-managed-runtime' }),
+        ),
+        Layer.provide(
+          Layer.succeed(UsageSummary.UsageSummaryService, {
+            getSummary: (input) =>
+              Effect.succeed({
+                readAt: DateTime.formatIso(TEST_EPOCH),
+                since: input.since,
+                until: input.until,
+                buckets: [],
+                sources: [],
+                partial: false,
               }),
           }),
         ),
@@ -970,6 +983,8 @@ const buildAppUnderTest = (options?: {
             }),
           ),
         ),
+      )
+      .pipe(
         Layer.provide(gitManagerLayer),
         Layer.provide(gitVcsDriverLayer),
         Layer.provide(gitWorkflowLayer),

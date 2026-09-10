@@ -145,6 +145,12 @@ export const ServerProviderContinuation = Schema.Struct({
 })
 export type ServerProviderContinuation = typeof ServerProviderContinuation.Type
 
+export const ServerProviderSetupCapabilities = Schema.Struct({
+  canAuthenticate: Schema.Boolean,
+  canInstall: Schema.Boolean,
+})
+export type ServerProviderSetupCapabilities = typeof ServerProviderSetupCapabilities.Type
+
 export const ServerProviderVersionAdvisoryStatus = Schema.Literals([
   'unknown',
   'current',
@@ -225,6 +231,7 @@ export const ServerProvider = Schema.Struct({
   accentColor: Schema.optional(TrimmedNonEmptyString),
   badgeLabel: Schema.optional(TrimmedNonEmptyString),
   continuation: Schema.optional(ServerProviderContinuation),
+  setup: Schema.optionalKey(ServerProviderSetupCapabilities),
   // older cached snapshots omit the matrix; consumers resolve that absence
   // through the conservative capability helper before making decisions.
   capabilities: Schema.optionalKey(ProviderRuntimeCapabilities),

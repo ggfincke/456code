@@ -47,7 +47,7 @@ export interface ThreadFeedActivity
 
 type WorkLogEntry = Omit<NormalizedWorkLogEntry, 'activityKind' | 'collapseKey' | 'toolCallId'>
 
-type DerivedWorkLogEntry = NormalizedWorkLogEntry
+type DerivedWorkLogEntry = NormalizedWorkLogEntry & { readonly isSubagentBatch?: boolean }
 
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -55,6 +55,8 @@ export function deriveWorkLogEntries(
 {
   return deriveNormalizedWorkLogEntries<DerivedWorkLogEntry>(activities, {
     requestKindFromRequestType,
+    mapEntry: ({ entry, payload }) =>
+      payload?.taskType === 'subagent_batch' ? { ...entry, isSubagentBatch: true } : entry,
     excludedActivityKinds: new Set([
       PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND,
       PROVIDER_SWITCH_FAILED_ACTIVITY_KIND,
@@ -107,6 +109,7 @@ export function workEntryStatus(entry: WorkLogEntry): ThreadFeedActivity['status
 
 export function workEntryIcon(entry: DerivedWorkLogEntry): ThreadFeedActivity['icon']
 {
+  if (entry.isSubagentBatch) return 'agent'
   if (
     entry.activityKind === 'user-input.requested' ||
     entry.activityKind === 'user-input.resolved'
