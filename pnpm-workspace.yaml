@@ -143,6 +143,9 @@ overrides:
   yaml: "catalog:"
 
 packageExtensions:
+  dependency-cruiser@18.2.0:
+    dependencies:
+      typescript: 6.0.3
   "@clerk/expo@*":
     dependencies:
       "@expo/config-plugins": 57.0.9
