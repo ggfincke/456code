@@ -1,3 +1,4 @@
+import { isFinckeDesktop } from "../fincke/build.ts";
 import {
   DESKTOP_UPDATE_RESTART_MARKER_FILE,
   DesktopUpdateChannelSchema,
@@ -358,7 +359,7 @@ export const make = Effect.gen(function* () {
         platform: environment.platform,
         appImage: Option.getOrUndefined(config.appImagePath),
         isDebPackage,
-        disabledByEnv: config.disableAutoUpdate,
+        disabledByEnv: isFinckeDesktop || config.disableAutoUpdate,
         hasUpdateFeedConfig: hasFeedConfig,
       }),
     );
