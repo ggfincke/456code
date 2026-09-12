@@ -1,3 +1,4 @@
+import { AnalyzeImpactButton } from "../cartographer/AnalyzeImpactButton";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import type { FileDiffContentsLoader, FileDiffMetadata } from "@pierre/diffs";
@@ -667,9 +668,31 @@ export default function DiffPanel({
     }
   };
 
+  const impactComparison =
+    selectedTurnId !== null && selectedCheckpointRange
+      ? {
+          kind: "turn" as const,
+          fromTurnCount: selectedCheckpointRange.fromTurnCount,
+          toTurnCount: selectedCheckpointRange.toTurnCount,
+        }
+      : selectedGitSource?.baseRef && branchDiffPreview.data && !selectedGitSource.truncated
+        ? {
+            kind: selectedGitSource.kind,
+            baseRef: selectedGitSource.baseRef,
+            ...(selectedGitSource.headRef ? { headRef: selectedGitSource.headRef } : {}),
+            diffHash: selectedGitSource.diffHash,
+            ignoreWhitespace: diffIgnoreWhitespace,
+            cwd: branchDiffPreview.data.cwd,
+          }
+        : null;
   const headerRow = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
+        {routeThreadRef &&
+          impactComparison &&
+          serverConfig?.environment.capabilities.cartographer === true && (
+            <AnalyzeImpactButton threadRef={routeThreadRef} comparison={impactComparison} />
+          )}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}

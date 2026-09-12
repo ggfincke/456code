@@ -54,6 +54,7 @@ interface RegistryState {
 }
 
 export interface McpSessionRegistryOptions {
+  readonly cartographer?: boolean;
   readonly livenessWindowMs?: number;
   readonly now?: () => number;
 }
@@ -127,6 +128,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
         capabilities: new Set<McpInvocationContext.McpCapability>([
           "pull-requests",
+          ...(options.cartographer ? ["cartographer" as const] : []),
           ...request.capabilities,
         ]),
         issuedAt,
@@ -206,7 +208,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
 let activeMcpSessionRegistry: McpSessionRegistryShape | undefined;
 
 const make = Effect.acquireRelease(
-  makeWithOptions().pipe(
+  makeWithOptions({ cartographer: true }).pipe(
     Effect.tap((registry) =>
       Effect.sync(() => {
         activeMcpSessionRegistry = registry;
