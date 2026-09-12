@@ -1207,6 +1207,7 @@ export function getThemeDefinition(theme: ThemePreference): ThemeDefinition | nu
 /** Artwork palettes are reviewed alongside built-ins; user themes always use the pill fallback. */
 export function themeAllowsSidebarArtwork(theme: ThemePreference): boolean {
   const themeId = themeIdFromPreference(theme);
+  if (themeId === "fincke-ocean") return true;
   return (
     BUILT_IN_THEME_DEFINITIONS.find((definition) => definition.id === themeId)?.sidebarArtwork ===
     true

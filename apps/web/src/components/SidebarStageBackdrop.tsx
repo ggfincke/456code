@@ -1,11 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useId } from "react";
+import { FinckeWaveArt } from "../fincke/FinckeWaveArt";
 
 import { APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
 
-export type SidebarStageBackdropVariant = "nightly" | "dev";
+export type SidebarStageBackdropVariant = "nightly" | "dev" | "fincke";
 export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
 
 // A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
@@ -26,6 +27,7 @@ export function resolveSidebarStageBackdropVariant(
 export function resolveSidebarStageFocusRingOffsetClass(
   variant: SidebarStageBackdropVariant,
 ): string {
+  if (variant === "fincke") return "focus-visible:ring-offset-sidebar";
   return variant === "nightly"
     ? "focus-visible:ring-offset-(--stage-night-bottom)"
     : "focus-visible:ring-offset-(--stage-art-bottom)";
@@ -51,7 +53,7 @@ export function useEnvironmentStageLabel(): string {
 }
 
 export function useSidebarStageBackdropVariant(enabled = true): SidebarStageBackdropVariant | null {
-  return resolveSidebarStageBackdropVariant(useEnvironmentStageLabel(), enabled);
+  return enabled ? "fincke" : null;
 }
 
 /** Stage-channel header art; palettes mirror the per-channel app icons in `assets/`. */
@@ -67,11 +69,23 @@ export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdro
 }
 
 export function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  return variant === "nightly" ? <NightlySkyArt /> : <DevBlueprintArt />;
+  return variant === "fincke" ? (
+    <FinckeWaveArt />
+  ) : variant === "nightly" ? (
+    <NightlySkyArt />
+  ) : (
+    <DevBlueprintArt />
+  );
 }
 
 export function StageBackdropButtonArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  return variant === "nightly" ? <NightlySkyArt compact /> : <DevBlueprintArt compact />;
+  return variant === "fincke" ? (
+    <FinckeWaveArt compact />
+  ) : variant === "nightly" ? (
+    <NightlySkyArt compact />
+  ) : (
+    <DevBlueprintArt compact />
+  );
 }
 
 const NIGHTLY_STARS: ReadonlyArray<{
