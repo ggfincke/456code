@@ -1,3 +1,4 @@
+import { isFinckeDesktop } from "../fincke/build.ts";
 import {
   DesktopUpdateChannelSchema,
   type DesktopRuntimeInfo,
@@ -343,7 +344,7 @@ export const make = Effect.gen(function* () {
         isPackaged: environment.isPackaged,
         platform: environment.platform,
         appImage: Option.getOrUndefined(config.appImagePath),
-        disabledByEnv: config.disableAutoUpdate,
+        disabledByEnv: isFinckeDesktop || config.disableAutoUpdate,
         hasUpdateFeedConfig: hasFeedConfig,
       }),
     );
