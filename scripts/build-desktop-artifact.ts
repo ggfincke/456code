@@ -70,6 +70,12 @@ const WorkspaceConfig = Schema.Struct({
 type WorkspaceConfig = typeof WorkspaceConfig.Type;
 
 const StageWorkspaceConfig = Schema.Struct({
+  packageExtensions: Schema.optional(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({ dependencies: Schema.Record(Schema.String, Schema.String) }),
+    ),
+  ),
   supportedArchitectures: Schema.Struct({
     os: Schema.Array(Schema.String),
     cpu: Schema.Array(Schema.String),
@@ -1474,6 +1480,7 @@ const stageClerkPasskeyNativeBinaries = Effect.fn("stageClerkPasskeyNativeBinari
 });
 
 export function createStageWorkspaceConfig(input: {
+  readonly cartographer?: boolean;
   readonly platform: typeof BuildPlatform.Type;
   readonly arch: typeof BuildArch.Type;
   readonly allowBuilds?: Record<string, boolean>;
@@ -1499,6 +1506,13 @@ export function createStageWorkspaceConfig(input: {
         };
 
   return {
+    ...(input.cartographer
+      ? {
+          packageExtensions: {
+            "dependency-cruiser@18.2.0": { dependencies: { typescript: "6.0.3" } },
+          },
+        }
+      : {}),
     supportedArchitectures,
     ...(allowBuilds && Object.keys(allowBuilds).length > 0 ? { allowBuilds } : {}),
     ...(patchedDependencies && Object.keys(patchedDependencies).length > 0
@@ -2950,6 +2964,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   );
   const sidecarWorkspaceConfig = {
     ...createStageWorkspaceConfig({
+      cartographer: true,
       platform: "win",
       arch: input.arch,
       allowBuilds: input.allowBuilds,
@@ -3705,6 +3720,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
   const stageWorkspaceConfig = createStageWorkspaceConfig({
+    cartographer: true,
     platform: options.platform,
     arch: options.arch,
     allowBuilds: workspaceAllowBuilds,

@@ -20,6 +20,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 
 const RIGHT_PANEL_KINDS = [
+  "cartographer-map",
+  "cartographer-impact",
   "diff",
   "files",
   "file",
@@ -40,6 +42,8 @@ export interface DeviceTabTarget {
 }
 
 export type RightPanelSurface =
+  | { id: "cartographer-map"; kind: "cartographer-map" }
+  | { id: "cartographer-impact"; kind: "cartographer-impact" }
   | { id: `browser:${string}`; kind: "preview"; resourceId: string }
   | { id: "browser:new"; kind: "preview"; resourceId: null }
   | { id: "device" | `device:${string}`; kind: "device"; target?: DeviceTabTarget; title?: string }
@@ -183,6 +187,10 @@ const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request">,
 ): RightPanelSurface => {
   switch (kind) {
+    case "cartographer-map":
+      return { id: "cartographer-map", kind };
+    case "cartographer-impact":
+      return { id: "cartographer-impact", kind };
     case "diff":
       return { id: "diff", kind };
     case "files":

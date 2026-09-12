@@ -14,6 +14,7 @@ import type {
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
+  Network,
   Bot,
   Smartphone,
   ChevronDown,
@@ -113,6 +114,7 @@ interface RightPanelTabsProps {
   onAddBrowserInProfile: (profileId: string) => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddMap?: (() => void) | undefined;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
@@ -311,6 +313,7 @@ function SurfaceMenuItem(props: {
  * surfaces stay visible with a one-line reason.
  */
 function RightPanelEmptyState(props: {
+  onAddMap?: (() => void) | undefined;
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
@@ -335,6 +338,19 @@ function RightPanelEmptyState(props: {
   const [highlight, setHighlight] = useState(-1);
 
   const actions = [
+    ...(props.onAddMap
+      ? [
+          {
+            label: "Repository Map",
+            icon: Network,
+            shortcut: "R",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddMap,
+            badgeCount: 0,
+          },
+        ]
+      : []),
     {
       label: "Browser",
       icon: Globe2,
@@ -611,6 +627,10 @@ function surfaceTitle(
   terminalLabelsById: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
+    case "cartographer-map":
+      return "Repository Map";
+    case "cartographer-impact":
+      return "Diff Impact";
     case "diff":
       return "Diff";
     case "files":
@@ -688,6 +708,9 @@ function SurfaceIcon({
         favicon && url && sameOrigin(favicon.pageUrl, url) ? favicon.dataUrl : null;
       return <PreviewFavicon capturedUrl={capturedUrl} url={url} />;
     }
+    case "cartographer-map":
+    case "cartographer-impact":
+      return <Network className="size-3 shrink-0" />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
     case "files":
@@ -861,6 +884,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   }, []);
 
   const addSurfaceActions = [
+    ...(props.onAddMap
+      ? [
+          {
+            label: "Repository Map",
+            icon: Network,
+            shortcut: "",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddMap,
+          },
+        ]
+      : []),
     {
       label: "Browser",
       icon: Globe2,
@@ -1392,6 +1427,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             browserProfiles={browserProfiles}
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
+            onAddMap={props.onAddMap}
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}

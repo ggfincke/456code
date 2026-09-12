@@ -213,6 +213,7 @@ export const make = Effect.gen(function* () {
     },
     serverVersion: packageJson.version,
     capabilities: {
+      cartographer: true,
       repositoryIdentity: true,
       connectionProbe: true,
       attachmentUploads: true,

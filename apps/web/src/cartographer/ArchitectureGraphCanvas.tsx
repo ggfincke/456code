@@ -1,0 +1,1242 @@
+// provides graph camera, geometry, minimap, and accessible selection mechanics
+
+import { Maximize2Icon, MinusIcon, PlusIcon } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type WheelEvent,
+} from "react";
+
+import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
+
+export type ArchitectureGraphCanvasTone = "identity" | "added" | "removed" | "affected" | "context";
+
+export type ArchitectureGraphCanvasStroke = "solid" | "dashed" | "double" | "muted";
+
+export interface ArchitectureGraphCanvasNode {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly badgeLabel: string;
+  readonly footerLabels: readonly string[];
+  readonly parentId?: string;
+  readonly position: { readonly x: number; readonly y: number };
+  readonly tintKey: string;
+  readonly tone: ArchitectureGraphCanvasTone;
+  readonly stroke: ArchitectureGraphCanvasStroke;
+  readonly ariaLabel: string;
+}
+
+export interface ArchitectureGraphCanvasEdge {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly weight: number;
+  readonly label: string;
+  readonly tone: ArchitectureGraphCanvasTone;
+  readonly stroke: ArchitectureGraphCanvasStroke;
+  readonly showBadge: boolean;
+  readonly ariaLabel: string;
+}
+
+export interface ArchitectureGraphCanvasPoint {
+  readonly node: ArchitectureGraphCanvasNode;
+  readonly x: number;
+  readonly y: number;
+}
+
+interface ArchitectureGraphCanvasLayout {
+  readonly points: readonly ArchitectureGraphCanvasPoint[];
+  readonly width: number;
+  readonly height: number;
+}
+
+interface ArchitectureGraphCanvasEdgeCurve {
+  readonly edge: ArchitectureGraphCanvasEdge;
+  readonly id: string;
+  readonly from: ArchitectureGraphCanvasPoint;
+  readonly to: ArchitectureGraphCanvasPoint;
+  readonly path: string;
+  readonly centerX: number;
+  readonly centerY: number;
+}
+
+interface ArchitectureGraphCanvasBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface ArchitectureGraphCanvasCamera {
+  readonly scale: number;
+  readonly translateX: number;
+  readonly translateY: number;
+}
+
+interface ArchitectureGraphCanvasViewport {
+  readonly width: number;
+  readonly height: number;
+}
+
+type ArchitectureNodeStyle = CSSProperties & {
+  readonly "--architecture-node-edge": string;
+  readonly "--architecture-node-fill": string;
+};
+
+export interface ArchitectureGraphCanvasView {
+  readonly sceneIdentity: string;
+  readonly camera: ArchitectureGraphCanvasCamera;
+}
+
+export interface ArchitectureGraphCanvasProps {
+  readonly initialView?: ArchitectureGraphCanvasView | undefined;
+  readonly initialFocusNodeId?: string | undefined;
+  readonly initialReadableView?: boolean | undefined;
+  readonly onViewChange?: ((view: ArchitectureGraphCanvasView) => void) | undefined;
+  readonly nodes: readonly ArchitectureGraphCanvasNode[];
+  readonly edges: readonly ArchitectureGraphCanvasEdge[];
+  readonly edgeVisibility?: "all" | "selection" | undefined;
+  readonly subduedEdges?: boolean | undefined;
+  readonly selectedNodeId: string | null;
+  readonly selectedEdgeId: string | null;
+  readonly highlightedNodeIds?: readonly string[] | undefined;
+  readonly ariaLabel: string;
+  readonly emptyLabel: string;
+  readonly onSelectNode: (node: ArchitectureGraphCanvasNode, trigger: HTMLButtonElement) => void;
+  readonly onSelectEdge: (edge: ArchitectureGraphCanvasEdge, trigger: HTMLButtonElement) => void;
+}
+
+const ARCHITECTURE_NODE_WIDTH = 236;
+const ARCHITECTURE_NODE_HEIGHT = 96;
+const ARCHITECTURE_POSITION_SCALE_X = 1.25;
+const ARCHITECTURE_POSITION_SCALE_Y = 1.18;
+const ARCHITECTURE_CANVAS_PADDING = 68;
+const ARCHITECTURE_CANVAS_MIN_WIDTH = 760;
+const ARCHITECTURE_CANVAS_MIN_HEIGHT = 540;
+const ARCHITECTURE_CAMERA_MIN_SCALE = 0.12;
+const ARCHITECTURE_CAMERA_MAX_SCALE = 1.6;
+const ARCHITECTURE_CAMERA_FIT_MAX_SCALE = 1;
+const ARCHITECTURE_CAMERA_READABLE_MIN_SCALE = 0.75;
+const ARCHITECTURE_CAMERA_MARGIN = 40;
+const ARCHITECTURE_CAMERA_ZOOM_STEP = 0.1;
+const ARCHITECTURE_MINIMAP_WIDTH = 168;
+const ARCHITECTURE_MINIMAP_CONTROL_GAP = 64;
+const ARCHITECTURE_MINIMAP_MIN_HEIGHT = 60;
+const ARCHITECTURE_MINIMAP_MAX_HEIGHT = 130;
+
+const ARCHITECTURE_NODE_TONES = [
+  {
+    edge: "color-mix(in srgb, var(--architecture-blue) 42%, var(--architecture-border))",
+    fill: "var(--architecture-node-analyze)",
+  },
+  {
+    edge: "color-mix(in srgb, var(--architecture-green) 38%, var(--architecture-border))",
+    fill: "var(--architecture-node-emit)",
+  },
+  {
+    edge: "color-mix(in srgb, var(--architecture-teal) 38%, var(--architecture-border))",
+    fill: "var(--architecture-node-store)",
+  },
+  {
+    edge: "color-mix(in srgb, var(--architecture-amber) 38%, var(--architecture-border))",
+    fill: "var(--architecture-node-cli)",
+  },
+  {
+    edge: "color-mix(in srgb, var(--architecture-purple) 42%, var(--architecture-border))",
+    fill: "var(--architecture-node-mcp)",
+  },
+  {
+    edge: "color-mix(in srgb, var(--architecture-red) 36%, var(--architecture-border))",
+    fill: "var(--architecture-node-web)",
+  },
+] as const;
+
+function architectureEdgeId(edge: ArchitectureGraphCanvasEdge): string {
+  return edge.id;
+}
+
+function stableToneIndex(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash % ARCHITECTURE_NODE_TONES.length;
+}
+
+function architectureNodeStyle(point: ArchitectureGraphCanvasPoint): ArchitectureNodeStyle {
+  if (point.node.tone !== "identity") {
+    const stateTone = {
+      added: {
+        edge: "color-mix(in srgb, var(--architecture-green) 72%, var(--architecture-border))",
+        fill: "color-mix(in srgb, var(--architecture-green) 13%, var(--architecture-page))",
+      },
+      removed: {
+        edge: "color-mix(in srgb, var(--architecture-red) 72%, var(--architecture-border))",
+        fill: "color-mix(in srgb, var(--architecture-red) 12%, var(--architecture-page))",
+      },
+      affected: {
+        edge: "color-mix(in srgb, var(--architecture-amber) 76%, var(--architecture-border))",
+        fill: "color-mix(in srgb, var(--architecture-amber) 13%, var(--architecture-page))",
+      },
+      context: {
+        edge: "var(--architecture-border)",
+        fill: "var(--architecture-node-neutral)",
+      },
+    }[point.node.tone];
+    return {
+      "--architecture-node-edge": stateTone.edge,
+      "--architecture-node-fill": stateTone.fill,
+      left: point.x,
+      top: point.y,
+    };
+  }
+  const ownershipKey = point.node.parentId ?? point.node.tintKey;
+  const tone = ARCHITECTURE_NODE_TONES[stableToneIndex(ownershipKey)];
+  return {
+    "--architecture-node-edge": tone?.edge ?? "var(--architecture-border)",
+    "--architecture-node-fill": tone?.fill ?? "var(--architecture-node-neutral)",
+    left: point.x,
+    top: point.y,
+  };
+}
+
+function createArchitectureGraphCanvasLayout(
+  nodes: readonly ArchitectureGraphCanvasNode[],
+): ArchitectureGraphCanvasLayout {
+  if (nodes.length === 0) {
+    return {
+      points: [],
+      width: ARCHITECTURE_CANVAS_MIN_WIDTH,
+      height: ARCHITECTURE_CANVAS_MIN_HEIGHT,
+    };
+  }
+
+  const xPositions = [...new Set(nodes.map((node) => node.position.x))].sort((a, b) => a - b);
+  const yPositions = [...new Set(nodes.map((node) => node.position.y))].sort((a, b) => a - b);
+  const xRank = new Map(xPositions.map((position, index) => [position, index] as const));
+  const yRank = new Map(yPositions.map((position, index) => [position, index] as const));
+  const points = nodes.map((node) => ({
+    node,
+    x:
+      (xRank.get(node.position.x) ?? 0) * 240 * ARCHITECTURE_POSITION_SCALE_X +
+      ARCHITECTURE_CANVAS_PADDING +
+      ARCHITECTURE_NODE_WIDTH / 2,
+    y:
+      (yRank.get(node.position.y) ?? 0) * 140 * ARCHITECTURE_POSITION_SCALE_Y +
+      ARCHITECTURE_CANVAS_PADDING +
+      ARCHITECTURE_NODE_HEIGHT / 2,
+  }));
+  const farthestX = Math.max(...points.map((point) => point.x));
+  const farthestY = Math.max(...points.map((point) => point.y));
+
+  return {
+    points,
+    width: Math.max(
+      ARCHITECTURE_CANVAS_MIN_WIDTH,
+      farthestX + ARCHITECTURE_NODE_WIDTH / 2 + ARCHITECTURE_CANVAS_PADDING,
+    ),
+    height: Math.max(
+      ARCHITECTURE_CANVAS_MIN_HEIGHT,
+      farthestY + ARCHITECTURE_NODE_HEIGHT / 2 + ARCHITECTURE_CANVAS_PADDING,
+    ),
+  };
+}
+
+export function architectureGraphCanvasPoints(
+  nodes: readonly ArchitectureGraphCanvasNode[],
+): readonly ArchitectureGraphCanvasPoint[] {
+  return createArchitectureGraphCanvasLayout(nodes).points;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function architectureCanvasBounds(
+  points: readonly ArchitectureGraphCanvasPoint[],
+): ArchitectureGraphCanvasBounds {
+  if (points.length === 0) {
+    return {
+      x: 0,
+      y: 0,
+      right: ARCHITECTURE_CANVAS_MIN_WIDTH,
+      bottom: ARCHITECTURE_CANVAS_MIN_HEIGHT,
+      width: ARCHITECTURE_CANVAS_MIN_WIDTH,
+      height: ARCHITECTURE_CANVAS_MIN_HEIGHT,
+    };
+  }
+
+  const padding = ARCHITECTURE_CANVAS_PADDING * 0.65;
+  const left = Math.min(...points.map((point) => point.x - ARCHITECTURE_NODE_WIDTH / 2)) - padding;
+  const top = Math.min(...points.map((point) => point.y - ARCHITECTURE_NODE_HEIGHT / 2)) - padding;
+  const right = Math.max(...points.map((point) => point.x + ARCHITECTURE_NODE_WIDTH / 2)) + padding;
+  const bottom =
+    Math.max(...points.map((point) => point.y + ARCHITECTURE_NODE_HEIGHT / 2)) + padding;
+
+  return {
+    x: left,
+    y: top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function centeredTranslation(
+  viewportLength: number,
+  contentStart: number,
+  contentLength: number,
+  scale: number,
+): number {
+  return (viewportLength - contentLength * scale) / 2 - contentStart * scale;
+}
+
+function clampCamera(
+  camera: ArchitectureGraphCanvasCamera,
+  bounds: ArchitectureGraphCanvasBounds,
+  viewport: ArchitectureGraphCanvasViewport,
+  bottomInset: number,
+): ArchitectureGraphCanvasCamera {
+  const scale = clamp(camera.scale, ARCHITECTURE_CAMERA_MIN_SCALE, ARCHITECTURE_CAMERA_MAX_SCALE);
+  const availableHeight = Math.max(1, viewport.height - bottomInset);
+  const contentWidth = bounds.width * scale;
+  const contentHeight = bounds.height * scale;
+  const centeredX = centeredTranslation(viewport.width, bounds.x, bounds.width, scale);
+  const centeredY = centeredTranslation(availableHeight, bounds.y, bounds.height, scale);
+  const minimumX = viewport.width - ARCHITECTURE_CAMERA_MARGIN - bounds.right * scale;
+  const maximumX = ARCHITECTURE_CAMERA_MARGIN - bounds.x * scale;
+  const minimumY = availableHeight - ARCHITECTURE_CAMERA_MARGIN - bounds.bottom * scale;
+  const maximumY = ARCHITECTURE_CAMERA_MARGIN - bounds.y * scale;
+
+  return {
+    scale,
+    translateX:
+      contentWidth <= viewport.width - ARCHITECTURE_CAMERA_MARGIN * 2
+        ? centeredX
+        : clamp(camera.translateX, minimumX, maximumX),
+    translateY:
+      contentHeight <= availableHeight - ARCHITECTURE_CAMERA_MARGIN * 2
+        ? centeredY
+        : clamp(camera.translateY, minimumY, maximumY),
+  };
+}
+
+function fitCamera(
+  bounds: ArchitectureGraphCanvasBounds,
+  viewport: ArchitectureGraphCanvasViewport,
+  bottomInset: number,
+): ArchitectureGraphCanvasCamera {
+  const availableWidth = Math.max(1, viewport.width - ARCHITECTURE_CAMERA_MARGIN * 2);
+  const availableViewportHeight = Math.max(1, viewport.height - bottomInset);
+  const availableHeight = Math.max(1, availableViewportHeight - ARCHITECTURE_CAMERA_MARGIN * 2);
+  const scale = clamp(
+    Math.min(availableWidth / bounds.width, availableHeight / bounds.height),
+    ARCHITECTURE_CAMERA_MIN_SCALE,
+    ARCHITECTURE_CAMERA_FIT_MAX_SCALE,
+  );
+
+  return {
+    scale,
+    translateX: centeredTranslation(viewport.width, bounds.x, bounds.width, scale),
+    translateY: centeredTranslation(availableViewportHeight, bounds.y, bounds.height, scale),
+  };
+}
+
+function cubicPoint(start: number, controlOne: number, controlTwo: number, end: number): number {
+  return (start + controlOne * 3 + controlTwo * 3 + end) / 8;
+}
+
+function edgeWidth(weight: number): number {
+  return Math.min(3.6, 1.2 + Math.log2(1 + weight) * 0.45);
+}
+
+function edgeTone(tone: ArchitectureGraphCanvasTone): string {
+  switch (tone) {
+    case "added":
+      return "var(--architecture-green)";
+    case "removed":
+      return "var(--architecture-red)";
+    case "affected":
+      return "var(--architecture-amber)";
+    case "context":
+      return "var(--architecture-text-faint)";
+    case "identity":
+      return "var(--architecture-edge)";
+  }
+}
+
+function edgeDashArray(stroke: ArchitectureGraphCanvasStroke): string | undefined {
+  return stroke === "dashed" ? "7 5" : stroke === "muted" ? "2 5" : undefined;
+}
+
+function nodeStrokeClass(stroke: ArchitectureGraphCanvasStroke): string | undefined {
+  if (stroke === "dashed") return "border-dashed";
+  if (stroke === "double") return "border-[3px] border-double";
+  return undefined;
+}
+
+function rectangularBoundaryPoint(
+  point: ArchitectureGraphCanvasPoint,
+  deltaX: number,
+  deltaY: number,
+): { readonly x: number; readonly y: number } {
+  const horizontalScale =
+    deltaX === 0 ? Number.POSITIVE_INFINITY : ARCHITECTURE_NODE_WIDTH / 2 / Math.abs(deltaX);
+  const verticalScale =
+    deltaY === 0 ? Number.POSITIVE_INFINITY : ARCHITECTURE_NODE_HEIGHT / 2 / Math.abs(deltaY);
+  const boundaryScale = Math.min(horizontalScale, verticalScale);
+  return {
+    x: point.x + deltaX * boundaryScale,
+    y: point.y + deltaY * boundaryScale,
+  };
+}
+
+function edgeCurve(
+  edge: ArchitectureGraphCanvasEdge,
+  pointsById: ReadonlyMap<string, ArchitectureGraphCanvasPoint>,
+  hasReciprocalEdge: boolean,
+): ArchitectureGraphCanvasEdgeCurve | null {
+  const from = pointsById.get(edge.from);
+  const to = pointsById.get(edge.to);
+  if (from === undefined || to === undefined) return null;
+
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+  if (deltaX === 0 && deltaY === 0) return null;
+
+  const start = rectangularBoundaryPoint(from, deltaX, deltaY);
+  const endTowardSource = rectangularBoundaryPoint(to, -deltaX, -deltaY);
+  const x1 = start.x;
+  const y1 = start.y;
+  const x2 = endTowardSource.x;
+  const y2 = endTowardSource.y;
+  const chordLength = Math.hypot(x2 - x1, y2 - y1);
+  const normalX = chordLength === 0 ? 0 : -(y2 - y1) / chordLength;
+  const normalY = chordLength === 0 ? 0 : (x2 - x1) / chordLength;
+  const reciprocalOffset = hasReciprocalEdge ? 22 : 0;
+  const horizontal = Math.abs(deltaX) >= Math.abs(deltaY);
+  const primaryDistance = horizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1);
+  const controlOffset = Math.max(42, Math.min(116, primaryDistance * 0.45));
+  const direction = horizontal ? Math.sign(deltaX) || 1 : Math.sign(deltaY) || 1;
+  const controlOneX = hasReciprocalEdge
+    ? x1 + (x2 - x1) * 0.35 + normalX * reciprocalOffset
+    : horizontal
+      ? x1 + controlOffset * direction
+      : x1;
+  const controlOneY = hasReciprocalEdge
+    ? y1 + (y2 - y1) * 0.35 + normalY * reciprocalOffset
+    : horizontal
+      ? y1
+      : y1 + controlOffset * direction;
+  const controlTwoX = hasReciprocalEdge
+    ? x1 + (x2 - x1) * 0.65 + normalX * reciprocalOffset
+    : horizontal
+      ? x2 - controlOffset * direction
+      : x2;
+  const controlTwoY = hasReciprocalEdge
+    ? y1 + (y2 - y1) * 0.65 + normalY * reciprocalOffset
+    : horizontal
+      ? y2
+      : y2 - controlOffset * direction;
+  const path = `M${x1},${y1} C${controlOneX},${controlOneY} ${controlTwoX},${controlTwoY} ${x2},${y2}`;
+
+  return {
+    edge,
+    id: architectureEdgeId(edge),
+    from,
+    to,
+    path,
+    centerX: cubicPoint(x1, controlOneX, controlTwoX, x2),
+    centerY: cubicPoint(y1, controlOneY, controlTwoY, y2),
+  };
+}
+
+export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
+  const { onViewChange, onSelectEdge } = props;
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef(new Map<string, HTMLButtonElement>());
+  const edgeRefs = useRef(new Map<string, HTMLButtonElement>());
+  const canvasPanRef = useRef<{
+    readonly pointerId: number;
+    readonly clientX: number;
+    readonly clientY: number;
+  } | null>(null);
+  const minimapRef = useRef<HTMLButtonElement>(null);
+  const minimapPointerRef = useRef<number | null>(null);
+  const fittedSceneRef = useRef<string | null>(props.initialView?.sceneIdentity ?? null);
+  const [nodeFocusId, setNodeFocusId] = useState<string | null>(null);
+  const [edgeFocusId, setEdgeFocusId] = useState<string | null>(null);
+  const [focusedEdgeId, setFocusedEdgeId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const [panning, setPanning] = useState(false);
+  const [viewport, setViewport] = useState<ArchitectureGraphCanvasViewport>({
+    width: 0,
+    height: 0,
+  });
+  const [camera, setCamera] = useState<ArchitectureGraphCanvasCamera>(
+    props.initialView?.camera ?? {
+      scale: 1,
+      translateX: 0,
+      translateY: 0,
+    },
+  );
+  const markerPrefix = `architecture-arrow-${useId().replaceAll(":", "")}`;
+  const layout = useMemo(() => createArchitectureGraphCanvasLayout(props.nodes), [props.nodes]);
+  const points = layout.points;
+  const bounds = useMemo(() => architectureCanvasBounds(points), [points]);
+  const sceneIdentity = useMemo(
+    () => props.nodes.map((unit) => `${unit.id}:${unit.position.x}:${unit.position.y}`).join("|"),
+    [props.nodes],
+  );
+  const pointsById = useMemo(
+    () => new Map(points.map((point) => [point.node.id, point] as const)),
+    [points],
+  );
+  const edgeCurves = useMemo(() => {
+    const directedEndpoints = new Set(props.edges.map((edge) => `${edge.from}\0${edge.to}`));
+    return props.edges.flatMap((edge) => {
+      if (
+        props.edgeVisibility === "selection" &&
+        (props.selectedEdgeId !== null
+          ? edge.id !== props.selectedEdgeId
+          : props.selectedNodeId === null ||
+            (edge.from !== props.selectedNodeId && edge.to !== props.selectedNodeId))
+      )
+        return [];
+      const curve = edgeCurve(edge, pointsById, directedEndpoints.has(`${edge.to}\0${edge.from}`));
+      return curve === null ? [] : [curve];
+    });
+  }, [pointsById, props.edges, props.edgeVisibility, props.selectedEdgeId, props.selectedNodeId]);
+  const visibleEdgeIds = useMemo(() => new Set(edgeCurves.map((curve) => curve.id)), [edgeCurves]);
+  const selectedEdgeId = props.selectedEdgeId;
+  const highlightedNodeIds = new Set(props.highlightedNodeIds ?? []);
+  const hasVisibleSelectedEdge = selectedEdgeId !== null && visibleEdgeIds.has(selectedEdgeId);
+  const hasVisibleSelectedUnit =
+    props.selectedNodeId !== null && pointsById.has(props.selectedNodeId);
+  const activeNodeFocusId = hasVisibleSelectedUnit
+    ? props.selectedNodeId
+    : nodeFocusId !== null && pointsById.has(nodeFocusId)
+      ? nodeFocusId
+      : (points[0]?.node.id ?? null);
+  const activeEdgeFocusId = hasVisibleSelectedEdge
+    ? selectedEdgeId
+    : edgeFocusId !== null && visibleEdgeIds.has(edgeFocusId)
+      ? edgeFocusId
+      : (edgeCurves[0]?.id ?? null);
+  const inspectedEdgeId = selectedEdgeId ?? focusedEdgeId ?? hoveredEdgeId;
+  const inspectedEdge = edgeCurves.find((curve) => curve.id === inspectedEdgeId) ?? null;
+  const outsidePageEdgeCount = useMemo(
+    () =>
+      props.edges.filter((edge) => !pointsById.has(edge.from) || !pointsById.has(edge.to)).length,
+    [pointsById, props.edges],
+  );
+  const minimapHeight = clamp(
+    (ARCHITECTURE_MINIMAP_WIDTH * bounds.height) / Math.max(1, bounds.width),
+    ARCHITECTURE_MINIMAP_MIN_HEIGHT,
+    ARCHITECTURE_MINIMAP_MAX_HEIGHT,
+  );
+  const showMinimap = viewport.width >= 640 && viewport.height >= 520 && props.nodes.length >= 6;
+  const cameraBottomInset = showMinimap ? minimapHeight + ARCHITECTURE_MINIMAP_CONTROL_GAP : 0;
+  const visibleWorld = {
+    x: Math.max(bounds.x, -camera.translateX / camera.scale),
+    y: Math.max(bounds.y, -camera.translateY / camera.scale),
+    right: Math.min(bounds.right, (viewport.width - camera.translateX) / camera.scale),
+    bottom: Math.min(
+      bounds.bottom,
+      (viewport.height - cameraBottomInset - camera.translateY) / camera.scale,
+    ),
+  };
+
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (element === null) return;
+
+    const measure = (): void => {
+      const next = {
+        width: element.clientWidth,
+        height: element.clientHeight,
+      };
+      setViewport((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (viewport.width === 0 || viewport.height === 0 || props.nodes.length === 0) return;
+
+    if (fittedSceneRef.current !== sceneIdentity) {
+      fittedSceneRef.current = sceneIdentity;
+      const initialFocus =
+        props.initialFocusNodeId === undefined
+          ? undefined
+          : pointsById.get(props.initialFocusNodeId);
+      const fitted = fitCamera(bounds, viewport, cameraBottomInset);
+      const selectedEdge =
+        props.selectedEdgeId === null
+          ? undefined
+          : props.edges.find((edge) => edge.id === props.selectedEdgeId);
+      const focus =
+        initialFocus ??
+        (props.initialReadableView
+          ? ((props.selectedNodeId === null ? undefined : pointsById.get(props.selectedNodeId)) ??
+            (selectedEdge === undefined ? undefined : pointsById.get(selectedEdge.from)) ??
+            points[0])
+          : undefined);
+      const scale =
+        initialFocus !== undefined
+          ? 1
+          : props.initialReadableView
+            ? Math.max(ARCHITECTURE_CAMERA_READABLE_MIN_SCALE, fitted.scale)
+            : fitted.scale;
+      setCamera(
+        focus === undefined
+          ? fitted
+          : clampCamera(
+              {
+                scale,
+                translateX: viewport.width / 2 - focus.x * scale,
+                translateY: (viewport.height - cameraBottomInset) / 2 - focus.y * scale,
+              },
+              bounds,
+              viewport,
+              cameraBottomInset,
+            ),
+      );
+      return;
+    }
+
+    setCamera((current) => clampCamera(current, bounds, viewport, cameraBottomInset));
+  }, [
+    bounds,
+    cameraBottomInset,
+    pointsById,
+    points,
+    props.initialFocusNodeId,
+    props.initialReadableView,
+    props.nodes.length,
+    props.edges,
+    props.selectedEdgeId,
+    props.selectedNodeId,
+    sceneIdentity,
+    viewport,
+  ]);
+
+  useEffect(() => {
+    if (viewport.width === 0 || viewport.height === 0 || fittedSceneRef.current !== sceneIdentity)
+      return;
+    onViewChange?.({ sceneIdentity, camera });
+  }, [camera, onViewChange, sceneIdentity, viewport.height, viewport.width]);
+
+  const updateCamera = useCallback(
+    (update: (current: ArchitectureGraphCanvasCamera) => ArchitectureGraphCanvasCamera): void => {
+      if (viewport.width === 0 || viewport.height === 0) return;
+      setCamera((current) => clampCamera(update(current), bounds, viewport, cameraBottomInset));
+    },
+    [bounds, cameraBottomInset, viewport],
+  );
+
+  const fitCanvas = useCallback((): void => {
+    if (viewport.width === 0 || viewport.height === 0) return;
+    setCamera(fitCamera(bounds, viewport, cameraBottomInset));
+  }, [bounds, cameraBottomInset, viewport]);
+
+  const zoomAt = useCallback(
+    (scale: number, focalX = viewport.width / 2, focalY = viewport.height / 2): void => {
+      updateCamera((current) => {
+        const nextScale = clamp(
+          scale,
+          ARCHITECTURE_CAMERA_MIN_SCALE,
+          ARCHITECTURE_CAMERA_MAX_SCALE,
+        );
+        const worldX = (focalX - current.translateX) / current.scale;
+        const worldY = (focalY - current.translateY) / current.scale;
+        return {
+          scale: nextScale,
+          translateX: focalX - worldX * nextScale,
+          translateY: focalY - worldY * nextScale,
+        };
+      });
+    },
+    [updateCamera, viewport.height, viewport.width],
+  );
+
+  const focusWorldPoint = useCallback(
+    (x: number, y: number): void => {
+      updateCamera((current) => ({
+        ...current,
+        translateX: viewport.width / 2 - x * current.scale,
+        translateY: viewport.height / 2 - y * current.scale,
+      }));
+    },
+    [updateCamera, viewport.height, viewport.width],
+  );
+
+  const activateEdge = useCallback(
+    (curve: ArchitectureGraphCanvasEdgeCurve): void => {
+      const trigger = edgeRefs.current.get(curve.id);
+      if (trigger === undefined) return;
+      trigger.focus();
+      onSelectEdge(curve.edge, trigger);
+    },
+    [onSelectEdge],
+  );
+
+  const focusRelativeNode = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+    offset: -1 | 1,
+  ): void => {
+    event.preventDefault();
+    const nextIndex = (index + offset + props.nodes.length) % props.nodes.length;
+    const nextUnit = props.nodes[nextIndex];
+    if (nextUnit === undefined) return;
+    const nextButton = nodeRefs.current.get(nextUnit.id);
+    if (nextButton === undefined) return;
+    const nextPoint = pointsById.get(nextUnit.id);
+    if (nextPoint !== undefined) focusWorldPoint(nextPoint.x, nextPoint.y);
+    setNodeFocusId(nextUnit.id);
+    nextButton.focus();
+  };
+
+  const focusRelativeEdge = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+    offset: -1 | 1,
+  ): void => {
+    event.preventDefault();
+    const nextCurve = edgeCurves[(index + offset + edgeCurves.length) % edgeCurves.length];
+    if (nextCurve === undefined) return;
+    setEdgeFocusId(nextCurve.id);
+    focusWorldPoint(nextCurve.centerX, nextCurve.centerY);
+    edgeRefs.current.get(nextCurve.id)?.focus();
+  };
+
+  const onCanvasPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest("button, [data-architecture-edge-hit]") !== null
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    canvasPanRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    setPanning(true);
+  };
+
+  const onCanvasPointerMove = (event: PointerEvent<HTMLDivElement>): void => {
+    const previous = canvasPanRef.current;
+    if (previous === null || previous.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    canvasPanRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    updateCamera((current) => ({
+      ...current,
+      translateX: current.translateX + event.clientX - previous.clientX,
+      translateY: current.translateY + event.clientY - previous.clientY,
+    }));
+  };
+
+  const endCanvasPan = (event: PointerEvent<HTMLDivElement>): void => {
+    if (canvasPanRef.current?.pointerId !== event.pointerId) return;
+    canvasPanRef.current = null;
+    setPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const onCanvasWheel = (event: WheelEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const nextScale = camera.scale * Math.exp(-event.deltaY * 0.0015);
+      zoomAt(nextScale, event.clientX - rect.left, event.clientY - rect.top);
+      return;
+    }
+
+    const horizontalDelta = event.shiftKey && event.deltaX === 0 ? event.deltaY : event.deltaX;
+    const verticalDelta = event.shiftKey ? 0 : event.deltaY;
+    updateCamera((current) => ({
+      ...current,
+      translateX: current.translateX - horizontalDelta,
+      translateY: current.translateY - verticalDelta,
+    }));
+  };
+
+  const panFromMinimap = (event: PointerEvent<HTMLButtonElement>): void => {
+    const element = minimapRef.current;
+    if (element === null) return;
+    const rect = element.getBoundingClientRect();
+    const minimapScale = Math.min(rect.width / bounds.width, rect.height / bounds.height);
+    const offsetX = (rect.width - bounds.width * minimapScale) / 2;
+    const offsetY = (rect.height - bounds.height * minimapScale) / 2;
+    const worldX = clamp(
+      bounds.x + (event.clientX - rect.left - offsetX) / minimapScale,
+      bounds.x,
+      bounds.right,
+    );
+    const worldY = clamp(
+      bounds.y + (event.clientY - rect.top - offsetY) / minimapScale,
+      bounds.y,
+      bounds.bottom,
+    );
+    focusWorldPoint(worldX, worldY);
+  };
+
+  const onMinimapPointerDown = (event: PointerEvent<HTMLButtonElement>): void => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    minimapPointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    panFromMinimap(event);
+  };
+
+  const onMinimapPointerMove = (event: PointerEvent<HTMLButtonElement>): void => {
+    if (minimapPointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+    panFromMinimap(event);
+  };
+
+  const endMinimapPan = (event: PointerEvent<HTMLButtonElement>): void => {
+    if (minimapPointerRef.current !== event.pointerId) return;
+    minimapPointerRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  if (props.nodes.length === 0) {
+    return (
+      <div className="architecture-surface flex min-h-64 items-center justify-center text-sm text-[var(--architecture-text-muted)]">
+        {props.emptyLabel}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={viewportRef}
+      aria-label={props.ariaLabel}
+      className={cn(
+        "architecture-surface relative size-full min-h-0 touch-none overflow-hidden overscroll-contain bg-[var(--architecture-page)]",
+        panning ? "cursor-grabbing" : "cursor-grab",
+      )}
+      data-architecture-canvas
+      data-panning={panning ? "true" : "false"}
+      onPointerCancel={endCanvasPan}
+      onPointerDown={onCanvasPointerDown}
+      onPointerMove={onCanvasPointerMove}
+      onPointerUp={endCanvasPan}
+      onWheel={onCanvasWheel}
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,var(--architecture-grid-dot)_1px,transparent_1px)] bg-[length:16px_16px]"
+      />
+      <div
+        className="absolute start-0 top-0 will-change-transform"
+        data-architecture-stage
+        style={{
+          width: layout.width,
+          height: layout.height,
+          transform: `translate(${camera.translateX}px, ${camera.translateY}px) scale(${camera.scale})`,
+          transformOrigin: "0 0",
+        }}
+      >
+        <svg aria-hidden="true" className="absolute inset-0 size-full overflow-visible">
+          <defs>
+            {(["identity", "added", "removed", "affected", "context"] as const).map((tone) => (
+              <marker
+                id={`${markerPrefix}-${tone}`}
+                key={tone}
+                markerHeight="9"
+                markerUnits="userSpaceOnUse"
+                markerWidth="9"
+                orient="auto"
+                refX="7"
+                refY="3"
+                viewBox="0 0 9 6"
+              >
+                <path d="M0 0 7 3 0 6Z" fill={edgeTone(tone)} />
+              </marker>
+            ))}
+            <marker
+              id={`${markerPrefix}-active`}
+              markerHeight="9"
+              markerUnits="userSpaceOnUse"
+              markerWidth="9"
+              orient="auto"
+              refX="7"
+              refY="3"
+              viewBox="0 0 9 6"
+            >
+              <path d="M0 0 7 3 0 6Z" fill="var(--architecture-accent)" />
+            </marker>
+          </defs>
+          {edgeCurves.map((curve) => {
+            const selected = curve.id === selectedEdgeId;
+            const active = selected || curve.id === focusedEdgeId || curve.id === hoveredEdgeId;
+            const incidentToSelectedNode =
+              hasVisibleSelectedUnit &&
+              (curve.edge.from === props.selectedNodeId || curve.edge.to === props.selectedNodeId);
+            const unrelated = hasVisibleSelectedEdge
+              ? !selected
+              : hasVisibleSelectedUnit && !incidentToSelectedNode;
+            const subdued =
+              props.subduedEdges &&
+              props.edgeVisibility !== "selection" &&
+              !incidentToSelectedNode &&
+              !highlightedNodeIds.has(curve.edge.from) &&
+              !highlightedNodeIds.has(curve.edge.to);
+            return (
+              <g key={curve.id}>
+                {curve.edge.stroke === "double" && !active ? (
+                  <path
+                    d={curve.path}
+                    fill="none"
+                    opacity={unrelated ? 0.2 : subdued ? 0.3 : 0.82}
+                    pointerEvents="none"
+                    stroke={edgeTone(curve.edge.tone)}
+                    strokeLinecap="round"
+                    strokeWidth={edgeWidth(curve.edge.weight) + 3}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null}
+                <path
+                  d={curve.path}
+                  fill="none"
+                  markerEnd={`url(#${markerPrefix}-${active ? "active" : curve.edge.tone})`}
+                  opacity={active ? 1 : unrelated ? 0.2 : subdued ? 0.3 : 0.78}
+                  pointerEvents="none"
+                  stroke={
+                    active
+                      ? "var(--architecture-accent)"
+                      : curve.edge.stroke === "double"
+                        ? "var(--architecture-page)"
+                        : edgeTone(curve.edge.tone)
+                  }
+                  strokeDasharray={edgeDashArray(curve.edge.stroke)}
+                  strokeLinecap="round"
+                  strokeWidth={
+                    selected
+                      ? Math.max(2.6, edgeWidth(curve.edge.weight))
+                      : edgeWidth(curve.edge.weight)
+                  }
+                  vectorEffect="non-scaling-stroke"
+                />
+                <path
+                  className="cursor-pointer"
+                  data-architecture-edge-hit={curve.id}
+                  d={curve.path}
+                  fill="none"
+                  pointerEvents="stroke"
+                  stroke="transparent"
+                  strokeLinecap="round"
+                  strokeWidth="18"
+                  vectorEffect="non-scaling-stroke"
+                  onClick={() => activateEdge(curve)}
+                  onMouseEnter={() => setHoveredEdgeId(curve.id)}
+                  onMouseLeave={() => setHoveredEdgeId(null)}
+                  onPointerDown={(event) => event.stopPropagation()}
+                />
+              </g>
+            );
+          })}
+        </svg>
+        {edgeCurves.map((curve, index) => {
+          const selected = curve.id === selectedEdgeId;
+          const active = selected || curve.id === focusedEdgeId || curve.id === hoveredEdgeId;
+          return (
+            <button
+              ref={(button) => {
+                if (button === null) edgeRefs.current.delete(curve.id);
+                else edgeRefs.current.set(curve.id, button);
+              }}
+              aria-label={curve.edge.ariaLabel}
+              aria-pressed={selected}
+              className={cn(
+                "absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--architecture-accent)] bg-[var(--architecture-overlay)] px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-opacity focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)]",
+                active || curve.edge.showBadge
+                  ? "pointer-events-auto opacity-100"
+                  : "pointer-events-none opacity-0",
+              )}
+              data-architecture-edge-id={curve.id}
+              key={`badge:${curve.id}`}
+              style={{ left: curve.centerX, top: curve.centerY }}
+              tabIndex={curve.id === activeEdgeFocusId ? 0 : -1}
+              type="button"
+              onBlur={() => setFocusedEdgeId(null)}
+              onClick={(event) => onSelectEdge(curve.edge, event.currentTarget)}
+              onFocus={() => {
+                setEdgeFocusId(curve.id);
+                setFocusedEdgeId(curve.id);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                  focusRelativeEdge(event, index, 1);
+                } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                  focusRelativeEdge(event, index, -1);
+                } else if (event.key === "Home") {
+                  event.preventDefault();
+                  const first = edgeCurves[0];
+                  if (first === undefined) return;
+                  setEdgeFocusId(first.id);
+                  focusWorldPoint(first.centerX, first.centerY);
+                  edgeRefs.current.get(first.id)?.focus();
+                } else if (event.key === "End") {
+                  event.preventDefault();
+                  const last = edgeCurves.at(-1);
+                  if (last === undefined) return;
+                  setEdgeFocusId(last.id);
+                  focusWorldPoint(last.centerX, last.centerY);
+                  edgeRefs.current.get(last.id)?.focus();
+                }
+              }}
+              onMouseEnter={() => setHoveredEdgeId(curve.id)}
+              onMouseLeave={() => setHoveredEdgeId(null)}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {curve.edge.showBadge ? curve.edge.label : `×${curve.edge.weight}`}
+            </button>
+          );
+        })}
+        {points.map((point, index) => {
+          const selected = props.selectedNodeId === point.node.id;
+          const highlighted = highlightedNodeIds.has(point.node.id);
+          const connectedToInspectedEdge =
+            inspectedEdge !== null &&
+            (inspectedEdge.edge.from === point.node.id || inspectedEdge.edge.to === point.node.id);
+          return (
+            <button
+              ref={(node) => {
+                if (node === null) nodeRefs.current.delete(point.node.id);
+                else nodeRefs.current.set(point.node.id, node);
+              }}
+              aria-label={point.node.ariaLabel}
+              aria-pressed={selected}
+              className={cn(
+                "absolute z-20 flex h-24 w-[236px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[11px] border px-[15px] pb-3 pt-[11px] text-left text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-[border-color,box-shadow,opacity] hover:border-[var(--architecture-accent)] hover:shadow-[var(--architecture-shadow-node-hover)] focus-visible:border-[var(--architecture-accent)] focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--architecture-page)]",
+                "border-[var(--architecture-node-edge)] bg-[var(--architecture-node-fill)]",
+                nodeStrokeClass(point.node.stroke),
+                selected &&
+                  "border-[var(--architecture-accent)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--architecture-accent)_20%,transparent),var(--architecture-shadow-node-hover)]",
+                highlighted &&
+                  !selected &&
+                  "border-[var(--architecture-amber)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--architecture-amber)_18%,transparent),var(--architecture-shadow-node)]",
+                connectedToInspectedEdge &&
+                  "border-[var(--architecture-accent)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--architecture-accent)_16%,transparent),var(--architecture-shadow-node)]",
+                hasVisibleSelectedEdge &&
+                  !connectedToInspectedEdge &&
+                  "opacity-35 hover:opacity-100",
+              )}
+              data-architecture-unit-id={point.node.id}
+              data-anchor-highlighted={highlighted ? "true" : undefined}
+              key={point.node.id}
+              style={architectureNodeStyle(point)}
+              tabIndex={point.node.id === activeNodeFocusId ? 0 : -1}
+              type="button"
+              onClick={(event) => props.onSelectNode(point.node, event.currentTarget)}
+              onFocus={() => setNodeFocusId(point.node.id)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                  focusRelativeNode(event, index, 1);
+                } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                  focusRelativeNode(event, index, -1);
+                } else if (event.key === "Home" || event.key === "End") {
+                  event.preventDefault();
+                  const target = event.key === "Home" ? points[0] : points.at(-1);
+                  if (target === undefined) return;
+                  setNodeFocusId(target.node.id);
+                  focusWorldPoint(target.x, target.y);
+                  nodeRefs.current.get(target.node.id)?.focus();
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <span className="flex min-w-0 items-center justify-between gap-3">
+                <span className="truncate text-[13px] font-semibold">{point.node.label}</span>
+                <span className="shrink-0 rounded-full border border-[var(--architecture-node-edge)] bg-[var(--architecture-page)]/40 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-[var(--architecture-text-secondary)]">
+                  {point.node.badgeLabel}
+                </span>
+              </span>
+              <span className="mt-1 line-clamp-2 min-h-7 text-[10.5px] leading-[1.35] text-[var(--architecture-text-muted)]">
+                {point.node.description}
+              </span>
+              <span className="mt-auto flex items-center gap-2 font-mono text-[9px] tabular-nums text-[var(--architecture-text-faint)]">
+                {point.node.footerLabels.map((label, footerIndex) => (
+                  <span key={`${point.node.id}:footer:${label}`}>
+                    {footerIndex > 0 ? <span aria-hidden="true">· </span> : null}
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {showMinimap ? (
+        <button
+          ref={minimapRef}
+          aria-label="Architecture minimap. Click or drag to pan; activate with the keyboard to fit."
+          className="absolute bottom-[52px] start-3 z-40 cursor-crosshair touch-none overflow-hidden rounded-[11px] border border-[var(--architecture-border)] bg-[var(--architecture-overlay)]/90 shadow-[var(--architecture-shadow-node)] backdrop-blur-md outline-none focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)]"
+          style={{ width: ARCHITECTURE_MINIMAP_WIDTH, height: minimapHeight }}
+          type="button"
+          onClick={(event) => {
+            if (event.detail === 0) fitCanvas();
+          }}
+          onPointerCancel={endMinimapPan}
+          onPointerDown={onMinimapPointerDown}
+          onPointerMove={onMinimapPointerMove}
+          onPointerUp={endMinimapPan}
+        >
+          <svg
+            aria-hidden="true"
+            className="size-full"
+            preserveAspectRatio="xMidYMid meet"
+            viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`}
+          >
+            <rect
+              fill="color-mix(in srgb, var(--architecture-page) 72%, transparent)"
+              height={bounds.height}
+              rx="18"
+              stroke="var(--architecture-border-soft)"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+              width={bounds.width}
+              x={bounds.x}
+              y={bounds.y}
+            />
+            {edgeCurves.map((curve) => (
+              <path
+                d={curve.path}
+                fill="none"
+                key={`minimap:${curve.id}`}
+                opacity={curve.id === selectedEdgeId ? 1 : 0.52}
+                stroke={
+                  curve.id === selectedEdgeId
+                    ? "var(--architecture-accent)"
+                    : edgeTone(curve.edge.tone)
+                }
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            {points.map((point) => (
+              <circle
+                cx={point.x}
+                cy={point.y}
+                fill={
+                  point.node.id === props.selectedNodeId
+                    ? "var(--architecture-accent)"
+                    : highlightedNodeIds.has(point.node.id)
+                      ? "var(--architecture-amber)"
+                      : point.node.tone === "identity"
+                        ? "var(--architecture-text-muted)"
+                        : edgeTone(point.node.tone)
+                }
+                key={`minimap:${point.node.id}`}
+                r="7"
+              />
+            ))}
+            <rect
+              fill="color-mix(in srgb, var(--architecture-accent) 12%, transparent)"
+              height={Math.max(0, visibleWorld.bottom - visibleWorld.y)}
+              rx="8"
+              stroke="var(--architecture-accent)"
+              strokeWidth="1.5"
+              vectorEffect="non-scaling-stroke"
+              width={Math.max(0, visibleWorld.right - visibleWorld.x)}
+              x={visibleWorld.x}
+              y={visibleWorld.y}
+            />
+          </svg>
+        </button>
+      ) : null}
+      <fieldset
+        aria-label="Canvas navigation"
+        className="absolute bottom-3 start-3 z-40 flex items-center gap-0.5 rounded-[11px] border border-[var(--architecture-border)] bg-[var(--architecture-overlay)]/90 p-0.5 shadow-[var(--architecture-shadow-node)] backdrop-blur-md"
+      >
+        <Button
+          aria-label="Zoom out"
+          className="text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
+          disabled={camera.scale <= ARCHITECTURE_CAMERA_MIN_SCALE}
+          size="icon-xs"
+          title="Zoom out"
+          variant="ghost"
+          onClick={() => zoomAt(camera.scale - ARCHITECTURE_CAMERA_ZOOM_STEP)}
+        >
+          <MinusIcon />
+        </Button>
+        <Button
+          aria-label={`Zoom level ${Math.round(camera.scale * 100)} percent. Reset to 100 percent.`}
+          className="min-w-12 px-1 font-mono text-[10px] tabular-nums text-[var(--architecture-text-secondary)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
+          size="xs"
+          title="Reset zoom to 100%"
+          variant="ghost"
+          onClick={() => zoomAt(1)}
+        >
+          {Math.round(camera.scale * 100)}%
+        </Button>
+        <Button
+          aria-label="Zoom in"
+          className="text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
+          disabled={camera.scale >= ARCHITECTURE_CAMERA_MAX_SCALE}
+          size="icon-xs"
+          title="Zoom in"
+          variant="ghost"
+          onClick={() => zoomAt(camera.scale + ARCHITECTURE_CAMERA_ZOOM_STEP)}
+        >
+          <PlusIcon />
+        </Button>
+        <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[var(--architecture-border-soft)]" />
+        <Button
+          aria-label="Fit architecture to view"
+          className="text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
+          size="icon-xs"
+          title="Fit to view"
+          variant="ghost"
+          onClick={fitCanvas}
+        >
+          <Maximize2Icon />
+        </Button>
+      </fieldset>
+      {outsidePageEdgeCount > 0 ? (
+        <p className="absolute bottom-3 end-3 z-30 rounded-md border border-[var(--architecture-border)] bg-[var(--architecture-overlay)] px-2 py-1 text-[10px] text-[var(--architecture-text-muted)] shadow-[var(--architecture-shadow-node)]">
+          {outsidePageEdgeCount} returned{" "}
+          {outsidePageEdgeCount === 1 ? "dependency connects" : "dependencies connect"} units
+          outside this page.
+        </p>
+      ) : null}
+    </div>
+  );
+}

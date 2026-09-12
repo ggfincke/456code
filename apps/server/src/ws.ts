@@ -1,3 +1,4 @@
+import * as CartographerService from "./cartographer/CartographerService.ts";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -548,6 +549,10 @@ const makeWsRpcLayer = (
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
+      const cartographer = Option.getOrElse(
+        yield* Effect.serviceOption(CartographerService.CartographerService),
+        () => CartographerService.unavailable,
+      );
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
@@ -1653,6 +1658,14 @@ const makeWsRpcLayer = (
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       return WsRpcGroup.of({
+        "cartographer.analyze": (input) =>
+          observeRpcEffect("cartographer.analyze", cartographer.analyze(input)),
+        "cartographer.get": (input) =>
+          observeRpcEffect("cartographer.get", cartographer.get(input)),
+        "cartographer.source": (input) =>
+          observeRpcEffect("cartographer.source", cartographer.source(input)),
+        "cartographer.dependencies": (input) =>
+          observeRpcEffect("cartographer.dependencies", cartographer.dependencies(input)),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,

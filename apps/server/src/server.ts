@@ -8,6 +8,7 @@ import {
   ProviderDriverKind,
   type RepositoryIdentity,
 } from "@t3tools/contracts";
+import * as CartographerService from "./cartographer/CartographerService.ts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -478,6 +479,7 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+  Layer.provideMerge(CartographerService.layer),
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
