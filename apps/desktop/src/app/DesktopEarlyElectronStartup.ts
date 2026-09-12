@@ -1,3 +1,4 @@
+import { finckeDesktop, isFinckeDesktop } from "../fincke/build.ts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -32,7 +33,11 @@ export interface EarlyLinuxElectronOptions {
 }
 
 export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
-  isDevelopment ? "com.t3tools.T3Code.Development.desktop" : "com.t3tools.T3Code.desktop";
+  isFinckeDesktop
+    ? `${finckeDesktop.appId}${isDevelopment ? ".dev" : ""}.desktop`
+    : isDevelopment
+      ? "com.t3tools.T3Code.Development.desktop"
+      : "com.t3tools.T3Code.desktop";
 
 const trimNonEmpty = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
@@ -88,7 +93,11 @@ export function resolveEarlyLinuxElectronOptions(
   const isDevelopment = isDevelopmentEnvironment(input.env);
   return {
     isDevelopment,
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxWmClass: isFinckeDesktop
+      ? `${finckeDesktop.profile}${isDevelopment ? "-dev" : ""}`
+      : isDevelopment
+        ? "t3code-dev"
+        : "t3code",
     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,

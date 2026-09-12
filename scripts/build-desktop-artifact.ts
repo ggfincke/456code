@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
+import { finckeDesktop } from "../apps/desktop/src/fincke/build.ts";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodeModule from "node:module";
@@ -2636,6 +2637,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   // source file was never written fails the electron-builder step.
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  personalBuild = false,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
@@ -2668,7 +2670,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
-  if (!isDesktopPreviewVersion(version)) {
+  if (!personalBuild && !isDesktopPreviewVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
       buildConfig.publish = [publishConfig];
@@ -2774,6 +2776,27 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     buildConfig.win = winConfig;
   }
 
+  if (personalBuild) {
+    buildConfig.appId = finckeDesktop.appId;
+    buildConfig.productName = "456code (Alpha)";
+    buildConfig.artifactName = "456code-thin-${version}-${arch}.${ext}";
+    buildConfig.publish = null;
+    for (const platformName of ["mac", "linux", "win"]) {
+      const config = buildConfig[platformName] as Record<string, unknown> | undefined;
+      if (config)
+        config.protocols = [
+          {
+            name: finckeDesktop.name,
+            schemes: [finckeDesktop.scheme, `${finckeDesktop.scheme}-dev`],
+          },
+        ];
+    }
+    if (platform === "linux") {
+      const linux = buildConfig.linux as Record<string, unknown>;
+      linux.executableName = finckeDesktop.profile;
+      linux.desktop = { entry: { StartupWMClass: finckeDesktop.profile } };
+    }
+  }
   return buildConfig;
 });
 
@@ -3668,6 +3691,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         : undefined,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
+      true,
     ),
     dependencies: stageDependencies,
     devDependencies: {
