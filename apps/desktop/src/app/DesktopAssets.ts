@@ -1,3 +1,4 @@
+import { isFinckeDesktop } from "../fincke/build.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -79,6 +80,17 @@ function resolveSourceTreeIconPath(
   ext: keyof DesktopIconPaths,
 ): string | undefined {
   if (environment.isPackaged || ext === "icns") return undefined;
+  if (isFinckeDesktop)
+    return environment.path.join(
+      environment.rootDir,
+      "assets",
+      "fincke",
+      ext === "ico"
+        ? "ocean-windows.ico"
+        : environment.platform === "darwin"
+          ? "ocean-macos-1024.png"
+          : "ocean-universal-1024.png",
+    );
   const brand = environment.isDevelopment ? "dev" : "prod";
   const fileNames = sourceTreeIconFileNames[brand];
   const fileName =

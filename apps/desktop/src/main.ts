@@ -1,3 +1,4 @@
+import * as FinckeFreshProfile from "./fincke/FreshProfile.ts";
 import * as MacPermissions from "./permissions/MacPermissions.ts";
 for (const stream of [process.stdout, process.stderr]) {
   stream.on("error", (err: NodeJS.ErrnoException) => {
@@ -75,13 +76,17 @@ const desktopEnvironmentLayer = Layer.unwrap(
     );
     const platform = yield* HostProcessPlatform;
     const processArch = yield* HostProcessArchitecture;
-    return DesktopEnvironment.layer({
-      dirname: __dirname,
-      homeDirectory: NodeOS.homedir(),
-      platform,
-      processArch,
-      ...metadata,
-    });
+    return FinckeFreshProfile.layer.pipe(
+      Layer.provideMerge(
+        DesktopEnvironment.layer({
+          dirname: __dirname,
+          homeDirectory: NodeOS.homedir(),
+          platform,
+          processArch,
+          ...metadata,
+        }),
+      ),
+    );
   }),
 );
 
