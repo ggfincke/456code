@@ -12,6 +12,8 @@ import * as EffectAcpAgent from "effect-acp/agent";
 import * as AcpError from "effect-acp/errors";
 import type * as AcpSchema from "effect-acp/schema";
 
+const coralProfile = process.env.T3_ACP_CORAL_MODES === "1";
+const coralRequiresAuth = process.env.T3_ACP_CORAL_REQUIRE_AUTH === "1";
 const requestLogPath = process.env.T3_ACP_REQUEST_LOG_PATH;
 const exitLogPath = process.env.T3_ACP_EXIT_LOG_PATH;
 const antigravityProfile = process.env.T3_ACP_ANTIGRAVITY === "1";
@@ -69,7 +71,7 @@ const permissionRequestCount = Math.max(
 );
 const sessionId = "mock-session-1";
 
-let currentModeId = antigravityProfile ? "default" : "ask";
+let currentModeId = antigravityProfile || coralProfile ? "default" : "ask";
 let currentModelId = antigravityProfile ? "gemini-test-low" : "default";
 let parameterizedModelPicker = false;
 let currentReasoning = "medium";
@@ -116,6 +118,27 @@ process.once("exit", (code) => {
 });
 
 function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
+  if (coralProfile)
+    return [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: currentModelId,
+        options: [
+          { value: "default", name: "Default" },
+          { value: "coral-alt", name: "Coral Alt" },
+        ],
+      },
+      {
+        id: "coral.runtime-mode",
+        name: "Permissions",
+        type: "select",
+        currentValue: "approval-required",
+        options: [{ value: "approval-required", name: "Ask" }],
+      },
+    ];
   if (antigravityProfile) {
     return [
       {
@@ -393,6 +416,12 @@ const program = Effect.gen(function* () {
       }
       parameterizedModelPicker =
         request.clientCapabilities?._meta?.parameterizedModelPicker === true;
+      if (coralProfile)
+        return {
+          protocolVersion: 1,
+          agentCapabilities: { sessionCapabilities: { resume: {} } },
+          authMethods: coralRequiresAuth ? [{ id: "test-auth", name: "Required" }] : [],
+        };
       if (antigravityProfile) {
         return {
           protocolVersion: 1,
@@ -592,6 +621,7 @@ const program = Effect.gen(function* () {
       cancelledSessions.add(cancelledSessionId);
       if (completeFirstPromptOnCancel) {
         yield* Deferred.succeed(nativeCancelRequested, undefined);
+        if (coralProfile) yield* Deferred.succeed(nativeCancelRelease, undefined);
         yield* agent.client.sessionUpdate({
           sessionId: cancelledSessionId,
           update: {

@@ -1,9 +1,11 @@
+import { CoralIcon } from "../../fincke/CoralIcon";
 import {
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
   GrokSettings,
+  CoralSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
@@ -44,6 +46,13 @@ export interface ProviderClientDefinition {
 }
 
 const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
+  {
+    value: ProviderDriverKind.make("coral"),
+    label: "Coral",
+    icon: CoralIcon,
+    settingsSchema: CoralSettings,
+    badgeLabel: "Early Access",
+  },
   {
     value: ProviderDriverKind.make("codex"),
     label: "Codex",

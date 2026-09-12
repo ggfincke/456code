@@ -1,3 +1,4 @@
+import { CoralIcon } from "../../fincke/CoralIcon";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import {
   AntigravityIcon,
@@ -15,6 +16,7 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>
   [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
   [ProviderDriverKind.make("cursor")]: CursorIcon,
   [ProviderDriverKind.make("grok")]: GrokIcon,
+  [ProviderDriverKind.make("coral")]: CoralIcon,
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
 };
 

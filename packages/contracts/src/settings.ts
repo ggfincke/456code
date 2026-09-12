@@ -1520,3 +1520,45 @@ export const ClientSettingsPatch = Schema.Struct({
   wordWrap: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
+
+export const CoralSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting("coral").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description: "Path to the Coral CLI binary.",
+        providerSettingsForm: { placeholder: "coral", clearWhenEmpty: "omit" },
+      }),
+    ),
+    ollamaHost: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("http://localhost:11434")),
+      Schema.annotateKey({
+        title: "Ollama host",
+        description: "HTTP or HTTPS endpoint Coral uses for Ollama inference.",
+        providerSettingsForm: {
+          placeholder: "http://localhost:11434",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    homePath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "CORAL_HOME path",
+        description: "Custom Coral session, trust, and local telemetry directory.",
+        providerSettingsForm: {
+          placeholder: "~/.coral",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+  },
+  {
+    order: ["binaryPath", "ollamaHost", "homePath"],
+  },
+);
+export type CoralSettings = typeof CoralSettings.Type;
