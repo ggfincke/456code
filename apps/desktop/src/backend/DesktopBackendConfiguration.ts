@@ -1,4 +1,5 @@
 import * as NodeOS from "node:os";
+import { isFinckeDesktop } from "../fincke/build.ts";
 
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import * as Context from "effect/Context";
@@ -105,8 +106,10 @@ const nodeBinDirOf = (nodePath: string): string => {
   return lastSlash > 0 ? nodePath.slice(0, lastSlash) : "/usr/bin";
 };
 
-const backendChildEnvPatch = (): Record<string, string | undefined> =>
-  Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
+const backendChildEnvPatch = (): Record<string, string | undefined> => ({
+  ...Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined])),
+  ...(isFinckeDesktop ? { T3CODE_HOME: undefined } : {}),
+});
 
 const getWslEnvEntryName = (entry: string): string => {
   const slashIndex = entry.indexOf("/");
