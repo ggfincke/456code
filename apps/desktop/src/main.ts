@@ -76,17 +76,13 @@ const desktopEnvironmentLayer = Layer.unwrap(
     );
     const platform = yield* HostProcessPlatform;
     const processArch = yield* HostProcessArchitecture;
-    return FinckeFreshProfile.layer.pipe(
-      Layer.provideMerge(
-        DesktopEnvironment.layer({
-          dirname: __dirname,
-          homeDirectory: NodeOS.homedir(),
-          platform,
-          processArch,
-          ...metadata,
-        }),
-      ),
-    );
+    return DesktopEnvironment.layer({
+      dirname: __dirname,
+      homeDirectory: NodeOS.homedir(),
+      platform,
+      processArch,
+      ...metadata,
+    });
   }),
 );
 
@@ -226,7 +222,12 @@ const desktopApplicationRuntimeLayer = desktopApplicationLayer.pipe(
 // yield and let Electron emit ready.
 const desktopRuntimeLayer = desktopClerkLayer.pipe(
   Layer.flatMap((clerkContext) =>
-    desktopApplicationRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),
+    FinckeFreshProfile.layer.pipe(
+      Layer.provide(Layer.succeedContext(clerkContext)),
+      Layer.flatMap(() =>
+        desktopApplicationRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),
+      ),
+    ),
   ),
   Layer.provideMerge(DesktopPreReadyPlatform.layer),
 );
