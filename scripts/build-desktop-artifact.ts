@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
-import { finckeDesktop } from "../apps/desktop/src/fincke/build.ts";
+import { finckeDesktop } from "./lib/fincke-desktop.ts";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodeModule from "node:module";
