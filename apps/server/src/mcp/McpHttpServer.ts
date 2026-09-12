@@ -1,3 +1,5 @@
+import { CartographerToolkit } from "./toolkits/cartographer/tools.ts";
+import { CartographerToolkitHandlersLive } from "./toolkits/cartographer/handlers.ts";
 import * as NodeCrypto from "node:crypto";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -631,5 +633,6 @@ const McpTransportLive = McpServer.layerHttp({
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
+  McpServer.toolkit(CartographerToolkit).pipe(Layer.provide(CartographerToolkitHandlersLive)),
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

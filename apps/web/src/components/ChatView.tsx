@@ -614,6 +614,7 @@ function useDraftHeroLayoutTransition(
 const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
+const CartographerPanel = lazy(() => import("../cartographer/CartographerPanel"));
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const selectAutoShowFloatingPreview = (settings: { browserAutoShowFloatingPreview: boolean }) =>
   settings.browserAutoShowFloatingPreview;
@@ -9641,6 +9642,19 @@ export default function ChatView(props: ChatViewProps) {
         newShortcutLabel={newTerminalShortcutLabel ?? undefined}
         closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
       />
+    ) : renderedRightPanelSurface?.kind === "cartographer-map" ||
+      renderedRightPanelSurface?.kind === "cartographer-impact" ? (
+      <Suspense fallback={null}>
+        {serverConfig?.environment.capabilities.cartographer === true ? (
+          <CartographerPanel
+            key={`${activeThreadKey}:${renderedRightPanelSurface.kind}`}
+            threadRef={activeThreadRef}
+            mode={renderedRightPanelSurface.kind === "cartographer-map" ? "map" : "impact"}
+          />
+        ) : (
+          <p className="p-4 text-sm">Cartographer is unavailable in this environment.</p>
+        )}
+      </Suspense>
     ) : renderedRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
         <DiffPanel
@@ -10362,6 +10376,16 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowserInProfile={createBrowserSurface}
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
+          onAddMap={
+            isServerThread &&
+            isGitRepo &&
+            serverConfig?.environment.capabilities.cartographer === true
+              ? () => {
+                  if (activeThreadRef)
+                    useRightPanelStore.getState().open(activeThreadRef, "cartographer-map");
+                }
+              : undefined
+          }
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
@@ -10419,6 +10443,16 @@ export default function ChatView(props: ChatViewProps) {
             onAddBrowserInProfile={createBrowserSurface}
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
+            onAddMap={
+              isServerThread &&
+              isGitRepo &&
+              serverConfig?.environment.capabilities.cartographer === true
+                ? () => {
+                    if (activeThreadRef)
+                      useRightPanelStore.getState().open(activeThreadRef, "cartographer-map");
+                  }
+                : undefined
+            }
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}

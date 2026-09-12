@@ -67,9 +67,14 @@ export default mergeConfig(
   defineConfig({
     run: {
       tasks: {
+        dev: {
+          command: "node --watch src/bin.ts",
+          dependsOn: ["@t3tools/cartographer-core#build"],
+          cache: false,
+        },
         build: {
           command: "node scripts/cli.ts build",
-          dependsOn: ["@t3tools/web#build"],
+          dependsOn: ["@t3tools/cartographer-core#build", "@t3tools/web#build"],
           cache: false,
         },
       },
@@ -77,7 +82,7 @@ export default mergeConfig(
     pack: {
       // The executable embeds one entry; the history worker becomes a hidden
       // subcommand there instead of a sibling script.
-      entry: packExecutable ? ["src/bin.ts"] : ["src/bin.ts", "src/claude-history-worker.ts"],
+      entry: packExecutable ? ["src/bin.ts"] : ["src/bin.ts", "src/claude-history-worker.ts", "src/cartographerWorker.ts"],
       outDir: packExecutable ? "dist-exe" : "dist",
       sourcemap: !packExecutable,
       clean: true,

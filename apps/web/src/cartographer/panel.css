@@ -1,0 +1,29 @@
+.cartographer-panel {
+  --architecture-page: var(--background);
+  --architecture-text: var(--foreground);
+  --architecture-text-secondary: var(--muted-foreground);
+  --architecture-text-muted: var(--muted-foreground);
+  --architecture-text-faint: var(--muted-foreground);
+  --architecture-accent: var(--primary);
+  --architecture-border: var(--border);
+  --architecture-border-soft: var(--border);
+  --architecture-edge: var(--muted-foreground);
+  --architecture-grid-dot: color-mix(in srgb, var(--foreground) 12%, transparent);
+  --architecture-overlay: var(--popover);
+  --architecture-hover: var(--accent);
+  --architecture-node-neutral: var(--card);
+  --architecture-node-analyze: var(--card);
+  --architecture-node-emit: var(--card);
+  --architecture-node-store: var(--card);
+  --architecture-node-cli: var(--card);
+  --architecture-node-mcp: var(--card);
+  --architecture-node-web: var(--card);
+  --architecture-blue: var(--chart-1);
+  --architecture-green: var(--chart-2);
+  --architecture-teal: var(--primary);
+  --architecture-amber: var(--chart-3);
+  --architecture-purple: var(--chart-4);
+  --architecture-red: var(--destructive);
+  --architecture-shadow-node: 0 2px 8px #0002;
+  --architecture-shadow-node-hover: 0 4px 12px #0003;
+}
