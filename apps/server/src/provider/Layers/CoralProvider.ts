@@ -6,31 +6,32 @@ import type {
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import * as Schema from "effect/Schema";
+import * as FileSystem from "effect/FileSystem";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildCoralAcpEnvironment,
   coralModelsFromSessionSetup,
   DEFAULT_CORAL_MODEL,
+  makeCoralAcpRuntime,
+  normalizeCoralOllamaHost,
 } from "../acp/CoralAcpSupport.ts";
 import {
   buildServerProvider,
   isCommandMissingCause,
-  parseGenericCliVersion,
-  spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse, HttpIncomingMessage } from "effect/unstable/http";
 
 const CORAL_PRESENTATION = {
   displayName: "Coral",
@@ -43,7 +44,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
 
-const VERSION_PROBE_TIMEOUT_MS = 4_000;
+const CORAL_PROBE_TIMEOUT_MS = 4_000;
 
 const CORAL_FALLBACK_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
@@ -110,112 +111,111 @@ export function buildInitialCoralProviderSnapshot(
   });
 }
 
-const runCoralVersionCommand = (coralSettings: CoralSettings, environment: NodeJS.ProcessEnv) =>
-  Effect.gen(function* () {
-    const command = coralSettings.binaryPath || "coral";
-    const spawnCommand = yield* resolveSpawnCommand(command, ["--version"], {
-      env: environment,
-    });
-    return yield* spawnAndCollect(
-      command,
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: environment,
-        shell: spawnCommand.shell,
-      }),
-    );
-  });
+const OllamaModels = Schema.Struct({
+  models: Schema.Array(
+    Schema.Struct({ name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)) }),
+  ).check(Schema.isMaxLength(512)),
+});
 
 export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(function* (
   coralSettings: CoralSettings,
   environment: NodeJS.ProcessEnv = process.env,
+  lastKnownModels: ReadonlyArray<ServerProviderModel> = [],
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
+  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | HttpClient.HttpClient
 > {
+  if (!coralSettings.enabled) return yield* buildInitialCoralProviderSnapshot(coralSettings);
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  if (!coralSettings.enabled) {
-    return yield* buildInitialCoralProviderSnapshot(coralSettings);
-  }
-
   const runtimeEnvironment = buildCoralAcpEnvironment(coralSettings, environment);
-  const versionResult = yield* runCoralVersionCommand(coralSettings, runtimeEnvironment).pipe(
-    Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS),
+  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const initialized = yield* Effect.gen(function* () {
+    const runtime = yield* makeCoralAcpRuntime({
+      coralSettings,
+      environment: runtimeEnvironment,
+      childProcessSpawner,
+      cwd: process.cwd(),
+      clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
+    });
+    return yield* runtime.initialize();
+  }).pipe(Effect.scoped, Effect.timeoutOption(CORAL_PROBE_TIMEOUT_MS), Effect.result);
+  const snapshot = (input: {
+    installed?: boolean;
+    version?: string | null;
+    message?: string;
+    models?: ReadonlyArray<ServerProviderModel>;
+  }) =>
+    buildServerProvider({
+      presentation: CORAL_PRESENTATION,
+      enabled: true,
+      checkedAt,
+      models: input.models ?? lastKnownModels,
+      probe: {
+        installed: input.installed ?? true,
+        version: input.version ?? null,
+        status: input.message ? "error" : "ready",
+        auth: { status: "unknown", label: "No authentication required" },
+        ...(input.message ? { message: input.message } : {}),
+      },
+    });
+  if (Result.isFailure(initialized))
+    return snapshot({
+      installed: !isCommandMissingCause(initialized.failure),
+      message:
+        "Cannot initialize Coral ACP. Configure a Coral build supporting `coral acp` and check its executable path.",
+    });
+  if (Option.isNone(initialized.success))
+    return snapshot({
+      message: "Coral ACP initialization timed out. Check the executable path and launcher.",
+    });
+  const init = initialized.success.value;
+  const version = init.agentInfo?.version ?? null;
+  if (init.protocolVersion !== 1 || !init.agentCapabilities?.sessionCapabilities?.resume)
+    return snapshot({
+      version,
+      message:
+        "This Coral build does not support the required ACP protocol and native session resume.",
+    });
+  if ((init.authMethods?.length ?? 0) > 0)
+    return snapshot({
+      version,
+      message:
+        "This Coral agent requires authentication, which the Coral integration does not support.",
+    });
+  const inventory = yield* Effect.gen(function* () {
+    const host = yield* Effect.try(() => normalizeCoralOllamaHost(coralSettings.ollamaHost));
+    const client = yield* HttpClient.HttpClient;
+    const response = yield* client
+      .get(`${host}/api/tags`)
+      .pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
+    return yield* HttpClientResponse.schemaBodyJson(OllamaModels)(response);
+  }).pipe(
+    Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(1_048_576)),
+    Effect.timeoutOption(CORAL_PROBE_TIMEOUT_MS),
     Effect.result,
   );
-
-  if (Result.isFailure(versionResult)) {
-    const error = versionResult.failure;
-    yield* Effect.logWarning("Coral CLI health check failed.", {
-      errorTag: error._tag,
-    });
-    return buildServerProvider({
-      presentation: CORAL_PRESENTATION,
-      enabled: true,
-      checkedAt,
-      models: CORAL_FALLBACK_MODELS,
-      probe: {
-        installed: !isCommandMissingCause(error),
-        version: null,
-        status: "error",
-        auth: { status: "unknown", label: "No authentication required" },
-        message: isCommandMissingCause(error)
-          ? "Coral CLI (`coral`) is not installed or not on PATH."
-          : "Failed to execute the Coral CLI health check.",
-      },
-    });
-  }
-
-  if (Option.isNone(versionResult.success)) {
-    return buildServerProvider({
-      presentation: CORAL_PRESENTATION,
-      enabled: true,
-      checkedAt,
-      models: CORAL_FALLBACK_MODELS,
-      probe: {
-        installed: true,
-        version: null,
-        status: "error",
-        auth: { status: "unknown", label: "No authentication required" },
-        message: "Coral CLI is installed but timed out while running `coral --version`.",
-      },
-    });
-  }
-
-  const versionOutput = versionResult.success.value;
-  const version = parseGenericCliVersion(`${versionOutput.stdout}\n${versionOutput.stderr}`);
-  if (versionOutput.code !== 0) {
-    yield* Effect.logWarning("Coral CLI version probe exited with a non-zero status.", {
-      exitCode: versionOutput.code,
-      stdoutLength: versionOutput.stdout.length,
-      stderrLength: versionOutput.stderr.length,
-    });
-    return buildServerProvider({
-      presentation: CORAL_PRESENTATION,
-      enabled: true,
-      checkedAt,
-      models: CORAL_FALLBACK_MODELS,
-      probe: {
-        installed: true,
-        version,
-        status: "error",
-        auth: { status: "unknown", label: "No authentication required" },
-        message: "Coral CLI is installed but failed to run.",
-      },
-    });
-  }
-
-  return buildServerProvider({
-    presentation: CORAL_PRESENTATION,
-    enabled: true,
-    checkedAt,
-    models: CORAL_FALLBACK_MODELS,
-    probe: {
-      installed: true,
+  if (Result.isFailure(inventory) || Option.isNone(inventory.success))
+    return snapshot({
       version,
-      status: "ready",
-      auth: { status: "unknown", label: "No authentication required" },
-    },
+      message:
+        "Cannot read models from the configured Ollama endpoint. Check Ollama and refresh; the last known model list is retained.",
+    });
+  const names = [...new Set(inventory.success.value.models.map((model) => model.name))];
+  if (names.length === 0)
+    return snapshot({
+      version,
+      models: [],
+      message: "No models are installed on the configured Ollama server.",
+    });
+  return snapshot({
+    version,
+    models: names.map((name) => ({
+      slug: name,
+      name,
+      isCustom: false,
+      capabilities: EMPTY_CAPABILITIES,
+    })),
   });
 });
 
