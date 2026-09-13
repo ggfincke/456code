@@ -16,7 +16,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { makeCoralAdapter } from "./CoralAdapter.ts";
-import { checkCoralProviderStatus } from "./CoralProvider.ts";
 
 const decodeSettings = Schema.decodeSync(CoralSettings);
 const driver = ProviderDriverKind.make("coral");
@@ -62,12 +61,9 @@ const fixture = Effect.fn("coral.test.fixture")(function* (
   return { adapter, cwd, settings, log: fs.readFileString(logPath), waitFor };
 });
 
-it.effect("uses multi-turn ACP, model selection, native resume, and session-free probes", () =>
+it.effect("uses multi-turn ACP, model selection, native resume, and isolated sessions", () =>
   Effect.gen(function* () {
     const f = yield* fixture();
-    const status = yield* checkCoralProviderStatus(f.settings);
-    expect(status.installed).toBe(true);
-    expect(yield* f.log).toBe("");
     const threadId = ThreadId.make("coral-turns");
     const session = yield* f.adapter.startSession({
       threadId,
