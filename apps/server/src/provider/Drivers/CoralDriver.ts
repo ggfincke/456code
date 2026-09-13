@@ -106,7 +106,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      // status probes stay on `coral --version`; bound sessions own the Ollama inventory
+      // metadata probes and bound sessions share the last known model inventory
       const sessionModelsRef = yield* Ref.make<ReadonlyArray<ServerProviderModel>>([]);
       const snapshotPublisherRef = yield* Ref.make<{
         readonly getSnapshot: Effect.Effect<ServerProvider>;
@@ -127,7 +127,9 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
           }),
       });
       const textGeneration = yield* makeCoralTextGeneration(effectiveConfig, processEnv);
-      const checkProvider = checkCoralProviderStatus(effectiveConfig, processEnv).pipe(
+      const checkProvider = Ref.get(sessionModelsRef).pipe(
+        Effect.flatMap((models) => checkCoralProviderStatus(effectiveConfig, processEnv, models)),
+        Effect.tap((draft) => Ref.set(sessionModelsRef, draft.models)),
         Effect.flatMap((draft) =>
           Ref.get(sessionModelsRef).pipe(
             Effect.map((sessionModels) =>
@@ -135,6 +137,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
             ),
           ),
         ),
+        Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );

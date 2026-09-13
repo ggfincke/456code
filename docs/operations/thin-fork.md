@@ -9,7 +9,7 @@ This replacement is T3 Code plus personal appearance, desktop isolation, Coral, 
 - Recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-The runtime patch inventory below contains **56 modified upstream paths**. In addition, 100 files are locally owned extension modules/assets/tests (before this document). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
+The runtime patch inventory below contains **56 modified upstream paths**. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
 
 ## Product and ownership boundaries
 
@@ -19,7 +19,7 @@ The runtime patch inventory below contains **56 modified upstream paths**. In ad
 
 **Coral:** one driver, adapter, settings/probe module, text-generation adapter and ACP support module under existing provider/text-generation directories. Coral uses supervised text turns, native approvals, cancellation, model changes and `session/resume`. Attachments, rollback, provider replacement/import, and app-MCP access are not advertised. The only shared ACP behavior patch is optional authentication when no auth method is advertised. Other drivers retain their existing authentication path.
 
-Coral requires an executable that implements `coral acp`. The regular local Coral 0.15.0 installation did not include that command during verification. The existing `coral-456code-integration` worktree's built CLI was verified with local Ollama; neither that worktree nor the installed launcher was changed. Configure that compatible executable and a fresh `CORAL_HOME` in T3's **Add provider instance** dialog. Probes do not create sessions. Model inventory is discovered from native session setup; the initial default is `qwen3.8:27b-mlx`.
+Coral now runs from the current-main ACP finish worktree through the repaired normal launcher. A four-second initialization-only probe checks protocol compatibility, native resume and authentication requirements, then closes its process without creating or resuming a session. A separate four-second, 1 MiB metadata-only Ollama request populates the initial picker with exact model names (up to 512 entries). Transient failures retain the last known inventory; an empty server reports an error and clears it. Native setup can also update that inventory. See [Coral local setup and validation](coral-setup.md) for the exact build, isolated homes and launcher recovery.
 
 **Engine:** `packages/cartographer-core` is private. It exposes only immutable snapshots and its analysis worker. Resolver/export/alias/coverage fixes and graph-navigation support were selected from the Cartographer review; old proposal modules, standalone MCP/CLI entry points and proposal acceptance scripts were removed. Private analyzer support and its major resolver tests remain. Dependency-cruiser needs its own TypeScript 6 runtime API; this does not replace T3's root TypeScript 7 toolchain.
 
@@ -49,6 +49,20 @@ Live verification used disposable backend homes and a tiny Git fixture, without 
 Two bugs found during desktop verification were fixed: asynchronous theme seeding before Electron protocol registration, and an inherited backend home overriding the isolated bootstrap path. Exact personal renderer origins were added to the existing HTTP policy.
 
 **Observed upstream limit:** in standalone development, T3's ReviewService only permits its configured workspace root and managed worktrees. Its diff UI can fall back to the server working directory for an outside project. Cartographer refuses that mismatched comparison rather than analyzing another repository. The positive diff check used a T3-managed worktree. No local Git-service fork was added.
+
+## Coral finishing pass (2026-09-12)
+
+The runtime finishing changes stay in the locally owned `CoralProvider.ts` and
+`CoralDriver.ts` modules. `CoralProvider.test.ts` adds compatibility, timeout,
+child cleanup and metadata-only discovery regressions; `CoralAdapter.test.ts`
+retains its five child-process lifecycle tests and drops the obsolete
+version-only check. No new modified upstream runtime path is introduced.
+
+Coral itself is selectively adapted onto current main in its own worktree;
+the normal launcher now points directly to that verified Node 24 build. Native
+snapshots and exclusive leases replace the earlier branch's extra ledger.
+Current TUI and session improvements remain intact. See the
+[setup record](coral-setup.md) for acceptance results and exact provenance.
 
 ## Six-commit update rehearsal
 
@@ -129,7 +143,7 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `apps/web/src/themePalette.ts`                                 | Appearance                       | Recognize the personal artwork identifier while preserving T3 theme storage and rendering.                                                     |
 | `packages/contracts/src/environment.ts`                        | Cartographer                     | Add an optional availability capability for version-skew tolerance.                                                                            |
 | `packages/contracts/src/index.ts`                              | Cartographer                     | Export the new schema-only contract module.                                                                                                    |
-| `packages/contracts/src/model.ts`                              | Coral                            | Supply the initial default model slug; native session inventory supplies available models.                                                     |
+| `packages/contracts/src/model.ts`                              | Coral                            | Supply the initial default model slug; metadata probes and native setup supply available models.                                               |
 | `packages/contracts/src/rpc.ts`                                | Cartographer                     | Include four namespaced RPC schemas in the existing group.                                                                                     |
 | `packages/contracts/src/settings.ts`                           | Coral                            | Describe executable, Ollama endpoint and per-instance home settings using upstream form schemas.                                               |
 | `pnpm-lock.yaml`                                               | Cartographer engine              | Lock only extension dependencies/importers; retain existing upstream resolutions.                                                              |
