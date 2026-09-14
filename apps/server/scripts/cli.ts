@@ -9,6 +9,8 @@ import * as Path from "effect/Path";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import packageJson from "../package.json" with { type: "json" };
+import { disabled as releaseUpdatesDisabled } from "../src/fincke/ReleaseUpdates.ts";
 import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-external-packages.ts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -186,6 +188,7 @@ const publishCmd = Command.make(
   },
   (config) =>
     Effect.gen(function* () {
+      if (packageJson.private) return yield* releaseUpdatesDisabled();
       const path = yield* Path.Path;
       const fs = yield* FileSystem.FileSystem;
       // npm runs with cwd set to the packages dir below, so tarball paths are
