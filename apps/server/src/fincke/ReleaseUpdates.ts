@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { ServerSelfUpdate } from "../cloud/selfUpdate.ts";
 
-const disabled = () =>
+export const disabled = () =>
   Effect.fail(
     new ServerSelfUpdateError({
       reason:

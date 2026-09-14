@@ -19,6 +19,7 @@ import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { serviceCommand } from "./cli/service.ts";
 import { uninstallCommand } from "./cli/uninstall.ts";
 import { updateCommand } from "./cli/update.ts";
+import { disabled as releaseUpdatesDisabled } from "./fincke/ReleaseUpdates.ts";
 import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
 import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
@@ -64,7 +65,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       authCommand,
       projectCommand,
       serviceCommand,
-      updateCommand,
+      updateCommand.pipe(Command.withHandler(releaseUpdatesDisabled)),
       uninstallCommand,
       serviceLauncherCommand,
       claudeHistoryCommand,
