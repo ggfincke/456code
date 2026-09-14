@@ -5,8 +5,10 @@ This replacement is T3 Code plus personal appearance, desktop isolation, Coral, 
 ## Base and local change groups
 
 - Starting upstream base: `e816064945144957b6eb9b268912a98b0555644b`.
-- Rehearsed/final upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
-- Recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
+- First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
+- Current upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
+- Current recovery branch: `codex/backup-thin-fork-before-9375c779` at `2f634894544b4ccb02638d60e2b6d624e3617975`.
+- Initial recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
 The runtime patch inventory below contains **56 modified upstream paths**. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
@@ -36,7 +38,7 @@ Focused checks passed on the rehearsed base:
 - 70 server tests: real child ACP fixture (multi-turn, approval, cancellation, model change, restart/resume, auth compatibility, no-session probes, attachment rejection), upstream ACP support, MCP access, RPC authorization and update rejection.
 - 31 engine tests: resolver/export/alias/coverage truth, repeat-dirty fingerprints, actual comparisons, task/root isolation, immutable source, bounded output and failed-refresh preservation.
 - 67 upstream theme/boot/artwork tests. 43 focused desktop tests passed after replay, including identity, fresh-profile preservation, protocol and backend configuration. Packaging identity tests also passed.
-- Server, web, desktop and scripts package type checks; engine compilation; targeted formatting/lint and desktop build (including engine, server/worker, web and Electron). Existing lint warnings remain; no lint errors. Frozen installation passed without upgrading existing upstream resolutions. Full-workspace tests were deliberately left to CI; nothing was pushed, so hosted CI has not run.
+- Server, web, desktop and scripts package type checks; engine compilation; targeted formatting/lint and desktop build (including engine, server/worker, web and Electron). Existing lint warnings remain; no lint errors. Frozen installation passed without upgrading existing upstream resolutions. Full-workspace tests were deliberately left to CI. This paragraph records the original local rehearsal; publication and the later rebase are recorded below.
 
 Live verification used disposable backend homes and a tiny Git fixture, without importing old sessions:
 
@@ -79,6 +81,77 @@ Replayed the seven concern-separated local commits over these exact upstream cha
 
 Preservation receipts matched old HEADs, staged/unstaged diffs and all recorded dirty/untracked bytes: main 25 files, Cartographer review 89, selective port 24, reconciliation 83,786. The initial reconciliation status discrepancy was only collapsed versus expanded untracked-directory output. `apps/mobile` has no diff against the final upstream base.
 
+## Rebase onto 9375c779 (2026-09-14)
+
+The 11 local commits were replayed from `d1d15c67f4` onto the pinned upstream
+`9375c779707fb95c06670db6da87441720b2d2e2`, incorporating all 83 commits in that
+range. This is a pinned update, not a claim that upstream has stopped moving.
+Eight patches replayed unchanged; three needed contextual or compatibility
+resolutions. The backup above preserves the complete published pre-rebase stack.
+
+Textual conflicts occurred in eight paths: desktop ElectronProtocol and
+DesktopBackendConfiguration; server package.json, scripts/cli.ts, server.ts and
+vite.config.ts; contracts/index.ts; and build-desktop-artifact.ts. Imports and
+registrations were combined. Upstream executable/archive packaging, hoisted
+Windows sidecars, Node paths and native preview serving were retained.
+
+Follow-up adaptations remove the duplicated server dev script, keep the scanner
+external through the server bundler and desktop staging hooks, and restore
+`scripts/lib/cli-external-packages.ts` exactly to upstream. The new CLI update
+entry point and npm archive publisher reject before downloads, service changes
+or publication. No provider-service, orchestration, migration, mobile or shared
+client-runtime patches were added.
+
+**Optional archive limit:** standalone CLI executables do not include the separate
+Cartographer worker. Their optional analysis capability is false and direct
+analysis requests return an explicit desktop/Node preparation action. Node server
+and Electron analysis remain supported. CLI archive distribution, remote runtime
+provisioning and fork release destinations remain unconfigured; archive/WSL
+Cartographer support requires a separate packaging decision.
+
+Validation on this base:
+
+- Frozen dependency installation and the seven-task desktop build passed.
+- 28 focused server tests passed, covering Coral fixtures/probes, ACP support,
+  Cartographer MCP access, RPC authorization, environment identity and update rejection.
+- 31 engine tests passed, including resolver/alias/export accuracy, immutable
+  comparison capture, repeated dirty fingerprints and last-good refresh behavior.
+- 46 desktop isolation/protocol/backend tests, 270 focused web theme/panel/chat
+  tests and 89 packaging/external-dependency tests passed. Upstream tests were
+  preserved; no tests were added or changed in this rebase.
+- Server, web, desktop and scripts type checks passed, with existing Effect
+  suggestions. Targeted formatting and lint passed.
+- Direct `t3 update --yes` and publisher `--dry-run --packages-dir ...` calls
+  rejected before side effects. The build still uses the separate personal
+  profile, app ID, protocol and disabled updater.
+- In the disposable web app, an ordinary Codex task returned `T3_REBASE_OK`.
+  Coral used the normal launcher and exact metadata-discovered models, completed
+  text turns, approved a write, declined a write without creating the file, and
+  cancelled a streamed response. The model picker switched to `muse-glimmer:30b-mlx`;
+  completion after that switch is not claimed.
+- Repository Map showed the actual fixture root, two source files and one import.
+  Dependency evidence -> captured source -> back worked. After changing a file
+  from 1 to 2 and then 3, each edit marked the map stale; stale source retained 1
+  and then 2 respectively until explicit refresh. Fincke Ocean was imported via
+  the upstream theme command; branding and the wave rendered.
+
+**Acceptance deferred at the user's battery request:** no more Coral inference
+or model loads. Clean restart/resume without replay, completion after the model
+switch, live worktree switching, actual Diff Impact, explicit theme-selection
+persistence and native desktop startup/shutdown were not completed in this pass.
+Earlier acceptance results above are historical evidence, not substitutes for
+these checks on the new base. Title generation was configured to Coral, but its
+new-base completion was not independently verified. The full workspace remains
+CI-owned. Do not call the replacement fully acceptance-verified on this record.
+
+Verification state is retained under `.t3/rebase-9375c779/`; its backend and web
+processes are stopped, ports 14150/6110 are closed and the Coral lease table is
+empty. Resuming this fixture must respect the user's no-local-model constraint:
+disable the Coral instance and select another text-generation provider first,
+or wait for explicit permission to resume model-based acceptance. Existing main
+branches, other worktrees, old application data and installed applications were
+not changed.
+
 ## Routine future update
 
 1. Record the current upstream SHA and local HEAD. Preserve dirty state and create a backup branch before rewriting this replacement stack.
@@ -113,9 +186,10 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `apps/desktop/vite.config.ts`                                  | Desktop isolation                | Define the personal build flag only in the desktop build.                                                                                      |
 | `apps/server/package.json`                                     | Cartographer / isolation         | Add the isolated engine and external scanner; move dev to a task with an engine build prerequisite; mark publication private.                  |
 | `apps/server/scripts/acp-mock-agent.ts`                        | Coral verification               | Add an opt-in real child-process Coral fixture profile; preserve existing fixture behavior.                                                    |
-| `apps/server/scripts/cli.ts`                                   | Desktop isolation                | Preserve private:true when assembling npm publication metadata.                                                                                |
+| `apps/server/scripts/cli.ts`                                   | Desktop isolation                | Reject npm publication while the server package is private, before reading archives or spawning npm.                                           |
+| `apps/server/src/bin.ts`                                       | Desktop isolation                | Override the upstream update command with the extension rejection before runtime download or service changes.                                  |
 | `apps/server/src/auth/RpcAuthorization.ts`                     | Cartographer                     | Assign the four namespaced methods to existing read/operate authorization scopes.                                                              |
-| `apps/server/src/environment/ServerEnvironment.ts`             | Cartographer                     | Advertise the optional map/impact availability capability.                                                                                     |
+| `apps/server/src/environment/ServerEnvironment.ts`             | Cartographer                     | Advertise map/impact analysis only in Node/Electron runtimes, which ship the separate analysis worker.                                         |
 | `apps/server/src/http.ts`                                      | Desktop isolation                | Accept the two exact personal renderer origins using existing authenticated HTTP/CORS handling.                                                |
 | `apps/server/src/mcp/McpHttpServer.ts`                         | Cartographer                     | Register the read-only toolkit alongside upstream app MCP tools.                                                                               |
 | `apps/server/src/mcp/McpInvocationContext.ts`                  | Cartographer                     | Name the Cartographer credential capability.                                                                                                   |
@@ -149,4 +223,3 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `pnpm-lock.yaml`                                               | Cartographer engine              | Lock only extension dependencies/importers; retain existing upstream resolutions.                                                              |
 | `pnpm-workspace.yaml`                                          | Cartographer engine              | Scope TypeScript 6 to dependency-cruiser 18.2.0, whose parser loader cannot use the root TypeScript 7 compiler API.                            |
 | `scripts/build-desktop-artifact.ts`                            | Desktop isolation / Cartographer | Use personal artifact identity, icons and publish:null; preserve scanner runtime dependencies in staged artifacts.                             |
-| `scripts/lib/cli-external-packages.ts`                         | Cartographer                     | Keep dependency-cruiser external so its dynamic parser loading works in the packaged worker.                                                   |
