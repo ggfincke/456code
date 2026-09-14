@@ -4,20 +4,22 @@ Validated on 2026-09-12. These changes finish local Coral usage on
 `codex/t3-thin-fork`; they do not merge either main, publish a release, replace
 the installed 456code application, or import old sessions.
 
+The 2026-09-14 T3 rebase is recorded in [the thin-fork update record](thin-fork.md#rebase-onto-9375c779-2026-09-14). Its remaining live acceptance checks were stopped at the user's battery request. Do not run Coral inference or load models again without renewed permission. The validation below remains the original finishing-pass record.
+
 ## Build provenance
 
-| Item                | Value                                                                        |
-| ------------------- | ---------------------------------------------------------------------------- |
-| Coral source        | `/Users/ggfincke/Projects/Worktrees/coral/coral-acp-finish`                  |
-| Coral branch        | `codex/456code-acp-finish`                                                   |
-| Coral base          | `c2370d9e4b5624c9cbaec3bdd1cd56c578695b4a` (0.15.0)                          |
-| Coral finish        | Local uncommitted source patch on that base; not a published version         |
-| Node executable     | `/Users/ggfincke/.local/share/mise/installs/node/24.20.0/bin/node`           |
-| Built entrypoint    | `/Users/ggfincke/Projects/Worktrees/coral/coral-acp-finish/dist/cli/main.js` |
-| 456code source      | `/Users/ggfincke/Projects/Worktrees/456code/456code-t3-thin-fork`            |
-| 456code branch      | `codex/t3-thin-fork`                                                         |
-| 456code finish base | `3df2ff915` plus the local Coral finishing patch                             |
-| Upstream T3 base    | `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`                                   |
+| Item                | Value                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| Coral source        | `/Users/ggfincke/Projects/Worktrees/coral/coral-acp-finish`                                         |
+| Coral branch        | `codex/456code-acp-finish`                                                                          |
+| Coral base          | `c2370d9e4b5624c9cbaec3bdd1cd56c578695b4a` (0.15.0)                                                 |
+| Coral finish        | `3fcc35854f740462aa6ec48b6d97d23cd0909087` ([PR #82](https://github.com/ggfincke/coral/pull/82))    |
+| Node executable     | `/Users/ggfincke/.local/share/mise/installs/node/24.20.0/bin/node`                                  |
+| Built entrypoint    | `/Users/ggfincke/Projects/Worktrees/coral/coral-acp-finish/dist/cli/main.js`                        |
+| 456code source      | `/Users/ggfincke/Projects/Worktrees/456code/456code-t3-thin-fork`                                   |
+| 456code branch      | `codex/t3-thin-fork`                                                                                |
+| 456code finish base | Original finishing commit `2f634894544b4ccb02638d60e2b6d624e3617975`, retained by the rebase backup |
+| Upstream T3 base    | `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`                                                          |
 
 The compiled Coral entrypoint SHA-256 is
 `adb5ab2d66903aa2d9a5859c661f6e8b86bcb82897f928525a3c9d7b669fa323`.
@@ -129,7 +131,7 @@ recovery lives in the Coral worktree's `docs/acp.md`.
 - Coral typecheck, targeted Prettier/ESLint, architecture boundary check and
   build passed. Server package typecheck, targeted Vite+ formatting/lint and
   the desktop build (seven dependency-scoped tasks) passed. Full-workspace
-  validation remains assigned to CI; nothing was pushed.
+  validation remains assigned to CI. The finishing commits were later published in Coral PR #82 and 456code PR #111.
 - Normal-shell and mise command resolution, `coral --version`, and
   `coral acp --help` passed. The current TUI opened, rendered its model/workspace
   and prompt, then exited successfully in a fresh home.
