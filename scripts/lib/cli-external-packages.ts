@@ -26,8 +26,6 @@
  * enforced by a test, not by inspection.
  */
 export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
-  // The Cartographer scanner loads parsers and package metadata from disk.
-  "dependency-cruiser",
   "node-pty",
   "ffi-rs",
   "@yuuang/",
