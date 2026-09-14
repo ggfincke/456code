@@ -1348,9 +1348,12 @@ export function resolveMergedStageDependencies(input: {
   readonly desktopDependencies: Record<string, string>;
   readonly arch: typeof BuildArch.Type;
   readonly fffNodeVersion: string;
-}) {
+}): Record<string, string> {
   return {
     ...selectCliRuntimeExternalDependencies(input.serverDependencies),
+    ...(input.serverDependencies["dependency-cruiser"]
+      ? { "dependency-cruiser": input.serverDependencies["dependency-cruiser"] }
+      : {}),
     ...input.desktopDependencies,
     ...resolveFffNativeDependencies(input.platform, input.arch, input.fffNodeVersion),
   };
@@ -3448,9 +3451,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
-  const resolvedServerRuntimeExternalDependencies = selectCliRuntimeExternalDependencies(
-    resolvedServerDependencies,
-  );
+  const resolvedServerRuntimeExternalDependencies = {
+    ...selectCliRuntimeExternalDependencies(resolvedServerDependencies),
+    "dependency-cruiser": serverPackageJson.dependencies["dependency-cruiser"],
+  };
   const resolvedDesktopRuntimeDependencies = yield* Effect.try({
     try: () => resolveDesktopRuntimeDependencies(desktopPackageJson.dependencies, workspaceCatalog),
     catch: (cause) =>
