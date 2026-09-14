@@ -8,6 +8,7 @@ import {
   type CartographerDependencies,
   type ThreadId,
 } from "@t3tools/contracts";
+import { HostProcessIsExecutable } from "@t3tools/shared/hostProcess";
 import { SnapshotStore, type Comparison } from "@t3tools/cartographer-core/snapshots";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -52,6 +53,7 @@ export const make = Effect.gen(function* () {
   const checkpointDiff = yield* CheckpointDiffQuery.CheckpointDiffQuery;
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
+  const executable = yield* HostProcessIsExecutable;
   const worker = yield* path.fromFileUrl(
     new URL(
       import.meta.url.endsWith(".ts") ? "../cartographerWorker.ts" : "./cartographerWorker.mjs",
@@ -103,6 +105,12 @@ export const make = Effect.gen(function* () {
   const attempt = <A>(work: () => Promise<A>) => Effect.tryPromise({ try: work, catch: failure });
 
   const analyze = Effect.fn("Cartographer.analyze")(function* (input: CartographerAnalyzeInput) {
+    if (executable) {
+      return yield* new CartographerError({
+        detail:
+          "Repository analysis requires the desktop or Node server build; standalone CLI archives do not include the analysis worker.",
+      });
+    }
     const task = yield* context(input.threadId);
     const selected = input.comparison;
     let comparison: Comparison | undefined;
