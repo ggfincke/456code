@@ -14,7 +14,7 @@ This replacement is T3 Code plus personal appearance, desktop isolation, Coral, 
 - Initial recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-The runtime patch inventory below contains **58 modified upstream paths**. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
+The runtime patch inventory below contains **61 modified upstream paths**. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
 
 ## Product and ownership boundaries
 
@@ -236,13 +236,69 @@ closed and the Coral lease table is empty. The fixture remains available for
 recovery with Coral disabled. No main branch, other worktree, old app data,
 installed application or Coral repository was modified by this update.
 
-**Remaining acceptance:** real Coral clean restart/resume and completion after
-its model change remain deferred by the battery constraint. Earlier Coral live
-results are historical; current mock ACP checks passed. Full-workspace CI is
-still required before cutover. PR #111 targets legacy fork main, so its merge
-conflict is expected; rebasing onto T3 does not resolve that replacement decision.
-The legacy PR-size action's `spawnSync git ENOBUFS` failure is separate from code
-validation. Do not merge legacy main into this stack merely to clear the badge.
+### Final acceptance on September 14
+
+The user renewed permission to run local models and requested the remaining
+checks. The normal Coral launcher, native session runtime and repository were
+unchanged. The built desktop backend used the existing disposable fixture:
+
+- Muse resumed native session `f587eab5`, recalled `REBASE_CORAL_9375`, and
+  returned `FINAL_RESUME_5EA64398_OK`. All 15 previous non-system messages were
+  identical; only a new user/assistant pair was added.
+- The model picker switched to `qwen3.8:27b-mlx`; its next turn completed with
+  `FINAL_MODEL_SWITCH_OK` in that same session.
+- A fresh Coral task completed and the tool-free title helper named it
+  “Explain Git Worktrees”. Only that task created another native session.
+- Clean desktop shutdown released all leases. After rebuilding and restarting,
+  the original session returned `REBASE_CORAL_9375 CLEAN_RESTART_OK`. Its 20
+  previous messages were preserved, except the rebuilt system prompt, and
+  exactly one new user/assistant pair was appended; no replay occurred.
+- An ordinary Codex task returned `FINAL_ORDINARY_TASK_OK` on the final build.
+  The built client retained the actual captured Diff Impact after restart.
+
+Full verification found and corrected four integration omissions: two hosted
+branding assertions expected upstream names; Knip needed the worker/retained CLI
+entry points and explicit external-parser/disabled-updater ownership; and the
+release-smoke fixture omitted the Cartographer package manifest. Clean CI also
+needed the compiled engine before server tests, so the existing Vite+ task graph
+now builds it first. A cold-build check passed 214 server tests. Unused local
+Coral exports and a dead canvas helper were removed. No upstream runtime or
+mobile files were changed for these checks; existing tests were retained.
+
+The seven-task desktop build, all 16 workspace type checks, full formatting/lint,
+Knip and preload verification passed. The non-server package suites passed
+11,413 tests (46 platform-specific skips), including all 4,978 web tests. Release,
+preview-artifact and nightly checks passed. The complete local server suite
+initially passed 4,666 tests and exposed 14 host-sensitive failures: 13 passed
+when rerun using canonical `TMPDIR=/private/tmp` (219 tests across eight files).
+The remaining upstream Codex text-generation fixture supplies an environment
+without PATH and cannot find this host's mise-only Node executable. Its source
+was retained unchanged and passed in Linux CI. All three hosted server shards
+passed: 4,680 tests, with 10 platform-specific skips.
+
+Hosted validation of application commit `2d4c8bcac8d45e8f46d377a0e4fdc8cb70e169b3`
+runs on [`codex/validate-thin-fork-20260914`](https://github.com/ggfincke/456code/actions/runs/34917548400).
+Its commit `94e1801d3169989c727f2bbba2f5e577ea3598df` differs only in the CI
+workflow: a validation-branch push trigger, standard GitHub runners and longer
+timeouts. It executes the existing checks without skipping assertions. The
+replacement branch's upstream CI workflow is unchanged. Hosted result: passed.
+All 16,138 package tests passed (11 platform-specific skips), along with the
+build, type/lint/format checks, Rust and release smoke. Mobile native analysis
+passed in the preceding run and was skipped in the final run because those
+files were unchanged.
+
+The test-owned desktop and Ollama processes were stopped and the fixture's
+previous Coral-disabled settings restored. Native leases are empty and ports
+3773, 6110 and 14150 have no listeners. The verification-owned Ollama server
+exited; a later unrelated Ollama process was left untouched. Main branches, other worktrees,
+old application data,
+installed apps and the Coral repository remain untouched.
+
+PR #111 still targets legacy fork main; its conflict remains the separate
+replacement/cutover decision. Its base-owned size-label action fails with
+`spawnSync git ENOBUFS` on the replacement diff. That metadata failure cannot be
+repaired from this PR's head workflow. Do not merge legacy main into the thin
+stack merely to clear the badge.
 
 ## Routine future update
 
@@ -278,7 +334,7 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `apps/desktop/src/main.ts`                                     | Appearance / isolation           | Seed the preset after Clerk protocol registration and before starting the application.                                                         |
 | `apps/desktop/src/updates/DesktopUpdates.ts`                   | Desktop isolation                | Disable native automatic updates for the personal build.                                                                                       |
 | `apps/desktop/vite.config.ts`                                  | Desktop isolation                | Define the personal build flag only in the desktop build.                                                                                      |
-| `apps/server/package.json`                                     | Cartographer / isolation         | Add the isolated engine and external scanner; move dev to a task with an engine build prerequisite; mark publication private.                  |
+| `apps/server/package.json`                                     | Cartographer / isolation         | Add the isolated engine and external scanner; move dev/test to tasks with an engine build prerequisite; mark publication private.              |
 | `apps/server/scripts/acp-mock-agent.ts`                        | Coral verification               | Add an opt-in real child-process Coral fixture profile; preserve existing fixture behavior.                                                    |
 | `apps/server/scripts/cli.ts`                                   | Desktop isolation                | Reject npm publication while the server package is private, before reading archives or spawning npm.                                           |
 | `apps/server/src/bin.ts`                                       | Desktop isolation                | Override the upstream update command with the extension rejection before runtime download or service changes.                                  |
@@ -292,11 +348,12 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `apps/server/src/provider/builtInDrivers.ts`                   | Coral                            | Register one driver through the upstream driver registry.                                                                                      |
 | `apps/server/src/server.ts`                                    | Cartographer / isolation         | Provide the extension service and replacement update policy at the composition root.                                                           |
 | `apps/server/src/ws.ts`                                        | Cartographer                     | Wire namespaced RPC handlers through the existing authenticated RPC path.                                                                      |
-| `apps/server/vite.config.ts`                                   | Cartographer                     | Build the analysis worker, supply ESM shims for its bundled parser, and require engine compilation before server dev/build.                    |
+| `apps/server/vite.config.ts`                                   | Cartographer                     | Build the analysis worker, supply ESM shims for its bundled parser, and require engine compilation before server dev/test/build.               |
 | `apps/web/public/apple-touch-icon.png`                         | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
 | `apps/web/public/favicon-16x16.png`                            | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
 | `apps/web/public/favicon-32x32.png`                            | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
 | `apps/web/public/favicon.ico`                                  | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
+| `apps/web/src/branding.test.ts`                                | Appearance verification          | Align existing hosted-name expectations with personal branding; preserve injected-brand tests.                                                 |
 | `apps/web/src/branding.ts`                                     | Appearance                       | Set the personal display-name constants.                                                                                                       |
 | `apps/web/src/components/ChatView.tsx`                         | Cartographer                     | Mount lazy map/impact panels and expose Map only for capable environments and Git-backed tasks.                                                |
 | `apps/web/src/components/DiffPanel.tsx`                        | Cartographer                     | Send the displayed comparison identities, cwd and diff hash to Analyze Impact.                                                                 |
@@ -314,6 +371,8 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `packages/contracts/src/model.ts`                              | Coral                            | Supply the initial default model slug; metadata probes and native setup supply available models.                                               |
 | `packages/contracts/src/rpc.ts`                                | Cartographer                     | Include four namespaced RPC schemas in the existing group.                                                                                     |
 | `packages/contracts/src/settings.ts`                           | Coral                            | Describe executable, Ollama endpoint and per-instance home settings using upstream form schemas.                                               |
+| `knip.jsonc`                                                   | Extension verification           | Declare worker and retained CLI entry points, external parser ownership and intentionally disabled upstream updater source.                    |
 | `pnpm-lock.yaml`                                               | Cartographer engine              | Lock only extension dependencies/importers; retain existing upstream resolutions.                                                              |
 | `pnpm-workspace.yaml`                                          | Cartographer engine              | Scope TypeScript 6 to dependency-cruiser 18.2.0, whose parser loader cannot use the root TypeScript 7 compiler API.                            |
 | `scripts/build-desktop-artifact.ts`                            | Desktop isolation / Cartographer | Use personal artifact identity, icons and publish:null; preserve scanner runtime dependencies in staged artifacts.                             |
+| `scripts/release-smoke.ts`                                     | Cartographer verification        | Include the engine manifest in the existing isolated workspace fixture.                                                                        |
