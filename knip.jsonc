@@ -13,20 +13,29 @@
       "vitest": { "entry": [".github/**/*.test.cjs"] },
     },
     "scripts": {
-      // Knip loads its preprocessor through a CLI option, not a source import.
-      "entry": ["knip-schemas.ts"],
+      // Knip loads its preprocessor through a CLI option; branding is a retained CLI.
+      "entry": ["knip-schemas.ts", "apply-web-brand-assets.ts"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
       "entry": [
         "src/bin.ts!",
         "src/claude-history-worker.ts!",
+        "src/cartographerWorker.ts!",
         "scripts/cli.ts",
         "src/provider/testFixtures/*.mjs",
       ],
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // Native msgpack acceleration and the Vite+ web build prerequisite.
-      "ignoreDependencies": ["@effect/platform-node-shared", "msgpackr-extract", "@t3tools/web"],
+      // The Cartographer worker bundles its engine but resolves this parser at runtime.
+      "ignoreDependencies": [
+        "@effect/platform-node-shared",
+        "msgpackr-extract",
+        "@t3tools/web",
+        "dependency-cruiser",
+      ],
+      // Keep upstream self-update source intact while fork updates are disabled.
+      "ignoreIssues": { "src/cloud/selfUpdate.ts": ["exports"] },
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.
