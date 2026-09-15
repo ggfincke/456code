@@ -6,12 +6,15 @@ This replacement is T3 Code plus personal appearance, desktop isolation, Coral, 
 
 - Starting upstream base: `e816064945144957b6eb9b268912a98b0555644b`.
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
-- Current upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
-- Current recovery branch: `codex/backup-thin-fork-before-9375c779` at `2f634894544b4ccb02638d60e2b6d624e3617975`.
+- Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
+- Current upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101` (26 additional commits from September 14).
+- Previous recovery branch: `codex/backup-thin-fork-before-9375c779` at `2f634894544b4ccb02638d60e2b6d624e3617975`.
+- Current recovery branch: `codex/backup-thin-fork-before-6dbea7ed` at `158ba6655cf62df4c16e2428af06adc78f63bdcf`; it preserves the published stack before this update.
+- Intermediate recovery refs: `codex/backup-thin-fork-before-5ea64398` and `codex/backup-thin-fork-before-coauthors-20260914`.
 - Initial recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-The runtime patch inventory below contains **56 modified upstream paths**. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
+The runtime patch inventory below contains **58 modified upstream paths**. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
 
 ## Product and ownership boundaries
 
@@ -152,6 +155,95 @@ or wait for explicit permission to resume model-based acceptance. Existing main
 branches, other worktrees, old application data and installed applications were
 not changed.
 
+## September 14 follow-up: 26 more commits
+
+The update now includes upstream `9375c779..5ea6439816470288d3f2b6b43635fea41fbbb101`.
+The first 25 commits ended at `6dbea7ed`; the final worktree-setup commit landed
+during verification and was included before publication. This brings in the
+provider refresh/version fixes, background clones, composer shortcuts, custom
+snoozing, async worktree setup, WSL fixes, release/archive changes, and unchanged
+upstream mobile updates.
+
+There was one textual conflict, in `desktop-macos-preview.yml`. Upstream split
+preview building from trusted signing/publication. The resolution retains that
+implementation and applies the existing upstream-repository guard to the new
+publisher's eligibility and cleanup jobs. Its dependent build/publish jobs
+cannot run when eligibility is skipped. No fork publication was enabled.
+
+Range-diff accounted for all 14 existing patches: 11 replayed identically, two
+had context-only changes (desktop observability and the upstream Clerk lockfile),
+and the publication patch received the workflow adaptation. The final upstream
+commit replayed the resulting 15-patch stack without conflicts or code changes.
+The one added test commit changes only the two launcher icon expectations to
+Fincke Ocean; upstream test coverage and locations remain intact. On request,
+all local commits now include the Codex co-author trailer; every existing
+co-author was preserved and the attribution-only rewrite has an identical tree.
+
+Validation:
+
+- Frozen installation and the seven-task desktop build passed at `6dbea7ed`;
+  the desktop pipeline passed again after the final upstream commit.
+- 279 focused server tests passed on the final base, including Coral child ACP
+  fixtures/probes, authorization, provider snapshots, router composition,
+  background clones and async/synchronous worktree setup. No Coral model ran.
+- 395 web theme/panel/chat/model-picker/keybinding tests passed before the final
+  commit; its affected chat/timeline/project-script suites then passed 267 tests.
+- 94 desktop isolation/protocol/backend/WSL/release-note tests passed (13
+  platform-specific cases skipped), plus 99 packaging/launcher/archive tests
+  and 31 engine accuracy/capture/access/last-good tests.
+- Server, web, desktop and scripts type checks passed. Server/web type checks
+  were repeated after the final commit. Targeted formatting/lint passed.
+- `apps/mobile`, orchestration, persistence, ProviderService, shared client
+  runtime and native external-dependency classification still match upstream.
+  The inventory has 58 modified upstream paths and 101 extension files.
+
+Live checks reused `.t3/rebase-9375c779/`. Coral was disabled before startup and
+text generation was set to Codex. On the 25-commit base, a normal Codex task
+created a T3-managed worktree, changed the fixture from `value = 1` to `42`,
+returned `WORKTREE_6DBEA7ED_OK`, and generated the title “Set Fixture Value To 42”.
+Actual Diff Impact matched that displayed Git comparison and retained base `1`
+and target `42`. Map -> dependency evidence -> captured import source -> back
+worked. Edits `42 -> 43 -> 44` each marked the map stale; explicit refresh
+produced a new capture of `43`. Switching between the original checkout and
+managed worktree retained their distinct roots and capture identities.
+Fincke Ocean was selected; switching to Grove survived reload, and Ocean was
+restored afterward.
+
+The built desktop reused that disposable database after the web server stopped.
+A temporary bootstrap redirected only the Electron process's home-directory
+lookup into the fixture, leaving the host HOME unchanged. A fixture-owned
+`desktop-parent/456code-thin` link points to the same disposable backend home;
+no live application data was linked. Process/open-file inspection confirmed the
+isolated Electron profile, database and personal protocol. The existing Codex
+task resumed and returned its previous marker plus `DESKTOP_RESUME_OK`.
+Native shutdown completed cleanly, and the final-base build restarted against
+the same isolated profile/database. Native mouse input was unavailable during
+that last pass, so the built server's web client completed the remaining checks;
+the ordinary task returned `FINAL_BASE_5EA64398_OK` after restart.
+
+That built-client check exposed a packaging defect missed by development tests:
+the bundled TypeScript parser read `__filename`/`__dirname` without ESM shims.
+The Node/desktop pack mode now enables Vite+'s existing shims; standalone
+executable mode remains unchanged. The desktop pipeline, 99 packaging tests,
+server type check and targeted formatting/lint passed after this fix. The real
+built worker then analyzed the displayed `1 -> 42` comparison successfully,
+returning captured target `42` while the current worktree held `44`. This is a
+packaged-runtime check, not only a source-module test. Direct built CLI update
+and publisher dry-run calls rejected before side effects.
+
+All owned verification processes are stopped; ports 3773, 6110 and 14150 are
+closed and the Coral lease table is empty. The fixture remains available for
+recovery with Coral disabled. No main branch, other worktree, old app data,
+installed application or Coral repository was modified by this update.
+
+**Remaining acceptance:** real Coral clean restart/resume and completion after
+its model change remain deferred by the battery constraint. Earlier Coral live
+results are historical; current mock ACP checks passed. Full-workspace CI is
+still required before cutover. PR #111 targets legacy fork main, so its merge
+conflict is expected; rebasing onto T3 does not resolve that replacement decision.
+The legacy PR-size action's `spawnSync git ENOBUFS` failure is separate from code
+validation. Do not merge legacy main into this stack merely to clear the badge.
+
 ## Routine future update
 
 1. Record the current upstream SHA and local HEAD. Preserve dirty state and create a backup branch before rewriting this replacement stack.
@@ -169,12 +261,14 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | -------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/workflows/deploy-relay.yml`                           | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/desktop-macos-preview.yml`                  | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
+| `.github/workflows/desktop-macos-preview-publish.yml`          | Release isolation                | Gate the new trusted preview publisher and cleanup on the upstream repository; keep signing/publication unconfigured for the fork.             |
 | `.github/workflows/mobile-eas-preview.yml`                     | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/mobile-eas-production.yml`                  | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/publish-aur.yml`                            | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/release.yml`                                | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/web-preview.yml`                            | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `apps/desktop/scripts/electron-launcher.mjs`                   | Desktop isolation                | Separate local app bundle identity and protocol registration; preserves the old installed app.                                                 |
+| `apps/desktop/scripts/electron-launcher.test.mjs`              | Appearance verification          | Adapt the two canonical icon expectations to the retained Ocean artwork; preserve the launcher tests.                                          |
 | `apps/desktop/src/app/DesktopAssets.ts`                        | Appearance                       | Resolve the personal icon through the existing asset entry point.                                                                              |
 | `apps/desktop/src/app/DesktopEarlyElectronStartup.ts`          | Desktop isolation                | Use the same isolated early-start settings path and Linux identity as the runtime.                                                             |
 | `apps/desktop/src/app/DesktopEnvironment.ts`                   | Desktop isolation                | Resolve personal display name, profile and identity behind the build flag; no legacy profile migration.                                        |
@@ -198,7 +292,7 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `apps/server/src/provider/builtInDrivers.ts`                   | Coral                            | Register one driver through the upstream driver registry.                                                                                      |
 | `apps/server/src/server.ts`                                    | Cartographer / isolation         | Provide the extension service and replacement update policy at the composition root.                                                           |
 | `apps/server/src/ws.ts`                                        | Cartographer                     | Wire namespaced RPC handlers through the existing authenticated RPC path.                                                                      |
-| `apps/server/vite.config.ts`                                   | Cartographer                     | Build the analysis worker and require engine compilation before server dev/build.                                                              |
+| `apps/server/vite.config.ts`                                   | Cartographer                     | Build the analysis worker, supply ESM shims for its bundled parser, and require engine compilation before server dev/build.                    |
 | `apps/web/public/apple-touch-icon.png`                         | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
 | `apps/web/public/favicon-16x16.png`                            | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
 | `apps/web/public/favicon-32x32.png`                            | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
