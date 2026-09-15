@@ -1,16 +1,4 @@
-// packages/cartographer-core/vite.config.ts
-// runs this package's suite from the repo-root tests tree
+import "vite-plus/test/config";
+import { defineConfig } from "vite-plus";
 
-import 'vite-plus/test/config'
-import { defineConfig, mergeConfig } from 'vite-plus'
-
-import baseConfig from '../../vite.config.ts'
-
-export default mergeConfig(
-  baseConfig,
-  defineConfig({
-    test: {
-      dir: '../../tests/packages/cartographer-core',
-    },
-  }),
-)
+export default defineConfig({ test: { testTimeout: 30000 } });

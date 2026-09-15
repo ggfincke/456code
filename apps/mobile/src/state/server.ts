@@ -1,18 +1,16 @@
-// apps/mobile/src/state/server.ts
-// manage server environment state
+import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
+import { createEnvironmentServerConfigsAtom } from "@t3tools/client-runtime/state/shell";
 
-import { createServerEnvironmentAtoms } from '@t3tools/client-runtime/state/server'
-import { createEnvironmentServerConfigsAtom } from '@t3tools/client-runtime/state/shell'
-
-import { environmentCatalog } from '../connection/catalog'
-import { connectionAtomRuntime } from '../connection/runtime'
-import { environmentSession } from './session'
+import { environmentCatalog } from "../connection/catalog";
+import { connectionAtomRuntime } from "../connection/runtime";
+import { environmentSession } from "./session";
 
 export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRuntime, {
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
+  usageLimitSources: true,
   usageLimitsCommand: true,
-})
+});
 export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   serverConfigValueAtom: serverEnvironment.configValueAtom,
-})
+});

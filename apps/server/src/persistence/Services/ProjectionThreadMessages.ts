@@ -1,25 +1,27 @@
-// apps/server/src/persistence/Services/ProjectionThreadMessages.ts
-// define projection thread messages service contract
-
-// owns persistence operations for projected thread messages rendered in the
-// orchestration read model.
-//
-// @module ProjectionThreadMessageRepository
+/**
+ * ProjectionThreadMessageRepository - Projection repository interface for messages.
+ *
+ * Owns persistence operations for projected thread messages rendered in the
+ * orchestration read model.
+ *
+ * @module ProjectionThreadMessageRepository
+ */
 import {
   ChatAttachment,
   MessageId,
+  OrchestrationMessageContext,
   OrchestrationMessageRole,
   ThreadId,
   TurnId,
   IsoDateTime,
-} from '@t3tools/contracts'
-import * as Schema from 'effect/Schema'
-import * as Context from 'effect/Context'
-import * as Struct from 'effect/Struct'
-import type * as Option from 'effect/Option'
-import type * as Effect from 'effect/Effect'
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import * as Struct from "effect/Struct";
+import type * as Option from "effect/Option";
+import type * as Effect from "effect/Effect";
 
-import type { ProjectionRepositoryError } from '../Errors.ts'
+import type { ProjectionRepositoryError } from "../Errors.ts";
 
 export const ProjectionThreadMessage = Schema.Struct({
   messageId: MessageId,
@@ -28,71 +30,94 @@ export const ProjectionThreadMessage = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  context: Schema.optional(OrchestrationMessageContext),
   isStreaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
-})
-export type ProjectionThreadMessage = typeof ProjectionThreadMessage.Type
+});
+export type ProjectionThreadMessage = typeof ProjectionThreadMessage.Type;
 
 export const AppendStreamingProjectionThreadMessage = Schema.Struct(
-  Struct.omit(ProjectionThreadMessage.fields, ['isStreaming']),
-)
+  Struct.omit(ProjectionThreadMessage.fields, ["isStreaming"]),
+);
 export type AppendStreamingProjectionThreadMessage =
-  typeof AppendStreamingProjectionThreadMessage.Type
+  typeof AppendStreamingProjectionThreadMessage.Type;
 
 export const ListProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
-})
-export type ListProjectionThreadMessagesInput = typeof ListProjectionThreadMessagesInput.Type
+});
+export type ListProjectionThreadMessagesInput = typeof ListProjectionThreadMessagesInput.Type;
 
 export const GetProjectionThreadMessageInput = Schema.Struct({
   messageId: MessageId,
-})
-export type GetProjectionThreadMessageInput = typeof GetProjectionThreadMessageInput.Type
+});
+export type GetProjectionThreadMessageInput = typeof GetProjectionThreadMessageInput.Type;
+
+export const HasProjectionThreadAssistantMessageInput = Schema.Struct({
+  threadId: ThreadId,
+  turnId: TurnId,
+  streamingOnly: Schema.Boolean,
+});
+export type HasProjectionThreadAssistantMessageInput =
+  typeof HasProjectionThreadAssistantMessageInput.Type;
 
 export const DeleteProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
-})
-export type DeleteProjectionThreadMessagesInput = typeof DeleteProjectionThreadMessagesInput.Type
+});
+export type DeleteProjectionThreadMessagesInput = typeof DeleteProjectionThreadMessagesInput.Type;
 
 /**
  * ProjectionThreadMessageRepositoryShape - Service API for projected thread messages.
  */
-export interface ProjectionThreadMessageRepositoryShape
-{
-  // insert or replace a projected thread message row.
-  //
-  // upserts by `messageId`.
+export interface ProjectionThreadMessageRepositoryShape {
+  /**
+   * Insert or replace a projected thread message row.
+   *
+   * Upserts by `messageId`.
+   */
   readonly upsert: (
     message: ProjectionThreadMessage,
-  ) => Effect.Effect<void, ProjectionRepositoryError>
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
-  // insert a streaming message or atomically append text to its existing row.
+  /** Insert a streaming message or append text to its existing row. */
   readonly appendStreaming: (
     message: AppendStreamingProjectionThreadMessage,
-  ) => Effect.Effect<void, ProjectionRepositoryError>
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
-  // read a projected thread message by id.
+  /**
+   * Read a projected thread message by id.
+   */
   readonly getByMessageId: (
     input: GetProjectionThreadMessageInput,
-  ) => Effect.Effect<Option.Option<ProjectionThreadMessage>, ProjectionRepositoryError>
+  ) => Effect.Effect<Option.Option<ProjectionThreadMessage>, ProjectionRepositoryError>;
 
-  // list projected thread messages for a thread.
-  //
-  // returned in ascending creation order.
+  /**
+   * Check for an assistant message in a turn without hydrating message text.
+   */
+  readonly hasAssistantMessageForTurn: (
+    input: HasProjectionThreadAssistantMessageInput,
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
+
+  /**
+   * List projected thread messages for a thread.
+   *
+   * Returned in ascending creation order.
+   */
   readonly listByThreadId: (
     input: ListProjectionThreadMessagesInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionThreadMessage>, ProjectionRepositoryError>
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadMessage>, ProjectionRepositoryError>;
 
-  // read the latest user-message timestamp without loading message bodies.
+  /** Read the latest user-message timestamp without loading message bodies. */
   readonly getLatestUserMessageAt: (
     input: ListProjectionThreadMessagesInput,
-  ) => Effect.Effect<ProjectionThreadMessage['createdAt'] | null, ProjectionRepositoryError>
+  ) => Effect.Effect<ProjectionThreadMessage["createdAt"] | null, ProjectionRepositoryError>;
 
-  // delete projected thread messages by thread.
+  /**
+   * Delete projected thread messages by thread.
+   */
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadMessagesInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 /**
@@ -101,5 +126,4 @@ export interface ProjectionThreadMessageRepositoryShape
 export class ProjectionThreadMessageRepository extends Context.Service<
   ProjectionThreadMessageRepository,
   ProjectionThreadMessageRepositoryShape
->()('456code/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository')
-{}
+>()("t3/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository") {}

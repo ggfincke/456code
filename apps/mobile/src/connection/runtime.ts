@@ -1,51 +1,58 @@
-// apps/mobile/src/connection/runtime.ts
-// assembles mobile connection services and foreground cleanup retry
+import { Connection } from "@t3tools/client-runtime/connection";
+import { shellSnapshotLoaderLayer } from "@t3tools/client-runtime/state/shell";
+import { threadSnapshotLoaderLayer } from "@t3tools/client-runtime/state/threads";
+import * as Layer from "effect/Layer";
+import { Atom } from "effect/unstable/reactivity";
 
-import { Connection, EnvironmentRegistry, Wakeups } from '@t3tools/client-runtime/connection'
-import { shellSnapshotLoaderLayer } from '@t3tools/client-runtime/state/shell'
-import { threadSnapshotLoaderLayer } from '@t3tools/client-runtime/state/threads'
-import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as Stream from 'effect/Stream'
-import { Atom } from 'effect/unstable/reactivity'
+import type { FoundationHotModule } from "../lib/foundation-fast-refresh";
+import { hotSwappableAtomRuntime } from "../lib/hot-swappable-atom-runtime";
+import { runtimeContextLayer } from "../lib/runtime";
+import { appAtomRegistry } from "../state/atom-registry";
+import {
+  mobileBackgroundActivityObserverLayer,
+  mobileBackgroundActivityReporterLayer,
+} from "./background-activity";
+import { connectionPlatformLayer } from "./platform";
 
-import { runtimeContextLayer } from '../lib/runtime'
-import { connectionPlatformLayer } from './platform'
+declare const module: { readonly hot?: FoundationHotModule } | undefined;
 
 const providedConnectionPlatformLayer = connectionPlatformLayer.pipe(
   Layer.provide(runtimeContextLayer),
-)
+);
 
-const snapshotLoaderLayer = Layer.merge(threadSnapshotLoaderLayer, shellSnapshotLoaderLayer)
-
-const environmentCleanupRetryLayer = Layer.effectDiscard(
-  Effect.gen(function* ()
-  {
-    const registry = yield* EnvironmentRegistry
-    const wakeups = yield* Wakeups.ConnectionWakeups
-    yield* wakeups.changes.pipe(
-      Stream.filter(Wakeups.isApplicationActiveWakeup),
-      Stream.runForEach(() => registry.retryOwnedDataCleanup),
-      Effect.forkScoped,
-    )
-  }),
-)
-
-const connectionWithCleanupRetryLayer = environmentCleanupRetryLayer.pipe(
-  Layer.provideMerge(Connection.layer),
-)
+const snapshotLoaderLayer = Layer.merge(threadSnapshotLoaderLayer, shellSnapshotLoaderLayer);
 
 type ConnectionLayerSource =
-  | typeof connectionWithCleanupRetryLayer
+  | typeof Connection.layer
   | typeof snapshotLoaderLayer
   | typeof runtimeContextLayer
   | typeof connectionPlatformLayer
+  | typeof mobileBackgroundActivityObserverLayer
+  | typeof mobileBackgroundActivityReporterLayer;
 
-const connectionLayer = Layer.merge(connectionWithCleanupRetryLayer, snapshotLoaderLayer).pipe(
-  Layer.provideMerge(Layer.mergeAll(runtimeContextLayer, providedConnectionPlatformLayer)),
-)
+const providedClientConnectionLayer = snapshotLoaderLayer.pipe(
+  Layer.provideMerge(
+    Connection.layerWithOptions({ usageLimitSources: true, usageLimitsCommand: true }),
+  ),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      runtimeContextLayer,
+      providedConnectionPlatformLayer,
+      mobileBackgroundActivityObserverLayer,
+    ),
+  ),
+);
+
+const connectionLayer = mobileBackgroundActivityReporterLayer.pipe(
+  Layer.provideMerge(providedClientConnectionLayer),
+);
 
 export const connectionAtomRuntime: Atom.AtomRuntime<
   Layer.Success<ConnectionLayerSource>,
   Layer.Error<ConnectionLayerSource>
-> = Atom.runtime(connectionLayer)
+> = hotSwappableAtomRuntime({
+  id: "t3.mobile.connection-runtime",
+  hotModule: typeof module === "undefined" ? undefined : module.hot,
+  registry: appAtomRegistry,
+  layer: connectionLayer,
+});

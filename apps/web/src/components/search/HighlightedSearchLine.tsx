@@ -1,76 +1,183 @@
-// apps/web/src/components/search/HighlightedSearchLine.tsx
-// render bounded plaintext match windows without interpreting file contents as markup
+import { getFiletypeFromFileName } from "@pierre/diffs";
+import type { ProjectContentMatch } from "@t3tools/contracts";
+import { memo, Suspense, use, useMemo, type CSSProperties } from "react";
 
-export const SEARCH_LINE_WINDOW = 320
+import { resolveDiffThemeName } from "~/lib/diffRendering";
+import { getSyntaxHighlighterPromise } from "~/lib/syntaxHighlighting";
 
-export interface SearchMatchRange
-{
-  readonly start: number
-  readonly end: number
+import { RenderErrorBoundary } from "../RenderErrorBoundary";
+
+interface Range {
+  readonly start: number;
+  readonly end: number;
 }
 
-export function searchLineWindow(text: string, ranges: ReadonlyArray<SearchMatchRange>)
-{
-  const validRanges = ranges
-    .filter(
-      (range) =>
-        Number.isInteger(range.start) &&
-        Number.isInteger(range.end) &&
-        range.start >= 0 &&
-        range.end > range.start &&
-        range.start < text.length,
-    )
-    .toSorted((left, right) => left.start - right.start)
-  const firstStart = validRanges[0]?.start ?? 0
-  let start = Math.max(0, Math.min(firstStart - 40, text.length - SEARCH_LINE_WINDOW))
-  let end = Math.min(text.length, start + SEARCH_LINE_WINDOW)
-  // avoid splitting a surrogate pair at either edge of the visible window
-  if (start > 0 && /[\uDC00-\uDFFF]/u.test(text[start] ?? '')) start -= 1
-  if (end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1] ?? '')) end -= 1
+interface CodeToken {
+  readonly content: string;
+  readonly offset: number;
+  readonly color?: string;
+  readonly fontStyle?: number;
+}
 
-  const segments: Array<{
-    readonly start: number
-    readonly text: string
-    readonly highlighted: boolean
-  }> = []
-  let cursor = start
-  for (const range of validRanges)
-  {
-    const from = Math.max(cursor, range.start)
-    const to = Math.min(end, range.end)
-    if (to <= from) continue
-    if (cursor < from)
-      segments.push({ start: cursor, text: text.slice(cursor, from), highlighted: false })
-    segments.push({ start: from, text: text.slice(from, to), highlighted: true })
-    cursor = to
+interface Segment {
+  readonly content: string;
+  readonly isMatch: boolean;
+  readonly start: number;
+  readonly end: number;
+  readonly token: CodeToken;
+}
+
+function normalizeRanges(match: ProjectContentMatch): Range[] {
+  const ranges = match.matchRanges
+    .map((range) => ({
+      start: Math.max(0, Math.min(match.lineContent.length, range.start)),
+      end: Math.max(0, Math.min(match.lineContent.length, range.end)),
+    }))
+    .filter((range) => range.end > range.start)
+    .toSorted((left, right) => left.start - right.start);
+
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const range of ranges) {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
   }
-  if (cursor < end)
-    segments.push({ start: cursor, text: text.slice(cursor, end), highlighted: false })
-  return { leadingEllipsis: start > 0, trailingEllipsis: end < text.length, segments }
+  return merged;
 }
 
-export function HighlightedSearchLine({
-  text,
-  ranges,
-}: {
-  readonly text: string
-  readonly ranges: ReadonlyArray<SearchMatchRange>
-})
-{
-  const window = searchLineWindow(text, ranges)
-  return (
-    <>
-      {window.leadingEllipsis ? '…' : null}
-      {window.segments.map((segment) =>
-        segment.highlighted ? (
-          <mark key={segment.start} className="rounded-sm bg-primary/20 text-inherit">
-            {segment.text}
-          </mark>
-        ) : (
-          <span key={segment.start}>{segment.text}</span>
-        ),
-      )}
-      {window.trailingEllipsis ? '…' : null}
-    </>
-  )
+function splitToken(line: string, token: CodeToken, ranges: ReadonlyArray<Range>): Segment[] {
+  const segments: Segment[] = [];
+  const tokenEnd = token.offset + token.content.length;
+  let cursor = token.offset;
+
+  for (const range of ranges) {
+    if (range.end <= cursor) continue;
+    if (range.start >= tokenEnd) break;
+
+    const matchStart = Math.max(cursor, range.start);
+    if (matchStart > cursor) {
+      segments.push({
+        content: line.slice(cursor, matchStart),
+        isMatch: false,
+        start: cursor,
+        end: matchStart,
+        token,
+      });
+    }
+
+    const matchEnd = Math.min(tokenEnd, range.end);
+    segments.push({
+      content: line.slice(matchStart, matchEnd),
+      isMatch: true,
+      start: matchStart,
+      end: matchEnd,
+      token,
+    });
+    cursor = matchEnd;
+  }
+
+  if (cursor < tokenEnd) {
+    segments.push({
+      content: line.slice(cursor, tokenEnd),
+      isMatch: false,
+      start: cursor,
+      end: tokenEnd,
+      token,
+    });
+  }
+  return segments;
 }
+
+function tokenStyle(token: CodeToken): CSSProperties {
+  const fontStyle = token.fontStyle ?? 0;
+  return {
+    ...(token.color ? { color: token.color } : {}),
+    ...(fontStyle & 1 ? { fontStyle: "italic" } : {}),
+    ...(fontStyle & 2 ? { fontWeight: 700 } : {}),
+    ...(fontStyle & 4 ? { textDecoration: "underline" } : {}),
+  };
+}
+
+function HighlightedTokens(props: {
+  readonly line: string;
+  readonly ranges: ReadonlyArray<Range>;
+  readonly tokens: ReadonlyArray<CodeToken>;
+}) {
+  return props.tokens
+    .flatMap((token) => splitToken(props.line, token, props.ranges))
+    .map((segment) =>
+      segment.isMatch ? (
+        <mark
+          className="rounded-[2px] bg-primary/25 text-inherit"
+          key={`${segment.start}:${segment.end}:match`}
+          style={tokenStyle(segment.token)}
+        >
+          {segment.content}
+        </mark>
+      ) : (
+        <span key={`${segment.start}:${segment.end}:code`} style={tokenStyle(segment.token)}>
+          {segment.content}
+        </span>
+      ),
+    );
+}
+
+function SyntaxHighlightedTokens(props: {
+  readonly line: string;
+  readonly language: string;
+  readonly ranges: ReadonlyArray<Range>;
+  readonly theme: "light" | "dark";
+}) {
+  const highlighter = use(getSyntaxHighlighterPromise(props.language));
+  const tokens = useMemo(() => {
+    try {
+      return highlighter.codeToTokens(props.line, {
+        lang: props.language,
+        theme: resolveDiffThemeName(props.theme),
+      }).tokens[0];
+    } catch {
+      return undefined;
+    }
+  }, [highlighter, props.language, props.line, props.theme]);
+
+  return tokens ? (
+    <HighlightedTokens line={props.line} ranges={props.ranges} tokens={tokens} />
+  ) : (
+    <HighlightedTokens
+      line={props.line}
+      ranges={props.ranges}
+      tokens={[{ content: props.line, offset: 0 }]}
+    />
+  );
+}
+
+export const HighlightedSearchLine = memo(function HighlightedSearchLine(props: {
+  readonly match: ProjectContentMatch;
+  readonly path: string;
+  readonly theme: "light" | "dark";
+}) {
+  const ranges = useMemo(() => normalizeRanges(props.match), [props.match]);
+  const fallback = (
+    <HighlightedTokens
+      line={props.match.lineContent}
+      ranges={ranges}
+      tokens={[{ content: props.match.lineContent, offset: 0 }]}
+    />
+  );
+
+  return (
+    <RenderErrorBoundary fallback={fallback}>
+      <Suspense fallback={fallback}>
+        <SyntaxHighlightedTokens
+          line={props.match.lineContent}
+          language={getFiletypeFromFileName(props.path)}
+          ranges={ranges}
+          theme={props.theme}
+        />
+      </Suspense>
+    </RenderErrorBoundary>
+  );
+});

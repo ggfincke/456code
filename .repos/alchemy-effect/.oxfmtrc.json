@@ -16,7 +16,15 @@
     "**/mdx/**",
     "**/*.mdx",
     "**/*.md",
+    "**/__snapshots__/**",
+    "**/.svelte-kit/**",
+    "**/routeTree.gen.ts",
+    "**/test-results/**",
     "**/.vendor/**",
-    "**/package.json"
+    "examples/prisma-tanstack-start/src/prisma/contract.d.ts",
+    "examples/prisma-tanstack-start/src/prisma/contract.json",
+    "**/package.json",
+    "./distilled",
+    "**/fixtures/chart/templates/**"
   ]
 }

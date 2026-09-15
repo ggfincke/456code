@@ -1,67 +1,64 @@
-// apps/server/src/provider/Drivers/CursorDriver.ts
-// creates Cursor ACP instances bound to their exact connection source
+/**
+ * CursorDriver — `ProviderDriver` for the Cursor Agent (`cursor-agent`) runtime.
+ *
+ * Cursor exposes an ACP-based CLI. Model catalog and capability refreshes
+ * happen during the managed provider status check via Cursor's
+ * `list_available_models` extension method.
+ *
+ * Text generation is supported via the ACP runtime — `makeCursorTextGeneration`
+ * drives `runtime.prompt` with a structured-output schema and collects the
+ * agent's `agent_message_chunk` stream into a single JSON blob.
+ *
+ * @module provider/Drivers/CursorDriver
+ */
+import { CursorSettings, ProviderDriverKind } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import { HttpClient } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
-// CursorDriver — `ProviderDriver` for the Cursor Agent (`cursor-agent`) runtime.
-//
-// cursor exposes an ACP-based CLI. Model catalog and capability refreshes
-// happen during the managed provider status check via Cursor's
-// `list_available_models` extension method.
-//
-// text generation is supported via the ACP runtime — `makeCursorTextGeneration`
-// drives `runtime.prompt` with a structured-output schema and collects the
-// agent's `agent_message_chunk` stream into a single JSON blob.
-//
-// @module provider/Drivers/CursorDriver
-import { CursorSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
-import * as Duration from 'effect/Duration'
-import * as Crypto from 'effect/Crypto'
-import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Path from 'effect/Path'
-import * as Schema from 'effect/Schema'
-import { HttpClient } from 'effect/unstable/http'
-import { ChildProcessSpawner } from 'effect/unstable/process'
-
-import { ServerConfig } from '../../config.ts'
-import { ServerSettingsService } from '../../serverSettings.ts'
-import { makeCursorTextGeneration } from '../../textGeneration/CursorTextGeneration.ts'
-import { buildCursorAcpSpawnInput } from '../acp/CursorAcpSupport.ts'
-import {
-  acpContinuationEnvironment,
-  acpContinuationRouteIssue,
-  normalizeAcpRuntimeEnvironment,
-  resolveAcpContinuationIdentity,
-} from '../continuationIdentity.ts'
-import { ProviderDriverError } from '../Errors.ts'
-import { makeCursorAdapter } from '../Layers/CursorAdapter.ts'
+import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
+import { ProviderDriverError } from "../Errors.ts";
+import { makeCursorAdapter } from "../Layers/CursorAdapter.ts";
 import {
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
-  enrichCursorSnapshot,
   makeCursorModelDiscovery,
-} from '../Layers/CursorProvider.ts'
-import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
-import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
-import { type ProviderDriver, type ProviderInstance } from '../catalog/ProviderDriver.ts'
-import type { ServerProviderDraft } from '../providerSnapshot.ts'
-import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
+  enrichCursorSnapshot,
+} from "../Layers/CursorProvider.ts";
+import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import {
+  defaultProviderContinuationIdentity,
+  type ProviderDriver,
+  type ProviderInstance,
+} from "../ProviderDriver.ts";
+import { withInstanceIdentity } from "./instanceIdentity.ts";
+import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   makeCachedProviderMaintenanceResolution,
   makeManualOnlyProviderMaintenanceCapabilities,
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilitiesResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from '../maintenance/providerMaintenance.ts'
+} from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from '../maintenance/providerUpdateSettings.ts'
-import { discoverCursorSkills, probeCursorSkills } from './CursorSkills.ts'
-const decodeCursorSettings = Schema.decodeSync(CursorSettings)
+} from "../providerUpdateSettings.ts";
+import { probeCursorSkills } from "./CursorSkills.ts";
+const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
-const DRIVER_KIND = ProviderDriverKind.make('cursor')
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
+const DRIVER_KIND = ProviderDriverKind.make("cursor");
+// cursor-agent updates itself, so the resolved executable is its own updater.
+// No executable means nothing to update, not "whatever is on PATH".
 const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
   resolve: (context) =>
     Effect.succeed(
@@ -70,19 +67,19 @@ const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
             provider: DRIVER_KIND,
             packageName: null,
             updateExecutable: context.resolvedCommandPath,
-            updateArgs: ['update'],
-            updateLockKey: 'cursor-agent',
+            updateArgs: ["update"],
+            updateLockKey: "cursor-agent",
             platform: context.platform,
-            env: context.env,
           })
         : makeManualOnlyProviderMaintenanceCapabilities({
             provider: DRIVER_KIND,
             packageName: null,
           }),
     ),
-}
+};
 
 export type CursorDriverEnv =
+  | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
@@ -90,72 +87,38 @@ export type CursorDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | ServerConfig
-  | ServerSettingsService
-
-const withInstanceIdentity =
-  (input: {
-    readonly instanceId: ProviderInstance['instanceId']
-    readonly displayName: string | undefined
-    readonly accentColor: string | undefined
-    readonly continuationGroupKey: string | null
-  }) =>
-  (snapshot: ServerProviderDraft): ServerProvider => ({
-    ...snapshot,
-    instanceId: input.instanceId,
-    driver: DRIVER_KIND,
-    ...(input.displayName ? { displayName: input.displayName } : {}),
-    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
-    ...(input.continuationGroupKey === null
-      ? {}
-      : { continuation: { groupKey: input.continuationGroupKey } }),
-  })
+  | ServerSettingsService;
 
 export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: 'Cursor',
+    displayName: "Cursor",
     supportsMultipleInstances: true,
   },
   configSchema: CursorSettings,
   defaultConfig: (): CursorSettings => decodeCursorSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* ()
-    {
-      const crypto = yield* Crypto.Crypto
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const httpClient = yield* HttpClient.HttpClient
-      const { cwd } = yield* ServerConfig
-      const serverSettings = yield* ServerSettingsService
-      const eventLoggers = yield* ProviderEventLoggers
-      const processEnv = normalizeAcpRuntimeEnvironment(
-        mergeProviderInstanceEnvironment(environment),
-        cwd,
-      )
-      const effectiveConfig = { ...config, enabled } satisfies CursorSettings
-      const spawnRoute = buildCursorAcpSpawnInput(effectiveConfig, cwd, processEnv)
-      const continuationRoute = {
-        command: spawnRoute.command,
-        args: spawnRoute.args,
-        env: normalizeAcpRuntimeEnvironment(
-          acpContinuationEnvironment(DRIVER_KIND, spawnRoute.env ?? {}, environment),
-          cwd,
-        ),
-      } as const
-      const continuationUnavailableReason = acpContinuationRouteIssue(continuationRoute)
-      const resolveContinuationIdentity = resolveAcpContinuationIdentity(
-        DRIVER_KIND,
-        continuationRoute,
-      )
-      const continuationIdentity = yield* resolveContinuationIdentity
+    Effect.gen(function* () {
+      const crypto = yield* Crypto.Crypto;
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const httpClient = yield* HttpClient.HttpClient;
+      const serverSettings = yield* ServerSettingsService;
+      const eventLoggers = yield* ProviderEventLoggers;
+      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const continuationIdentity = defaultProviderContinuationIdentity({
+        driverKind: DRIVER_KIND,
+        instanceId,
+      });
       const stampIdentity = withInstanceIdentity({
         instanceId,
+        driverKind: DRIVER_KIND,
         displayName,
         accentColor,
-        continuationGroupKey:
-          continuationUnavailableReason === null ? continuationIdentity.continuationKey : null,
-      })
+        continuationGroupKey: continuationIdentity.continuationKey,
+      });
+      const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
           binaryPath: effectiveConfig.binaryPath,
@@ -165,29 +128,29 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         ),
-      )
+      );
 
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
-        enableAbnormalTermination: true,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
-      })
-      const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv)
-      const discoverModels = yield* makeCursorModelDiscovery(effectiveConfig, processEnv)
+      });
+      const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv);
 
-      const checkProvider = Effect.all([
-        checkCursorProviderStatus(effectiveConfig, processEnv, discoverModels),
-        discoverCursorSkills(undefined, processEnv),
-      ]).pipe(
-        Effect.map(([provider, skills]) => stampIdentity({ ...provider, skills })),
+      const discoverModels = yield* makeCursorModelDiscovery(effectiveConfig, processEnv);
+      const checkProvider = checkCursorProviderStatus(
+        effectiveConfig,
+        processEnv,
+        discoverModels,
+      ).pipe(
+        Effect.map(stampIdentity),
         Effect.provideService(Crypto.Crypto, crypto),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
-      )
+      );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CursorSettings>>({
         resolveMaintenance,
         getSettings: snapshotSettings.getSettings,
@@ -196,7 +159,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         initialSnapshot: (settings) =>
           buildInitialCursorProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider,
-        // model catalog and capabilities come exclusively from Cursor's
+        // Model catalog and capabilities come exclusively from Cursor's
         // list_available_models extension method during provider checks.
         enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
           resolveMaintenance().pipe(
@@ -211,8 +174,8 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
                 httpClient,
               }),
             ),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           ),
-        refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(
           (cause) =>
@@ -223,40 +186,37 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
               cause,
             }),
         ),
-      )
-      const snapshotForCwd = (workspaceCwd: string) =>
-        !effectiveConfig.enabled
-          ? snapshot.getSnapshot
-          : Effect.all([
-              snapshot.getSnapshot,
-              probeCursorSkills(workspaceCwd, processEnv).pipe(
-                Effect.provideService(FileSystem.FileSystem, fileSystem),
-                Effect.provideService(Path.Path, path),
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderDriverError({
-                      driver: DRIVER_KIND,
-                      instanceId,
-                      detail: `Failed to discover Cursor skills for '${workspaceCwd}'`,
-                      cause,
-                    }),
-                ),
-              ),
-            ]).pipe(Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })))
+      );
 
       return {
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,
-        resolveContinuationIdentity,
-        ...(continuationUnavailableReason === null ? {} : { continuationUnavailableReason }),
         displayName,
         accentColor,
         enabled,
         snapshot,
-        snapshotForCwd,
+        snapshotForCwd: (cwd) =>
+          !effectiveConfig.enabled
+            ? snapshot.getSnapshot
+            : Effect.all([
+                snapshot.getSnapshot,
+                probeCursorSkills(cwd, processEnv).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderDriverError({
+                        driver: DRIVER_KIND,
+                        instanceId,
+                        detail: `Failed to discover Cursor skills for '${cwd}'`,
+                        cause,
+                      }),
+                  ),
+                ),
+              ]).pipe(Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills }))),
         adapter,
         textGeneration,
-      } satisfies ProviderInstance
+      } satisfies ProviderInstance;
     }),
-}
+};

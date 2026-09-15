@@ -1,178 +1,171 @@
-// apps/mobile/src/features/review/reviewState.ts
-// manage review state
+import { useAtomValue } from "@effect/atom-react";
 
-import { useAtomValue } from '@effect/atom-react'
+import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from "@t3tools/contracts";
+import { Atom } from "effect/unstable/reactivity";
 
-import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from '@t3tools/contracts'
-import { Atom } from 'effect/unstable/reactivity'
+import { scopedThreadKey } from "../../lib/scopedEntities";
+import { appAtomRegistry } from "../../state/atom-registry";
+import { buildReviewParsedDiff, type ReviewParsedDiff } from "./reviewModel";
 
-import { scopedThreadKey } from '../../lib/scopedEntities'
-import { appAtomRegistry } from '../../state/atom-registry'
-import { buildReviewParsedDiff, type ReviewParsedDiff } from './reviewModel'
-
-const EMPTY_GIT_REVIEW_SECTIONS = Object.freeze<ReadonlyArray<ReviewDiffPreviewSource>>([])
-const EMPTY_REVIEW_TURN_DIFFS = Object.freeze<Readonly<Record<string, string>>>({})
-const EMPTY_REVIEW_LOADING_TURN_IDS = Object.freeze<Readonly<Record<string, boolean>>>({})
+const EMPTY_GIT_REVIEW_SECTIONS = Object.freeze<ReadonlyArray<ReviewDiffPreviewSource>>([]);
+const EMPTY_REVIEW_TURN_DIFFS = Object.freeze<Readonly<Record<string, string>>>({});
+const EMPTY_REVIEW_LOADING_TURN_IDS = Object.freeze<Readonly<Record<string, boolean>>>({});
 const EMPTY_REVIEW_ASYNC_STATE = Object.freeze<ReviewAsyncState>({
   loadingTurnIds: EMPTY_REVIEW_LOADING_TURN_IDS,
   error: null,
-})
+});
 const EMPTY_REVIEW_SECTION_FILE_IDS = Object.freeze<
   Readonly<Record<string, ReadonlyArray<string> | undefined>>
->({})
+>({});
 const EMPTY_REVIEW_GIT_SECTIONS_ATOM = Atom.make(EMPTY_GIT_REVIEW_SECTIONS).pipe(
   Atom.keepAlive,
-  Atom.withLabel('mobile:review:git-sections:null'),
-)
+  Atom.withLabel("mobile:review:git-sections:null"),
+);
 const EMPTY_REVIEW_TURN_DIFFS_ATOM = Atom.make(EMPTY_REVIEW_TURN_DIFFS).pipe(
   Atom.keepAlive,
-  Atom.withLabel('mobile:review:turn-diffs:null'),
-)
+  Atom.withLabel("mobile:review:turn-diffs:null"),
+);
 const EMPTY_REVIEW_SELECTED_SECTION_ID_ATOM = Atom.make<string | null>(null).pipe(
   Atom.keepAlive,
-  Atom.withLabel('mobile:review:selected-section-id:null'),
-)
+  Atom.withLabel("mobile:review:selected-section-id:null"),
+);
 const EMPTY_REVIEW_ASYNC_STATE_ATOM = Atom.make(EMPTY_REVIEW_ASYNC_STATE).pipe(
   Atom.keepAlive,
-  Atom.withLabel('mobile:review:async-state:null'),
-)
+  Atom.withLabel("mobile:review:async-state:null"),
+);
 const EMPTY_REVIEW_SECTION_FILE_IDS_ATOM = Atom.make(EMPTY_REVIEW_SECTION_FILE_IDS).pipe(
   Atom.keepAlive,
-  Atom.withLabel('mobile:review:section-file-ids:null'),
-)
+  Atom.withLabel("mobile:review:section-file-ids:null"),
+);
 
 const reviewGitSectionsByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make(EMPTY_GIT_REVIEW_SECTIONS).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:git-sections:${threadKey}`),
   ),
-)
+);
 
 const reviewTurnDiffByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make(EMPTY_REVIEW_TURN_DIFFS).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:turn-diffs:${threadKey}`),
   ),
-)
+);
 
 const reviewSelectedSectionIdByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make<string | null>(null).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:selected-section-id:${threadKey}`),
   ),
-)
+);
 
 const reviewAsyncStateByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make(EMPTY_REVIEW_ASYNC_STATE).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:async-state:${threadKey}`),
   ),
-)
+);
 
 const reviewExpandedFileIdsByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make(EMPTY_REVIEW_SECTION_FILE_IDS).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:expanded-file-ids:${threadKey}`),
   ),
-)
+);
 
 const reviewRevealedLargeFileIdsByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make(EMPTY_REVIEW_SECTION_FILE_IDS).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:revealed-large-file-ids:${threadKey}`),
   ),
-)
+);
 
 const reviewViewedFileIdsByThreadKeyAtom = Atom.family((threadKey: string) =>
   Atom.make(EMPTY_REVIEW_SECTION_FILE_IDS).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:viewed-file-ids:${threadKey}`),
   ),
-)
+);
 
-export const MAX_CACHED_REVIEW_DIFFS = 8
-export const MAX_CACHED_REVIEW_SOURCE_CHARACTERS = 4 * 1024 * 1024
+export const MAX_CACHED_REVIEW_DIFFS = 8;
+// This bounds source string length, not the parsed or native heap size.
+export const MAX_CACHED_REVIEW_SOURCE_CHARACTERS = 4 * 1024 * 1024;
 
-interface CachedReviewParsedDiff
-{
-  readonly diff: string | null
-  readonly parsed: ReviewParsedDiff
-  readonly sourceCharacterCount: number
+interface CachedReviewParsedDiff {
+  readonly diff: string | null;
+  readonly parsed: ReviewParsedDiff;
+  readonly sourceCharacterCount: number;
 }
 
+// The factory keeps this mutable cache local to the registry and releases it on reset or disposal.
 const reviewParsedDiffCacheAtom = Atom.make(() => ({
   entries: new Map<string, CachedReviewParsedDiff>(),
   sourceCharacterCount: 0,
-})).pipe(Atom.keepAlive, Atom.withLabel('mobile:review:parsed-diffs'))
+})).pipe(Atom.keepAlive, Atom.withLabel("mobile:review:parsed-diffs"));
 
-export interface ReviewCacheForThread
-{
-  readonly threadKey: string | null
-  readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>
-  readonly turnDiffById: Readonly<Record<string, string>>
-  readonly selectedSectionId: string | null
-  readonly asyncState: ReviewAsyncState
-  readonly expandedFileIdsBySection: Readonly<Record<string, ReadonlyArray<string> | undefined>>
+export interface ReviewCacheForThread {
+  readonly threadKey: string | null;
+  readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>;
+  readonly turnDiffById: Readonly<Record<string, string>>;
+  readonly selectedSectionId: string | null;
+  readonly asyncState: ReviewAsyncState;
+  readonly expandedFileIdsBySection: Readonly<Record<string, ReadonlyArray<string> | undefined>>;
   readonly revealedLargeFileIdsBySection: Readonly<
     Record<string, ReadonlyArray<string> | undefined>
-  >
-  readonly viewedFileIdsBySection: Readonly<Record<string, ReadonlyArray<string> | undefined>>
+  >;
+  readonly viewedFileIdsBySection: Readonly<Record<string, ReadonlyArray<string> | undefined>>;
 }
 
-export interface ReviewAsyncState
-{
-  readonly loadingTurnIds: Readonly<Record<string, boolean>>
-  readonly error: string | null
+export interface ReviewAsyncState {
+  readonly loadingTurnIds: Readonly<Record<string, boolean>>;
+  readonly error: string | null;
 }
 
 function buildThreadKey(input: {
-  readonly environmentId?: EnvironmentId
-  readonly threadId?: ThreadId
-}): string | null
-{
+  readonly environmentId?: EnvironmentId;
+  readonly threadId?: ThreadId;
+}): string | null {
   return input.environmentId && input.threadId
     ? scopedThreadKey(input.environmentId, input.threadId)
-    : null
+    : null;
 }
 
-function buildSectionCacheKey(threadKey: string, sectionId: string): string
-{
-  return `${threadKey}:${sectionId}`
+function buildSectionCacheKey(threadKey: string, sectionId: string): string {
+  return `${threadKey}:${sectionId}`;
 }
 
 export function useReviewCacheForThread(input: {
-  readonly environmentId?: EnvironmentId
-  readonly threadId?: ThreadId
-}): ReviewCacheForThread
-{
-  const threadKey = buildThreadKey(input)
+  readonly environmentId?: EnvironmentId;
+  readonly threadId?: ThreadId;
+}): ReviewCacheForThread {
+  const threadKey = buildThreadKey(input);
   const gitSections = useAtomValue(
     threadKey ? reviewGitSectionsByThreadKeyAtom(threadKey) : EMPTY_REVIEW_GIT_SECTIONS_ATOM,
-  )
+  );
   const turnDiffById = useAtomValue(
     threadKey ? reviewTurnDiffByThreadKeyAtom(threadKey) : EMPTY_REVIEW_TURN_DIFFS_ATOM,
-  )
+  );
   const selectedSectionId = useAtomValue(
     threadKey
       ? reviewSelectedSectionIdByThreadKeyAtom(threadKey)
       : EMPTY_REVIEW_SELECTED_SECTION_ID_ATOM,
-  )
+  );
   const asyncState = useAtomValue(
     threadKey ? reviewAsyncStateByThreadKeyAtom(threadKey) : EMPTY_REVIEW_ASYNC_STATE_ATOM,
-  )
+  );
   const expandedFileIdsBySection = useAtomValue(
     threadKey
       ? reviewExpandedFileIdsByThreadKeyAtom(threadKey)
       : EMPTY_REVIEW_SECTION_FILE_IDS_ATOM,
-  )
+  );
   const revealedLargeFileIdsBySection = useAtomValue(
     threadKey
       ? reviewRevealedLargeFileIdsByThreadKeyAtom(threadKey)
       : EMPTY_REVIEW_SECTION_FILE_IDS_ATOM,
-  )
+  );
   const viewedFileIdsBySection = useAtomValue(
     threadKey ? reviewViewedFileIdsByThreadKeyAtom(threadKey) : EMPTY_REVIEW_SECTION_FILE_IDS_ATOM,
-  )
+  );
 
   return {
     threadKey,
@@ -183,188 +176,153 @@ export function useReviewCacheForThread(input: {
     expandedFileIdsBySection,
     revealedLargeFileIdsBySection,
     viewedFileIdsBySection,
-  }
+  };
 }
 
 export function setReviewGitSections(
   threadKey: string,
   sections: ReadonlyArray<ReviewDiffPreviewSource>,
-): void
-{
-  appAtomRegistry.set(reviewGitSectionsByThreadKeyAtom(threadKey), sections)
+): void {
+  appAtomRegistry.set(reviewGitSectionsByThreadKeyAtom(threadKey), sections);
 }
 
-export function setReviewTurnDiff(threadKey: string, sectionId: string, diff: string): void
-{
-  const atom = reviewTurnDiffByThreadKeyAtom(threadKey)
-  const current = appAtomRegistry.get(atom)
+export function setReviewTurnDiff(threadKey: string, sectionId: string, diff: string): void {
+  const atom = reviewTurnDiffByThreadKeyAtom(threadKey);
+  const current = appAtomRegistry.get(atom);
   appAtomRegistry.set(atom, {
     ...current,
     [sectionId]: diff,
-  })
+  });
 }
 
-export function setReviewSelectedSectionId(threadKey: string, sectionId: string | null): void
-{
-  appAtomRegistry.set(reviewSelectedSectionIdByThreadKeyAtom(threadKey), sectionId)
+export function setReviewSelectedSectionId(threadKey: string, sectionId: string | null): void {
+  appAtomRegistry.set(reviewSelectedSectionIdByThreadKeyAtom(threadKey), sectionId);
 }
 
 function updateReviewAsyncState(
   threadKey: string,
   update: (current: ReviewAsyncState) => ReviewAsyncState,
-): void
-{
-  const atom = reviewAsyncStateByThreadKeyAtom(threadKey)
-  appAtomRegistry.set(atom, update(appAtomRegistry.get(atom)))
+): void {
+  const atom = reviewAsyncStateByThreadKeyAtom(threadKey);
+  appAtomRegistry.set(atom, update(appAtomRegistry.get(atom)));
 }
 
 export function setReviewTurnDiffLoading(
   threadKey: string,
   sectionId: string,
   isLoading: boolean,
-): void
-{
-  updateReviewAsyncState(threadKey, (current) =>
-  {
-    const loadingTurnIds = { ...current.loadingTurnIds }
-    if (isLoading)
-    {
-      loadingTurnIds[sectionId] = true
-    }
-    else
-    {
-      delete loadingTurnIds[sectionId]
+): void {
+  updateReviewAsyncState(threadKey, (current) => {
+    const loadingTurnIds = { ...current.loadingTurnIds };
+    if (isLoading) {
+      loadingTurnIds[sectionId] = true;
+    } else {
+      delete loadingTurnIds[sectionId];
     }
     return {
       ...current,
       loadingTurnIds,
-    }
-  })
+    };
+  });
 }
 
-export function setReviewAsyncError(threadKey: string, error: string | null): void
-{
+export function setReviewAsyncError(threadKey: string, error: string | null): void {
   updateReviewAsyncState(threadKey, (current) => ({
     ...current,
     error,
-  }))
+  }));
 }
 
-export function getReviewAsyncStateSnapshot(threadKey: string): ReviewAsyncState
-{
-  return appAtomRegistry.get(reviewAsyncStateByThreadKeyAtom(threadKey))
+export function getReviewAsyncStateSnapshot(threadKey: string): ReviewAsyncState {
+  return appAtomRegistry.get(reviewAsyncStateByThreadKeyAtom(threadKey));
 }
 
 export function updateReviewExpandedFileIds(
   threadKey: string,
   sectionId: string,
   update: (current: ReadonlyArray<string> | undefined) => ReadonlyArray<string> | undefined,
-): void
-{
-  const atom = reviewExpandedFileIdsByThreadKeyAtom(threadKey)
-  const current = appAtomRegistry.get(atom)
-  const nextValue = update(current[sectionId])
+): void {
+  const atom = reviewExpandedFileIdsByThreadKeyAtom(threadKey);
+  const current = appAtomRegistry.get(atom);
+  const nextValue = update(current[sectionId]);
   appAtomRegistry.set(atom, {
     ...current,
     [sectionId]: nextValue,
-  })
-}
-
-export function updateReviewRevealedLargeFileIds(
-  threadKey: string,
-  sectionId: string,
-  update: (current: ReadonlyArray<string> | undefined) => ReadonlyArray<string> | undefined,
-): void
-{
-  const atom = reviewRevealedLargeFileIdsByThreadKeyAtom(threadKey)
-  const current = appAtomRegistry.get(atom)
-  const nextValue = update(current[sectionId])
-  appAtomRegistry.set(atom, {
-    ...current,
-    [sectionId]: nextValue,
-  })
+  });
 }
 
 export function updateReviewViewedFileIds(
   threadKey: string,
   sectionId: string,
   update: (current: ReadonlyArray<string> | undefined) => ReadonlyArray<string> | undefined,
-): void
-{
-  const atom = reviewViewedFileIdsByThreadKeyAtom(threadKey)
-  const current = appAtomRegistry.get(atom)
-  const nextValue = update(current[sectionId])
+): void {
+  const atom = reviewViewedFileIdsByThreadKeyAtom(threadKey);
+  const current = appAtomRegistry.get(atom);
+  const nextValue = update(current[sectionId]);
   appAtomRegistry.set(atom, {
     ...current,
     [sectionId]: nextValue,
-  })
+  });
+}
+
+/** Returns the larger of current input and matching cached source, without changing recency. */
+export function getReviewParsedDiffSourceCharacterCount(input: {
+  readonly threadKey: string;
+  readonly sectionId: string;
+  readonly diff: string | null;
+}): number {
+  const sourceCharacterCount = input.diff?.length ?? 0;
+  const cache = appAtomRegistry.get(reviewParsedDiffCacheAtom);
+  const cached = cache.entries.get(buildSectionCacheKey(input.threadKey, input.sectionId));
+  return cached && cached.diff === (input.diff?.trim() ?? null)
+    ? Math.max(sourceCharacterCount, cached.sourceCharacterCount)
+    : sourceCharacterCount;
 }
 
 export function getCachedReviewParsedDiff(input: {
-  readonly threadKey: string | null
-  readonly sectionId: string | null
-  readonly diff: string | null | undefined
-}): ReviewParsedDiff
-{
-  if (!input.threadKey || !input.sectionId)
-  {
-    return buildReviewParsedDiff(input.diff, input.sectionId ?? 'mobile-review')
+  readonly threadKey: string | null;
+  readonly sectionId: string | null;
+  readonly diff: string | null | undefined;
+}): ReviewParsedDiff {
+  if (!input.threadKey || !input.sectionId) {
+    return buildReviewParsedDiff(input.diff, input.sectionId ?? "mobile-review");
   }
 
-  const cacheKey = buildSectionCacheKey(input.threadKey, input.sectionId)
-  const normalizedDiff = input.diff?.trim() ?? null
-  const cache = appAtomRegistry.get(reviewParsedDiffCacheAtom)
-  const cached = cache.entries.get(cacheKey)
-  if (cached && cached.diff === normalizedDiff)
-  {
-    cache.entries.delete(cacheKey)
-    cache.entries.set(cacheKey, cached)
-    return cached.parsed
+  const cacheKey = buildSectionCacheKey(input.threadKey, input.sectionId);
+  const normalizedDiff = input.diff?.trim() ?? null;
+  const cache = appAtomRegistry.get(reviewParsedDiffCacheAtom);
+  const cached = cache.entries.get(cacheKey);
+  if (cached && cached.diff === normalizedDiff) {
+    cache.entries.delete(cacheKey);
+    cache.entries.set(cacheKey, cached);
+    return cached.parsed;
   }
 
-  const parsed = buildReviewParsedDiff(input.diff, input.sectionId)
-  if (cached)
-  {
-    cache.entries.delete(cacheKey)
-    cache.sourceCharacterCount -= cached.sourceCharacterCount
+  const parsed = buildReviewParsedDiff(input.diff, input.sectionId);
+  if (cached) {
+    cache.entries.delete(cacheKey);
+    cache.sourceCharacterCount -= cached.sourceCharacterCount;
   }
-  const sourceCharacterCount = input.diff?.length ?? 0
-  if (sourceCharacterCount > MAX_CACHED_REVIEW_SOURCE_CHARACTERS)
-  {
-    return parsed
+  const sourceCharacterCount = input.diff?.length ?? 0;
+  if (sourceCharacterCount > MAX_CACHED_REVIEW_SOURCE_CHARACTERS) {
+    return parsed;
   }
 
-  for (const [oldestKey, oldest] of cache.entries)
-  {
+  for (const [oldestKey, oldest] of cache.entries) {
     if (
       cache.entries.size < MAX_CACHED_REVIEW_DIFFS &&
       cache.sourceCharacterCount + sourceCharacterCount <= MAX_CACHED_REVIEW_SOURCE_CHARACTERS
-    )
-    {
-      break
+    ) {
+      break;
     }
-    cache.entries.delete(oldestKey)
-    cache.sourceCharacterCount -= oldest.sourceCharacterCount
+    cache.entries.delete(oldestKey);
+    cache.sourceCharacterCount -= oldest.sourceCharacterCount;
   }
   cache.entries.set(cacheKey, {
     diff: normalizedDiff,
     parsed,
     sourceCharacterCount,
-  })
-  cache.sourceCharacterCount += sourceCharacterCount
-  return parsed
-}
-
-export function getReviewParsedDiffSourceCharacterCount(input: {
-  readonly threadKey: string
-  readonly sectionId: string
-  readonly diff: string | null
-}): number
-{
-  const sourceCharacterCount = input.diff?.length ?? 0
-  const cache = appAtomRegistry.get(reviewParsedDiffCacheAtom)
-  const cached = cache.entries.get(buildSectionCacheKey(input.threadKey, input.sectionId))
-  return cached && cached.diff === (input.diff?.trim() ?? null)
-    ? Math.max(sourceCharacterCount, cached.sourceCharacterCount)
-    : sourceCharacterCount
+  });
+  cache.sourceCharacterCount += sourceCharacterCount;
+  return parsed;
 }

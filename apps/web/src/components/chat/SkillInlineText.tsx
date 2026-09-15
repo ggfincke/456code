@@ -1,100 +1,83 @@
-// apps/web/src/components/chat/SkillInlineText.tsx
-// render skill inline text
+import { Children, cloneElement, isValidElement, type ReactNode } from "react";
+import type { ServerProviderSkill } from "@t3tools/contracts";
+import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
 
-import { Children, cloneElement, isValidElement, type ReactNode } from 'react'
-import type { ServerProviderSkill } from '@t3tools/contracts'
-
-import { formatProviderSkillDisplayName } from '../../providerSkillPresentation'
 import {
   CHAT_INLINE_CHIP_CLASS_NAME,
   CHAT_INLINE_CHIP_LABEL_CLASS_NAME,
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
+  CONTEXT_INLINE_CHIP_TONE_CLASS_NAMES,
   SKILL_CHIP_ICON_SVG,
-} from '../composerInlineChip'
-import { cn } from '~/lib/utils'
+} from "../composerInlineChip";
+import { cn } from "~/lib/utils";
 
 const SKILL_TOKEN_REGEX =
-  /(^|\s)\$(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s|$)/g
+  /(^|\s)\$(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s|$)/g;
 
-type InlineSkill = Pick<ServerProviderSkill, 'name' | 'displayName'>
+type InlineSkill = Pick<ServerProviderSkill, "name" | "displayName">;
 
-export function SkillInlineText(props: { text: string; skills: ReadonlyArray<InlineSkill> })
-{
-  const nodes: ReactNode[] = []
-  let cursor = 0
+export function SkillInlineText(props: { text: string; skills: ReadonlyArray<InlineSkill> }) {
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
 
-  for (const match of props.text.matchAll(SKILL_TOKEN_REGEX))
-  {
-    const prefix = match[1] ?? ''
-    const name = match[2] ?? ''
-    const start = (match.index ?? 0) + prefix.length
-    const rawText = `$${name}`
-    const skill = props.skills.find((candidate) => candidate.name === name)
-    if (!skill)
-    {
-      continue
+  for (const match of props.text.matchAll(SKILL_TOKEN_REGEX)) {
+    const prefix = match[1] ?? "";
+    const name = match[2] ?? "";
+    const start = (match.index ?? 0) + prefix.length;
+    const rawText = `$${name}`;
+    const skill = props.skills.find((candidate) => candidate.name === name);
+    if (!skill) {
+      continue;
     }
 
-    if (start > cursor)
-    {
-      nodes.push(props.text.slice(cursor, start))
+    if (start > cursor) {
+      nodes.push(props.text.slice(cursor, start));
     }
-    nodes.push(<SkillChip key={`${start}:${name}`} skill={skill} rawText={rawText} />)
-    cursor = start + rawText.length
+    nodes.push(<SkillChip key={`${start}:${name}`} skill={skill} rawText={rawText} />);
+    cursor = start + rawText.length;
   }
 
-  if (cursor === 0)
-  {
-    return <>{props.text}</>
+  if (cursor === 0) {
+    return <>{props.text}</>;
   }
-  if (cursor < props.text.length)
-  {
-    nodes.push(props.text.slice(cursor))
+  if (cursor < props.text.length) {
+    nodes.push(props.text.slice(cursor));
   }
-  return <>{nodes}</>
+  return <>{nodes}</>;
 }
 
 export function renderSkillInlineMarkdownChildren(
   children: ReactNode,
   skills: ReadonlyArray<InlineSkill>,
-): ReactNode
-{
-  return Children.map(children, (child) =>
-  {
-    if (typeof child === 'string')
-    {
-      return <SkillInlineText text={child} skills={skills} />
+): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child === "string") {
+      return <SkillInlineText text={child} skills={skills} />;
     }
-    if (!isValidElement<{ children?: ReactNode }>(child))
-    {
-      return child
+    if (!isValidElement<{ children?: ReactNode; node?: { tagName?: string } }>(child)) {
+      return child;
     }
-    if (child.type === 'code' || child.type === 'a')
-    {
-      return child
+    // Custom react-markdown components replace the intrinsic type, so also
+    // check the hast node they carry.
+    const markdownTagName = typeof child.type === "string" ? child.type : child.props.node?.tagName;
+    if (markdownTagName === "code" || markdownTagName === "a") {
+      return child;
     }
-    if (!('children' in child.props))
-    {
-      return child
+    if (!("children" in child.props)) {
+      return child;
     }
     return cloneElement(
       child,
       undefined,
       renderSkillInlineMarkdownChildren(child.props.children, skills),
-    )
-  })
+    );
+  });
 }
 
-function SkillChip(props: { skill: InlineSkill; rawText: string })
-{
+function SkillChip(props: { skill: InlineSkill; rawText: string }) {
   return (
     <span className="inline-flex align-middle leading-none" data-markdown-copy={props.rawText}>
-      <span
-        className={cn(
-          CHAT_INLINE_CHIP_CLASS_NAME,
-          'border-fuchsia-500/25 bg-fuchsia-500/12 text-fuchsia-700 dark:text-fuchsia-300',
-        )}
-      >
+      <span className={cn(CHAT_INLINE_CHIP_CLASS_NAME, CONTEXT_INLINE_CHIP_TONE_CLASS_NAMES.skill)}>
         <span
           aria-hidden="true"
           className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME}
@@ -105,5 +88,5 @@ function SkillChip(props: { skill: InlineSkill; rawText: string })
         </span>
       </span>
     </span>
-  )
+  );
 }

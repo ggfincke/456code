@@ -1,6 +1,14 @@
-// apps/mobile/src/state/atom-registry.ts
-// manage app atom registry state
+import { AtomRegistry } from "effect/unstable/reactivity";
 
-import { AtomRegistry } from 'effect/unstable/reactivity'
+import {
+  disposeOnFoundationReplace,
+  type FoundationHotModule,
+} from "../lib/foundation-fast-refresh";
 
-export const appAtomRegistry = AtomRegistry.make()
+declare const module: { readonly hot?: FoundationHotModule } | undefined;
+
+export const appAtomRegistry = AtomRegistry.make();
+
+disposeOnFoundationReplace(typeof module === "undefined" ? undefined : module.hot, () =>
+  appAtomRegistry.dispose(),
+);

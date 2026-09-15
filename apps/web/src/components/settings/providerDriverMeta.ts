@@ -1,33 +1,28 @@
-// apps/web/src/components/settings/providerDriverMeta.ts
-// resolve driver option
-
+import { CoralIcon } from "../../fincke/CoralIcon";
 import {
   AntigravitySettings,
   ClaudeSettings,
-  CoralSettings,
   CodexSettings,
   CursorSettings,
-  GeminiSettings,
   GrokSettings,
+  CoralSettings,
   OpenCodeSettings,
   ProviderDriverKind,
-} from '@t3tools/contracts'
-import type * as Schema from 'effect/Schema'
+} from "@t3tools/contracts";
+import type * as Schema from "effect/Schema";
 import {
   AntigravityIcon,
   ClaudeAI,
-  CoralIcon,
   CursorIcon,
-  Gemini,
   GrokIcon,
   type Icon,
   OpenAI,
   OpenCodeIcon,
-} from '../Icons'
+} from "../Icons";
 
 type ProviderSettingsSchema = {
-  readonly fields: Readonly<Record<string, Schema.Top>>
-} & Schema.Top
+  readonly fields: Readonly<Record<string, Schema.Top>>;
+} & Schema.Top;
 
 /**
  * Browser-safe provider definition. This is deliberately shaped like the
@@ -35,90 +30,85 @@ type ProviderSettingsSchema = {
  * field annotations plus provider-level presentation metadata, then renders
  * settings generically.
  */
-export interface ProviderClientDefinition
-{
-  readonly value: ProviderDriverKind
-  readonly label: string
-  readonly icon: Icon
-  readonly settingsSchema: ProviderSettingsSchema
-  // optional short label rendered as a `variant="warning"` badge next to
-  // the instance title. Used to flag drivers that still ship under an
-  // early-access or preview gate — the flag is a property of the driver
-  // kind (not a specific instance), so every instance of that driver —
-  // built-in default or custom — advertises the same marker.
-  readonly badgeLabel?: string
+export interface ProviderClientDefinition {
+  readonly value: ProviderDriverKind;
+  readonly label: string;
+  readonly icon: Icon;
+  readonly settingsSchema: ProviderSettingsSchema;
+  /**
+   * Optional short label rendered as a `variant="warning"` badge next to
+   * the instance title. Used to flag drivers that still ship under an
+   * early-access or preview gate — the flag is a property of the driver
+   * kind (not a specific instance), so every instance of that driver —
+   * built-in default or custom — advertises the same marker.
+   */
+  readonly badgeLabel?: string;
 }
 
-export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
+const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
-    value: ProviderDriverKind.make('codex'),
-    label: 'Codex',
+    value: ProviderDriverKind.make("coral"),
+    label: "Coral",
+    icon: CoralIcon,
+    settingsSchema: CoralSettings,
+    badgeLabel: "Early Access",
+  },
+  {
+    value: ProviderDriverKind.make("codex"),
+    label: "Codex",
     icon: OpenAI,
     settingsSchema: CodexSettings,
   },
   {
-    value: ProviderDriverKind.make('claudeAgent'),
-    label: 'Claude',
+    value: ProviderDriverKind.make("claudeAgent"),
+    label: "Claude",
     icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
   },
   {
-    value: ProviderDriverKind.make('cursor'),
-    label: 'Cursor',
+    value: ProviderDriverKind.make("cursor"),
+    label: "Cursor",
     icon: CursorIcon,
-    badgeLabel: 'Early Access',
+    badgeLabel: "Early Access",
     settingsSchema: CursorSettings,
   },
   {
-    value: ProviderDriverKind.make('grok'),
-    label: 'Grok',
+    value: ProviderDriverKind.make("grok"),
+    label: "Grok",
     icon: GrokIcon,
-    badgeLabel: 'Early Access',
+    badgeLabel: "Early Access",
     settingsSchema: GrokSettings,
   },
   {
-    value: ProviderDriverKind.make('opencode'),
-    label: 'OpenCode',
+    value: ProviderDriverKind.make("opencode"),
+    label: "OpenCode",
     icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
   },
   {
-    value: ProviderDriverKind.make('coral'),
-    label: 'Coral',
-    icon: CoralIcon,
-    badgeLabel: 'Early Access',
-    settingsSchema: CoralSettings,
-  },
-  {
-    value: ProviderDriverKind.make('gemini'),
-    label: 'Gemini',
-    icon: Gemini,
-    settingsSchema: GeminiSettings,
-  },
-  {
-    value: ProviderDriverKind.make('antigravity'),
-    label: 'Antigravity',
+    value: ProviderDriverKind.make("antigravity"),
+    label: "Antigravity",
     icon: AntigravityIcon,
-    badgeLabel: 'Experimental',
     settingsSchema: AntigravitySettings,
   },
-]
+];
 
-export const PROVIDER_CLIENT_DEFINITION_BY_VALUE: Partial<
+const PROVIDER_CLIENT_DEFINITION_BY_VALUE: Partial<
   Record<ProviderDriverKind, ProviderClientDefinition>
 > = Object.fromEntries(
   PROVIDER_CLIENT_DEFINITIONS.map((definition) => [definition.value, definition]),
-)
+);
 
-export const DRIVER_OPTIONS = PROVIDER_CLIENT_DEFINITIONS
-export const DRIVER_OPTION_BY_VALUE = PROVIDER_CLIENT_DEFINITION_BY_VALUE
-export type DriverOption = ProviderClientDefinition
+export const DRIVER_OPTIONS = PROVIDER_CLIENT_DEFINITIONS;
+export const DRIVER_OPTION_BY_VALUE = PROVIDER_CLIENT_DEFINITION_BY_VALUE;
+export type DriverOption = ProviderClientDefinition;
 
-// look up the driver metadata for an instance's `driver` field. Accepts
-// returns `undefined` for fork / unknown drivers so callers can decide how
-// to render them — typically by falling back to a generic card.
-export function getDriverOption(driver: ProviderDriverKind | undefined): DriverOption | undefined
-{
-  if (driver === undefined) return undefined
-  return PROVIDER_CLIENT_DEFINITION_BY_VALUE[driver]
+/**
+ * Look up the driver metadata for an instance's `driver` field. Accepts
+ * Returns `undefined` for fork / unknown drivers so callers can decide how
+ * to render them — typically by falling back to a generic card.
+ */
+export function getDriverOption(driver: ProviderDriverKind | undefined): DriverOption | undefined {
+  if (driver === undefined) return undefined;
+  return PROVIDER_CLIENT_DEFINITION_BY_VALUE[driver];
 }

@@ -1,4 +1,15 @@
-// apps/web/src/logicalProject.ts
-// expose the stable facade for logical project helpers
-
-export * from './lib/logicalProject'
+export {
+  buildProjectGroups,
+  deriveLogicalProjectKey,
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKey,
+  derivePhysicalProjectKeyFromPath,
+  deriveProjectGroupingOverrideKey,
+  getProjectOrderKey,
+  resolveProjectGroupingMode,
+  selectProjectGroupingSettings,
+  type ProjectGroupingMode,
+  type ProjectGroupingSettings,
+  type ProjectGroup,
+  type ProjectGroupMember,
+} from "@t3tools/client-runtime/state/project-grouping";

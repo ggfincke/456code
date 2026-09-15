@@ -1,12 +1,19 @@
 import * as cloudfront from "@distilled.cloud/aws/cloudfront";
 import * as Data from "effect/Data";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
+import * as Stream from "effect/Stream";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import { isResolved } from "../../Diff.ts";
 import type { Input } from "../../Input.ts";
 import * as Provider from "../../Provider.ts";
-import { Resource } from "../../Resource.ts";
+import { toWireSeconds } from "../../Util/Duration.ts";
+import { Resource, type ResourceBinding } from "../../Resource.ts";
 import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList, diffTags } from "../../Tags.ts";
+import { AWSEnvironment } from "../Environment.ts";
 
 const CLOUDFRONT_HOSTED_ZONE_ID = "Z2FDTNDATAQYW2" as const;
 
@@ -45,51 +52,253 @@ export interface DistributionOrigin {
    */
   s3Origin?: boolean;
   /**
+   * Explicit S3 origin settings (legacy Origin Access Identity, read timeout).
+   * When set, the origin is treated as an S3 origin regardless of `s3Origin`.
+   */
+  s3OriginConfig?: {
+    originAccessIdentity?: string;
+    originReadTimeout?: Duration.Input;
+  };
+  /**
    * Optional custom origin settings.
    */
   customOriginConfig?: {
     httpPort?: number;
     httpsPort?: number;
     originProtocolPolicy?: cloudfront.OriginProtocolPolicy;
-    originReadTimeout?: number;
-    originKeepaliveTimeout?: number;
+    originReadTimeout?: Duration.Input;
+    originKeepaliveTimeout?: Duration.Input;
     originSslProtocols?: cloudfront.SslProtocol[];
+    /**
+     * IP address type CloudFront uses to connect to the origin.
+     */
+    ipAddressType?: cloudfront.IpAddressType;
+    /**
+     * Mutual TLS configuration for the origin connection.
+     */
+    originMtlsConfig?: {
+      clientCertificateArn: string;
+    };
   };
+  /**
+   * Route this origin through a VPC origin (private ALB/NLB/EC2). Mutually
+   * exclusive with `s3Origin`/`s3OriginConfig`/`customOriginConfig`.
+   */
+  vpcOriginConfig?: {
+    vpcOriginId: Input<string>;
+    originReadTimeout?: Duration.Input;
+    originKeepaliveTimeout?: Duration.Input;
+    ownerAccountId?: string;
+  };
+  /**
+   * Custom headers CloudFront adds to every request it sends to the origin.
+   */
+  customHeaders?: Record<string, string>;
+  /**
+   * Origin Shield configuration.
+   */
+  originShield?: {
+    enabled: boolean;
+    originShieldRegion?: string;
+  };
+  /**
+   * Number of times CloudFront attempts to connect to the origin (1-3).
+   */
+  connectionAttempts?: number;
+  /**
+   * How long CloudFront waits when trying to establish a connection (1-10
+   * seconds), e.g. `"5 seconds"` (a bare number is milliseconds).
+   */
+  connectionTimeout?: Duration.Input;
+  /**
+   * How long CloudFront waits for the origin to deliver a complete response,
+   * e.g. `"30 seconds"` (a bare number is milliseconds).
+   */
+  responseCompletionTimeout?: Duration.Input;
 }
 
 export interface DistributionBehavior {
+  /**
+   * ID of the origin (or origin group) this behavior routes requests to.
+   */
   targetOriginId: string;
+  /**
+   * How viewers may connect (e.g. `redirect-to-https`, `https-only`).
+   */
   viewerProtocolPolicy?: cloudfront.ViewerProtocolPolicy;
+  /**
+   * HTTP methods CloudFront accepts and forwards to the origin.
+   */
   allowedMethods?: cloudfront.Method[];
+  /**
+   * HTTP methods whose responses CloudFront caches.
+   */
   cachedMethods?: cloudfront.Method[];
+  /**
+   * Whether CloudFront automatically compresses eligible responses.
+   */
   compress?: boolean;
+  /**
+   * Cache policy ID (a managed policy or a `CachePolicy`) controlling the
+   * cache key and TTLs.
+   */
   cachePolicyId?: string;
+  /**
+   * Origin request policy ID controlling which viewer values CloudFront
+   * forwards to the origin.
+   */
   originRequestPolicyId?: string;
+  /**
+   * Response headers policy ID applied to viewer responses.
+   */
   responseHeadersPolicyId?: string;
+  /**
+   * Legacy forwarded-values settings. Prefer `cachePolicyId` /
+   * `originRequestPolicyId` for new configurations.
+   */
   forwardedValues?: cloudfront.ForwardedValues;
-  minTtl?: number;
-  defaultTtl?: number;
-  maxTtl?: number;
+  /**
+   * Minimum time responses stay cached, e.g. `"1 hour"` (a bare number is
+   * milliseconds). Used with `forwardedValues`.
+   */
+  minTtl?: Duration.Input;
+  /**
+   * Default time responses stay cached when the origin sends no caching
+   * headers.
+   */
+  defaultTtl?: Duration.Input;
+  /**
+   * Maximum time responses stay cached.
+   */
+  maxTtl?: Duration.Input;
+  /**
+   * CloudFront Functions to run on viewer request/response events.
+   */
   functionAssociations?: {
     functionArn: string;
     eventType: cloudfront.EventType;
   }[];
+  /**
+   * Lambda@Edge functions to run on viewer/origin request/response events.
+   */
   lambdaFunctionAssociations?: {
     lambdaFunctionArn: string;
     eventType: cloudfront.EventType;
     includeBody?: boolean;
   }[];
+  /**
+   * CloudFront KeyGroup IDs whose public keys gate signed URLs/cookies.
+   */
+  trustedKeyGroups?: Input<string[]>;
+  /**
+   * Legacy trusted signer AWS account numbers for signed URLs/cookies.
+   */
+  trustedSigners?: string[];
+  /**
+   * Field-level encryption configuration ID.
+   */
+  fieldLevelEncryptionId?: string;
+  /**
+   * ARN of a real-time log configuration to attach.
+   */
+  realtimeLogConfigArn?: string;
+  /**
+   * Whether Microsoft Smooth Streaming is enabled for this behavior.
+   */
+  smoothStreaming?: boolean;
+  /**
+   * gRPC configuration for this behavior.
+   */
+  grpcConfig?: {
+    enabled: boolean;
+  };
 }
 
 export interface DistributionViewerCertificate {
+  /**
+   * Serve HTTPS with the default `*.cloudfront.net` certificate (no custom
+   * domains).
+   */
   cloudFrontDefaultCertificate?: boolean;
+  /**
+   * ARN of an ACM certificate (must live in `us-east-1`) covering the
+   * distribution's aliases.
+   */
   acmCertificateArn?: string;
+  /**
+   * How CloudFront serves HTTPS to viewers (`sni-only` for modern clients).
+   */
   sslSupportMethod?: cloudfront.SSLSupportMethod;
+  /**
+   * Minimum TLS protocol version viewers must support.
+   */
   minimumProtocolVersion?: cloudfront.MinimumProtocolVersion;
+  /**
+   * Legacy IAM certificate ID.
+   */
+  iamCertificateId?: string;
+  /**
+   * Legacy certificate identifier (IAM/ACM raw value).
+   */
+  certificate?: string;
+  /**
+   * Source of the legacy certificate.
+   */
+  certificateSource?: cloudfront.CertificateSource;
+}
+
+export interface DistributionGeoRestriction {
+  /**
+   * Restriction mode. `none` disables geo restriction.
+   */
+  restrictionType: cloudfront.GeoRestrictionType;
+  /**
+   * Two-letter ISO 3166-1 country codes the restriction applies to.
+   */
+  locations?: string[];
+}
+
+export interface DistributionLogging {
+  /**
+   * Whether access logging is enabled.
+   * @default true
+   */
+  enabled?: boolean;
+  /**
+   * Whether cookies are included in access logs.
+   */
+  includeCookies?: boolean;
+  /**
+   * S3 bucket (domain name) that receives access logs.
+   */
+  bucket?: string;
+  /**
+   * Prefix applied to access log object keys.
+   */
+  prefix?: string;
+}
+
+export interface DistributionOriginGroup {
+  /**
+   * Origin group identifier (target it from a cache behavior).
+   */
+  id: string;
+  /**
+   * Member origin IDs in failover order (primary first, secondary second).
+   */
+  members: string[];
+  /**
+   * HTTP status codes that trigger failover to the next member.
+   */
+  failoverStatusCodes: number[];
+  /**
+   * How CloudFront selects the origin within the group.
+   */
+  selectionCriteria?: cloudfront.OriginGroupSelectionCriteria;
 }
 
 const isFunctionAssociationPending = (error: cloudfront.InvalidArgument) => {
-  const message = error.Message ?? "";
+  const message = error.message ?? "";
   return (
     message.includes("FunctionAssociationArn") &&
     message.includes("not found or is not published")
@@ -159,10 +368,74 @@ export interface DistributionProps {
    */
   isIpv6Enabled?: boolean;
   /**
+   * Geographic distribution restrictions. Defaults to no restriction.
+   */
+  geoRestriction?: DistributionGeoRestriction;
+  /**
+   * Standard access logging configuration.
+   */
+  logging?: DistributionLogging;
+  /**
+   * Origin failover groups. Target a group id from a cache behavior's
+   * `targetOriginId`.
+   */
+  originGroups?: Input<DistributionOriginGroup[]>;
+  /**
+   * Continuous deployment policy ID for blue/green deployments.
+   */
+  continuousDeploymentPolicyId?: string;
+  /**
+   * Whether this is a staging distribution for blue/green deployments.
+   * Create-only — changing it forces a replacement.
+   */
+  staging?: boolean;
+  /**
+   * Anycast static IP list ID to associate with the distribution.
+   */
+  anycastIpListId?: string;
+  /**
    * User-defined tags to apply to the distribution.
    */
   tags?: Record<string, string>;
 }
+
+/**
+ * Binding contract of {@link Distribution}: composites contribute additional
+ * alternate domain names without a circular input prop (e.g. a site attached
+ * to an `AWS.Website.Router` binds its hostnames onto the Router's
+ * distribution). Bound aliases are merged with the declared `aliases` prop
+ * at reconcile time; the viewer certificate must cover them.
+ */
+export type DistributionBinding = {
+  /**
+   * Additional alternate domain names (CNAMEs) attached to the
+   * distribution.
+   */
+  aliases?: string[];
+};
+
+/**
+ * Union of declared and bound aliases (see {@link DistributionBinding}),
+ * deduped, preserving declared order first. Tolerates both `{ sid, data }`
+ * rows (provider lifecycle) and bare binding payloads.
+ * @internal
+ */
+const resolveEffectiveAliases = (
+  declared: string[] | undefined,
+  bindings:
+    | ReadonlyArray<DistributionBinding | ResourceBinding<DistributionBinding>>
+    | undefined,
+): string[] | undefined => {
+  const bound = (bindings ?? []).flatMap((binding) =>
+    "data" in binding && binding.data !== undefined
+      ? ((binding as ResourceBinding<DistributionBinding>).data.aliases ?? [])
+      : ((binding as DistributionBinding).aliases ?? []),
+  );
+  if (bound.length === 0) {
+    return declared;
+  }
+  return [...new Set([...(declared ?? []), ...bound])];
+};
 
 export interface Distribution extends Resource<
   "AWS.CloudFront.Distribution",
@@ -180,6 +453,17 @@ export interface Distribution extends Resource<
      * CloudFront-assigned domain name.
      */
     domainName: string;
+    /**
+     * The distribution's own URL — what a viewer opens.
+     *
+     * `https://{domainName}` on AWS. Under `alchemy dev` the emulator has no
+     * such hostname to offer (`*.cloudfront.net` resolves to nothing on a
+     * developer's machine), so it serves the distribution's edge on a local
+     * port and this is `http://localhost:{port}`. Reading `url` instead of
+     * building one from {@link domainName} is what makes a consumer work
+     * unchanged in both modes.
+     */
+    url: string;
     /**
      * Route 53 hosted zone ID for CloudFront aliases.
      */
@@ -217,7 +501,7 @@ export interface Distribution extends Resource<
      */
     tags: Record<string, string>;
   },
-  never,
+  DistributionBinding,
   Providers
 > {}
 
@@ -227,9 +511,30 @@ export interface Distribution extends Resource<
  * `Distribution` manages the CDN layer for static sites and HTTP origins such
  * as Lambda Function URLs and ALBs. It exposes the distribution domain and
  * hosted zone ID needed for Route 53 alias records.
+ * ### Creating Distributions
+ * **Example:** CDN in Front of an HTTP Origin
+ * ```typescript
+ * import * as AWS from "alchemy/AWS";
  *
- * @section Creating Distributions
- * @example Private S3 Origin
+ * const distribution = yield* AWS.CloudFront.Distribution("ApiCdn", {
+ *   origins: [
+ *     {
+ *       id: "api",
+ *       domainName: "abc123.lambda-url.us-west-2.on.aws",
+ *       customOriginConfig: { originProtocolPolicy: "https-only" },
+ *     },
+ *   ],
+ *   defaultCacheBehavior: {
+ *     targetOriginId: "api",
+ *     viewerProtocolPolicy: "redirect-to-https",
+ *     cachePolicyId: AWS.CloudFront.MANAGED_CACHING_DISABLED_POLICY_ID,
+ *     originRequestPolicyId:
+ *       AWS.CloudFront.MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
+ *   },
+ * });
+ * ```
+ *
+ * **Example:** Private S3 Origin
  * ```typescript
  * const distribution = yield* Distribution("WebsiteCdn", {
  *   aliases: ["www.example.com"],
@@ -253,6 +558,22 @@ export interface Distribution extends Resource<
  *   },
  * });
  * ```
+ *
+ * ### Invalidating the Cache
+ * **Example:** Purge Paths on Deploy
+ * ```typescript
+ * // declaratively, whenever `version` changes:
+ * yield* AWS.CloudFront.Invalidation("PurgeBlog", {
+ *   distributionId: distribution.distributionId,
+ *   paths: ["/blog/*"],
+ *   version: buildId,
+ * });
+ * ```
+ *
+ * To purge at runtime from a Lambda Function, bind
+ * `CloudFront.CreateInvalidation(distribution)` instead.
+ *
+ * @resource
  */
 export const Distribution = Resource<Distribution>(
   "AWS.CloudFront.Distribution",
@@ -267,6 +588,16 @@ export const DistributionProvider = () =>
           `CloudFront Distribution wait: polling deployment for ${distributionId}`,
         );
         return yield* cloudfront.getDistribution({ Id: distributionId }).pipe(
+          // Bound each poll — a wedged read must count as "not deployed
+          // yet" and retry, never hang the deploy (see the delete-wait).
+          Effect.timeout(30_000),
+          Effect.catchTag("TimeoutError", () =>
+            Effect.fail(
+              new DistributionPendingDeployment({
+                message: `Timed out reading distribution ${distributionId} while polling deployment`,
+              }),
+            ),
+          ),
           Effect.map((response) => response.Distribution),
           Effect.flatMap((distribution) =>
             distribution?.Status === "Deployed"
@@ -289,9 +620,10 @@ export const DistributionProvider = () =>
           ),
           Effect.retry({
             while: (error) => error._tag === "DistributionPendingDeployment",
-            schedule: Schedule.fixed("10 seconds").pipe(
-              Schedule.both(Schedule.recurs(60)),
-            ),
+            schedule: Schedule.max([
+              Schedule.fixed("10 seconds"),
+              Schedule.recurs(60),
+            ]),
           }),
         );
       });
@@ -401,9 +733,25 @@ export const DistributionProvider = () =>
         return yield* Effect.logInfo(
           `CloudFront Distribution delete: waiting for ${distributionId} to become disabled and deployed`,
         ).pipe(
-          Effect.andThen(() => getCurrent(distributionId)),
+          // Bound each poll: a single wedged HTTP read (stale keep-alive
+          // socket) otherwise hangs the whole destroy — observed as a
+          // disable-wait that logged one poll and then sat silent past a
+          // 60-minute test budget. Timeout counts as "not ready yet" and
+          // rides the same bounded retry.
+          Effect.andThen(() =>
+            getCurrent(distributionId).pipe(
+              Effect.timeout(30_000),
+              Effect.catchTag("TimeoutError", () =>
+                Effect.fail(
+                  new DistributionPendingDeletionReadiness({
+                    message: `Timed out reading distribution ${distributionId} while waiting for deletion readiness`,
+                  }),
+                ),
+              ),
+            ),
+          ),
           Effect.flatMap(
-            Effect.fnUntraced(function* (current) {
+            Effect.fn(function* (current) {
               if (!current) {
                 yield* Effect.logInfo(
                   `CloudFront Distribution delete: ${distributionId} already absent while waiting`,
@@ -434,9 +782,10 @@ export const DistributionProvider = () =>
           Effect.retry({
             while: (error) =>
               error._tag === "DistributionPendingDeletionReadiness",
-            schedule: Schedule.fixed("10 seconds").pipe(
-              Schedule.both(Schedule.recurs(60)),
-            ),
+            schedule: Schedule.max([
+              Schedule.fixed("10 seconds"),
+              Schedule.recurs(60),
+            ]),
           }),
         );
       });
@@ -448,6 +797,16 @@ export const DistributionProvider = () =>
           "domainName",
           "hostedZoneId",
         ],
+        // `Staging` is create-only at the CloudFront API level; toggling it
+        // requires a fresh distribution. Everything else updates in place via
+        // the whole-config `updateDistribution` PUT.
+        diff: Effect.fn(function* ({ olds, news: _news }) {
+          if (!isResolved(_news)) return undefined;
+          const news = _news as DistributionProps;
+          if ((olds?.staging ?? false) !== (news.staging ?? false)) {
+            return { action: "replace" } as const;
+          }
+        }),
         read: Effect.fn(function* ({ output }) {
           if (!output?.distributionId) {
             return undefined;
@@ -458,15 +817,86 @@ export const DistributionProvider = () =>
             return undefined;
           }
 
-          return toAttrs(current.distribution, current.etag, current.tags);
+          return toAttrs(
+            current.distribution,
+            current.etag,
+            current.tags,
+            yield* resolveUrl(current.distribution),
+          );
         }),
+        // CloudFront is a global service (no region). Enumerate every
+        // distribution in the account via the paginated `listDistributions`
+        // op, then resolve each summary to the full `read`-shaped Attributes
+        // (distribution + config + tags) so callers get a `delete`-ready item.
+        list: () =>
+          Effect.gen(function* () {
+            const summaries = yield* cloudfront.listDistributions
+              .pages({})
+              .pipe(
+                Stream.runCollect,
+                Effect.map((chunk) =>
+                  Array.from(chunk).flatMap(
+                    (page) => page.DistributionList?.Items ?? [],
+                  ),
+                ),
+              );
+
+            const rows = yield* Effect.forEach(
+              summaries,
+              (summary) =>
+                getCurrent(summary.Id).pipe(
+                  // Hydrating every distribution fires three read calls each
+                  // (getDistribution + getDistributionConfig +
+                  // listTagsForResource). Across a busy account that trips
+                  // CloudFront's low read throttle, so ride it out.
+                  Effect.retry({
+                    while: (error) => error._tag === "ThrottlingException",
+                    // Steady, capped backoff: CloudFront's read throttle
+                    // resets quickly, so a fixed cadence drains far faster
+                    // than an exponential whose tail delay can balloon past
+                    // the test budget on a busy account.
+                    schedule: Schedule.max([
+                      Schedule.spaced("1 second").pipe(Schedule.jittered),
+                      Schedule.recurs(30),
+                    ]),
+                  }),
+                  Effect.flatMap((current) =>
+                    current
+                      ? Effect.map(
+                          resolveUrl(current.distribution),
+                          (url) =>
+                            toAttrs(
+                              current.distribution,
+                              current.etag,
+                              current.tags,
+                              url,
+                            ) as Distribution["Attributes"] | undefined,
+                        )
+                      : Effect.succeed(undefined),
+                  ),
+                ),
+              { concurrency: 10 },
+            );
+
+            return rows.filter(
+              (row): row is Distribution["Attributes"] => row !== undefined,
+            );
+          }),
         reconcile: Effect.fn(function* ({
           id,
           instanceId,
-          news,
+          news: _news,
           output,
           session,
+          bindings,
         }) {
+          // Fold bound aliases (see `DistributionBinding`) into the desired
+          // props up front so both the create and update paths (`toConfig`)
+          // attach them uniformly.
+          const news: typeof _news = {
+            ..._news,
+            aliases: resolveEffectiveAliases(_news.aliases, bindings),
+          };
           const desiredTags = {
             ...(yield* createInternalTags(id)),
             ...news.tags,
@@ -583,7 +1013,7 @@ export const DistributionProvider = () =>
                             Effect.fail(
                               new DistributionFunctionAssociationPending({
                                 message:
-                                  error.Message ??
+                                  error.message ??
                                   "CloudFront function association pending",
                               }),
                             ),
@@ -594,9 +1024,10 @@ export const DistributionProvider = () =>
                 Effect.retry({
                   while: (error) =>
                     error instanceof DistributionFunctionAssociationPending,
-                  schedule: Schedule.fixed("5 seconds").pipe(
-                    Schedule.both(Schedule.recurs(24)),
-                  ),
+                  schedule: Schedule.max([
+                    Schedule.fixed("5 seconds"),
+                    Schedule.recurs(24),
+                  ]),
                 }),
               );
 
@@ -614,13 +1045,21 @@ export const DistributionProvider = () =>
               `CloudFront Distribution reconcile: deployed ${created.distributionId} domain=${deployed.DomainName}`,
             );
             yield* session.note(created.distributionId);
-            return toAttrs(deployed, created.etag, created.tags);
+            return toAttrs(
+              deployed,
+              created.etag,
+              created.tags,
+              yield* resolveUrl(deployed),
+            );
           }
 
           // Sync config — diff observed config against desired and patch
           // via `updateDistribution` with the freshly observed ETag. We
           // keep the observed `CallerReference` because CloudFront does
-          // not allow it to change.
+          // not allow it to change, and fill every member the props don't
+          // express from the observed config: UpdateDistribution replaces
+          // the whole config and rejects requests with missing members
+          // (see `mergeWithObservedConfig`).
           yield* Effect.logInfo(
             `CloudFront Distribution reconcile: updating config for ${observed.distribution.Id} with etag=${observed.etag ?? "missing"}`,
           );
@@ -628,9 +1067,9 @@ export const DistributionProvider = () =>
             .updateDistribution({
               Id: observed.distribution.Id,
               IfMatch: observed.etag,
-              DistributionConfig: toConfig(
-                observed.config.CallerReference,
-                news,
+              DistributionConfig: mergeWithObservedConfig(
+                toConfig(observed.config.CallerReference, news),
+                observed.config,
               ),
             })
             .pipe(
@@ -651,7 +1090,7 @@ export const DistributionProvider = () =>
                           Effect.fail(
                             new DistributionFunctionAssociationPending({
                               message:
-                                error.Message ??
+                                error.message ??
                                 "CloudFront function association pending",
                             }),
                           ),
@@ -662,9 +1101,10 @@ export const DistributionProvider = () =>
               Effect.retry({
                 while: (error) =>
                   error instanceof DistributionFunctionAssociationPending,
-                schedule: Schedule.fixed("5 seconds").pipe(
-                  Schedule.both(Schedule.recurs(24)),
-                ),
+                schedule: Schedule.max([
+                  Schedule.fixed("5 seconds"),
+                  Schedule.recurs(24),
+                ]),
               }),
             );
 
@@ -714,7 +1154,12 @@ export const DistributionProvider = () =>
             `CloudFront Distribution reconcile: deployed ${observed.distribution.Id} domain=${deployed.DomainName}`,
           );
           yield* session.note(observed.distribution.Id);
-          return toAttrs(deployed, updated.ETag, desiredTags);
+          return toAttrs(
+            deployed,
+            updated.ETag,
+            desiredTags,
+            yield* resolveUrl(deployed),
+          );
         }),
         delete: Effect.fn(function* ({ output }) {
           yield* Effect.logInfo(
@@ -811,10 +1256,38 @@ const toBehavior = (
   CachePolicyId: behavior.cachePolicyId,
   OriginRequestPolicyId: behavior.originRequestPolicyId,
   ResponseHeadersPolicyId: behavior.responseHeadersPolicyId,
-  ForwardedValues: behavior.forwardedValues,
-  MinTTL: behavior.minTtl,
-  DefaultTTL: behavior.defaultTtl,
-  MaxTTL: behavior.maxTtl,
+  // Without a cache policy, CloudFront is in legacy mode and rejects the
+  // request unless both ForwardedValues and MinTTL are present.
+  ForwardedValues:
+    behavior.forwardedValues ??
+    (behavior.cachePolicyId === undefined
+      ? { QueryString: false, Cookies: { Forward: "none" } }
+      : undefined),
+  MinTTL:
+    toWireSeconds(behavior.minTtl) ??
+    (behavior.cachePolicyId === undefined ? 0 : undefined),
+  DefaultTTL: toWireSeconds(behavior.defaultTtl),
+  MaxTTL: toWireSeconds(behavior.maxTtl),
+  TrustedKeyGroups: behavior.trustedKeyGroups
+    ? {
+        Enabled: (behavior.trustedKeyGroups as string[]).length > 0,
+        Quantity: (behavior.trustedKeyGroups as string[]).length,
+        Items: behavior.trustedKeyGroups as string[],
+      }
+    : undefined,
+  TrustedSigners: behavior.trustedSigners
+    ? {
+        Enabled: behavior.trustedSigners.length > 0,
+        Quantity: behavior.trustedSigners.length,
+        Items: behavior.trustedSigners,
+      }
+    : undefined,
+  FieldLevelEncryptionId: behavior.fieldLevelEncryptionId,
+  RealtimeLogConfigArn: behavior.realtimeLogConfigArn,
+  SmoothStreaming: behavior.smoothStreaming,
+  GrpcConfig: behavior.grpcConfig
+    ? { Enabled: behavior.grpcConfig.enabled }
+    : undefined,
   FunctionAssociations: behavior.functionAssociations
     ? {
         Quantity: behavior.functionAssociations.length,
@@ -836,30 +1309,190 @@ const toBehavior = (
     : undefined,
 });
 
-const toOrigin = (origin: DistributionOrigin): cloudfront.Origin => ({
-  Id: origin.id,
-  DomainName: origin.domainName as string,
-  OriginPath: origin.originPath as string | undefined,
-  OriginAccessControlId: origin.originAccessControlId as string | undefined,
-  S3OriginConfig: origin.s3Origin ? { OriginAccessIdentity: "" } : undefined,
-  CustomOriginConfig: origin.s3Origin
-    ? undefined
-    : {
-        HTTPPort: origin.customOriginConfig?.httpPort ?? 80,
-        HTTPSPort: origin.customOriginConfig?.httpsPort ?? 443,
-        OriginProtocolPolicy:
-          origin.customOriginConfig?.originProtocolPolicy ?? "https-only",
-        OriginSslProtocols: {
-          Quantity: (
-            origin.customOriginConfig?.originSslProtocols ?? ["TLSv1.2"]
-          ).length,
-          Items: origin.customOriginConfig?.originSslProtocols ?? ["TLSv1.2"],
-        },
-        OriginReadTimeout: origin.customOriginConfig?.originReadTimeout,
-        OriginKeepaliveTimeout:
-          origin.customOriginConfig?.originKeepaliveTimeout,
-      },
-});
+const toOrigin = (origin: DistributionOrigin): cloudfront.Origin => {
+  // Exactly one of the three origin-config shapes may be set. A VPC origin
+  // wins, then an explicit/legacy S3 origin, otherwise a custom origin.
+  const isVpcOrigin = origin.vpcOriginConfig !== undefined;
+  const isS3Origin =
+    !isVpcOrigin &&
+    (origin.s3Origin === true || origin.s3OriginConfig !== undefined);
+
+  return {
+    Id: origin.id,
+    DomainName: origin.domainName as string,
+    OriginPath: origin.originPath as string | undefined,
+    OriginAccessControlId: origin.originAccessControlId as string | undefined,
+    CustomHeaders: origin.customHeaders
+      ? {
+          Quantity: Object.keys(origin.customHeaders).length,
+          Items: Object.entries(origin.customHeaders).map(([name, value]) => ({
+            HeaderName: name,
+            HeaderValue: value,
+          })),
+        }
+      : undefined,
+    OriginShield: origin.originShield
+      ? {
+          Enabled: origin.originShield.enabled,
+          OriginShieldRegion: origin.originShield.originShieldRegion,
+        }
+      : undefined,
+    ConnectionAttempts: origin.connectionAttempts,
+    ConnectionTimeout: toWireSeconds(origin.connectionTimeout),
+    ResponseCompletionTimeout: toWireSeconds(origin.responseCompletionTimeout),
+    VpcOriginConfig: isVpcOrigin
+      ? {
+          VpcOriginId: origin.vpcOriginConfig!.vpcOriginId as string,
+          OwnerAccountId: origin.vpcOriginConfig!.ownerAccountId,
+          OriginReadTimeout: toWireSeconds(
+            origin.vpcOriginConfig!.originReadTimeout,
+          ),
+          OriginKeepaliveTimeout: toWireSeconds(
+            origin.vpcOriginConfig!.originKeepaliveTimeout,
+          ),
+        }
+      : undefined,
+    S3OriginConfig: isS3Origin
+      ? {
+          OriginAccessIdentity:
+            origin.s3OriginConfig?.originAccessIdentity ?? "",
+          OriginReadTimeout: toWireSeconds(
+            origin.s3OriginConfig?.originReadTimeout,
+          ),
+        }
+      : undefined,
+    CustomOriginConfig:
+      isVpcOrigin || isS3Origin
+        ? undefined
+        : {
+            HTTPPort: origin.customOriginConfig?.httpPort ?? 80,
+            HTTPSPort: origin.customOriginConfig?.httpsPort ?? 443,
+            OriginProtocolPolicy:
+              origin.customOriginConfig?.originProtocolPolicy ?? "https-only",
+            OriginSslProtocols: {
+              Quantity: (
+                origin.customOriginConfig?.originSslProtocols ?? ["TLSv1.2"]
+              ).length,
+              Items: origin.customOriginConfig?.originSslProtocols ?? [
+                "TLSv1.2",
+              ],
+            },
+            OriginReadTimeout: toWireSeconds(
+              origin.customOriginConfig?.originReadTimeout,
+            ),
+            OriginKeepaliveTimeout: toWireSeconds(
+              origin.customOriginConfig?.originKeepaliveTimeout,
+            ),
+            IpAddressType: origin.customOriginConfig?.ipAddressType,
+            OriginMtlsConfig: origin.customOriginConfig?.originMtlsConfig
+              ? {
+                  ClientCertificateArn:
+                    origin.customOriginConfig.originMtlsConfig
+                      .clientCertificateArn,
+                }
+              : undefined,
+          },
+  };
+};
+
+/**
+ * Recursively fills `undefined` members of `desired` from `observed`.
+ * Defined values in `desired` always win; arrays are taken from `desired`
+ * wholesale (item-level merging is the caller's concern).
+ */
+const fillUndefined = <T>(desired: T, observed: T): T => {
+  if (desired === undefined) return observed;
+  if (
+    desired === null ||
+    typeof desired !== "object" ||
+    Array.isArray(desired) ||
+    observed === null ||
+    typeof observed !== "object" ||
+    Array.isArray(observed)
+  ) {
+    return desired;
+  }
+  const out: Record<string, unknown> = {
+    ...(desired as Record<string, unknown>),
+  };
+  const desiredObj = desired as Record<string, unknown>;
+  for (const key of Object.keys(observed as Record<string, unknown>)) {
+    // CloudFront list shapes pair `Quantity` with `Items`. A desired node
+    // that declares a `Quantity` but no `Items` (e.g. a geo restriction of
+    // `{ RestrictionType: "none", Quantity: 0 }`) is fully specified —
+    // filling `Items` from the observed config would desynchronize the two
+    // and CloudFront rejects the update with `InconsistentQuantities`.
+    if (
+      key === "Items" &&
+      typeof desiredObj.Quantity === "number" &&
+      desiredObj.Items === undefined
+    ) {
+      continue;
+    }
+    out[key] = fillUndefined(
+      desiredObj[key],
+      (observed as Record<string, unknown>)[key],
+    );
+  }
+  return out as T;
+};
+
+/**
+ * Completes a desired `DistributionConfig` with the freshly observed live
+ * config before an `updateDistribution` call.
+ *
+ * CloudFront's `UpdateDistribution` replaces the ENTIRE distribution config:
+ * any member missing from the request is rejected with `IllegalUpdate`
+ * (observed in practice: "Default root object is missing for the resource",
+ * "The 'OriginCustomHeaders' field is missing"). `toConfig` emits only the
+ * members the props express, so updating a live distribution fails on every
+ * member the props don't model — some of which (e.g. per-origin
+ * `CustomHeaders`, per-behavior `TrustedSigners`) are nested inside
+ * collections and not expressible as props at all.
+ *
+ * The standard CloudFront update pattern is read-modify-write, which the
+ * delete path here already uses (`{ ...current.config, Enabled: false }`).
+ * This applies the same idea to updates: desired values always win — the
+ * declared props still fully control drift — and only `undefined` members
+ * are carried over from the observed config. `Origins` and `CacheBehaviors`
+ * items are additionally merged by identity (`Id` / `PathPattern`) so their
+ * nested unexpressed members carry over too.
+ *
+ * Exported for unit tests.
+ */
+export const mergeWithObservedConfig = (
+  desired: cloudfront.DistributionConfig,
+  observed: cloudfront.DistributionConfig,
+): cloudfront.DistributionConfig => {
+  const merged = fillUndefined(desired, observed);
+  if (merged.Origins?.Items && observed.Origins?.Items) {
+    const observedOrigins = observed.Origins.Items;
+    merged.Origins = {
+      ...merged.Origins,
+      Items: merged.Origins.Items.map((item) =>
+        fillUndefined(
+          item,
+          observedOrigins.find((origin) => origin.Id === item.Id) ?? item,
+        ),
+      ),
+    };
+  }
+  if (merged.CacheBehaviors?.Items && observed.CacheBehaviors?.Items) {
+    const observedBehaviors = observed.CacheBehaviors.Items;
+    merged.CacheBehaviors = {
+      ...merged.CacheBehaviors,
+      Items: merged.CacheBehaviors.Items.map((item) =>
+        fillUndefined(
+          item,
+          observedBehaviors.find(
+            (behavior) => behavior.PathPattern === item.PathPattern,
+          ) ?? item,
+        ),
+      ),
+    };
+  }
+  return merged;
+};
 
 const toConfig = (
   callerReference: string,
@@ -898,6 +1531,27 @@ const toConfig = (
         ) as cloudfront.CacheBehavior[],
       }
     : undefined,
+  OriginGroups: props.originGroups
+    ? {
+        Quantity: (props.originGroups as DistributionOriginGroup[]).length,
+        Items: (props.originGroups as DistributionOriginGroup[]).map(
+          (group) => ({
+            Id: group.id,
+            FailoverCriteria: {
+              StatusCodes: {
+                Quantity: group.failoverStatusCodes.length,
+                Items: group.failoverStatusCodes,
+              },
+            },
+            Members: {
+              Quantity: group.members.length,
+              Items: group.members.map((originId) => ({ OriginId: originId })),
+            },
+            SelectionCriteria: group.selectionCriteria,
+          }),
+        ),
+      }
+    : undefined,
   CustomErrorResponses: props.customErrorResponses
     ? {
         Quantity: (
@@ -907,12 +1561,23 @@ const toConfig = (
       }
     : undefined,
   Comment: props.comment ?? "",
+  Logging: props.logging
+    ? {
+        Enabled: props.logging.enabled ?? true,
+        IncludeCookies: props.logging.includeCookies ?? false,
+        Bucket: props.logging.bucket ?? "",
+        Prefix: props.logging.prefix ?? "",
+      }
+    : undefined,
   Enabled: props.enabled ?? true,
   ViewerCertificate: props.viewerCertificate
     ? {
         CloudFrontDefaultCertificate: (
           props.viewerCertificate as DistributionViewerCertificate
         ).cloudFrontDefaultCertificate,
+        IAMCertificateId: (
+          props.viewerCertificate as DistributionViewerCertificate
+        ).iamCertificateId,
         ACMCertificateArn: (
           props.viewerCertificate as DistributionViewerCertificate
         ).acmCertificateArn,
@@ -922,32 +1587,102 @@ const toConfig = (
         MinimumProtocolVersion: (
           props.viewerCertificate as DistributionViewerCertificate
         ).minimumProtocolVersion,
+        Certificate: (props.viewerCertificate as DistributionViewerCertificate)
+          .certificate,
+        CertificateSource: (
+          props.viewerCertificate as DistributionViewerCertificate
+        ).certificateSource,
       }
     : props.aliases && props.aliases.length > 0
       ? undefined
       : {
           CloudFrontDefaultCertificate: true,
         },
-  Restrictions: {
-    GeoRestriction: {
-      RestrictionType: "none",
-      Quantity: 0,
-    },
-  },
+  Restrictions: props.geoRestriction
+    ? {
+        GeoRestriction: {
+          RestrictionType: props.geoRestriction.restrictionType,
+          Quantity: props.geoRestriction.locations?.length ?? 0,
+          Items: props.geoRestriction.locations,
+        },
+      }
+    : {
+        GeoRestriction: {
+          RestrictionType: "none",
+          Quantity: 0,
+        },
+      },
   PriceClass: props.priceClass,
   WebACLId: props.webAclId,
   HttpVersion: props.httpVersion ?? "http2",
   IsIPV6Enabled: props.isIpv6Enabled ?? true,
+  ContinuousDeploymentPolicyId: props.continuousDeploymentPolicyId,
+  Staging: props.staging,
+  AnycastIpListId: props.anycastIpListId,
+});
+
+/**
+ * The distribution's own URL.
+ *
+ * On AWS this is `https://` + the CloudFront domain name. The local emulator
+ * has no such hostname — `*.cloudfront.net` resolves to nothing on a
+ * developer's machine — so it serves each distribution's edge on a plain-HTTP
+ * port of its own and reports which one. Asking it here (rather than having
+ * every consumer interpolate a URL from `domainName`) is what keeps `url`
+ * openable in both modes. Anything unexpected falls back to the AWS-shaped
+ * URL: a missing edge port must never fail a reconcile.
+ */
+const resolveUrl = Effect.fn("AWS.CloudFront.Distribution.url")(function* (
+  distribution: cloudfront.Distribution,
+) {
+  const awsUrl = `https://${distribution.DomainName}`;
+  const env = yield* AWSEnvironment.current;
+  const endpoint = env.endpoint;
+  if (endpoint === undefined || !(yield* AWSEnvironment.isLocalEmulator)) {
+    return awsUrl;
+  }
+  return yield* Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient;
+    const response = yield* client.get(
+      `${endpoint}/_floci/cloudfront-edge/${distribution.Id}`,
+    );
+    // A distribution legitimately has no edge port: the emulator binds one
+    // opportunistically and stays Host-addressable when it can't, and the
+    // endpoint 404s (with a JSON error body) for one it doesn't know yet.
+    // `client.get` does not fail on 404, so every shape lands here — `null`,
+    // an error object, or a port-less entry. Anything that isn't a numeric
+    // `Port` means "no local edge", which is the AWS URL.
+    const edge = (yield* response.json) as { Port?: number } | null;
+    if (
+      edge === null ||
+      typeof edge !== "object" ||
+      typeof edge.Port !== "number"
+    ) {
+      return awsUrl;
+    }
+    const host = yield* Effect.sync(() => new URL(endpoint).hostname);
+    return `http://${host}:${edge.Port}`;
+  }).pipe(
+    Effect.timeout("10 seconds"),
+    Effect.provide(FetchHttpClient.layer),
+    // `orElseSucceed` alone only covers the error channel. A malformed body
+    // throws inside the generator, which Effect surfaces as a DEFECT — that
+    // escaped the fallback and killed a reconcile with a raw TypeError.
+    // Resolving a convenience URL must never be able to fail a deploy.
+    Effect.catchCause(() => Effect.succeed(awsUrl)),
+  );
 });
 
 const toAttrs = (
   distribution: cloudfront.Distribution,
   etag: string | undefined,
   tags: Record<string, string>,
+  url: string,
 ): Distribution["Attributes"] => ({
   distributionId: distribution.Id,
   distributionArn: distribution.ARN,
   domainName: distribution.DomainName,
+  url,
   hostedZoneId: CLOUDFRONT_HOSTED_ZONE_ID,
   status: distribution.Status,
   aliases: distribution.DistributionConfig.Aliases?.Items ?? [],

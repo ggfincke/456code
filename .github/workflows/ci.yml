@@ -1,6 +1,3 @@
-# .github/workflows/ci.yml
-# verify pull requests and main-branch changes across supported surfaces
-
 name: CI
 
 on:
@@ -12,14 +9,23 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Reject repository-owned PR assets
         run: |
@@ -29,25 +35,6 @@ jobs:
             exit 1
           fi
 
-      - name: Parse PowerShell acceptance script
-        shell: pwsh
-        run: |
-          $tokens = $null
-          $parseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "scripts/windows-desktop-acceptance.ps1").Path,
-            [ref]$tokens,
-            [ref]$parseErrors
-          ) | Out-Null
-          if ($parseErrors.Count -gt 0) {
-            $parseErrors | ForEach-Object { Write-Error $_.Message }
-            exit 1
-          }
-
-      - name: Select single-root Vite+ layout
-        shell: bash
-        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
-
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -58,18 +45,9 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @t3tools/desktop ensure:electron
 
-      - name: Check Prettier formatting
-        run: node scripts/format-repository.ts --check --prettier-only
-
-      - name: Check comment style
-        run: |
-          node scripts/check-js-comments.ts apps packages scripts tests oxlint-plugin-456code vite.config.ts
-          python3 scripts/check_comment_style.py --check --headers apps packages scripts tests experiments .github .vite-hooks
-
-      - name: Check directive preservation
-        run: |
-          git fetch --no-tags --depth=1 origin main
-          node scripts/check-directive-preservation.ts FETCH_HEAD
+      # Files/dependencies are repo-wide; export checks cover clean workspaces only.
+      - name: Check unused code
+        run: vp run knip:check
 
       - name: Check
         run: vp check
@@ -77,87 +55,36 @@ jobs:
       - name: Typecheck
         run: vpr typecheck
 
+      - uses: ./.github/actions/setup-apt-mirrors
+
+      - name: Install browser secret helper build libraries
+        run: |
+          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
       - name: Build desktop pipeline
         run: vp run build:desktop
 
       - name: Verify preload bundle output
-        run: |
-          test -f apps/desktop/dist-electron/preload.cjs
-          grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
+        run: node apps/desktop/scripts/verify-preload-bundle.mjs
 
-  cartographer:
-    name: Cartographer (node ${{ matrix.node }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      # engine-floor lanes: cartographer-core advertises ^22.16 || ^23.11 || >=24.10,
-      # so the bounded job runs the floor, the odd line, and the repo default
-      matrix:
-        # prettier-ignore
-        node: ["22.16", "23.11", "24"]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: bash
-        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: ${{ matrix.node != '22.16' }}
-          run-install: true
-
-      - name: Verify native bootstrap
-        if: matrix.node == '22.16'
-        run: |
-          node --input-type=module -e '
-            import { createRequire } from "node:module";
-            const require = createRequire(new URL("./apps/server/package.json", import.meta.url));
-            const pty = require("node-pty").spawn("/bin/sh", ["-c", "printf bootstrap-ok"], { cols: 80, rows: 24 });
-            let output = "";
-            const timeout = setTimeout(() => { pty.kill(); process.exit(1); }, 10000);
-            pty.onData((data) => { output += data; });
-            pty.onExit(({ exitCode }) => { clearTimeout(timeout); if (exitCode !== 0 || !output.includes("bootstrap-ok")) process.exit(1); });
-          '
-
-      - name: Select Cartographer runtime
-        run: |
-          vp env use "${{ matrix.node }}"
-          node --version
-          node -e 'const selected = process.versions.node; if (!selected.startsWith("${{ matrix.node }}.")) throw new Error(`Unexpected runtime: ${selected}`)'
-
-      - name: Build Cartographer core
-        run: vp run --filter @t3tools/cartographer-core build
-
-      - name: Test Cartographer core
-        working-directory: packages/cartographer-core
-        run: vp test run
-
-      - name: Run standalone acceptance
-        working-directory: packages/cartographer-core
-        run: |
-          node scripts/standaloneAcceptance.mjs
-          node scripts/proposalConcurrencyAcceptance.mjs
-          node scripts/patchPerformanceAcceptance.mjs
-
-      - name: Smoke-test the Cartographer MCP server
-        run: node --experimental-strip-types scripts/smoke-cartographer-mcp.ts
-
+  # Everything except `t3` (apps/server). `--parallel` drops the package
+  # dependency ordering that `vp run` applies by default: these `test` tasks
+  # declare no `dependsOn` and resolve workspace deps from source, so ordering
+  # only bought us idle runners between dependency layers. The concurrency
+  # limit stays at the default 4 so peak load per runner is unchanged.
   test:
     name: Test
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: bash
-        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -169,29 +96,30 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @t3tools/desktop ensure:electron
 
-      # new workspace packages with test scripts must be added explicitly; Cartographer stays in its bounded job
-      # the server suite runs in its own sharded job below because it disables file parallelism
-      - name: Test
-        run: |
-          vp run \
-            --filter @t3tools/desktop \
-            --filter @t3tools/mobile \
-            --filter @t3tools/web \
-            --filter @t3tools/client-runtime \
-            --filter @t3tools/contracts \
-            --filter effect-acp \
-            --filter effect-codex-app-server \
-            --filter @t3tools/shared \
-            --filter @t3tools/ssh \
-            --filter @t3tools/tailscale \
-            --filter @t3tools/oxlint-plugin-456code \
-            --filter @t3tools/scripts \
-            test
+      - uses: ./.github/actions/setup-apt-mirrors
 
+      - name: Install browser secret helper build libraries
+        run: |
+          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
+      - name: Test preview artifact validation
+        run: python3 -B .github/scripts/stage-preview-bundle.test.py
+
+      - name: Test nightly release checks
+        run: node --test .github/scripts/check-nightly-release.test.cjs
+
+      - name: Test
+        run: vp run --parallel --concurrency-limit 4 --filter '!t3' --filter '!@t3tools/monorepo' test
+
+  # apps/server sets `fileParallelism: false`, so its 239 files run strictly
+  # one at a time. Sharding spreads them over separate runners instead of
+  # separate workers, so no two server test files ever share a machine and the
+  # isolation that flag buys is preserved exactly.
   test_server:
-    name: Test server (shard ${{ matrix.shard }}/3)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    name: Test Server ${{ matrix.shard }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -199,10 +127,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: bash
-        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -211,20 +140,86 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Build Cartographer core
-        run: vp run --filter @t3tools/cartographer-core build
+      # No Electron setup here: `t3` (apps/server) has no Electron dependency
+      # and none of its tests touch the runtime. Only the non-server `test`
+      # job, which covers @t3tools/desktop, needs the download.
+      - name: Test
+        env:
+          T3CODE_TRANSFER_BUDGET_REPORT_PATH: ${{ runner.temp }}/t3code-transfer-budget.md
+          T3CODE_TRANSFER_BUDGET_RESULT_PATH: ${{ runner.temp }}/thread-transfer-result.json
+        run: vp run --filter t3 test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
-      - name: Test server suite
-        working-directory: apps/server
-        run: vp test run --shard ${{ matrix.shard }}/3
+      # src/server.test.ts writes the budget report, so exactly one shard
+      # produces these files. Gating the upload on their presence keeps a
+      # single `thread-transfer-results` artifact per run, which is the name
+      # thread-transfer-report.yml resolves.
+      - name: Detect transfer budget report
+        id: transfer_budget
+        if: always()
+        run: |
+          if test -f "${{ runner.temp }}/thread-transfer-result.json"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
 
-  # The static analysis below needs a macOS runner, which bills far more than a
-  # Linux minute, so gate it on the native sources it actually lints instead of
-  # paying for it on every push. Detection is API-only (no checkout) and fails
-  # open: if the diff cannot be resolved, the lint runs.
+      - name: Publish transfer budget report
+        if: always() && steps.transfer_budget.outputs.present == 'true'
+        run: |
+          if test -f "${{ runner.temp }}/t3code-transfer-budget.md"; then
+            tee -a "$GITHUB_STEP_SUMMARY" < "${{ runner.temp }}/t3code-transfer-budget.md"
+          else
+            echo "Transfer budget report was not produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload thread transfer result
+        if: always() && steps.transfer_budget.outputs.present == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: thread-transfer-results
+          path: ${{ runner.temp }}/thread-transfer-result.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Split out of Check and Test: both paid ~7-9s to install a Rust toolchain
+  # for checks that take under 3s, on the critical path of every PR.
+  rust:
+    name: Rust
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check Rust formatting
+        run: |
+          for crate in resource-monitor kde-snap-shot hyprland-snap-shot; do
+            cargo fmt --manifest-path "native/$crate/Cargo.toml" -- --check
+          done
+
+      - name: Test Rust crates
+        run: |
+          for crate in resource-monitor kde-snap-shot hyprland-snap-shot; do
+            cargo test --locked --manifest-path "native/$crate/Cargo.toml"
+          done
+
+  # The static analysis below needs a macOS runner, which bills ~6.7x a Linux
+  # minute, so gate it on the native sources it actually lints instead of paying
+  # for it on every push. Detection is API-only (no checkout) and fails open: if
+  # the diff cannot be resolved, the lint runs.
   mobile_native_changes:
     name: Mobile Native Changes
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
       contents: read
@@ -251,14 +246,14 @@ jobs:
             printf '%s\n' "$1" | grep -c . || true
           }
 
-          # one row per changed file, holding the new path and, for a rename,
+          # One row per changed file, holding the new path and, for a rename,
           # the path it replaced: renaming a matched file out of the matched
-          # paths removes a lint input just like editing it
+          # paths removes a lint input just like editing it.
           row='[.filename, (.previous_filename // empty)] | @tsv'
 
           if [[ -n "${PR_NUMBER}" ]]; then
-            # the PR files endpoint stops at 3000 files and pagination cannot
-            # extend it, so cross-check against the count the PR itself reports
+            # The PR files endpoint stops at 3000 files and pagination cannot
+            # extend it, so cross-check against the count the PR itself reports.
             expected=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.changed_files') \
               || fail_open "Could not read the pull request."
             rows=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq ".[] | ${row}") \
@@ -272,8 +267,8 @@ jobs:
             rows=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BEFORE_SHA}...${GITHUB_SHA}" --jq ".files[]? | ${row}") \
               || fail_open "Could not resolve changed files."
 
-            # the compare endpoint reports at most 300 files and pagination does
-            # not extend that list, so a full list may be hiding native changes
+            # The compare endpoint reports at most 300 files and pagination does
+            # not extend that list, so a full list may be hiding native changes.
             listed=$(count_rows "$rows")
             if [[ "$listed" -ge 300 ]]; then
               fail_open "GitHub listed ${listed} changed files, the compare endpoint maximum."
@@ -282,10 +277,10 @@ jobs:
 
           paths=$(tr '\t' '\n' <<< "$rows")
 
-          # sources scripts/mobile-native-static-check.ts lints, plus the tool
+          # Sources scripts/mobile-native-static-check.ts lints, plus the tool
           # and rule configuration that decides how it lints them, plus the
-          # root package.json that defines the lint:mobile command
-          pattern='^apps/mobile/.*\.swift$|^apps/mobile/(\.swiftlint\.yml|Brewfile)$|^scripts/mobile-native-static-check\.ts$|^package\.json$|^\.github/workflows/ci\.yml$'
+          # root package.json that defines the lint:mobile command.
+          pattern='^apps/mobile/.*\.(swift|kt|kts)$|^apps/mobile/(\.swiftlint\.yml|detekt\.yml|\.editorconfig|Brewfile)$|^scripts/mobile-native-static-check\.ts$|^package\.json$|^\.github/workflows/ci\.yml$'
 
           if grep -qE "$pattern" <<< "$paths"; then
             echo "Native sources or lint configuration changed:"
@@ -299,25 +294,28 @@ jobs:
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
     needs: mobile_native_changes
-    # skip only on an explicit "no": a gate job that failed or errored leaves the
-    # output empty, and that must run the lint rather than silently skip it
+    # Skip only on an explicit "no": a gate job that failed or errored leaves the
+    # output empty, and that must run the lint rather than silently skip it.
     if: ${{ !cancelled() && needs.mobile_native_changes.outputs.changed != 'false' }}
-    runs-on: macos-15
-    timeout-minutes: 20
+    runs-on: blacksmith-6vcpu-macos-26
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: bash
-        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
           cache: true
-          run-install: true
+          run-install: |
+            args:
+              - --filter=@t3tools/scripts...
 
       - name: Install mobile native static analysis tools
         run: brew bundle install --file apps/mobile/Brewfile
@@ -327,44 +325,16 @@ jobs:
 
   release_smoke:
     name: Release Smoke
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: bash
-        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
         with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Expose pnpm
-        run: |
-          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$VP_HOME/package_manager/pnpm/$pnpm_version/pnpm/bin"
-          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
-          "$vp_pnpm_bin/pnpm" --version
-
-      - name: Exercise release-only workflow steps
-        run: node scripts/release-smoke.ts
-
-  release_smoke_windows:
-    name: Release Smoke (Windows package shims)
-    runs-on: windows-2025
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: pwsh
-        run: '"VP_HOME=$(Join-Path $env:USERPROFILE ''.vite-plus'')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -373,286 +343,7 @@ jobs:
           cache: true
           run-install: |
             args:
-              - --filter=456code...
-              - --filter=@t3tools/cartographer-core...
-              - --filter=@t3tools/web...
               - --filter=@t3tools/scripts...
 
-      - name: Verify Windows toolchain
-        shell: pwsh
-        run: |
-          foreach ($relativePath in @('current\bin\vp.exe', 'bin\vp.shim')) {
-            if (-not (Test-Path (Join-Path $env:VP_HOME $relativePath))) {
-              throw "Missing Vite+ toolchain path: $relativePath"
-            }
-          }
-          vp --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $pnpmVersion = (Get-Content package.json | ConvertFrom-Json).packageManager.Split('@')[-1]
-          & (Join-Path $env:VP_HOME "package_manager\pnpm\$pnpmVersion\pnpm\bin\pnpm.cmd") --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Expose pnpm
-        shell: pwsh
-        run: |
-          $pnpmVersion = node --print "require('./package.json').packageManager.split('@').pop()"
-          $vpPnpmBin = Join-Path $env:VP_HOME "package_manager/pnpm/$pnpmVersion/pnpm/bin"
-          $vpPnpmBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          & (Join-Path $vpPnpmBin "pnpm.cmd") --version
-
-      - name: Build CLI release graph
-        run: vp run --filter 456code build
-
-      - name: Exercise exact packed CLI through Windows shims
-        run: node apps/server/scripts/cli.ts publish --dry-run --app-version 9.9.9-smoke.0 --verbose
-
-  windows_wsl_node_pty:
-    name: Windows acceptance WSL node-pty producer
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: bash
-        run: echo "VP_HOME=${USERPROFILE:-$HOME}/.vite-plus" >> "$GITHUB_ENV"
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Build Linux x64 node-pty for the packaged WSL tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
-          pty_dir="$(dirname "$pty_pkg")"
-          ( cd "$pty_dir" && "$GITHUB_WORKSPACE/scripts/node_modules/.bin/node-gyp" rebuild )
-          mkdir -p wsl-prebuild
-          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
-          file wsl-prebuild/pty.node
-
-      - name: Upload WSL prebuild
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-acceptance-wsl-node-pty
-          path: wsl-prebuild/pty.node
-          if-no-files-found: error
-          retention-days: 3
-
-  windows_desktop_package:
-    name: Windows unsigned NSIS acceptance producer
-    needs: [windows_wsl_node_pty]
-    runs-on: windows-2025
-    timeout-minutes: 60
-    outputs:
-      acceptance_artifact_id: ${{ steps.upload_acceptance.outputs.artifact-id }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: pwsh
-        run: '"VP_HOME=$(Join-Path $env:USERPROFILE ''.vite-plus'')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Verify Windows toolchain
-        shell: pwsh
-        run: |
-          foreach ($relativePath in @('current\bin\vp.exe', 'bin\vp.shim')) {
-            if (-not (Test-Path (Join-Path $env:VP_HOME $relativePath))) {
-              throw "Missing Vite+ toolchain path: $relativePath"
-            }
-          }
-          vp --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $pnpmVersion = (Get-Content package.json | ConvertFrom-Json).packageManager.Split('@')[-1]
-          & (Join-Path $env:VP_HOME "package_manager\pnpm\$pnpmVersion\pnpm\bin\pnpm.cmd") --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Download WSL prebuild
-        uses: actions/download-artifact@v8
-        with:
-          name: windows-acceptance-wsl-node-pty
-          path: wsl-prebuild
-
-      - name: Build exact N and N+1 unsigned installers
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          vp run dist:desktop:artifact `
-            --platform win `
-            --target nsis `
-            --arch x64 `
-            --build-version 0.0.17-nightly.20990101.1 `
-            --output-dir windows-acceptance-artifacts/n `
-            --mock-updates `
-            --mock-update-server-port 41230 `
-            --wsl-prebuild "$env:GITHUB_WORKSPACE/wsl-prebuild/pty.node" `
-            --verbose
-          vp run dist:desktop:artifact `
-            --platform win `
-            --target nsis `
-            --arch x64 `
-            --build-version 0.0.17-nightly.20990101.2 `
-            --output-dir windows-acceptance-artifacts/n1 `
-            --skip-build `
-            --mock-updates `
-            --mock-update-server-port 41230 `
-            --wsl-prebuild "$env:GITHUB_WORKSPACE/wsl-prebuild/pty.node" `
-            --verbose
-
-      - name: Verify producer artifact contract
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          foreach ($version in @("n", "n1")) {
-            $root = "windows-acceptance-artifacts/$version"
-            $installers = @(Get-ChildItem $root -Filter "*.exe" -File)
-            $blockmaps = @(Get-ChildItem $root -Filter "*.exe.blockmap" -File)
-            $manifests = @(
-              Get-ChildItem $root -Filter "*.yml" -File |
-                Where-Object { $_.Name -notlike "builder-*" }
-            )
-            if ($installers.Count -ne 1 -or $blockmaps.Count -ne 1 -or $manifests.Count -lt 1) {
-              throw "Unexpected $version artifact set: installers=$($installers.Count), blockmaps=$($blockmaps.Count), manifests=$($manifests.Count)"
-            }
-          }
-
-      - name: Upload exact unsigned acceptance artifacts
-        id: upload_acceptance
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-unsigned-nsis-acceptance
-          path: windows-acceptance-artifacts/**/*
-          if-no-files-found: error
-          retention-days: 1
-
-  windows_desktop_acceptance:
-    name: Windows installed artifact acceptance
-    needs: [windows_desktop_package]
-    runs-on: windows-2025
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Select single-root Vite+ layout
-        shell: pwsh
-        run: '"VP_HOME=$(Join-Path $env:USERPROFILE ''.vite-plus'')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
-
-      - name: Verify Windows toolchain
-        shell: pwsh
-        run: |
-          foreach ($relativePath in @('current\bin\vp.exe', 'bin\vp.shim')) {
-            if (-not (Test-Path (Join-Path $env:VP_HOME $relativePath))) {
-              throw "Missing Vite+ toolchain path: $relativePath"
-            }
-          }
-          vp --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $pnpmVersion = (Get-Content package.json | ConvertFrom-Json).packageManager.Split('@')[-1]
-          & (Join-Path $env:VP_HOME "package_manager\pnpm\$pnpmVersion\pnpm\bin\pnpm.cmd") --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Download exact unsigned installers
-        uses: actions/download-artifact@v8
-        with:
-          name: windows-unsigned-nsis-acceptance
-          path: windows-acceptance-artifacts
-
-      - name: Exercise digest and stale-tree lifecycle on Windows
-        run: >-
-          vp test run
-          tests/apps/desktop/wsl/DesktopWslServerTree.test.ts
-          tests/apps/server/textGeneration/ClaudeTextGeneration.test.ts
-          tests/scripts/build-desktop-artifact.test.ts
-
-      - name: Exercise installed package and updater paths
-        shell: pwsh
-        timeout-minutes: 30
-        run: >-
-          ./scripts/windows-desktop-acceptance.ps1
-          -ArtifactsRoot ./windows-acceptance-artifacts
-
-      - name: Upload acceptance evidence on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-acceptance-failure-evidence
-          path: |
-            ${{ runner.temp }}/456code-windows-acceptance/**/*.log
-            ${{ runner.temp }}/456code-windows-acceptance/**/*.jsonl
-            ${{ runner.temp }}/456code-windows-acceptance/**/*.ndjson
-          if-no-files-found: ignore
-          retention-days: 3
-
-  windows_desktop_artifact_cleanup:
-    name: Windows acceptance artifact cleanup
-    needs: [windows_desktop_package, windows_desktop_acceptance]
-    if: >-
-      ${{
-        always() &&
-        needs.windows_desktop_package.outputs.acceptance_artifact_id != '' &&
-        (github.event_name == 'push' ||
-          github.event.pull_request.head.repo.full_name == github.repository)
-      }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Delete exact acceptance artifact
-        env:
-          ACCEPTANCE_ARTIFACT_ID: ${{ needs.windows_desktop_package.outputs.acceptance_artifact_id }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set +e
-          detail="$(
-            gh api \
-              --method DELETE \
-              "repos/$GITHUB_REPOSITORY/actions/artifacts/$ACCEPTANCE_ARTIFACT_ID" 2>&1
-          )"
-          status=$?
-          set -e
-
-          if [[ "$status" -eq 0 ]]; then
-            echo "Deleted acceptance artifact $ACCEPTANCE_ARTIFACT_ID."
-            exit 0
-          fi
-          if [[ "$detail" == *"HTTP 404"* ]]; then
-            echo "Acceptance artifact $ACCEPTANCE_ARTIFACT_ID was already absent."
-            exit 0
-          fi
-          if [[ "$detail" == *"HTTP 403"* ]]; then
-            echo "::warning::Artifact deletion was not permitted; one-day retention remains the fallback."
-            exit 0
-          fi
-          echo "$detail" >&2
-          exit "$status"
+      - name: Exercise release-only workflow steps
+        run: node scripts/release-smoke.ts

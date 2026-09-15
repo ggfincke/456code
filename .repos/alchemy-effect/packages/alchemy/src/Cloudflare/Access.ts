@@ -8,11 +8,11 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { cachedFunction } from "../Util/cached-function.ts";
 
-export class AccessError extends Schema.TaggedErrorClass<AccessError>()(
+export class AccessError extends Schema.TaggedError<AccessError>()(
   "AccessError",
   {
     message: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

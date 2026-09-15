@@ -1,28 +1,30 @@
-// apps/server/src/orchestration/projector.ts
-// applies orchestration events to in-memory read models
-
-import type { OrchestrationEvent, OrchestrationReadModel } from '@t3tools/contracts'
+import type {
+  OrchestrationEvent,
+  OrchestrationProject,
+  OrchestrationReadModel,
+  ThreadId,
+  ThreadLinkedPullRequest,
+  ThreadPullRequestKey,
+  ThreadPullRequestLink,
+} from "@t3tools/contracts";
 import {
-  ApprovalOutcome,
-  ApprovalRequestId,
+  isImportedAgentSessionMessageId,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
-  ThreadId,
-} from '@t3tools/contracts'
-import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
-import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
-import { isAdjacentProviderSwitchActivity } from '@t3tools/shared/providerSwitchActivity'
-import * as Effect from 'effect/Effect'
-import * as Predicate from 'effect/Predicate'
-import * as Schema from 'effect/Schema'
-
-import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from './Errors.ts'
+} from "@t3tools/contracts";
 import {
-  COMMAND_RELEVANT_THREAD_ACTIVITY_KIND_SET,
-  isImportContinuationActivityPayload,
-} from './activityPolicy.ts'
+  legacyLinkedPullRequestOf,
+  legacyThreadPullRequestKey,
+  threadPullRequestKeysEqual,
+} from "@t3tools/shared/threadPullRequests";
+import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as Predicate from "effect/Predicate";
+
+import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
@@ -33,149 +35,77 @@ import {
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
-  ThreadHandoffClearedPayload,
   ThreadMetaUpdatedPayload,
-  ThreadOrchestrateRunExecutionAdmittedPayload,
-  ThreadOrchestrateRunExecutionUpdatedPayload,
-  ThreadOrchestrateRunIntegrationSetPayload,
-  ThreadOrchestratePlanResponseRequestedPayload,
-  ThreadOrchestratePlanUpsertedPayload,
-  ThreadProviderSwitchedPayload,
-  ThreadProviderSwitchFailedPayload,
-  ThreadProviderSwitchProgressedPayload,
-  ThreadProviderSwitchRequestedPayload,
   ThreadProposedPlanUpsertedPayload,
-  ThreadPinnedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
+  ThreadPinnedPayload,
+  ThreadPinReorderedPayload,
+  ThreadPullRequestLinkedPayload,
+  ThreadPullRequestSyncedPayload,
+  ThreadPullRequestUnlinkedPayload,
   ThreadSnoozedPayload,
-  ThreadUnarchivedPayload,
   ThreadUnpinnedPayload,
+  ThreadUnarchivedPayload,
   ThreadUnsettledPayload,
   ThreadUnsnoozedPayload,
   ThreadRevertedPayload,
-  ThreadApprovalResponseRequestedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
-} from './Schemas.ts'
+} from "./Schemas.ts";
 
-type ThreadPatch = Partial<Omit<OrchestrationThread, 'id' | 'projectId'>>
-const MAX_THREAD_MESSAGES = 2_000
-const MAX_THREAD_CHECKPOINTS = 500
-const isApprovalOutcome = Schema.is(ApprovalOutcome)
+type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
+const MAX_THREAD_MESSAGES = 2_000;
+const MAX_THREAD_CHECKPOINTS = 500;
 
-function upsertApprovalOutcome(
-  outcomes: OrchestrationThread['approvalOutcomes'],
-  outcome: ApprovalOutcome,
-): ReadonlyArray<ApprovalOutcome>
-{
-  const current = outcomes ?? []
-  const existing = current.find((entry) => entry.requestId === outcome.requestId)
-  if (
-    existing !== undefined &&
-    (existing.status === 'accepted' || existing.status === 'stale-terminal') &&
-    existing.status !== outcome.status
-  )
-  {
-    return current
+// Async questions can stay open while the agent produces more activity.
+// Match the database snapshot's pending-question retention.
+function retainThreadActivities(activities: OrchestrationThread["activities"]) {
+  const recentStart = activities.length - 500;
+  if (recentStart <= 0) return activities;
+  const pending = new Map<string, OrchestrationThread["activities"][number]>();
+  for (const activity of activities) {
+    if (!Predicate.isObject(activity.payload)) continue;
+    const requestId = activity.payload.requestId;
+    if (typeof requestId !== "string") continue;
+    if (activity.kind === "user-input.requested" && activity.payload.responseMode === "message") {
+      pending.set(requestId, activity);
+    } else if (activity.kind === "user-input.resolved") {
+      pending.delete(requestId);
+    }
   }
-  return [...current.filter((entry) => entry.requestId !== outcome.requestId), outcome]
+  const pendingActivities = new Set(pending.values());
+  return activities.filter(
+    (activity, index) => index >= recentStart || pendingActivities.has(activity),
+  );
 }
 
-function approvalOutcomeFromActivity(
-  activity: OrchestrationThread['activities'][number],
-): ApprovalOutcome | null
-{
-  const payload =
-    typeof activity.payload === 'object' && activity.payload !== null
-      ? (activity.payload as Record<string, unknown>)
-      : null
-  const embedded = payload?.approvalOutcome
-  if (activity.kind === 'provider.approval.respond.failed')
-  {
-    const classification = classifyApprovalFailure(payload)
-    if (isApprovalOutcome(embedded))
-    {
-      return { ...embedded, status: classification.status }
-    }
-    const requestId = typeof payload?.requestId === 'string' ? payload.requestId : null
-    if (requestId === null)
-    {
-      return null
-    }
-    const detail =
-      typeof payload?.detail === 'string' ? payload.detail : 'Provider response failed.'
-    return {
-      requestId: ApprovalRequestId.make(requestId),
-      status: classification.status,
-      detail,
-      updatedAt: activity.createdAt,
-    }
-  }
-  if (isApprovalOutcome(embedded))
-  {
-    return embedded
-  }
-  const requestId = typeof payload?.requestId === 'string' ? payload.requestId : null
-  if (requestId === null)
-  {
-    return null
-  }
-  if (activity.kind === 'approval.requested')
-  {
-    return {
-      requestId: ApprovalRequestId.make(requestId),
-      status: 'pending',
-      updatedAt: activity.createdAt,
-    }
-  }
-  if (activity.kind === 'approval.resolved')
-  {
-    const decision =
-      payload?.decision === 'accept' ||
-      payload?.decision === 'acceptForSession' ||
-      payload?.decision === 'acceptAlways' ||
-      payload?.decision === 'decline' ||
-      payload?.decision === 'cancel'
-        ? payload.decision
-        : null
-    return {
-      requestId: ApprovalRequestId.make(requestId),
-      status: 'accepted',
-      decision,
-      updatedAt: activity.createdAt,
-    }
-  }
-  return null
+function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
+  if (status === "error") return "error" as const;
+  // Match SQL and client projections: a missing git ref is not an interruption.
+  return "completed" as const;
 }
 
-function checkpointStatusToLatestTurnState(status: 'ready' | 'missing' | 'error')
-{
-  if (status === 'error') return 'error' as const
-  // a missing git ref alone does not mean the provider turn was interrupted.
-  return 'completed' as const
-}
-
-// turn state to settle a still-running latest turn with when its session
-// leaves the "running" status, or null while the session is (re)starting or
-// running and the turn must stay unsettled.
+/**
+ * Turn state to settle a still-running latest turn with when its session
+ * leaves the "running" status, or null while the session is (re)starting or
+ * running and the turn must stay unsettled.
+ */
 function settledTurnStateForSessionStatus(
-  status: OrchestrationSession['status'],
-): 'completed' | 'interrupted' | 'error' | null
-{
-  switch (status)
-  {
-    case 'idle':
-    case 'ready':
-      return 'completed'
-    case 'error':
-      return 'error'
-    case 'interrupted':
-    case 'stopped':
-      return 'interrupted'
-    case 'starting':
-    case 'running':
-      return null
+  status: OrchestrationSession["status"],
+): "completed" | "interrupted" | "error" | null {
+  switch (status) {
+    case "idle":
+    case "ready":
+      return "completed";
+    case "error":
+      return "error";
+    case "interrupted":
+    case "stopped":
+      return "interrupted";
+    case "starting":
+    case "running":
+      return null;
   }
 }
 
@@ -183,352 +113,236 @@ function updateThread(
   threads: ReadonlyArray<OrchestrationThread>,
   threadId: ThreadId,
   patch: ThreadPatch,
-): OrchestrationThread[]
-{
-  return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread))
+): OrchestrationThread[] {
+  return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
+}
+
+/** Patch that swaps a thread's links and re-derives the legacy single-PR field from them. */
+function pullRequestsPatch(
+  thread: Pick<OrchestrationThread, "projectId">,
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>,
+  projects: OrchestrationReadModel["projects"],
+): Pick<OrchestrationThread, "pullRequests" | "linkedPullRequest"> {
+  return {
+    pullRequests,
+    linkedPullRequest: legacyLinkedPullRequestOf(
+      pullRequests,
+      thread.projectId,
+      projects.find((project) => project.id === thread.projectId)?.repositoryIdentity,
+    ),
+  };
+}
+
+function upsertPullRequestLink(
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>,
+  link: ThreadPullRequestLink,
+): ReadonlyArray<ThreadPullRequestLink> {
+  const index = pullRequests.findIndex((entry) => threadPullRequestKeysEqual(entry, link));
+  return index === -1
+    ? [...pullRequests, link]
+    : pullRequests.map((entry, entryIndex) => (entryIndex === index ? link : entry));
+}
+
+function removePullRequestLink(
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>,
+  key: ThreadPullRequestKey,
+): ReadonlyArray<ThreadPullRequestLink> {
+  return pullRequests.filter((entry) => !threadPullRequestKeysEqual(entry, key));
+}
+
+/**
+ * Host for a legacy `linkedPullRequest` being replayed into the link array.
+ * Legacy links never carried one; the project's canonical key
+ * (`<host>/<owner>/<name>`) is the best witness, then the link URL.
+ */
+function legacyPullRequestHost(
+  project: OrchestrationProject | undefined,
+  linked: ThreadLinkedPullRequest,
+): string {
+  const canonicalHost = project?.repositoryIdentity?.canonicalKey.split("/")[0];
+  if (canonicalHost) return canonicalHost.toLowerCase();
+  try {
+    return new URL(linked.url).hostname.toLowerCase();
+  } catch {
+    return "unknown";
+  }
+}
+
+function legacyLinkToPullRequests(
+  thread: Pick<OrchestrationThread, "pullRequests">,
+  project: OrchestrationProject | undefined,
+  linked: ThreadLinkedPullRequest | null,
+  linkedAt: string,
+): ReadonlyArray<ThreadPullRequestLink> {
+  // The legacy field held one user-chosen link, so null clears exactly the
+  // manual ones and leaves created/agent/stack links alone.
+  const withoutManual = thread.pullRequests.filter((entry) => entry.source !== "manual");
+  if (linked === null) return withoutManual;
+  return upsertPullRequestLink(withoutManual, {
+    ...legacyThreadPullRequestKey(linked, legacyPullRequestHost(project, linked)),
+    url: linked.url,
+    source: "manual",
+    linkedAt,
+    snapshot: null,
+    stack: null,
+  });
 }
 
 function decodeForEvent<A>(
   schema: Schema.Decoder<A, never>,
   value: unknown,
-  eventType: OrchestrationEvent['type'],
+  eventType: OrchestrationEvent["type"],
   field: string,
-): Effect.Effect<A, OrchestrationProjectorDecodeError>
-{
+): Effect.Effect<A, OrchestrationProjectorDecodeError> {
   return Schema.decodeUnknownEffect(schema)(value).pipe(
     Effect.mapError(toProjectorDecodeError(`${eventType}:${field}`)),
-  )
+  );
 }
 
 function retainThreadMessagesAfterRevert(
   messages: ReadonlyArray<OrchestrationMessage>,
   retainedTurnIds: ReadonlySet<string>,
   turnCount: number,
-): ReadonlyArray<OrchestrationMessage>
-{
-  const retainedMessageIds = new Set<string>()
-  for (const message of messages)
-  {
-    if (message.role === 'system')
-    {
-      retainedMessageIds.add(message.id)
-      continue
+): ReadonlyArray<OrchestrationMessage> {
+  const retainedMessageIds = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "system" || isImportedAgentSessionMessageId(message.id)) {
+      retainedMessageIds.add(message.id);
+      continue;
     }
-    if (message.turnId !== null && retainedTurnIds.has(message.turnId))
-    {
-      retainedMessageIds.add(message.id)
+    if (message.turnId !== null && retainedTurnIds.has(message.turnId)) {
+      retainedMessageIds.add(message.id);
     }
   }
 
   const retainedUserCount = messages.filter(
-    (message) => message.role === 'user' && retainedMessageIds.has(message.id),
-  ).length
-  const missingUserCount = Math.max(0, turnCount - retainedUserCount)
-  if (missingUserCount > 0)
-  {
+    (message) =>
+      message.role === "user" &&
+      !isImportedAgentSessionMessageId(message.id) &&
+      retainedMessageIds.has(message.id),
+  ).length;
+  const missingUserCount = Math.max(0, turnCount - retainedUserCount);
+  if (missingUserCount > 0) {
     const fallbackUserMessages = messages
       .filter(
         (message) =>
-          message.role === 'user' &&
+          message.role === "user" &&
           !retainedMessageIds.has(message.id) &&
           (message.turnId === null || retainedTurnIds.has(message.turnId)),
       )
       .toSorted(
         (left, right) =>
-          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+          compareDateTimeStrings(left.createdAt, right.createdAt) ||
+          left.id.localeCompare(right.id),
       )
-      .slice(0, missingUserCount)
-    for (const message of fallbackUserMessages)
-    {
-      retainedMessageIds.add(message.id)
+      .slice(0, missingUserCount);
+    for (const message of fallbackUserMessages) {
+      retainedMessageIds.add(message.id);
     }
   }
 
   const retainedAssistantCount = messages.filter(
-    (message) => message.role === 'assistant' && retainedMessageIds.has(message.id),
-  ).length
-  const missingAssistantCount = Math.max(0, turnCount - retainedAssistantCount)
-  if (missingAssistantCount > 0)
-  {
+    (message) =>
+      message.role === "assistant" &&
+      !isImportedAgentSessionMessageId(message.id) &&
+      retainedMessageIds.has(message.id),
+  ).length;
+  const missingAssistantCount = Math.max(0, turnCount - retainedAssistantCount);
+  if (missingAssistantCount > 0) {
     const fallbackAssistantMessages = messages
       .filter(
         (message) =>
-          message.role === 'assistant' &&
+          message.role === "assistant" &&
           !retainedMessageIds.has(message.id) &&
           (message.turnId === null || retainedTurnIds.has(message.turnId)),
       )
       .toSorted(
         (left, right) =>
-          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+          compareDateTimeStrings(left.createdAt, right.createdAt) ||
+          left.id.localeCompare(right.id),
       )
-      .slice(0, missingAssistantCount)
-    for (const message of fallbackAssistantMessages)
-    {
-      retainedMessageIds.add(message.id)
+      .slice(0, missingAssistantCount);
+    for (const message of fallbackAssistantMessages) {
+      retainedMessageIds.add(message.id);
     }
   }
 
-  return messages.filter((message) => retainedMessageIds.has(message.id))
+  return messages.filter((message) => retainedMessageIds.has(message.id));
 }
 
 function retainThreadActivitiesAfterRevert(
-  activities: ReadonlyArray<OrchestrationThread['activities'][number]>,
+  activities: ReadonlyArray<OrchestrationThread["activities"][number]>,
   retainedTurnIds: ReadonlySet<string>,
-): ReadonlyArray<OrchestrationThread['activities'][number]>
-{
+): ReadonlyArray<OrchestrationThread["activities"][number]> {
   return activities.filter(
     (activity) => activity.turnId === null || retainedTurnIds.has(activity.turnId),
-  )
+  );
 }
 
 function retainThreadProposedPlansAfterRevert(
-  proposedPlans: ReadonlyArray<OrchestrationThread['proposedPlans'][number]>,
+  proposedPlans: ReadonlyArray<OrchestrationThread["proposedPlans"][number]>,
   retainedTurnIds: ReadonlySet<string>,
-): ReadonlyArray<OrchestrationThread['proposedPlans'][number]>
-{
+): ReadonlyArray<OrchestrationThread["proposedPlans"][number]> {
   return proposedPlans.filter(
     (proposedPlan) => proposedPlan.turnId === null || retainedTurnIds.has(proposedPlan.turnId),
-  )
+  );
 }
 
-function retainThreadOrchestratePlansAfterRevert(
-  orchestratePlans: ReadonlyArray<OrchestrationThread['orchestratePlans'][number]>,
-  retainedTurnIds: ReadonlySet<string>,
-): ReadonlyArray<OrchestrationThread['orchestratePlans'][number]>
-{
-  return orchestratePlans.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId))
-}
-
-// command ACK occupies the revision as approved/rejected before sendTurn;
-// a failed envelope must free it so the user can respond again
-export function readOrchestratePlanRespondFailureTarget(payload: unknown): {
-  readonly runId: string
-  readonly revision: number
-} | null
-{
-  if (typeof payload !== 'object' || payload === null)
-  {
-    return null
-  }
-  const record = payload as Record<string, unknown>
-  const runId = typeof record.runId === 'string' ? record.runId.trim() : ''
-  const revision = record.revision
-  if (
-    runId.length === 0 ||
-    typeof revision !== 'number' ||
-    !Number.isInteger(revision) ||
-    revision < 0
-  )
-  {
-    return null
-  }
-  return { runId, revision }
-}
-
-type OccupiedOrchestratePlanRef = {
-  readonly runId: string
-  readonly revision: number
-  readonly status: string
-  readonly updatedAt: string
-}
-
-// tagged payloads pin the revision; legacy failures (detail-only) take the
-// newest occupied plan whose stamp is not after the failure
-export function pickOccupiedOrchestratePlanForRespondFailure(
-  plans: ReadonlyArray<OccupiedOrchestratePlanRef>,
-  payload: unknown,
-  failureCreatedAt: string,
-): { readonly runId: string; readonly revision: number } | null
-{
-  const occupied = plans.filter(
-    (entry) =>
-      (entry.status === 'approved' || entry.status === 'rejected') &&
-      entry.updatedAt <= failureCreatedAt,
-  )
-  if (occupied.length === 0)
-  {
-    return null
-  }
-  const target = readOrchestratePlanRespondFailureTarget(payload)
-  if (target !== null)
-  {
-    return occupied.some(
-      (entry) => entry.runId === target.runId && entry.revision === target.revision,
-    )
-      ? target
-      : null
-  }
-  return occupied.reduce((best, entry) =>
-  {
-    if (entry.updatedAt > best.updatedAt)
-    {
-      return entry
+function compareThreadActivities(
+  left: OrchestrationThread["activities"][number],
+  right: OrchestrationThread["activities"][number],
+): number {
+  if (left.sequence !== undefined && right.sequence !== undefined) {
+    if (left.sequence !== right.sequence) {
+      return left.sequence - right.sequence;
     }
-    if (entry.updatedAt === best.updatedAt && entry.revision > best.revision)
-    {
-      return entry
-    }
-    return best
-  })
-}
-
-export function revertOrchestratePlansAfterRespondFailure(
-  plans: OrchestrationThread['orchestratePlans'],
-  payload: unknown,
-  updatedAt: string,
-): OrchestrationThread['orchestratePlans']
-{
-  const picked = pickOccupiedOrchestratePlanForRespondFailure(plans, payload, updatedAt)
-  if (picked === null)
-  {
-    return plans
+  } else if (left.sequence !== undefined) {
+    return 1;
+  } else if (right.sequence !== undefined) {
+    return -1;
   }
-  let changed = false
-  const next = plans.map((entry) =>
-  {
-    if (
-      entry.runId !== picked.runId ||
-      entry.revision !== picked.revision ||
-      (entry.status !== 'approved' && entry.status !== 'rejected')
-    )
-    {
-      return entry
-    }
-    changed = true
-    return { ...entry, status: 'pending' as const, updatedAt }
-  })
-  return changed ? next : plans
+
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
-export function healOrchestratePlansAfterFailedEnvelope(
-  plans: OrchestrationThread['orchestratePlans'],
-  activities: ReadonlyArray<{
-    readonly kind: string
-    readonly payload: unknown
-    readonly createdAt: string
-  }>,
-): OrchestrationThread['orchestratePlans']
-{
-  return activities.reduce(
-    (next, activity) =>
-      activity.kind === 'provider.orchestrate-plan.respond.failed'
-        ? revertOrchestratePlansAfterRespondFailure(next, activity.payload, activity.createdAt)
-        : next,
-    plans,
-  )
-}
-
-function isImportContinuationActivity(
-  activity: OrchestrationThread['activities'][number],
-): boolean
-{
-  return isImportContinuationActivityPayload(activity.payload)
-}
-
-function retainThreadActivities(
-  activities: ReadonlyArray<OrchestrationThread['activities'][number]>,
-): ReadonlyArray<OrchestrationThread['activities'][number]>
-{
-  const latestImportContinuation = activities.findLast(isImportContinuationActivity)
-  const pendingAsyncQuestions = new Map<string, OrchestrationThread['activities'][number]>()
-  for (const activity of activities)
-  {
-    if (!Predicate.isObject(activity.payload)) continue
-    const requestId = activity.payload.requestId
-    if (typeof requestId !== 'string') continue
-    if (activity.kind === 'user-input.requested' && activity.payload.responseMode === 'message')
-    {
-      pendingAsyncQuestions.set(requestId, activity)
-    }
-    else if (activity.kind === 'user-input.resolved')
-    {
-      pendingAsyncQuestions.delete(requestId)
-    }
-  }
-  const retainedAsyncQuestions = new Set(pendingAsyncQuestions.values())
-  const retainedActivities = activities.filter(
-    (activity, index) =>
-      !isImportContinuationActivity(activity) &&
-      (index >= activities.length - 500 || retainedAsyncQuestions.has(activity)),
-  )
-  if (latestImportContinuation === undefined)
-  {
-    return retainedActivities
-  }
-  return [latestImportContinuation, ...retainedActivities].toSorted(
-    compareOrchestrationThreadActivities,
-  )
-}
-
-function appendProjectedActivity(
-  activities: ReadonlyArray<OrchestrationThread['activities'][number]>,
-  activity: OrchestrationThread['activities'][number],
-): ReadonlyArray<OrchestrationThread['activities'][number]>
-{
-  return retainThreadActivities(
-    [...activities.filter((entry) => entry.id !== activity.id), activity].toSorted(
-      compareOrchestrationThreadActivities,
-    ),
-  )
-}
-
-function compactFinalizedImportActivities(
-  activities: ReadonlyArray<OrchestrationThread['activities'][number]>,
-): ReadonlyArray<OrchestrationThread['activities'][number]>
-{
-  const latestImportContinuation = activities.findLast(isImportContinuationActivity)
-  const retainedActivities = activities.filter((activity) =>
-    COMMAND_RELEVANT_THREAD_ACTIVITY_KIND_SET.has(activity.kind),
-  )
-  if (latestImportContinuation === undefined)
-  {
-    return retainedActivities
-  }
-  return [...retainedActivities, latestImportContinuation].toSorted(
-    compareOrchestrationThreadActivities,
-  )
-}
-
-export function createEmptyReadModel(nowIso: string): OrchestrationReadModel
-{
+export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [],
     threads: [],
-    orchestrateRuns: [],
-    orchestrateRunExecutions: [],
     updatedAt: nowIso,
-  }
+  };
 }
 
 export function projectEvent(
   model: OrchestrationReadModel,
   event: OrchestrationEvent,
-): Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError>
-{
+): Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError> {
   const nextBase: OrchestrationReadModel = {
     ...model,
     snapshotSequence: event.sequence,
     updatedAt: event.occurredAt,
-  }
+  };
 
-  switch (event.type)
-  {
-    case 'project.created':
-      return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, 'payload').pipe(
-        Effect.map((payload) =>
-        {
-          const existing = nextBase.projects.find((entry) => entry.id === payload.projectId)
+  switch (event.type) {
+    case "project.created":
+      return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const existing = nextBase.projects.find((entry) => entry.id === payload.projectId);
           const nextProject = {
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
+            defaultThreadEnvMode: null,
+            autoPull: false,
+            faviconPath: payload.faviconPath ?? null,
+            projectIcon: payload.projectIcon ?? null,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
-          }
+          };
 
           return {
             ...nextBase,
@@ -537,12 +351,12 @@ export function projectEvent(
                   entry.id === payload.projectId ? nextProject : entry,
                 )
               : [...nextBase.projects, nextProject],
-          }
+          };
         }),
-      )
+      );
 
-    case 'project.meta-updated':
-      return decodeForEvent(ProjectMetaUpdatedPayload, event.payload, event.type, 'payload').pipe(
+    case "project.meta-updated":
+      return decodeForEvent(ProjectMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           projects: nextBase.projects.map((project) =>
@@ -556,16 +370,26 @@ export function projectEvent(
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
+                  ...(payload.defaultThreadEnvMode !== undefined
+                    ? { defaultThreadEnvMode: payload.defaultThreadEnvMode }
+                    : {}),
+                  ...(payload.autoPull !== undefined ? { autoPull: payload.autoPull } : {}),
+                  ...(payload.faviconPath !== undefined
+                    ? { faviconPath: payload.faviconPath }
+                    : {}),
+                  ...(payload.projectIcon !== undefined
+                    ? { projectIcon: payload.projectIcon }
+                    : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
           ),
         })),
-      )
+      );
 
-    case 'project.deleted':
-      return decodeForEvent(ProjectDeletedPayload, event.payload, event.type, 'payload').pipe(
+    case "project.deleted":
+      return decodeForEvent(ProjectDeletedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           projects: nextBase.projects.map((project) =>
@@ -578,17 +402,16 @@ export function projectEvent(
               : project,
           ),
         })),
-      )
+      );
 
-    case 'thread.created':
-      return Effect.gen(function* ()
-      {
+    case "thread.created":
+      return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
           ThreadCreatedPayload,
           event.payload,
           event.type,
-          'payload',
-        )
+          "payload",
+        );
         const thread: OrchestrationThread = yield* decodeForEvent(
           OrchestrationThread,
           {
@@ -598,51 +421,40 @@ export function projectEvent(
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
-            ...(payload.orchestrate !== undefined ? { orchestrate: payload.orchestrate } : {}),
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            pullRequests: [],
+            branchPullRequest: null,
             latestTurn: null,
-            pendingHandoff: null,
-            providerSwitch: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
-            archiveGeneration: 0,
-            origin: payload.origin,
             settledOverride: null,
             settledAt: null,
             unsettledAt: null,
+            activeOrderKey: null,
             snoozedUntil: null,
             snoozedAt: null,
-            pinnedAt: null,
-            activeOrderKey: null,
             deletedAt: null,
             messages: [],
             activities: [],
             checkpoints: [],
             session: null,
-            approvalOutcomes: [],
           },
           event.type,
-          'thread',
-        )
-        const existing = nextBase.threads.find((entry) => entry.id === thread.id)
+          "thread",
+        );
+        const existing = nextBase.threads.find((entry) => entry.id === thread.id);
         return {
           ...nextBase,
           threads: existing
             ? nextBase.threads.map((entry) => (entry.id === thread.id ? thread : entry))
             : [...nextBase.threads, thread],
-          orchestrateRuns: (nextBase.orchestrateRuns ?? []).filter(
-            (run) => run.threadId !== thread.id,
-          ),
-          orchestrateRunExecutions: (nextBase.orchestrateRunExecutions ?? []).filter(
-            (execution) => execution.threadId !== thread.id,
-          ),
-        }
-      })
+        };
+      });
 
-    case 'thread.deleted':
-      return decodeForEvent(ThreadDeletedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.deleted":
+      return decodeForEvent(ThreadDeletedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -650,22 +462,22 @@ export function projectEvent(
             updatedAt: payload.deletedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.archived':
-      return decodeForEvent(ThreadArchivedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.archived":
+      return decodeForEvent(ThreadArchivedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             archivedAt: payload.archivedAt,
-            archiveGeneration: payload.archiveGeneration ?? 0,
+            titleRegeneration: null,
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.unarchived':
-      return decodeForEvent(ThreadUnarchivedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.unarchived":
+      return decodeForEvent(ThreadUnarchivedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -673,45 +485,46 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.settled':
-      return decodeForEvent(ThreadSettledPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.settled":
+      return decodeForEvent(ThreadSettledPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
-            settledOverride: 'settled',
+            settledOverride: "settled",
             settledAt: payload.settledAt,
             unsettledAt: null,
             activeOrderKey: null,
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.unsettled':
-      return decodeForEvent(ThreadUnsettledPayload, event.payload, event.type, 'payload').pipe(
-        Effect.map((payload) =>
-        {
-          const existing = nextBase.threads.find((thread) => thread.id === payload.threadId)
+    case "thread.unsettled":
+      return decodeForEvent(ThreadUnsettledPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const existing = nextBase.threads.find((thread) => thread.id === payload.threadId);
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              settledOverride: payload.reason === 'user' ? 'active' : null,
+              settledOverride: payload.reason === "user" ? "active" : null,
               settledAt: null,
-              // clearing an existing active pin is not a list re-entry
+              // Re-entry stamp for active-list ordering. A thread already
+              // pinned active keeps its stamp: the activity reset that clears
+              // the pin is not a re-entry and must not reorder the list.
               unsettledAt:
-                existing?.settledOverride === 'active'
+                existing?.settledOverride === "active"
                   ? (existing.unsettledAt ?? null)
                   : payload.updatedAt,
               updatedAt: payload.updatedAt,
             }),
-          }
+          };
         }),
-      )
+      );
 
-    case 'thread.snoozed':
-      return decodeForEvent(ThreadSnoozedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.snoozed":
+      return decodeForEvent(ThreadSnoozedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -720,10 +533,10 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.unsnoozed':
-      return decodeForEvent(ThreadUnsnoozedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.unsnoozed":
+      return decodeForEvent(ThreadUnsnoozedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -732,166 +545,174 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.pinned':
-      return decodeForEvent(ThreadPinnedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.pinned":
+      return decodeForEvent(ThreadPinnedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             pinnedAt: payload.pinnedAt,
+            ...(payload.pinOrderKey !== undefined ? { pinOrderKey: payload.pinOrderKey } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.unpinned':
-      return decodeForEvent(ThreadUnpinnedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.unpinned":
+      return decodeForEvent(ThreadUnpinnedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             pinnedAt: null,
+            // Unpin clears the slot: re-pinning is "pin again", not "restore
+            // an ancient position".
+            pinOrderKey: null,
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.meta-updated':
-      return decodeForEvent(ThreadMetaUpdatedPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.pin-reordered":
+      return decodeForEvent(ThreadPinReorderedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
-            ...(payload.title !== undefined ? { title: payload.title } : {}),
-            ...(payload.modelSelection !== undefined
-              ? { modelSelection: payload.modelSelection }
-              : {}),
-            ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
-            ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
-            ...(payload.activeOrderKey !== undefined
-              ? { activeOrderKey: payload.activeOrderKey }
-              : {}),
+            pinOrderKey: payload.orderKey,
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    // updatedAt is left alone on purpose; see ThreadOrchestrateRunIntegrationSetPayload
-    case 'thread.orchestrate-run-integration-set':
-      if (
-        nextBase.threads.find((thread) => thread.id === event.payload.threadId)
-          ?.orchestrateRunExecution !== undefined
-      )
-      {
-        return Effect.succeed(nextBase)
-      }
+    case "thread.meta-updated":
+      return decodeForEvent(ThreadMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          // Legacy single-link events replay into the link array so the
+          // derived linkedPullRequest and pullRequests never disagree.
+          const legacyLinkPatch =
+            thread !== undefined && payload.linkedPullRequest !== undefined
+              ? pullRequestsPatch(
+                  thread,
+                  legacyLinkToPullRequests(
+                    thread,
+                    nextBase.projects.find((project) => project.id === thread.projectId),
+                    payload.linkedPullRequest,
+                    payload.updatedAt,
+                  ),
+                  nextBase.projects,
+                )
+              : {};
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              ...(payload.title !== undefined ? { title: payload.title } : {}),
+              ...(payload.titleRegeneration !== undefined
+                ? { titleRegeneration: payload.titleRegeneration }
+                : {}),
+              ...(payload.modelSelection !== undefined
+                ? { modelSelection: payload.modelSelection }
+                : {}),
+              ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
+              ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+              ...(payload.activeOrderKey !== undefined
+                ? { activeOrderKey: payload.activeOrderKey }
+                : {}),
+              ...(payload.branchPullRequest !== undefined
+                ? { branchPullRequest: payload.branchPullRequest }
+                : {}),
+              ...legacyLinkPatch,
+              updatedAt: payload.updatedAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.pull-request-linked":
       return decodeForEvent(
-        ThreadOrchestrateRunIntegrationSetPayload,
+        ThreadPullRequestLinkedPayload,
         event.payload,
         event.type,
-        'payload',
+        "payload",
       ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            orchestrateRunWorktreePath: payload.worktreePath,
-            orchestrateRunBranch: payload.branch,
-          }),
-        })),
-      )
-
-    case 'thread.orchestrate-run-execution-admitted':
-      return decodeForEvent(
-        ThreadOrchestrateRunExecutionAdmittedPayload,
-        event.payload,
-        event.type,
-        'payload',
-      ).pipe(
-        Effect.map(({ execution }) =>
-        {
-          const nextExecution = { ...execution, current: true }
-          const orchestrateRunExecutions = [
-            ...(nextBase.orchestrateRunExecutions ?? [])
-              .filter(
-                (entry) =>
-                  entry.threadId !== execution.threadId ||
-                  entry.runId !== execution.runId ||
-                  entry.planRevision !== execution.planRevision,
-              )
-              .map((entry) =>
-                entry.threadId === execution.threadId && entry.current
-                  ? { ...entry, current: false }
-                  : entry,
-              ),
-            nextExecution,
-          ]
-          const existingRun = (nextBase.orchestrateRuns ?? []).find(
-            (entry) => entry.threadId === execution.threadId && entry.runId === execution.runId,
-          )
-          const nextRun = {
-            threadId: execution.threadId,
-            runId: execution.runId,
-            currentPlanRevision: execution.planRevision,
-            createdAt: existingRun?.createdAt ?? execution.admittedAt,
-            updatedAt: execution.updatedAt,
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
           }
           return {
             ...nextBase,
-            orchestrateRuns: [
-              ...(nextBase.orchestrateRuns ?? []).filter(
-                (entry) => entry.threadId !== execution.threadId || entry.runId !== execution.runId,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              ...pullRequestsPatch(
+                thread,
+                upsertPullRequestLink(thread.pullRequests, payload.link),
+                nextBase.projects,
               ),
-              nextRun,
-            ],
-            orchestrateRunExecutions,
-            threads: updateThread(nextBase.threads, execution.threadId, {
-              orchestrateRunExecution: nextExecution,
-              orchestrateRunWorktreePath:
-                nextExecution.availability === 'available' ? nextExecution.integrationRoot : null,
-              orchestrateRunBranch:
-                nextExecution.availability === 'available' ? nextExecution.integrationBranch : null,
+              updatedAt: payload.updatedAt,
             }),
-          }
+          };
         }),
-      )
+      );
 
-    case 'thread.orchestrate-run-execution-updated':
+    case "thread.pull-request-unlinked":
       return decodeForEvent(
-        ThreadOrchestrateRunExecutionUpdatedPayload,
+        ThreadPullRequestUnlinkedPayload,
         event.payload,
         event.type,
-        'payload',
+        "payload",
       ).pipe(
-        Effect.map(({ execution }) =>
-        {
-          const orchestrateRunExecutions = [
-            ...(nextBase.orchestrateRunExecutions ?? []).filter(
-              (entry) =>
-                entry.threadId !== execution.threadId ||
-                entry.runId !== execution.runId ||
-                entry.planRevision !== execution.planRevision,
-            ),
-            execution,
-          ]
-          if (!execution.current)
-          {
-            return { ...nextBase, orchestrateRunExecutions }
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
           }
           return {
             ...nextBase,
-            orchestrateRunExecutions,
-            threads: updateThread(nextBase.threads, execution.threadId, {
-              orchestrateRunExecution: execution,
-              orchestrateRunWorktreePath:
-                execution.availability === 'available' ? execution.integrationRoot : null,
-              orchestrateRunBranch:
-                execution.availability === 'available' ? execution.integrationBranch : null,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              ...pullRequestsPatch(
+                thread,
+                removePullRequestLink(thread.pullRequests, payload),
+                nextBase.projects,
+              ),
+              updatedAt: payload.updatedAt,
             }),
-          }
+          };
         }),
-      )
+      );
 
-    case 'thread.runtime-mode-set':
-      return decodeForEvent(ThreadRuntimeModeSetPayload, event.payload, event.type, 'payload').pipe(
+    case "thread.pull-request-synced":
+      return decodeForEvent(
+        ThreadPullRequestSyncedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          // A sync for a link the user removed in the meantime is stale; drop it.
+          if (
+            !thread ||
+            !thread.pullRequests.some((link) => threadPullRequestKeysEqual(link, payload))
+          ) {
+            return nextBase;
+          }
+          const pullRequests = thread.pullRequests.map((link) =>
+            threadPullRequestKeysEqual(link, payload)
+              ? { ...link, snapshot: payload.snapshot, stack: payload.stack }
+              : link,
+          );
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              ...pullRequestsPatch(thread, pullRequests, nextBase.projects),
+              updatedAt: payload.updatedAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.runtime-mode-set":
+      return decodeForEvent(ThreadRuntimeModeSetPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -899,234 +720,35 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.interaction-mode-set':
+    case "thread.interaction-mode-set":
       return decodeForEvent(
         ThreadInteractionModeSetPayload,
         event.payload,
         event.type,
-        'payload',
+        "payload",
       ).pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             interactionMode: payload.interactionMode,
-            orchestrate: payload.orchestrate ?? false,
             updatedAt: payload.updatedAt,
           }),
         })),
-      )
+      );
 
-    case 'thread.provider-switch-requested':
-      return decodeForEvent(
-        ThreadProviderSwitchRequestedPayload,
-        event.payload,
-        event.type,
-        'payload',
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            providerSwitch: {
-              phase: 'pending',
-              targetInstanceId: payload.targetModelSelection.instanceId,
-              targetModel: payload.targetModelSelection.model,
-              requestedAt: event.occurredAt,
-              requestId: event.eventId,
-              requestSequence: event.sequence,
-              sourceModelSelection:
-                payload.sourceModelSelection ??
-                nextBase.threads.find((thread) => thread.id === payload.threadId)?.modelSelection,
-            },
-            updatedAt: event.occurredAt,
-          }),
-        })),
-      )
-
-    case 'thread.provider-switch-progressed':
-      return decodeForEvent(
-        ThreadProviderSwitchProgressedPayload,
-        event.payload,
-        event.type,
-        'payload',
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: nextBase.threads.map((thread) =>
-            thread.id === payload.threadId &&
-            thread.providerSwitch !== null &&
-            (payload.requestId === undefined ||
-              thread.providerSwitch.requestId === payload.requestId)
-              ? {
-                  ...thread,
-                  providerSwitch: { ...thread.providerSwitch, phase: payload.phase },
-                  updatedAt: event.occurredAt,
-                }
-              : thread,
-          ),
-        })),
-      )
-
-    case 'thread.provider-switch-failed':
-      return decodeForEvent(
-        ThreadProviderSwitchFailedPayload,
-        event.payload,
-        event.type,
-        'payload',
-      ).pipe(
-        Effect.map((payload) =>
-        {
-          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-          if (!thread)
-          {
-            return nextBase
-          }
-          const target = thread.providerSwitch
-          if (payload.requestId !== undefined && target?.requestId !== payload.requestId)
-          {
-            return nextBase
-          }
-          const sourceModelSelection = payload.sourceModelSelection ?? thread.modelSelection
-          const targetModelSelection =
-            payload.targetModelSelection ??
-            (target === null
-              ? undefined
-              : { instanceId: target.targetInstanceId, model: target.targetModel })
-          const activity: OrchestrationThread['activities'][number] = {
-            id: event.eventId,
-            tone: 'error',
-            kind: 'provider.switch.failed',
-            summary: 'Provider switch failed',
-            payload: {
-              reasonCode: payload.reasonCode,
-              detail: payload.detail,
-              fromInstanceId: sourceModelSelection.instanceId,
-              fromModel: sourceModelSelection.model,
-              ...(targetModelSelection === undefined
-                ? {}
-                : {
-                    toInstanceId: targetModelSelection.instanceId,
-                    toModel: targetModelSelection.model,
-                    retryTargetModelSelection: targetModelSelection,
-                  }),
-            },
-            turnId: null,
-            sequence: event.sequence,
-            createdAt: event.occurredAt,
-          }
-          const hasHistoricalActivity =
-            payload.activityVersion === undefined &&
-            thread.activities.some((entry) => isAdjacentProviderSwitchActivity(entry, activity))
-          return {
-            ...nextBase,
-            threads: updateThread(nextBase.threads, payload.threadId, {
-              providerSwitch: null,
-              activities: hasHistoricalActivity
-                ? thread.activities
-                : appendProjectedActivity(thread.activities, activity),
-              updatedAt: event.occurredAt,
-            }),
-          }
-        }),
-      )
-
-    case 'thread.provider-switched':
-      return decodeForEvent(
-        ThreadProviderSwitchedPayload,
-        event.payload,
-        event.type,
-        'payload',
-      ).pipe(
-        Effect.map((payload) =>
-        {
-          const threadId = ThreadId.make(event.aggregateId)
-          const thread = nextBase.threads.find((entry) => entry.id === threadId)
-          if (!thread)
-          {
-            return nextBase
-          }
-          if (
-            payload.requestId !== undefined &&
-            thread.providerSwitch?.requestId !== payload.requestId
-          )
-          {
-            return nextBase
-          }
-          const sourceModelSelection = payload.sourceModelSelection ?? {
-            instanceId: payload.fromInstanceId ?? thread.modelSelection.instanceId,
-            model: payload.fromModel ?? thread.modelSelection.model,
-          }
-          const activity: OrchestrationThread['activities'][number] = {
-            id: event.eventId,
-            tone: 'info',
-            kind: 'provider.switch.completed',
-            summary: `Switched from ${
-              sourceModelSelection.model ?? sourceModelSelection.instanceId ?? 'prior provider'
-            } to ${payload.modelSelection.model || payload.modelSelection.instanceId}`,
-            payload: {
-              fromInstanceId: sourceModelSelection.instanceId,
-              fromModel: sourceModelSelection.model,
-              toInstanceId: payload.modelSelection.instanceId,
-              toModel: payload.modelSelection.model,
-              targetModelSelection: payload.modelSelection,
-            },
-            turnId: null,
-            sequence: event.sequence,
-            createdAt: event.occurredAt,
-          }
-          const hasHistoricalActivity =
-            payload.activityVersion === undefined &&
-            thread.activities.some((entry) => isAdjacentProviderSwitchActivity(entry, activity))
-          return {
-            ...nextBase,
-            threads: updateThread(nextBase.threads, threadId, {
-              modelSelection: payload.modelSelection,
-              providerSwitch: null,
-              // empty text contributes no new context, so preserve any
-              // unconsumed handoff until delivery or explicit clearing
-              pendingHandoff:
-                payload.handoffText.trim().length > 0
-                  ? {
-                      text: payload.handoffText,
-                      fromInstanceId: payload.fromInstanceId,
-                      ...(payload.fromModel !== undefined ? { fromModel: payload.fromModel } : {}),
-                      createdAt: event.occurredAt,
-                    }
-                  : thread.pendingHandoff,
-              activities: hasHistoricalActivity
-                ? thread.activities
-                : appendProjectedActivity(thread.activities, activity),
-              updatedAt: event.occurredAt,
-            }),
-          }
-        }),
-      )
-
-    case 'thread.handoff-cleared':
-      return decodeForEvent(ThreadHandoffClearedPayload, event.payload, event.type, 'payload').pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            pendingHandoff: null,
-            updatedAt: event.occurredAt,
-          }),
-        })),
-      )
-
-    case 'thread.message-sent':
-      return Effect.gen(function* ()
-      {
+    case "thread.message-sent":
+      return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
           MessageSentPayloadSchema,
           event.payload,
           event.type,
-          'payload',
-        )
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-        if (!thread)
-        {
-          return nextBase
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
         }
 
         const message: OrchestrationMessage = yield* decodeForEvent(
@@ -1136,16 +758,17 @@ export function projectEvent(
             role: payload.role,
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
+            ...(payload.context !== undefined ? { context: payload.context } : {}),
             turnId: payload.turnId,
             streaming: payload.streaming,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
           },
           event.type,
-          'message',
-        )
+          "message",
+        );
 
-        const existingMessage = thread.messages.find((entry) => entry.id === message.id)
+        const existingMessage = thread.messages.find((entry) => entry.id === message.id);
         const messages = existingMessage
           ? thread.messages.map((entry) =>
               entry.id === message.id
@@ -1162,11 +785,12 @@ export function projectEvent(
                     ...(message.attachments !== undefined
                       ? { attachments: message.attachments }
                       : {}),
+                    ...(message.context !== undefined ? { context: message.context } : {}),
                   }
                 : entry,
             )
-          : [...thread.messages, message]
-        const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES)
+          : [...thread.messages, message];
+        const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
 
         return {
           ...nextBase,
@@ -1174,67 +798,41 @@ export function projectEvent(
             messages: cappedMessages,
             updatedAt: event.occurredAt,
           }),
-        }
-      })
+        };
+      });
 
-    case 'thread.session-stop-requested':
-    {
-      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId)
-      if (!thread?.session)
-      {
-        return Effect.succeed(nextBase)
-      }
-      return Effect.succeed({
-        ...nextBase,
-        threads: updateThread(nextBase.threads, event.payload.threadId, {
-          session: {
-            ...thread.session,
-            status: 'stopped',
-            activeTurnId: null,
-            updatedAt: event.payload.createdAt,
-          },
-          updatedAt: event.occurredAt,
-        }),
-      })
-    }
-
-    case 'thread.provider-continuation-clear-requested':
-      return Effect.succeed(nextBase)
-
-    case 'thread.session-set':
-      return Effect.gen(function* ()
-      {
+    case "thread.session-set":
+      return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
           ThreadSessionSetPayload,
           event.payload,
           event.type,
-          'payload',
-        )
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-        if (!thread)
-        {
-          return nextBase
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
         }
 
         const session: OrchestrationSession = yield* decodeForEvent(
           OrchestrationSession,
           payload.session,
           event.type,
-          'session',
-        )
+          "session",
+        );
 
-        // leaving the "running" session status is the turn-end signal: settle
+        // Leaving the "running" session status is the turn-end signal: settle
         // a still-running latest turn so its duration reflects the whole turn.
-        const settledTurnState = settledTurnStateForSessionStatus(session.status)
+        const settledTurnState = settledTurnStateForSessionStatus(session.status);
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
             latestTurn:
-              session.status === 'running' && session.activeTurnId !== null
+              session.status === "running" && session.activeTurnId !== null
                 ? {
                     turnId: session.activeTurnId,
-                    state: 'running',
+                    state: "running",
                     requestedAt:
                       thread.latestTurn?.turnId === session.activeTurnId
                         ? thread.latestTurn.requestedAt
@@ -1250,12 +848,12 @@ export function projectEvent(
                         : null,
                   }
                 : thread.latestTurn !== null &&
-                    thread.latestTurn.state === 'running' &&
+                    thread.latestTurn.state === "running" &&
                     settledTurnState !== null
                   ? {
                       ...thread.latestTurn,
                       state: settledTurnState,
-                      // a running turn's completedAt can only hold a mid-turn
+                      // A running turn's completedAt can only hold a mid-turn
                       // placeholder checkpoint timestamp — the session leaving
                       // "running" is the authoritative turn end.
                       completedAt: session.updatedAt,
@@ -1263,22 +861,20 @@ export function projectEvent(
                   : thread.latestTurn,
             updatedAt: event.occurredAt,
           }),
-        }
-      })
+        };
+      });
 
-    case 'thread.proposed-plan-upserted':
-      return Effect.gen(function* ()
-      {
+    case "thread.proposed-plan-upserted":
+      return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
           ThreadProposedPlanUpsertedPayload,
           event.payload,
           event.type,
-          'payload',
-        )
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-        if (!thread)
-        {
-          return nextBase
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
         }
 
         const proposedPlans = [
@@ -1289,7 +885,7 @@ export function projectEvent(
             (left, right) =>
               left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
           )
-          .slice(-200)
+          .slice(-200);
 
         return {
           ...nextBase,
@@ -1297,120 +893,20 @@ export function projectEvent(
             proposedPlans,
             updatedAt: event.occurredAt,
           }),
-        }
-      })
+        };
+      });
 
-    case 'thread.orchestrate-plan-upserted':
-      return Effect.gen(function* ()
-      {
-        const payload = yield* decodeForEvent(
-          ThreadOrchestratePlanUpsertedPayload,
-          event.payload,
-          event.type,
-          'payload',
-        )
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-        if (!thread)
-        {
-          return nextBase
-        }
-
-        // a new revision supersedes older pending revisions of the same run
-        const orchestratePlans = [
-          ...thread.orchestratePlans
-            .filter(
-              (entry) =>
-                entry.runId !== payload.plan.runId || entry.revision !== payload.plan.revision,
-            )
-            .map((entry) =>
-              entry.runId === payload.plan.runId &&
-              entry.revision < payload.plan.revision &&
-              entry.status === 'pending'
-                ? {
-                    ...entry,
-                    status: 'superseded' as const,
-                    updatedAt: payload.plan.updatedAt,
-                  }
-                : entry,
-            ),
-          { ...payload.plan, sourceSequence: event.sequence },
-        ]
-          .toSorted(
-            (left, right) =>
-              left.createdAt.localeCompare(right.createdAt) ||
-              left.runId.localeCompare(right.runId) ||
-              left.revision - right.revision,
-          )
-          .slice(-200)
-
-        return {
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            orchestratePlans,
-            updatedAt: event.occurredAt,
-          }),
-        }
-      })
-
-    case 'thread.orchestrate-plan-response-requested':
-      return Effect.gen(function* ()
-      {
-        const payload = yield* decodeForEvent(
-          ThreadOrchestratePlanResponseRequestedPayload,
-          event.payload,
-          event.type,
-          'payload',
-        )
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-        const plan = thread?.orchestratePlans.find(
-          (entry) => entry.runId === payload.runId && entry.revision === payload.revision,
-        )
-        if (!thread || !plan)
-        {
-          yield* Effect.logWarning('ignoring response for unknown orchestrate plan revision', {
-            threadId: payload.threadId,
-            runId: payload.runId,
-            revision: payload.revision,
-          })
-          return nextBase
-        }
-        if (payload.decision === 'discuss')
-        {
-          return nextBase
-        }
-
-        const status = payload.decision === 'approve' ? 'approved' : 'rejected'
-        return {
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            orchestratePlans: thread.orchestratePlans.map((entry) =>
-              entry.runId === payload.runId && entry.revision === payload.revision
-                ? { ...entry, status, updatedAt: payload.createdAt }
-                : entry,
-            ),
-            updatedAt: event.occurredAt,
-          }),
-        }
-      })
-
-    // turn-zero identity is durable projection evidence but is intentionally
-    // absent from the public turn timeline because no turn owns that boundary
-    case 'thread.checkpoint-baseline-recorded':
-      return Effect.succeed(nextBase)
-
-    case 'thread.turn-diff-completed':
-      return Effect.gen(function* ()
-      {
+    case "thread.turn-diff-completed":
+      return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
           ThreadTurnDiffCompletedPayload,
           event.payload,
           event.type,
-          'payload',
-        )
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-        if (!thread)
-        {
-          return nextBase
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
         }
 
         const checkpoint = yield* decodeForEvent(
@@ -1423,23 +919,19 @@ export function projectEvent(
             files: payload.files,
             assistantMessageId: payload.assistantMessageId,
             completedAt: payload.completedAt,
-            checkpointCaptureRoot: payload.checkpointCaptureRoot ?? null,
-            checkpointRepositoryCommonDir: payload.checkpointRepositoryCommonDir ?? null,
-            checkpointCommitOid: payload.checkpointCommitOid ?? null,
           },
           event.type,
-          'checkpoint',
-        )
+          "checkpoint",
+        );
 
-        // do not let a placeholder (status "missing") overwrite a checkpoint
+        // Do not let a placeholder (status "missing") overwrite a checkpoint
         // that has already been captured with a real git ref (status "ready").
         // ProviderRuntimeIngestion may fire multiple turn.diff.updated events
         // per turn; without this guard later placeholders would clobber the
         // real capture dispatched by CheckpointReactor.
-        const existing = thread.checkpoints.find((entry) => entry.turnId === checkpoint.turnId)
-        if (existing && existing.status !== 'missing' && checkpoint.status === 'missing')
-        {
-          return nextBase
+        const existing = thread.checkpoints.find((entry) => entry.turnId === checkpoint.turnId);
+        if (existing && existing.status !== "missing" && checkpoint.status === "missing") {
+          return nextBase;
         }
 
         const checkpoints = [
@@ -1447,12 +939,12 @@ export function projectEvent(
           checkpoint,
         ]
           .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
-          .slice(-MAX_THREAD_CHECKPOINTS)
+          .slice(-MAX_THREAD_CHECKPOINTS);
 
-        // mid-turn diff updates produce placeholder checkpoints; record the
+        // Mid-turn diff updates produce placeholder checkpoints; record the
         // checkpoint, but don't settle a turn its session is still running.
         const turnStillRunning =
-          thread.session?.status === 'running' && thread.session.activeTurnId === payload.turnId
+          thread.session?.status === "running" && thread.session.activeTurnId === payload.turnId;
 
         return {
           ...nextBase,
@@ -1464,8 +956,8 @@ export function projectEvent(
                   turnId: payload.turnId,
                   state:
                     thread.latestTurn?.turnId === payload.turnId &&
-                    thread.latestTurn.state === 'interrupted'
-                      ? 'interrupted'
+                    thread.latestTurn.state === "interrupted"
+                      ? "interrupted"
                       : checkpointStatusToLatestTurnState(payload.status),
                   requestedAt:
                     thread.latestTurn?.turnId === payload.turnId
@@ -1480,40 +972,34 @@ export function projectEvent(
                 },
             updatedAt: event.occurredAt,
           }),
-        }
-      })
+        };
+      });
 
-    case 'thread.reverted':
-      return decodeForEvent(ThreadRevertedPayload, event.payload, event.type, 'payload').pipe(
-        Effect.map((payload) =>
-        {
-          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-          if (!thread)
-          {
-            return nextBase
+    case "thread.reverted":
+      return decodeForEvent(ThreadRevertedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
           }
 
           const checkpoints = thread.checkpoints
             .filter((entry) => entry.checkpointTurnCount <= payload.turnCount)
             .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
-            .slice(-MAX_THREAD_CHECKPOINTS)
-          const retainedTurnIds = new Set(checkpoints.map((checkpoint) => checkpoint.turnId))
+            .slice(-MAX_THREAD_CHECKPOINTS);
+          const retainedTurnIds = new Set(checkpoints.map((checkpoint) => checkpoint.turnId));
           const messages = retainThreadMessagesAfterRevert(
             thread.messages,
             retainedTurnIds,
             payload.turnCount,
-          ).slice(-MAX_THREAD_MESSAGES)
+          ).slice(-MAX_THREAD_MESSAGES);
           const proposedPlans = retainThreadProposedPlansAfterRevert(
             thread.proposedPlans,
             retainedTurnIds,
-          ).slice(-200)
-          const orchestratePlans = retainThreadOrchestratePlansAfterRevert(
-            thread.orchestratePlans,
-            retainedTurnIds,
-          ).slice(-200)
-          const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds)
+          ).slice(-200);
+          const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds);
 
-          const latestCheckpoint = checkpoints.at(-1) ?? null
+          const latestCheckpoint = checkpoints.at(-1) ?? null;
           const latestTurn =
             latestCheckpoint === null
               ? null
@@ -1524,7 +1010,7 @@ export function projectEvent(
                   startedAt: latestCheckpoint.completedAt,
                   completedAt: latestCheckpoint.completedAt,
                   assistantMessageId: latestCheckpoint.assistantMessageId,
-                }
+                };
 
           return {
             ...nextBase,
@@ -1532,124 +1018,45 @@ export function projectEvent(
               checkpoints,
               messages,
               proposedPlans,
-              orchestratePlans,
               activities,
               latestTurn,
               updatedAt: event.occurredAt,
             }),
-          }
+          };
         }),
-      )
+      );
 
-    case 'thread.activity-appended':
+    case "thread.activity-appended":
       return decodeForEvent(
         ThreadActivityAppendedPayload,
         event.payload,
         event.type,
-        'payload',
+        "payload",
       ).pipe(
-        Effect.map((payload) =>
-        {
-          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-          if (!thread)
-          {
-            return nextBase
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
           }
 
-          const isProviderSwitchActivity =
-            payload.activity.kind === 'provider.switch.failed' ||
-            payload.activity.kind === 'provider.switch.completed'
-          const activity =
-            isProviderSwitchActivity && payload.activity.sequence === undefined
-              ? { ...payload.activity, sequence: event.sequence }
-              : payload.activity
-          const replacedActivityId = isProviderSwitchActivity
-            ? thread.activities.findLast(
-                (entry) =>
-                  event.causationEventId === entry.id ||
-                  isAdjacentProviderSwitchActivity(entry, activity),
-              )?.id
-            : undefined
-          const activities = [
-            ...thread.activities.filter(
-              (entry) => entry.id !== activity.id && entry.id !== replacedActivityId,
-            ),
-            activity,
-          ].toSorted(compareOrchestrationThreadActivities)
-          const importFinalized =
-            thread.origin !== null &&
-            thread.latestTurn === null &&
-            isImportContinuationActivity(activity)
-          const approvalOutcome = approvalOutcomeFromActivity(activity)
-          const orchestratePlans =
-            activity.kind === 'provider.orchestrate-plan.respond.failed'
-              ? revertOrchestratePlansAfterRespondFailure(
-                  thread.orchestratePlans,
-                  activity.payload,
-                  activity.createdAt,
-                )
-              : thread.orchestratePlans
+          const activities = retainThreadActivities(
+            [
+              ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
+              payload.activity,
+            ].toSorted(compareThreadActivities),
+          );
 
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              activities: importFinalized
-                ? compactFinalizedImportActivities(activities)
-                : retainThreadActivities(activities),
-              orchestratePlans,
-              pendingHandoff:
-                activity.kind === 'provider.handoff.delivered' ? null : thread.pendingHandoff,
-              ...(approvalOutcome === null
-                ? {}
-                : {
-                    approvalOutcomes: upsertApprovalOutcome(
-                      thread.approvalOutcomes,
-                      approvalOutcome,
-                    ),
-                  }),
-              ...(importFinalized
-                ? {
-                    messages: [],
-                    checkpoints: [],
-                  }
-                : {}),
+              activities,
               updatedAt: event.occurredAt,
             }),
-          }
+          };
         }),
-      )
-
-    case 'thread.approval-response-requested':
-      return decodeForEvent(
-        ThreadApprovalResponseRequestedPayload,
-        event.payload,
-        event.type,
-        'payload',
-      ).pipe(
-        Effect.map((payload) =>
-        {
-          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
-          if (!thread)
-          {
-            return nextBase
-          }
-          const outcome = payload.approvalOutcome ?? {
-            requestId: payload.requestId,
-            status: 'responding' as const,
-            requestedDecision: payload.decision,
-            updatedAt: payload.createdAt,
-          }
-          return {
-            ...nextBase,
-            threads: updateThread(nextBase.threads, payload.threadId, {
-              approvalOutcomes: upsertApprovalOutcome(thread.approvalOutcomes, outcome),
-              updatedAt: event.occurredAt,
-            }),
-          }
-        }),
-      )
+      );
 
     default:
-      return Effect.succeed(nextBase)
+      return Effect.succeed(nextBase);
   }
 }

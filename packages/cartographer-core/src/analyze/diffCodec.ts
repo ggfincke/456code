@@ -1,20 +1,17 @@
-// packages/cartographer-core/src/analyze/diffCodec.ts
-// strictly decodes sealed structural graph-diff artifacts
+import { z } from "zod";
 
-import { z } from 'zod'
-
-import type { GraphDiff } from './diff.js'
+import type { GraphDiff } from "./diff.js";
 
 const EdgeEndpointsSchema = z
   .object({
     from: z.string(),
     to: z.string(),
   })
-  .strict()
+  .strict();
 
 const MoveFlowSchema = EdgeEndpointsSchema.extend({
   count: z.number().int().nonnegative(),
-}).strict()
+}).strict();
 
 const ExportChangeSchema = z
   .object({
@@ -22,7 +19,7 @@ const ExportChangeSchema = z
     typeOnly: z.boolean().optional(),
     brokenConsumers: z.array(z.string()).optional(),
   })
-  .strict()
+  .strict();
 
 const FileApiChangeSchema = z
   .object({
@@ -30,16 +27,16 @@ const FileApiChangeSchema = z
     addedExports: z.array(ExportChangeSchema),
     removedExports: z.array(ExportChangeSchema),
   })
-  .strict()
+  .strict();
 
 const ViolationDeltaSchema = z
   .object({
     from: z.string(),
     to: z.string(),
     rule: z.string(),
-    severity: z.enum(['error', 'warn', 'info']),
+    severity: z.enum(["error", "warn", "info"]),
   })
-  .strict()
+  .strict();
 
 const GraphDiffSchema = z
   .object({
@@ -59,11 +56,10 @@ const GraphDiffSchema = z
     resolvedViolations: z.array(ViolationDeltaSchema),
     changed: z.boolean(),
   })
-  .strict()
+  .strict();
 
-export function parseGraphDiff(value: unknown): GraphDiff
-{
-  const parsed = GraphDiffSchema.parse(value)
+export function parseGraphDiff(value: unknown): GraphDiff {
+  const parsed = GraphDiffSchema.parse(value);
   const apiChanges = parsed.apiChanges.map((change) => ({
     file: change.file,
     addedExports: change.addedExports.map((entry) => ({
@@ -76,7 +72,7 @@ export function parseGraphDiff(value: unknown): GraphDiff
       ...(entry.typeOnly === undefined ? {} : { typeOnly: entry.typeOnly }),
       ...(entry.brokenConsumers === undefined ? {} : { brokenConsumers: entry.brokenConsumers }),
     })),
-  }))
+  }));
   return {
     baseGeneratedAt: parsed.baseGeneratedAt,
     headGeneratedAt: parsed.headGeneratedAt,
@@ -93,5 +89,5 @@ export function parseGraphDiff(value: unknown): GraphDiff
     newViolations: parsed.newViolations,
     resolvedViolations: parsed.resolvedViolations,
     changed: parsed.changed,
-  }
+  };
 }

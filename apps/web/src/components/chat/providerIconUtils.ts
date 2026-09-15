@@ -1,46 +1,63 @@
-// apps/web/src/components/chat/providerIconUtils.ts
-// provide provider icon by integration
-
-import { ProviderDriverKind } from '@t3tools/contracts'
+import { CoralIcon } from "../../fincke/CoralIcon";
+import { ProviderDriverKind } from "@t3tools/contracts";
 import {
   AntigravityIcon,
   ClaudeAI,
-  CoralIcon,
   CursorIcon,
-  Gemini,
   GrokIcon,
   Icon,
   OpenAI,
   OpenCodeIcon,
-} from '../Icons'
-import { PROVIDER_OPTIONS } from '../../session-logic'
-
-export {
-  getDisplayModelName,
-  getTriggerDisplayModelLabel,
-  getTriggerDisplayModelName,
-  type ModelEsque,
-} from '../../lib/modelDisplay'
+} from "../Icons";
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
-  [ProviderDriverKind.make('codex')]: OpenAI,
-  [ProviderDriverKind.make('claudeAgent')]: ClaudeAI,
-  [ProviderDriverKind.make('opencode')]: OpenCodeIcon,
-  [ProviderDriverKind.make('cursor')]: CursorIcon,
-  [ProviderDriverKind.make('grok')]: GrokIcon,
-  [ProviderDriverKind.make('coral')]: CoralIcon,
-  [ProviderDriverKind.make('gemini')]: Gemini,
-  [ProviderDriverKind.make('antigravity')]: AntigravityIcon,
+  [ProviderDriverKind.make("codex")]: OpenAI,
+  [ProviderDriverKind.make("claudeAgent")]: ClaudeAI,
+  [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
+  [ProviderDriverKind.make("cursor")]: CursorIcon,
+  [ProviderDriverKind.make("grok")]: GrokIcon,
+  [ProviderDriverKind.make("coral")]: CoralIcon,
+  [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
+};
+
+export type ModelEsque = {
+  slug: string;
+  name: string;
+  shortName?: string | undefined;
+  subProvider?: string | undefined;
+  aliases?: ReadonlyArray<string> | undefined;
+  isDefault?: boolean | undefined;
+  badge?: "new" | undefined;
+  isLegacy?: boolean | undefined;
+  isUnavailable?: boolean | undefined;
+};
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
-  value: ProviderDriverKind
-  label: string
-  available: true
-  pickerSidebarBadge?: 'new' | 'soon'
-}
-{
-  return option.available
+function stripLeadingQualifier(value: string, qualifier: string | null | undefined): string {
+  const trimmedQualifier = qualifier?.trim();
+  if (!trimmedQualifier) {
+    return value;
+  }
+
+  const pattern = new RegExp(`^${escapeRegExp(trimmedQualifier)}(?:\\s*[.:/-]\\s*|\\s+)`, "iu");
+  return value.replace(pattern, "").trim() || value;
 }
 
-export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption)
+export function getDisplayModelName(
+  model: ModelEsque,
+  options?: { preferShortName?: boolean },
+): string {
+  const name = options?.preferShortName && model.shortName ? model.shortName : model.name;
+  return stripLeadingQualifier(name, model.subProvider);
+}
+
+export function getTriggerDisplayModelName(model: ModelEsque): string {
+  return getDisplayModelName(model, { preferShortName: true });
+}
+
+export function getTriggerDisplayModelLabel(model: ModelEsque): string {
+  return getTriggerDisplayModelName(model);
+}

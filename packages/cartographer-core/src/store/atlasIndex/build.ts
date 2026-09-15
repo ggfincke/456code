@@ -1,16 +1,13 @@
-// packages/cartographer-core/src/store/atlasIndex/build.ts
-// coarse atlas index membership, aggregation & file ranking
-
 // @effect-diagnostics nodeBuiltinImport:off
 
-import * as NodePath from 'node:path'
-import { fileDegrees } from '../../analyze/degrees.js'
+import * as NodePath from "node:path";
+import { fileDegrees } from "../../analyze/degrees.js";
 import {
   buildSemanticSnapshot,
   directoryPrefixes,
   type SemanticSnapshot,
-} from '../../analyze/semanticMembership.js'
-import { selectSystemHierarchy } from '../../analyze/systemHierarchy.js'
+} from "../../analyze/semanticMembership.js";
+import { selectSystemHierarchy } from "../../analyze/systemHierarchy.js";
 import type {
   AtlasIndex,
   AtlasIndexCrosswalks,
@@ -26,75 +23,65 @@ import type {
   CartographerGraph,
   GraphNode,
   SourceGraphDigest,
-} from '../../contracts/types.js'
-import { ATLAS_INDEX_SCHEMA_VERSION } from '../../contracts/types.js'
-import { BLOCK_UNIT_LIMIT, DIR_UNIT_LIMIT, EDGE_LIMIT, SYSTEM_UNIT_LIMIT } from './constants.js'
+} from "../../contracts/types.js";
+import { ATLAS_INDEX_SCHEMA_VERSION } from "../../contracts/types.js";
+import { BLOCK_UNIT_LIMIT, DIR_UNIT_LIMIT, EDGE_LIMIT, SYSTEM_UNIT_LIMIT } from "./constants.js";
 
-interface Membership
-{
-  systemOf: Map<string, string>
-  blockOf: Map<string, string>
-  dirOf: Map<string, string>
-  systemLabels: Map<string, string>
-  systemDescriptions: Map<string, string>
-  systemSources: Map<string, 'authored' | 'fallback' | 'inferred'>
-  systemOrder: Map<string, number>
-  systemSource: 'authored' | 'inferred'
+interface Membership {
+  systemOf: Map<string, string>;
+  blockOf: Map<string, string>;
+  dirOf: Map<string, string>;
+  systemLabels: Map<string, string>;
+  systemDescriptions: Map<string, string>;
+  systemSources: Map<string, "authored" | "fallback" | "inferred">;
+  systemOrder: Map<string, number>;
+  systemSource: "authored" | "inferred";
 }
 
-interface LevelBuild
-{
-  units: AtlasIndexUnit[]
-  edges: AtlasIndexEdge[]
-  total: number
-  edgeTotal: number
-  retained: Set<string>
-  exactEdges: AtlasIndexEdge[]
-  parentByKey: Map<string, string>
-  totalByParent: Map<string, number>
+interface LevelBuild {
+  units: AtlasIndexUnit[];
+  edges: AtlasIndexEdge[];
+  total: number;
+  edgeTotal: number;
+  retained: Set<string>;
+  exactEdges: AtlasIndexEdge[];
+  parentByKey: Map<string, string>;
+  totalByParent: Map<string, number>;
 }
 
-type RetainedUnits = Record<AtlasIndexLevel, Set<string>>
+type RetainedUnits = Record<AtlasIndexLevel, Set<string>>;
 
-function unitId(level: AtlasIndexLevel, key: string): string
-{
-  return `${level}:${key}`
+function unitId(level: AtlasIndexLevel, key: string): string {
+  return `${level}:${key}`;
 }
 
-function compareText(left: string, right: string): number
-{
-  return left < right ? -1 : left > right ? 1 : 0
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function dirKey(id: string): string
-{
-  const slash = id.lastIndexOf('/')
-  return slash > 0 ? id.slice(0, slash) : '.'
+function dirKey(id: string): string {
+  const slash = id.lastIndexOf("/");
+  return slash > 0 ? id.slice(0, slash) : ".";
 }
 
-function displayPath(key: string): string
-{
-  if (key === '.')
-  {
-    return 'Root'
+function displayPath(key: string): string {
+  if (key === ".") {
+    return "Root";
   }
-  const tail = key.split('/').pop() ?? key
-  return tail.replace(/[-_]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase())
+  const tail = key.split("/").pop() ?? key;
+  return tail.replace(/[-_]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function increment(map: Map<string, number>, key: string, amount = 1): void
-{
-  map.set(key, (map.get(key) ?? 0) + amount)
+function increment(map: Map<string, number>, key: string, amount = 1): void {
+  map.set(key, (map.get(key) ?? 0) + amount);
 }
 
 function dominant(
   counts: Map<string, number>,
   preferredOrder?: Map<string, number>,
-): string | undefined
-{
-  let top: [string, number] | undefined
-  for (const entry of counts)
-  {
+): string | undefined {
+  let top: [string, number] | undefined;
+  for (const entry of counts) {
     if (
       !top ||
       entry[1] > top[1] ||
@@ -103,19 +90,17 @@ function dominant(
           ? (preferredOrder.get(entry[0]) ?? Number.MAX_SAFE_INTEGER) <
             (preferredOrder.get(top[0]) ?? Number.MAX_SAFE_INTEGER)
           : compareText(entry[0], top[0]) < 0))
-    )
-    {
-      top = entry
+    ) {
+      top = entry;
     }
   }
-  return top?.[0]
+  return top?.[0];
 }
 
-function buildMembership(graph: CartographerGraph): Membership
-{
-  const blockOf = new Map(graph.nodes.map((node) => [node.id, node.group]))
-  const dirOf = new Map(graph.nodes.map((node) => [node.id, dirKey(node.id)]))
-  const hierarchy = selectSystemHierarchy(graph.nodes, graph.systems ?? [])
+function buildMembership(graph: CartographerGraph): Membership {
+  const blockOf = new Map(graph.nodes.map((node) => [node.id, node.group]));
+  const dirOf = new Map(graph.nodes.map((node) => [node.id, dirKey(node.id)]));
+  const hierarchy = selectSystemHierarchy(graph.nodes, graph.systems ?? []);
   return {
     systemOf: hierarchy.systemOfFile,
     blockOf,
@@ -131,7 +116,7 @@ function buildMembership(graph: CartographerGraph): Membership
     ),
     systemOrder: new Map(hierarchy.candidates.map((candidate, index) => [candidate.key, index])),
     systemSource: hierarchy.source,
-  }
+  };
 }
 
 function parentByMajority(
@@ -139,28 +124,24 @@ function parentByMajority(
   childOf: Map<string, string>,
   parentOf: Map<string, string>,
   preferredOrder?: Map<string, number>,
-): Map<string, string>
-{
-  const counts = new Map<string, Map<string, number>>()
-  for (const node of graph.nodes)
-  {
-    const child = childOf.get(node.id)
-    const parent = parentOf.get(node.id)
-    if (!child || !parent)
-    {
-      continue
+): Map<string, string> {
+  const counts = new Map<string, Map<string, number>>();
+  for (const node of graph.nodes) {
+    const child = childOf.get(node.id);
+    const parent = parentOf.get(node.id);
+    if (!child || !parent) {
+      continue;
     }
-    const row = counts.get(child) ?? new Map<string, number>()
-    increment(row, parent)
-    counts.set(child, row)
+    const row = counts.get(child) ?? new Map<string, number>();
+    increment(row, parent);
+    counts.set(child, row);
   }
   return new Map(
-    [...counts].flatMap(([child, row]) =>
-    {
-      const parent = dominant(row, preferredOrder)
-      return parent ? [[child, parent] as [string, string]] : []
+    [...counts].flatMap(([child, row]) => {
+      const parent = dominant(row, preferredOrder);
+      return parent ? [[child, parent] as [string, string]] : [];
     }),
-  )
+  );
 }
 
 function aggregateLevel(
@@ -170,69 +151,59 @@ function aggregateLevel(
   labels: Map<string, string>,
   descriptions: Map<string, string>,
   parents: Map<string, string>,
-  sources: Map<string, 'authored' | 'fallback' | 'inferred'>,
+  sources: Map<string, "authored" | "fallback" | "inferred">,
   unitLimit: number,
   allowedParents?: Set<string>,
-): LevelBuild
-{
-  const counts = new Map<string, number>()
-  for (const node of graph.nodes)
-  {
-    const key = keyOf.get(node.id)
-    if (key)
-    {
-      increment(counts, key)
+): LevelBuild {
+  const counts = new Map<string, number>();
+  for (const node of graph.nodes) {
+    const key = keyOf.get(node.id);
+    if (key) {
+      increment(counts, key);
     }
   }
-  const inbound = new Map<string, number>()
-  const outbound = new Map<string, number>()
-  const edgeWeights = new Map<string, number>()
-  const totalByParent = new Map<string, number>()
-  for (const key of counts.keys())
-  {
-    const parent = parents.get(key)
-    if (parent !== undefined)
-    {
-      increment(totalByParent, parent)
+  const inbound = new Map<string, number>();
+  const outbound = new Map<string, number>();
+  const edgeWeights = new Map<string, number>();
+  const totalByParent = new Map<string, number>();
+  for (const key of counts.keys()) {
+    const parent = parents.get(key);
+    if (parent !== undefined) {
+      increment(totalByParent, parent);
     }
   }
-  for (const edge of graph.edges)
-  {
-    const from = keyOf.get(edge.from)
-    const to = keyOf.get(edge.to)
-    if (!from || !to || from === to)
-    {
-      continue
+  for (const edge of graph.edges) {
+    const from = keyOf.get(edge.from);
+    const to = keyOf.get(edge.to);
+    if (!from || !to || from === to) {
+      continue;
     }
-    increment(outbound, from)
-    increment(inbound, to)
-    increment(edgeWeights, `${from}\u0000${to}`)
+    increment(outbound, from);
+    increment(inbound, to);
+    increment(edgeWeights, `${from}\u0000${to}`);
   }
-  const ranked = [...counts].sort((a, b) =>
-  {
-    const aScore = a[1] * 4 + (inbound.get(a[0]) ?? 0) + (outbound.get(a[0]) ?? 0)
-    const bScore = b[1] * 4 + (inbound.get(b[0]) ?? 0) + (outbound.get(b[0]) ?? 0)
-    return bScore - aScore || compareText(a[0], b[0])
-  })
-  const visibilityRank = new Map(ranked.map(([key], index): [string, number] => [key, index + 1]))
+  const ranked = [...counts].sort((a, b) => {
+    const aScore = a[1] * 4 + (inbound.get(a[0]) ?? 0) + (outbound.get(a[0]) ?? 0);
+    const bScore = b[1] * 4 + (inbound.get(b[0]) ?? 0) + (outbound.get(b[0]) ?? 0);
+    return bScore - aScore || compareText(a[0], b[0]);
+  });
+  const visibilityRank = new Map(ranked.map(([key], index): [string, number] => [key, index + 1]));
   const eligible = allowedParents
-    ? ranked.filter(([key]) =>
-      {
-        const parent = parents.get(key)
-        return parent !== undefined && allowedParents.has(parent)
+    ? ranked.filter(([key]) => {
+        const parent = parents.get(key);
+        return parent !== undefined && allowedParents.has(parent);
       })
-    : ranked
+    : ranked;
   const retained = eligible
     .slice(0, unitLimit)
     .map(([key]) => key)
-    .sort()
-  const retainedSet = new Set(retained)
-  const columns = Math.max(1, Math.ceil(Math.sqrt(retained.length)))
-  const units = retained.map((key, order): AtlasIndexUnit =>
-  {
-    const description = descriptions.get(key)
-    const parent = parents.get(key)
-    const source = sources.get(key)
+    .sort();
+  const retainedSet = new Set(retained);
+  const columns = Math.max(1, Math.ceil(Math.sqrt(retained.length)));
+  const units = retained.map((key, order): AtlasIndexUnit => {
+    const description = descriptions.get(key);
+    const parent = parents.get(key);
+    const source = sources.get(key);
     return {
       id: unitId(level, key),
       key,
@@ -241,7 +212,7 @@ function aggregateLevel(
       ...(description ? { description } : {}),
       ...(parent
         ? {
-            parent: unitId(level === 'blocks' ? 'systems' : 'blocks', parent),
+            parent: unitId(level === "blocks" ? "systems" : "blocks", parent),
           }
         : {}),
       ...(source ? { source } : {}),
@@ -254,24 +225,23 @@ function aggregateLevel(
         x: (order % columns) * 240,
         y: Math.floor(order / columns) * 140,
       },
-    }
-  })
+    };
+  });
   const exactEdges = [...edgeWeights]
-    .map(([key, weight]): AtlasIndexEdge =>
-    {
-      const split = key.indexOf('\u0000')
-      const from = key.slice(0, split)
-      const to = key.slice(split + 1)
-      return { from: unitId(level, from), to: unitId(level, to), weight }
+    .map(([key, weight]): AtlasIndexEdge => {
+      const split = key.indexOf("\u0000");
+      const from = key.slice(0, split);
+      const to = key.slice(split + 1);
+      return { from: unitId(level, from), to: unitId(level, to), weight };
     })
-    .sort((a, b) => b.weight - a.weight || compareText(a.from, b.from) || compareText(a.to, b.to))
+    .sort((a, b) => b.weight - a.weight || compareText(a.from, b.from) || compareText(a.to, b.to));
   const edges = exactEdges
     .filter(
       (edge) =>
         retainedSet.has(edge.from.slice(level.length + 1)) &&
         retainedSet.has(edge.to.slice(level.length + 1)),
     )
-    .slice(0, EDGE_LIMIT)
+    .slice(0, EDGE_LIMIT);
   return {
     units,
     edges,
@@ -281,32 +251,29 @@ function aggregateLevel(
     exactEdges,
     parentByKey: parents,
     totalByParent,
-  }
+  };
 }
 
 function scopeSummaries(
   parents: AtlasIndexUnit[],
   children: LevelBuild,
-  childLevel: 'blocks' | 'dirs',
-): AtlasIndexScopeSummary[]
-{
-  return parents.map((parent) =>
-  {
+  childLevel: "blocks" | "dirs",
+): AtlasIndexScopeSummary[] {
+  return parents.map((parent) => {
     const exactChildIds = new Set(
       children.units.filter((unit) => unit.parent === parent.id).map((unit) => unit.id),
-    )
-    const totalChildren = children.totalByParent.get(parent.key) ?? 0
-    const totalEdges = children.exactEdges.filter((edge) =>
-    {
-      const from = edge.from.slice(childLevel.length + 1)
-      const to = edge.to.slice(childLevel.length + 1)
+    );
+    const totalChildren = children.totalByParent.get(parent.key) ?? 0;
+    const totalEdges = children.exactEdges.filter((edge) => {
+      const from = edge.from.slice(childLevel.length + 1);
+      const to = edge.to.slice(childLevel.length + 1);
       return (
         children.parentByKey.get(from) === parent.key && children.parentByKey.get(to) === parent.key
-      )
-    }).length
+      );
+    }).length;
     const indexedEdges = children.edges.filter(
       (edge) => exactChildIds.has(edge.from) && exactChildIds.has(edge.to),
-    ).length
+    ).length;
     return {
       parent: parent.id,
       childLevel,
@@ -320,8 +287,8 @@ function scopeSummaries(
         indexed: indexedEdges,
         omitted: totalEdges - indexedEdges,
       },
-    }
-  })
+    };
+  });
 }
 
 function fileRecord(
@@ -331,89 +298,83 @@ function fileRecord(
   fanOut: Map<string, number>,
   visibilityRank: number,
   retained: RetainedUnits,
-): AtlasIndexFile
-{
-  const system = membership.systemOf.get(node.id)
-  const block = membership.blockOf.get(node.id)
-  const dir = membership.dirOf.get(node.id)
+): AtlasIndexFile {
+  const system = membership.systemOf.get(node.id);
+  const block = membership.blockOf.get(node.id);
+  const dir = membership.dirOf.get(node.id);
   return {
     id: node.id,
     label: node.label,
     ...(node.description ? { description: node.description } : {}),
-    ...(system && retained.systems.has(system) ? { system: unitId('systems', system) } : {}),
-    ...(block && retained.blocks.has(block) ? { block: unitId('blocks', block) } : {}),
-    ...(dir && retained.dirs.has(dir) ? { dir: unitId('dirs', dir) } : {}),
+    ...(node.descriptionSource ? { descriptionSource: node.descriptionSource } : {}),
+    ...(node.descriptionStale ? { descriptionStale: true as const } : {}),
+    ...(node.headerPathStale ? { headerPathStale: true as const } : {}),
+    ...(system && retained.systems.has(system) ? { system: unitId("systems", system) } : {}),
+    ...(block && retained.blocks.has(block) ? { block: unitId("blocks", block) } : {}),
+    ...(dir && retained.dirs.has(dir) ? { dir: unitId("dirs", dir) } : {}),
     fanIn: fanIn.get(node.id) ?? 0,
     fanOut: fanOut.get(node.id) ?? 0,
     visibilityRank,
-  }
+  };
 }
 
 function rankedFiles(
   graph: CartographerGraph,
   membership: Membership,
   retained: RetainedUnits,
-): AtlasIndexFile[]
-{
-  const { fanIn, fanOut } = fileDegrees(graph.edges)
+): AtlasIndexFile[] {
+  const { fanIn, fanOut } = fileDegrees(graph.edges);
   return [...graph.nodes]
-    .sort((a, b) =>
-    {
-      const aScore = (fanIn.get(a.id) ?? 0) * 3 + (fanOut.get(a.id) ?? 0)
-      const bScore = (fanIn.get(b.id) ?? 0) * 3 + (fanOut.get(b.id) ?? 0)
-      return bScore - aScore || compareText(a.id, b.id)
+    .sort((a, b) => {
+      const aScore = (fanIn.get(a.id) ?? 0) * 3 + (fanOut.get(a.id) ?? 0);
+      const bScore = (fanIn.get(b.id) ?? 0) * 3 + (fanOut.get(b.id) ?? 0);
+      return bScore - aScore || compareText(a.id, b.id);
     })
-    .map((node, index) => fileRecord(node, membership, fanIn, fanOut, index + 1, retained))
+    .map((node, index) => fileRecord(node, membership, fanIn, fanOut, index + 1, retained));
 }
 
-function buildStructure(graph: CartographerGraph, snapshot: SemanticSnapshot): AtlasIndexStructure
-{
-  const directFiles = new Map<string, string[]>()
-  const childDirectories = new Map<string, string[]>()
-  for (const node of graph.nodes)
-  {
-    const directory = snapshot.memberships.dirs.get(node.id)
-    if (directory === undefined) throw new Error(`missing directory membership for ${node.id}`)
-    const files = directFiles.get(directory) ?? []
-    files.push(node.id)
-    directFiles.set(directory, files)
+function buildStructure(graph: CartographerGraph, snapshot: SemanticSnapshot): AtlasIndexStructure {
+  const directFiles = new Map<string, string[]>();
+  const childDirectories = new Map<string, string[]>();
+  for (const node of graph.nodes) {
+    const directory = snapshot.memberships.dirs.get(node.id);
+    if (directory === undefined) throw new Error(`missing directory membership for ${node.id}`);
+    const files = directFiles.get(directory) ?? [];
+    files.push(node.id);
+    directFiles.set(directory, files);
   }
-  for (const unit of snapshot.units.dirs.values())
-  {
-    if (unit.parentId === undefined) continue
-    const children = childDirectories.get(unit.parentId) ?? []
-    children.push(unit.id)
-    childDirectories.set(unit.parentId, children)
+  for (const unit of snapshot.units.dirs.values()) {
+    if (unit.parentId === undefined) continue;
+    const children = childDirectories.get(unit.parentId) ?? [];
+    children.push(unit.id);
+    childDirectories.set(unit.parentId, children);
   }
-  const inbound = new Map<string, number>()
-  const outbound = new Map<string, number>()
-  for (const edge of snapshot.directoryScopeEdges)
-  {
-    increment(outbound, edge.from, edge.weight)
-    increment(inbound, edge.to, edge.weight)
+  const inbound = new Map<string, number>();
+  const outbound = new Map<string, number>();
+  for (const edge of snapshot.directoryScopeEdges) {
+    increment(outbound, edge.from, edge.weight);
+    increment(inbound, edge.to, edge.weight);
   }
-  const siblingOrder = new Map<string, number>()
-  for (const [parent, children] of childDirectories)
-  {
-    children.sort(compareText)
-    children.forEach((id, order) => siblingOrder.set(`${parent}\0${id}`, order))
+  const siblingOrder = new Map<string, number>();
+  for (const [parent, children] of childDirectories) {
+    children.sort(compareText);
+    children.forEach((id, order) => siblingOrder.set(`${parent}\0${id}`, order));
   }
   const directories = [...snapshot.units.dirs.values()]
     .sort(
       (left, right) =>
-        (left.key === '.' ? 0 : left.key.split('/').length) -
-          (right.key === '.' ? 0 : right.key.split('/').length) || compareText(left.key, right.key),
+        (left.key === "." ? 0 : left.key.split("/").length) -
+          (right.key === "." ? 0 : right.key.split("/").length) || compareText(left.key, right.key),
     )
-    .map((unit): AtlasIndexStructureDirectory =>
-    {
-      const children = childDirectories.get(unit.id) ?? []
-      const files = (directFiles.get(unit.id) ?? []).sort(compareText)
+    .map((unit): AtlasIndexStructureDirectory => {
+      const children = childDirectories.get(unit.id) ?? [];
+      const files = (directFiles.get(unit.id) ?? []).sort(compareText);
       return {
         id: unit.id,
         key: unit.key,
         label: unit.label,
         ...(unit.parentId === undefined ? {} : { parentId: unit.parentId }),
-        depth: unit.key === '.' ? 0 : unit.key.split('/').length,
+        depth: unit.key === "." ? 0 : unit.key.split("/").length,
         childDirectoryIds: children,
         directFileIds: files,
         directFileCount: files.length,
@@ -423,14 +384,14 @@ function buildStructure(graph: CartographerGraph, snapshot: SemanticSnapshot): A
         order:
           unit.parentId === undefined ? 0 : (siblingOrder.get(`${unit.parentId}\0${unit.id}`) ?? 0),
         position: unit.position,
-      }
-    })
-  const edges = snapshot.directoryScopeEdges.map((edge) => ({ ...edge }))
+      };
+    });
+  const edges = snapshot.directoryScopeEdges.map((edge) => ({ ...edge }));
   const fileEdges = [...snapshot.edges.files.values()].sort(
     (left, right) => compareText(left.from, right.from) || compareText(left.to, right.to),
-  )
+  );
   return {
-    rootId: 'dirs:.',
+    rootId: "dirs:.",
     directories,
     edges,
     fileEdges,
@@ -440,76 +401,68 @@ function buildStructure(graph: CartographerGraph, snapshot: SemanticSnapshot): A
       edges: edges.length,
       fileEdges: fileEdges.length,
     },
-  }
+  };
 }
 
 function dominantCrosswalks(
   sourceIds: readonly string[],
   counts: ReadonlyMap<string, ReadonlyMap<string, number>>,
-): AtlasIndexDominantCrosswalk[]
-{
-  return [...sourceIds].sort(compareText).map((sourceId) =>
-  {
-    const candidates = counts.get(sourceId) ?? new Map<string, number>()
-    const matchedFileCount = Math.max(0, ...candidates.values())
+): AtlasIndexDominantCrosswalk[] {
+  return [...sourceIds].sort(compareText).map((sourceId) => {
+    const candidates = counts.get(sourceId) ?? new Map<string, number>();
+    const matchedFileCount = Math.max(0, ...candidates.values());
     const targetIds = [...candidates]
       .filter(([, count]) => count === matchedFileCount && count > 0)
       .map(([id]) => id)
-      .sort(compareText)
+      .sort(compareText);
     return {
       sourceId,
       targetIds,
       matchedFileCount,
       status:
-        targetIds.length === 0 ? 'unmatched' : targetIds.length === 1 ? 'matched' : 'ambiguous',
-    }
-  })
+        targetIds.length === 0 ? "unmatched" : targetIds.length === 1 ? "matched" : "ambiguous",
+    };
+  });
 }
 
 function buildCrosswalks(
   graph: CartographerGraph,
   snapshot: SemanticSnapshot,
-): AtlasIndexCrosswalks
-{
+): AtlasIndexCrosswalks {
   const files: AtlasIndexFileCrosswalk[] = graph.nodes
-    .map((node): AtlasIndexFileCrosswalk =>
-    {
-      const systemId = snapshot.memberships.systems.get(node.id)
-      const blockId = snapshot.memberships.blocks.get(node.id)
-      const directoryId = snapshot.memberships.dirs.get(node.id)
-      const file = snapshot.units.files.get(node.id)
+    .map((node): AtlasIndexFileCrosswalk => {
+      const systemId = snapshot.memberships.systems.get(node.id);
+      const blockId = snapshot.memberships.blocks.get(node.id);
+      const directoryId = snapshot.memberships.dirs.get(node.id);
+      const file = snapshot.units.files.get(node.id);
       if (
         systemId === undefined ||
         blockId === undefined ||
         directoryId === undefined ||
         file === undefined
-      )
-      {
-        throw new Error(`missing semantic crosswalk membership for ${node.id}`)
+      ) {
+        throw new Error(`missing semantic crosswalk membership for ${node.id}`);
       }
-      return { fileId: node.id, systemId, blockId, directoryId, position: file.position }
+      return { fileId: node.id, systemId, blockId, directoryId, position: file.position };
     })
-    .sort((left, right) => compareText(left.fileId, right.fileId))
-  const systemDirectories = new Map<string, Map<string, number>>()
-  const blockDirectories = new Map<string, Map<string, number>>()
-  const directorySystems = new Map<string, Map<string, number>>()
-  const directoryBlocks = new Map<string, Map<string, number>>()
-  const count = (map: Map<string, Map<string, number>>, source: string, target: string): void =>
-  {
-    const row = map.get(source) ?? new Map<string, number>()
-    increment(row, target)
-    map.set(source, row)
-  }
-  for (const file of files)
-  {
-    count(systemDirectories, file.systemId, file.directoryId)
-    count(blockDirectories, file.blockId, file.directoryId)
-    const directoryKey = file.directoryId.slice('dirs:'.length)
-    for (const prefix of directoryPrefixes(directoryKey))
-    {
-      const directoryId = unitId('dirs', prefix)
-      count(directorySystems, directoryId, file.systemId)
-      count(directoryBlocks, directoryId, file.blockId)
+    .sort((left, right) => compareText(left.fileId, right.fileId));
+  const systemDirectories = new Map<string, Map<string, number>>();
+  const blockDirectories = new Map<string, Map<string, number>>();
+  const directorySystems = new Map<string, Map<string, number>>();
+  const directoryBlocks = new Map<string, Map<string, number>>();
+  const count = (map: Map<string, Map<string, number>>, source: string, target: string): void => {
+    const row = map.get(source) ?? new Map<string, number>();
+    increment(row, target);
+    map.set(source, row);
+  };
+  for (const file of files) {
+    count(systemDirectories, file.systemId, file.directoryId);
+    count(blockDirectories, file.blockId, file.directoryId);
+    const directoryKey = file.directoryId.slice("dirs:".length);
+    for (const prefix of directoryPrefixes(directoryKey)) {
+      const directoryId = unitId("dirs", prefix);
+      count(directorySystems, directoryId, file.systemId);
+      count(directoryBlocks, directoryId, file.blockId);
     }
   }
   return {
@@ -518,49 +471,47 @@ function buildCrosswalks(
     blocksToDirectories: dominantCrosswalks([...snapshot.units.blocks.keys()], blockDirectories),
     directoriesToSystems: dominantCrosswalks([...snapshot.units.dirs.keys()], directorySystems),
     directoriesToBlocks: dominantCrosswalks([...snapshot.units.dirs.keys()], directoryBlocks),
-  }
+  };
 }
 
 export function buildAtlasIndex(
   graph: CartographerGraph,
   sourceGraphDigest: SourceGraphDigest,
   root = graph.repoRoot,
-): AtlasIndex
-{
-  const canonicalRoot = NodePath.resolve(root)
-  const membership = buildMembership(graph)
-  const semanticSnapshot = buildSemanticSnapshot(graph)
+): AtlasIndex {
+  const canonicalRoot = NodePath.resolve(root);
+  const membership = buildMembership(graph);
+  const semanticSnapshot = buildSemanticSnapshot(graph);
   const blockParents = parentByMajority(
     graph,
     membership.blockOf,
     membership.systemOf,
     membership.systemOrder,
-  )
-  const dirParents = parentByMajority(graph, membership.dirOf, membership.blockOf)
-  const groupLabels = new Map(graph.groups.map((group) => [group.id, group.label]))
+  );
+  const dirParents = parentByMajority(graph, membership.dirOf, membership.blockOf);
+  const groupLabels = new Map(graph.groups.map((group) => [group.id, group.label]));
   const groupDescriptions = new Map(
     graph.groups.flatMap((group) =>
       group.description ? [[group.id, group.description] as [string, string]] : [],
     ),
-  )
-  const dirLabels = new Map<string, string>()
-  for (const key of membership.dirOf.values())
-  {
-    dirLabels.set(key, key === '.' ? '(root)' : key)
+  );
+  const dirLabels = new Map<string, string>();
+  for (const key of membership.dirOf.values()) {
+    dirLabels.set(key, key === "." ? "(root)" : key);
   }
   const systems = aggregateLevel(
     graph,
-    'systems',
+    "systems",
     membership.systemOf,
     membership.systemLabels,
     membership.systemDescriptions,
     new Map(),
     membership.systemSources,
     SYSTEM_UNIT_LIMIT,
-  )
+  );
   const blocks = aggregateLevel(
     graph,
-    'blocks',
+    "blocks",
     membership.blockOf,
     groupLabels,
     groupDescriptions,
@@ -568,10 +519,10 @@ export function buildAtlasIndex(
     new Map(),
     BLOCK_UNIT_LIMIT,
     systems.retained,
-  )
+  );
   const dirs = aggregateLevel(
     graph,
-    'dirs',
+    "dirs",
     membership.dirOf,
     dirLabels,
     new Map(),
@@ -579,15 +530,16 @@ export function buildAtlasIndex(
     new Map(),
     DIR_UNIT_LIMIT,
     blocks.retained,
-  )
+  );
   const retained: RetainedUnits = {
     systems: systems.retained,
     blocks: blocks.retained,
     dirs: dirs.retained,
-  }
+  };
   return {
     version: ATLAS_INDEX_SCHEMA_VERSION,
     sourceGeneratedAt: graph.generatedAt,
+    ...(graph.coverage ? { coverage: graph.coverage } : {}),
     sourceGraphDigest,
     repo: {
       root: canonicalRoot,
@@ -635,8 +587,8 @@ export function buildAtlasIndex(
       },
     },
     scopes: [
-      ...scopeSummaries(systems.units, blocks, 'blocks'),
-      ...scopeSummaries(blocks.units, dirs, 'dirs'),
+      ...scopeSummaries(systems.units, blocks, "blocks"),
+      ...scopeSummaries(blocks.units, dirs, "dirs"),
     ],
     health: {
       cycles: graph.metrics.cycles,
@@ -648,5 +600,5 @@ export function buildAtlasIndex(
     files: rankedFiles(graph, membership, retained),
     structure: buildStructure(graph, semanticSnapshot),
     crosswalks: buildCrosswalks(graph, semanticSnapshot),
-  }
+  };
 }

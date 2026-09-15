@@ -1,8 +1,5 @@
-// apps/mobile/src/state/sourceControl.ts
-// manage source control environment state
+import { createSourceControlEnvironmentAtoms } from "@t3tools/client-runtime/state/source-control";
 
-import { createSourceControlEnvironmentAtoms } from '@t3tools/client-runtime/state/source-control'
+import { connectionAtomRuntime } from "../connection/runtime";
 
-import { connectionAtomRuntime } from '../connection/runtime'
-
-export const sourceControlEnvironment = createSourceControlEnvironmentAtoms(connectionAtomRuntime)
+export const sourceControlEnvironment = createSourceControlEnvironmentAtoms(connectionAtomRuntime);

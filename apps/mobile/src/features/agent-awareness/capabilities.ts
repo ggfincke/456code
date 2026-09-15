@@ -1,9 +1,9 @@
-// apps/mobile/src/features/agent-awareness/capabilities.ts
-// determine whether agent awareness push
+import Constants from "expo-constants";
+import { Platform } from "react-native";
+import { supportsAndroidAgentNotifications } from "./androidNotifications";
 
-import Constants from 'expo-constants'
-
-export function supportsAgentAwarenessPush()
-{
-  return Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true
+export function supportsAgentAwarenessPush() {
+  return Platform.OS === "android"
+    ? supportsAndroidAgentNotifications()
+    : Platform.OS === "ios" && Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true;
 }

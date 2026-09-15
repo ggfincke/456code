@@ -1,11 +1,16 @@
-// apps/web/src/hooks/useTerminalFocus.ts
-// track terminal focus through a React hook
+import { useSyncExternalStore } from "react";
 
-import { useSyncExternalStore } from 'react'
+import { isTerminalFocused } from "../lib/terminalFocus";
 
-import { isTerminalFocused, subscribeToTerminalFocusChanges } from '../lib/terminalFocus'
+export function subscribeToTerminalFocusChanges(listener: () => void): () => void {
+  window.addEventListener("focusin", listener, true);
+  window.addEventListener("focusout", listener, true);
+  return () => {
+    window.removeEventListener("focusin", listener, true);
+    window.removeEventListener("focusout", listener, true);
+  };
+}
 
-export function useTerminalFocus(): boolean
-{
-  return useSyncExternalStore(subscribeToTerminalFocusChanges, isTerminalFocused, () => false)
+export function useTerminalFocus(): boolean {
+  return useSyncExternalStore(subscribeToTerminalFocusChanges, isTerminalFocused, () => false);
 }

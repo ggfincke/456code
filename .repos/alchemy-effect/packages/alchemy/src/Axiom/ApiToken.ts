@@ -6,12 +6,12 @@ import * as Provider from "../Provider.ts";
 import { Resource } from "../Resource.ts";
 import type { Providers } from "./Providers.ts";
 
-export type ApiTokenProps = Omit<Axiom.CreateAPITokenInput, never>;
+export type ApiTokenProps = Omit<Axiom.CreateAPITokenRequest, never>;
 
 export type ApiToken = Resource<
   "Axiom.ApiToken",
   ApiTokenProps,
-  Omit<Axiom.CreateAPITokenOutput, "token"> & {
+  Omit<Axiom.CreateAPITokenResponse, "token"> & {
     /**
      * The bearer token. Returned only by `create` (and `regenerate`); Axiom
      * does not return it on subsequent reads. Persisted in resource state via
@@ -34,11 +34,10 @@ export type ApiToken = Resource<
  * {@link Redacted}) on initial create and persisted in resource state.
  * Treat resource state as sensitive — anyone with read access can recover
  * the token. Pair with a secret store for downstream consumption.
- *
  * @see https://axiom.co/docs/reference/tokens
  *
- * @section Creating an API Token
- * @example Ingest-only token scoped to one dataset
+ * ### Creating an API Token
+ * **Example:** Ingest-only token scoped to one dataset
  * ```typescript
  * const ingest = yield* Axiom.ApiToken("ingest", {
  *   name: "prod-ingest",
@@ -49,7 +48,7 @@ export type ApiToken = Resource<
  * });
  * ```
  *
- * @example Read-only query token
+ * **Example:** Read-only query token
  * ```typescript
  * yield* Axiom.ApiToken("query", {
  *   name: "grafana-reader",
@@ -60,13 +59,15 @@ export type ApiToken = Resource<
  * });
  * ```
  *
- * @section Consuming the Token
- * @example Forward the token via Cloudflare Secrets
+ * ### Consuming the Token
+ * **Example:** Forward the token via Cloudflare Secrets
  * ```typescript
- * const secret = yield* Cloudflare.Secret("axiom-token", {
+ * const secret = yield* Cloudflare.SecretsStore.Secret("axiom-token", {
  *   value: ingest.token,
  * });
  * ```
+ *
+ * @resource
  */
 export const ApiToken = Resource<ApiToken>("Axiom.ApiToken");
 
@@ -77,9 +78,25 @@ export const ApiTokenProvider = () =>
       const create = yield* Axiom.createAPIToken;
       const get = yield* Axiom.getAPIToken;
       const del = yield* Axiom.deleteAPIToken;
+      const listTokens = yield* Axiom.getAPITokens;
 
       return {
         stables: ["id", "token"],
+        // Enumerate every API token in the org. Axiom exposes a single
+        // account-wide `GET /v2/tokens` collection op (no pagination), so we
+        // fetch it once and hydrate each row into the exact `read` Attributes
+        // shape. The bearer secret is returned by Axiom only at creation and is
+        // never echoed back on enumeration, so — matching `read`, which sources
+        // the secret from cached state — we surface an empty Redacted token
+        // here rather than the real value.
+        list: () =>
+          Effect.gen(function* () {
+            const tokens = yield* listTokens({});
+            return tokens.map((token) => ({
+              ...token,
+              token: Redacted.make(""),
+            }));
+          }),
         diff: Effect.fn(function* ({ olds, news, output }) {
           if (!isResolved(news)) return undefined;
           // First create — let the engine create normally.

@@ -886,7 +886,11 @@ export type ClientRequest__Personality = "none" | "friendly" | "pragmatic";
 export const ClientRequest__Personality = Schema.Literals(["none", "friendly", "pragmatic"]);
 
 export type ClientRequest__PluginListMarketplaceKind =
-  "local" | "vertical" | "workspace-directory" | "shared-with-me" | "created-by-me-remote";
+  | "local"
+  | "vertical"
+  | "workspace-directory"
+  | "shared-with-me"
+  | "created-by-me-remote";
 export const ClientRequest__PluginListMarketplaceKind = Schema.Literals([
   "local",
   "vertical",
@@ -1200,7 +1204,12 @@ export type ClientRequest__ThreadGoalGetParams = { readonly threadId: string };
 export const ClientRequest__ThreadGoalGetParams = Schema.Struct({ threadId: Schema.String });
 
 export type ClientRequest__ThreadGoalStatus =
-  "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 export const ClientRequest__ThreadGoalStatus = Schema.Literals([
   "active",
   "paused",
@@ -1419,7 +1428,10 @@ export type CommandExecutionRequestApprovalParams__LegacyAppPathString = string;
 export const CommandExecutionRequestApprovalParams__LegacyAppPathString = Schema.String;
 
 export type CommandExecutionRequestApprovalParams__NetworkApprovalProtocol =
-  "http" | "https" | "socks5Tcp" | "socks5Udp";
+  | "http"
+  | "https"
+  | "socks5Tcp"
+  | "socks5Udp";
 export const CommandExecutionRequestApprovalParams__NetworkApprovalProtocol = Schema.Literals([
   "http",
   "https",
@@ -1517,7 +1529,10 @@ export const ExecCommandApprovalResponse__NetworkPolicyRuleAction = Schema.Liter
 ]);
 
 export type FileChangeRequestApprovalResponse__FileChangeApprovalDecision =
-  "accept" | "acceptForSession" | "decline" | "cancel";
+  | "accept"
+  | "acceptForSession"
+  | "decline"
+  | "cancel";
 export const FileChangeRequestApprovalResponse__FileChangeApprovalDecision = Schema.Literals([
   "accept",
   "acceptForSession",
@@ -1532,7 +1547,8 @@ export const FuzzyFileSearchResponse__FuzzyFileSearchMatchType = Schema.Literals
 ]);
 
 export type FuzzyFileSearchSessionUpdatedNotification__FuzzyFileSearchMatchType =
-  "file" | "directory";
+  | "file"
+  | "directory";
 export const FuzzyFileSearchSessionUpdatedNotification__FuzzyFileSearchMatchType = Schema.Literals([
   "file",
   "directory",
@@ -1637,7 +1653,10 @@ export type McpServerElicitationRequestParams__McpElicitationObjectType = "objec
 export const McpServerElicitationRequestParams__McpElicitationObjectType = Schema.Literal("object");
 
 export type McpServerElicitationRequestParams__McpElicitationStringFormat =
-  "email" | "uri" | "date" | "date-time";
+  | "email"
+  | "uri"
+  | "date"
+  | "date-time";
 export const McpServerElicitationRequestParams__McpElicitationStringFormat = Schema.Literals([
   "email",
   "uri",
@@ -1649,7 +1668,9 @@ export type McpServerElicitationRequestParams__McpElicitationStringType = "strin
 export const McpServerElicitationRequestParams__McpElicitationStringType = Schema.Literal("string");
 
 export type McpServerElicitationRequestResponse__McpServerElicitationAction =
-  "accept" | "decline" | "cancel";
+  | "accept"
+  | "decline"
+  | "cancel";
 export const McpServerElicitationRequestResponse__McpServerElicitationAction = Schema.Literals([
   "accept",
   "decline",
@@ -1850,7 +1871,13 @@ export const ServerNotification__AutoReviewDecisionSource = Schema.Literal("agen
 });
 
 export type ServerNotification__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const ServerNotification__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -1899,7 +1926,10 @@ export const ServerNotification__CommandExecutionOutputDeltaNotification = Schem
 });
 
 export type ServerNotification__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const ServerNotification__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -2052,7 +2082,11 @@ export const ServerNotification__GitInfo = Schema.Struct({
 });
 
 export type ServerNotification__GuardianApprovalReviewStatus =
-  "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
+  | "inProgress"
+  | "approved"
+  | "denied"
+  | "timedOut"
+  | "aborted";
 export const ServerNotification__GuardianApprovalReviewStatus = Schema.Literals([
   "inProgress",
   "approved",
@@ -2124,7 +2158,11 @@ export type ServerNotification__HookHandlerType = "command" | "prompt" | "agent"
 export const ServerNotification__HookHandlerType = Schema.Literals(["command", "prompt", "agent"]);
 
 export type ServerNotification__HookOutputEntryKind =
-  "warning" | "stop" | "feedback" | "context" | "error";
+  | "warning"
+  | "stop"
+  | "feedback"
+  | "context"
+  | "error";
 export const ServerNotification__HookOutputEntryKind = Schema.Literals([
   "warning",
   "stop",
@@ -2143,7 +2181,11 @@ export const ServerNotification__HookPromptFragment = Schema.Struct({
 });
 
 export type ServerNotification__HookRunStatus =
-  "running" | "completed" | "failed" | "blocked" | "stopped";
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "stopped";
 export const ServerNotification__HookRunStatus = Schema.Literals([
   "running",
   "completed",
@@ -2180,7 +2222,10 @@ export const ServerNotification__McpServerStartupFailureReason = Schema.Literal(
 );
 
 export type ServerNotification__McpServerStartupState =
-  "starting" | "ready" | "failed" | "cancelled";
+  | "starting"
+  | "ready"
+  | "failed"
+  | "cancelled";
 export const ServerNotification__McpServerStartupState = Schema.Literals([
   "starting",
   "ready",
@@ -2294,7 +2339,10 @@ export type ServerNotification__ModelVerification = "trustedAccessForCyber";
 export const ServerNotification__ModelVerification = Schema.Literal("trustedAccessForCyber");
 
 export type ServerNotification__NetworkApprovalProtocol =
-  "http" | "https" | "socks5Tcp" | "socks5Udp";
+  | "http"
+  | "https"
+  | "socks5Tcp"
+  | "socks5Udp";
 export const ServerNotification__NetworkApprovalProtocol = Schema.Literals([
   "http",
   "https",
@@ -2306,7 +2354,10 @@ export type ServerNotification__NonSteerableTurnKind = "review" | "compact";
 export const ServerNotification__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type ServerNotification__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const ServerNotification__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -2539,7 +2590,10 @@ export const ServerNotification__ReasoningTextDeltaNotification = Schema.Struct(
 });
 
 export type ServerNotification__RemoteControlConnectionStatus =
-  "disabled" | "connecting" | "connected" | "errored";
+  | "disabled"
+  | "connecting"
+  | "connected"
+  | "errored";
 export const ServerNotification__RemoteControlConnectionStatus = Schema.Literals([
   "disabled",
   "connecting",
@@ -2573,7 +2627,10 @@ export const ServerNotification__SpendControlLimitSnapshot = Schema.Struct({
 });
 
 export type ServerNotification__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const ServerNotification__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -2661,7 +2718,12 @@ export const ServerNotification__ThreadGoalClearedNotification = Schema.Struct({
 });
 
 export type ServerNotification__ThreadGoalStatus =
-  "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 export const ServerNotification__ThreadGoalStatus = Schema.Literals([
   "active",
   "paused",
@@ -3562,7 +3624,9 @@ export const V2ConfigReadResponse__ReasoningSummary = Schema.Union(
 });
 
 export type V2ConfigReadResponse__SandboxMode =
-  "read-only" | "workspace-write" | "danger-full-access";
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
 export const V2ConfigReadResponse__SandboxMode = Schema.Literals([
   "read-only",
   "workspace-write",
@@ -3711,7 +3775,9 @@ export type V2ConfigRequirementsReadResponse__ResidencyRequirement = "us";
 export const V2ConfigRequirementsReadResponse__ResidencyRequirement = Schema.Literal("us");
 
 export type V2ConfigRequirementsReadResponse__SandboxMode =
-  "read-only" | "workspace-write" | "danger-full-access";
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
 export const V2ConfigRequirementsReadResponse__SandboxMode = Schema.Literals([
   "read-only",
   "workspace-write",
@@ -3719,7 +3785,10 @@ export const V2ConfigRequirementsReadResponse__SandboxMode = Schema.Literals([
 ]);
 
 export type V2ConfigRequirementsReadResponse__WebSearchMode =
-  "disabled" | "cached" | "indexed" | "live";
+  | "disabled"
+  | "cached"
+  | "indexed"
+  | "live";
 export const V2ConfigRequirementsReadResponse__WebSearchMode = Schema.Literals([
   "disabled",
   "cached",
@@ -3762,7 +3831,10 @@ export type V2ConfigWriteResponse__WriteStatus = "ok" | "okOverridden";
 export const V2ConfigWriteResponse__WriteStatus = Schema.Literals(["ok", "okOverridden"]);
 
 export type V2ConsumeAccountRateLimitResetCreditResponse__ConsumeAccountRateLimitResetCreditOutcome =
-  "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed";
+  | "reset"
+  | "nothingToReset"
+  | "noCredit"
+  | "alreadyRedeemed";
 export const V2ConsumeAccountRateLimitResetCreditResponse__ConsumeAccountRateLimitResetCreditOutcome =
   Schema.Literals(["reset", "nothingToReset", "noCredit", "alreadyRedeemed"]);
 
@@ -4147,7 +4219,10 @@ export const V2GetAccountRateLimitsResponse__RateLimitReachedType = Schema.Liter
 ]);
 
 export type V2GetAccountRateLimitsResponse__RateLimitResetCreditStatus =
-  "available" | "redeeming" | "redeemed" | "unknown";
+  | "available"
+  | "redeeming"
+  | "redeemed"
+  | "unknown";
 export const V2GetAccountRateLimitsResponse__RateLimitResetCreditStatus = Schema.Literals([
   "available",
   "redeeming",
@@ -4262,7 +4337,9 @@ export const V2GetAccountTokenUsageResponse__AccountTokenUsageSummary = Schema.S
 });
 
 export type V2GetWorkspaceMessagesResponse__WorkspaceMessageType =
-  "headline" | "announcement" | "unknown";
+  | "headline"
+  | "announcement"
+  | "unknown";
 export const V2GetWorkspaceMessagesResponse__WorkspaceMessageType = Schema.Literals([
   "headline",
   "announcement",
@@ -4312,7 +4389,11 @@ export const V2HookCompletedNotification__HookHandlerType = Schema.Literals([
 ]);
 
 export type V2HookCompletedNotification__HookOutputEntryKind =
-  "warning" | "stop" | "feedback" | "context" | "error";
+  | "warning"
+  | "stop"
+  | "feedback"
+  | "context"
+  | "error";
 export const V2HookCompletedNotification__HookOutputEntryKind = Schema.Literals([
   "warning",
   "stop",
@@ -4322,7 +4403,11 @@ export const V2HookCompletedNotification__HookOutputEntryKind = Schema.Literals(
 ]);
 
 export type V2HookCompletedNotification__HookRunStatus =
-  "running" | "completed" | "failed" | "blocked" | "stopped";
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "stopped";
 export const V2HookCompletedNotification__HookRunStatus = Schema.Literals([
   "running",
   "completed",
@@ -4455,7 +4540,11 @@ export const V2HookStartedNotification__HookHandlerType = Schema.Literals([
 ]);
 
 export type V2HookStartedNotification__HookOutputEntryKind =
-  "warning" | "stop" | "feedback" | "context" | "error";
+  | "warning"
+  | "stop"
+  | "feedback"
+  | "context"
+  | "error";
 export const V2HookStartedNotification__HookOutputEntryKind = Schema.Literals([
   "warning",
   "stop",
@@ -4465,7 +4554,11 @@ export const V2HookStartedNotification__HookOutputEntryKind = Schema.Literals([
 ]);
 
 export type V2HookStartedNotification__HookRunStatus =
-  "running" | "completed" | "failed" | "blocked" | "stopped";
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "stopped";
 export const V2HookStartedNotification__HookRunStatus = Schema.Literals([
   "running",
   "completed",
@@ -4484,7 +4577,13 @@ export const V2ItemCompletedNotification__AbsolutePathBuf = Schema.String.annota
 });
 
 export type V2ItemCompletedNotification__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ItemCompletedNotification__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -4496,7 +4595,10 @@ export const V2ItemCompletedNotification__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ItemCompletedNotification__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ItemCompletedNotification__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -4533,7 +4635,9 @@ export const V2ItemCompletedNotification__DynamicToolCallOutputContentItem = Sch
 );
 
 export type V2ItemCompletedNotification__DynamicToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2ItemCompletedNotification__DynamicToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -4625,7 +4729,10 @@ export const V2ItemCompletedNotification__MessagePhase = Schema.Literals([
 });
 
 export type V2ItemCompletedNotification__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ItemCompletedNotification__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -4659,7 +4766,10 @@ export const V2ItemCompletedNotification__ReasoningEffort = Schema.String.annota
 }).check(Schema.isMinLength(1));
 
 export type V2ItemCompletedNotification__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ItemCompletedNotification__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -4744,30 +4854,43 @@ export const V2ItemGuardianApprovalReviewCompletedNotification__AutoReviewDecisi
   });
 
 export type V2ItemGuardianApprovalReviewCompletedNotification__FileSystemAccessMode =
-  "read" | "write" | "deny";
+  | "read"
+  | "write"
+  | "deny";
 export const V2ItemGuardianApprovalReviewCompletedNotification__FileSystemAccessMode =
   Schema.Literals(["read", "write", "deny"]);
 
 export type V2ItemGuardianApprovalReviewCompletedNotification__GuardianApprovalReviewStatus =
-  "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
+  | "inProgress"
+  | "approved"
+  | "denied"
+  | "timedOut"
+  | "aborted";
 export const V2ItemGuardianApprovalReviewCompletedNotification__GuardianApprovalReviewStatus =
   Schema.Literals(["inProgress", "approved", "denied", "timedOut", "aborted"]).annotate({
     description: "[UNSTABLE] Lifecycle state for an approval auto-review.",
   });
 
 export type V2ItemGuardianApprovalReviewCompletedNotification__GuardianCommandSource =
-  "shell" | "unifiedExec";
+  | "shell"
+  | "unifiedExec";
 export const V2ItemGuardianApprovalReviewCompletedNotification__GuardianCommandSource =
   Schema.Literals(["shell", "unifiedExec"]);
 
 export type V2ItemGuardianApprovalReviewCompletedNotification__GuardianRiskLevel =
-  "low" | "medium" | "high" | "critical";
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
 export const V2ItemGuardianApprovalReviewCompletedNotification__GuardianRiskLevel = Schema.Literals(
   ["low", "medium", "high", "critical"],
 ).annotate({ description: "[UNSTABLE] Risk level assigned by approval auto-review." });
 
 export type V2ItemGuardianApprovalReviewCompletedNotification__GuardianUserAuthorization =
-  "unknown" | "low" | "medium" | "high";
+  | "unknown"
+  | "low"
+  | "medium"
+  | "high";
 export const V2ItemGuardianApprovalReviewCompletedNotification__GuardianUserAuthorization =
   Schema.Literals(["unknown", "low", "medium", "high"]).annotate({
     description: "[UNSTABLE] Authorization level assigned by approval auto-review.",
@@ -4777,7 +4900,10 @@ export type V2ItemGuardianApprovalReviewCompletedNotification__LegacyAppPathStri
 export const V2ItemGuardianApprovalReviewCompletedNotification__LegacyAppPathString = Schema.String;
 
 export type V2ItemGuardianApprovalReviewCompletedNotification__NetworkApprovalProtocol =
-  "http" | "https" | "socks5Tcp" | "socks5Udp";
+  | "http"
+  | "https"
+  | "socks5Tcp"
+  | "socks5Udp";
 export const V2ItemGuardianApprovalReviewCompletedNotification__NetworkApprovalProtocol =
   Schema.Literals(["http", "https", "socks5Tcp", "socks5Udp"]);
 
@@ -4795,24 +4921,34 @@ export const V2ItemGuardianApprovalReviewStartedNotification__AdditionalNetworkP
   Schema.Struct({ enabled: Schema.optionalKey(Schema.Union([Schema.Boolean, Schema.Null])) });
 
 export type V2ItemGuardianApprovalReviewStartedNotification__FileSystemAccessMode =
-  "read" | "write" | "deny";
+  | "read"
+  | "write"
+  | "deny";
 export const V2ItemGuardianApprovalReviewStartedNotification__FileSystemAccessMode =
   Schema.Literals(["read", "write", "deny"]);
 
 export type V2ItemGuardianApprovalReviewStartedNotification__GuardianApprovalReviewStatus =
-  "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
+  | "inProgress"
+  | "approved"
+  | "denied"
+  | "timedOut"
+  | "aborted";
 export const V2ItemGuardianApprovalReviewStartedNotification__GuardianApprovalReviewStatus =
   Schema.Literals(["inProgress", "approved", "denied", "timedOut", "aborted"]).annotate({
     description: "[UNSTABLE] Lifecycle state for an approval auto-review.",
   });
 
 export type V2ItemGuardianApprovalReviewStartedNotification__GuardianCommandSource =
-  "shell" | "unifiedExec";
+  | "shell"
+  | "unifiedExec";
 export const V2ItemGuardianApprovalReviewStartedNotification__GuardianCommandSource =
   Schema.Literals(["shell", "unifiedExec"]);
 
 export type V2ItemGuardianApprovalReviewStartedNotification__GuardianRiskLevel =
-  "low" | "medium" | "high" | "critical";
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
 export const V2ItemGuardianApprovalReviewStartedNotification__GuardianRiskLevel = Schema.Literals([
   "low",
   "medium",
@@ -4821,7 +4957,10 @@ export const V2ItemGuardianApprovalReviewStartedNotification__GuardianRiskLevel 
 ]).annotate({ description: "[UNSTABLE] Risk level assigned by approval auto-review." });
 
 export type V2ItemGuardianApprovalReviewStartedNotification__GuardianUserAuthorization =
-  "unknown" | "low" | "medium" | "high";
+  | "unknown"
+  | "low"
+  | "medium"
+  | "high";
 export const V2ItemGuardianApprovalReviewStartedNotification__GuardianUserAuthorization =
   Schema.Literals(["unknown", "low", "medium", "high"]).annotate({
     description: "[UNSTABLE] Authorization level assigned by approval auto-review.",
@@ -4831,7 +4970,10 @@ export type V2ItemGuardianApprovalReviewStartedNotification__LegacyAppPathString
 export const V2ItemGuardianApprovalReviewStartedNotification__LegacyAppPathString = Schema.String;
 
 export type V2ItemGuardianApprovalReviewStartedNotification__NetworkApprovalProtocol =
-  "http" | "https" | "socks5Tcp" | "socks5Udp";
+  | "http"
+  | "https"
+  | "socks5Tcp"
+  | "socks5Udp";
 export const V2ItemGuardianApprovalReviewStartedNotification__NetworkApprovalProtocol =
   Schema.Literals(["http", "https", "socks5Tcp", "socks5Udp"]);
 
@@ -4842,7 +4984,13 @@ export const V2ItemStartedNotification__AbsolutePathBuf = Schema.String.annotate
 });
 
 export type V2ItemStartedNotification__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ItemStartedNotification__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -4854,7 +5002,10 @@ export const V2ItemStartedNotification__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ItemStartedNotification__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ItemStartedNotification__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -4891,7 +5042,9 @@ export const V2ItemStartedNotification__DynamicToolCallOutputContentItem = Schem
 );
 
 export type V2ItemStartedNotification__DynamicToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2ItemStartedNotification__DynamicToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -4983,7 +5136,10 @@ export const V2ItemStartedNotification__MessagePhase = Schema.Literals([
 });
 
 export type V2ItemStartedNotification__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ItemStartedNotification__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -5017,7 +5173,10 @@ export const V2ItemStartedNotification__ReasoningEffort = Schema.String.annotate
 }).check(Schema.isMinLength(1));
 
 export type V2ItemStartedNotification__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ItemStartedNotification__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -5089,7 +5248,10 @@ export const V2ListMcpServerStatusParams__McpServerStatusDetail = Schema.Literal
 ]);
 
 export type V2ListMcpServerStatusResponse__McpAuthStatus =
-  "unsupported" | "notLoggedIn" | "bearerToken" | "oAuth";
+  | "unsupported"
+  | "notLoggedIn"
+  | "bearerToken"
+  | "oAuth";
 export const V2ListMcpServerStatusResponse__McpAuthStatus = Schema.Literals([
   "unsupported",
   "notLoggedIn",
@@ -5242,7 +5404,10 @@ export const V2McpServerStatusUpdatedNotification__McpServerStartupFailureReason
 );
 
 export type V2McpServerStatusUpdatedNotification__McpServerStartupState =
-  "starting" | "ready" | "failed" | "cancelled";
+  | "starting"
+  | "ready"
+  | "failed"
+  | "cancelled";
 export const V2McpServerStatusUpdatedNotification__McpServerStartupState = Schema.Literals([
   "starting",
   "ready",
@@ -5343,7 +5508,9 @@ export const V2PluginInstalledResponse__PluginAuthPolicy = Schema.Literals([
 ]);
 
 export type V2PluginInstalledResponse__PluginInstallPolicy =
-  "NOT_AVAILABLE" | "AVAILABLE" | "INSTALLED_BY_DEFAULT";
+  | "NOT_AVAILABLE"
+  | "AVAILABLE"
+  | "INSTALLED_BY_DEFAULT";
 export const V2PluginInstalledResponse__PluginInstallPolicy = Schema.Literals([
   "NOT_AVAILABLE",
   "AVAILABLE",
@@ -5351,14 +5518,17 @@ export const V2PluginInstalledResponse__PluginInstallPolicy = Schema.Literals([
 ]);
 
 export type V2PluginInstalledResponse__PluginInstallPolicySource =
-  "WORKSPACE_SETTING" | "IMPLICIT_CANONICAL_APP";
+  | "WORKSPACE_SETTING"
+  | "IMPLICIT_CANONICAL_APP";
 export const V2PluginInstalledResponse__PluginInstallPolicySource = Schema.Literals([
   "WORKSPACE_SETTING",
   "IMPLICIT_CANONICAL_APP",
 ]);
 
 export type V2PluginInstalledResponse__PluginShareDiscoverability =
-  "LISTED" | "UNLISTED" | "PRIVATE";
+  | "LISTED"
+  | "UNLISTED"
+  | "PRIVATE";
 export const V2PluginInstalledResponse__PluginShareDiscoverability = Schema.Literals([
   "LISTED",
   "UNLISTED",
@@ -5410,7 +5580,11 @@ export const V2PluginListParams__AbsolutePathBuf = Schema.String.annotate({
 });
 
 export type V2PluginListParams__PluginListMarketplaceKind =
-  "local" | "vertical" | "workspace-directory" | "shared-with-me" | "created-by-me-remote";
+  | "local"
+  | "vertical"
+  | "workspace-directory"
+  | "shared-with-me"
+  | "created-by-me-remote";
 export const V2PluginListParams__PluginListMarketplaceKind = Schema.Literals([
   "local",
   "vertical",
@@ -5434,7 +5608,9 @@ export type V2PluginListResponse__PluginAuthPolicy = "ON_INSTALL" | "ON_USE";
 export const V2PluginListResponse__PluginAuthPolicy = Schema.Literals(["ON_INSTALL", "ON_USE"]);
 
 export type V2PluginListResponse__PluginInstallPolicy =
-  "NOT_AVAILABLE" | "AVAILABLE" | "INSTALLED_BY_DEFAULT";
+  | "NOT_AVAILABLE"
+  | "AVAILABLE"
+  | "INSTALLED_BY_DEFAULT";
 export const V2PluginListResponse__PluginInstallPolicy = Schema.Literals([
   "NOT_AVAILABLE",
   "AVAILABLE",
@@ -5442,7 +5618,8 @@ export const V2PluginListResponse__PluginInstallPolicy = Schema.Literals([
 ]);
 
 export type V2PluginListResponse__PluginInstallPolicySource =
-  "WORKSPACE_SETTING" | "IMPLICIT_CANONICAL_APP";
+  | "WORKSPACE_SETTING"
+  | "IMPLICIT_CANONICAL_APP";
 export const V2PluginListResponse__PluginInstallPolicySource = Schema.Literals([
   "WORKSPACE_SETTING",
   "IMPLICIT_CANONICAL_APP",
@@ -5497,7 +5674,8 @@ export const V2PluginReadResponse__AppSummary = Schema.Struct({
 }).annotate({ description: "EXPERIMENTAL - app metadata summary for plugin responses." });
 
 export type V2PluginReadResponse__AppTemplateUnavailableReason =
-  "NOT_CONFIGURED_FOR_WORKSPACE" | "NO_ACTIVE_WORKSPACE";
+  | "NOT_CONFIGURED_FOR_WORKSPACE"
+  | "NO_ACTIVE_WORKSPACE";
 export const V2PluginReadResponse__AppTemplateUnavailableReason = Schema.Literals([
   "NOT_CONFIGURED_FOR_WORKSPACE",
   "NO_ACTIVE_WORKSPACE",
@@ -5533,7 +5711,9 @@ export type V2PluginReadResponse__PluginAuthPolicy = "ON_INSTALL" | "ON_USE";
 export const V2PluginReadResponse__PluginAuthPolicy = Schema.Literals(["ON_INSTALL", "ON_USE"]);
 
 export type V2PluginReadResponse__PluginInstallPolicy =
-  "NOT_AVAILABLE" | "AVAILABLE" | "INSTALLED_BY_DEFAULT";
+  | "NOT_AVAILABLE"
+  | "AVAILABLE"
+  | "INSTALLED_BY_DEFAULT";
 export const V2PluginReadResponse__PluginInstallPolicy = Schema.Literals([
   "NOT_AVAILABLE",
   "AVAILABLE",
@@ -5541,7 +5721,8 @@ export const V2PluginReadResponse__PluginInstallPolicy = Schema.Literals([
 ]);
 
 export type V2PluginReadResponse__PluginInstallPolicySource =
-  "WORKSPACE_SETTING" | "IMPLICIT_CANONICAL_APP";
+  | "WORKSPACE_SETTING"
+  | "IMPLICIT_CANONICAL_APP";
 export const V2PluginReadResponse__PluginInstallPolicySource = Schema.Literals([
   "WORKSPACE_SETTING",
   "IMPLICIT_CANONICAL_APP",
@@ -5569,7 +5750,13 @@ export const V2PluginReadResponse__PluginSharePrincipalType = Schema.Literals([
 ]);
 
 export type V2PluginReadResponse__ScheduledTaskWeekday =
-  "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
+  | "MO"
+  | "TU"
+  | "WE"
+  | "TH"
+  | "FR"
+  | "SA"
+  | "SU";
 export const V2PluginReadResponse__ScheduledTaskWeekday = Schema.Literals([
   "MO",
   "TU",
@@ -5599,7 +5786,9 @@ export const V2PluginShareListResponse__PluginAuthPolicy = Schema.Literals([
 ]);
 
 export type V2PluginShareListResponse__PluginInstallPolicy =
-  "NOT_AVAILABLE" | "AVAILABLE" | "INSTALLED_BY_DEFAULT";
+  | "NOT_AVAILABLE"
+  | "AVAILABLE"
+  | "INSTALLED_BY_DEFAULT";
 export const V2PluginShareListResponse__PluginInstallPolicy = Schema.Literals([
   "NOT_AVAILABLE",
   "AVAILABLE",
@@ -5607,14 +5796,17 @@ export const V2PluginShareListResponse__PluginInstallPolicy = Schema.Literals([
 ]);
 
 export type V2PluginShareListResponse__PluginInstallPolicySource =
-  "WORKSPACE_SETTING" | "IMPLICIT_CANONICAL_APP";
+  | "WORKSPACE_SETTING"
+  | "IMPLICIT_CANONICAL_APP";
 export const V2PluginShareListResponse__PluginInstallPolicySource = Schema.Literals([
   "WORKSPACE_SETTING",
   "IMPLICIT_CANONICAL_APP",
 ]);
 
 export type V2PluginShareListResponse__PluginShareDiscoverability =
-  "LISTED" | "UNLISTED" | "PRIVATE";
+  | "LISTED"
+  | "UNLISTED"
+  | "PRIVATE";
 export const V2PluginShareListResponse__PluginShareDiscoverability = Schema.Literals([
   "LISTED",
   "UNLISTED",
@@ -5659,7 +5851,9 @@ export type V2PluginShareSaveParams__PluginShareTargetRole = "reader" | "editor"
 export const V2PluginShareSaveParams__PluginShareTargetRole = Schema.Literals(["reader", "editor"]);
 
 export type V2PluginShareUpdateTargetsParams__PluginSharePrincipalType =
-  "user" | "group" | "workspace";
+  | "user"
+  | "group"
+  | "workspace";
 export const V2PluginShareUpdateTargetsParams__PluginSharePrincipalType = Schema.Literals([
   "user",
   "group",
@@ -5673,7 +5867,9 @@ export const V2PluginShareUpdateTargetsParams__PluginShareTargetRole = Schema.Li
 ]);
 
 export type V2PluginShareUpdateTargetsParams__PluginShareUpdateDiscoverability =
-  "UNLISTED" | "PRIVATE" | "LISTED";
+  | "UNLISTED"
+  | "PRIVATE"
+  | "LISTED";
 export const V2PluginShareUpdateTargetsParams__PluginShareUpdateDiscoverability = Schema.Literals([
   "UNLISTED",
   "PRIVATE",
@@ -5681,7 +5877,9 @@ export const V2PluginShareUpdateTargetsParams__PluginShareUpdateDiscoverability 
 ]);
 
 export type V2PluginShareUpdateTargetsResponse__PluginShareDiscoverability =
-  "LISTED" | "UNLISTED" | "PRIVATE";
+  | "LISTED"
+  | "UNLISTED"
+  | "PRIVATE";
 export const V2PluginShareUpdateTargetsResponse__PluginShareDiscoverability = Schema.Literals([
   "LISTED",
   "UNLISTED",
@@ -5689,7 +5887,9 @@ export const V2PluginShareUpdateTargetsResponse__PluginShareDiscoverability = Sc
 ]);
 
 export type V2PluginShareUpdateTargetsResponse__PluginSharePrincipalRole =
-  "reader" | "editor" | "owner";
+  | "reader"
+  | "editor"
+  | "owner";
 export const V2PluginShareUpdateTargetsResponse__PluginSharePrincipalRole = Schema.Literals([
   "reader",
   "editor",
@@ -5697,7 +5897,9 @@ export const V2PluginShareUpdateTargetsResponse__PluginSharePrincipalRole = Sche
 ]);
 
 export type V2PluginShareUpdateTargetsResponse__PluginSharePrincipalType =
-  "user" | "group" | "workspace";
+  | "user"
+  | "group"
+  | "workspace";
 export const V2PluginShareUpdateTargetsResponse__PluginSharePrincipalType = Schema.Literals([
   "user",
   "group",
@@ -5745,7 +5947,10 @@ export const V2RawResponseItemCompletedNotification__AgentMessageInputContent = 
 );
 
 export type V2RawResponseItemCompletedNotification__ImageDetail =
-  "auto" | "low" | "high" | "original";
+  | "auto"
+  | "low"
+  | "high"
+  | "original";
 export const V2RawResponseItemCompletedNotification__ImageDetail = Schema.Literals([
   "auto",
   "low",
@@ -5796,7 +6001,9 @@ export const V2RawResponseItemCompletedNotification__LocalShellAction = Schema.U
 );
 
 export type V2RawResponseItemCompletedNotification__LocalShellStatus =
-  "completed" | "in_progress" | "incomplete";
+  | "completed"
+  | "in_progress"
+  | "incomplete";
 export const V2RawResponseItemCompletedNotification__LocalShellStatus = Schema.Literals([
   "completed",
   "in_progress",
@@ -5888,7 +6095,10 @@ export const V2RawResponseItemCompletedNotification__ResponsesApiWebSearchAction
 );
 
 export type V2RemoteControlStatusChangedNotification__RemoteControlConnectionStatus =
-  "disabled" | "connecting" | "connected" | "errored";
+  | "disabled"
+  | "connecting"
+  | "connected"
+  | "errored";
 export const V2RemoteControlStatusChangedNotification__RemoteControlConnectionStatus =
   Schema.Literals(["disabled", "connecting", "connected", "errored"]);
 
@@ -5950,7 +6160,13 @@ export const V2ReviewStartResponse__AbsolutePathBuf = Schema.String.annotate({
 });
 
 export type V2ReviewStartResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ReviewStartResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -5962,7 +6178,10 @@ export const V2ReviewStartResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ReviewStartResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ReviewStartResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -6091,7 +6310,10 @@ export type V2ReviewStartResponse__NonSteerableTurnKind = "review" | "compact";
 export const V2ReviewStartResponse__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type V2ReviewStartResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ReviewStartResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -6125,7 +6347,10 @@ export const V2ReviewStartResponse__ReasoningEffort = Schema.String.annotate({
 }).check(Schema.isMinLength(1));
 
 export type V2ReviewStartResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ReviewStartResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -6159,7 +6384,10 @@ export const V2ReviewStartResponse__TextElement = Schema.Struct({
 });
 
 export type V2ReviewStartResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ReviewStartResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -6206,7 +6434,8 @@ export const V2SendAddCreditsNudgeEmailParams__AddCreditsNudgeCreditType = Schem
 ]);
 
 export type V2SendAddCreditsNudgeEmailResponse__AddCreditsNudgeEmailStatus =
-  "sent" | "cooldown_active";
+  | "sent"
+  | "cooldown_active";
 export const V2SendAddCreditsNudgeEmailResponse__AddCreditsNudgeEmailStatus = Schema.Literals([
   "sent",
   "cooldown_active",
@@ -6310,7 +6539,9 @@ export const V2ThreadForkParams__AskForApproval = Schema.Union(
 );
 
 export type V2ThreadForkParams__SandboxMode =
-  "read-only" | "workspace-write" | "danger-full-access";
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
 export const V2ThreadForkParams__SandboxMode = Schema.Literals([
   "read-only",
   "workspace-write",
@@ -6359,7 +6590,13 @@ export const V2ThreadForkResponse__AskForApproval = Schema.Union(
 );
 
 export type V2ThreadForkResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadForkResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -6371,7 +6608,10 @@ export const V2ThreadForkResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadForkResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadForkResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -6511,7 +6751,10 @@ export type V2ThreadForkResponse__NonSteerableTurnKind = "review" | "compact";
 export const V2ThreadForkResponse__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type V2ThreadForkResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadForkResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -6545,7 +6788,10 @@ export const V2ThreadForkResponse__ReasoningEffort = Schema.String.annotate({
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadForkResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadForkResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -6591,7 +6837,10 @@ export type V2ThreadForkResponse__ThreadSource = string;
 export const V2ThreadForkResponse__ThreadSource = Schema.String;
 
 export type V2ThreadForkResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadForkResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -6632,7 +6881,12 @@ export const V2ThreadForkResponse__WebSearchAction = Schema.Union(
 );
 
 export type V2ThreadGoalGetResponse__ThreadGoalStatus =
-  "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 export const V2ThreadGoalGetResponse__ThreadGoalStatus = Schema.Literals([
   "active",
   "paused",
@@ -6643,7 +6897,12 @@ export const V2ThreadGoalGetResponse__ThreadGoalStatus = Schema.Literals([
 ]);
 
 export type V2ThreadGoalSetParams__ThreadGoalStatus =
-  "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 export const V2ThreadGoalSetParams__ThreadGoalStatus = Schema.Literals([
   "active",
   "paused",
@@ -6654,7 +6913,12 @@ export const V2ThreadGoalSetParams__ThreadGoalStatus = Schema.Literals([
 ]);
 
 export type V2ThreadGoalSetResponse__ThreadGoalStatus =
-  "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 export const V2ThreadGoalSetResponse__ThreadGoalStatus = Schema.Literals([
   "active",
   "paused",
@@ -6665,7 +6929,12 @@ export const V2ThreadGoalSetResponse__ThreadGoalStatus = Schema.Literals([
 ]);
 
 export type V2ThreadGoalUpdatedNotification__ThreadGoalStatus =
-  "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 export const V2ThreadGoalUpdatedNotification__ThreadGoalStatus = Schema.Literals([
   "active",
   "paused",
@@ -6725,7 +6994,13 @@ export type V2ThreadListResponse__AgentPath = string;
 export const V2ThreadListResponse__AgentPath = Schema.String;
 
 export type V2ThreadListResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadListResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -6737,7 +7012,10 @@ export const V2ThreadListResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadListResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadListResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -6877,7 +7155,10 @@ export type V2ThreadListResponse__NonSteerableTurnKind = "review" | "compact";
 export const V2ThreadListResponse__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type V2ThreadListResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadListResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -6911,7 +7192,10 @@ export const V2ThreadListResponse__ReasoningEffort = Schema.String.annotate({
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadListResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadListResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -6957,7 +7241,10 @@ export type V2ThreadListResponse__ThreadSource = string;
 export const V2ThreadListResponse__ThreadSource = Schema.String;
 
 export type V2ThreadListResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadListResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -7042,7 +7329,13 @@ export type V2ThreadMetadataUpdateResponse__AgentPath = string;
 export const V2ThreadMetadataUpdateResponse__AgentPath = Schema.String;
 
 export type V2ThreadMetadataUpdateResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadMetadataUpdateResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -7054,7 +7347,10 @@ export const V2ThreadMetadataUpdateResponse__CollabAgentStatus = Schema.Literals
 ]);
 
 export type V2ThreadMetadataUpdateResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadMetadataUpdateResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -7091,7 +7387,9 @@ export const V2ThreadMetadataUpdateResponse__DynamicToolCallOutputContentItem = 
 );
 
 export type V2ThreadMetadataUpdateResponse__DynamicToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2ThreadMetadataUpdateResponse__DynamicToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -7161,7 +7459,9 @@ export const V2ThreadMetadataUpdateResponse__McpToolCallResult = Schema.Struct({
 });
 
 export type V2ThreadMetadataUpdateResponse__McpToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2ThreadMetadataUpdateResponse__McpToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -7201,7 +7501,10 @@ export const V2ThreadMetadataUpdateResponse__NonSteerableTurnKind = Schema.Liter
 ]);
 
 export type V2ThreadMetadataUpdateResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadMetadataUpdateResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -7235,7 +7538,10 @@ export const V2ThreadMetadataUpdateResponse__ReasoningEffort = Schema.String.ann
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadMetadataUpdateResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadMetadataUpdateResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -7269,7 +7575,8 @@ export const V2ThreadMetadataUpdateResponse__TextElement = Schema.Struct({
 });
 
 export type V2ThreadMetadataUpdateResponse__ThreadActiveFlag =
-  "waitingOnApproval" | "waitingOnUserInput";
+  | "waitingOnApproval"
+  | "waitingOnUserInput";
 export const V2ThreadMetadataUpdateResponse__ThreadActiveFlag = Schema.Literals([
   "waitingOnApproval",
   "waitingOnUserInput",
@@ -7282,7 +7589,10 @@ export type V2ThreadMetadataUpdateResponse__ThreadSource = string;
 export const V2ThreadMetadataUpdateResponse__ThreadSource = Schema.String;
 
 export type V2ThreadMetadataUpdateResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadMetadataUpdateResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -7332,7 +7642,13 @@ export type V2ThreadReadResponse__AgentPath = string;
 export const V2ThreadReadResponse__AgentPath = Schema.String;
 
 export type V2ThreadReadResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadReadResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -7344,7 +7660,10 @@ export const V2ThreadReadResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadReadResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadReadResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -7484,7 +7803,10 @@ export type V2ThreadReadResponse__NonSteerableTurnKind = "review" | "compact";
 export const V2ThreadReadResponse__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type V2ThreadReadResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadReadResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -7518,7 +7840,10 @@ export const V2ThreadReadResponse__ReasoningEffort = Schema.String.annotate({
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadReadResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadReadResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -7564,7 +7889,10 @@ export type V2ThreadReadResponse__ThreadSource = string;
 export const V2ThreadReadResponse__ThreadSource = Schema.String;
 
 export type V2ThreadReadResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadReadResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -7843,7 +8171,9 @@ export const V2ThreadResumeParams__ResponsesApiWebSearchAction = Schema.Union(
 );
 
 export type V2ThreadResumeParams__SandboxMode =
-  "read-only" | "workspace-write" | "danger-full-access";
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
 export const V2ThreadResumeParams__SandboxMode = Schema.Literals([
   "read-only",
   "workspace-write",
@@ -7899,7 +8229,13 @@ export const V2ThreadResumeResponse__AskForApproval = Schema.Union(
 );
 
 export type V2ThreadResumeResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadResumeResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -7911,7 +8247,10 @@ export const V2ThreadResumeResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadResumeResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadResumeResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -8051,7 +8390,10 @@ export type V2ThreadResumeResponse__NonSteerableTurnKind = "review" | "compact";
 export const V2ThreadResumeResponse__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type V2ThreadResumeResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadResumeResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -8085,7 +8427,10 @@ export const V2ThreadResumeResponse__ReasoningEffort = Schema.String.annotate({
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadResumeResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadResumeResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -8131,7 +8476,10 @@ export type V2ThreadResumeResponse__ThreadSource = string;
 export const V2ThreadResumeResponse__ThreadSource = Schema.String;
 
 export type V2ThreadResumeResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadResumeResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -8181,7 +8529,13 @@ export type V2ThreadRollbackResponse__AgentPath = string;
 export const V2ThreadRollbackResponse__AgentPath = Schema.String;
 
 export type V2ThreadRollbackResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadRollbackResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -8193,7 +8547,10 @@ export const V2ThreadRollbackResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadRollbackResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadRollbackResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -8336,7 +8693,10 @@ export const V2ThreadRollbackResponse__NonSteerableTurnKind = Schema.Literals([
 ]);
 
 export type V2ThreadRollbackResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadRollbackResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -8370,7 +8730,10 @@ export const V2ThreadRollbackResponse__ReasoningEffort = Schema.String.annotate(
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadRollbackResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadRollbackResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -8416,7 +8779,10 @@ export type V2ThreadRollbackResponse__ThreadSource = string;
 export const V2ThreadRollbackResponse__ThreadSource = Schema.String;
 
 export type V2ThreadRollbackResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadRollbackResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -8483,7 +8849,9 @@ export const V2ThreadSettingsUpdatedNotification__ActivePermissionProfile = Sche
 });
 
 export type V2ThreadSettingsUpdatedNotification__ApprovalsReviewer =
-  "user" | "auto_review" | "guardian_subagent";
+  | "user"
+  | "auto_review"
+  | "guardian_subagent";
 export const V2ThreadSettingsUpdatedNotification__ApprovalsReviewer = Schema.Literals([
   "user",
   "auto_review",
@@ -8541,7 +8909,10 @@ export const V2ThreadSettingsUpdatedNotification__ReasoningEffort = Schema.Strin
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadSettingsUpdatedNotification__ReasoningSummary =
-  "auto" | "concise" | "detailed" | "none";
+  | "auto"
+  | "concise"
+  | "detailed"
+  | "none";
 export const V2ThreadSettingsUpdatedNotification__ReasoningSummary = Schema.Union(
   [
     Schema.Literals(["auto", "concise", "detailed"]),
@@ -8563,7 +8934,13 @@ export type V2ThreadStartedNotification__AgentPath = string;
 export const V2ThreadStartedNotification__AgentPath = Schema.String;
 
 export type V2ThreadStartedNotification__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadStartedNotification__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -8575,7 +8952,10 @@ export const V2ThreadStartedNotification__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadStartedNotification__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadStartedNotification__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -8612,7 +8992,9 @@ export const V2ThreadStartedNotification__DynamicToolCallOutputContentItem = Sch
 );
 
 export type V2ThreadStartedNotification__DynamicToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2ThreadStartedNotification__DynamicToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -8721,7 +9103,10 @@ export const V2ThreadStartedNotification__NonSteerableTurnKind = Schema.Literals
 ]);
 
 export type V2ThreadStartedNotification__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadStartedNotification__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -8755,7 +9140,10 @@ export const V2ThreadStartedNotification__ReasoningEffort = Schema.String.annota
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadStartedNotification__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadStartedNotification__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -8789,7 +9177,8 @@ export const V2ThreadStartedNotification__TextElement = Schema.Struct({
 });
 
 export type V2ThreadStartedNotification__ThreadActiveFlag =
-  "waitingOnApproval" | "waitingOnUserInput";
+  | "waitingOnApproval"
+  | "waitingOnUserInput";
 export const V2ThreadStartedNotification__ThreadActiveFlag = Schema.Literals([
   "waitingOnApproval",
   "waitingOnUserInput",
@@ -8802,7 +9191,10 @@ export type V2ThreadStartedNotification__ThreadSource = string;
 export const V2ThreadStartedNotification__ThreadSource = Schema.String;
 
 export type V2ThreadStartedNotification__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadStartedNotification__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -8908,7 +9300,9 @@ export type V2ThreadStartParams__Personality = "none" | "friendly" | "pragmatic"
 export const V2ThreadStartParams__Personality = Schema.Literals(["none", "friendly", "pragmatic"]);
 
 export type V2ThreadStartParams__SandboxMode =
-  "read-only" | "workspace-write" | "danger-full-access";
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
 export const V2ThreadStartParams__SandboxMode = Schema.Literals([
   "read-only",
   "workspace-write",
@@ -8960,7 +9354,13 @@ export const V2ThreadStartResponse__AskForApproval = Schema.Union(
 );
 
 export type V2ThreadStartResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadStartResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -8972,7 +9372,10 @@ export const V2ThreadStartResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadStartResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadStartResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9112,7 +9515,10 @@ export type V2ThreadStartResponse__NonSteerableTurnKind = "review" | "compact";
 export const V2ThreadStartResponse__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type V2ThreadStartResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadStartResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9146,7 +9552,10 @@ export const V2ThreadStartResponse__ReasoningEffort = Schema.String.annotate({
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadStartResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadStartResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -9192,7 +9601,10 @@ export type V2ThreadStartResponse__ThreadSource = string;
 export const V2ThreadStartResponse__ThreadSource = Schema.String;
 
 export type V2ThreadStartResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadStartResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -9233,7 +9645,8 @@ export const V2ThreadStartResponse__WebSearchAction = Schema.Union(
 );
 
 export type V2ThreadStatusChangedNotification__ThreadActiveFlag =
-  "waitingOnApproval" | "waitingOnUserInput";
+  | "waitingOnApproval"
+  | "waitingOnUserInput";
 export const V2ThreadStatusChangedNotification__ThreadActiveFlag = Schema.Literals([
   "waitingOnApproval",
   "waitingOnUserInput",
@@ -9268,7 +9681,13 @@ export type V2ThreadUnarchiveResponse__AgentPath = string;
 export const V2ThreadUnarchiveResponse__AgentPath = Schema.String;
 
 export type V2ThreadUnarchiveResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2ThreadUnarchiveResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -9280,7 +9699,10 @@ export const V2ThreadUnarchiveResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2ThreadUnarchiveResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadUnarchiveResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9317,7 +9739,9 @@ export const V2ThreadUnarchiveResponse__DynamicToolCallOutputContentItem = Schem
 );
 
 export type V2ThreadUnarchiveResponse__DynamicToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2ThreadUnarchiveResponse__DynamicToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9426,7 +9850,10 @@ export const V2ThreadUnarchiveResponse__NonSteerableTurnKind = Schema.Literals([
 ]);
 
 export type V2ThreadUnarchiveResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2ThreadUnarchiveResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9460,7 +9887,10 @@ export const V2ThreadUnarchiveResponse__ReasoningEffort = Schema.String.annotate
 }).check(Schema.isMinLength(1));
 
 export type V2ThreadUnarchiveResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2ThreadUnarchiveResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -9494,7 +9924,8 @@ export const V2ThreadUnarchiveResponse__TextElement = Schema.Struct({
 });
 
 export type V2ThreadUnarchiveResponse__ThreadActiveFlag =
-  "waitingOnApproval" | "waitingOnUserInput";
+  | "waitingOnApproval"
+  | "waitingOnUserInput";
 export const V2ThreadUnarchiveResponse__ThreadActiveFlag = Schema.Literals([
   "waitingOnApproval",
   "waitingOnUserInput",
@@ -9507,7 +9938,10 @@ export type V2ThreadUnarchiveResponse__ThreadSource = string;
 export const V2ThreadUnarchiveResponse__ThreadSource = Schema.String;
 
 export type V2ThreadUnarchiveResponse__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2ThreadUnarchiveResponse__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -9548,7 +9982,9 @@ export const V2ThreadUnarchiveResponse__WebSearchAction = Schema.Union(
 );
 
 export type V2ThreadUnsubscribeResponse__ThreadUnsubscribeStatus =
-  "notLoaded" | "notSubscribed" | "unsubscribed";
+  | "notLoaded"
+  | "notSubscribed"
+  | "unsubscribed";
 export const V2ThreadUnsubscribeResponse__ThreadUnsubscribeStatus = Schema.Literals([
   "notLoaded",
   "notSubscribed",
@@ -9562,7 +9998,13 @@ export const V2TurnCompletedNotification__AbsolutePathBuf = Schema.String.annota
 });
 
 export type V2TurnCompletedNotification__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2TurnCompletedNotification__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -9574,7 +10016,10 @@ export const V2TurnCompletedNotification__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2TurnCompletedNotification__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2TurnCompletedNotification__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9611,7 +10056,9 @@ export const V2TurnCompletedNotification__DynamicToolCallOutputContentItem = Sch
 );
 
 export type V2TurnCompletedNotification__DynamicToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2TurnCompletedNotification__DynamicToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9709,7 +10156,10 @@ export const V2TurnCompletedNotification__NonSteerableTurnKind = Schema.Literals
 ]);
 
 export type V2TurnCompletedNotification__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2TurnCompletedNotification__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9743,7 +10193,10 @@ export const V2TurnCompletedNotification__ReasoningEffort = Schema.String.annota
 }).check(Schema.isMinLength(1));
 
 export type V2TurnCompletedNotification__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2TurnCompletedNotification__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -9777,7 +10230,10 @@ export const V2TurnCompletedNotification__TextElement = Schema.Struct({
 });
 
 export type V2TurnCompletedNotification__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2TurnCompletedNotification__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -9818,7 +10274,9 @@ export const V2TurnCompletedNotification__WebSearchAction = Schema.Union(
 );
 
 export type V2TurnPlanUpdatedNotification__TurnPlanStepStatus =
-  "pending" | "inProgress" | "completed";
+  | "pending"
+  | "inProgress"
+  | "completed";
 export const V2TurnPlanUpdatedNotification__TurnPlanStepStatus = Schema.Literals([
   "pending",
   "inProgress",
@@ -9832,7 +10290,13 @@ export const V2TurnStartedNotification__AbsolutePathBuf = Schema.String.annotate
 });
 
 export type V2TurnStartedNotification__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2TurnStartedNotification__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -9844,7 +10308,10 @@ export const V2TurnStartedNotification__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2TurnStartedNotification__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2TurnStartedNotification__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9881,7 +10348,9 @@ export const V2TurnStartedNotification__DynamicToolCallOutputContentItem = Schem
 );
 
 export type V2TurnStartedNotification__DynamicToolCallStatus =
-  "inProgress" | "completed" | "failed";
+  | "inProgress"
+  | "completed"
+  | "failed";
 export const V2TurnStartedNotification__DynamicToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -9979,7 +10448,10 @@ export const V2TurnStartedNotification__NonSteerableTurnKind = Schema.Literals([
 ]);
 
 export type V2TurnStartedNotification__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2TurnStartedNotification__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -10013,7 +10485,10 @@ export const V2TurnStartedNotification__ReasoningEffort = Schema.String.annotate
 }).check(Schema.isMinLength(1));
 
 export type V2TurnStartedNotification__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2TurnStartedNotification__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -10047,7 +10522,10 @@ export const V2TurnStartedNotification__TextElement = Schema.Struct({
 });
 
 export type V2TurnStartedNotification__TurnStatus =
-  "completed" | "interrupted" | "failed" | "inProgress";
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "inProgress";
 export const V2TurnStartedNotification__TurnStatus = Schema.Literals([
   "completed",
   "interrupted",
@@ -10201,7 +10679,13 @@ export const V2TurnStartResponse__AbsolutePathBuf = Schema.String.annotate({
 });
 
 export type V2TurnStartResponse__CollabAgentStatus =
-  "pendingInit" | "running" | "interrupted" | "completed" | "errored" | "shutdown" | "notFound";
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
 export const V2TurnStartResponse__CollabAgentStatus = Schema.Literals([
   "pendingInit",
   "running",
@@ -10213,7 +10697,10 @@ export const V2TurnStartResponse__CollabAgentStatus = Schema.Literals([
 ]);
 
 export type V2TurnStartResponse__CommandExecutionStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2TurnStartResponse__CommandExecutionStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -10342,7 +10829,10 @@ export type V2TurnStartResponse__NonSteerableTurnKind = "review" | "compact";
 export const V2TurnStartResponse__NonSteerableTurnKind = Schema.Literals(["review", "compact"]);
 
 export type V2TurnStartResponse__PatchApplyStatus =
-  "inProgress" | "completed" | "failed" | "declined";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined";
 export const V2TurnStartResponse__PatchApplyStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -10376,7 +10866,10 @@ export const V2TurnStartResponse__ReasoningEffort = Schema.String.annotate({
 }).check(Schema.isMinLength(1));
 
 export type V2TurnStartResponse__SubAgentActivityKind =
-  "started" | "interacted" | "interrupted" | "completed";
+  | "started"
+  | "interacted"
+  | "interrupted"
+  | "completed";
 export const V2TurnStartResponse__SubAgentActivityKind = Schema.Literals([
   "started",
   "interacted",
@@ -10484,7 +10977,9 @@ export const V2TurnSteerParams__TextElement = Schema.Struct({
 });
 
 export type V2WindowsSandboxReadinessResponse__WindowsSandboxReadiness =
-  "ready" | "notConfigured" | "updateRequired";
+  | "ready"
+  | "notConfigured"
+  | "updateRequired";
 export const V2WindowsSandboxReadinessResponse__WindowsSandboxReadiness = Schema.Literals([
   "ready",
   "notConfigured",
@@ -10492,7 +10987,8 @@ export const V2WindowsSandboxReadinessResponse__WindowsSandboxReadiness = Schema
 ]);
 
 export type V2WindowsSandboxSetupCompletedNotification__WindowsSandboxSetupMode =
-  "elevated" | "unelevated";
+  | "elevated"
+  | "unelevated";
 export const V2WindowsSandboxSetupCompletedNotification__WindowsSandboxSetupMode = Schema.Literals([
   "elevated",
   "unelevated",
@@ -19267,7 +19763,8 @@ export const ClientRequest__CommandExecParams = Schema.Struct({
 });
 
 export type ClientRequest__FunctionCallOutputBody =
-  string | ReadonlyArray<ClientRequest__FunctionCallOutputContentItem>;
+  | string
+  | ReadonlyArray<ClientRequest__FunctionCallOutputContentItem>;
 export const ClientRequest__FunctionCallOutputBody = Schema.Union([
   Schema.String,
   Schema.Array(ClientRequest__FunctionCallOutputContentItem),
@@ -19928,8 +20425,11 @@ export type ServerNotification__ThreadItem =
       readonly memoryCitation?: ServerNotification__MemoryCitation | null;
       readonly phase?: ServerNotification__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -20055,8 +20555,18 @@ export const ServerNotification__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([ServerNotification__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -21026,8 +21536,11 @@ export type V2ItemCompletedNotification__ThreadItem =
       readonly memoryCitation?: V2ItemCompletedNotification__MemoryCitation | null;
       readonly phase?: V2ItemCompletedNotification__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -21157,8 +21670,18 @@ export const V2ItemCompletedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2ItemCompletedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -21496,8 +22019,11 @@ export type V2ItemStartedNotification__ThreadItem =
       readonly memoryCitation?: V2ItemStartedNotification__MemoryCitation | null;
       readonly phase?: V2ItemStartedNotification__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -21625,8 +22151,18 @@ export const V2ItemStartedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2ItemStartedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -22099,7 +22635,8 @@ export const V2PluginShareListResponse__PluginShareContext = Schema.Struct({
 });
 
 export type V2RawResponseItemCompletedNotification__FunctionCallOutputBody =
-  string | ReadonlyArray<V2RawResponseItemCompletedNotification__FunctionCallOutputContentItem>;
+  | string
+  | ReadonlyArray<V2RawResponseItemCompletedNotification__FunctionCallOutputContentItem>;
 export const V2RawResponseItemCompletedNotification__FunctionCallOutputBody = Schema.Union([
   Schema.String,
   Schema.Array(V2RawResponseItemCompletedNotification__FunctionCallOutputContentItem),
@@ -22135,8 +22672,11 @@ export type V2ReviewStartResponse__ThreadItem =
       readonly memoryCitation?: V2ReviewStartResponse__MemoryCitation | null;
       readonly phase?: V2ReviewStartResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -22262,8 +22802,18 @@ export const V2ReviewStartResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ReviewStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -22588,8 +23138,11 @@ export type V2ThreadForkResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadForkResponse__MemoryCitation | null;
       readonly phase?: V2ThreadForkResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -22715,8 +23268,18 @@ export const V2ThreadForkResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadForkResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -23010,8 +23573,11 @@ export type V2ThreadListResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadListResponse__MemoryCitation | null;
       readonly phase?: V2ThreadListResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -23137,8 +23703,18 @@ export const V2ThreadListResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadListResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -23432,8 +24008,11 @@ export type V2ThreadMetadataUpdateResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadMetadataUpdateResponse__MemoryCitation | null;
       readonly phase?: V2ThreadMetadataUpdateResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -23563,8 +24142,18 @@ export const V2ThreadMetadataUpdateResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadMetadataUpdateResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -23859,8 +24448,11 @@ export type V2ThreadReadResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadReadResponse__MemoryCitation | null;
       readonly phase?: V2ThreadReadResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -23986,8 +24578,18 @@ export const V2ThreadReadResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadReadResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -24252,7 +24854,8 @@ export const V2ThreadReadResponse__ThreadItem = Schema.Union(
 );
 
 export type V2ThreadResumeParams__FunctionCallOutputBody =
-  string | ReadonlyArray<V2ThreadResumeParams__FunctionCallOutputContentItem>;
+  | string
+  | ReadonlyArray<V2ThreadResumeParams__FunctionCallOutputContentItem>;
 export const V2ThreadResumeParams__FunctionCallOutputBody = Schema.Union([
   Schema.String,
   Schema.Array(V2ThreadResumeParams__FunctionCallOutputContentItem),
@@ -24288,8 +24891,11 @@ export type V2ThreadResumeResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadResumeResponse__MemoryCitation | null;
       readonly phase?: V2ThreadResumeResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -24415,8 +25021,18 @@ export const V2ThreadResumeResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadResumeResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -24710,8 +25326,11 @@ export type V2ThreadRollbackResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadRollbackResponse__MemoryCitation | null;
       readonly phase?: V2ThreadRollbackResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -24839,8 +25458,18 @@ export const V2ThreadRollbackResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadRollbackResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -25144,8 +25773,11 @@ export type V2ThreadStartedNotification__ThreadItem =
       readonly memoryCitation?: V2ThreadStartedNotification__MemoryCitation | null;
       readonly phase?: V2ThreadStartedNotification__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -25275,8 +25907,18 @@ export const V2ThreadStartedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadStartedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -25571,8 +26213,11 @@ export type V2ThreadStartResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadStartResponse__MemoryCitation | null;
       readonly phase?: V2ThreadStartResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -25698,8 +26343,18 @@ export const V2ThreadStartResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2ThreadStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -25993,8 +26648,11 @@ export type V2ThreadUnarchiveResponse__ThreadItem =
       readonly memoryCitation?: V2ThreadUnarchiveResponse__MemoryCitation | null;
       readonly phase?: V2ThreadUnarchiveResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -26122,8 +26780,18 @@ export const V2ThreadUnarchiveResponse__ThreadItem = Schema.Union(
         Schema.Union([V2ThreadUnarchiveResponse__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -26418,8 +27086,11 @@ export type V2TurnCompletedNotification__ThreadItem =
       readonly memoryCitation?: V2TurnCompletedNotification__MemoryCitation | null;
       readonly phase?: V2TurnCompletedNotification__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -26549,8 +27220,18 @@ export const V2TurnCompletedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2TurnCompletedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -26845,8 +27526,11 @@ export type V2TurnStartedNotification__ThreadItem =
       readonly memoryCitation?: V2TurnStartedNotification__MemoryCitation | null;
       readonly phase?: V2TurnStartedNotification__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -26974,8 +27658,18 @@ export const V2TurnStartedNotification__ThreadItem = Schema.Union(
         Schema.Union([V2TurnStartedNotification__MessagePhase, Schema.Null]),
       ),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -27270,8 +27964,11 @@ export type V2TurnStartResponse__ThreadItem =
       readonly memoryCitation?: V2TurnStartResponse__MemoryCitation | null;
       readonly phase?: V2TurnStartResponse__MessagePhase | null;
       readonly text: string;
-      readonly delivery?: unknown;
-      readonly questions?: unknown;
+      readonly delivery?: "async" | null;
+      readonly questions?: ReadonlyArray<{
+        readonly title: string;
+        readonly options?: ReadonlyArray<string> | null;
+      }> | null;
       readonly type: "agentMessage";
     }
   | { readonly id: string; readonly text: string; readonly type: "plan" }
@@ -27397,8 +28094,18 @@ export const V2TurnStartResponse__ThreadItem = Schema.Union(
       ),
       phase: Schema.optionalKey(Schema.Union([V2TurnStartResponse__MessagePhase, Schema.Null])),
       text: Schema.String,
-      delivery: Schema.optionalKey(Schema.Unknown),
-      questions: Schema.optionalKey(Schema.Unknown),
+      delivery: Schema.optionalKey(Schema.Union([Schema.Literal("async"), Schema.Null])),
+      questions: Schema.optionalKey(
+        Schema.Union([
+          Schema.Array(
+            Schema.Struct({
+              title: Schema.String,
+              options: Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+            }),
+          ),
+          Schema.Null,
+        ]),
+      ),
       type: Schema.Literal("agentMessage").annotate({ title: "AgentMessageThreadItemType" }),
     }).annotate({ title: "AgentMessageThreadItem" }),
     Schema.Struct({
@@ -33279,7 +33986,9 @@ export const ClientRequest__DynamicToolSpec = Schema.Union(
 );
 
 export type ClientRequest__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const ClientRequest__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -33744,7 +34453,8 @@ export const ClientRequest__ThreadRealtimeInitialItem = Schema.Struct({
 });
 
 export type ClientRequest__ThreadRealtimeStartTransport =
-  { readonly type: "websocket" } | { readonly sdp: string; readonly type: "webrtc" };
+  | { readonly type: "websocket" }
+  | { readonly sdp: string; readonly type: "webrtc" };
 export const ClientRequest__ThreadRealtimeStartTransport = Schema.Union(
   [
     Schema.Struct({
@@ -34131,7 +34841,8 @@ export const GetAuthStatusResponse = Schema.Struct({
 }).annotate({ title: "GetAuthStatusResponse" });
 
 export type GetConversationSummaryParams =
-  { readonly rolloutPath: string } | { readonly conversationId: string };
+  | { readonly rolloutPath: string }
+  | { readonly conversationId: string };
 export const GetConversationSummaryParams = Schema.Union(
   [Schema.Struct({ rolloutPath: Schema.String }), Schema.Struct({ conversationId: Schema.String })],
   { mode: "oneOf" },
@@ -35887,7 +36598,10 @@ export const ServerNotification__CollabAgentTool = Schema.Literals([
 ]);
 
 export type ServerNotification__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const ServerNotification__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -35902,7 +36616,10 @@ export const ServerNotification__CommandExecOutputStream = Schema.Literals([
 ]).annotate({ description: "Stream label for `command/exec/outputDelta` notifications." });
 
 export type ServerNotification__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const ServerNotification__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -35937,7 +36654,9 @@ export const ServerNotification__HookSource = Schema.Literals([
 ]);
 
 export type ServerNotification__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const ServerNotification__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -36871,7 +37590,9 @@ export const V2ConfigRequirementsReadResponse = Schema.Struct({
 }).annotate({ title: "ConfigRequirementsReadResponse" });
 
 export type V2ConfigRequirementsReadResponse__ApprovalsReviewer =
-  "user" | "auto_review" | "guardian_subagent";
+  | "user"
+  | "auto_review"
+  | "guardian_subagent";
 export const V2ConfigRequirementsReadResponse__ApprovalsReviewer = Schema.Literals([
   "user",
   "auto_review",
@@ -37229,7 +37950,11 @@ export const V2ExperimentalFeatureListResponse = Schema.Struct({
 }).annotate({ title: "ExperimentalFeatureListResponse" });
 
 export type V2ExperimentalFeatureListResponse__ExperimentalFeatureStage =
-  "beta" | "underDevelopment" | "stable" | "deprecated" | "removed";
+  | "beta"
+  | "underDevelopment"
+  | "stable"
+  | "deprecated"
+  | "removed";
 export const V2ExperimentalFeatureListResponse__ExperimentalFeatureStage = Schema.Literals([
   "beta",
   "underDevelopment",
@@ -37961,7 +38686,10 @@ export const V2ItemCompletedNotification__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ItemCompletedNotification__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ItemCompletedNotification__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -37970,7 +38698,10 @@ export const V2ItemCompletedNotification__CollabAgentToolCallStatus = Schema.Lit
 ]);
 
 export type V2ItemCompletedNotification__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ItemCompletedNotification__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -38102,7 +38833,10 @@ export const V2ItemStartedNotification__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ItemStartedNotification__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ItemStartedNotification__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -38111,7 +38845,10 @@ export const V2ItemStartedNotification__CollabAgentToolCallStatus = Schema.Liter
 ]);
 
 export type V2ItemStartedNotification__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ItemStartedNotification__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -39123,7 +39860,10 @@ export const V2ReviewStartResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ReviewStartResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ReviewStartResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -39132,7 +39872,10 @@ export const V2ReviewStartResponse__CollabAgentToolCallStatus = Schema.Literals(
 ]);
 
 export type V2ReviewStartResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ReviewStartResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -39525,7 +40268,10 @@ export const V2ThreadForkResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadForkResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadForkResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -39534,7 +40280,10 @@ export const V2ThreadForkResponse__CollabAgentToolCallStatus = Schema.Literals([
 ]);
 
 export type V2ThreadForkResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadForkResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -39543,7 +40292,9 @@ export const V2ThreadForkResponse__CommandExecutionSource = Schema.Literals([
 ]);
 
 export type V2ThreadForkResponse__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const V2ThreadForkResponse__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -39887,7 +40638,10 @@ export const V2ThreadListResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadListResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadListResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -39896,7 +40650,10 @@ export const V2ThreadListResponse__CollabAgentToolCallStatus = Schema.Literals([
 ]);
 
 export type V2ThreadListResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadListResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -40070,7 +40827,10 @@ export const V2ThreadMetadataUpdateResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadMetadataUpdateResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadMetadataUpdateResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -40079,7 +40839,10 @@ export const V2ThreadMetadataUpdateResponse__CollabAgentToolCallStatus = Schema.
 ]);
 
 export type V2ThreadMetadataUpdateResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadMetadataUpdateResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -40208,7 +40971,10 @@ export const V2ThreadReadResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadReadResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadReadResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -40217,7 +40983,10 @@ export const V2ThreadReadResponse__CollabAgentToolCallStatus = Schema.Literals([
 ]);
 
 export type V2ThreadReadResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadReadResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -40869,7 +41638,9 @@ export const V2ThreadResumeResponse__ActivePermissionProfile = Schema.Struct({
 });
 
 export type V2ThreadResumeResponse__ApprovalsReviewer =
-  "user" | "auto_review" | "guardian_subagent";
+  | "user"
+  | "auto_review"
+  | "guardian_subagent";
 export const V2ThreadResumeResponse__ApprovalsReviewer = Schema.Literals([
   "user",
   "auto_review",
@@ -40912,7 +41683,10 @@ export const V2ThreadResumeResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadResumeResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadResumeResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -40921,7 +41695,10 @@ export const V2ThreadResumeResponse__CollabAgentToolCallStatus = Schema.Literals
 ]);
 
 export type V2ThreadResumeResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadResumeResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -40930,7 +41707,9 @@ export const V2ThreadResumeResponse__CommandExecutionSource = Schema.Literals([
 ]);
 
 export type V2ThreadResumeResponse__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const V2ThreadResumeResponse__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -41284,7 +42063,10 @@ export const V2ThreadRollbackResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadRollbackResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadRollbackResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -41293,7 +42075,10 @@ export const V2ThreadRollbackResponse__CollabAgentToolCallStatus = Schema.Litera
 ]);
 
 export type V2ThreadRollbackResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadRollbackResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -41552,7 +42337,9 @@ export const V2ThreadSettingsUpdatedNotification = Schema.Struct({
 }).annotate({ title: "ThreadSettingsUpdatedNotification" });
 
 export type V2ThreadSettingsUpdatedNotification__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const V2ThreadSettingsUpdatedNotification__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -41625,7 +42412,10 @@ export const V2ThreadStartedNotification__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadStartedNotification__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadStartedNotification__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -41634,7 +42424,10 @@ export const V2ThreadStartedNotification__CollabAgentToolCallStatus = Schema.Lit
 ]);
 
 export type V2ThreadStartedNotification__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadStartedNotification__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -41819,7 +42612,9 @@ export const V2ThreadStartParams__DynamicToolSpec = Schema.Union(
 );
 
 export type V2ThreadStartParams__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const V2ThreadStartParams__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -42029,7 +42824,10 @@ export const V2ThreadStartResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadStartResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadStartResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -42038,7 +42836,10 @@ export const V2ThreadStartResponse__CollabAgentToolCallStatus = Schema.Literals(
 ]);
 
 export type V2ThreadStartResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadStartResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -42047,7 +42848,9 @@ export const V2ThreadStartResponse__CommandExecutionSource = Schema.Literals([
 ]);
 
 export type V2ThreadStartResponse__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const V2ThreadStartResponse__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -42234,7 +43037,10 @@ export const V2ThreadUnarchiveResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2ThreadUnarchiveResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2ThreadUnarchiveResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -42243,7 +43049,10 @@ export const V2ThreadUnarchiveResponse__CollabAgentToolCallStatus = Schema.Liter
 ]);
 
 export type V2ThreadUnarchiveResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2ThreadUnarchiveResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -42372,7 +43181,10 @@ export const V2TurnCompletedNotification__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2TurnCompletedNotification__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2TurnCompletedNotification__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -42381,7 +43193,10 @@ export const V2TurnCompletedNotification__CollabAgentToolCallStatus = Schema.Lit
 ]);
 
 export type V2TurnCompletedNotification__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2TurnCompletedNotification__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -42488,7 +43303,10 @@ export const V2TurnStartedNotification__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2TurnStartedNotification__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2TurnStartedNotification__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -42497,7 +43315,10 @@ export const V2TurnStartedNotification__CollabAgentToolCallStatus = Schema.Liter
 ]);
 
 export type V2TurnStartedNotification__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2TurnStartedNotification__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",
@@ -42623,7 +43444,9 @@ export const V2TurnStartParams__CollaborationMode = Schema.Struct({
 }).annotate({ description: "Collaboration mode for a Codex session." });
 
 export type V2TurnStartParams__MultiAgentMode =
-  "explicitRequestOnly" | "proactive" | { readonly custom: string };
+  | "explicitRequestOnly"
+  | "proactive"
+  | { readonly custom: string };
 export const V2TurnStartParams__MultiAgentMode = Schema.Union(
   [
     Schema.Literals(["explicitRequestOnly", "proactive"]),
@@ -42694,7 +43517,10 @@ export const V2TurnStartResponse__CollabAgentTool = Schema.Literals([
 ]);
 
 export type V2TurnStartResponse__CollabAgentToolCallStatus =
-  "inProgress" | "completed" | "failed" | "interrupted";
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const V2TurnStartResponse__CollabAgentToolCallStatus = Schema.Literals([
   "inProgress",
   "completed",
@@ -42703,7 +43529,10 @@ export const V2TurnStartResponse__CollabAgentToolCallStatus = Schema.Literals([
 ]);
 
 export type V2TurnStartResponse__CommandExecutionSource =
-  "agent" | "userShell" | "unifiedExecStartup" | "unifiedExecInteraction";
+  | "agent"
+  | "userShell"
+  | "unifiedExecStartup"
+  | "unifiedExecInteraction";
 export const V2TurnStartResponse__CommandExecutionSource = Schema.Literals([
   "agent",
   "userShell",

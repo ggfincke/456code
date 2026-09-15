@@ -1,7 +1,4 @@
-// packages/client-runtime/src/rpc/index.ts
-// expose rpc session
-
-export * from './client.ts'
-export * from './http.ts'
-export * from './protocol.ts'
-export { type RpcSession, RpcSessionFactory } from './session.ts'
+export * from "./client.ts";
+export * from "./http.ts";
+export * from "./protocol.ts";
+export { type RpcSession } from "./session.ts";

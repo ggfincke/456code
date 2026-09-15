@@ -1,234 +1,142 @@
-// apps/server/src/orchestration/ThreadLiveEventCoalescer.ts
-// coalesces nonterminal live tool updates within one bounded subscription
-
-import {
-  type OrchestrationEvent,
+import type {
+  OrchestrationEvent,
   OrchestrationGetSnapshotError,
-  type OrchestrationThreadStreamItem,
-} from '@t3tools/contracts'
-import * as Deferred from 'effect/Deferred'
-import * as Duration from 'effect/Duration'
-import * as Effect from 'effect/Effect'
-import * as Fiber from 'effect/Fiber'
-import * as Predicate from 'effect/Predicate'
-import * as Queue from 'effect/Queue'
-import * as Result from 'effect/Result'
-import * as Semaphore from 'effect/Semaphore'
-import * as Stream from 'effect/Stream'
+  OrchestrationThreadStreamItem,
+} from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Predicate from "effect/Predicate";
+import * as Queue from "effect/Queue";
+import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 
-import { projectActivityEvent } from './ActivityPayloadProjection.ts'
-import { makeLiveStreamBudget, type RetainedLiveItem } from './LiveStreamBudget.ts'
+import { projectActivityEvent } from "./ActivityPayloadProjection.ts";
+import { makeLiveStreamBudget, type RetainedLiveItem } from "./LiveStreamBudget.ts";
 
-const COALESCE_WINDOW = Duration.millis(50)
-const MAX_PENDING_UPDATES = 512
-const MAX_TRACKED_TOOL_STATUSES = 512
+const COALESCE_WINDOW = Duration.millis(50);
+const MAX_PENDING_UPDATES = 512;
 
 export type ThreadLiveInput =
-  { readonly kind: 'event'; readonly event: OrchestrationEvent } | { readonly kind: 'synchronized' }
+  | { readonly kind: "event"; readonly event: OrchestrationEvent }
+  | { readonly kind: "synchronized" };
 
-function asRecord(value: unknown): Record<string, unknown> | null
-{
-  return Predicate.isObject(value) ? value : null
+function isToolUpdated(event: OrchestrationEvent): boolean {
+  return (
+    event.type === "thread.activity-appended" && event.payload.activity.kind === "tool.updated"
+  );
 }
 
-function asTrimmedString(value: unknown): string | null
-{
-  if (!Predicate.isString(value))
-  {
-    return null
+function asTrimmedString(value: unknown): string | null {
+  if (!Predicate.isString(value)) {
+    return null;
   }
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-function stableToolCallIdentity(event: OrchestrationEvent): string | null
-{
-  if (event.type !== 'thread.activity-appended')
-  {
-    return null
+function stableToolCallIdentity(event: OrchestrationEvent): string | null {
+  if (event.type !== "thread.activity-appended") {
+    return null;
   }
-  const payload = asRecord(event.payload.activity.payload)
-  const data = asRecord(payload?.data)
-  return asTrimmedString(payload?.toolCallId) ?? asTrimmedString(data?.toolCallId)
-}
-
-function stableToolCallKey(event: OrchestrationEvent): string | null
-{
-  const identity = stableToolCallIdentity(event)
-  if (identity === null || event.type !== 'thread.activity-appended')
-  {
-    return null
+  const payload = event.payload.activity.payload;
+  if (!Predicate.isObject(payload)) {
+    return null;
   }
-  return `${event.payload.activity.turnId ?? ''}\u0000${identity}`
+  const data = Predicate.isObject(payload.data) ? payload.data : null;
+  return asTrimmedString(payload.toolCallId) ?? asTrimmedString(data?.toolCallId);
 }
 
-function rememberStatus(statuses: Map<string, string>, key: string, status: string): void
-{
-  statuses.delete(key)
-  statuses.set(key, status)
-  if (statuses.size > MAX_TRACKED_TOOL_STATUSES)
-  {
-    const oldestKey = statuses.keys().next().value
-    if (oldestKey !== undefined)
-    {
-      statuses.delete(oldestKey)
-    }
-  }
-}
-
-function normalizeToolStatus(status: string | null): string
-{
-  return status === null ? 'unknown' : status === 'in_progress' ? 'inProgress' : status
-}
-
-function isCoalescibleToolUpdate(
-  event: OrchestrationEvent,
-  statuses: Map<string, string>,
-): boolean
-{
-  if (event.type !== 'thread.activity-appended')
-  {
-    return false
-  }
-  const payload = asRecord(event.payload.activity.payload)
-  const data = asRecord(payload?.data)
-  const item = asRecord(data?.item)
-  const rawStatus =
-    asTrimmedString(payload?.status) ??
-    asTrimmedString(data?.status) ??
-    asTrimmedString(item?.status)
-  const status = normalizeToolStatus(rawStatus)
-  const key = stableToolCallKey(event)
-  const terminal = status === 'completed' || status === 'failed' || status === 'declined'
-  const hasError =
-    payload?.error !== undefined || data?.error !== undefined || item?.error !== undefined
-  const statusChanged = key === null || statuses.get(key) !== status
-
-  if (key !== null)
-  {
-    if (terminal || hasError || event.payload.activity.kind === 'tool.completed')
-    {
-      statuses.delete(key)
-    }
-    else
-    {
-      rememberStatus(statuses, key, status)
-    }
-  }
-
-  return event.payload.activity.kind === 'tool.updated' && !terminal && !hasError && !statusChanged
-}
-
-function coalescePendingToolUpdates(
-  pendingUpdates: ReadonlyArray<OrchestrationEvent>,
-): ReadonlyArray<OrchestrationEvent>
-{
-  const seen = new Set<string>()
-  const latestUpdates: Array<OrchestrationEvent> = []
-  for (let index = pendingUpdates.length - 1; index >= 0; index -= 1)
-  {
-    const event = pendingUpdates[index]!
-    const key = stableToolCallKey(event)
-    if (key !== null && seen.has(key))
-    {
-      continue
-    }
-    if (key !== null)
-    {
-      seen.add(key)
-    }
-    latestUpdates.push(event)
-  }
-  latestUpdates.reverse()
-  return latestUpdates
-}
-
-// keep only the latest repeated-status update for each stable tool-call id
+/**
+ * Retain only the latest in-flight update for each stable tool-call id in a
+ * live run. Anonymous calls pass through because labels are not unique when
+ * tools execute in parallel. Survivors remain in sequence order.
+ */
 export function coalesceLiveToolUpdatedEvents(
   events: ReadonlyArray<OrchestrationEvent>,
-): ReadonlyArray<OrchestrationEvent>
-{
-  const survivors: Array<OrchestrationEvent> = []
-  const statuses = new Map<string, string>()
-  let pendingUpdates: Array<OrchestrationEvent> = []
+): ReadonlyArray<OrchestrationEvent> {
+  const survivors: Array<OrchestrationEvent> = [];
+  let pendingUpdates: Array<OrchestrationEvent> = [];
 
-  const flushUpdates = () =>
-  {
-    survivors.push(...coalescePendingToolUpdates(pendingUpdates))
-    pendingUpdates = []
-  }
-
-  for (const event of events)
-  {
-    if (isCoalescibleToolUpdate(event, statuses))
-    {
-      pendingUpdates.push(event)
-      continue
+  const flushUpdates = () => {
+    const seen = new Set<string>();
+    const latestUpdates: Array<OrchestrationEvent> = [];
+    for (let index = pendingUpdates.length - 1; index >= 0; index -= 1) {
+      const event = pendingUpdates[index]!;
+      const identity = stableToolCallIdentity(event);
+      const activity =
+        event.type === "thread.activity-appended" ? event.payload.activity : undefined;
+      const key = identity ? `${activity?.turnId ?? ""}\u0000${identity}` : null;
+      if (key && seen.has(key)) {
+        continue;
+      }
+      if (key) {
+        seen.add(key);
+      }
+      latestUpdates.push(event);
     }
-    flushUpdates()
-    survivors.push(event)
+    latestUpdates.reverse();
+    survivors.push(...latestUpdates);
+    pendingUpdates = [];
+  };
+
+  for (const event of events) {
+    if (isToolUpdated(event)) {
+      pendingUpdates.push(event);
+      continue;
+    }
+    flushUpdates();
+    survivors.push(event);
   }
-  flushUpdates()
-  return survivors
+  flushUpdates();
+  return survivors;
 }
 
-export const makeThreadLiveEventCoalescer = Effect.fn('makeThreadLiveEventCoalescer')(
+export const makeThreadLiveEventCoalescer = Effect.fn("makeThreadLiveEventCoalescer")(
   function* (options?: {
-    readonly coalesceWindow?: Duration.Input
-    readonly maxItems?: number
-    readonly maxSerializedBytes?: number
-  })
-  {
-    const coalescerScope = yield* Effect.scope
-    const budget = yield* makeLiveStreamBudget(options)
-    const cleanupComplete = yield* Deferred.make<void>()
-    const input = yield* Queue.unbounded<
-      RetainedLiveItem<ThreadLiveInput>,
-      OrchestrationGetSnapshotError
-    >()
+    readonly coalesceWindow?: Duration.Input;
+    readonly maxItems?: number;
+    readonly maxSerializedBytes?: number;
+  }) {
+    const coalescerScope = yield* Effect.scope;
+    const budget = yield* makeLiveStreamBudget(options);
+    const cleanupComplete = yield* Deferred.make<void>();
     const output = yield* Queue.unbounded<
       RetainedLiveItem<OrchestrationThreadStreamItem>,
       OrchestrationGetSnapshotError
-    >()
-    const mutex = yield* Semaphore.make(1)
-    const coalesceWindow = options?.coalesceWindow ?? COALESCE_WINDOW
-    let pendingUpdates: Array<RetainedLiveItem<ThreadLiveInput>> = []
-    const toolStatuses = new Map<string, string>()
-    let windowGeneration = 0
-    let windowFiber: Fiber.Fiber<void, never> | null = null
-    let closed = false
+    >();
+    const mutex = yield* Semaphore.make(1);
+    const coalesceWindow = options?.coalesceWindow ?? COALESCE_WINDOW;
+    let pendingUpdates: Array<RetainedLiveItem<OrchestrationEvent>> = [];
+    let windowGeneration = 0;
+    let windowFiber: Fiber.Fiber<void, never> | null = null;
+    let closed = false;
 
-    const cancelWindow = Effect.fn('ThreadLiveEventCoalescer.cancelWindow')(function* ()
-    {
-      const fiber = windowFiber
-      if (fiber === null)
-      {
-        return
+    const cancelWindow = Effect.fn("ThreadLiveEventCoalescer.cancelWindow")(function* () {
+      const fiber = windowFiber;
+      if (!fiber) {
+        return;
       }
-      windowFiber = null
-      yield* Fiber.interrupt(fiber)
-    })
+      windowFiber = null;
+      yield* Fiber.interrupt(fiber);
+    });
 
-    const flushPending = Effect.fn('ThreadLiveEventCoalescer.flushPending')(function* ()
-    {
-      if (pendingUpdates.length === 0)
-      {
-        return
+    const flushPending = Effect.fn("ThreadLiveEventCoalescer.flushPending")(function* () {
+      if (pendingUpdates.length === 0) {
+        return;
       }
-      const previous = pendingUpdates
-      pendingUpdates = []
       const items = yield* budget.replace(
-        previous,
-        coalescePendingToolUpdates(
-          previous.flatMap((item) => (item.value.kind === 'event' ? [item.value.event] : [])),
-        ).map((event) => ({
-          kind: 'event' as const,
-          event: projectActivityEvent(event),
+        pendingUpdates,
+        coalesceLiveToolUpdatedEvents(pendingUpdates.map((item) => item.value)).map((event) => ({
+          kind: "event" as const,
+          event,
         })),
         (item) => item.event,
-      )
-      yield* Queue.offerAll(output, items)
-    }, Effect.uninterruptible)
+      );
+      pendingUpdates = [];
+      yield* Queue.offerAll(output, items);
+    }, Effect.uninterruptible);
 
     const flushWindow = (generation: number) =>
       Effect.sleep(coalesceWindow).pipe(
@@ -238,150 +146,96 @@ export const makeThreadLiveEventCoalescer = Effect.fn('makeThreadLiveEventCoales
           ),
         ),
         Effect.ensuring(
-          Effect.sync(() =>
-          {
-            if (generation === windowGeneration)
-            {
-              windowFiber = null
+          Effect.sync(() => {
+            if (generation === windowGeneration) {
+              windowFiber = null;
             }
           }),
         ),
         Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
-      )
+      );
 
-    const processAll = Effect.fn('ThreadLiveEventCoalescer.processAll')(function* (
-      inputs: ReadonlyArray<RetainedLiveItem<ThreadLiveInput>>,
-    )
-    {
+    // Keep each source batch together so a synchronization marker cannot pass
+    // events already pulled from PubSub but still being coalesced.
+    const offerAll = Effect.fn("ThreadLiveEventCoalescer.offerAll")(function* (
+      inputs: ReadonlyArray<ThreadLiveInput>,
+    ) {
       yield* mutex.withPermits(1)(
         Effect.forEach(
           inputs,
-          (retainedInput) =>
-            Effect.gen(function* ()
-            {
-              yield* budget.check
-              const liveInput = retainedInput.value
-              if (
-                liveInput.kind === 'event' &&
-                isCoalescibleToolUpdate(liveInput.event, toolStatuses)
-              )
-              {
-                pendingUpdates.push(retainedInput)
-                if (pendingUpdates.length === 1)
-                {
-                  const generation = ++windowGeneration
-                  windowFiber = yield* Effect.forkIn(flushWindow(generation), coalescerScope)
+          (input) =>
+            Effect.gen(function* () {
+              yield* budget.check;
+              if (input.kind === "event") {
+                // Retain only the client payload, not full persisted tool output.
+                yield* budget.retain(projectActivityEvent(input.event)).pipe(
+                  Effect.tap((item) => Effect.sync(() => pendingUpdates.push(item))),
+                  Effect.uninterruptible,
+                );
+              }
+              if (input.kind === "event" && isToolUpdated(input.event)) {
+                if (pendingUpdates.length === 1) {
+                  const generation = ++windowGeneration;
+                  windowFiber = yield* Effect.forkIn(flushWindow(generation), coalescerScope);
                 }
-                if (pendingUpdates.length >= MAX_PENDING_UPDATES)
-                {
-                  yield* cancelWindow()
-                  windowGeneration += 1
-                  yield* flushPending()
+                if (pendingUpdates.length >= MAX_PENDING_UPDATES) {
+                  yield* cancelWindow();
+                  windowGeneration += 1;
+                  yield* flushPending();
                 }
-                return
+                return;
               }
 
-              yield* cancelWindow()
-              windowGeneration += 1
-              yield* flushPending()
-              if (liveInput.kind === 'synchronized')
-              {
-                toolStatuses.clear()
+              yield* cancelWindow();
+              windowGeneration += 1;
+              // A non-update event closes the run immediately. The coalescer keeps
+              // that boundary after the final update from the run.
+              yield* flushPending();
+              if (input.kind === "synchronized") {
+                yield* budget.retain({ kind: "synchronized" as const }).pipe(
+                  Effect.flatMap((marker) => Queue.offer(output, marker)),
+                  Effect.uninterruptible,
+                );
               }
-              const values: ReadonlyArray<OrchestrationThreadStreamItem> =
-                liveInput.kind === 'synchronized'
-                  ? [{ kind: 'synchronized' }]
-                  : [
-                      {
-                        kind: 'event',
-                        event: projectActivityEvent(liveInput.event),
-                      },
-                    ]
-              const items = yield* budget.replace([retainedInput], values, (item) =>
-                item.kind === 'event' ? item.event : item,
-              )
-              yield* Queue.offerAll(output, items)
             }),
           { discard: true },
         ),
-      )
-    })
+      );
+    });
 
     const close = (error?: OrchestrationGetSnapshotError) =>
       mutex.withPermits(1)(
-        Effect.gen(function* ()
-        {
-          if (closed)
-          {
-            return
+        Effect.gen(function* () {
+          if (closed) {
+            return;
           }
-          closed = true
-          windowGeneration += 1
-          yield* cancelWindow()
-          budget.release(pendingUpdates)
-          pendingUpdates = []
-          budget.release(yield* Queue.clear(input).pipe(Effect.orDie))
-          budget.release(yield* Queue.clear(output).pipe(Effect.orDie))
-          if (error !== undefined)
-          {
-            yield* Queue.fail(input, error)
-            yield* Queue.fail(output, error)
+          closed = true;
+          windowGeneration += 1;
+          yield* cancelWindow();
+          budget.release(pendingUpdates);
+          pendingUpdates = [];
+          budget.release(yield* Queue.clear(output).pipe(Effect.orDie));
+          if (error) {
+            yield* Queue.fail(output, error);
           }
-          yield* Queue.shutdown(input)
-          yield* Queue.shutdown(output)
-          yield* Deferred.succeed(cleanupComplete, undefined)
+          yield* Queue.shutdown(output);
+          yield* Deferred.succeed(cleanupComplete, undefined);
         }),
-      )
+      );
 
-    const admit = (liveInput: ThreadLiveInput): boolean =>
-    {
-      if (closed)
-      {
-        return false
-      }
-      const payload = liveInput.kind === 'event' ? liveInput.event : liveInput
-      const retained = budget.retainUnsafe(liveInput, payload)
-      if (Result.isFailure(retained))
-      {
-        return false
-      }
-      if (Queue.offerUnsafe(input, retained.success))
-      {
-        return true
-      }
-      budget.release([retained.success])
-      budget.failUnsafe(
-        new OrchestrationGetSnapshotError({
-          message: 'The live event buffer closed before delivery.',
-        }),
-      )
-      return false
-    }
-
-    const offer = (liveInput: ThreadLiveInput) =>
-      Effect.suspend(() => (admit(liveInput) ? Effect.void : budget.check))
-
-    yield* Effect.addFinalizer(() => close())
+    yield* Effect.addFinalizer(() => close());
     yield* budget.failed.pipe(
       Effect.catchTags({ OrchestrationGetSnapshotError: close }),
       Effect.forkScoped,
-    )
-    yield* Stream.fromQueue(input).pipe(
-      Stream.runForEachArray(processAll),
-      Effect.raceFirst(budget.failed),
-      Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
-      Effect.forkScoped,
-    )
+    );
 
     return {
-      admit,
-      offer,
-      offerAll: (inputs: ReadonlyArray<ThreadLiveInput>) =>
-        Effect.forEach(inputs, offer, { discard: true }),
+      offer: (input: ThreadLiveInput) => offerAll([input]),
+      offerAll,
       stream: budget.deliver(Stream.fromQueue(output)),
       failed: budget.failed,
       closed: Deferred.await(cleanupComplete),
       usage: budget.usage,
-    } as const
+    } as const;
   },
-)
+);

@@ -1,123 +1,101 @@
-// apps/web/src/lib/diffRendering.ts
-// parses diffs and derives render metadata
-import { parsePatchFiles } from '@pierre/diffs/utils/parsePatchFiles'
-import type { FileDiffMetadata } from '@pierre/diffs/types'
+import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
+import type { FileDiffMetadata } from "@pierre/diffs/types";
 
-// every creation path must choose wasm before pierre's shared singleton initializes.
-export const PREFERRED_HIGHLIGHTER = 'shiki-wasm' as const
+const DIFF_THEME_NAMES = {
+  light: "pierre-light",
+  dark: "pierre-dark",
+} as const;
 
-// shiki's bundled material-theme-ocean carries token colors byte-identical to
-// t3dotgg/vsc-material-but-i-wont-sue-you's Material Theme Ocean High Contrast;
-// the HC-only deltas are UI chrome keys the diff surface never reads, and the
-// ocean CSS in index.css already covers those.
-export const DIFF_THEME_NAMES = {
-  light: 'pierre-light',
-  dark: 'pierre-dark',
-  ocean: 'material-theme-ocean',
-} as const
+export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
 
-export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES]
-
-// ocean is a dark appearance w/ its own syntax palette, so it is tracked separately
-export type DiffThemeAppearance = keyof typeof DIFF_THEME_NAMES
-
-export function resolveDiffThemeName(theme: DiffThemeAppearance): DiffThemeName
-{
-  return DIFF_THEME_NAMES[theme]
+export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
+  return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
 }
 
-const FNV_OFFSET_BASIS_32 = 0x811c9dc5
-const FNV_PRIME_32 = 0x01000193
-const SECONDARY_HASH_SEED = 0x9e3779b9
-const SECONDARY_HASH_MULTIPLIER = 0x85ebca6b
+const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
+const FNV_PRIME_32 = 0x01000193;
+const SECONDARY_HASH_SEED = 0x9e3779b9;
+const SECONDARY_HASH_MULTIPLIER = 0x85ebca6b;
 
 export function fnv1a32(
   input: string,
   seed = FNV_OFFSET_BASIS_32,
   multiplier = FNV_PRIME_32,
-): number
-{
-  let hash = seed >>> 0
-  for (let index = 0; index < input.length; index += 1)
-  {
-    hash ^= input.charCodeAt(index)
-    hash = Math.imul(hash, multiplier) >>> 0
+): number {
+  let hash = seed >>> 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, multiplier) >>> 0;
   }
-  return hash >>> 0
+  return hash >>> 0;
 }
 
-export function buildPatchCacheKey(patch: string, scope = 'diff-panel'): string
-{
-  const normalizedPatch = patch.trim()
-  const primary = fnv1a32(normalizedPatch, FNV_OFFSET_BASIS_32, FNV_PRIME_32).toString(36)
+export function buildPatchCacheKey(patch: string, scope = "diff-panel"): string {
+  const normalizedPatch = patch.trim();
+  const primary = fnv1a32(normalizedPatch, FNV_OFFSET_BASIS_32, FNV_PRIME_32).toString(36);
   const secondary = fnv1a32(
     normalizedPatch,
     SECONDARY_HASH_SEED,
     SECONDARY_HASH_MULTIPLIER,
-  ).toString(36)
-  return `${scope}:${normalizedPatch.length}:${primary}:${secondary}`
+  ).toString(36);
+  return `${scope}:${normalizedPatch.length}:${primary}:${secondary}`;
 }
 
 export type RenderablePatch =
   | {
-      kind: 'files'
-      files: FileDiffMetadata[]
+      kind: "files";
+      files: FileDiffMetadata[];
     }
   | {
-      kind: 'raw'
-      text: string
-      reason: string
-    }
+      kind: "raw";
+      text: string;
+      reason: string;
+    };
 
-export interface DiffLineStat
-{
-  additions: number
-  deletions: number
+export interface DiffLineStat {
+  additions: number;
+  deletions: number;
 }
 
-export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLineStat
-{
+export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLineStat {
   return files.reduce<DiffLineStat>(
-    (total, file) =>
-    {
-      for (const hunk of file.hunks)
-      {
-        total.additions += hunk.additionLines
-        total.deletions += hunk.deletionLines
+    (total, file) => {
+      for (const hunk of file.hunks) {
+        total.additions += hunk.additionLines;
+        total.deletions += hunk.deletionLines;
       }
 
-      return total
+      return total;
     },
     { additions: 0, deletions: 0 },
-  )
+  );
 }
 
-interface RenderablePatchOptions
-{
-  // pierre's partial-patch parser keeps hunk render starts in source-file
-  // coordinates. Its virtualizer iterates partial patches as compact rows, so
-  // review diffs need compact render starts while retaining collapsedBefore
-  // for the "N unmodified lines" separator.
-  compactPartialHunkOffsets?: boolean
+interface RenderablePatchOptions {
+  /**
+   * Pierre's partial-patch parser keeps hunk render starts in source-file
+   * coordinates. Its virtualizer iterates partial patches as compact rows, so
+   * review diffs need compact render starts while retaining collapsedBefore
+   * for the "N unmodified lines" separator.
+   */
+  compactPartialHunkOffsets?: boolean;
 }
 
-export function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata
-{
-  if (!file.isPartial) return file
+function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata {
+  if (!file.isPartial) return file;
 
-  let splitLineStart = 0
-  let unifiedLineStart = 0
-  const hunks = file.hunks.map((hunk) =>
-  {
+  let splitLineStart = 0;
+  let unifiedLineStart = 0;
+  const hunks = file.hunks.map((hunk) => {
     const compactHunk = {
       ...hunk,
       splitLineStart,
       unifiedLineStart,
-    }
-    splitLineStart += hunk.splitLineCount
-    unifiedLineStart += hunk.unifiedLineCount
-    return compactHunk
-  })
+    };
+    splitLineStart += hunk.splitLineCount;
+    unifiedLineStart += hunk.unifiedLineCount;
+    return compactHunk;
+  });
 
   return {
     ...file,
@@ -125,145 +103,219 @@ export function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetad
     splitLineCount: splitLineStart,
     unifiedLineCount: unifiedLineStart,
     ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:compact-partial` } : {}),
-  }
+  };
 }
 
 export function getRenderablePatch(
   patch: string | undefined,
-  cacheScope = 'diff-panel',
+  cacheScope = "diff-panel",
   options: RenderablePatchOptions = {},
-): RenderablePatch | null
-{
-  if (!patch) return null
-  const normalizedPatch = patch.trim()
-  if (normalizedPatch.length === 0) return null
+): RenderablePatch | null {
+  if (!patch) return null;
+  const normalizedPatch = patch.trim();
+  if (normalizedPatch.length === 0) return null;
 
-  try
-  {
+  try {
     const parsedPatches = parsePatchFiles(
       normalizedPatch,
       buildPatchCacheKey(normalizedPatch, cacheScope),
-    )
+    );
     const files = parsedPatches.flatMap((parsedPatch) =>
       options.compactPartialHunkOffsets
         ? parsedPatch.files.map(compactPartialHunkOffsets)
         : parsedPatch.files,
-    )
-    if (files.length > 0)
-    {
-      return { kind: 'files', files }
+    );
+    if (files.length > 0) {
+      return { kind: "files", files };
     }
 
     return {
-      kind: 'raw',
+      kind: "raw",
       text: normalizedPatch,
-      reason: 'Unsupported diff format. Showing raw patch.',
-    }
-  }
-  catch
-  {
+      reason: "Unsupported diff format. Showing raw patch.",
+    };
+  } catch {
     return {
-      kind: 'raw',
+      kind: "raw",
       text: normalizedPatch,
-      reason: 'Failed to parse patch. Showing raw patch.',
+      reason: "Failed to parse patch. Showing raw patch.",
+    };
+  }
+}
+
+export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
+  const raw = fileDiff.name ?? fileDiff.prevName ?? "";
+  if (raw.startsWith("a/") || raw.startsWith("b/")) {
+    return raw.slice(2);
+  }
+  return raw;
+}
+
+/**
+ * What the file was called before the change. Only a rename makes it differ from the current
+ * path, and the hosts that resolve a diff position against both sides need both names.
+ */
+export function resolveFileDiffPreviousPath(fileDiff: FileDiffMetadata): string {
+  const raw = fileDiff.prevName ?? fileDiff.name ?? "";
+  if (raw.startsWith("a/") || raw.startsWith("b/")) {
+    return raw.slice(2);
+  }
+  return raw;
+}
+
+export function buildFileDiffIdentityKey(fileDiff: FileDiffMetadata): string {
+  return `${resolveFileDiffPreviousPath(fileDiff)}\u0000${resolveFileDiffPath(fileDiff)}`;
+}
+
+export function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
+  const cacheKey = fileDiff.cacheKey;
+  if (!cacheKey) return `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
+
+  return cacheKey.endsWith(":hydrated") ? cacheKey.slice(0, -":hydrated".length) : cacheKey;
+}
+
+function hashFileDiffPart(hash: number, value: string | number | boolean | undefined): number {
+  const serialized = value === undefined ? "undefined" : String(value);
+  const withLength = fnv1a32(`${typeof value}:${serialized.length}:`, hash);
+  return fnv1a32(serialized, withLength);
+}
+
+/**
+ * Content-only version for CodeView reconciliation. Pierre's cache key includes
+ * the whole patch, so using it here would repaint every file when one changes.
+ */
+export function buildFileDiffContentVersion(fileDiff: FileDiffMetadata): number {
+  let hash = FNV_OFFSET_BASIS_32;
+  const append = (value: string | number | boolean | undefined) => {
+    hash = hashFileDiffPart(hash, value);
+  };
+
+  append(fileDiff.name);
+  append(fileDiff.prevName);
+  append(fileDiff.lang);
+  append(fileDiff.newObjectId);
+  append(fileDiff.prevObjectId);
+  append(fileDiff.mode);
+  append(fileDiff.prevMode);
+  append(fileDiff.type);
+  append(fileDiff.isPartial);
+  append(fileDiff.splitLineCount);
+  append(fileDiff.unifiedLineCount);
+
+  for (const line of fileDiff.additionLines) append(line);
+  for (const line of fileDiff.deletionLines) append(line);
+  for (const hunk of fileDiff.hunks) {
+    append(hunk.collapsedBefore);
+    append(hunk.additionStart);
+    append(hunk.additionCount);
+    append(hunk.additionLines);
+    append(hunk.additionLineIndex);
+    append(hunk.deletionStart);
+    append(hunk.deletionCount);
+    append(hunk.deletionLines);
+    append(hunk.deletionLineIndex);
+    append(hunk.hunkContext);
+    append(hunk.hunkSpecs);
+    append(hunk.splitLineStart);
+    append(hunk.splitLineCount);
+    append(hunk.unifiedLineStart);
+    append(hunk.unifiedLineCount);
+    append(hunk.noEOFCRAdditions);
+    append(hunk.noEOFCRDeletions);
+    for (const content of hunk.hunkContent) {
+      append(content.type);
+      append(content.additionLineIndex);
+      append(content.deletionLineIndex);
+      append(content.type === "change" ? content.additions : content.lines);
+      append(content.type === "change" ? content.deletions : undefined);
     }
   }
+
+  return hash;
 }
 
-export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string
-{
-  const raw = fileDiff.name ?? fileDiff.prevName ?? ''
-  if (raw.startsWith('a/') || raw.startsWith('b/'))
-  {
-    return raw.slice(2)
-  }
-  return raw
-}
-
-export function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string
-{
-  return fileDiff.cacheKey ?? `${fileDiff.prevName ?? 'none'}:${fileDiff.name}`
-}
-
-export function buildFileDiffIdentityKey(fileDiff: FileDiffMetadata): string
-{
-  // parser-normalized names retain real top-level a/ and b/ directories
-  return JSON.stringify([fileDiff.prevName ?? fileDiff.name, fileDiff.name])
-}
-
-function hashFileDiffPart(hash: number, value: string | number | boolean | undefined): number
-{
-  const serialized = value === undefined ? 'undefined' : String(value)
-  const withLength = fnv1a32(`${typeof value}:${serialized.length}:`, hash)
-  return fnv1a32(serialized, withLength)
-}
-
-// content versions repaint changed files without resetting surviving interaction state
-export function buildFileDiffContentVersion(fileDiff: FileDiffMetadata): number
-{
-  let hash = FNV_OFFSET_BASIS_32
-  const append = (value: string | number | boolean | undefined) =>
-  {
-    hash = hashFileDiffPart(hash, value)
-  }
-
-  append(fileDiff.name)
-  append(fileDiff.prevName)
-  append(fileDiff.lang)
-  append(fileDiff.newObjectId)
-  append(fileDiff.prevObjectId)
-  append(fileDiff.mode)
-  append(fileDiff.prevMode)
-  append(fileDiff.type)
-  append(fileDiff.isPartial)
-  append(fileDiff.splitLineCount)
-  append(fileDiff.unifiedLineCount)
-  for (const line of fileDiff.additionLines) append(line)
-  for (const line of fileDiff.deletionLines) append(line)
-  for (const hunk of fileDiff.hunks)
-  {
-    append(hunk.collapsedBefore)
-    append(hunk.additionStart)
-    append(hunk.additionCount)
-    append(hunk.additionLines)
-    append(hunk.additionLineIndex)
-    append(hunk.deletionStart)
-    append(hunk.deletionCount)
-    append(hunk.deletionLines)
-    append(hunk.deletionLineIndex)
-    append(hunk.hunkContext)
-    append(hunk.hunkSpecs)
-    append(hunk.splitLineStart)
-    append(hunk.splitLineCount)
-    append(hunk.unifiedLineStart)
-    append(hunk.unifiedLineCount)
-    append(hunk.noEOFCRAdditions)
-    append(hunk.noEOFCRDeletions)
-    for (const content of hunk.hunkContent)
-    {
-      append(content.type)
-      append(content.additionLineIndex)
-      append(content.deletionLineIndex)
-      append(content.type === 'change' ? content.additions : content.lines)
-      append(content.type === 'change' ? content.deletions : undefined)
-    }
-  }
-  return hash
-}
-
-export function getDiffCollapseIconClassName(fileDiff: FileDiffMetadata): string
-{
-  switch (fileDiff.type)
-  {
-    case 'new':
-      return 'text-[var(--diffs-addition-base)]'
-    case 'deleted':
-      return 'text-[var(--diffs-deletion-base)]'
-    case 'change':
-    case 'rename-pure':
-    case 'rename-changed':
-      return 'text-[var(--diffs-modified-base)]'
+export function getDiffCollapseIconClassName(fileDiff: FileDiffMetadata): string {
+  switch (fileDiff.type) {
+    case "new":
+      return "text-[var(--diffs-addition-base)]";
+    case "deleted":
+      return "text-[var(--diffs-deletion-base)]";
+    case "change":
+    case "rename-pure":
+    case "rename-changed":
+      return "text-[var(--diffs-modified-base)]";
     default:
-      return 'text-muted-foreground/80'
+      return "text-muted-foreground/80";
   }
 }
+
+/**
+ * Maps every diff/file surface the @pierre/diffs renderer paints onto the
+ * app's code tokens, so themed palettes reach the code body, gutter, and
+ * row tints instead of the renderer's bundled colors. Shared by the diff
+ * panel and the file preview.
+ */
+export const DIFF_SURFACE_THEME_UNSAFE_CSS = `
+[data-diffs-header],
+[data-diff],
+[data-file],
+[data-error-wrapper],
+[data-virtualizer-buffer] {
+  --diffs-header-font-family: var(--font-sans) !important;
+  --diffs-font-family: var(--font-mono) !important;
+  --diffs-bg: var(--code-background) !important;
+  --diffs-light-bg: var(--code-background) !important;
+  --diffs-dark-bg: var(--code-background) !important;
+  --diffs-token-light-bg: transparent;
+  --diffs-token-dark-bg: transparent;
+
+  /* Gutter, context, and row tints all derive from the code surface the diff
+     body sits on — mixing from the canvas leaves the gutter looking unthemed
+     when a palette separates the two. */
+  --diffs-bg-context-override: color-mix(in srgb, var(--code-background) 97%, var(--code-foreground));
+  --diffs-bg-hover-override: color-mix(in srgb, var(--code-background) 94%, var(--code-foreground));
+  --diffs-bg-separator-override: color-mix(
+    in srgb,
+    var(--code-background) 95%,
+    var(--code-foreground)
+  );
+  --diffs-bg-buffer-override: color-mix(in srgb, var(--code-background) 90%, var(--code-foreground));
+
+  --diffs-bg-addition-override: light-dark(
+    color-mix(in srgb, var(--code-background) 50%, var(--diff-addition)),
+    color-mix(in srgb, var(--code-background) 70%, var(--diff-addition))
+  );
+  --diffs-bg-addition-number-override: light-dark(
+    color-mix(in srgb, var(--code-background) 35%, var(--diff-addition)),
+    color-mix(in srgb, var(--code-background) 60%, var(--diff-addition))
+  );
+  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--code-background) 85%, var(--diff-addition));
+  --diffs-bg-addition-emphasis-override: color-mix(
+    in srgb,
+    var(--code-background) 80%,
+    var(--diff-addition)
+  );
+
+  --diffs-bg-deletion-override: light-dark(
+    color-mix(in srgb, var(--code-background) 50%, var(--diff-deletion)),
+    color-mix(in srgb, var(--code-background) 70%, var(--diff-deletion))
+  );
+  --diffs-bg-deletion-number-override: light-dark(
+    color-mix(in srgb, var(--code-background) 35%, var(--diff-deletion)),
+    color-mix(in srgb, var(--code-background) 60%, var(--diff-deletion))
+  );
+  --diffs-bg-deletion-hover-override: color-mix(
+    in srgb,
+    var(--code-background) 85%,
+    var(--diff-deletion)
+  );
+  --diffs-bg-deletion-emphasis-override: color-mix(
+    in srgb,
+    var(--code-background) 80%,
+    var(--diff-deletion)
+  );
+
+  background-color: var(--diffs-bg) !important;
+  color: var(--code-foreground) !important;
+}
+`;

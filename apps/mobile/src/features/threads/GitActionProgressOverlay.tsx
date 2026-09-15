@@ -1,93 +1,87 @@
-// apps/mobile/src/features/threads/GitActionProgressOverlay.tsx
-// render git action progress overlay
+import * as Haptics from "expo-haptics";
+import { GlassView } from "expo-glass-effect";
+import { SymbolView } from "../../components/AppSymbol";
+import { useCallback, useEffect, useRef } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, useColorScheme, View } from "react-native";
+import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import * as Haptics from 'expo-haptics'
-import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
-import { SymbolView } from '../../components/AppSymbol'
-import { useCallback, useEffect, useRef } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, useColorScheme, View } from 'react-native'
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { AppText as Text } from "../../components/AppText";
+import { APP_BAR_HEIGHT } from "../../lib/layoutMetrics";
+import { themeColorWithAlpha } from "../../lib/mobileTheme";
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { useUniwindTheme } from "../../lib/useUniwindTheme";
+import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
+import type { GitActionProgress } from "../../state/use-vcs-action-state";
 
-import { AppText as Text } from '../../components/AppText'
-import { tryOpenExternalUrl } from '../../lib/openExternalUrl'
-import { useThemeColor } from '../../lib/useThemeColor'
-import type { GitActionProgress } from '../../state/use-vcs-action-state'
-
-const OVERLAY_LAYOUT_TRANSITION = LinearTransition.duration(220)
-const AnimatedLiquidGlassView = Animated.createAnimatedComponent(LiquidGlassView)
+const OVERLAY_LAYOUT_TRANSITION = LinearTransition.duration(220);
+const OVERLAY_TOP_GAP = 8;
+const AnimatedGlassView = Animated.createAnimatedComponent(GlassView);
 
 export function GitActionProgressOverlay(props: {
-  readonly progress: GitActionProgress
-  readonly onDismiss: () => void
-})
-{
-  const { progress, onDismiss } = props
-  const insets = useSafeAreaInsets()
-  const prevPhaseRef = useRef(progress.phase)
+  readonly progress: GitActionProgress;
+  readonly onDismiss: () => void;
+}) {
+  const { progress, onDismiss } = props;
+  const insets = useSafeAreaInsets();
+  const prevPhaseRef = useRef(progress.phase);
 
-  useEffect(() =>
-  {
-    const prev = prevPhaseRef.current
-    prevPhaseRef.current = progress.phase
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = progress.phase;
 
-    if (prev === 'running' && progress.phase === 'success')
-    {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+    if (prev === "running" && progress.phase === "success") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (prev === "running" && progress.phase === "error") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
-    else if (prev === 'running' && progress.phase === 'error')
-    {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
-    }
-  }, [progress.phase])
+  }, [progress.phase]);
 
-  const handlePress = useCallback(() =>
-  {
-    if (progress.prUrl)
-    {
-      void tryOpenExternalUrl(progress.prUrl, 'pull-request')
-      return
+  const handlePress = useCallback(() => {
+    if (progress.prUrl) {
+      void tryOpenExternalUrl(progress.prUrl, "pull-request");
+      return;
     }
-    if (progress.phase === 'success' || progress.phase === 'error')
-    {
-      onDismiss()
+    if (progress.phase === "success" || progress.phase === "error") {
+      onDismiss();
     }
-  }, [onDismiss, progress.phase, progress.prUrl])
+  }, [onDismiss, progress.phase, progress.prUrl]);
 
-  if (progress.phase === 'idle')
-  {
-    return null
+  if (progress.phase === "idle") {
+    return null;
   }
 
   return (
     <Animated.View
-      entering={isLiquidGlassSupported ? undefined : FadeIn.duration(200)}
+      entering={NATIVE_LIQUID_GLASS_SUPPORTED ? undefined : FadeIn.duration(200)}
       exiting={FadeOut.duration(150)}
       className="absolute inset-x-3 z-[100]"
-      style={{ top: insets.top + 48 }}
+      style={{ top: insets.top + APP_BAR_HEIGHT + OVERLAY_TOP_GAP }}
       pointerEvents="box-none"
     >
       <Pressable onPress={handlePress}>
         <OverlayContent progress={progress} />
       </Pressable>
     </Animated.View>
-  )
+  );
 }
 
-function OverlayContent(props: { readonly progress: GitActionProgress })
-{
-  const { progress } = props
-  const iconColor = useThemeColor('--color-icon')
-  const glassBorder = useThemeColor('--color-header-border')
-  const glassTint = useThemeColor('--color-glass-tint')
-  const isDarkMode = useColorScheme() === 'dark'
+function OverlayContent(props: { readonly progress: GitActionProgress }) {
+  const { progress } = props;
+  const colors = useUniwindTheme();
+  const glassSurface = colors["--color-glass-surface"];
+  const foreground = colors["--color-foreground"];
+  const shadowColor = colors["--color-primary-shadow"];
+  const isDarkMode = useColorScheme() === "dark";
+  const glassTint = themeColorWithAlpha(String(glassSurface), isDarkMode ? 0.48 : 0.38);
+  const glassBorder = themeColorWithAlpha(String(foreground), isDarkMode ? 0.18 : 0.12);
   const content = (
     <>
-      <OverlayIcon phase={progress.phase} iconColor={iconColor} />
+      <OverlayIcon phase={progress.phase} />
 
       <View className="flex-1 gap-0.5">
         {progress.label ? (
-          <Text className="text-sm font-sans-bold text-foreground" numberOfLines={1}>
+          <Text className="text-sm font-t3-bold text-foreground" numberOfLines={1}>
             {progress.label}
           </Text>
         ) : null}
@@ -99,34 +93,42 @@ function OverlayContent(props: { readonly progress: GitActionProgress })
       </View>
 
       {progress.prUrl ? (
-        <SymbolView name="arrow.up.right" size={13} tintColor={iconColor} type="monochrome" />
+        <SymbolView
+          name="arrow.up.right"
+          size={13}
+          tintColorClassName={"accent-icon"}
+          type="monochrome"
+        />
       ) : null}
     </>
-  )
+  );
 
-  if (isLiquidGlassSupported)
-  {
+  if (NATIVE_LIQUID_GLASS_SUPPORTED) {
     return (
       <Animated.View
         layout={OVERLAY_LAYOUT_TRANSITION}
         style={{
-          backgroundColor: glassTint,
-          borderColor: glassBorder,
-          borderCurve: 'continuous',
+          borderCurve: "continuous",
           borderRadius: 26,
-          borderWidth: StyleSheet.hairlineWidth,
-          overflow: 'hidden',
+          elevation: 12,
+          shadowColor,
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: isDarkMode ? 0.42 : 0.2,
+          shadowRadius: 18,
         }}
       >
-        <AnimatedLiquidGlassView
-          colorScheme={isDarkMode ? 'dark' : 'light'}
-          effect="regular"
-          interactive
+        <AnimatedGlassView
+          colorScheme={isDarkMode ? "dark" : "light"}
+          glassEffectStyle="regular"
+          isInteractive
           layout={OVERLAY_LAYOUT_TRANSITION}
+          tintColor={glassTint}
           style={{
-            borderCurve: 'continuous',
+            borderColor: glassBorder,
+            borderCurve: "continuous",
             borderRadius: 26,
-            overflow: 'hidden',
+            borderWidth: StyleSheet.hairlineWidth,
+            overflow: "hidden",
           }}
         >
           <Animated.View
@@ -135,15 +137,13 @@ function OverlayContent(props: { readonly progress: GitActionProgress })
           >
             {content}
           </Animated.View>
-        </AnimatedLiquidGlassView>
+        </AnimatedGlassView>
       </Animated.View>
-    )
+    );
   }
 
   const bgClass =
-    progress.phase === 'error'
-      ? 'bg-adaptive-red-50-950-a80 border-adaptive-red-200-800'
-      : 'bg-card border-border'
+    progress.phase === "error" ? "border-danger-border bg-danger" : "bg-card border-border";
 
   return (
     <Animated.View
@@ -152,36 +152,31 @@ function OverlayContent(props: { readonly progress: GitActionProgress })
     >
       {content}
     </Animated.View>
-  )
+  );
 }
 
-function OverlayIcon(props: {
-  readonly phase: GitActionProgress['phase']
-  readonly iconColor: ReturnType<typeof useThemeColor>
-})
-{
-  switch (props.phase)
-  {
-    case 'running':
-      return <ActivityIndicator size="small" />
-    case 'success':
+function OverlayIcon(props: { readonly phase: GitActionProgress["phase"] }) {
+  switch (props.phase) {
+    case "running":
+      return <ActivityIndicator size="small" colorClassName={"accent-icon"} />;
+    case "success":
       return (
         <View className="h-6 w-6 items-center justify-center rounded-full bg-green-500">
           <SymbolView name="checkmark" size={12} tintColor="white" type="monochrome" />
         </View>
-      )
-    case 'error':
+      );
+    case "error":
       return (
-        <View className="h-6 w-6 items-center justify-center rounded-full bg-red-500">
+        <View className="h-6 w-6 items-center justify-center rounded-full bg-danger">
           <SymbolView
             name="exclamationmark.triangle"
             size={12}
-            tintColor="white"
+            tintColorClassName="accent-danger-foreground"
             type="monochrome"
           />
         </View>
-      )
+      );
     default:
-      return null
+      return null;
   }
 }

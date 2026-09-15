@@ -1,49 +1,45 @@
-// apps/server/src/auth/EnvironmentAuthPolicy.ts
-// implement environment auth policy
+import type { ServerAuthDescriptor } from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
-import type { ServerAuthDescriptor } from '@t3tools/contracts'
-import * as Context from 'effect/Context'
-import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-
-import * as ServerConfig from '../config.ts'
-import * as ServerEnvironment from '../environment/ServerEnvironment.ts'
-import { isRemoteReachableHost, resolveSessionCookieName } from './utils.ts'
+import * as ServerConfig from "../config.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { isRemoteReachableHost, resolveSessionCookieName } from "./utils.ts";
 
 export class EnvironmentAuthPolicy extends Context.Service<
   EnvironmentAuthPolicy,
   {
-    readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>
+    readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>;
   }
->()('456code/auth/EnvironmentAuthPolicy')
-{}
+>()("t3/auth/EnvironmentAuthPolicy") {}
 
-export const make = Effect.gen(function* ()
-{
-  const config = yield* ServerConfig.ServerConfig
-  const serverEnvironment = yield* ServerEnvironment.ServerEnvironment
-  const isRemoteReachable = isRemoteReachableHost(config.host)
+/** @public Service construction is part of the canonical Effect module API. */
+export const make = Effect.gen(function* () {
+  const config = yield* ServerConfig.ServerConfig;
+  const serverEnvironment = yield* ServerEnvironment.ServerEnvironmentIdentity;
+  const isRemoteReachable = isRemoteReachableHost(config.host);
 
   const policy =
-    config.mode === 'desktop'
+    config.mode === "desktop"
       ? isRemoteReachable
-        ? 'remote-reachable'
-        : 'desktop-managed-local'
+        ? "remote-reachable"
+        : "desktop-managed-local"
       : isRemoteReachable
-        ? 'remote-reachable'
-        : 'loopback-browser'
+        ? "remote-reachable"
+        : "loopback-browser";
 
-  const bootstrapMethods: ServerAuthDescriptor['bootstrapMethods'] =
-    policy === 'desktop-managed-local'
-      ? ['desktop-bootstrap']
-      : config.mode === 'desktop' && policy === 'remote-reachable'
-        ? ['desktop-bootstrap', 'one-time-token']
-        : ['one-time-token']
+  const bootstrapMethods: ServerAuthDescriptor["bootstrapMethods"] =
+    policy === "desktop-managed-local"
+      ? ["desktop-bootstrap"]
+      : config.mode === "desktop" && policy === "remote-reachable"
+        ? ["desktop-bootstrap", "one-time-token"]
+        : ["one-time-token"];
 
   const descriptor: ServerAuthDescriptor = {
     policy,
     bootstrapMethods,
-    sessionMethods: ['browser-session-cookie', 'bearer-access-token', 'dpop-access-token'],
+    sessionMethods: ["browser-session-cookie", "bearer-access-token", "dpop-access-token"],
     sessionCookieName: resolveSessionCookieName({
       mode: config.mode,
       port: config.port,
@@ -52,12 +48,12 @@ export const make = Effect.gen(function* ()
       environmentId: yield* serverEnvironment.getEnvironmentId,
       development: config.devUrl !== undefined,
     }),
-  }
+  };
 
   return EnvironmentAuthPolicy.of({
     getDescriptor: () =>
-      Effect.succeed(descriptor).pipe(Effect.withSpan('EnvironmentAuthPolicy.getDescriptor')),
-  })
-})
+      Effect.succeed(descriptor).pipe(Effect.withSpan("EnvironmentAuthPolicy.getDescriptor")),
+  });
+});
 
-export const layer = Layer.effect(EnvironmentAuthPolicy, make)
+export const layer = Layer.effect(EnvironmentAuthPolicy, make);

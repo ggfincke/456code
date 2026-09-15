@@ -1,89 +1,71 @@
-// apps/mobile/src/lib/copyTextWithHaptic.ts
-// define copy text clipboard write error
-
-import * as Schema from 'effect/Schema'
-import * as Clipboard from 'expo-clipboard'
-import * as Haptics from 'expo-haptics'
+import * as Schema from "effect/Schema";
+import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
 
 export class CopyTextClipboardWriteError extends Schema.TaggedError<CopyTextClipboardWriteError>()(
-  'CopyTextClipboardWriteError',
+  "CopyTextClipboardWriteError",
   {
     target: Schema.String,
     cause: Schema.Defect(),
   },
-)
-{
-  override get message(): string
-  {
-    return `Failed to copy ${this.target} to the clipboard.`
+) {
+  override get message(): string {
+    return `Failed to copy ${this.target} to the clipboard.`;
   }
 }
 
 export class CopyTextHapticFeedbackError extends Schema.TaggedError<CopyTextHapticFeedbackError>()(
-  'CopyTextHapticFeedbackError',
+  "CopyTextHapticFeedbackError",
   {
     target: Schema.String,
-    feedback: Schema.Literals(['light-impact', 'selection']),
+    feedback: Schema.Literals(["light-impact", "selection"]),
     cause: Schema.Defect(),
   },
-)
-{
-  override get message(): string
-  {
-    return `Failed to trigger ${this.feedback} haptic feedback after copying ${this.target}.`
+) {
+  override get message(): string {
+    return `Failed to trigger ${this.feedback} haptic feedback after copying ${this.target}.`;
   }
 }
 
-export function copyTextWithHaptic(
+interface CopyTextWithHapticOptions {
+  readonly target?: string;
+  readonly feedback?: "light-impact" | "selection";
+}
+
+export async function tryCopyTextWithHaptic(
   value: string,
-  options: {
-    readonly target?: string
-    readonly feedback?: 'light-impact' | 'selection'
-  } = {},
-): void
-{
-  const target = options.target ?? 'text'
-  const feedback = options.feedback ?? 'light-impact'
+  options: CopyTextWithHapticOptions = {},
+): Promise<boolean> {
+  const target = options.target ?? "text";
+  const feedback = options.feedback ?? "light-impact";
 
-  void (async () =>
-  {
-    try
-    {
-      await Clipboard.setStringAsync(value)
+  const clipboardWrite = (async () => {
+    try {
+      await Clipboard.setStringAsync(value);
+      return true;
+    } catch (cause) {
+      const error = new CopyTextClipboardWriteError({ target, cause });
+      console.error(error.message, { _tag: error._tag, target, stack: error.stack });
+      return false;
     }
-    catch (cause)
-    {
-      console.error(
-        new CopyTextClipboardWriteError({
-          target,
-          cause,
-        }),
-      )
-    }
-  })()
+  })();
 
-  void (async () =>
-  {
-    try
-    {
-      if (feedback === 'selection')
-      {
-        await Haptics.selectionAsync()
+  void (async () => {
+    try {
+      if (feedback === "selection") {
+        await Haptics.selectionAsync();
+      } else {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
-      else
-      {
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-      }
+    } catch (cause) {
+      const error = new CopyTextHapticFeedbackError({ target, feedback, cause });
+      console.error(error.message, { _tag: error._tag, target, feedback, stack: error.stack });
     }
-    catch (cause)
-    {
-      console.error(
-        new CopyTextHapticFeedbackError({
-          target,
-          feedback,
-          cause,
-        }),
-      )
-    }
-  })()
+  })();
+
+  return await clipboardWrite;
+}
+
+export function copyTextWithHaptic(value: string, options: CopyTextWithHapticOptions = {}): void {
+  void tryCopyTextWithHaptic(value, options);
 }

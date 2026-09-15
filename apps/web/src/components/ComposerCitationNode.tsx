@@ -1,12 +1,9 @@
-// apps/web/src/components/ComposerCitationNode.tsx
-// represent durable assistant citations as editable Lexical inline tokens
-
-import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
-import type { AssistantCitation } from '@t3tools/contracts'
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import type { AssistantCitation } from "@t3tools/contracts";
 import {
   serializeAssistantCitation,
   withAssistantCitationComment,
-} from '@t3tools/shared/assistantCitations'
+} from "@t3tools/shared/assistantCitations";
 import {
   $applyNodeReplacement,
   $getNodeByKey,
@@ -18,105 +15,106 @@ import {
   type NodeKey,
   type SerializedLexicalNode,
   type Spread,
-} from 'lexical'
-import { createContext, use, type ReactElement } from 'react'
-import type { AssistantCitationSourceAnchor } from '~/lib/assistantTextSelection'
+} from "lexical";
+import { createContext, use, type ReactElement } from "react";
+import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 
-import { AssistantCitationChip } from './chat/AssistantCitationChip'
-import { COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME } from './composerInlineChip'
+import { AssistantCitationChip } from "./chat/AssistantCitationChip";
+import { COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME } from "./composerInlineChip";
 
 type SerializedComposerCitationNode = Spread<
-  { citation: AssistantCitation; source: string; type: 'composer-citation'; version: 1 },
+  {
+    citation: AssistantCitation;
+    source: string;
+    type: "composer-citation";
+    version: 1;
+  },
   SerializedLexicalNode
->
+>;
 
 export type ComposerCitationCommentRequest = {
-  previousValue: string
-  value: string
-  citationStart: number
-  sourceAnchor: AssistantCitationSourceAnchor
-}
+  previousValue: string;
+  value: string;
+  citationStart: number;
+  sourceAnchor: AssistantCitationSourceAnchor;
+};
 
 export type ComposerCitationCommentTarget = {
-  nodeKey: NodeKey
-  sourceAnchor?: AssistantCitationSourceAnchor
-  removeOnCancel?: boolean
-}
+  nodeKey: NodeKey;
+  sourceAnchor?: AssistantCitationSourceAnchor;
+  removeOnCancel?: boolean;
+};
 
 export const ComposerCitationCommentContext = createContext<{
-  openComment: ComposerCitationCommentTarget | null
-  onOpenChange: (nodeKey: NodeKey, open: boolean) => void
-  onSubmitAndSend: () => void
-}>({ openComment: null, onOpenChange: () =>
-{}, onSubmitAndSend: () =>
-{} })
+  openComment: ComposerCitationCommentTarget | null;
+  onOpenChange: (nodeKey: NodeKey, open: boolean) => void;
+  onSubmitAndSend: () => void;
+}>({ openComment: null, onOpenChange: () => {}, onSubmitAndSend: () => {} });
 
+/** Consume a cite action once its controlled prompt has been committed to the editor. */
 export function $consumeComposerCitationCommentRequest(requestRef: {
-  current: ComposerCitationCommentRequest | null
-}): ComposerCitationCommentTarget | null
-{
-  const request = requestRef.current
-  if (!request) return null
-  const root = $getRoot()
-  const value = root.getTextContent()
-  if (value === request.previousValue) return null
-  requestRef.current = null
-  if (value !== request.value) return null
-  const paragraph = root.getFirstChild()
-  if (!$isElementNode(paragraph)) return null
-  let offset = 0
-  for (const node of paragraph.getChildren())
-  {
-    if (offset === request.citationStart && node instanceof ComposerCitationNode)
-    {
-      return { nodeKey: node.getKey(), sourceAnchor: request.sourceAnchor, removeOnCancel: true }
+  current: ComposerCitationCommentRequest | null;
+}): ComposerCitationCommentTarget | null {
+  const request = requestRef.current;
+  if (!request) return null;
+  const root = $getRoot();
+  const value = root.getTextContent();
+  if (value === request.previousValue) return null;
+  requestRef.current = null;
+  if (value !== request.value) return null;
+
+  // Controlled prompts use one paragraph with inline nodes and explicit line breaks.
+  const paragraph = root.getFirstChild();
+  if (!$isElementNode(paragraph)) return null;
+  let offset = 0;
+  for (const node of paragraph.getChildren()) {
+    if (offset === request.citationStart && node instanceof ComposerCitationNode) {
+      return {
+        nodeKey: node.getKey(),
+        sourceAnchor: request.sourceAnchor,
+        removeOnCancel: true,
+      };
     }
-    offset += node.getTextContentSize()
+    offset += node.getTextContentSize();
   }
-  return null
+  return null;
 }
 
-function ComposerCitationDecorator(props: { citation: AssistantCitation; nodeKey: NodeKey })
-{
-  const [editor] = useLexicalComposerContext()
-  const commentContext = use(ComposerCitationCommentContext)
+function ComposerCitationDecorator(props: { citation: AssistantCitation; nodeKey: NodeKey }) {
+  const [editor] = useLexicalComposerContext();
+  const commentContext = use(ComposerCitationCommentContext);
   const commentTarget =
-    commentContext.openComment?.nodeKey === props.nodeKey ? commentContext.openComment : null
-  const onSaveComment = (comment: string): boolean =>
-  {
-    if (!editor.isEditable()) return false
-    let accepted = false
+    commentContext.openComment?.nodeKey === props.nodeKey ? commentContext.openComment : null;
+  const onSaveComment = (comment: string): boolean => {
+    if (!editor.isEditable()) return false;
+    let accepted = false;
     editor.update(
-      () =>
-      {
-        const node = $getNodeByKey(props.nodeKey)
-        if (node instanceof ComposerCitationNode && node.isAttached())
-        {
-          node.setComment(comment)
-          accepted = true
+      () => {
+        const node = $getNodeByKey(props.nodeKey);
+        if (node instanceof ComposerCitationNode && node.isAttached()) {
+          node.setComment(comment);
+          accepted = true;
         }
       },
       { discrete: true, tag: [HISTORY_PUSH_TAG, SKIP_DOM_SELECTION_TAG] },
-    )
-    return accepted
-  }
-  const onRemove = () =>
-  {
-    if (!editor.isEditable()) return
+    );
+    return accepted;
+  };
+  /** Cancelling a comment on a just-created citation removes the chip the cite action added. */
+  const onRemove = () => {
+    if (!editor.isEditable()) return;
     editor.update(
-      () =>
-      {
-        const node = $getNodeByKey(props.nodeKey)
-        if (node instanceof ComposerCitationNode)
-        {
-          node.selectPrevious()
-          node.remove()
+      () => {
+        const node = $getNodeByKey(props.nodeKey);
+        if (node instanceof ComposerCitationNode) {
+          node.selectPrevious();
+          node.remove();
         }
       },
       { tag: HISTORY_PUSH_TAG },
-    )
-    editor.getRootElement()?.focus({ preventScroll: true })
-  }
+    );
+    editor.getRootElement()?.focus({ preventScroll: true });
+  };
   return (
     <span
       className="inline-flex min-w-0 max-w-full"
@@ -126,104 +124,100 @@ function ComposerCitationDecorator(props: { citation: AssistantCitation; nodeKey
     >
       <AssistantCitationChip
         citation={props.citation}
+        composer
         commentEditor={{
           open: commentTarget !== null,
           sourceAnchor: commentTarget?.sourceAnchor,
-          onOpenChange: (open) =>
-          {
-            if (open && !editor.isEditable()) return
-            commentContext.onOpenChange(props.nodeKey, open)
+          onOpenChange: (open) => {
+            if (open && !editor.isEditable()) return;
+            commentContext.onOpenChange(props.nodeKey, open);
           },
           ...(commentTarget?.removeOnCancel ? { onCancel: onRemove } : {}),
           onSave: onSaveComment,
-          onSaveAndSend: (comment) =>
-          {
-            if (!onSaveComment(comment)) return false
-            commentContext.onSubmitAndSend()
-            return true
+          onSaveAndSend: (comment) => {
+            if (!onSaveComment(comment)) return false;
+            commentContext.onSubmitAndSend();
+            return true;
           },
         }}
-        onRemove={onRemove}
       />
     </span>
-  )
+  );
 }
 
-export class ComposerCitationNode extends DecoratorNode<ReactElement>
-{
-  __citation: AssistantCitation
-  __source: string
+export class ComposerCitationNode extends DecoratorNode<ReactElement> {
+  __citation: AssistantCitation;
+  __source: string;
 
-  static override getType(): string
-  {
-    return 'composer-citation'
+  static override getType(): string {
+    return "composer-citation";
   }
-  static override clone(node: ComposerCitationNode): ComposerCitationNode
-  {
-    return new ComposerCitationNode(node.__citation, node.__source, node.__key)
+
+  static override clone(node: ComposerCitationNode): ComposerCitationNode {
+    return new ComposerCitationNode(node.__citation, node.__source, node.__key);
   }
-  static override importJSON(serializedNode: SerializedComposerCitationNode): ComposerCitationNode
-  {
+
+  static override importJSON(serializedNode: SerializedComposerCitationNode): ComposerCitationNode {
     return $createComposerCitationNode(
       serializedNode.citation,
       serializedNode.source,
-    ).updateFromJSON(serializedNode)
+    ).updateFromJSON(serializedNode);
   }
-  constructor(citation: AssistantCitation, source: string, key?: NodeKey)
-  {
-    super(key)
-    this.__citation = citation
-    this.__source = source
+
+  constructor(citation: AssistantCitation, source: string, key?: NodeKey) {
+    super(key);
+    this.__citation = citation;
+    this.__source = source;
   }
-  override exportJSON(): SerializedComposerCitationNode
-  {
-    const node = this.getLatest()
+
+  override exportJSON(): SerializedComposerCitationNode {
+    const node = this.getLatest();
     return {
       ...super.exportJSON(),
       citation: node.__citation,
       source: node.__source,
-      type: 'composer-citation',
+      type: "composer-citation",
       version: 1,
-    }
+    };
   }
-  override createDOM(): HTMLElement
-  {
-    const dom = document.createElement('span')
-    dom.className = `${COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME} max-w-full`
-    return dom
+
+  override createDOM(): HTMLElement {
+    const dom = document.createElement("span");
+    dom.className = `${COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME} max-w-full`;
+    return dom;
   }
-  override updateDOM(): false
-  {
-    return false
+
+  override updateDOM(): false {
+    return false;
   }
-  override getTextContent(): string
-  {
-    return this.getLatest().__source
+
+  override getTextContent(): string {
+    return this.getLatest().__source;
   }
-  setComment(comment: string): this
-  {
-    const latest = this.getLatest()
-    const citation = withAssistantCitationComment(latest.__citation, comment)
-    if (citation.comment === latest.__citation.comment) return latest
-    const writable = this.getWritable()
-    writable.__citation = citation
-    writable.__source = serializeAssistantCitation(citation)
-    return writable
+
+  setComment(comment: string): this {
+    const latest = this.getLatest();
+    const citation = withAssistantCitationComment(latest.__citation, comment);
+    if (citation.comment === latest.__citation.comment) return latest;
+    const source = serializeAssistantCitation(citation);
+    const writable = this.getWritable();
+    writable.__citation = citation;
+    writable.__source = source;
+    return writable;
   }
-  override isInline(): true
-  {
-    return true
+
+  override isInline(): true {
+    return true;
   }
-  override decorate(): ReactElement
-  {
-    return <ComposerCitationDecorator citation={this.__citation} nodeKey={this.__key} />
+
+  override decorate(): ReactElement {
+    return <ComposerCitationDecorator citation={this.__citation} nodeKey={this.__key} />;
   }
 }
 
 export function $createComposerCitationNode(
   citation: AssistantCitation,
   source: string,
-): ComposerCitationNode
-{
-  return $applyNodeReplacement(new ComposerCitationNode(citation, source))
+): ComposerCitationNode {
+  return $applyNodeReplacement(new ComposerCitationNode(citation, source));
 }

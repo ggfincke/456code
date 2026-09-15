@@ -1,7 +1,0 @@
-{
-  "platforms": ["apple"],
-  "apple": {
-    "modules": ["Code456TerminalModule"],
-    "podspecPath": "Code456TerminalNative.podspec"
-  }
-}

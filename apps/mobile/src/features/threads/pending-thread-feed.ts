@@ -1,49 +1,40 @@
-// apps/mobile/src/features/threads/pending-thread-feed.ts
-// appends durable outbox messages to the projected mobile thread timeline
-
-import type { ThreadFeedEntry } from '../../lib/threadActivity'
-import type { QueuedThreadMessage } from '../../state/thread-outbox-model'
+import type { ThreadFeedEntry } from "../../lib/threadActivity";
+import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 
 export type PendingThreadFeedEntry = ThreadFeedEntry & {
-  readonly pendingMessage?: QueuedThreadMessage
-  readonly acknowledged?: boolean
-}
+  readonly pendingMessage?: QueuedThreadMessage;
+  readonly acknowledged?: boolean;
+};
 
+/** Append the outbox after all presented activity, until the server echoes each message. */
 export function appendPendingThreadMessages(
   presentedFeed: ReadonlyArray<ThreadFeedEntry>,
-  sourceFeed: ReadonlyArray<ThreadFeedEntry>,
-  pendingMessages: ReadonlyArray<{
-    readonly message: QueuedThreadMessage
-    readonly acknowledged: boolean
-  }>,
-): ReadonlyArray<PendingThreadFeedEntry>
-{
-  if (pendingMessages.length === 0)
-  {
-    return presentedFeed
-  }
+  feed: ReadonlyArray<ThreadFeedEntry>,
+  queuedMessages: ReadonlyArray<QueuedThreadMessage>,
+): ReadonlyArray<PendingThreadFeedEntry> {
+  if (queuedMessages.length === 0) return presentedFeed;
   const deliveredIds = new Set(
-    sourceFeed.flatMap((entry) => (entry.type === 'message' ? [entry.message.id] : [])),
-  )
+    feed.flatMap((entry) => (entry.type === "message" ? [entry.message.id] : [])),
+  );
   return [
     ...presentedFeed,
-    ...pendingMessages
-      .filter(({ message }) => !deliveredIds.has(message.messageId))
-      .map(({ message: pendingMessage, acknowledged }): PendingThreadFeedEntry => ({
-        type: 'message',
+    ...queuedMessages
+      .filter((message) => !deliveredIds.has(message.messageId))
+      .map((pendingMessage): PendingThreadFeedEntry => ({
+        type: "message",
         id: pendingMessage.messageId,
         createdAt: pendingMessage.createdAt,
         pendingMessage,
-        acknowledged,
         message: {
           id: pendingMessage.messageId,
-          role: 'user',
+          role: "user",
           text: pendingMessage.text,
+          context: pendingMessage.context,
           createdAt: pendingMessage.createdAt,
           updatedAt: pendingMessage.createdAt,
           turnId: null,
           streaming: false,
         },
       })),
-  ]
+  ];
 }

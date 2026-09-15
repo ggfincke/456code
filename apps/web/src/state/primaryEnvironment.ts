@@ -1,18 +1,12 @@
-// apps/web/src/state/primaryEnvironment.ts
-// manage primary environment id atom state
+import { Atom } from "effect/unstable/reactivity";
 
-import { Atom } from 'effect/unstable/reactivity'
+import { environmentCatalog } from "../connection/catalog";
 
-import { environmentCatalog } from '../connection/catalog'
-
-export const primaryEnvironmentIdAtom = Atom.make((get) =>
-{
-  for (const [environmentId, entry] of get(environmentCatalog.catalogValueAtom).entries)
-  {
-    if (entry.target._tag === 'PrimaryConnectionTarget')
-    {
-      return environmentId
+export const primaryEnvironmentIdAtom = Atom.make((get) => {
+  for (const [environmentId, entry] of get(environmentCatalog.catalogValueAtom).entries) {
+    if (entry.target._tag === "PrimaryConnectionTarget") {
+      return environmentId;
     }
   }
-  return null
-}).pipe(Atom.withLabel('web-primary-environment-id'))
+  return null;
+}).pipe(Atom.withLabel("web-primary-environment-id"));

@@ -1,7 +1,0 @@
-{
-  "platforms": ["apple"],
-  "apple": {
-    "modules": ["Code456ReviewDiffModule"],
-    "podspecPath": "Code456ReviewDiffNative.podspec"
-  }
-}

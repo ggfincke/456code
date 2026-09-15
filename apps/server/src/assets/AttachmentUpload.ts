@@ -1,263 +1,242 @@
-// apps/server/src/assets/AttachmentUpload.ts
-// authenticate bounded pending attachment transfers
+import * as NodeCrypto from "node:crypto";
 
-// @effect-diagnostics nodeBuiltinImport:off
-import * as NodeCrypto from 'node:crypto'
-import * as NodeFS from 'node:fs'
 import {
   ATTACHMENT_UPLOAD_URL_TTL_MS,
-  AttachmentCreateUploadUrlInput,
-  AttachmentDeleteError,
+  type AttachmentCreateUploadUrlInput,
   AttachmentUploadSigningKeyError,
-} from '@t3tools/contracts'
-import * as Clock from 'effect/Clock'
-import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Option from 'effect/Option'
-import * as Schema from 'effect/Schema'
-import * as Stream from 'effect/Stream'
-import type * as HttpServerRequest from 'effect/unstable/http/HttpServerRequest'
+} from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
 import {
-  createPendingAttachmentId,
-  parsePendingAttachmentId,
   attachmentFileExtension,
-} from '../attachments/attachmentStore.ts'
-import { inspectManagedFile, isSafeManagedPath } from '../attachments/attachmentFiles.ts'
-import { resolveAttachmentRelativePath } from '../attachments/attachmentPaths.ts'
-import { inferImageExtension } from '../attachments/imageMime.ts'
+  createPendingAttachmentId,
+  parseThreadSegmentFromAttachmentId,
+  PENDING_ATTACHMENT_THREAD_SEGMENT,
+  resolveAttachmentPathById,
+  sweepStalePendingAttachments,
+} from "../attachmentStore.ts";
+import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import {
   base64UrlDecodeUtf8,
   base64UrlEncode,
   signPayload,
   timingSafeEqualBase64Url,
-} from '../auth/utils.ts'
-import * as ServerSecretStore from '../auth/ServerSecretStore.ts'
-import { ServerConfig } from '../config.ts'
+} from "../auth/utils.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerConfig from "../config.ts";
+import { inferImageExtension } from "../imageMime.ts";
 
-export const ATTACHMENT_UPLOAD_ROUTE_PREFIX = '/api/attachments/upload'
-const SIGNING_SECRET_NAME = 'asset-access-signing-key'
-const Claims = Schema.Struct({
+export const ATTACHMENT_UPLOAD_ROUTE_PREFIX = "/api/attachments/upload";
+
+// Asset download tokens share this key, but their signed claim kind is different.
+const SIGNING_SECRET_NAME = "asset-access-signing-key";
+const PENDING_ATTACHMENT_SWEEP_INTERVAL_MS = 15 * 60_000;
+const lastPendingSweepByDirectory = new Map<string, number>();
+
+const AttachmentUploadClaims = Schema.Struct({
   version: Schema.Literal(1),
-  kind: Schema.Literal('attachment-upload'),
-  type: Schema.Literals(['image', 'file']),
+  kind: Schema.Literal("attachment-upload"),
+  type: Schema.Literals(["image", "file"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("image" as const)),
+  ),
   attachmentId: Schema.String,
   name: Schema.String,
   mimeType: Schema.String,
   sizeBytes: Schema.Number,
   expiresAt: Schema.Number,
-})
-export type AttachmentUploadClaims = typeof Claims.Type
-const decodeClaims = Schema.decodeUnknownOption(Schema.fromJsonString(Claims))
-const encodeClaims = Schema.encodeSync(Schema.fromJsonString(Claims))
-const isUploadInput = Schema.is(AttachmentCreateUploadUrlInput)
+});
+export type AttachmentUploadClaims = typeof AttachmentUploadClaims.Type;
 
-const loadSigningSecret = Effect.gen(function* ()
-{
-  const secretStore = yield* ServerSecretStore.ServerSecretStore
-  return yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32)
-})
+const attachmentUploadClaimsJson = Schema.fromJsonString(AttachmentUploadClaims);
+const decodeAttachmentUploadClaims = Schema.decodeUnknownOption(attachmentUploadClaimsJson);
+const encodeAttachmentUploadClaims = Schema.encodeSync(attachmentUploadClaimsJson);
 
-export const issueAttachmentUploadUrl = Effect.fn('AttachmentUpload.issueUrl')(function* (
+function decodeClaims(encodedPayload: string): AttachmentUploadClaims | null {
+  try {
+    return Option.getOrNull(decodeAttachmentUploadClaims(base64UrlDecodeUtf8(encodedPayload)));
+  } catch {
+    return null;
+  }
+}
+
+const loadSigningSecret = Effect.gen(function* () {
+  const secretStore = yield* ServerSecretStore.ServerSecretStore;
+  return yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+});
+
+export const issueAttachmentUploadUrl = Effect.fn("AttachmentUpload.issueUrl")(function* (
   input: AttachmentCreateUploadUrlInput,
-)
-{
+) {
   const secret = yield* loadSigningSecret.pipe(
     Effect.mapError((cause) => new AttachmentUploadSigningKeyError({ cause })),
-  )
-  const type = input.type ?? 'image'
-  const extension =
-    type === 'image'
-      ? inferImageExtension({ mimeType: input.mimeType, fileName: input.name })
-      : attachmentFileExtension(input.name)
-  const attachmentId = createPendingAttachmentId(type, extension)
-  const expiresAt = (yield* Clock.currentTimeMillis) + ATTACHMENT_UPLOAD_URL_TTL_MS
-  const payload = base64UrlEncode(
-    encodeClaims({
+  );
+  const config = yield* ServerConfig.ServerConfig;
+  const nowMs = yield* Clock.currentTimeMillis;
+  const previousSweep = lastPendingSweepByDirectory.get(config.attachmentsDir);
+  if (
+    previousSweep === undefined ||
+    nowMs - previousSweep >= PENDING_ATTACHMENT_SWEEP_INTERVAL_MS
+  ) {
+    lastPendingSweepByDirectory.set(config.attachmentsDir, nowMs);
+    const swept = sweepStalePendingAttachments({
+      attachmentsDir: config.attachmentsDir,
+      nowMs,
+    });
+    if (swept.deleted > 0) {
+      yield* Effect.logInfo("Removed expired attachment uploads.", { deleted: swept.deleted });
+    }
+  }
+
+  const attachmentType = input.type ?? "image";
+  const attachmentId = createPendingAttachmentId(
+    attachmentType === "file" ? attachmentFileExtension(input.name) : undefined,
+  );
+  const expiresAt = nowMs + ATTACHMENT_UPLOAD_URL_TTL_MS;
+  const encodedPayload = base64UrlEncode(
+    encodeAttachmentUploadClaims({
       version: 1,
-      kind: 'attachment-upload',
-      ...input,
-      type,
+      kind: "attachment-upload",
+      type: attachmentType,
       attachmentId,
+      name: input.name,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
       expiresAt,
     }),
-  )
+  );
+
   return {
     attachmentId,
-    relativeUrl: `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/${payload}.${signPayload(payload, secret)}`,
+    relativeUrl: `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/${encodedPayload}.${signPayload(encodedPayload, secret)}`,
     expiresAt,
-  }
-})
+  };
+});
 
-export const validateAttachmentUploadToken = Effect.fn('AttachmentUpload.validateToken')(function* (
+export const validateAttachmentUploadToken = Effect.fn("AttachmentUpload.validateToken")(function* (
   token: string,
-)
-{
-  if (token.length > 4096) return null
-  const [payload, signature, extra] = token.split('.')
-  if (
-    !payload ||
-    !signature ||
-    extra !== undefined ||
-    !/^[A-Za-z0-9_-]+$/.test(payload) ||
-    !/^[A-Za-z0-9_-]{43}$/.test(signature)
-  )
-    return null
-  const secret = yield* loadSigningSecret.pipe(Effect.orElseSucceed(() => null))
-  if (!secret || !timingSafeEqualBase64Url(signature, signPayload(payload, secret))) return null
-  let claims: AttachmentUploadClaims | null = null
-  try
-  {
-    claims = Option.getOrNull(decodeClaims(base64UrlDecodeUtf8(payload)))
+) {
+  const [encodedPayload, signature, unexpectedSegment] = token.split(".");
+  if (!encodedPayload || !signature || unexpectedSegment) {
+    return null;
   }
-  catch
-  {
-    return null
+
+  const secret = yield* loadSigningSecret.pipe(
+    Effect.tapError((cause) =>
+      Effect.logError("Failed to load the attachment upload signing key.", { cause }),
+    ),
+    Effect.orElseSucceed(() => null),
+  );
+  if (!secret || !timingSafeEqualBase64Url(signature, signPayload(encodedPayload, secret))) {
+    return null;
   }
-  if (
-    !claims ||
-    !isUploadInput(claims) ||
-    !Number.isSafeInteger(claims.expiresAt) ||
-    claims.expiresAt <= (yield* Clock.currentTimeMillis)
-  )
-    return null
-  const pending = parsePendingAttachmentId(claims.attachmentId)
-  const extension =
-    claims.type === 'image'
-      ? inferImageExtension({ mimeType: claims.mimeType, fileName: claims.name })
-      : attachmentFileExtension(claims.name)
-  return pending?.type === claims.type && pending.extension === extension ? claims : null
-})
+
+  const claims = decodeClaims(encodedPayload);
+  if (!claims || claims.expiresAt <= (yield* Clock.currentTimeMillis)) {
+    return null;
+  }
+  return claims;
+});
 
 export type StoreAttachmentUploadResult =
-  { readonly ok: true } | { readonly ok: false; readonly status: number; readonly detail: string }
+  | { readonly ok: true }
+  | { readonly ok: false; readonly status: number; readonly detail: string };
 
-export const storeAttachmentUpload = Effect.fn('AttachmentUpload.store')(function* (
+export const storeAttachmentUpload = Effect.fn("AttachmentUpload.store")(function* (
   claims: AttachmentUploadClaims,
-  body: Uint8Array | HttpServerRequest.HttpServerRequest['stream'],
-): Effect.fn.Return<StoreAttachmentUploadResult, never, ServerConfig | FileSystem.FileSystem>
-{
-  const pending = parsePendingAttachmentId(claims.attachmentId)
+  body: Uint8Array | HttpServerRequest.HttpServerRequest["stream"],
+) {
+  if (body instanceof Uint8Array && body.byteLength !== claims.sizeBytes) {
+    return {
+      ok: false,
+      status: 400,
+      detail: `Body was ${body.byteLength} bytes, expected ${claims.sizeBytes}.`,
+    } satisfies StoreAttachmentUploadResult;
+  }
+
+  const config = yield* ServerConfig.ServerConfig;
   const extension =
-    claims.type === 'image'
-      ? inferImageExtension({ mimeType: claims.mimeType, fileName: claims.name })
-      : attachmentFileExtension(claims.name)
-  if (
-    !pending ||
-    pending.type !== claims.type ||
-    pending.extension !== extension ||
-    !isUploadInput(claims) ||
-    !Number.isSafeInteger(claims.expiresAt) ||
-    claims.expiresAt <= (yield* Clock.currentTimeMillis)
-  )
-    return { ok: false, status: 400, detail: 'Invalid upload claims.' }
-  const config = yield* ServerConfig
-  const fileSystem = yield* FileSystem.FileSystem
-  const relativePath = `${claims.attachmentId}${pending.extension}`
-  const partRelativePath = `${relativePath}.${NodeCrypto.randomUUID()}.part`
+    claims.type === "file"
+      ? attachmentFileExtension(claims.name)
+      : inferImageExtension({ mimeType: claims.mimeType, fileName: claims.name });
+  const relativePath = `${claims.attachmentId}${extension}`;
   const finalPath = resolveAttachmentRelativePath({
     attachmentsDir: config.attachmentsDir,
     relativePath,
-  })!
+  });
   const partPath = resolveAttachmentRelativePath({
     attachmentsDir: config.attachmentsDir,
-    relativePath: partRelativePath,
-  })!
-  let received = 0
-  const bodyStream = body instanceof Uint8Array ? Stream.make(body) : body
-  return yield* Effect.gen(function* ()
-  {
-    yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true })
-    if (
-      !isSafeManagedPath({ attachmentsDir: config.attachmentsDir, relativePath }, true) ||
-      !isSafeManagedPath(
-        { attachmentsDir: config.attachmentsDir, relativePath: partRelativePath },
-        true,
-      )
-    )
-      return { ok: false, status: 400, detail: 'Unsafe upload destination.' } as const
+    relativePath: `${relativePath}.${NodeCrypto.randomUUID()}.part`,
+  });
+  if (!finalPath || !partPath) {
+    return { ok: false, status: 500, detail: "Failed to resolve attachment path." };
+  }
+
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  let receivedBytes = 0;
+  const bodyStream = body instanceof Uint8Array ? Stream.make(body) : body;
+  return yield* Effect.gen(function* () {
+    yield* fileSystem.makeDirectory(path.dirname(finalPath), { recursive: true });
     yield* Stream.run(
       bodyStream.pipe(
-        Stream.takeWhile((chunk) =>
-        {
-          received += chunk.byteLength
-          return received <= claims.sizeBytes
+        Stream.takeWhile((chunk) => {
+          receivedBytes += chunk.byteLength;
+          return receivedBytes <= claims.sizeBytes;
         }),
       ),
-      fileSystem.sink(partPath, { flag: 'wx' }),
-    )
-    if (received !== claims.sizeBytes)
+      fileSystem.sink(partPath),
+    );
+    if (receivedBytes !== claims.sizeBytes) {
       return {
         ok: false,
         status: 400,
-        detail: 'Upload body does not match its signed size.',
-      } as const
-    if (claims.expiresAt <= (yield* Clock.currentTimeMillis))
-      return { ok: false, status: 400, detail: 'Upload expired during transfer.' } as const
-    if (!isSafeManagedPath({ attachmentsDir: config.attachmentsDir, relativePath }, true))
-      return { ok: false, status: 400, detail: 'Unsafe upload destination.' } as const
-    // a hard-link publication is atomic and cannot replace bytes behind a live pending id
-    yield* fileSystem.link(partPath, finalPath)
-    return { ok: true } as const
+        detail: `Body was ${receivedBytes} bytes, expected ${claims.sizeBytes}.`,
+      } satisfies StoreAttachmentUploadResult;
+    }
+    yield* fileSystem.rename(partPath, finalPath);
+    return { ok: true } satisfies StoreAttachmentUploadResult;
   }).pipe(
-    Effect.catch(() =>
-      Effect.succeed({ ok: false, status: 500, detail: 'Failed to persist upload.' } as const),
+    Effect.catch((cause) =>
+      Effect.logError("Failed to persist attachment upload.", {
+        attachmentId: claims.attachmentId,
+        cause,
+      }).pipe(
+        Effect.as({
+          ok: false,
+          status: 500,
+          detail: "Failed to persist upload.",
+        } satisfies StoreAttachmentUploadResult),
+      ),
     ),
     Effect.ensuring(
-      Effect.sync(() =>
-      {
-        if (
-          !isSafeManagedPath({
-            attachmentsDir: config.attachmentsDir,
-            relativePath: partRelativePath,
-          })
-        )
-          return
-        // an interrupted transfer may not have created the file
-        try
-        {
-          NodeFS.unlinkSync(partPath)
-        }
-        catch
-        {}
-      }),
+      fileSystem.remove(partPath, { force: true }).pipe(Effect.orElseSucceed(() => undefined)),
     ),
-  )
-})
+  );
+});
 
-export const deletePendingAttachment = Effect.fn('AttachmentUpload.deletePending')(function* (
+export const deletePendingAttachment = Effect.fn("AttachmentUpload.deletePending")(function* (
   attachmentId: string,
-)
-{
-  const pending = parsePendingAttachmentId(attachmentId)
-  if (!pending) return
-  const { attachmentsDir } = yield* ServerConfig
-  yield* Effect.try({
-    try: () =>
-    {
-      const relativePath = `${attachmentId}${pending.extension}`
-      try
-      {
-        NodeFS.lstatSync(attachmentsDir)
-      }
-      catch (cause)
-      {
-        if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return
-        throw cause
-      }
-      if (!isSafeManagedPath({ attachmentsDir, relativePath }, true))
-        throw new Error('Unsafe pending attachment path.')
-      const file = inspectManagedFile({ attachmentsDir, relativePath })
-      if (!file) return
-      try
-      {
-        NodeFS.unlinkSync(file.path)
-      }
-      catch (cause)
-      {
-        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause
-      }
-    },
-    catch: (cause) => new AttachmentDeleteError({ cause }),
-  })
-})
+) {
+  if (parseThreadSegmentFromAttachmentId(attachmentId) !== PENDING_ATTACHMENT_THREAD_SEGMENT) {
+    return;
+  }
+
+  const config = yield* ServerConfig.ServerConfig;
+  const attachmentPath = resolveAttachmentPathById({
+    attachmentsDir: config.attachmentsDir,
+    attachmentId,
+  });
+  if (!attachmentPath) {
+    return;
+  }
+
+  const fileSystem = yield* FileSystem.FileSystem;
+  yield* fileSystem.remove(attachmentPath, { force: true }).pipe(Effect.orElseSucceed(() => {}));
+});

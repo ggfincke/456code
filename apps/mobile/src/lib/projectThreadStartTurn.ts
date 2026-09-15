@@ -1,86 +1,78 @@
-// apps/mobile/src/lib/projectThreadStartTurn.ts
-// derive thread title from prompt
-
 import {
   CommandId,
   MessageId,
   ThreadId,
-  toWireInteractionMode,
-  type CollaborationMode,
   type ModelSelection,
+  type OrchestrationMessageContext,
   type ProjectId,
-  type ProviderRuntimeModeWarningId,
+  type ProviderInteractionMode,
   type RuntimeMode,
-} from '@t3tools/contracts'
-import { assistantCitationsToPlainText } from '@t3tools/shared/assistantCitations'
+} from "@t3tools/contracts";
+import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 
-import { toUploadChatImageAttachments, type DraftComposerImageAttachment } from './composerImages'
+import type { UploadedMobileAttachment } from "./attachmentUpload";
 
-export function deriveThreadTitleFromPrompt(value: string): string
-{
-  const trimmed = assistantCitationsToPlainText(value).trim()
-  if (trimmed.length === 0)
-  {
-    return 'New thread'
+export function deriveThreadTitleFromPrompt(value: string): string {
+  const trimmed = assistantCitationsToPlainText(value).trim();
+  if (trimmed.length === 0) {
+    return "New thread";
   }
 
-  const compact = trimmed.replace(/\s+/g, ' ')
-  return compact.length <= 72 ? compact : `${compact.slice(0, 69).trimEnd()}...`
+  const compact = trimmed.replace(/\s+/g, " ");
+  return compact.length <= 72 ? compact : `${compact.slice(0, 69).trimEnd()}...`;
 }
 
-export interface ProjectThreadStartTurnSpec
-{
-  readonly projectId: ProjectId
-  readonly projectCwd: string
-  readonly threadId: string
-  readonly commandId: string
-  readonly messageId: string
-  readonly createdAt: string
-  readonly text: string
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>
-  readonly modelSelection: ModelSelection
-  readonly runtimeMode: RuntimeMode
-  readonly runtimeModeAcknowledgements: ReadonlyArray<ProviderRuntimeModeWarningId>
-  readonly interactionMode: CollaborationMode
-  readonly workspaceMode: 'local' | 'worktree'
-  readonly branch: string | null
-  readonly worktreePath: string | null
-  readonly startFromOrigin: boolean
-  // generated temp branch for worktree mode; unused for local mode.
-  readonly worktreeBranchName: string
+export interface ProjectThreadStartTurnSpec {
+  readonly projectId: ProjectId;
+  readonly projectCwd: string;
+  readonly threadId: string;
+  readonly commandId: string;
+  readonly messageId: string;
+  readonly createdAt: string;
+  readonly text: string;
+  readonly context?: OrchestrationMessageContext;
+  /** Wire attachments from `prepareTurnAttachments`, in composer order. */
+  readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment>;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly workspaceMode: "local" | "worktree";
+  readonly branch: string | null;
+  readonly worktreePath: string | null;
+  readonly startFromOrigin: boolean;
+  /** Generated temp branch for worktree mode; unused for local mode. */
+  readonly worktreeBranchName: string;
 }
 
-// single source of the `thread.turn.start` bootstrap payload used to create a
-// thread from a project draft — shared by the immediate send path and the
-// offline outbox drain so both deliver identical commands.
-export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpec)
-{
-  const title = deriveThreadTitleFromPrompt(spec.text)
-  const isWorktree = spec.workspaceMode === 'worktree'
-  const wireInteractionMode = toWireInteractionMode(spec.interactionMode)
+/**
+ * Single source of the `thread.turn.start` bootstrap payload used to create a
+ * thread from a project draft — shared by the immediate send path and the
+ * offline outbox drain so both deliver identical commands.
+ */
+export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpec) {
+  const title = deriveThreadTitleFromPrompt(spec.text);
+  const isWorktree = spec.workspaceMode === "worktree";
   return {
     commandId: CommandId.make(spec.commandId),
     threadId: ThreadId.make(spec.threadId),
     message: {
       messageId: MessageId.make(spec.messageId),
-      role: 'user' as const,
+      role: "user" as const,
       text: spec.text,
-      attachments: toUploadChatImageAttachments(spec.attachments),
+      ...(spec.context ? { context: spec.context } : {}),
+      attachments: spec.uploadedAttachments,
     },
     modelSelection: spec.modelSelection,
     titleSeed: title,
     runtimeMode: spec.runtimeMode,
-    ...(spec.runtimeModeAcknowledgements.length > 0
-      ? { runtimeModeAcknowledgements: spec.runtimeModeAcknowledgements }
-      : {}),
-    ...wireInteractionMode,
+    interactionMode: spec.interactionMode,
     bootstrap: {
       createThread: {
         projectId: spec.projectId,
         title,
         modelSelection: spec.modelSelection,
         runtimeMode: spec.runtimeMode,
-        ...wireInteractionMode,
+        interactionMode: spec.interactionMode,
         branch: spec.branch,
         worktreePath: isWorktree ? null : spec.worktreePath,
         createdAt: spec.createdAt,
@@ -98,5 +90,5 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
         : {}),
     },
     createdAt: spec.createdAt,
-  }
+  };
 }

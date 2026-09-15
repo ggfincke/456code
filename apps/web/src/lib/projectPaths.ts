@@ -1,6 +1,3 @@
-// apps/web/src/lib/projectPaths.ts
-// provide the stable web facade for shared project path helpers
-
 export {
   appendBrowsePathSegment,
   canNavigateUp,
@@ -17,4 +14,4 @@ export {
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
   resolveProjectPathForDispatch,
-} from '@t3tools/client-runtime/state/projects'
+} from "@t3tools/client-runtime/state/projects";

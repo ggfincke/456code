@@ -1,23 +1,27 @@
-// apps/mobile/src/features/layout/WorkspaceEmptyDetail.tsx
-// render workspace empty detail
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { SymbolView } from "../../components/AppSymbol";
+import { Pressable, View } from "react-native";
 
-import { SymbolView } from '../../components/AppSymbol'
-import { Pressable, View } from 'react-native'
+import { AppText as Text } from "../../components/AppText";
 
-import { AppText as Text } from '../../components/AppText'
-
-export function WorkspaceEmptyDetail(props: { readonly onStartNewTask?: () => void })
-{
+export function WorkspaceEmptyDetail(props: { readonly onStartNewTask?: () => void }) {
+  const { materialYouStyleLayoutActive } = useAppearancePreferences();
   return (
-    <View className="flex-1 items-center justify-center bg-screen px-10">
+    <View
+      className={
+        materialYouStyleLayoutActive
+          ? "flex-1 items-center justify-center px-10"
+          : "flex-1 items-center justify-center bg-screen px-10"
+      }
+    >
       <View className="max-w-[360px] items-center gap-3">
         <SymbolView
           name="sidebar.left"
           size={34}
-          tintColorClassName="accent-icon-subtle"
+          tintColorClassName={"accent-icon-subtle"}
           type="hierarchical"
         />
-        <Text className="text-center text-xl font-sans-bold">Select a thread</Text>
+        <Text className="text-center text-xl font-t3-bold">Select a thread</Text>
         <Text className="text-center text-base text-foreground-muted">
           Choose a thread from the sidebar or start a new task.
         </Text>
@@ -27,10 +31,10 @@ export function WorkspaceEmptyDetail(props: { readonly onStartNewTask?: () => vo
             className="mt-2 flex-row items-center gap-2 rounded-full bg-primary px-5 py-3 active:opacity-70"
             onPress={props.onStartNewTask}
           >
-            <Text className="text-base font-sans-bold text-primary-foreground">New Task</Text>
+            <Text className="text-base font-t3-bold text-primary-foreground">New Task</Text>
           </Pressable>
         ) : null}
       </View>
     </View>
-  )
+  );
 }

@@ -16,6 +16,7 @@ export interface AccountAlias extends Resource<
   "AWS.IAM.AccountAlias",
   AccountAliasProps,
   {
+    /** The alias assigned to the AWS account. */
     accountAlias: string;
   },
   never,
@@ -27,14 +28,15 @@ export interface AccountAlias extends Resource<
  *
  * `AccountAlias` manages the one account-level alias that customizes the AWS
  * sign-in URL for the current account.
- *
- * @section Managing Account Identity
- * @example Set the Account Alias
+ * ### Managing Account Identity
+ * **Example:** Set the Account Alias
  * ```typescript
  * const alias = yield* AccountAlias("AccountAlias", {
  *   accountAlias: "my-company-prod",
  * });
  * ```
+ *
+ * @resource
  */
 export const AccountAlias = Resource<AccountAlias>("AWS.IAM.AccountAlias");
 
@@ -58,6 +60,12 @@ export const AccountAliasProvider = () =>
         return undefined;
       }
       return { accountAlias };
+    }),
+    // Account singleton: an AWS account has at most one alias. Enumerate the
+    // single alias (if set) as a one-element array, or [] when none is set.
+    list: Effect.fn(function* () {
+      const accountAlias = yield* readAccountAlias;
+      return accountAlias ? [{ accountAlias }] : [];
     }),
     reconcile: Effect.fn(function* ({ news, session }) {
       // Observe — the account alias is a singleton; the only way to know

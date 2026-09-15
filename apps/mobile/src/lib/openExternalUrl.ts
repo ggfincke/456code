@@ -1,69 +1,56 @@
-// apps/mobile/src/lib/openExternalUrl.ts
-// open external url
-
-import * as Schema from 'effect/Schema'
-import { Linking } from 'react-native'
+import * as Schema from "effect/Schema";
+import { Linking } from "react-native";
 
 const ExternalUrlTarget = Schema.Literals([
-  'file-preview',
-  'markdown-link',
-  'provider-auth',
-  'pull-request',
-])
+  "file-preview",
+  "markdown-link",
+  "pull-request",
+  "provider-auth",
+]);
 
-export type ExternalUrlTarget = typeof ExternalUrlTarget.Type
+export type ExternalUrlTarget = typeof ExternalUrlTarget.Type;
 
 export class ExternalUrlOpenError extends Schema.TaggedError<ExternalUrlOpenError>()(
-  'ExternalUrlOpenError',
+  "ExternalUrlOpenError",
   {
     target: ExternalUrlTarget,
     scheme: Schema.String,
     host: Schema.optional(Schema.String),
     cause: Schema.Defect(),
   },
-)
-{
-  override get message(): string
-  {
-    return `Failed to open ${this.target} URL with the ${this.scheme} scheme.`
+) {
+  override get message(): string {
+    return `Failed to open ${this.target} URL with the ${this.scheme} scheme.`;
   }
 }
 
-function externalUrlMetadata(url: string): { readonly scheme: string; readonly host?: string }
-{
-  try
-  {
-    const parsed = new URL(url)
+function externalUrlMetadata(url: string): { readonly scheme: string; readonly host?: string } {
+  try {
+    const parsed = new URL(url);
     return {
-      scheme: parsed.protocol.replace(/:$/, '') || 'unknown',
+      scheme: parsed.protocol.replace(/:$/, "") || "unknown",
       host: parsed.hostname || undefined,
-    }
-  }
-  catch
-  {
+    };
+  } catch {
     return {
-      scheme: /^([a-z][a-z\d+.-]*):/i.exec(url)?.[1]?.toLowerCase() ?? 'unknown',
-    }
+      scheme: /^([a-z][a-z\d+.-]*):/i.exec(url)?.[1]?.toLowerCase() ?? "unknown",
+    };
   }
 }
 
-export async function tryOpenExternalUrl(url: string, target: ExternalUrlTarget): Promise<boolean>
-{
-  try
-  {
-    await Linking.openURL(url)
-    return true
-  }
-  catch (cause)
-  {
-    const error = new ExternalUrlOpenError({ target, ...externalUrlMetadata(url), cause })
+export async function tryOpenExternalUrl(url: string, target: ExternalUrlTarget): Promise<boolean> {
+  try {
+    await Linking.openURL(url);
+    return true;
+  } catch (cause) {
+    const error = new ExternalUrlOpenError({ target, ...externalUrlMetadata(url), cause });
     console.error(error.message, {
       _tag: error._tag,
       target: error.target,
       scheme: error.scheme,
       host: error.host,
       stack: error.stack,
-    })
-    return false
+    });
+    return false;
   }
 }

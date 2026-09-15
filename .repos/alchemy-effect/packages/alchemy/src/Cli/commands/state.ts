@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
-import { Argument, Command, Flag } from "effect/unstable/cli";
+import { Command, Flag } from "effect/unstable/cli";
 
 import { AuthProviders } from "../../Auth/AuthProvider.ts";
 import { withProfileOverride } from "../../Auth/Profile.ts";
@@ -21,7 +21,6 @@ import {
   instrumentCommand,
   profile,
   script,
-  stage,
   yes,
 } from "./_shared.ts";
 
@@ -39,16 +38,16 @@ const localFlag = Flag.boolean("local").pipe(
   Flag.withDefault(false),
 );
 
-const stackArg = Argument.string("stack").pipe(
-  Argument.withDescription("Stack name (e.g. AlchemyEffectWebsite)"),
+const stackFlag = Flag.string("stack").pipe(
+  Flag.withDescription("Stack name (e.g. AlchemyEffectWebsite)"),
 );
 
-const stageArg = Argument.string("stage").pipe(
-  Argument.withDescription("Stage name (e.g. dev_samgoodwin, prod)"),
+const stageFlag = Flag.string("stage").pipe(
+  Flag.withDescription("Stage name (e.g. dev, prod)"),
 );
 
-const fqnArg = Argument.string("fqn").pipe(
-  Argument.withDescription("Fully-qualified resource name"),
+const fqnFlag = Flag.string("fqn").pipe(
+  Flag.withDescription("Fully-qualified resource name"),
 );
 
 /**
@@ -57,12 +56,15 @@ const fqnArg = Argument.string("fqn").pipe(
  * The stack file is imported and evaluated so that its `state` layer
  * (Cloudflare HTTP store, in-memory, etc.) is in scope. Pass `local`
  * to swap the configured State for an on-disk LocalState instead.
+ *
+ * The Stage service is only needed to build the stack's state layer;
+ * state operations address (stack, stage) explicitly, so a placeholder
+ * value (same as `alchemy unsafe nuke`) is sufficient.
  */
 const withStateService = <A, E>(
   args: {
     main: string;
-    stage: string;
-    envFile: import("effect/Option").Option<string>;
+    envFile: Option.Option<string>;
     profile: string;
     local: boolean;
   },
@@ -80,7 +82,7 @@ const withStateService = <A, E>(
         ),
       ),
       Logger.layer([fileLogger("out")], { mergeWithExisting: true }),
-      Layer.succeed(Stage, args.stage),
+      Layer.succeed(Stage, "placeholder"),
       // When --local is set we still build the stack to get its other
       // services, but force State to be LocalState. Without --local the
       // stack's configured State (httpState, etc.) wins.
@@ -98,9 +100,9 @@ const withStateService = <A, E>(
 
 const stacksCommand = Command.make(
   "stacks",
-  { main: script, envFile, stage, profile, local: localFlag },
+  { main: script, envFile, profile, local: localFlag },
   instrumentCommand("state.stacks")(
-    Effect.fnUntraced(function* (args) {
+    Effect.fn(function* (args) {
       yield* withStateService(args, (state) =>
         Effect.gen(function* () {
           const stacks = yield* state.listStacks();
@@ -119,9 +121,9 @@ const stacksCommand = Command.make(
 
 const stagesCommand = Command.make(
   "stages",
-  { stack: stackArg, main: script, envFile, stage, profile, local: localFlag },
+  { stack: stackFlag, main: script, envFile, profile, local: localFlag },
   instrumentCommand("state.stages")(
-    Effect.fnUntraced(function* ({ stack: stackName, ...rest }) {
+    Effect.fn(function* ({ stack: stackName, ...rest }) {
       yield* withStateService(rest, (state) =>
         Effect.gen(function* () {
           const stages = yield* state.listStages(stackName);
@@ -141,18 +143,15 @@ const stagesCommand = Command.make(
 const resourcesCommand = Command.make(
   "resources",
   {
-    stack: stackArg,
-    stageName: Argument.string("stage").pipe(
-      Argument.withDescription("Stage to list resources from"),
-    ),
+    stack: stackFlag,
+    stageName: stageFlag,
     main: script,
     envFile,
-    stage,
     profile,
     local: localFlag,
   },
   instrumentCommand("state.resources")(
-    Effect.fnUntraced(function* ({ stack: stackName, stageName, ...rest }) {
+    Effect.fn(function* ({ stack: stackName, stageName, ...rest }) {
       yield* withStateService(rest, (state) =>
         Effect.gen(function* () {
           const fqns = yield* state.list({
@@ -175,24 +174,16 @@ const resourcesCommand = Command.make(
 const getCommand = Command.make(
   "get",
   {
-    stack: stackArg,
-    stageName: Argument.string("stage").pipe(
-      Argument.withDescription("Stage the resource lives in"),
-    ),
-    fqn: fqnArg,
+    stack: stackFlag,
+    stageName: stageFlag,
+    fqn: fqnFlag,
     main: script,
     envFile,
-    stage,
     profile,
     local: localFlag,
   },
   instrumentCommand("state.get")(
-    Effect.fnUntraced(function* ({
-      stack: stackName,
-      stageName,
-      fqn,
-      ...rest
-    }) {
+    Effect.fn(function* ({ stack: stackName, stageName, fqn, ...rest }) {
       yield* withStateService(rest, (state) =>
         Effect.gen(function* () {
           const value = yield* state.get({
@@ -216,9 +207,9 @@ const getCommand = Command.make(
 
 const treeCommand = Command.make(
   "tree",
-  { main: script, envFile, stage, profile, local: localFlag },
+  { main: script, envFile, profile, local: localFlag },
   instrumentCommand("state.tree")(
-    Effect.fnUntraced(function* (args) {
+    Effect.fn(function* (args) {
       yield* withStateService(args, (state) =>
         Effect.gen(function* () {
           const stacks = [...(yield* state.listStacks())].sort();
@@ -271,18 +262,92 @@ const treeCommand = Command.make(
   ),
 );
 
-const clearStackArg = Argument.string("stack").pipe(
-  Argument.withDescription(
-    "Stack name to clear. Omit to clear ALL stacks in the store.",
+const optionalStackFlag = Flag.string("stack").pipe(
+  Flag.withDescription(
+    "Stack name to export. Omit to export ALL stacks in the store.",
   ),
-  Argument.optional,
+  Flag.optional,
+  Flag.map(Option.getOrUndefined),
 );
 
-const clearStageArg = Argument.string("stage").pipe(
-  Argument.withDescription(
+const optionalStageFlag = Flag.string("stage").pipe(
+  Flag.withDescription(
+    "Stage to export within the stack. Omit to export all stages.",
+  ),
+  Flag.optional,
+  Flag.map(Option.getOrUndefined),
+);
+
+/**
+ * Bulk state read: every matching resource record as one JSON
+ * document, so a whole estate is read in a single CLI invocation
+ * instead of `state resources` + one `state get` per FQN per
+ * stack/stage. Filter locally, e.g.:
+ *
+ * ```sh
+ * alchemy state export | jq '.resources[] | select(.state.resourceType == "AWS.EC2.Instance")'
+ * ```
+ */
+const exportCommand = Command.make(
+  "export",
+  {
+    stack: optionalStackFlag,
+    stageName: optionalStageFlag,
+    main: script,
+    envFile,
+    profile,
+    local: localFlag,
+  },
+  instrumentCommand("state.export")(
+    Effect.fn(function* ({ stack: stackName, stageName, ...rest }) {
+      if (stageName !== undefined && stackName === undefined) {
+        yield* Console.log(
+          "Error: cannot specify --stage without --stack. Pass the stack name via --stack.",
+        );
+        return yield* Effect.fail(new Error("missing stack"));
+      }
+
+      yield* withStateService(rest, (state) =>
+        Effect.gen(function* () {
+          const exported = yield* State.exportState(state, {
+            stack: stackName,
+            stage: stageName,
+          });
+          // Same JSON-friendly view `state get` prints: redacted
+          // secrets become `{ __redacted__: ... }`, Resources are
+          // flattened, etc.
+          yield* Console.log(
+            JSON.stringify(
+              {
+                resources: exported.resources.map((r) => ({
+                  ...r,
+                  state: encodeState(r.state),
+                })),
+              },
+              null,
+              2,
+            ),
+          );
+        }),
+      );
+    }),
+  ),
+);
+
+const clearStackFlag = Flag.string("stack").pipe(
+  Flag.withDescription(
+    "Stack name to clear. Omit to clear ALL stacks in the store.",
+  ),
+  Flag.optional,
+  Flag.map(Option.getOrUndefined),
+);
+
+const clearStageFlag = Flag.string("stage").pipe(
+  Flag.withDescription(
     "Stage to clear within the stack. Omit to clear all stages in the stack.",
   ),
-  Argument.optional,
+  Flag.optional,
+  Flag.map(Option.getOrUndefined),
 );
 
 /**
@@ -293,28 +358,24 @@ const clearStageArg = Argument.string("stage").pipe(
 const clearCommand = Command.make(
   "clear",
   {
-    stack: clearStackArg,
-    stageName: clearStageArg,
+    stack: clearStackFlag,
+    stageName: clearStageFlag,
     main: script,
     envFile,
-    stage,
     profile,
     local: localFlag,
     yes,
   },
   instrumentCommand("state.clear")(
-    Effect.fnUntraced(function* ({
-      stack: stackOpt,
-      stageName: stageOpt,
+    Effect.fn(function* ({
+      stack: stackName,
+      stageName,
       yes: yesFlag,
       ...rest
     }) {
-      const stackName = Option.getOrUndefined(stackOpt);
-      const stageName = Option.getOrUndefined(stageOpt);
-
       if (stageName !== undefined && stackName === undefined) {
         yield* Console.log(
-          "Error: cannot specify <stage> without <stack>. Pass the stack name as the first argument.",
+          "Error: cannot specify --stage without --stack. Pass the stack name via --stack.",
         );
         return yield* Effect.fail(new Error("missing stack"));
       }
@@ -353,12 +414,17 @@ const clearCommand = Command.make(
             }
           }
 
-          for (const target of targets) {
-            yield* state.deleteStack(target);
-            yield* Console.log(
-              `cleared ${target.stack}${target.stage ? `/${target.stage}` : ""}`,
-            );
-          }
+          yield* Effect.forEach(
+            targets,
+            (target) =>
+              Effect.gen(function* () {
+                yield* state.deleteStack(target);
+                yield* Console.log(
+                  `cleared ${target.stack}${target.stage ? `/${target.stage}` : ""}`,
+                );
+              }),
+            { concurrency: 32 },
+          );
         }),
       );
     }),
@@ -371,6 +437,7 @@ export const stateCommand = Command.make("state", {}).pipe(
     stagesCommand,
     resourcesCommand,
     getCommand,
+    exportCommand,
     treeCommand,
     clearCommand,
   ]),

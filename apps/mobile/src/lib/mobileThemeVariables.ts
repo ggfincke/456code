@@ -1,19 +1,27 @@
-// apps/mobile/src/lib/mobileThemeVariables.ts
-// expose generated default theme variables to native and third-party boundaries
+import defaultThemeVariables from "../../generated-uniwind-default-theme-variables.json";
 
-import defaultThemeVariables from '../../generated-uniwind-default-theme-variables.json'
-
-export type MobileThemeAppearance = 'light' | 'dark'
-export type MobileThemeVariable = `--color-${string}`
-export type MobileThemeVariables = Readonly<Record<MobileThemeVariable, string>>
+import {
+  DEFAULT_MOBILE_THEME_ID,
+  getMobileThemeVariables,
+  type MobileThemeAppearance,
+  type MobileThemeId,
+  type MobileThemeVariables,
+} from "./mobileTheme";
 
 const defaults = defaultThemeVariables as Readonly<
   Record<MobileThemeAppearance, MobileThemeVariables>
->
+>;
 
-export function getDefaultMobileThemeVariables(
+/**
+ * Complete palette for native and third-party APIs that cannot consume a
+ * Uniwind className. The standard palette is generated from global.css; custom
+ * palettes share the same source that generates their registered CSS themes.
+ */
+export function getMobileThemeRuntimeVariables(
+  themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
-): MobileThemeVariables
-{
-  return defaults[appearance]
+): MobileThemeVariables {
+  return themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you"
+    ? defaults[appearance]
+    : getMobileThemeVariables(themeId, appearance);
 }

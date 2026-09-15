@@ -5,12 +5,12 @@ import * as Provider from "../Provider.ts";
 import { Resource } from "../Resource.ts";
 import type { Providers } from "./Providers.ts";
 
-export type ViewProps = Axiom.CreateViewInput;
+export type ViewProps = Axiom.CreateViewRequest;
 
 export type View = Resource<
   "Axiom.View",
   ViewProps,
-  Axiom.CreateViewOutput & {
+  Axiom.View & {
     /**
      * Path identifier used by `updateView` / `getView` / `deleteView`.
      * Currently derived from `name` because Axiom's view list/get responses
@@ -29,11 +29,10 @@ export type View = Resource<
  *
  * The path identifier is `name`. Renaming a view triggers a replacement
  * (the old one is deleted, a new one is created).
- *
  * @see https://axiom.co/docs/query-data/datasets — APL query reference
  *
- * @section Creating a View
- * @example Recent errors across one dataset
+ * ### Creating a View
+ * **Example:** Recent errors across one dataset
  * ```typescript
  * yield* Axiom.View("recent-errors", {
  *   name: "recent-errors",
@@ -48,7 +47,7 @@ export type View = Resource<
  * });
  * ```
  *
- * @example Cross-dataset join (logs + traces by trace_id)
+ * **Example:** Cross-dataset join (logs + traces by trace_id)
  * ```typescript
  * yield* Axiom.View("trace-with-logs", {
  *   name: "trace-with-logs",
@@ -60,6 +59,8 @@ export type View = Resource<
  *   `,
  * });
  * ```
+ *
+ * @resource
  */
 export const View = Resource<View>("Axiom.View");
 
@@ -70,10 +71,21 @@ export const ViewProvider = () =>
       const create = yield* Axiom.createView;
       const update = yield* Axiom.updateView;
       const get = yield* Axiom.getView;
+      const listViews = yield* Axiom.getViews;
       const del = yield* Axiom.deleteView;
 
       return {
         stables: ["id"],
+        // Enumerate every view in the org. Axiom exposes a single account-wide
+        // `GET /v2/views` collection op (no pagination) that already returns
+        // the full view objects, so we fetch it once and hydrate each row into
+        // the exact `read` Attributes shape (`id` is derived from `name`, the
+        // path identifier) — directly usable by `delete` with no follow-up get.
+        list: () =>
+          Effect.gen(function* () {
+            const views = yield* listViews({});
+            return views.map((view) => ({ ...view, id: view.name }));
+          }),
         diff: Effect.fn(function* ({ news, output }) {
           if (!isResolved(news)) return undefined;
           if (output && news.name !== output.name) {

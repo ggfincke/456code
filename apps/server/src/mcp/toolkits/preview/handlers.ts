@@ -1,92 +1,129 @@
-// apps/server/src/mcp/toolkits/preview/handlers.ts
-// expose preview standard toolkit handlers live
-
-import * as Effect from 'effect/Effect'
-import * as DateTime from 'effect/DateTime'
-import * as Option from 'effect/Option'
-import * as Schema from 'effect/Schema'
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Schema from "effect/Schema";
 import {
-  CommandId,
-  MessageId,
-  PREVIEW_RECORDING_STOP_TIMEOUT_MS,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
-  PreviewAutomationRecordingDesktopUpdateRequiredError,
-  PreviewAutomationRecordingTransferArtifact,
+  PREVIEW_RECORDING_STOP_TIMEOUT_MS,
   PreviewAutomationRecordingTransferError,
+  PreviewAutomationRecordingDesktopUpdateRequiredError,
+  PreviewAutomationRecordingArtifact,
+  type ToolActivityIcon,
+  type ThreadId,
   type PreviewAutomationOperation,
-  type PreviewAutomationRecordingArtifact,
+  type PreviewAutomationOpenInput,
   type PreviewAutomationRecordingStatus,
   type PreviewAutomationResizeResult,
   type PreviewAutomationSetColorSchemeResult,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
   type PreviewTabId,
-  type ThreadId,
-} from '@t3tools/contracts'
+} from "@t3tools/contracts";
 
 import {
-  deriveAttachmentStagingKey,
+  parseAttachmentUuid,
   parseAttachmentFileExtension,
-  parsePendingAttachmentId,
+  PENDING_ATTACHMENT_THREAD_SEGMENT,
   toSafeThreadAttachmentSegment,
-} from '../../../attachments/attachmentStore.ts'
-import { processManagedAttachmentFile } from '../../../attachments/attachmentFiles.ts'
-import { resolveAttachmentRelativePath } from '../../../attachments/attachmentPaths.ts'
-import { deletePendingAttachment } from '../../../assets/AttachmentUpload.ts'
-import * as ServerConfig from '../../../config.ts'
-import * as ProjectionSnapshotQuery from '../../../orchestration/Services/ProjectionSnapshotQuery.ts'
-import { AttachmentLifecycleRepository } from '../../../persistence/Services/AttachmentLifecycle.ts'
-import { ProviderService } from '../../../provider/Services/ProviderService.ts'
-import * as McpInvocationContext from '../../McpInvocationContext.ts'
-import * as PreviewAutomationBroker from '../../PreviewAutomationBroker.ts'
-import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from './tools.ts'
+} from "../../../attachmentStore.ts";
+import { resolveAttachmentRelativePath } from "../../../attachmentPaths.ts";
+import * as ServerConfig from "../../../config.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
-const invoke = Effect.fn('PreviewToolkit.invoke')(function* <A>(
+/**
+ * Collapses the `show` alias onto `open` and defaults tab reuse.
+ *
+ * Deliberately leaves an unstated `open` unstated. Whether a preview the agent
+ * said nothing about surfaces is the user's `browserAutoShowFloatingPreview`
+ * preference, which is desktop-local and unreadable from here — filling in
+ * `true` would silently override it for every `preview_open`.
+ */
+export function normalizePreviewOpenInput(
+  input: PreviewAutomationOpenInput,
+): PreviewAutomationOpenInput {
+  const open = input.open ?? input.show;
+  return {
+    ...input,
+    ...(open === undefined ? {} : { open, show: open }),
+    reuseExistingTab: input.reuseExistingTab ?? true,
+  };
+}
+
+const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
   operation: PreviewAutomationOperation,
   input: unknown,
   timeoutMs?: number,
   tabId?: PreviewTabId,
 ): Effect.fn.Return<
-  A,
-  import('@t3tools/contracts').PreviewAutomationError,
+  { result: A; toolIcon?: ToolActivityIcon },
+  import("@t3tools/contracts").PreviewAutomationError,
   McpInvocationContext.McpInvocationContext | PreviewAutomationBroker.PreviewAutomationBroker
->
-{
-  const scope = yield* McpInvocationContext.requireMcpCapability('preview')
-  const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker
-  return yield* broker.invoke<A>({
+> {
+  const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+  const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+  let targetTabId = tabId;
+  const result = yield* broker.invoke<A>({
+    onTargetTab: (resolvedTabId) => {
+      targetTabId = resolvedTabId;
+    },
     scope,
     operation,
     input,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(tabId === undefined ? {} : { tabId }),
-  })
-})
+  });
+  if (["status", "open", "navigate", "snapshot"].includes(operation)) return { result };
+  const statusTabId =
+    (operation !== "evaluate" && typeof result === "object" && result !== null
+      ? (result as { tabId?: PreviewTabId }).tabId
+      : undefined) ?? targetTabId;
+  const page = yield* broker
+    .invoke<PreviewAutomationStatus>({
+      scope,
+      operation: "status",
+      input: {},
+      timeoutMs: 500,
+      updateCurrentTab: false,
+      ...(statusTabId === undefined ? {} : { tabId: statusTabId }),
+    })
+    .pipe(Effect.catch(() => Effect.succeed(null)));
+  return {
+    result,
+    ...(page?.url && /^https?:\/\//i.test(page.url) && page.url.length <= 4096
+      ? { toolIcon: { _tag: "website" as const, pageUrl: page.url } }
+      : {}),
+  };
+});
 
-const invokeTargeted = <A>(
+const invokeTargeted = <A extends object>(
   operation: PreviewAutomationOperation,
   input: {
-    readonly tabId?: PreviewTabId | undefined
-    readonly [key: string]: unknown
+    readonly tabId?: PreviewTabId | undefined;
+    readonly [key: string]: unknown;
   },
   timeoutMs?: number,
-) =>
-{
-  const { tabId, ...operationInput } = input
-  return invoke<A>(operation, operationInput, timeoutMs, tabId)
-}
+) => {
+  const { tabId, ...operationInput } = input;
+  return invoke<A>(operation, operationInput, timeoutMs, tabId).pipe(
+    Effect.map(({ result, toolIcon }) => ({
+      ...result,
+      ...(toolIcon ? { toolIcon } : {}),
+    })),
+  );
+};
 
-const decodeRecordingTransferArtifact = Schema.decodeUnknownEffect(
-  PreviewAutomationRecordingTransferArtifact,
-)
+const UploadedRecordingArtifact = Schema.Struct({
+  ...PreviewAutomationRecordingArtifact.fields,
+  uploadedAttachmentId: Schema.optional(Schema.String),
+});
+const decodeUploadedRecordingArtifact = Schema.decodeUnknownEffect(UploadedRecordingArtifact);
 
-export const claimPreviewRecording = Effect.fn('PreviewToolkit.claimRecording')(function* (
-  scope: McpInvocationContext.McpInvocationScope,
+export const claimPreviewRecording = Effect.fn("PreviewToolkit.claimRecording")(function* (
+  threadId: ThreadId,
   response: unknown,
-)
-{
-  const threadId = scope.threadId
-  const artifact = yield* decodeRecordingTransferArtifact(response).pipe(
+) {
+  const artifact = yield* decodeUploadedRecordingArtifact(response).pipe(
     Effect.mapError(
       (cause) =>
         new PreviewAutomationRecordingTransferError({
@@ -94,255 +131,109 @@ export const claimPreviewRecording = Effect.fn('PreviewToolkit.claimRecording')(
           cause,
         }),
     ),
-  )
-  if (artifact.uploadedAttachmentId === undefined)
-  {
-    return yield* new PreviewAutomationRecordingDesktopUpdateRequiredError({ threadId })
+  );
+  if (!artifact.uploadedAttachmentId) {
+    return yield* new PreviewAutomationRecordingDesktopUpdateRequiredError({ threadId });
   }
-  const uploadedAttachmentId = artifact.uploadedAttachmentId
-
-  const pending = parsePendingAttachmentId(artifact.uploadedAttachmentId)
-  const match =
-    /^pending-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-file-([a-z0-9]{1,10})$/.exec(
-      artifact.uploadedAttachmentId,
-    )
-  const extension = parseAttachmentFileExtension(artifact.uploadedAttachmentId)
-  const threadSegment = toSafeThreadAttachmentSegment(threadId)
-  if (
-    pending?.type !== 'file' ||
-    match === null ||
-    extension === null ||
-    extension !== `.${match[2]}` ||
-    threadSegment === null
-  )
-  {
-    return yield* new PreviewAutomationRecordingTransferError({ threadId })
+  const config = yield* ServerConfig.ServerConfig;
+  const uuid = parseAttachmentUuid(artifact.uploadedAttachmentId);
+  const extension = parseAttachmentFileExtension(artifact.uploadedAttachmentId);
+  const threadSegment = toSafeThreadAttachmentSegment(threadId);
+  const pendingId = `${PENDING_ATTACHMENT_THREAD_SEGMENT}-${uuid}-${extension}`;
+  if (!uuid || !extension || !threadSegment || artifact.uploadedAttachmentId !== pendingId) {
+    return yield* new PreviewAutomationRecordingTransferError({
+      threadId,
+    });
   }
-
-  const finalId = `${threadSegment}-${match[1]}-${match[2]}`
-  if (
-    !Number.isSafeInteger(artifact.sizeBytes) ||
-    artifact.sizeBytes <= 0 ||
-    artifact.sizeBytes > PROVIDER_SEND_TURN_MAX_FILE_BYTES ||
-    scope.providerSessionGeneration === undefined
-  )
-  {
-    return yield* new PreviewAutomationRecordingTransferError({ threadId })
-  }
-
-  const config = yield* ServerConfig.ServerConfig
-  const pendingRelativePath = `${artifact.uploadedAttachmentId}${extension}`
-  const finalRelativePath = `${finalId}${extension}`
+  // The same completed upload can be returned to overlapping stop requests.
+  const finalId = `${threadSegment}-${uuid}-${extension}`;
+  const currentPath = resolveAttachmentRelativePath({
+    attachmentsDir: config.attachmentsDir,
+    relativePath: `${pendingId}.${extension}`,
+  });
   const finalPath = resolveAttachmentRelativePath({
     attachmentsDir: config.attachmentsDir,
-    relativePath: finalRelativePath,
-  })
-  if (finalPath === null)
-  {
-    return yield* new PreviewAutomationRecordingTransferError({ threadId })
+    relativePath: `${finalId}.${extension}`,
+  });
+  if (!currentPath || !finalPath) {
+    return yield* new PreviewAutomationRecordingTransferError({ threadId });
   }
-
-  const providerService = yield* ProviderService
-  const projection = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery
-  const attachmentLifecycle = yield* AttachmentLifecycleRepository
-  const requireCurrentOwner = Effect.fn('PreviewToolkit.requireCurrentRecordingOwner')(
-    function* ()
-    {
-      const identity = yield* providerService.captureSessionIdentity({
-        threadId,
-        expectedProviderInstanceId: scope.providerInstanceId,
-      })
-      if (
-        Option.isNone(identity) ||
-        identity.value.threadId !== threadId ||
-        identity.value.providerInstanceId !== scope.providerInstanceId ||
-        identity.value.sessionGeneration !== scope.providerSessionGeneration
-      )
-      {
-        return yield* new PreviewAutomationRecordingTransferError({ threadId })
-      }
-      const thread = yield* projection.getThreadDetailSnapshot(threadId)
-      if (Option.isNone(thread))
-      {
-        return yield* new PreviewAutomationRecordingTransferError({ threadId })
-      }
-      return thread.value.snapshotSequence
-    },
-  )
-  yield* requireCurrentOwner().pipe(
-    Effect.mapError((cause) => new PreviewAutomationRecordingTransferError({ threadId, cause })),
-  )
-
-  const commandId = CommandId.make(`preview-recording:${threadSegment}:${match[1]}`)
-  const messageId = MessageId.make(`preview-recording:${match[1]}`)
-  const stagingKey = deriveAttachmentStagingKey({ commandId, messageId, attachmentIndex: 0 })
-  const now = DateTime.formatIso(yield* DateTime.now)
-
-  yield* attachmentLifecycle
-    .withCommandPermit(
-      commandId,
-      Effect.gen(function* ()
-      {
-        const existing = yield* attachmentLifecycle.getByStagingKey(stagingKey)
-        if (Option.isSome(existing) && existing.value.state === 'owned')
-        {
-          if (
-            existing.value.threadId !== threadId ||
-            existing.value.attachmentId !== finalId ||
-            existing.value.relativePath !== finalRelativePath ||
-            existing.value.mimeType !== artifact.mimeType ||
-            existing.value.byteCount !== artifact.sizeBytes
-          )
-          {
-            return yield* new PreviewAutomationRecordingTransferError({ threadId })
-          }
-          const digest = yield* processManagedAttachmentFile({
-            attachmentsDir: config.attachmentsDir,
-            relativePath: finalRelativePath,
-            expectedSize: artifact.sizeBytes,
-          })
-          if (digest !== existing.value.contentDigest)
-          {
-            return yield* new PreviewAutomationRecordingTransferError({ threadId })
-          }
-          yield* requireCurrentOwner()
-          return
-        }
-
-        const contentDigest = yield* processManagedAttachmentFile({
-          attachmentsDir: config.attachmentsDir,
-          relativePath: pendingRelativePath,
-          expectedSize: artifact.sizeBytes,
-        })
-        const row = yield* attachmentLifecycle.stage({
-          stagingKey,
-          commandId,
-          threadId,
-          messageId,
-          attachmentIndex: 0,
-          attachmentId: finalId,
-          stagingRelativePath: `.staging/${stagingKey}/${finalRelativePath}`,
-          relativePath: finalRelativePath,
-          mimeType: artifact.mimeType,
-          byteCount: artifact.sizeBytes,
-          contentDigest,
-          now,
-        })
-
-        if (row.state !== 'owned')
-        {
-          const copiedDigest = yield* processManagedAttachmentFile({
-            attachmentsDir: config.attachmentsDir,
-            relativePath: pendingRelativePath,
-            expectedSize: artifact.sizeBytes,
-            copyTo: finalRelativePath,
-          }).pipe(
-            // a prior interrupted claim may have published the immutable target.
-            Effect.catch(() =>
-              processManagedAttachmentFile({
-                attachmentsDir: config.attachmentsDir,
-                relativePath: finalRelativePath,
-                expectedSize: artifact.sizeBytes,
-              }),
-            ),
-          )
-          if (copiedDigest !== contentDigest)
-          {
-            return yield* new PreviewAutomationRecordingTransferError({ threadId })
-          }
-          yield* attachmentLifecycle.markPromoted({ stagingKey, now })
-        }
-
-        const owner = yield* requireCurrentOwner()
-        yield* attachmentLifecycle.associateAccepted({
-          commandId,
-          ownerSequence: owner,
-          ownerEventType: 'preview.recording-transferred',
-          now,
-        })
-        yield* deletePendingAttachment(uploadedAttachmentId).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning('unable to remove claimed preview recording upload', {
-              attachmentId: artifact.uploadedAttachmentId,
-              cause,
-            }),
-          ),
-        )
-      }).pipe(
-        Effect.onError(() =>
-          attachmentLifecycle
-            .markDispatchFailure({
-              commandId,
-              reason: 'preview_recording_transfer_failed',
-              now,
-            })
-            .pipe(Effect.ignore),
-        ),
+  const fileSystem = yield* FileSystem.FileSystem;
+  const validateFile = (filePath: string) =>
+    fileSystem.stat(filePath).pipe(
+      Effect.filterOrFail(
+        (stat) =>
+          stat.type === "File" &&
+          Number(stat.size) === artifact.sizeBytes &&
+          artifact.sizeBytes > 0 &&
+          artifact.sizeBytes <= PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+        () => new PreviewAutomationRecordingTransferError({ threadId }),
       ),
-    )
-    .pipe(
-      Effect.mapError((cause) => new PreviewAutomationRecordingTransferError({ threadId, cause })),
-    )
-
-  const { uploadedAttachmentId: _uploadedAttachmentId, ...recording } = artifact
-  return {
-    ...recording,
-    id: finalId,
-    path: finalPath,
-  } satisfies PreviewAutomationRecordingArtifact
-})
+    );
+  yield* Effect.gen(function* () {
+    yield* validateFile(currentPath);
+    yield* fileSystem.rename(currentPath, finalPath);
+  }).pipe(
+    // Another stop may already have claimed this exact upload for this thread.
+    Effect.catch((cause) =>
+      cause._tag !== "PreviewAutomationRecordingTransferError" && cause.reason._tag === "NotFound"
+        ? validateFile(finalPath)
+        : Effect.fail(cause),
+    ),
+    Effect.mapError((cause) => new PreviewAutomationRecordingTransferError({ threadId, cause })),
+  );
+  const { uploadedAttachmentId: _uploadedAttachmentId, ...recording } = artifact;
+  return { ...recording, id: finalId, path: finalPath };
+});
 
 const handlers = {
-  preview_status: (input) => invokeTargeted<PreviewAutomationStatus>('status', input ?? {}),
+  preview_status: (input) => invokeTargeted<PreviewAutomationStatus>("status", input ?? {}),
   preview_open: (input) =>
-    invokeTargeted<PreviewAutomationStatus>('open', {
-      ...input,
-      reuseExistingTab: input.reuseExistingTab ?? true,
-    }),
+    invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input)),
   preview_navigate: (input) =>
-    invokeTargeted<PreviewAutomationStatus>('navigate', input, input.timeoutMs),
+    invokeTargeted<PreviewAutomationStatus>("navigate", input, input.timeoutMs),
   preview_resize: (input) =>
-    invokeTargeted<PreviewAutomationResizeResult>('resize', input, input.timeoutMs),
+    invokeTargeted<PreviewAutomationResizeResult>("resize", input, input.timeoutMs),
   preview_set_appearance: (input) =>
-    invokeTargeted<PreviewAutomationSetColorSchemeResult>('setColorScheme', input),
-  preview_snapshot: (input) =>
-  {
-    // output selection is MCP-only; the browser still produces a complete snapshot
-    const { includeImage: _includeImage, ...operationInput } = input ?? {}
-    return invokeTargeted<PreviewAutomationSnapshot>('snapshot', operationInput)
+    invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
+  preview_snapshot: (input) => {
+    // Output selection and saving are MCP-only; the browser still produces a complete snapshot.
+    const { includeImage: _includeImage, save: _save, ...operationInput } = input ?? {};
+    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", operationInput);
   },
-  preview_click: (input) =>
-    invokeTargeted<void>('click', input, input.timeoutMs).pipe(Effect.as({})),
-  preview_type: (input) => invokeTargeted<void>('type', input, input.timeoutMs).pipe(Effect.as({})),
-  preview_press: (input) => invokeTargeted<void>('press', input).pipe(Effect.as({})),
-  preview_scroll: (input) => invokeTargeted<void>('scroll', input).pipe(Effect.as({})),
-  preview_evaluate: (input) =>
-    invokeTargeted<unknown>('evaluate', input).pipe(
-      Effect.map((result) => ({ value: result ?? null })),
+  preview_click: (input) => invokeTargeted<object>("click", input, input.timeoutMs),
+  preview_type: (input) => invokeTargeted<object>("type", input, input.timeoutMs),
+  preview_press: (input) => invokeTargeted<object>("press", input),
+  preview_scroll: (input) => invokeTargeted<object>("scroll", input),
+  preview_evaluate: ({ tabId, ...input }) =>
+    invoke<unknown>("evaluate", input, undefined, tabId).pipe(
+      Effect.map(({ result, toolIcon }) => ({
+        value: result ?? null,
+        ...(toolIcon ? { toolIcon } : {}),
+      })),
     ),
-  preview_wait_for: (input) =>
-    invokeTargeted<void>('waitFor', input, input.timeoutMs).pipe(Effect.as({})),
+  preview_wait_for: (input) => invokeTargeted<object>("waitFor", input, input.timeoutMs),
   preview_recording_start: (input) =>
-    invokeTargeted<PreviewAutomationRecordingStatus>('recordingStart', input ?? {}),
+    invokeTargeted<PreviewAutomationRecordingStatus>("recordingStart", input ?? {}),
   preview_recording_stop: (input) =>
-    Effect.gen(function* ()
-    {
-      const scope = yield* McpInvocationContext.requireMcpCapability('preview')
-      const response = yield* invokeTargeted<unknown>(
-        'recordingStop',
-        { ...input, transferToEnvironment: true },
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+      const { tabId, ...operationInput } = input;
+      const response = yield* invoke<unknown>(
+        "recordingStop",
+        { ...operationInput, transferToEnvironment: true },
         PREVIEW_RECORDING_STOP_TIMEOUT_MS,
-      )
-      return yield* claimPreviewRecording(scope, response)
+        tabId,
+      );
+      const artifact = yield* claimPreviewRecording(scope.threadId, response.result);
+      return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
     }),
-} satisfies Parameters<typeof PreviewToolkit.toLayer>[0]
+} satisfies Parameters<typeof PreviewToolkit.toLayer>[0];
 
-const { preview_snapshot, ...standardHandlers } = handlers
+const { preview_snapshot, ...standardHandlers } = handlers;
 
-export const PreviewStandardToolkitHandlersLive = PreviewStandardToolkit.toLayer(standardHandlers)
+export const PreviewStandardToolkitHandlersLive = PreviewStandardToolkit.toLayer(standardHandlers);
 
 export const PreviewSnapshotToolkitHandlersLive = PreviewSnapshotToolkit.toLayer({
   preview_snapshot,
-})
-
-export const PreviewToolkitHandlersLive = PreviewToolkit.toLayer(handlers)
+});

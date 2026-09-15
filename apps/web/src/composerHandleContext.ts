@@ -1,4 +1,10 @@
-// apps/web/src/composerHandleContext.ts
-// expose the stable facade for composer handle context
+import { createContext, use } from "react";
+import type { ChatComposerHandle } from "./components/chat/ChatComposer";
 
-export * from './components/chat/composer/composerHandleContext'
+export type ComposerHandleRef = React.RefObject<ChatComposerHandle | null>;
+
+export const ComposerHandleContext = createContext<ComposerHandleRef | null>(null);
+
+export function useComposerHandleContext(): ComposerHandleRef | null {
+  return use(ComposerHandleContext);
+}

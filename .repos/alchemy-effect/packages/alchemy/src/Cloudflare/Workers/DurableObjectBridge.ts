@@ -9,10 +9,11 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { HttpServerResponse } from "effect/unstable/http";
+import { buildEventTelemetry } from "../../Telemetry.ts";
 import type {
   DurableObjectExport,
   DurableObjectShape,
-} from "./DurableObjectNamespace.ts";
+} from "./DurableObject.ts";
 import {
   DurableObjectState,
   fromDurableObjectState,
@@ -42,41 +43,49 @@ export const makeDurableObjectBridge =
       };
     },
   ) =>
-  (className: string) =>
-    class DurableObjectBridge extends DurableObject {
+  (className: string) => {
+    // One isolate-lifetime layer build shared by every activation of this DO
+    // class: `build` memoizes the built context, so re-activations (including
+    // hibernatable WebSocket wakes, which re-run the constructor) reuse it
+    // instead of rebuilding the layer stack.
+    const { build } = getWorkerExport<DurableObjectExport>({
+      entrypoint,
+      stack,
+      exportName: className,
+    });
+
+    return class DurableObjectBridge extends DurableObject {
       #state;
-      #globalContext;
-      #exported;
       #instance;
       constructor(state: cf.DurableObjectState, env: any) {
         super(state as any, env);
         this.#state = state;
 
-        const { globalContext, exported } =
-          getWorkerExport<DurableObjectExport>({
-            entrypoint,
-            stack,
-            exportName: className,
-          });
-
-        this.#globalContext = globalContext;
-        this.#exported = exported;
-
         this.#instance = state.blockConcurrencyWhile(() =>
-          this.#exported.pipe(
-            Effect.flatMap(({ constructor, services }) =>
-              constructor.pipe(
-                Effect.provide(
-                  Layer.succeed(
-                    DurableObjectState,
-                    fromDurableObjectState(this.#state),
-                  ).pipe(Layer.provideMerge(Layer.succeedContext(services))),
+          build((promise) => void (state as any).waitUntil?.(promise)).then(
+            ({ context, export: exported, telemetry }) => {
+              const { constructor, services } = exported;
+              const doContext = Layer.succeed(
+                DurableObjectState,
+                fromDurableObjectState(this.#state),
+              ).pipe(
+                Layer.provideMerge(Layer.succeedContext(services)),
+                Layer.provideMerge(Layer.succeedContext(context)),
+              );
+              return constructor.pipe(
+                Effect.provide(doContext),
+                Effect.flatMap((instance) =>
+                  instance.pipe(Effect.provide(doContext)),
                 ),
-                Effect.map((instance) => ({ instance, services })),
-              ),
-            ),
-            Effect.provide(this.#globalContext),
-            Effect.runPromise,
+                Effect.map((instance) => ({
+                  instance,
+                  services,
+                  context,
+                  telemetry,
+                })),
+                Effect.runPromise,
+              );
+            },
           ),
         );
 
@@ -91,14 +100,17 @@ export const makeDurableObjectBridge =
                 const method = instance[prop as keyof DurableObjectShape];
                 if (typeof method === "function") {
                   const result = (method as any)(...args);
-                  // A streaming RPC method returns a `Stream` directly rather
-                  // than an `Effect`. Lift it into the success channel so the
-                  // resulting `Exit.value` is the `Stream` and `handleRpcExit`
-                  // can encode it as a stream envelope instead of trying to run
-                  // it as an effect.
-                  return Stream.isStream(result)
-                    ? Effect.succeed(result)
-                    : result;
+                  // Effects (including nested-RPC values built by
+                  // `asEffectOrStream`, which are Effects *branded* as Streams)
+                  // must be run as effects — their resolved value may itself be
+                  // a `Stream`, which `handleRpcExit` then encodes. Only a
+                  // *genuine* `Stream` (not an Effect) is lifted into the
+                  // success channel so `handleRpcExit` encodes it directly.
+                  return Effect.isEffect(result)
+                    ? result
+                    : Stream.isStream(result)
+                      ? Effect.succeed(result)
+                      : result;
                 } else if (Effect.isEffect(method)) {
                   return method;
                 } else {
@@ -111,39 +123,55 @@ export const makeDurableObjectBridge =
 
       async #execute(
         fn: (instance: DurableObjectShape) => Effect.Effect<any, any, any>,
-        onExit?: (exit: Exit.Exit<any, any>) => Promise<any>,
+        onExit?: (
+          exit: Exit.Exit<any, any>,
+          scope: Scope.Closeable,
+        ) => Promise<any>,
       ) {
         const scope = Scope.makeUnsafe();
 
-        const { instance, services } = await this.#instance;
+        const { instance, services, context, telemetry } = await this.#instance;
 
         return fn(instance)
           .pipe(
             Effect.provide(
-              Layer.succeed(
-                DurableObjectState,
-                fromDurableObjectState(this.#state),
+              Layer.mergeAll(
+                Layer.succeed(
+                  DurableObjectState,
+                  fromDurableObjectState(this.#state),
+                ),
+                Layer.succeed(Scope.Scope, scope),
+                // The configured telemetry exporters, attached to the *call*
+                // scope by `buildEventTelemetry` so buffered telemetry
+                // flushes when the scope closes into `waitUntil` below (the
+                // isolate scope never finalizes on workerd).
+                Layer.effectContext(
+                  buildEventTelemetry(context, scope, telemetry()),
+                ),
               ).pipe(
-                Layer.provideMerge(Layer.succeed(Scope.Scope, scope)),
                 Layer.provideMerge(Layer.succeedContext(services)),
-                Layer.provideMerge(this.#globalContext),
+                Layer.provideMerge(Layer.succeedContext(context)),
               ),
             ),
             Effect.runPromiseExit,
           )
-          .then(
-            onExit ??
-              ((exit) =>
-                exit._tag === "Success"
-                  ? Promise.resolve(exit.value)
-                  : Promise.reject(Cause.squash(exit.cause))),
+          .then((exit) =>
+            onExit
+              ? onExit(exit, scope)
+              : exit._tag === "Success"
+                ? Promise.resolve(exit.value)
+                : Promise.reject(Cause.squash(exit.cause)),
           )
           .finally(() =>
             isScopeEjected(scope)
               ? undefined
-              : Scope.close(scope, Exit.void).pipe(
-                  Effect.runPromise,
-                  (promise) => this.ctx.waitUntil(promise),
+              : this.ctx.waitUntil(
+                  // Match WorkerBridge: yield one macrotask so the
+                  // HttpMiddleware tracer's late span-end reaches the
+                  // telemetry exporter before the scope's flush finalizer.
+                  new Promise((resolve) => setTimeout(resolve, 0)).then(() =>
+                    Effect.runPromise(Scope.close(scope, Exit.void)),
+                  ),
                 ),
           );
       }
@@ -189,3 +217,4 @@ export const makeDurableObjectBridge =
         );
       }
     } as any;
+  };

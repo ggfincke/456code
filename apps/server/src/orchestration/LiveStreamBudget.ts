@@ -1,301 +1,196 @@
-// apps/server/src/orchestration/LiveStreamBudget.ts
-// bounds retained live stream data through client acknowledgement
+import { OrchestrationGetSnapshotError } from "@t3tools/contracts";
+import * as Arr from "effect/Array";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
-import { OrchestrationGetSnapshotError } from '@t3tools/contracts'
-import * as Arr from 'effect/Array'
-import * as Deferred from 'effect/Deferred'
-import * as Effect from 'effect/Effect'
-import * as Exit from 'effect/Exit'
-import * as Result from 'effect/Result'
-import * as Scope from 'effect/Scope'
-import * as Stream from 'effect/Stream'
+const LIVE_STREAM_MAX_ITEMS = 1_000;
+const LIVE_STREAM_MAX_SERIALIZED_BYTES = 8 * 1024 * 1024;
 
-export const LIVE_STREAM_MAX_ITEMS = 1_000
-export const LIVE_STREAM_MAX_SERIALIZED_BYTES = 8 * 1024 * 1024
-
-export interface RetainedLiveItem<A>
-{
-  readonly value: A
-  readonly serializedBytes: number
+export interface RetainedLiveItem<A> {
+  readonly value: A;
+  readonly serializedBytes: number;
 }
 
-// published events are immutable and shared across subscriptions
-const serializedSizes = new WeakMap<object, number>()
+// Published events are immutable and shared across subscriptions. Measure each
+// object once without keeping the event or its serialized copy alive.
+const serializedSizes = new WeakMap<object, number>();
 
-function serializedSize(value: object): number
-{
-  const cached = serializedSizes.get(value)
-  if (cached !== undefined)
-  {
-    return cached
+function serializedSize(value: object): number {
+  const cached = serializedSizes.get(value);
+  if (cached !== undefined) {
+    return cached;
   }
-  const serialized = JSON.stringify(value)
-  if (serialized === undefined)
-  {
-    throw new TypeError('Live stream payload is not JSON serializable.')
-  }
-  const bytes = Buffer.byteLength(serialized)
-  serializedSizes.set(value, bytes)
-  return bytes
+  const bytes = Buffer.byteLength(JSON.stringify(value));
+  serializedSizes.set(value, bytes);
+  return bytes;
 }
 
-// one budget owns all retained live data for one RPC subscription
-export const makeLiveStreamBudget = Effect.fn('makeLiveStreamBudget')(function* (limits?: {
-  readonly maxItems?: number
-  readonly maxSerializedBytes?: number
-})
-{
-  const budgetScope = yield* Effect.scope
-  const maxItems = limits?.maxItems ?? LIVE_STREAM_MAX_ITEMS
-  const maxSerializedBytes = limits?.maxSerializedBytes ?? LIVE_STREAM_MAX_SERIALIZED_BYTES
-  const failed = yield* Deferred.make<never, OrchestrationGetSnapshotError>()
-  const cleanupComplete = yield* Deferred.make<void>()
-  let failure: OrchestrationGetSnapshotError | undefined
-  let overflowUsage:
-    | {
-        readonly nextItems: number
-        readonly nextSerializedBytes: number
+/** One budget covers one subscription and its delivery stream, including the batch waiting for an RPC ACK. */
+export const makeLiveStreamBudget = Effect.fn("makeLiveStreamBudget")(function* (limits?: {
+  readonly maxItems?: number;
+  readonly maxSerializedBytes?: number;
+}) {
+  const maxItems = limits?.maxItems ?? LIVE_STREAM_MAX_ITEMS;
+  const maxSerializedBytes = limits?.maxSerializedBytes ?? LIVE_STREAM_MAX_SERIALIZED_BYTES;
+  const failed = yield* Deferred.make<never, OrchestrationGetSnapshotError>();
+  const cleanupComplete = yield* Deferred.make<void>();
+  let failure: OrchestrationGetSnapshotError | undefined;
+  const retained = new Set<RetainedLiveItem<unknown>>();
+  let retainedSerializedBytes = 0;
+
+  const release = (items: Iterable<RetainedLiveItem<unknown>>) => {
+    for (const item of items) {
+      if (!retained.delete(item)) {
+        continue;
       }
-    | undefined
-  const retained = new Set<RetainedLiveItem<unknown>>()
-  const acknowledgementInFlight = new Set<RetainedLiveItem<unknown>>()
-  let retainedSerializedBytes = 0
-
-  const release = (items: Iterable<RetainedLiveItem<unknown>>) =>
-  {
-    for (const item of items)
-    {
-      if (!retained.delete(item))
-      {
-        continue
-      }
-      retainedSerializedBytes -= item.serializedBytes
+      retainedSerializedBytes -= item.serializedBytes;
     }
-  }
+  };
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => release(retained)).pipe(
+      Effect.andThen(Deferred.succeed(cleanupComplete, undefined)),
+    ),
+  );
 
-  const failUnsafe = (error: OrchestrationGetSnapshotError): OrchestrationGetSnapshotError =>
-  {
-    if (failure === undefined)
-    {
-      failure = error
-      Deferred.doneUnsafe(failed, Effect.fail(error))
-    }
-    return failure
-  }
+  const check = Effect.suspend(() => (failure ? Effect.fail(failure) : Effect.void));
 
-  const overflowUnsafe = (
+  const overflow = Effect.fn("LiveStreamBudget.overflow")(function* (
     nextItems: number,
     nextSerializedBytes: number,
-  ): OrchestrationGetSnapshotError =>
-  {
-    overflowUsage ??= { nextItems, nextSerializedBytes }
-    return failUnsafe(
-      new OrchestrationGetSnapshotError({
-        message: 'The live event buffer is full. Resume from the last received sequence.',
-      }),
-    )
-  }
-
-  const measure = (payload: object): Result.Result<number, OrchestrationGetSnapshotError> =>
-  {
-    try
-    {
-      return Result.succeed(serializedSize(payload))
-    }
-    catch (cause)
-    {
-      return Result.fail(
-        failUnsafe(
-          new OrchestrationGetSnapshotError({
-            message: 'Failed to measure a live event payload.',
-            cause,
-          }),
-        ),
-      )
-    }
-  }
-
-  const retainUnsafe = <A extends object>(
-    value: A,
-    payload: object = value,
-  ): Result.Result<RetainedLiveItem<A>, OrchestrationGetSnapshotError> =>
-  {
-    if (failure !== undefined)
-    {
-      return Result.fail(failure)
-    }
-    const measured = measure(payload)
-    if (Result.isFailure(measured))
-    {
-      return Result.fail(measured.failure)
-    }
-    const nextItems = retained.size + 1
-    const nextSerializedBytes = retainedSerializedBytes + measured.success
-    if (nextItems > maxItems || nextSerializedBytes > maxSerializedBytes)
-    {
-      return Result.fail(overflowUnsafe(nextItems, nextSerializedBytes))
-    }
-    const item = { value, serializedBytes: measured.success }
-    retained.add(item)
-    retainedSerializedBytes = nextSerializedBytes
-    return Result.succeed(item)
-  }
+  ) {
+    failure ??= new OrchestrationGetSnapshotError({
+      message: "The live event buffer is full. Resume from the last received sequence.",
+    });
+    yield* Deferred.fail(failed, failure);
+    yield* Effect.logWarning("orchestration live event buffer is full", {
+      retainedItems: retained.size,
+      retainedSerializedBytes,
+      nextItems,
+      nextSerializedBytes,
+      maxItems,
+      maxSerializedBytes,
+    });
+    return yield* failure;
+  });
 
   const retain = <A extends object>(value: A, payload: object = value) =>
-    Effect.suspend(() =>
-      Result.match(retainUnsafe(value, payload), {
-        onFailure: Effect.fail,
-        onSuccess: Effect.succeed,
-      }),
-    )
+    Effect.suspend(() => {
+      if (failure) {
+        return Effect.fail(failure);
+      }
+      const serializedBytes = serializedSize(payload);
+      const nextItems = retained.size + 1;
+      const nextSerializedBytes = retainedSerializedBytes + serializedBytes;
+      if (nextItems > maxItems || nextSerializedBytes > maxSerializedBytes) {
+        return overflow(nextItems, nextSerializedBytes);
+      }
+      const item = { value, serializedBytes };
+      retained.add(item);
+      retainedSerializedBytes = nextSerializedBytes;
+      return Effect.succeed(item);
+    });
 
-  // raw and projected values share one counter across coalescing
+  // Replace one coalescing batch atomically. Queued and coalesced payloads
+  // count against the same budget, and discarded updates release their charge.
   const replace = <A extends object>(
     previous: ReadonlyArray<RetainedLiveItem<unknown>>,
     values: ReadonlyArray<A>,
     payload: (value: A) => object = (value) => value,
   ) =>
-    Effect.suspend(() =>
-    {
-      if (failure !== undefined)
-      {
-        return Effect.fail(failure)
+    Effect.suspend(() => {
+      if (failure) {
+        return Effect.fail(failure);
       }
-      const next: Array<RetainedLiveItem<A>> = []
-      for (const value of values)
-      {
-        const measured = measure(payload(value))
-        if (Result.isFailure(measured))
-        {
-          return Effect.fail(measured.failure)
-        }
-        next.push({ value, serializedBytes: measured.success })
-      }
-      let nextItems = retained.size + next.length
+      const next = values.map((value) => ({
+        value,
+        serializedBytes: serializedSize(payload(value)),
+      }));
+      let nextItems = retained.size + next.length;
       let nextSerializedBytes =
-        retainedSerializedBytes + next.reduce((sum, item) => sum + item.serializedBytes, 0)
-      for (const item of previous)
-      {
-        if (retained.has(item))
-        {
-          nextItems -= 1
-          nextSerializedBytes -= item.serializedBytes
+        retainedSerializedBytes + next.reduce((sum, item) => sum + item.serializedBytes, 0);
+      for (const item of previous) {
+        if (retained.has(item)) {
+          nextItems -= 1;
+          nextSerializedBytes -= item.serializedBytes;
         }
       }
-      if (nextItems > maxItems || nextSerializedBytes > maxSerializedBytes)
-      {
-        return Effect.fail(overflowUnsafe(nextItems, nextSerializedBytes))
+      if (nextItems > maxItems || nextSerializedBytes > maxSerializedBytes) {
+        return overflow(nextItems, nextSerializedBytes);
       }
-      release(previous)
-      for (const item of next)
-      {
-        retained.add(item)
+      release(previous);
+      for (const item of next) {
+        retained.add(item);
       }
-      retainedSerializedBytes = nextSerializedBytes
-      return Effect.succeed(next)
-    })
-
-  const check = Effect.suspend(() => (failure === undefined ? Effect.void : Effect.fail(failure)))
+      retainedSerializedBytes = nextSerializedBytes;
+      return Effect.succeed(next);
+    });
 
   const deliver = <A, E, R>(stream: Stream.Stream<RetainedLiveItem<A>, E, R>) =>
     Stream.fromPull(
-      Effect.gen(function* ()
-      {
-        yield* check
-        const sourceScope = yield* Scope.fork(budgetScope)
+      Effect.gen(function* () {
+        yield* check;
+        const sourceScope = yield* Scope.fork(yield* Effect.scope);
         const source = {
           pull: yield* Stream.toPull(stream).pipe(Scope.provide(sourceScope)),
-        }
-        let inFlight: ReadonlyArray<RetainedLiveItem<A>> = []
+        };
+        let inFlight: ReadonlyArray<RetainedLiveItem<A>> = [];
         yield* Effect.addFinalizer(() =>
-          Effect.sync(() =>
-          {
-            release(inFlight)
-            for (const item of inFlight)
-            {
-              acknowledgementInFlight.delete(item)
-            }
-            inFlight = []
-            source.pull = Effect.interrupt
+          Effect.sync(() => {
+            release(inFlight);
+            inFlight = [];
+            source.pull = Effect.interrupt;
           }),
-        )
+        );
         yield* Deferred.await(failed).pipe(
           Effect.catchTags({
             OrchestrationGetSnapshotError: (error) =>
-              Effect.sync(() =>
-              {
-                source.pull = Effect.interrupt
-              }).pipe(Effect.andThen(Scope.close(sourceScope, Exit.fail(error)))),
+              Effect.sync(() => {
+                // A grouped source can retain its own pending chunk. Close it
+                // and release the pull closure without waiting for an RPC ACK.
+                source.pull = Effect.interrupt;
+              }).pipe(
+                Effect.andThen(Scope.close(sourceScope, Exit.fail(error))),
+                Effect.andThen(
+                  Effect.sync(() => {
+                    const delivered = new Set<RetainedLiveItem<unknown>>(inFlight);
+                    for (const item of retained) {
+                      if (!delivered.has(item)) {
+                        release([item]);
+                      }
+                    }
+                  }),
+                ),
+                Effect.andThen(Deferred.succeed(cleanupComplete, undefined)),
+              ),
           }),
           Effect.forkScoped,
-        )
+        );
         // @effect-diagnostics-next-line returnEffectInGen:off - Stream.fromPull needs the pull effect as its result.
-        return Effect.gen(function* ()
-        {
-          // the RPC server asks for the next pull only after acknowledging this one
-          release(inFlight)
-          for (const item of inFlight)
-          {
-            acknowledgementInFlight.delete(item)
-          }
-          inFlight = []
-          yield* check
-          const items = yield* Effect.raceFirst(source.pull, Deferred.await(failed))
-          yield* check
-          inFlight = items
-          for (const item of items)
-          {
-            acknowledgementInFlight.add(item)
-          }
-          return Arr.map(items, (item) => item.value)
-        })
+        return Effect.gen(function* () {
+          // RpcServer requests the next batch only after the client ACKs this
+          // one. Removing items from a queue alone does not mean delivery ended.
+          release(inFlight);
+          inFlight = [];
+          yield* check;
+          const items = yield* Effect.raceFirst(source.pull, Deferred.await(failed));
+          inFlight = items;
+          yield* check;
+          return Arr.map(items, (item) => item.value);
+        });
       }),
-    ).pipe(Stream.scoped)
-
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => release(retained)).pipe(
-      Effect.andThen(Deferred.succeed(cleanupComplete, undefined)),
-    ),
-  )
-  yield* Deferred.await(failed).pipe(
-    Effect.catchTags({
-      OrchestrationGetSnapshotError: (error) =>
-        Effect.logWarning('orchestration live event buffer failed', {
-          error,
-          retainedItems: retained.size,
-          retainedSerializedBytes,
-          maxItems,
-          maxSerializedBytes,
-          ...overflowUsage,
-        }).pipe(
-          Effect.andThen(
-            Effect.sync(() =>
-            {
-              for (const item of retained)
-              {
-                if (!acknowledgementInFlight.has(item))
-                {
-                  release([item])
-                }
-              }
-            }),
-          ),
-          Effect.andThen(Deferred.succeed(cleanupComplete, undefined)),
-        ),
-    }),
-    Effect.forkScoped,
-  )
+    );
 
   return {
     retain,
-    retainUnsafe,
     replace,
     release,
-    failUnsafe,
     deliver,
     check,
     failed: Deferred.await(failed),
     closed: Deferred.await(cleanupComplete),
     usage: Effect.sync(() => ({ retainedItems: retained.size, retainedSerializedBytes })),
-  } as const
-})
+  };
+});

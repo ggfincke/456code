@@ -1,18 +1,20 @@
 import { unwrapRpcHandlers } from "@/Local/RpcSerialization.ts";
 import type { RpcProxyApi } from "@/Local/RpcServer.ts";
 import { PlatformServices } from "@/Util/PlatformServices.ts";
-import { assert, describe, expect, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "alchemy-test";
 import { newWebSocketRpcSession, type RpcStub } from "capnweb";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import { fileURLToPath } from "node:url";
 import { openWebSocket, waitForExit } from "./fixtures/process-effect.ts";
 import { runtimes } from "./fixtures/runtimes.ts";
 
-const FIXTURE_TS = new URL("./fixtures/rpc-server-entry.ts", import.meta.url)
-  .pathname;
+const FIXTURE_TS = fileURLToPath(
+  new URL("./fixtures/rpc-server-entry.ts", import.meta.url),
+);
 
 const ADDRESS_RE = /<ALCHEMY_RPC_ADDRESS>(.+?)<\/ALCHEMY_RPC_ADDRESS>/;
 
@@ -29,10 +31,13 @@ const sampleEnv = () =>
     stack: { name: "test", stage: "dev" },
   });
 
-for (const runtime of runtimes()) {
-  describe.skipIf(!runtime.available)(
-    `Local.RpcServer (${runtime.name})`,
-    () => {
+// Concurrent at both levels: every test spawns its own isolated child
+// process, and two of them deliberately wait out the sidecar's ~10s
+// parent-connect self-termination. Run serially (the file default) those
+// two waits alone would stack to ~20s of wall clock.
+describe.concurrent("Local.RpcServer", () => {
+  for (const runtime of runtimes()) {
+    describe.concurrent.skipIf(!runtime.available)(runtime.name, () => {
       const [bin, ...args] = runtime.argv(FIXTURE_TS);
       const launch = ChildProcess.make(bin, args, {
         env: {
@@ -77,7 +82,11 @@ for (const runtime of runtimes()) {
             // Drive a real RPC call through a session websocket. capnweb's
             // surface is Promise-based, so we wrap exactly at the boundary
             // and let everything above and below stay in Effect.
-            const stub = newWebSocketRpcSession(url) as RpcStub<RpcProxyApi>;
+
+            // TODO(sam): tsc (typescript 7) vomits here, so we cast to any.
+            const stub = (newWebSocketRpcSession as any)(
+              url,
+            ) as RpcStub<RpcProxyApi>;
             const result = yield* Effect.promise(async () => {
               const provider = await stub.getProvider("Test.Echo");
               const handlers = unwrapRpcHandlers(provider as any) as {
@@ -110,6 +119,6 @@ for (const runtime of runtimes()) {
           }).pipe(Effect.scoped, Effect.provide(PlatformServices)),
         { timeout: 30_000 },
       );
-    },
-  );
-}
+    });
+  }
+});

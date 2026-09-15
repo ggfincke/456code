@@ -1,10 +1,16 @@
 {
-  "extends": "../../tsconfig.strict.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2023"],
     "types": ["node"],
-    "sourceMap": true
+    "sourceMap": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": false
+      }
+    ]
   },
-  "include": ["src", "../../tests/packages/cartographer-core"]
+  "include": ["src"]
 }

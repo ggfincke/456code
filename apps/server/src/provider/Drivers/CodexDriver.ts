@@ -1,148 +1,149 @@
-// apps/server/src/provider/Drivers/CodexDriver.ts
-// creates isolated Codex provider instances and source-bound continuation routes
+/**
+ * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
+ *
+ * A driver is a plain value (not a Context.Service) whose `create()` returns
+ * one `ProviderInstance` bundling:
+ *   - `snapshot`   — the live `ServerProviderShape` for this instance;
+ *   - `adapter`    — the Codex session/turn/approval runtime;
+ *   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
+ *
+ * Each call to `create()` captures the `codexConfig` argument in closures
+ * owned by the returned instance. Two instances created with different
+ * `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
+ * fully independent Codex app-server processes and `CODEX_HOME`
+ * environments — no shared mutable state.
+ *
+ * Resource lifecycle: `create()` runs in a scope handed in by the registry.
+ * Closing that scope releases the adapter's child processes, the managed
+ * snapshot's refresh fibre, and the text-generation binaries' transient
+ * scratch files. The registry uses this to tear down an instance when its
+ * `providerInstances` entry disappears or its config changes.
+ *
+ * @module provider/Drivers/CodexDriver
+ */
+import { CodexSettings, ProviderDriverKind } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import { HttpClient } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
-// CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
-//
-// a driver is a plain value (not a Context.Service) whose `create()` returns
-// one `ProviderInstance` bundling:
-//   - `snapshot`   — the live `ServerProviderShape` for this instance;
-//   - `adapter`    — the Codex session/turn/approval runtime;
-//   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
-//
-// each call to `create()` captures the `codexConfig` argument in closures
-// owned by the returned instance. Two instances created with different
-// `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
-// fully independent Codex app-server processes and `CODEX_HOME`
-// environments — no shared mutable state.
-//
-// resource lifecycle: `create()` runs in a scope handed in by the registry.
-// closing that scope releases the adapter's child processes, the managed
-// snapshot's refresh fibre, and the text-generation binaries' transient
-// scratch files. The registry uses this to tear down an instance when its
-// `providerInstances` entry disappears or its config changes.
-//
-// @module provider/Drivers/CodexDriver
-import { CodexSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
-import * as Duration from 'effect/Duration'
-import * as Crypto from 'effect/Crypto'
-import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Path from 'effect/Path'
-import * as Schema from 'effect/Schema'
-import { HttpClient } from 'effect/unstable/http'
-import { ChildProcessSpawner } from 'effect/unstable/process'
-
-import { makeCodexTextGeneration } from '../../textGeneration/CodexTextGeneration.ts'
-import { ServerConfig } from '../../config.ts'
-import { ServerSettingsService } from '../../serverSettings.ts'
-import { canonicalFileContinuationIdentity } from '../continuationIdentity.ts'
-import { ProviderDriverError } from '../Errors.ts'
-import { makeCodexAdapter } from '../Layers/CodexAdapter.ts'
+import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
+import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import { ServerConfig } from "../../config.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { ProviderDriverError } from "../Errors.ts";
+import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
+import {
+  CODEX_RESET_CREDIT_TIMEOUT,
+  CodexResetCreditCoordinator,
+} from "../Layers/codexResetCredit.ts";
 import {
   checkCodexProviderStatus,
   makePendingCodexProvider,
   probeCodexSkillsForCwd,
-} from '../Layers/CodexProvider.ts'
-import { resolveCodexLaunchArgs } from '../Layers/codexLaunchArgs.ts'
-import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
-import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
-import type { ProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
-import type { ServerProviderDraft } from '../providerSnapshot.ts'
-import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
-import { providerUsageAccountIdentity } from '../providerUsageLimits.ts'
+  withCodexAppServerClient,
+} from "../Layers/CodexProvider.ts";
+import { resolveCodexLaunchArgs } from "../Layers/codexLaunchArgs.ts";
+import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import * as ModelManifest from "../ModelManifest.ts";
+import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
+import { withInstanceIdentity } from "./instanceIdentity.ts";
+import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from '../maintenance/providerMaintenance.ts'
+} from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from '../maintenance/providerUpdateSettings.ts'
-import { materializeCodexShadowHome, resolveCodexHomeLayout } from './CodexHomeLayout.ts'
-const decodeCodexSettings = Schema.decodeSync(CodexSettings)
+} from "../providerUpdateSettings.ts";
+import {
+  codexContinuationIdentity,
+  materializeCodexShadowHome,
+  resolveCodexHomeLayout,
+} from "./CodexHomeLayout.ts";
+const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
-const DRIVER_KIND = ProviderDriverKind.make('codex')
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
-
-function isCodexStandaloneCommandPath(commandPath: string): boolean
-{
-  return normalizeCommandPath(commandPath).includes('/packages/standalone/')
+const DRIVER_KIND = ProviderDriverKind.make("codex");
+// The standalone installer lays out `<CODEX_HOME>/packages/standalone/…`;
+// CODEX_HOME is not always `~/.codex`.
+function isCodexStandaloneCommandPath(commandPath: string): boolean {
+  return normalizeCommandPath(commandPath).includes("/packages/standalone/");
 }
 
-// point standalone updates at the shared package tree, not the optional auth overlay
-function makeCodexMaintenanceResolver(sharedHomePath: string)
-{
+/**
+ * `codex update` replaces the standalone tree under `CODEX_HOME`. That tree
+ * lives in the shared home even when an auth-overlay shadow home is in use
+ * (the overlay only carries auth and a few local entries), so the updater
+ * runs against `sharedHomePath` rather than the instance's effective home.
+ */
+function makeCodexMaintenanceResolver(sharedHomePath: string) {
   return makePackageManagedProviderMaintenanceResolver({
     provider: DRIVER_KIND,
-    npmPackageName: '@openai/codex',
+    npmPackageName: "@openai/codex",
     nativeUpdate: {
-      args: ['update'],
+      args: ["update"],
       isCommandPath: isCodexStandaloneCommandPath,
       env: { CODEX_HOME: sharedHomePath },
     },
-  })
+  });
 }
 
-// services the driver needs to materialize an instance. Surfaced as the
-// driver's `R` so the registry layer aggregates these across every
-// registered driver and the runtime satisfies them once.
+/**
+ * Services the driver needs to materialize an instance. Surfaced as the
+ * driver's `R` so the registry layer aggregates these across every
+ * registered driver and the runtime satisfies them once.
+ */
 export type CodexDriverEnv =
+  | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
+  | CodexResetCreditCoordinator
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
+  | ModelManifest.ModelManifest
   | Path.Path
   | ProviderEventLoggers
   | ServerConfig
-  | ServerSettingsService
-
-// stamp instance identity onto a `ServerProvider` snapshot produced by the
-// driver-kind-only codex helpers. Once `buildServerProvider` in
-// `providerSnapshot.ts` is widened to accept `instanceId`/`driver`, this
-// wrapper disappears.
-const withInstanceIdentity =
-  (input: {
-    readonly instanceId: ProviderInstance['instanceId']
-    readonly displayName: string | undefined
-    readonly accentColor: string | undefined
-    readonly continuationGroupKey: string
-  }) =>
-  (snapshot: ServerProviderDraft): ServerProvider => ({
-    ...snapshot,
-    instanceId: input.instanceId,
-    driver: DRIVER_KIND,
-    ...(input.displayName ? { displayName: input.displayName } : {}),
-    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
-    continuation: { groupKey: input.continuationGroupKey },
-  })
+  | ServerSettingsService;
 
 export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: 'Codex',
+    displayName: "Codex",
     supportsMultipleInstances: true,
   },
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => decodeCodexSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* ()
-    {
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const fileSystem = yield* FileSystem.FileSystem
-      const httpClient = yield* HttpClient.HttpClient
-      const path = yield* Path.Path
-      const { cwd } = yield* ServerConfig
-      const serverSettings = yield* ServerSettingsService
-      const eventLoggers = yield* ProviderEventLoggers
-      const processEnv = mergeProviderInstanceEnvironment(environment)
-      const homeLayout = yield* resolveCodexHomeLayout(config, {
-        environment: processEnv,
-        cwd,
-      })
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const resetCreditCoordinator = yield* CodexResetCreditCoordinator;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const pathService = yield* Path.Path;
+      const httpClient = yield* HttpClient.HttpClient;
+      const serverSettings = yield* ServerSettingsService;
+      const eventLoggers = yield* ProviderEventLoggers;
+      const modelManifest = yield* ModelManifest.ModelManifest;
+      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const homeLayout = yield* resolveCodexHomeLayout(config);
+      const continuationIdentity = codexContinuationIdentity(homeLayout);
+      const stampIdentity = withInstanceIdentity({
+        instanceId,
+        driverKind: DRIVER_KIND,
+        displayName,
+        accentColor,
+        continuationGroupKey: continuationIdentity.continuationKey,
+      });
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
           (cause) =>
@@ -153,23 +154,13 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               cause,
             }),
         ),
-      )
-      const resolveContinuationIdentity = canonicalFileContinuationIdentity(
-        DRIVER_KIND,
-        path.join(homeLayout.sharedHomePath, 'sessions'),
-      ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
-      const continuationIdentity = yield* resolveContinuationIdentity
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
-      })
+      );
       const effectiveConfig = {
         ...config,
         enabled,
-        homePath: homeLayout.effectiveHomePath ?? '',
-      } satisfies CodexSettings
+        binaryPath: expandHomePath(config.binaryPath),
+        homePath: homeLayout.effectiveHomePath ?? "",
+      } satisfies CodexSettings;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(
           makeCodexMaintenanceResolver(homeLayout.sharedHomePath),
@@ -180,10 +171,9 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         ).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
+          Effect.provideService(Path.Path, pathService),
         ),
-      )
-      const usageAccountFence: { current: string | undefined } = { current: undefined }
+      );
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -194,37 +184,41 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
-        usageAccountIdentity: () => usageAccountFence.current,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-      })
-      const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv)
+      });
 
-      // build a managed snapshot whose settings never change — mutations come
+      // Build a managed snapshot whose settings never change — mutations come
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
-      const checkProvider = Effect.sync(() =>
-      {
-        usageAccountFence.current = undefined
-      }).pipe(
-        Effect.andThen(checkCodexProviderStatus(effectiveConfig, undefined, processEnv)),
-        Effect.map(stampIdentity),
-        Effect.tap((snapshot) =>
-          Effect.sync(() =>
-          {
-            usageAccountFence.current = providerUsageAccountIdentity(snapshot)
-          }),
+      // Kick the TTL-gated manifest refresh in the background and classify
+      // with the in-memory manifest, so a slow or hung fetch never delays the
+      // provider check. A refresh that lands mid-probe applies on the next one.
+      const checkProvider = modelManifest.refreshInBackground.pipe(
+        Effect.andThen(
+          Effect.zipWith(
+            checkCodexProviderStatus(effectiveConfig, undefined, processEnv),
+            modelManifest.current,
+            (draft, manifest) =>
+              stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
+            { concurrent: true },
+          ),
         ),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      )
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
+      );
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
         resolveMaintenance,
         getSettings: snapshotSettings.getSettings,
         streamSettings: snapshotSettings.streamSettings,
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
         initialSnapshot: (settings) =>
-          makePendingCodexProvider(settings.provider).pipe(Effect.map(stampIdentity)),
+          Effect.zipWith(
+            makePendingCodexProvider(settings.provider),
+            modelManifest.current,
+            (draft, manifest) =>
+              stampIdentity(ModelManifest.applyModelManifest(draft, manifest, DRIVER_KIND)),
+          ),
         checkProvider,
         enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
           resolveMaintenance().pipe(
@@ -236,7 +230,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             Effect.provideService(HttpClient.HttpClient, httpClient),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
-        refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(
           (cause) =>
@@ -247,7 +240,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               cause,
             }),
         ),
-      )
+      );
+      const textGeneration = yield* makeCodexTextGeneration(
+        effectiveConfig,
+        processEnv,
+        snapshot.getSnapshot.pipe(Effect.map((value) => value.models)),
+      );
       const snapshotForCwd = (cwd: string) =>
         !effectiveConfig.enabled
           ? snapshot.getSnapshot
@@ -261,6 +259,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
                 environment: processEnv,
               }).pipe(
                 Effect.scoped,
+                Effect.timeout("20 seconds"),
                 Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
               ),
             ]).pipe(
@@ -274,20 +273,82 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
                     cause,
                   }),
               ),
-            )
+            );
+
+      // Redemption spends something on the user's account. It serialises on
+      // the account (instances sharing a Codex home share the credit), keeps
+      // one idempotency key until Codex reports an outcome, and is bounded so
+      // a hung app-server cannot hold the account lock.
+      // Keyed on the directory holding auth.json: an auth-overlay instance has
+      // its own account under `effectiveHomePath`, while plain instances share
+      // the common home. The continuation key would conflate the two.
+      const accountKey = homeLayout.effectiveHomePath ?? homeLayout.sharedHomePath;
+      const consumeResetCredit: NonNullable<ProviderInstance["consumeResetCredit"]> = () =>
+        resetCreditCoordinator
+          .redeem(accountKey, (idempotencyKey) =>
+            Effect.gen(function* () {
+              const { client } = yield* withCodexAppServerClient({
+                binaryPath: effectiveConfig.binaryPath,
+                homePath: effectiveConfig.homePath,
+                launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
+                // Account-level request; any directory serves, same as the status probe.
+                cwd: process.cwd(),
+                environment: processEnv,
+              });
+              const response = yield* client.request("account/rateLimitResetCredit/consume", {
+                idempotencyKey,
+              });
+              return response.outcome;
+            }).pipe(Effect.scoped, Effect.timeout(CODEX_RESET_CREDIT_TIMEOUT)),
+          )
+          .pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            Effect.mapError(
+              (cause) =>
+                new ProviderDriverError({
+                  driver: DRIVER_KIND,
+                  instanceId,
+                  detail: "Codex could not redeem the reset credit.",
+                  cause,
+                }),
+            ),
+            // The windows just changed; re-probe so the snapshot says so. A
+            // failed probe republishes the pre-redemption limits rather than
+            // marking them failed, so "confirmed" means `checkedAt` moved
+            // past what was published before the redemption started.
+            Effect.tap(() =>
+              Effect.gen(function* () {
+                const before = (yield* snapshot.getSnapshot).usageLimits?.checkedAt;
+                const refreshed = yield* snapshot.refresh;
+                const after = refreshed.usageLimits?.checkedAt;
+                if (
+                  after === undefined ||
+                  after === before ||
+                  refreshed.usageLimits?.unavailable?.reason === "probeFailed"
+                ) {
+                  return yield* new ProviderDriverError({
+                    driver: DRIVER_KIND,
+                    instanceId,
+                    detail:
+                      "The reset was applied, but Codex could not confirm the new limits. Refresh to check.",
+                  });
+                }
+              }),
+            ),
+          );
 
       return {
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,
-        resolveContinuationIdentity,
         displayName,
         accentColor,
         enabled,
         snapshot,
         snapshotForCwd,
+        consumeResetCredit,
         adapter,
         textGeneration,
-      } satisfies ProviderInstance
+      } satisfies ProviderInstance;
     }),
-}
+};

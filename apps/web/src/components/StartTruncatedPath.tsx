@@ -1,18 +1,14 @@
-// apps/web/src/components/StartTruncatedPath.tsx
-// keeps the filename visible when a long path overflows
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+import { cn } from "~/lib/utils";
 
-import { Tooltip, TooltipPopup, TooltipTrigger } from '~/components/ui/tooltip'
-import { cn } from '~/lib/utils'
-
-export function StartTruncatedPath({ path, className }: { path: string; className?: string })
-{
+export function StartTruncatedPath({ path, className }: { path: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
             className={cn(
-              'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left',
+              "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left",
               className,
             )}
             dir="rtl"
@@ -25,5 +21,5 @@ export function StartTruncatedPath({ path, className }: { path: string; classNam
         {path}
       </TooltipPopup>
     </Tooltip>
-  )
+  );
 }

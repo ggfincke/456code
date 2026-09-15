@@ -1,70 +1,59 @@
-// apps/web/src/components/preview/PreviewFaviconIcon.tsx
-// render ordered preview favicon sources with a stable visual fallback
+import type { ScopedThreadRef } from "@t3tools/contracts";
+import { type ReactNode, useState } from "react";
 
-import type { ScopedThreadRef } from '@t3tools/contracts'
-import { type ReactNode, useState } from 'react'
+import { useFaviconForThreadUrl } from "~/browserFaviconStore";
+import { cn } from "~/lib/utils";
 
-import { useFaviconForThreadUrl } from '~/browser/browserFaviconStore'
-import { faviconUrlForOrigin } from '~/lib/favicon'
-import { cn } from '~/lib/utils'
+import { BrowserMockup } from "./BrowserMockup";
 
-import { BrowserMockup } from './BrowserMockup'
-
-interface FaviconImageProps
-{
-  sources: ReadonlyArray<string | null | undefined>
-  fallback: ReactNode
-  className?: string | undefined
-}
-
-export function FaviconImage(props: FaviconImageProps)
-{
-  const sources = [...new Set(props.sources.filter((source): source is string => Boolean(source)))]
+export function FaviconImage(props: {
+  sources: ReadonlyArray<string | null | undefined>;
+  fallback: ReactNode;
+  className?: string | undefined;
+}) {
+  const sources = props.sources.filter((source): source is string => Boolean(source));
   return (
     <FaviconImageAttempt
-      key={sources.join('\0')}
+      key={sources.join("\0")}
       sources={sources}
       fallback={props.fallback}
       className={props.className}
     />
-  )
+  );
 }
 
 function FaviconImageAttempt(props: {
-  sources: ReadonlyArray<string>
-  fallback: ReactNode
-  className?: string | undefined
-})
-{
-  const [sourceIndex, setSourceIndex] = useState(0)
-  const source = props.sources[sourceIndex]
-  if (!source) return props.fallback
+  sources: ReadonlyArray<string>;
+  fallback: ReactNode;
+  className?: string | undefined;
+}) {
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const source = props.sources.find((candidate) => !failed.has(candidate));
+  if (!source) return props.fallback;
   return (
     <img
-      key={source}
       src={source}
       alt=""
-      aria-hidden
+      aria-hidden="true"
       draggable={false}
       className={props.className}
-      onError={() => setSourceIndex((current) => (current === sourceIndex ? current + 1 : current))}
+      onError={() => setFailed((current) => new Set(current).add(source))}
     />
-  )
+  );
 }
 
 export function PreviewFaviconIcon(props: {
-  threadRef: ScopedThreadRef
-  url: string
-  className?: string | undefined
-})
-{
-  const capturedSource = useFaviconForThreadUrl(props.threadRef, props.url)
-  const originSource = faviconUrlForOrigin(props.url)
+  threadRef: ScopedThreadRef;
+  url: string;
+  className?: string | undefined;
+}) {
+  const source = useFaviconForThreadUrl(props.threadRef, props.url);
+  const fallback = <BrowserMockup className={cn("size-7 shrink-0", props.className)} />;
   return (
     <FaviconImage
-      sources={[capturedSource, originSource]}
-      fallback={<BrowserMockup className={cn('size-7 shrink-0', props.className)} />}
-      className={cn('size-7 shrink-0 rounded object-contain', props.className)}
+      sources={[source]}
+      fallback={fallback}
+      className={cn("size-7 shrink-0 rounded object-contain", props.className)}
     />
-  )
+  );
 }

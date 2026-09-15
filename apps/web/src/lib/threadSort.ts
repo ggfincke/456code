@@ -1,12 +1,9 @@
-// apps/web/src/lib/threadSort.ts
-// provide the stable web facade for shared thread sort helpers
-
 export {
-  activeThreadAnchorTimestampMs,
   getLatestThreadForProject,
   getThreadSortTimestamp,
+  resolveSettledThreadTimestamp,
   sortThreads,
-  sortActiveThreadsByOrderKey,
   toSortableTimestamp,
+  type SettledThreadTimestampInput,
   type ThreadSortInput,
-} from '@t3tools/client-runtime/state/thread-sort'
+} from "@t3tools/client-runtime/state/thread-sort";

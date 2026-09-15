@@ -6,9 +6,7 @@
   },
   "build": {
     "development": {
-      "node": "24.20.0",
-      "pnpm": "12.3.4",
-      "corepack": false,
+      "corepack": true,
       "env": {
         "APP_VARIANT": "development",
         "NODE_OPTIONS": "--max-old-space-size=4096"
@@ -18,9 +16,7 @@
       "distribution": "internal"
     },
     "preview": {
-      "node": "24.20.0",
-      "pnpm": "12.3.4",
-      "corepack": false,
+      "corepack": true,
       "env": {
         "APP_VARIANT": "preview",
         "NODE_OPTIONS": "--max-old-space-size=4096"
@@ -30,9 +26,7 @@
       "distribution": "internal"
     },
     "preview:dev": {
-      "node": "24.20.0",
-      "pnpm": "12.3.4",
-      "corepack": false,
+      "corepack": true,
       "env": {
         "APP_VARIANT": "preview",
         "MOBILE_VERSION_POLICY": "fingerprint",
@@ -41,12 +35,13 @@
       "channel": "preview",
       "environment": "preview",
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
     },
     "production": {
-      "node": "24.20.0",
-      "pnpm": "12.3.4",
-      "corepack": false,
+      "corepack": true,
       "env": {
         "APP_VARIANT": "production",
         "NODE_OPTIONS": "--max-old-space-size=4096"
@@ -60,6 +55,9 @@
     "production": {
       "ios": {
         "ascAppId": "6787819824"
+      },
+      "android": {
+        "track": "internal"
       }
     }
   }

@@ -1,10 +1,11 @@
-// apps/server/src/persistence/Services/ProjectionThreadActivities.ts
-// define projection thread activities service contract
-
-// owns persistence operations for activity timeline entries projected from
-// orchestration events.
-//
-// @module ProjectionThreadActivityRepository
+/**
+ * ProjectionThreadActivityRepository - Projection repository interface for thread activity.
+ *
+ * Owns persistence operations for activity timeline entries projected from
+ * orchestration events.
+ *
+ * @module ProjectionThreadActivityRepository
+ */
 import {
   EventId,
   IsoDateTime,
@@ -12,12 +13,13 @@ import {
   OrchestrationThreadActivityTone,
   ThreadId,
   TurnId,
-} from '@t3tools/contracts'
-import * as Schema from 'effect/Schema'
-import * as Context from 'effect/Context'
-import type * as Effect from 'effect/Effect'
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 
-import type { ProjectionRepositoryError } from '../Errors.ts'
+import type { ProjectionRepositoryError } from "../Errors.ts";
 
 export const ProjectionThreadActivity = Schema.Struct({
   activityId: EventId,
@@ -29,47 +31,74 @@ export const ProjectionThreadActivity = Schema.Struct({
   payload: Schema.Unknown,
   sequence: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
-})
-export type ProjectionThreadActivity = typeof ProjectionThreadActivity.Type
+});
+export type ProjectionThreadActivity = typeof ProjectionThreadActivity.Type;
 
 export const ListProjectionThreadActivitiesInput = Schema.Struct({
   threadId: ThreadId,
-})
-export type ListProjectionThreadActivitiesInput = typeof ListProjectionThreadActivitiesInput.Type
+  activityKinds: Schema.optional(Schema.Array(Schema.String)),
+  limit: Schema.optional(NonNegativeInt),
+});
+export type ListProjectionThreadActivitiesInput = typeof ListProjectionThreadActivitiesInput.Type;
+
+export const GetLatestProjectionThreadTaskActivityInput = Schema.Struct({
+  threadId: ThreadId,
+  taskId: Schema.String,
+});
+export type GetLatestProjectionThreadTaskActivityInput =
+  typeof GetLatestProjectionThreadTaskActivityInput.Type;
 
 export const DeleteProjectionThreadActivitiesInput = Schema.Struct({
   threadId: ThreadId,
-})
+});
 export type DeleteProjectionThreadActivitiesInput =
-  typeof DeleteProjectionThreadActivitiesInput.Type
+  typeof DeleteProjectionThreadActivitiesInput.Type;
 
 /**
  * ProjectionThreadActivityRepositoryShape - Service API for projected thread activity.
  */
-export interface ProjectionThreadActivityRepositoryShape
-{
-  // insert or replace a projected thread activity row.
-  //
-  // upserts by `activityId` and JSON-encodes payload.
-  readonly upsert: (row: ProjectionThreadActivity) => Effect.Effect<void, ProjectionRepositoryError>
+export interface ProjectionThreadActivityRepositoryShape {
+  /**
+   * Insert or replace a projected thread activity row.
+   *
+   * Upserts by `activityId` and JSON-encodes payload.
+   */
+  readonly upsert: (
+    row: ProjectionThreadActivity,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
-  // list projected thread activity rows for a thread.
-  //
-  // returned in ascending runtime sequence order (or creation order when
-  // sequence is unavailable).
+  /**
+   * List projected thread activity rows for a thread.
+   *
+   * Returned in ascending runtime sequence order (or creation order when
+   * sequence is unavailable). A limit selects the newest matching rows.
+   */
   readonly listByThreadId: (
     input: ListProjectionThreadActivitiesInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>;
 
-  // list only the lifecycle rows used to derive pending user-input state.
+  /**
+   * List activity rows used to derive pending user-input state.
+   *
+   * Filters in SQLite so unrelated payloads do not enter server memory.
+   */
   readonly listUserInputLifecycleByThreadId: (
     input: ListProjectionThreadActivitiesInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>;
 
-  // delete projected thread activity rows by thread.
+  /**
+   * Read the latest task-start or task-progress activity with a usable title.
+   */
+  readonly getLatestTaskActivity: (
+    input: GetLatestProjectionThreadTaskActivityInput,
+  ) => Effect.Effect<Option.Option<ProjectionThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * Delete projected thread activity rows by thread.
+   */
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadActivitiesInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 /**
@@ -78,5 +107,4 @@ export interface ProjectionThreadActivityRepositoryShape
 export class ProjectionThreadActivityRepository extends Context.Service<
   ProjectionThreadActivityRepository,
   ProjectionThreadActivityRepositoryShape
->()('456code/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository')
-{}
+>()("t3/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository") {}

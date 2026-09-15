@@ -1,4 +1,9 @@
-// packages/client-runtime/src/state/vcsRef.ts
-// re-export vcsRef from nested state owner
+import type { EnvironmentId, VcsRef as ContractVcsRef } from "@t3tools/contracts";
 
-export * from './vcs/vcsRef.ts'
+export interface VcsRefTarget {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly query?: string | null;
+}
+
+export type VcsRef = ContractVcsRef;

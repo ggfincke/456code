@@ -8,12 +8,22 @@ export interface Runtime {
 
 const hasBin = (bin: string): boolean => {
   try {
-    const r = spawnSync("which", [bin], { encoding: "utf-8" });
+    // `which` doesn't exist on Windows; `where` is the equivalent.
+    const probe = process.platform === "win32" ? "where" : "which";
+    const r = spawnSync(probe, [bin], { encoding: "utf-8" });
     return r.status === 0 && Boolean(r.stdout?.trim());
   } catch {
     return false;
   }
 };
+
+const canTransformTypes =
+  spawnSync("node", ["-p", 'process.features.typescript === "transform"'], {
+    encoding: "utf-8",
+  }).stdout.trim() === "true";
+const transformTypesFlags = canTransformTypes
+  ? ["--experimental-transform-types", "--no-warnings=ExperimentalWarning"]
+  : [];
 
 export const runtimes = (): Array<Runtime> => [
   {
@@ -23,12 +33,10 @@ export const runtimes = (): Array<Runtime> => [
   },
   {
     name: "node",
-    argv: (entry) => [
-      "node",
-      "--experimental-transform-types",
-      "--no-warnings=ExperimentalWarning",
-      entry,
-    ],
-    available: hasBin("node"),
+    argv: (entry) => ["node", ...transformTypesFlags, entry],
+    // Node 26 removed transform-types and its built-in strip-only loader
+    // cannot execute parameter properties used by Alchemy's source graph.
+    // Published JS remains supported; only these source-level fixtures skip.
+    available: hasBin("node") && canTransformTypes,
   },
 ];

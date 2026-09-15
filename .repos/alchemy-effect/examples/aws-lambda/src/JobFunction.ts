@@ -19,9 +19,9 @@ import {
 export default class JobFunction extends AWS.Lambda.Function<JobFunction>()(
   "JobFunction",
   Stack.useSync((stack) => ({
-    main: import.meta.filename,
-    memory: stack.stage === "prod" ? 1024 : 512,
-    url: true,
+    main: import.meta.url,
+    memorySize: stack.stage === "prod" ? 1024 : 512,
+    functionUrl: true,
   })),
   Effect.gen(function* () {
     const jobStorage = yield* JobStorage;

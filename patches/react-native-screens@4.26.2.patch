@@ -1,3 +1,59 @@
+diff --git a/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderConfigViewManager.kt b/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderConfigViewManager.kt
+index fa1b77317f609983ae2434764174072e51130550..270c81c90971b0ff3038b999973dd4d128a9d140 100644
+--- a/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderConfigViewManager.kt
++++ b/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderConfigViewManager.kt
+@@ -124,6 +124,34 @@ class ScreenStackHeaderConfigViewManager :
+         config.setTitle(title)
+     }
+ 
++    // The t3 patch adds these iOS glass-chrome props to the native spec; they have
++    // no Android implementation, but the codegen-generated interface requires the
++    // setters to exist. No-ops keep the Android build compiling.
++    override fun setSubtitle(
++        config: ScreenStackHeaderConfig,
++        subtitle: String?,
++    ) = Unit
++
++    override fun setLargeSubtitle(
++        config: ScreenStackHeaderConfig,
++        largeSubtitle: String?,
++    ) = Unit
++
++    override fun setNavigationItemStyle(
++        config: ScreenStackHeaderConfig,
++        navigationItemStyle: String?,
++    ) = Unit
++
++    override fun setHeaderCenterBarButtonItems(
++        config: ScreenStackHeaderConfig,
++        headerCenterBarButtonItems: ReadableArray?,
++    ) = Unit
++
++    override fun setHeaderToolbarItems(
++        config: ScreenStackHeaderConfig,
++        headerToolbarItems: ReadableArray?,
++    ) = Unit
++
+     override fun setTitleFontFamily(
+         config: ScreenStackHeaderConfig,
+         titleFontFamily: String?,
+diff --git a/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderSubviewManager.kt b/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderSubviewManager.kt
+index 64f14f0c5ade16eb9519b8780d4ce013f88fbd3a..6cb1d69f97a95759c662a6006a9626925d9fefd9 100644
+--- a/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderSubviewManager.kt
++++ b/android/src/main/java/com/swmansion/rnscreens/ScreenStackHeaderSubviewManager.kt
+@@ -47,6 +47,12 @@ class ScreenStackHeaderSubviewManager :
+         Log.w("[RNScreens]", "hidesSharedBackground prop is not available on Android")
+     }
+ 
++    // Bar button transition identifiers only apply on iOS.
++    override fun setIdentifier(
++        view: ScreenStackHeaderSubview,
++        identifier: String?,
++    ) = Unit
++
+     // synchronousShadowStateUpdatesEnabled is not available on Android atm,
+     // however we must override their setters
+     override fun setSynchronousShadowStateUpdatesEnabled(
 diff --git a/ios/RNSBarButtonItem.h b/ios/RNSBarButtonItem.h
 index a26d1254eafd89268f65d968988cf6a3b8c1e457..62eea42ac26c532801189556c5f51012c3df3a52 100644
 --- a/ios/RNSBarButtonItem.h
@@ -1050,8 +1106,143 @@ index 1c844846a5c66e31cfa530ca462774d2fb6bbea1..a60b96b44e85d3f4b29dc0d190b95ab6
    [self updateViewControllerIfNeeded];
  
    if (needsNavigationControllerLayout) {
+diff --git a/ios/RNSScreenStack.mm b/ios/RNSScreenStack.mm
+--- a/ios/RNSScreenStack.mm
++++ b/ios/RNSScreenStack.mm
+@@ -1074,6 +1074,15 @@ RNS_IGNORE_SUPER_CALL_END
+   return scrollView.contentSize.width > scrollView.frame.size.width;
+ }
+ 
++// Whether a horizontally scrollable ScrollView is resting at its leading edge, so a
++// pan in the back-gesture direction has nothing left to scroll. Checked in the
++// ScrollView's own coordinate space: React Native mirrors the view for RTL layout,
++// which keeps the leading edge at the minimum content offset in both directions.
++- (BOOL)scrollViewIsAtLeadingEdge:(UIScrollView *)scrollView
++{
++  return scrollView.contentOffset.x <= -scrollView.adjustedContentInset.left + 1.0;
++}
++
+ // Custom method for compatibility with iOS < 13.4
+ // RNSScreenStackView is a UIGestureRecognizerDelegate for three types of gesture recognizers:
+ // RNSPanGestureRecognizer, RNSScreenEdgeGestureRecognizer, _UIParallaxTransitionPanGestureRecognizer
+@@ -1167,9 +1176,11 @@ RNS_IGNORE_SUPER_CALL_END
+     if (gestureRecognizer == _controller.interactiveContentPopGestureRecognizer &&
+         [self isScrollViewPanGestureRecognizer:otherGestureRecognizer]) {
+       // ScrollView should take precedence when scrolling horizontally (it should be required to fail).
+-      // However, if it does not allow for horizontal scrolling, there should be no such restriction,
++      // However, if it does not allow for horizontal scrolling, or is already resting at its leading
++      // edge so a back swipe has nothing left to scroll, there should be no such restriction,
+       // and swiping horizontally should dismiss the screen.
+-      return [self scrollViewHasHorizontalPart:static_cast<UIScrollView *>(otherGestureRecognizer.view)];
++      UIScrollView *scrollView = static_cast<UIScrollView *>(otherGestureRecognizer.view);
++      return [self scrollViewHasHorizontalPart:scrollView] && ![self scrollViewIsAtLeadingEdge:scrollView];
+     }
+   }
+ 
+@@ -1189,6 +1200,15 @@ RNS_IGNORE_SUPER_CALL_END
+     // gestureRecognizer:shouldRequireFailureOfGestureRecognizer
+     isEdgeSwipeGestureRecognizer =
+         isEdgeSwipeGestureRecognizer && gestureRecognizer != _controller.interactiveContentPopGestureRecognizer;
++
++    // The exception is a horizontal ScrollView resting at its leading edge: its pan recognizer would
++    // still begin (and merely bounce) on a back swipe, so it must yield to the pop gesture the same
++    // way plain content does.
++    if (gestureRecognizer == _controller.interactiveContentPopGestureRecognizer &&
++        [self isScrollViewPanGestureRecognizer:otherGestureRecognizer]) {
++      UIScrollView *scrollView = static_cast<UIScrollView *>(otherGestureRecognizer.view);
++      return [self scrollViewHasHorizontalPart:scrollView] && [self scrollViewIsAtLeadingEdge:scrollView];
++    }
+   }
+ #endif // check for iOS >= 26
+ 
+diff --git a/ios/RNSScreenStackHeaderSubview.mm b/ios/RNSScreenStackHeaderSubview.mm
+index add33c4807e038dcd846f6c72b2fc472ded02809..489afa5fa2da09c1ec6986d1832b58bb595396ae 100644
+--- a/ios/RNSScreenStackHeaderSubview.mm
++++ b/ios/RNSScreenStackHeaderSubview.mm
+@@ -20,7 +20,9 @@ @implementation RNSScreenStackHeaderSubview {
+   // This is a strong reference to UIBarButtonItem which creates a retain cycle.
+   // The cycle is cleared via `invalidateUIBarButtonItem` method, called by `invalidate` callback.
+   UIBarButtonItem *_barButtonItem;
++  NSString *_barButtonItemIdentifier;
+   BOOL _hidesSharedBackground;
++  UILabel *_titleScrollEdgeEffectGuide;
+ }
+ 
+ #pragma mark - Common
+@@ -102,5 +104,24 @@ - (void)updateShadowStateWithFrame:(CGRect)frame
+ - (void)layoutSubviews
+ {
+   [super layoutSubviews];
++#if RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
++  if (@available(iOS 26.0, *)) {
++    if (_type == RNSScreenStackHeaderSubviewTypeTitle || _type == RNSScreenStackHeaderSubviewTypeCenter) {
++      // UIKit shapes the navigation bar's scroll-edge fade around native labels,
++      // but does not recognize Fabric's custom text views. An empty, non-interactive
++      // label supplies the title's geometry without drawing or becoming a bar item.
++      if (_titleScrollEdgeEffectGuide == nil) {
++        _titleScrollEdgeEffectGuide = [UILabel new];
++        _titleScrollEdgeEffectGuide.accessibilityElementsHidden = YES;
++        // Append after Fabric's children so their mount/unmount indices stay intact.
++        [self addSubview:_titleScrollEdgeEffectGuide];
++      }
++      _titleScrollEdgeEffectGuide.frame = self.bounds;
++    } else {
++      [_titleScrollEdgeEffectGuide removeFromSuperview];
++      _titleScrollEdgeEffectGuide = nil;
++    }
++  }
++#endif
+   [self updateShadowStateInContextOfAncestorView:[self findNavigationBar]];
+ }
+@@ -124,6 +145,7 @@ - (void)updateProps:(react::Props::Shared const &)props oldProps:(react::Props::
+   const auto &newHeaderSubviewProps = *std::static_pointer_cast<const react::RNSScreenStackHeaderSubviewProps>(props);
+ 
+   [self setType:[RNSConvert RNSScreenStackHeaderSubviewTypeFromCppEquivalent:newHeaderSubviewProps.type]];
++  [self setBarButtonItemIdentifier:RCTNSStringFromStringNilIfEmpty(newHeaderSubviewProps.identifier)];
+   [self setHidesSharedBackground:newHeaderSubviewProps.hidesSharedBackground];
+   [self setSynchronousShadowStateUpdatesEnabled:newHeaderSubviewProps.synchronousShadowStateUpdatesEnabled];
+   [super updateProps:props oldProps:oldProps];
+@@ -276,7 +298,14 @@ - (void)configureBarButtonItem
+ #if RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
+   if (@available(iOS 26.0, *)) {
+     if (_barButtonItem != nil) {
+-      [_barButtonItem setHidesSharedBackground:_hidesSharedBackground];
++      NSString *currentIdentifier = _barButtonItem.identifier;
++      if (currentIdentifier != _barButtonItemIdentifier &&
++          ![currentIdentifier isEqualToString:_barButtonItemIdentifier]) {
++        _barButtonItem.identifier = _barButtonItemIdentifier;
++      }
++      if (_barButtonItem.hidesSharedBackground != _hidesSharedBackground) {
++        _barButtonItem.hidesSharedBackground = _hidesSharedBackground;
++      }
+     }
+   }
+ #endif // RNS_IPHONE_OS_VERSION_AVAILABLE(26_0)
+@@ -284,10 +313,22 @@ - (void)configureBarButtonItem
+ 
+ - (void)setHidesSharedBackground:(BOOL)hidesSharedBackground
+ {
++  if (_hidesSharedBackground == hidesSharedBackground) {
++    return;
++  }
+   _hidesSharedBackground = hidesSharedBackground;
+   [self configureBarButtonItem];
+ }
+ 
++- (void)setBarButtonItemIdentifier:(nullable NSString *)identifier
++{
++  if (_barButtonItemIdentifier == identifier || [_barButtonItemIdentifier isEqualToString:identifier]) {
++    return;
++  }
++  _barButtonItemIdentifier = [identifier copy];
++  [self configureBarButtonItem];
++}
++
+ #pragma mark - Dynamic frameworks support
+ 
+ // Needed because of this: https://github.com/facebook/react-native/pull/37274
 diff --git a/lib/commonjs/components/ScreenStackHeaderConfig.js b/lib/commonjs/components/ScreenStackHeaderConfig.js
-index 8c509f2657105cfd86448347c1a01fb73651ff9e..5e3b5185c0ea33c6b98f5daed69239d2c0d0ce90 100644
+index 8c509f2657105cfd86448347c1a01fb73651ff9e..e668e089a1788973cb122a150be7846364a2a2cf 100644
 --- a/lib/commonjs/components/ScreenStackHeaderConfig.js
 +++ b/lib/commonjs/components/ScreenStackHeaderConfig.js
 @@ -26,17 +26,42 @@ const ScreenStackHeaderConfig = exports.ScreenStackHeaderConfig = /*#__PURE__*/_
@@ -1223,7 +1414,7 @@ index ab93f62e4a7049d63c6681cecbd6cf8b1d07ce10..9dca2ab640e92161eb647b819a989acd
  //# sourceMappingURL=prepareHeaderBarButtonItems.js.map
 \ No newline at end of file
 diff --git a/lib/module/components/ScreenStackHeaderConfig.js b/lib/module/components/ScreenStackHeaderConfig.js
-index 68e3ba6a78314aba908d07098bb6982d11e6ee80..b787b3cf0284ffb81c80360a06c4059277bf4c1e 100644
+index 68e3ba6a78314aba908d07098bb6982d11e6ee80..db5d17bfdac19ed3e664b55b6a73ce49766ac7c5 100644
 --- a/lib/module/components/ScreenStackHeaderConfig.js
 +++ b/lib/module/components/ScreenStackHeaderConfig.js
 @@ -22,17 +22,42 @@ export const ScreenStackHeaderConfig = /*#__PURE__*/React.forwardRef((props, ref
@@ -1446,6 +1637,18 @@ index a51d8648567cff29cd2be0d5262bd15c6fc69c61..8b7439aff4d7e6fe8a72bf0bac93c3c1
      onPressHeaderBarButtonItem?: CT.DirectEventHandler<OnPressHeaderBarButtonItemEvent> | undefined;
      onPressHeaderBarButtonMenuItem?: CT.DirectEventHandler<OnPressHeaderBarButtonMenuItemEvent> | undefined;
      synchronousShadowStateUpdatesEnabled?: CT.WithDefault<boolean, true>;
+diff --git a/lib/typescript/fabric/ScreenStackHeaderSubviewNativeComponent.d.ts b/lib/typescript/fabric/ScreenStackHeaderSubviewNativeComponent.d.ts
+index 1ca926e6753294861f5f79ab6267dc7999f70639..94e676fdb08ff9d1cf81a1cf06a45e931b5461f1 100644
+--- a/lib/typescript/fabric/ScreenStackHeaderSubviewNativeComponent.d.ts
++++ b/lib/typescript/fabric/ScreenStackHeaderSubviewNativeComponent.d.ts
+@@ -3,6 +3,7 @@ export type HeaderSubviewTypes = 'back' | 'right' | 'left' | 'title' | 'center'
+ export interface NativeProps extends ViewProps {
+     type?: CT.WithDefault<HeaderSubviewTypes, 'left'>;
+     hidesSharedBackground?: boolean | undefined;
++    identifier?: string | undefined;
+     synchronousShadowStateUpdatesEnabled?: CT.WithDefault<boolean, true>;
+ }
+ declare const _default: import("react-native").HostComponent<NativeProps>;
 diff --git a/lib/typescript/types.d.ts b/lib/typescript/types.d.ts
 index 10a31341f4eff258a7f8ea6abae3eddf0dd21218..bab5031f5f9b246f15e5396f3f2fee90b91d826a 100644
 --- a/lib/typescript/types.d.ts
@@ -1521,6 +1724,20 @@ index 10a31341f4eff258a7f8ea6abae3eddf0dd21218..bab5031f5f9b246f15e5396f3f2fee90
      /**
       * Allows for setting text color of the title.
       */
+@@ -999,6 +1042,13 @@ export interface SearchBarProps {
+     shouldShowHintSearchIcon?: boolean | undefined;
+ }
+ export interface ScreenStackHeaderSubviewProps {
++    /**
++     * An identifier used to match this item across navigation bar transitions.
++     * Only applicable to type="right" and type="left" subviews on iOS 26.0 and later.
++     *
++     * Read more: https://developer.apple.com/documentation/uikit/uibarbuttonitem/identifier
++     */
++    identifier?: string | undefined;
+     /**
+      * A boolean value indicating whether the background this item may share with other items in the bar should be hidden.
+      * Only applicable to type="right" and type="left" subviews.
 @@ -1037,6 +1087,11 @@ interface SharedHeaderBarButtonItem {
       * Read more: https://developer.apple.com/documentation/uikit/uibarbuttonitem/style-swift.property
       */
@@ -1837,6 +2054,18 @@ index a80d9fef0c0ab5ce8221c5e0c7fae65162bc6164..fc16f51425702a418c09de553a547533
    onPressHeaderBarButtonItem?:
      | CT.DirectEventHandler<OnPressHeaderBarButtonItemEvent>
      | undefined;
+diff --git a/src/fabric/ScreenStackHeaderSubviewNativeComponent.ts b/src/fabric/ScreenStackHeaderSubviewNativeComponent.ts
+index 7d3fbfe08c70461936832a40a1ce8d9c11b22457..1f9caca6271b68d182b70a180f180d6a4ce3988c 100644
+--- a/src/fabric/ScreenStackHeaderSubviewNativeComponent.ts
++++ b/src/fabric/ScreenStackHeaderSubviewNativeComponent.ts
+@@ -14,6 +14,7 @@ export type HeaderSubviewTypes =
+ export interface NativeProps extends ViewProps {
+   type?: CT.WithDefault<HeaderSubviewTypes, 'left'>;
+   hidesSharedBackground?: boolean | undefined;
++  identifier?: string | undefined;
+   synchronousShadowStateUpdatesEnabled?: CT.WithDefault<boolean, true>;
+ }
+ 
 diff --git a/src/types.tsx b/src/types.tsx
 index 9c3ab4c3653ee1769addda8a6464cdf49695a601..6f242ad2bbd7152ea9f873ef7754ad47caf2466d 100644
 --- a/src/types.tsx
@@ -1912,6 +2141,20 @@ index 9c3ab4c3653ee1769addda8a6464cdf49695a601..6f242ad2bbd7152ea9f873ef7754ad47
    /**
     * Allows for setting text color of the title.
     */
+@@ -1120,6 +1163,13 @@ export interface SearchBarProps {
+ }
+ 
+ export interface ScreenStackHeaderSubviewProps {
++  /**
++   * An identifier used to match this item across navigation bar transitions.
++   * Only applicable to type="right" and type="left" subviews on iOS 26.0 and later.
++   *
++   * Read more: https://developer.apple.com/documentation/uikit/uibarbuttonitem/identifier
++   */
++  identifier?: string | undefined;
+   /**
+    * A boolean value indicating whether the background this item may share with other items in the bar should be hidden.
+    * Only applicable to type="right" and type="left" subviews.
 @@ -1161,6 +1211,11 @@ interface SharedHeaderBarButtonItem {
     * Read more: https://developer.apple.com/documentation/uikit/uibarbuttonitem/style-swift.property
     */
@@ -1972,51 +2215,3 @@ index 9c3ab4c3653ee1769addda8a6464cdf49695a601..6f242ad2bbd7152ea9f873ef7754ad47
    | HeaderBarButtonItemSpacing;
  
  /**
-diff --git a/ios/RNSScreenStack.mm b/ios/RNSScreenStack.mm
---- a/ios/RNSScreenStack.mm
-+++ b/ios/RNSScreenStack.mm
-@@ -1074,6 +1074,15 @@ RNS_IGNORE_SUPER_CALL_END
-   return scrollView.contentSize.width > scrollView.frame.size.width;
- }
- 
-+// Whether a horizontally scrollable ScrollView is resting at its leading edge, so a
-+// pan in the back-gesture direction has nothing left to scroll. Checked in the
-+// ScrollView's own coordinate space: React Native mirrors the view for RTL layout,
-+// which keeps the leading edge at the minimum content offset in both directions.
-+- (BOOL)scrollViewIsAtLeadingEdge:(UIScrollView *)scrollView
-+{
-+  return scrollView.contentOffset.x <= -scrollView.adjustedContentInset.left + 1.0;
-+}
-+
- // Custom method for compatibility with iOS < 13.4
- // RNSScreenStackView is a UIGestureRecognizerDelegate for three types of gesture recognizers:
- // RNSPanGestureRecognizer, RNSScreenEdgeGestureRecognizer, _UIParallaxTransitionPanGestureRecognizer
-@@ -1167,9 +1176,11 @@ RNS_IGNORE_SUPER_CALL_END
-     if (gestureRecognizer == _controller.interactiveContentPopGestureRecognizer &&
-         [self isScrollViewPanGestureRecognizer:otherGestureRecognizer]) {
-       // ScrollView should take precedence when scrolling horizontally (it should be required to fail).
--      // However, if it does not allow for horizontal scrolling, there should be no such restriction,
-+      // However, if it does not allow for horizontal scrolling, or is already resting at its leading
-+      // edge so a back swipe has nothing left to scroll, there should be no such restriction,
-       // and swiping horizontally should dismiss the screen.
--      return [self scrollViewHasHorizontalPart:static_cast<UIScrollView *>(otherGestureRecognizer.view)];
-+      UIScrollView *scrollView = static_cast<UIScrollView *>(otherGestureRecognizer.view);
-+      return [self scrollViewHasHorizontalPart:scrollView] && ![self scrollViewIsAtLeadingEdge:scrollView];
-     }
-   }
- 
-@@ -1189,5 +1200,14 @@ RNS_IGNORE_SUPER_CALL_END
-     // gestureRecognizer:shouldRequireFailureOfGestureRecognizer
-     isEdgeSwipeGestureRecognizer =
-         isEdgeSwipeGestureRecognizer && gestureRecognizer != _controller.interactiveContentPopGestureRecognizer;
-+
-+    // The exception is a horizontal ScrollView resting at its leading edge: its pan recognizer would
-+    // still begin (and merely bounce) on a back swipe, so it must yield to the pop gesture the same
-+    // way plain content does.
-+    if (gestureRecognizer == _controller.interactiveContentPopGestureRecognizer &&
-+        [self isScrollViewPanGestureRecognizer:otherGestureRecognizer]) {
-+      UIScrollView *scrollView = static_cast<UIScrollView *>(otherGestureRecognizer.view);
-+      return [self scrollViewHasHorizontalPart:scrollView] && [self scrollViewIsAtLeadingEdge:scrollView];
-+    }
-   }
- #endif // check for iOS >= 26

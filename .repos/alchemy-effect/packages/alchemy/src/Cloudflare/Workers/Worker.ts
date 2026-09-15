@@ -1,58 +1,58 @@
 import type * as cf from "@cloudflare/workers-types";
 import * as workers from "@distilled.cloud/cloudflare/workers";
-import * as zones from "@distilled.cloud/cloudflare/zones";
-import * as Config from "effect/Config";
+import type * as Config from "effect/Config";
+import type { ConfigError } from "effect/Config";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
+import type * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
-import * as Schedule from "effect/Schedule";
-import * as crypto from "node:crypto";
-import { Unowned } from "../../AdoptPolicy.ts";
-import { AlchemyContext } from "../../AlchemyContext.ts";
-import * as Artifacts from "../../Artifacts.ts";
-import { hashDirectory, type MemoOptions } from "../../Build/Memo.ts";
-import * as Bundle from "../../Bundle/Bundle.ts";
-import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
-import { isResolved } from "../../Diff.ts";
+import { type MemoOptions } from "../../Command/Memo.ts";
+import type { Dependencies } from "../../Dependencies.ts";
 import type { InputProps } from "../../Input.ts";
-import { Platform, type Main, type PlatformProps } from "../../Platform.ts";
-import * as Provider from "../../Provider.ts";
-import { Resource, type ResourceBinding } from "../../Resource.ts";
-import { Stack } from "../../Stack.ts";
+import type { Named, Tag } from "../../Named.ts";
+import type * as Output from "../../Output.ts";
+import {
+  Platform,
+  type Main,
+  type MainRpc,
+  type MakeShape,
+  type PlatformProps,
+  type PlatformServices,
+} from "../../Platform.ts";
+import {
+  isResourceOfType,
+  Resource,
+  type ResourceClassLike,
+} from "../../Resource.ts";
+import type { Rpc } from "../../Rpc.ts";
+import type { RuntimeContext } from "../../RuntimeContext.ts";
+import type { Self as SelfService } from "../../Self.ts";
 import { CloudflareEnvironment } from "../CloudflareEnvironment.ts";
-import type { HyperdriveDevOrigin } from "../Hyperdrive/Hyperdrive.ts";
-import { CloudflareLogs } from "../Logs.ts";
+import type { Container } from "../Containers/Container.ts";
+import type { DevContainerImage } from "../Containers/ContainerApplication.ts";
+import type { DevOrigin } from "../Hyperdrive/Connection.ts";
 import type { Providers } from "../Providers.ts";
+import type { DispatchNamespace } from "../WorkersForPlatforms/DispatchNamespace.ts";
+import type { WorkflowExport } from "../Workflows/Workflow.ts";
+import type { Reference as ZoneReference } from "../Zone/lookup.ts";
+import { type Assets, type AssetsProps } from "./Assets.ts";
 import {
-  readAssets,
-  uploadAssets,
-  type Assets,
-  type AssetsConfig,
-  type AssetsProps,
-} from "./Assets.ts";
-import { getCompatibility } from "./Compatibility.ts";
-import { isDurableObjectExport } from "./DurableObjectNamespace.ts";
-import {
-  LocalWorkerProvider,
-  localRuntimeServices,
-} from "./LocalWorkerProvider.ts";
+  resolveAccessContext,
+  type WorkerAccessConfig,
+  type WorkerAccessIdentity,
+  type WorkerExecutionContextAccess,
+} from "./WorkerAccess.ts";
+import { type DurableObjectExport } from "./DurableObject.ts";
 import { Request } from "./Request.ts";
-import * as Vite from "./Vite.ts";
-import {
-  bindWorkerAsyncBindings,
-  getCronBindings,
-} from "./WorkerAsyncBindings.ts";
+import type { ModuleRule } from "./Sources/Prebuilt.ts";
+import type { WorkerBuildOptions } from "./Sources/Rolldown.ts";
+import { bindWorkerAsyncBindings } from "./WorkerAsyncBindings.ts";
 import type {
   WorkerBinding,
   WorkerBindingResource,
   WorkerBindings,
-  WorkerSettingsBinding,
 } from "./WorkerBinding.ts";
-import { WorkerBundle } from "./WorkerBundle.ts";
-import { createWorkerName } from "./WorkerName.ts";
 import {
   makeWorkerRuntimeContext,
   type WorkerRuntimeContext,
@@ -62,20 +62,163 @@ export const WorkerTypeId = "Cloudflare.Worker";
 export type WorkerTypeId = typeof WorkerTypeId;
 
 export const isWorker = <T>(value: T): value is T & Worker =>
-  typeof value === "object" &&
-  value !== null &&
-  "Type" in value &&
-  value.Type === WorkerTypeId;
+  isResourceOfType(value, WorkerTypeId);
 
 export class WorkerEnvironment extends Context.Service<
   WorkerEnvironment,
   Record<string, any>
 >()("Cloudflare.Workers.WorkerEnvironment") {}
 
+export class CachePurgeError extends Data.TaggedError("CachePurgeError")<{
+  message: string;
+  cause?: unknown;
+}> {}
+
+/**
+ * Effect-native view of the Workers Cache runtime API on the execution
+ * context (`ctx.cache`). Only available when the Worker has Workers Cache
+ * enabled (the `cache` prop or `yield* Cloudflare.cache()`).
+ */
+export interface WorkerExecutionContextCache {
+  /**
+   * Purge cached responses by `Cache-Tag`, path prefix, or everything.
+   */
+  purge(
+    options: cf.CachePurgeOptions,
+  ): Effect.Effect<cf.CachePurgeResult, CachePurgeError, RuntimeContext>;
+}
+
 export class WorkerExecutionContext extends Context.Service<
   WorkerExecutionContext,
-  cf.ExecutionContext
+  {
+    /**
+     * Run an Effect in the background without blocking the response, keeping
+     * the Worker alive until it settles. The Effect runs with the caller's
+     * full context (services, tracing), and the resulting promise is
+     * registered with workerd's `ctx.waitUntil`.
+     */
+    waitUntil<A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ): Effect.Effect<void, never, R | RuntimeContext>;
+    /**
+     * Forward the request to the origin if the Worker throws an unhandled
+     * exception, instead of returning an error page.
+     */
+    passThroughOnException(): Effect.Effect<void, never, RuntimeContext>;
+    /**
+     * The Workers Cache runtime API (`ctx.cache`).
+     */
+    readonly cache: WorkerExecutionContextCache;
+    /**
+     * The Cloudflare Access context for the current request (`ctx.access`),
+     * or `undefined` when the request did not pass through Access. Under
+     * `alchemy dev` the Worker's `dev.access` config simulates it.
+     */
+    readonly access: Effect.Effect<
+      WorkerExecutionContextAccess | undefined,
+      never,
+      RuntimeContext
+    >;
+    /**
+     * The raw workerd ExecutionContext, for interop with async APIs.
+     */
+    readonly raw: cf.ExecutionContext;
+  }
 >()("Cloudflare.Workers.WorkerExecutionContext") {}
+
+export const fromExecutionContext = (
+  ctx: cf.ExecutionContext,
+  env?: Record<string, unknown>,
+): WorkerExecutionContext["Service"] => ({
+  raw: ctx,
+  access: Effect.sync(() => resolveAccessContext(ctx, env)),
+  waitUntil: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const context = yield* Effect.context<R>();
+      // Register the promise with workerd un-awaited — waitUntil extends the
+      // invocation's lifetime without blocking the response.
+      yield* Effect.sync(() =>
+        ctx.waitUntil(Effect.runPromise(effect.pipe(Effect.provide(context)))),
+      );
+    }),
+  passThroughOnException: () => Effect.sync(() => ctx.passThroughOnException()),
+  cache: {
+    purge: (options) =>
+      ctx.cache
+        ? Effect.tryPromise({
+            try: () => ctx.cache!.purge(options),
+            catch: (cause) =>
+              new CachePurgeError({
+                message:
+                  cause instanceof Error
+                    ? cause.message
+                    : "Unknown cache purge error",
+                cause,
+              }),
+          })
+        : Effect.fail(
+            new CachePurgeError({
+              message:
+                "ctx.cache is not available — enable Workers Cache on this " +
+                "Worker (the `cache` prop or `yield* Cloudflare.cache()`) " +
+                "and note it is not supported in local dev.",
+            }),
+          ),
+  },
+});
+
+/**
+ * A {@link WorkerExecutionContext} whose methods resolve the live per-event
+ * context from the calling fiber at call time. Provided during the Worker's
+ * init phase (plan and runtime module init) so the service can be yielded
+ * and closed over in the top-level closure; every method is colored with
+ * `RuntimeContext`, so it can only be *run* inside a handler, where the
+ * bridge provides the real per-event context that these methods defer to.
+ */
+export const deferredExecutionContext: WorkerExecutionContext["Service"] = {
+  get raw(): cf.ExecutionContext {
+    throw new Error(
+      "WorkerExecutionContext.raw is only available inside a request handler",
+    );
+  },
+  waitUntil: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    liveExecutionContext.pipe(
+      Effect.flatMap((live) => live.waitUntil(effect)),
+    ) as Effect.Effect<void, never, R | RuntimeContext>,
+  passThroughOnException: () =>
+    liveExecutionContext.pipe(
+      Effect.flatMap((live) => live.passThroughOnException()),
+    ) as Effect.Effect<void, never, RuntimeContext>,
+  cache: {
+    purge: (options) =>
+      liveExecutionContext.pipe(
+        Effect.flatMap((live) => live.cache.purge(options)),
+      ) as Effect.Effect<cf.CachePurgeResult, CachePurgeError, RuntimeContext>,
+  },
+  // A getter so this module-level literal doesn't eagerly reference
+  // `liveExecutionContext` before its declaration below.
+  get access() {
+    return liveExecutionContext.pipe(
+      Effect.flatMap((live) => live.access),
+    ) as Effect.Effect<
+      WorkerExecutionContextAccess | undefined,
+      never,
+      RuntimeContext
+    >;
+  },
+};
+
+const liveExecutionContext = WorkerExecutionContext.pipe(
+  Effect.flatMap((live) =>
+    live === deferredExecutionContext
+      ? Effect.die(
+          new Error(
+            "WorkerExecutionContext can only be used inside a request handler",
+          ),
+        )
+      : Effect.succeed(live),
+  ),
+);
 
 export type WorkerEvent = Exclude<
   {
@@ -98,20 +241,12 @@ export const isWorkerEvent = (value: any): value is WorkerEvent =>
  * When hash is provided, it's used directly for diffing instead of computing from directory contents.
  * This is useful when integrating with Build resources that produce a deterministic hash.
  */
-export interface AssetsWithHash {
-  /**
-   * Path to the assets directory.
-   */
-  path: string;
+export interface AssetsWithHash extends AssetsProps {
   /**
    * Pre-computed hash of the assets. When provided, this hash is used for diffing
    * to determine if the worker needs to be redeployed.
    */
   hash: string;
-  /**
-   * Optional assets configuration.
-   */
-  config?: AssetsConfig;
 }
 
 export interface WorkerObservability extends Exclude<
@@ -121,6 +256,11 @@ export interface WorkerObservability extends Exclude<
 
 export interface WorkerLimits extends Exclude<
   workers.PutScriptRequest["metadata"]["limits"],
+  undefined
+> {}
+
+export interface WorkerCache extends Exclude<
+  workers.PutScriptRequest["metadata"]["cacheOptions"],
   undefined
 > {}
 
@@ -144,9 +284,13 @@ export type WorkerServices =
   | Worker
   | Request
   | WorkerExecutionContext
-  | WorkerEnvironment;
+  | WorkerEnvironment
+  | CloudflareEnvironment
+  | Container.Application<any>
+  | SelfService;
 
-export type WorkerShape = Main<WorkerServices>;
+export type WorkerShape<Req = never> = Main<WorkerServices | Req> &
+  MainRpc<WorkerServices | Req>;
 
 export type WorkerEnv = Record<
   string,
@@ -165,7 +309,14 @@ export type WorkerBindingProps = {
     | Effect.Effect<WorkerBindingResource, any, any>;
 };
 
-type NormalizedBindings<
+type Unwrap<T> = T extends Output.Output<infer A, infer _Req> ? A : T;
+
+// NOTE: `Worker<NormalizedBindings<...>>` must provably satisfy the
+// `WorkerBindings` constraint for *generic* `Bindings`, which restricts the
+// shapes usable here: conditional checks on the naked parameter `T` and an
+// outermost `Extract<..., WorkerBindingResource>` are provable; e.g.
+// `Unwrap<T> extends ...` as a check type is not.
+export type NormalizedBindings<
   Bindings extends WorkerBindingProps = {},
   AssetsConfig extends WorkerAssetsConfig | undefined = undefined,
 > = {
@@ -174,16 +325,296 @@ type NormalizedBindings<
     any,
     any
   >
-    ? T extends Redacted.Redacted<infer T> | Config.Config<infer T>
-      ? T
-      : T
-    : Extract<Bindings[B], WorkerBindingResource>;
+    ? T extends Redacted.Redacted<infer V> | Config.Config<infer V>
+      ? V
+      : Unwrap<T>
+    : Extract<Unwrap<Bindings[B]>, WorkerBindingResource>;
 } & (undefined extends AssetsConfig ? {} : { ASSETS: Assets });
 
 export type WorkerAssetsConfig = string | AssetsProps | AssetsWithHash;
 
+/**
+ * Fine-grained control over the Worker's `workers.dev` surface. The two
+ * toggles are independent on the Cloudflare API.
+ */
+export interface WorkersDevConfig {
+  /**
+   * Serve the Worker at its stable `workers.dev` URL
+   * (`https://<worker-name>.<account-subdomain>.workers.dev`).
+   * @default true
+   */
+  enabled?: boolean;
+  /**
+   * Enable version preview URLs — a distinct
+   * `https://<version-prefix>-<worker-name>.<account-subdomain>.workers.dev`
+   * URL per uploaded version, plus stable aliased preview URLs
+   * (`https://<alias>-...`) for versions uploaded with an alias.
+   *
+   * When previews are enabled but {@link enabled} is `false`, the current
+   * version's preview URL becomes the Worker's primary `url` output.
+   * @default true
+   */
+  previewsEnabled?: boolean;
+}
+
+/**
+ * The Worker's custom-domain configuration: one canonical hostname, plus
+ * optional aliases that also serve the Worker and redirect hostnames that
+ * 301 to the canonical name.
+ */
+export interface WorkerDomainConfig {
+  /**
+   * The canonical hostname (e.g. `"example.com"`). Attached to the Worker
+   * as a Cloudflare custom domain — DNS record and edge certificate are
+   * managed automatically. The Cloudflare zone is inferred from the
+   * hostname unless {@link zoneId}, {@link zone}, or {@link zoneName} is
+   * set. The zone must already exist in the account.
+   *
+   * When set, `https://<name>` is the Worker's primary `url` output.
+   */
+  name: string;
+  /**
+   * Additional hostnames that serve the Worker (e.g. `"www.example.com"`,
+   * `"api.example.com"`). Each is attached as its own custom domain.
+   * Order matters: aliases follow `name` in the `urls` output.
+   */
+  aliases?: string[];
+  /**
+   * Hostnames that permanently redirect (HTTP 301, path and query
+   * preserved) to {@link name} — e.g. `"old.example.com"`. Each is
+   * attached as a custom domain (for DNS + TLS) with a redirect rule in
+   * the zone's `http_request_dynamic_redirect` phase, which runs before
+   * the Worker — redirected requests never invoke it. Redirect hostnames
+   * serve no content, so they appear in the `domain` output but never in
+   * `urls`.
+   */
+  redirects?: string[];
+  /**
+   * Cloudflare zone ID for every hostname in this config. Equivalent to
+   * Wrangler's `zone_id`. Wins over {@link zone} / {@link zoneName}.
+   * When omitted, each hostname's zone is looked up by name
+   * (`GET /zones?name=`), not by listing the account's first page of zones.
+   */
+  zoneId?: string;
+  /**
+   * Cloudflare zone name, e.g. `"example.com"`. Equivalent to Wrangler's
+   * `zone_name`.
+   */
+  zoneName?: string;
+  /**
+   * Zone reference — a zone ID, zone name, or `{ zoneId, name? }` object.
+   * Alternative to {@link zoneId} / {@link zoneName}.
+   */
+  zone?: ZoneReference;
+}
+
+export interface WorkerRouteConfig {
+  /**
+   * URL pattern to match incoming requests against, e.g.
+   * `"subdomain.example.com/*"` or `"example.com/api/*"`.
+   */
+  pattern: string;
+  /**
+   * Cloudflare zone ID. Equivalent to Wrangler's `zone_id`.
+   */
+  zoneId?: string;
+  /**
+   * Cloudflare zone name, e.g. `"example.com"`. Equivalent to Wrangler's
+   * `zone_name`.
+   */
+  zoneName?: string;
+  /**
+   * Zone reference — a zone ID, zone name, or `{ zoneId, name? }` object.
+   * Alternative to `zoneId` / `zoneName`.
+   */
+  zone?: ZoneReference;
+}
+
+/**
+ * Version-affinity configuration — keeps each user on one version for the
+ * duration of a gradual rollout.
+ *
+ * Percentages route each request independently, so one user can bounce
+ * between versions mid-rollout. Cloudflare pins a request to a version
+ * deterministically when it carries a `Cloudflare-Workers-Version-Key`
+ * header: the key is hashed and assigned a version from the current
+ * percentages, so equal keys always land on the same version, and pinned
+ * users only move forward as percentages rise.
+ *
+ * Setting `affinity` provisions that header as infrastructure: a `rewrite`
+ * Transform Rule in the `http_request_late_transform` phase of every zone
+ * the Worker serves on (custom domains and zone routes), scoped to the
+ * Worker's hostnames, filling the header from the configured source. The
+ * rule is updated in place as the config changes and removed when
+ * `affinity` is removed or the Worker is destroyed; other rules in the
+ * zone's shared entrypoint are left untouched.
+ *
+ * Exactly one of {@link cookie}, {@link header}, or {@link key} may be
+ * set; {@link ip} combines with `cookie`/`header` as a fallback or stands
+ * alone as the sole source.
+ *
+ * Transform Rules only see **zone traffic** — the Worker must have a
+ * `domain` or `routes` (or, with `version.parent`, the parent must).
+ * A workers.dev-only Worker fails the deploy with
+ * `WorkerVersionConfigError`; on the bare workers.dev URL clients must
+ * send the header themselves.
+ */
+export interface WorkerVersionAffinity {
+  /**
+   * Pin by the value of this request cookie (e.g. a session id). Requests
+   * without the cookie fall back to {@link ip} when set, otherwise they
+   * route independently by percentage.
+   */
+  cookie?: string;
+  /**
+   * Pin by the value of this request header (e.g. a tenant or user id
+   * your edge already stamps, or a stable auth claim forwarded as a
+   * header). Requests without the header fall back to {@link ip} when
+   * set, otherwise they route independently by percentage.
+   */
+  header?: string;
+  /**
+   * Pin by client IP. On its own (`{ ip: true }`) every request is keyed
+   * by `ip.src`; combined with {@link cookie} or {@link header} it is the
+   * fallback for requests missing the primary source (e.g. sticky by
+   * session cookie, falling back to sticky IP before the cookie is set).
+   */
+  ip?: boolean;
+  /**
+   * Escape hatch: a raw [Rules-language](https://developers.cloudflare.com/ruleset-engine/rules-language/)
+   * expression that computes the version key — e.g. a JWT claim via API
+   * Shield's `http.request.jwt.claims`, or any composite of request
+   * fields. Applied to every request on the Worker's hostnames; cannot be
+   * combined with the other sources.
+   */
+  key?: string;
+}
+
+/**
+ * Versioning configuration for a Worker deploy — controls Worker
+ * [versions and gradual deployments](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/).
+ *
+ * Two modes, selected by {@link parent}:
+ *
+ * - **Version worker** (`parent` set): instead of creating its own script,
+ *   this Worker uploads an immutable *version* to the referenced parent
+ *   Worker's script. With `traffic: 0` (the default) the parent's live
+ *   deployment is untouched and the version is reachable only at its
+ *   preview URL (`<version-prefix>-<name>.<subdomain>.workers.dev`) —
+ *   the PR-preview use case. With `traffic > 0` the version becomes a
+ *   canary taking that percentage of the parent's traffic.
+ * - **Gradual rollout** (`parent` omitted): when this Worker deploys
+ *   itself, the newly uploaded version receives {@link traffic} percent
+ *   and the currently-live version keeps the remainder, instead of the
+ *   default 100% cutover.
+ *
+ * A gradual rollout carries only what a version can: code, static assets,
+ * bindings, compatibility settings, and cache configuration. A deploy that
+ * changes Durable Object class migrations must go out at
+ * 100% (migrations cannot ride a rollout), and script-level settings
+ * (tags, observability, limits, placement, logpush) keep their live
+ * values until the next full deploy.
+ */
+export interface WorkerVersionOptions {
+  /**
+   * The Worker that owns the script this version is uploaded to. Accepts a
+   * Worker reference — typically `yield* Cloudflare.Worker.ref(id, { stage,
+   * stack })` for a Worker deployed in another stage/stack, or a
+   * locally-declared Worker — or a literal script name as an escape hatch.
+   *
+   * When set, this resource does not create a script of its own: it
+   * uploads a version (code + static assets + bindings + compatibility
+   * settings) to the parent's script. Script-level settings apply immediately
+   * to *all* versions of the parent, so they cannot be set on a version worker —
+   * `name`, `namespace`, `crons`, `domain`, `routes`, `tags`,
+   * `logpush`, `observability`, `placement`, `limits`, and `subdomain` are
+   * rejected, as are locally-hosted Durable Object or Workflow classes
+   * (their migrations would mutate the parent).
+   *
+   * Changing the parent replaces the resource (a version belongs to
+   * exactly one script).
+   */
+  parent?: string | Worker;
+  /**
+   * Percentage of traffic (0–100) the newly uploaded version receives; the
+   * currently-live version keeps the remainder. Cloudflare deployments
+   * split between at most two versions, so one canary can be active per
+   * script at a time.
+   *
+   * With {@link parent} set, defaults to `0`: the version is
+   * preview-URL-only and the parent's live deployment is untouched.
+   * Without `parent`, defaults to `100` (today's full cutover); `0` means
+   * "upload the version without deploying it" (the equivalent of
+   * `wrangler versions upload`).
+   *
+   * Percentages replace the previous deployment, they never add. Each
+   * versioned deploy splits its new version against the *stable* version —
+   * the majority holder of the current deployment — so deploying at 10 and
+   * then at 20 yields the second version at 20% against the stable version
+   * at 80%, with the earlier 10% version dropped from routing entirely
+   * (still uploaded, but unreachable even via a version-override header).
+   * With unchanged code that replacement is exactly a ramp; with changed
+   * code it swaps canaries. The first deploy of a script always goes to
+   * 100%, since there is no previous version to split with.
+   *
+   * Note that a subsequent full deploy of the parent (or of this Worker
+   * itself, at the default 100) resets traffic to 100% of its own new
+   * version.
+   */
+  traffic?: number;
+  /**
+   * Preview-URL alias for the uploaded version. Aliased preview URLs
+   * (`<alias>-<name>.<subdomain>.workers.dev`) are stable — each upload
+   * with the same alias re-points the URL at the new version — which is
+   * what makes them useful as shareable PR-preview links and lets
+   * `Worker.URL` resolve before the version exists.
+   *
+   * For a version worker ({@link parent} set) an alias is derived
+   * automatically from the stack, stage, and logical id, so every version
+   * worker gets a stable preview URL out of the box; set this to override
+   * it. Must start with a lowercase letter, contain only lowercase
+   * letters, digits, and dashes, and `<alias>-<worker-name>` must fit in
+   * 63 characters (a DNS label).
+   */
+  alias?: string;
+  /**
+   * Keep each user on one version for the duration of the rollout by
+   * pinning them to a stable request property — a session cookie, a
+   * header, the client IP, or a raw Rules-language expression:
+   *
+   * ```typescript
+   * version: {
+   *   traffic: 10,
+   *   // sticky by session cookie, falling back to sticky IP
+   *   affinity: { cookie: "session_id", ip: true },
+   * }
+   * ```
+   *
+   * Provisions a Transform Rule that fills the
+   * `Cloudflare-Workers-Version-Key` header on the zones the Worker
+   * serves on — the Worker (or, with {@link parent}, the parent) must
+   * have a `domain` or `routes`. With `parent` set, the rule lands on the
+   * parent's zones, pinning users across the canary split. See
+   * {@link WorkerVersionAffinity}.
+   */
+  affinity?: WorkerVersionAffinity;
+  /**
+   * Human-readable annotation attached to the uploaded version, shown in
+   * the Cloudflare dashboard and `wrangler versions list`.
+   */
+  message?: string;
+  /**
+   * Machine-readable tag annotation attached to the uploaded version
+   * (e.g. a git commit SHA or PR number).
+   */
+  tag?: string;
+}
+
 export interface WorkerProps<
-  Bindings extends WorkerBindingProps = any,
+  // PERF: unconstrained for the same reason as `Worker<Bindings>` above —
+  // the `extends WorkerBindingProps` proof is expensive for generic mapped
+  // types and the call-site overloads already constrain user input.
+  Bindings = any,
   Assets extends WorkerAssetsConfig | undefined =
     | WorkerAssetsConfig
     | undefined,
@@ -194,26 +625,123 @@ export interface WorkerProps<
    */
   name?: string;
   /**
-   * Whether to enable a workers.dev URL for this worker
+   * Deploy this Worker into a Workers for Platforms dispatch namespace as a
+   * "user worker" — a customer Worker that a platform Worker dispatches to at
+   * runtime via a dynamic-dispatch binding — instead of as a regular
+   * account-level Worker.
+   *
+   * Accepts the namespace name or a {@link DispatchNamespace} resource. The
+   * Worker's put/read/delete switch from the account-level
+   * `/workers/scripts` endpoints to the dispatch-namespace
+   * `/workers/dispatch/namespaces/:namespace/scripts` endpoints.
+   *
+   * User workers are not directly routable: they have no `workers.dev`
+   * subdomain, custom domains, or cron triggers, so {@link url},
+   * {@link domain}, and {@link crons} are ignored when this is set. Changing
+   * the namespace (or moving a Worker in or out of one) replaces the Worker,
+   * since an account-level script and a dispatch-namespace script are
+   * distinct cloud resources.
+   *
+   * @see https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/
+   */
+  namespace?: string | DispatchNamespace;
+  /**
+   * Worker versions & gradual deployments. Set `version.parent` to upload
+   * this Worker as a preview/canary *version* of another Worker's script
+   * instead of creating its own; set `version.traffic` below 100 to
+   * gradually roll out a deploy of this Worker's own script. See
+   * {@link WorkerVersionOptions}.
+   */
+  version?: WorkerVersionOptions;
+  /**
+   * Controls the Worker's `workers.dev` surface.
+   *
+   * - `true` (the default) — serve the Worker at its stable `workers.dev`
+   *   URL and enable version preview URLs.
+   * - `false` — no `workers.dev` URLs at all.
+   * - An object — toggle the stable URL and version previews independently,
+   *   e.g. `{ enabled: false, previewsEnabled: true }` keeps the stable URL
+   *   off while each deployed version stays reachable at its preview URL.
+   *
    * @default true
    */
-  url?: boolean;
+  workersDev?: boolean | WorkersDevConfig;
+  /**
+   * Protect this Worker with Cloudflare Access. Two forms:
+   *
+   * **Dedicated** — `{ policies, ... }` declares an Access application
+   * owned by this Worker (namespaced under it as `<Worker>/Access`),
+   * created, updated, and deleted with it:
+   * ```ts
+   * access: {
+   *   policies: [
+   *     { decision: "allow", include: [{ emailDomain: "example.com" }] },
+   *   ],
+   * }
+   * ```
+   *
+   * **Shared** — pass a `Cloudflare.Access.Application` directly to enroll
+   * into it. Access policies are application-wide: every enrolled Worker
+   * is gated by the same policy set:
+   * ```ts
+   * access: TeamOnly
+   * ```
+   *
+   * Either way the Worker's `worker` destination — and a `preview_worker`
+   * destination unless `previews: false` (dedicated form) — is pushed onto
+   * the application, covering custom domains, routes, the `workers.dev`
+   * URL, and version preview URLs. Removing the prop (or deleting the
+   * Worker) un-enrolls it.
+   *
+   * At runtime, read the authenticated identity from `ctx.access` via
+   * `Cloudflare.Access.Context`; under `alchemy dev`, simulate it with
+   * `dev: { access: ... }`. Also accepted by every `Cloudflare.Website.*`
+   * framework. See the
+   * [Protect a Worker with Access](/cloudflare/security/access) guide.
+   */
+  access?: WorkerAccessConfig;
   /**
    * Static assets to serve. Can be:
    * - A string path to the assets directory
    * - An AssetsProps object with directory and config
    * - An object with path and hash (e.g., from a Build resource)
+   *
+   * Plans hash the directory contents, so an unchanged tree converges to a
+   * noop. Supplying a precomputed `hash` (e.g. from a Build resource) makes
+   * that hash authoritative instead — the directory is not read during
+   * planning at all.
+   *
+   * Requests are served assets-first by default: a request matching a file
+   * never invokes the Worker. `runWorkerFirst` inverts that — `true` routes
+   * every request through the Worker ahead of the asset layer (serve files
+   * yourself via the `ASSETS` binding), and a glob array (e.g. `["/api/*"]`)
+   * routes only matching paths worker-first. The same routing applies under
+   * `alchemy dev`.
+   *
+   * When neither {@link main} nor {@link script} is provided, the Worker is
+   * deployed **assets-only**: no script is uploaded at all and Cloudflare's
+   * asset layer serves every request, applying `htmlHandling` /
+   * `notFoundHandling` (including single-page-application fallback) itself.
    */
   assets?: Assets;
-  subdomain?: {
-    enabled?: boolean;
-    previewsEnabled?: boolean;
-  };
-  /** @internal used by Cloudflare.Vite resource */
-  vite?: {
-    rootDir?: string;
-    memo?: MemoOptions;
-  };
+  /** @internal used by Cloudflare.Website.Vite resource */
+  vite?: ViteOptions;
+  /**
+   * An external source provider for this Worker — a package that builds
+   * the assets and server bundle (and serves local dev) in place of the
+   * built-in bundling pipeline. Used by framework integrations
+   * (Next/OpenNext, Astro, SvelteKit, Waku); most users configure it
+   * through the framework's `Website.*` wrapper rather than directly.
+   *
+   * The named package must be installed in your project — it is loaded
+   * with a dynamic `import()` and its default export must satisfy the
+   * `WorkerSourceModule` contract (`{ make(options) }`).
+   *
+   * Mutually exclusive with {@link script}, {@link vite}, and
+   * {@link main} — a source is self-contained; a provider that needs a
+   * custom entry takes it in its own `options`.
+   */
+  source?: WorkerSourceDescriptor;
   logpush?: boolean;
   /**
    * Cloudflare Workers Observability settings. Controls Workers Logs
@@ -225,10 +753,37 @@ export interface WorkerProps<
    * `traces: { enabled: true, ... }`.
    */
   observability?: WorkerObservability;
+  /**
+   * Workers Cache settings. When `enabled` is `true`, Cloudflare checks a
+   * regionally tiered cache in front of the Worker on every HTTP request —
+   * cache hits are served from the edge without invoking the Worker at all.
+   * The Worker controls what gets cached via standard response headers
+   * (`Cache-Control`, `Cache-Tag`, `Vary`), including
+   * `stale-while-revalidate`.
+   *
+   * Set `crossVersionCache: true` to share cached responses across Worker
+   * versions (by default the cache is scoped to a single version, so every
+   * deploy starts cold).
+   *
+   * If omitted, Workers Cache is disabled — unless the Worker's init phase
+   * enables it via `yield* Cloudflare.cache()`, which is the preferred way
+   * for Effect-native Workers (and also returns the runtime purge client).
+   * When both are set, this prop takes precedence.
+   *
+   * @see https://blog.cloudflare.com/workers-cache/
+   */
+  cache?: WorkerCache;
   tags?: string[];
   /**
    * Path to the Worker's entry module. Bundled with rolldown before
-   * upload. Mutually exclusive with {@link script} — provide exactly one.
+   * upload. Mutually exclusive with {@link script} — provide at most one.
+   * Omit both (with {@link assets} set) to deploy an assets-only Worker.
+   *
+   * A `.py` entry deploys a Python Worker instead: no bundling runs — the
+   * entry plus every sibling `.py` file upload as Python modules, the
+   * `python_workers` compatibility flag is added, and dependencies from
+   * `pyproject.toml` (or a prebuilt `python_modules/` directory) are
+   * vendored alongside. See the Python Workers section above.
    */
   main?: string;
   /**
@@ -245,7 +800,12 @@ export interface WorkerProps<
   };
   limits?: WorkerLimits;
   placement?: WorkerPlacement;
-  exports?: string[];
+  /**
+   * Tracks Durable Object and Workflow exports for Effect-native Workers only.
+   * Populated automatically from bindings; do not set manually.
+   * @internal
+   */
+  exports?: Record<string, DurableObjectExport | WorkflowExport>;
   /**
    * Environment variables and native Cloudflare Bindings to bind to
    * the Worker. Accepts:
@@ -257,9 +817,14 @@ export interface WorkerProps<
    *   `Config.number`, …) — resolved at deploy time and bound as
    *   `secret_text` on Cloudflare regardless of the `Config`
    *   constructor used. See
-   *   {@link https://v2.alchemy.run/concepts/secrets | Concepts › Secrets and Variables}.
+   *   [Secrets & env](/cloudflare/security/secrets-env).
    * - Literal values — routed by shape: `Redacted<string>` →
    *   `secret_text`, `string` → `plain_text`, anything else → `json`.
+   * - `Output` values that resolve to a plain env value (e.g.
+   *   `Alchemy.makeRandom`) — classified at deploy time by their
+   *   resolved value using the literal rules above. Whole-resource
+   *   Outputs (`Output.of(bucket)`) are rejected at deploy time; bind
+   *   the resource itself instead.
    *
    * In Effect-native Workers you can alternatively `yield*` a
    * `Config` in the Init phase to register the binding implicitly;
@@ -269,72 +834,610 @@ export interface WorkerProps<
   /**
    * Cron expressions that trigger the Worker's scheduled handler.
    *
+   * This is how async (non-Effect) Workers configure Cron Triggers — the
+   * entry module exports its own `scheduled` handler and this prop attaches
+   * the schedules at deploy time. Effect-native Workers usually skip this
+   * prop and call `Cloudflare.Workers.cron(expression, handler)` in the Init
+   * phase instead, which attaches the expression and registers the runtime
+   * listener in one step.
+   *
    * Pass an empty array to remove all Cron Triggers.
    */
   crons?: string[];
   /**
-   * One or more custom hostnames (e.g. `"app.example.com"`) to bind to this
-   * Worker. The Cloudflare Zone is inferred from the hostname — the zone must
-   * already exist in the account.
+   * Tail Workers that consume this Worker's execution traces. Each entry is
+   * another {@link Worker} (or a literal script name) that exports a `tail()`
+   * handler; after each invocation of this Worker, Cloudflare delivers the
+   * invocation's trace events (console logs, exceptions, event metadata) to
+   * every listed consumer.
+   *
+   * Pass the consumer Worker resource directly — Alchemy resolves it to its
+   * deployed script name and deploys the consumer before this Worker — or a
+   * plain script name string for a tail Worker managed outside this stack.
+   *
+   * Changing the list is an in-place update. Omitting the prop (or passing
+   * `[]`) deploys this Worker with no tail consumers attached.
+   *
+   * @see https://developers.cloudflare.com/workers/observability/logs/tail-workers/
    */
-  domain?: string | string[];
+  tailConsumers?: (string | Worker)[];
   /**
-   * Extra bundler options applied on top of the standard rolldown input/output
-   * options used to build this Worker. See {@link Bundle.BundleExtraOptions}.
+   * Streaming Tail Workers that consume this Worker's execution events as
+   * they happen. Each entry is another {@link Worker} (or a literal script
+   * name) that exports a `tailStream()` handler; Cloudflare invokes it with
+   * the invocation's `onset` event *while this Worker is still executing*,
+   * and the returned handler receives every subsequent event of the session
+   * (`log`, `spanOpen`, ...) ending with the terminal `outcome`.
+   *
+   * This differs from {@link tailConsumers}: a plain tail consumer's `tail()`
+   * handler receives the completed `TraceItem`s only after the producer's
+   * invocation finishes, while a streaming tail consumer observes events
+   * live, per-session, during execution.
+   *
+   * Pass the consumer Worker resource directly — Alchemy resolves it to its
+   * deployed script name and deploys the consumer before this Worker — or a
+   * plain script name string for a streaming tail Worker managed outside
+   * this stack.
+   *
+   * Changing the list is an in-place update. Omitting the prop (or passing
+   * `[]`) deploys this Worker with no streaming tail consumers attached.
+   *
+   * Streaming tail workers are experimental on Cloudflare's cloud: the
+   * configuration deploys, but production does not yet deliver events —
+   * Cloudflare rejects the `streaming_tail_worker` compatibility flag as
+   * "experimental and cannot yet be used in Workers deployed to
+   * Cloudflare", so a deployed consumer cannot enable its `tailStream()`
+   * handler. Under `alchemy dev`, local delivery is fully emulated.
+   *
+   * @see https://developers.cloudflare.com/workers/observability/logs/tail-workers/
    */
-  build?: Bundle.BundleExtraOptions;
+  streamingTailConsumers?: (string | Worker)[];
+  /**
+   * The Worker's custom domain: one canonical hostname, plus optional
+   * `aliases` that also serve the Worker and `redirects` that 301 to the
+   * canonical name. A bare string is shorthand for `{ name }`. Pin the
+   * zone with `zoneId` / `zone` / `zoneName` (same as {@link routes});
+   * otherwise each hostname is looked up by name. The zone must already
+   * exist in the account.
+   *
+   * When set, `https://<name>` becomes the Worker's primary `url` output,
+   * ranking above the `workers.dev` URL. See {@link WorkerDomainConfig}.
+   *
+   * Omitting the prop leaves custom domains unmanaged — attachments made
+   * outside Alchemy are preserved. Pass `null` to explicitly detach every
+   * custom domain (and remove their redirect rules).
+   */
+  domain?: string | WorkerDomainConfig | null;
+  /**
+   * Zone routes that map URL patterns to this Worker. Equivalent to Wrangler's
+   * `routes` array — provide `zoneName` or `zoneId` (or `zone`) alongside each
+   * `pattern`. When the zone is omitted, it is inferred from the pattern's
+   * hostname.
+   */
+  routes?: WorkerRouteConfig[];
+  /**
+   * Extra bundler options applied on top of the standard rolldown
+   * input/output options used to build this Worker. Includes the generic
+   * bundle extras (pure-annotation packages, bundle analyzer) plus an
+   * `output` field of rolldown output overrides (e.g. `codeSplitting`
+   * groups) merged over Alchemy's defaults. See {@link WorkerBuildOptions}.
+   */
+  build?: WorkerBuildOptions;
+  /**
+   * Whether to bundle {@link main} with rolldown before upload.
+   *
+   * Set to `false` when `main` already points at a complete,
+   * runtime-ready ESM Worker produced by an external tool (OpenNext,
+   * a separate rolldown/esbuild pipeline, etc.). The entry and every
+   * file around it matching {@link rules} are uploaded byte-for-byte —
+   * no bundling, no minification, no transformation. Module names are
+   * the files' POSIX paths relative to the entry's directory, matching
+   * Wrangler's `no_bundle` contract.
+   *
+   * Re-bundling such artifacts is unsafe: dynamic `import()` calls the
+   * upstream tool relies on can be rewritten in ways that break runtime
+   * behavior.
+   *
+   * Durable Object and Workflow classes must be exported by the prebuilt
+   * entry itself — {@link exports} is not applied when `bundle` is
+   * `false`.
+   *
+   * @default true
+   */
+  bundle?: boolean;
+  /**
+   * Module rules selecting which files in the directory containing
+   * {@link main} are uploaded as additional modules when {@link bundle}
+   * is `false`. Each rule's globs are matched against POSIX-style paths
+   * relative to that directory, mirroring Wrangler's `rules`
+   * configuration. When provided, these rules replace
+   * {@link defaultModuleRules}.
+   *
+   * @default defaultModuleRules — ESModule (`**\/*.js`, `**\/*.mjs`), CompiledWasm (`**\/*.wasm`), Text (`**\/*.txt`, `**\/*.html`, `**\/*.sql`), Data (`**\/*.bin`)
+   */
+  rules?: ModuleRule[];
   /**
    * Options for the local dev server that runs this Worker under `alchemy dev`.
    * Each Worker is served on its own port.
+   *
+   * Use `{ mode: "external" }` to skip starting a local Worker entirely —
+   * useful when an external dev server (e.g. one spawned via `Command.Dev`)
+   * is serving the content this Worker would otherwise host.
    */
-  dev?: {
+  dev?:
+    | {
+        /**
+         * Run this Worker in `workerd` locally (the default).
+         * @default "worker"
+         */
+        mode?: "worker";
+        /**
+         * Host the local dev server binds to.
+         * @default "localhost"
+         */
+        host?: string;
+        /**
+         * Port the local dev server listens on. If the port is unavailable,
+         * the next free port is used unless {@link strictPort} is `true`.
+         * @default 1337
+         */
+        port?: number;
+        /**
+         * When `true`, fail instead of falling back to another port if
+         * {@link port} is already in use.
+         * @default false
+         */
+        strictPort?: boolean;
+        /**
+         * Whether the local runtime's Cache API simulator
+         * (`caches.default` / `caches.open()`) stores responses. Set
+         * `false` to make every cache operation a no-op — matching
+         * production behaviour on `workers.dev` subdomains, where the
+         * Cache API silently does nothing.
+         * @default true
+         */
+        cache?: boolean;
+        /**
+         * Override the `request.cf` blob served to this Worker locally.
+         * Defaults to a static placeholder (Miniflare's Austin/DFW blob);
+         * pass e.g. `{ colo: "LHR", country: "GB" }` to simulate a
+         * different edge location.
+         */
+        cf?: Record<string, unknown>;
+        /**
+         * Stub the authenticated Access state in local dev. In production,
+         * `ctx.access` is populated by Cloudflare's edge after a request
+         * passes the Access login wall — locally there is no edge and no
+         * login, so without this stub `ctx.access` is always `undefined`
+         * and identity-dependent code paths can't run. When set, every
+         * request served by `alchemy dev` behaves as if this one user had
+         * logged in: `ctx.access` carries the given audience and
+         * `getIdentity()` resolves the given identity. Omit to simulate
+         * unauthenticated requests. Inert on deploy — the deployed Worker
+         * always gets the real edge-populated `ctx.access`.
+         */
+        access?: {
+          /**
+           * Simulated Access application audience (AUD) tag.
+           * @default "dev"
+           */
+          aud?: string;
+          /**
+           * Simulated identity returned by `ctx.access.getIdentity()`,
+           * e.g. `{ email: "dev@example.com" }`.
+           */
+          identity?: WorkerAccessIdentity;
+        };
+      }
+    | {
+        /**
+         * Don't start a local Worker; an external dev server is running instead.
+         */
+        mode: "external";
+        /**
+         * URL the external dev server is reachable at, if applicable.
+         * This will be returned as the `url` attribute of the Worker resource.
+         */
+        url?: string;
+      };
+}
+
+/**
+ * A serializable reference to an external Worker source provider.
+ * Persists in state (`olds`) and crosses the local-provider RPC
+ * boundary, so it must stay plain JSON data — the implementation is
+ * resolved by dynamically importing {@link provider}.
+ */
+export interface WorkerSourceDescriptor {
+  /**
+   * Module specifier resolved with `import()`, e.g.
+   * `"@alchemy.run/cloudflare-next"`. The module's default export must
+   * satisfy the `WorkerSourceModule` contract.
+   */
+  readonly provider: string;
+  /**
+   * How the source serves local development. Server-mode sources run in an
+   * isolated child process; bundle-mode sources stream rebuilds back to the
+   * local Worker host.
+   */
+  readonly devMode: "server" | "bundle";
+  /**
+   * The framework project root. Server-mode dev children are spawned with
+   * this directory as their working directory — some framework dev servers
+   * (e.g. `next dev`, which 404s every route when `process.cwd()` differs
+   * from its `dir`) require cwd to be the project root. Relative paths
+   * resolve against the engine's working directory. Defaults to the
+   * engine's working directory.
+   */
+  readonly rootDir?: string;
+  /**
+   * The JS runtime the server-mode dev child must run under. Some framework
+   * dev servers are runtime-sensitive — `next dev` (Turbopack) silently 404s
+   * every route when cold-started under bun — so the provider can pin the
+   * child to `"node"`. When the requested runtime is not installed, the
+   * engine falls back to its own runtime. Defaults to the engine's runtime.
+   */
+  readonly runtime?: "node";
+  /**
+   * Provider-specific options (rootDir, memo, framework config, ...).
+   * Must be JSON-serializable AND JSON-stable: the descriptor persists
+   * in state and participates in the metadata hash, so non-deterministic
+   * values here cause perpetual redeploys.
+   */
+  readonly options?: unknown;
+}
+
+export interface ViteOptions {
+  /**
+   * Overrides the module that becomes the deployed Worker entry, forwarded
+   * to the Cloudflare Vite plugin's `main` option. Relative paths resolve
+   * from the Vite root (`rootDir`).
+   *
+   * By default the entry environment's own entry (the server bundle the
+   * framework produces) is deployed. Point `main` at a custom module when
+   * the deployed Worker must export more than the framework's fetch
+   * handler — e.g. Durable Object classes or additional handlers wrapping
+   * the framework handler.
+   *
+   * @example
+   * ```typescript
+   * vite: { main: "worker/index.ts" }
+   * ```
+   */
+  main?: string;
+  /**
+   * Root directory passed to Vite's `root` option.
+   * Defaults to the current working directory (`process.cwd()`).
+   */
+  rootDir?: string;
+  /**
+   * Controls which files are hashed to decide whether a rebuild is needed.
+   * By default every non-gitignored file in `cwd` is hashed, plus the nearest
+   * lockfile. Provide explicit globs to narrow the scope.
+   *
+   * @see {@link MemoOptions}
+   */
+  memo?: MemoOptions & {
     /**
-     * Host the local dev server binds to.
-     * @default "localhost"
+     * Configure additional workspaces to hash.
+     * By default, auto-detects workspaces during Vite build, then hashes all
+     * non-gitignored files in the workspace plus the nearest lockfile.
+     * @default "auto"
      */
-    host?: string;
-    /**
-     * Port the local dev server listens on. If the port is unavailable, the
-     * next free port is used unless {@link strictPort} is `true`.
-     * @default 1337
-     */
-    port?: number;
-    /**
-     * When `true`, fail instead of falling back to another port if {@link port}
-     * is already in use.
-     * @default false
-     */
-    strictPort?: boolean;
+    workspaces?:
+      | "auto"
+      | Array<
+          MemoOptions & {
+            /**
+             * The working directory to hash, relative to the Vite root.
+             */
+            cwd: string;
+          }
+        >;
+  };
+  /**
+   * Selects which Vite environments make up the deployed Worker, for
+   * frameworks that build more than one (e.g. React Server Components).
+   *
+   * A single-environment SSR build needs no configuration. For a
+   * multi-environment build, point `entry` at the environment that
+   * produces the server entry chunk and list the remaining server-side
+   * environments in `children` so their chunks are bundled alongside it.
+   * The `client` environment is always treated as static assets.
+   *
+   * @example React Router / React Server Components
+   * ```typescript
+   * viteEnvironments: { entry: "rsc", children: ["ssr"] }
+   * ```
+   *
+   * @default { entry: "ssr", children: [] }
+   */
+  viteEnvironments?: {
+    entry?: string;
+    children?: string[];
   };
 }
 
-export type Worker<Bindings extends WorkerBindings = any> = Resource<
+// PERF: deliberately NOT `Bindings extends WorkerBindings`. The constraint
+// forced the checker to prove the generic `NormalizedBindings<...>` mapped
+// type assignable to the ~30-member `WorkerBindingResource` union at every
+// `Worker<...>` instantiation — a single 28s structural relation that was 45%
+// of the whole program's check time. Input is already constrained at the
+// call boundary (`Bindings extends WorkerBindingProps`), so this type
+// argument is only ever produced from validated shapes.
+export type Worker<Bindings = any> = Resource<
   WorkerTypeId,
   WorkerProps<Bindings>,
   {
+    /**
+     * The immutable ID Cloudflare assigns to this Worker's script — a hex
+     * value like `c81a2d22c29840ed9d61681a3270dbff`, shown as the Worker ID
+     * in the dashboard and the identifier Access `worker` destinations key
+     * on. Stable across every update; changes only when the script is
+     * replaced. For the script *name*, use {@link workerName}. A version
+     * worker carries its parent script's ID. Under `alchemy dev` there is
+     * no cloud script, so the local provider generates a `dev:`-prefixed
+     * ID instead (switching between dev and deploy replaces the resource,
+     * so the two identities never mix).
+     */
     workerId: string;
+    /** The script name, e.g. `"api"` — the classic API's identifier. */
     workerName: string;
+    /**
+     * The Workers for Platforms dispatch namespace this Worker was deployed
+     * into, or `undefined` for a regular account-level Worker.
+     */
+    namespace: string | undefined;
     logpush: boolean | undefined;
+    /**
+     * The most significant URL the Worker is reachable at — always
+     * `urls[0]`, or `undefined` when the Worker is not reachable at any
+     * URL (e.g. a dispatch-namespace user worker). Ranking: the canonical
+     * custom domain, then aliases, then the stable `workers.dev` URL; a
+     * version worker's `url` is its aliased preview URL; under
+     * `alchemy dev` it is the local dev server's URL.
+     */
     url: string | undefined;
+    /**
+     * Every URL that serves this Worker, most significant first —
+     * `[https://<domain.name>?, ...aliases, <workers.dev URL>?,
+     * <version preview URLs>?]`, or the local dev server's
+     * `[localhost, ...LAN]` URLs under `alchemy dev`. Redirect hostnames
+     * never appear (they don't serve the Worker). Useful wholesale, e.g.
+     * as a CORS allow-list.
+     */
+    urls: string[];
+    /**
+     * The Worker's resolved custom-domain configuration — canonical
+     * `name`, `aliases`, and `redirects` as deployed — or `undefined`
+     * when no custom domain is configured.
+     */
+    domain:
+      | {
+          name: string;
+          aliases: string[];
+          redirects: string[];
+          zone?: ZoneReference;
+        }
+      | undefined;
     tags: string[] | undefined;
     durableObjectNamespaces: Record<string, string>;
     accountId: string;
-    domains: string[];
+    routes: { id: string; pattern: string; zoneId: string }[];
     crons: string[];
+    /**
+     * The tail consumers attached to this Worker's script — each entry the
+     * consuming Worker's script name — or `undefined` when none are
+     * attached. Local emulation (`RuntimeWorker.tails`) lowers this same
+     * list into workerd tail-service designators.
+     */
+    tailConsumers?: { service: string }[] | undefined;
+    /**
+     * The streaming tail consumers attached to this Worker's script — each
+     * entry the consuming Worker's script name — or `undefined` when none
+     * are attached. Recorded from the uploaded metadata: the script-settings
+     * read endpoint does not expose `streaming_tail_consumers`, so this is
+     * the deployed value, not an observed one. Local emulation
+     * (`RuntimeWorker.streamingTails`) lowers this same list into workerd
+     * streaming-tail service designators.
+     */
+    streamingTailConsumers?: { service: string }[] | undefined;
+    /**
+     * The parent script name this Worker uploads versions to, when this
+     * resource is a version worker (`version.parent` set). `undefined` for
+     * a Worker that owns its own script — including one deploying with a
+     * gradual rollout. This is the discriminator `read`/`delete` use to
+     * avoid treating the parent's script as this resource's own.
+     */
+    versionOf?: string | undefined;
+    /**
+     * The id of the version uploaded by the most recent deploy. Only set
+     * when versioning is in play: always for a version worker
+     * (`version.parent`), and for a self-owned Worker when a gradual
+     * rollout (`version.traffic` < 100) deployed via the versions API.
+     */
+    versionId?: string | undefined;
+    /**
+     * The preview-URL alias attached to the uploaded version — the
+     * user-provided `version.alias`, or the auto-derived stable alias for
+     * a version worker. The aliased preview URL
+     * (`<alias>-<name>.<subdomain>.workers.dev`) is stable across
+     * deploys and is the version worker's primary `url`.
+     */
+    versionAlias?: string | undefined;
+    /**
+     * The id of the deployment created by the most recent deploy, when the
+     * deploy created one through the deployments API (a version with
+     * `traffic > 0`). Preview-only versions (`traffic: 0`) have no
+     * deployment.
+     */
+    deploymentId?: string | undefined;
+    /**
+     * The zone ids currently holding this resource's version-affinity
+     * Transform Rules (`version.affinity`) — the cleanup list consulted
+     * when affinity is removed or the resource is deleted. For a version
+     * worker these are the *parent's* zones. `undefined` when no affinity
+     * rules are deployed.
+     */
+    affinityZoneIds?: string[] | undefined;
     hash?: {
       assets: string | undefined;
       bundle: string | undefined;
       input: string | undefined;
+      additionalWorkspaces: string[] | undefined;
+      // Hash of the deploy-time metadata surface (compatibility, env,
+      // bindings, asset config, limits, observability, ...) so metadata-only
+      // edits trigger an update (#745). Optional: state written before this
+      // field existed has no `metadata`, which reads as a one-time update on
+      // the first diff after upgrading (the apply backfills it).
+      metadata?: string | undefined;
     };
   },
   {
     bindings?: WorkerBinding[];
-    containers?: { className: string }[];
+    /**
+     * Workers Cache settings contributed by `yield* Cloudflare.cache()`.
+     * Merged into the upload metadata's `cache_options`; an explicit
+     * `WorkerProps.cache` takes precedence.
+     */
+    cache?: WorkerCache;
+    containers?: {
+      className: string;
+      dev: DevContainerImage | undefined;
+      /**
+       * Content hash of the image (bundle/Dockerfile/context). Part of the
+       * local worker's restart config: `dev` only carries stable PATHS, so
+       * without the hash an image content change would never restart the
+       * instance and the running container would serve stale code.
+       */
+      hash: string | undefined;
+    }[];
     crons?: string[];
-    hyperdrives?: Record<string, Required<HyperdriveDevOrigin>>;
+    hyperdrives?: Record<string, Required<DevOrigin>>;
+    /**
+     * Dev-only channel (like `hyperdrives`): binding name → opt-out of local
+     * emulation in `alchemy dev` (the binding was piped through `Alchemy.remote()`
+     * constructor). Contributed alongside the pure wire binding instead of
+     * being embedded in it — wire descriptors stay exactly what Cloudflare
+     * accepts. Records from multiple bind calls merge by key; the local
+     * worker provider reads it when lowering `browser` / `images` / `stream`
+     * / `send_email` bindings to their local or remote runtime hooks. The
+     * live provider ignores it.
+     */
+    devRemote?: Record<string, boolean>;
   },
   Providers
 >;
+
+/** The env key the resolved URL is injected under when `yield*`-ed. */
+const SELF_URL_BINDING_NAME = "WORKER_URL";
+
+/**
+ * Effect-native accessor for the Worker's own URL. The value is injected as an
+ * env binding that only exists at the *exec* phase on the deployed Worker, so
+ * reading it is deferred behind an Effect that requires {@link RuntimeContext}.
+ * Yield it inside a handler to obtain the URL string.
+ */
+export type URLAccessor = Effect.Effect<string, never, RuntimeContext>;
+
+/**
+ * The type of {@link URL} (`Worker.URL`).
+ *
+ * It is a real `Effect` — `yield* Worker.URL` inside a Worker init attaches
+ * the binding and resolves the deferred {@link URLAccessor} — but it also
+ * carries the `~alchemy/Kind` marker statically, so when it is declared on a
+ * Worker's `env` the binding machinery recognises it as a `self_url` binding
+ * (`isSelfUrl`) instead of running it.
+ *
+ * Defined in this module (not its own file): the effect closes over the
+ * `Worker` tag and `WorkerEnvironment`, and a separate module would form a
+ * value cycle with Worker.ts that the deploy bundler's scope hoisting turns
+ * into a startup crash.
+ */
+export interface URLEffect extends Effect.Effect<
+  URLAccessor,
+  never,
+  WorkerEnvironment | Worker
+> {
+  "~alchemy/Kind": "Cloudflare.Workers.URL";
+}
+
+/**
+ * A Worker's own public URL, injected as a binding on that same Worker. At
+ * deploy time Alchemy resolves the URL the Worker will be served at (its first
+ * custom domain if any, otherwise its `workers.dev` URL) and injects it as a
+ * plain-text env binding, so the running Worker knows its own public address.
+ *
+ * Declare it on a Worker's `env` (it flows through `InferEnv` → `string`) or
+ * `yield*` it inside an Effect-native Worker to attach the binding and obtain
+ * a deferred {@link URLAccessor}. It is also exposed as
+ * `Cloudflare.Worker.URL`.
+ *
+ * Because the URL is resolved *before* the bundle is built, a `VITE_`-prefixed
+ * env key holding `Worker.URL` is inlined into the client bundle as
+ * `import.meta.env.VITE_*` — the canonical way to give a Vite frontend its own
+ * public URL.
+ */
+export const URL: URLEffect = Object.assign(
+  Effect.gen(function* () {
+    // Deploy-time only: register the binding on the host Worker. The provider
+    // lowers the `self_url` sentinel into a plain-text binding holding the
+    // resolved URL just before upload.
+    if (!globalThis.__ALCHEMY_RUNTIME__) {
+      yield* (yield* Worker).bind`${SELF_URL_BINDING_NAME}`({
+        bindings: [{ type: "self_url", name: SELF_URL_BINDING_NAME }],
+      });
+    }
+    // Captured at init; the deferred read only runs at exec phase (the
+    // accessor is colored with RuntimeContext), where env is populated.
+    const env = yield* WorkerEnvironment;
+    return Effect.sync(
+      () => (env as Record<string, string>)[SELF_URL_BINDING_NAME]!,
+    ) as URLAccessor;
+  }),
+  { "~alchemy/Kind": "Cloudflare.Workers.URL" as const },
+);
+
+/**
+ * Returns true when the value is the `Worker.URL` binding (keyed on the
+ * static `~alchemy/Kind` marker — the value is a real Effect, so every
+ * env-resolution site must check this before `Effect.isEffect`).
+ */
+export const isSelfUrl = (value: unknown): value is URLEffect =>
+  typeof value === "object" &&
+  value !== null &&
+  "~alchemy/Kind" in value &&
+  (value as URLEffect)["~alchemy/Kind"] === "Cloudflare.Workers.URL";
+
+/**
+ * A service binding that points at this Worker ITSELF. Declare it on `env`
+ * to give the Worker a self-referencing service binding — the provider
+ * lowers it into a `service` binding targeting the Worker's own physical
+ * name at upload, and local dev serves it with the runtime's in-process
+ * self service.
+ *
+ * The canonical consumer is OpenNext's `WORKER_SELF_REFERENCE` (the ISR
+ * revalidation queue re-fetches the worker through it):
+ *
+ * ```typescript
+ * const site = yield* Cloudflare.Website.Nextjs("Site", {
+ *   env: {
+ *     WORKER_SELF_REFERENCE: Cloudflare.Workers.Self,
+ *   },
+ * });
+ * ```
+ */
+export const Self = {
+  "~alchemy/Kind": "Cloudflare.Workers.Self",
+} as const;
+export type Self = typeof Self;
+
+/** Returns true when the value is the {@link Self} marker. */
+export const isSelf = (value: unknown): value is Self =>
+  typeof value === "object" &&
+  value !== null &&
+  "~alchemy/Kind" in value &&
+  (value as Self)["~alchemy/Kind"] === "Cloudflare.Workers.Self";
 
 /**
  * A Cloudflare Worker host with deploy-time binding support and runtime export
@@ -348,7 +1451,7 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * ```typescript
  * Effect.gen(function* () {
  *   // Phase 1: bind resources (runs at deploy time)
- *   const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *   const kv = yield* Cloudflare.KV.ReadWriteNamespace(MyKV);
  *
  *   return {
  *     // Phase 2: runtime handlers (runs on each request)
@@ -361,14 +1464,68 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * ```
  *
  * There are three ways to define a Worker, from simplest to most
- * flexible. See the {@link https://alchemy.run/concepts/platform | Platform concept}
+ * flexible. See the [Functions & Servers](/infrastructure-as-effects/functions-and-servers)
  * page for the full explanation.
  *
  * - **Async** — plain `async fetch` handler, no Effect runtime in the bundle.
  * - **Effect** — Effect implementation passed directly, single file.
  * - **Layer** — class and `.make()` in a single file; Rolldown tree-shakes `.make()` from consumers.
+ * ### Protect with Access
+ * Put Cloudflare Access in front of the Worker with the `access` prop —
+ * unauthenticated requests are redirected to your team's login page, and
+ * handlers read the authenticated identity from `ctx.access` via
+ * `Cloudflare.Access.Context`. See the
+ * [Protect a Worker with Access](/cloudflare/security/access) guide.
  *
- * @section Async Workers
+ * **Example:** Dedicated application — per-Worker policies
+ * The `{ policies }` form declares an Access application owned by this
+ * Worker (namespaced under it as `<Worker>/Access`), created, updated,
+ * and deleted with it:
+ * ```typescript
+ * export default Cloudflare.Worker(
+ *   "Api",
+ *   {
+ *     main: import.meta.url,
+ *     access: {
+ *       policies: [
+ *         { decision: "allow", include: [{ emailDomain: "example.com" }] },
+ *       ],
+ *     },
+ *     // simulate the authenticated state under `alchemy dev`
+ *     dev: { access: { aud: "dev", identity: { email: "dev@example.com" } } },
+ *   },
+ *   Effect.gen(function* () {
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         const access = yield* Cloudflare.Access.Context;
+ *         const identity = yield* access!.getIdentity();
+ *         return yield* HttpServerResponse.json({ email: identity?.email });
+ *       }),
+ *     };
+ *   }),
+ * );
+ * ```
+ *
+ * **Example:** Shared application — one policy set, many Workers
+ * Pass a `Cloudflare.Access.Application` directly to enroll into it.
+ * Access policies are application-wide: every enrolled Worker is gated
+ * by the same policy set.
+ * ```typescript
+ * const TeamOnly = Cloudflare.Access.Application("TeamOnly", {
+ *   type: "self_hosted",
+ *   policies: [
+ *     { decision: "allow", include: [{ emailDomain: "example.com" }] },
+ *   ],
+ * });
+ *
+ * export default Cloudflare.Worker(
+ *   "Api",
+ *   { main: import.meta.url, access: TeamOnly },
+ *   /* ... *​/
+ * );
+ * ```
+ *
+ * ### Async Workers
  * You don't have to use Effect for your runtime code. If you create
  * a Worker resource with `main` pointing at a file but provide no
  * `Effect.gen` implementation, Alchemy bundles and deploys that file
@@ -380,15 +1537,15 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * `Cloudflare.InferEnv` to extract a fully typed `env` object from
  * them.
  *
- * See the {@link https://alchemy.run/guides/async-worker | Async Workers Guide}
+ * See the [Workers guide](/cloudflare/compute/workers)
  * for a comprehensive walkthrough of all binding types (R2, D1,
  * Durable Objects, Assets, and more).
  *
- * @example Defining an async Worker in your stack
+ * **Example:** Defining an async Worker in your stack
  * ```typescript
  * // alchemy.run.ts
- * const db = yield* Cloudflare.D1Database("DB");
- * const bucket = yield* Cloudflare.R2Bucket("Bucket");
+ * const db = yield* Cloudflare.D1.Database("DB");
+ * const bucket = yield* Cloudflare.R2.Bucket("Bucket");
  *
  * export type WorkerEnv = Cloudflare.InferEnv<typeof Worker>;
  *
@@ -398,7 +1555,7 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * });
  * ```
  *
- * @example Writing the async handler
+ * **Example:** Writing the async handler
  * ```typescript
  * // src/worker.ts
  * import type { WorkerEnv } from "../alchemy.run.ts";
@@ -414,20 +1571,71 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * };
  * ```
  *
- * @section Effect Workers
+ * ### Python Workers
+ * Point `main` at a `.py` file to deploy a
+ * [Python Worker](https://developers.cloudflare.com/workers/languages/python/)
+ * (open beta). There is no bundling step — the entry and every sibling
+ * `.py` module upload as-is and are interpreted by Pyodide, and the
+ * `python_workers` compatibility flag is added automatically. Like async
+ * Workers, Python Workers take no inline Effect implementation; declare
+ * bindings with the `env` prop and read them from `self.env` in Python.
+ *
+ * Dependencies come from `pyproject.toml` next to the entry: Alchemy
+ * vendors `[project.dependencies]` with [uv](https://docs.astral.sh/uv/)
+ * against the Pyodide wheel index and uploads them under
+ * `python_modules/`. If a `python_modules/` directory already exists
+ * (e.g. produced by `pywrangler sync`), it is uploaded as-is and uv is
+ * not invoked.
+ *
+ * See the [Python Workers guide](/cloudflare/compute/python-workers)
+ * for the full walkthrough.
+ *
+ * **Example:** Defining a Python Worker in your stack
+ * ```typescript
+ * // alchemy.run.ts
+ * const kv = yield* Cloudflare.KV.Namespace("Cache");
+ *
+ * export const Worker = Cloudflare.Worker("Worker", {
+ *   main: "./src/worker.py",
+ *   env: { CACHE: kv },
+ * });
+ * ```
+ *
+ * **Example:** Writing the Python handler
+ * ```python
+ * # src/worker.py
+ * from workers import Response, WorkerEntrypoint
+ *
+ * class Default(WorkerEntrypoint):
+ *     async def fetch(self, request):
+ *         cached = await self.env.CACHE.get("greeting")
+ *         return Response(cached or "Hello from Python!")
+ * ```
+ *
+ * **Example:** Vendoring dependencies with pyproject.toml
+ * ```toml
+ * # src/pyproject.toml — vendored with uv on deploy
+ * [project]
+ * name = "my-worker"
+ * version = "0.1.0"
+ * requires-python = ">=3.13"
+ * dependencies = ["humanize"]
+ * ```
+ *
+ * ### Effect Workers
  * Pass the Effect implementation as the third argument. This is the
  * simplest Effect-based approach — everything lives in one file.
  * Convenient for standalone Workers that don't need to be referenced
  * by other Workers.
  *
- * @example Worker Effect
+ * **Example:** Worker Effect
  * ```typescript
  * export default class MyWorker extends Cloudflare.Worker<MyWorker>()(
  *   "MyWorker",
- *   { main: import.meta.filename },
+ *   { main: import.meta.url },
  *   Effect.gen(function* () {
  *     // init: bind resources
- *     const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *     const kv = yield* Cloudflare.KV.ReadWriteNamespace(MyKV);
  *
  *     return {
  *       // runtime: use them
@@ -440,7 +1648,7 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * ) {}
  * ```
  *
- * @section Worker Layer
+ * ### Worker Layer
  * When two Workers need to reference each other (e.g. WorkerA calls
  * WorkerB and vice versa), or you simply want optimal tree-shaking,
  * define the Worker class separately from its `.make()` call. The
@@ -451,21 +1659,23 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * them away entirely.
  *
  * The class and `.make()` can live in the same file. This is the
- * same pattern used by `Container` and `DurableObjectNamespace`,
+ * same pattern used by `Container` and `DurableObject`,
  * and is recommended for any cross-Worker or cross-DO bindings.
  *
- * @example Worker Layer (class + .make() in one file)
+ * **Example:** Worker Layer (class + .make() in one file)
  * ```typescript
- * // src/WorkerB.ts
- * export default class WorkerB extends Cloudflare.Worker<WorkerB>()(
- *   "WorkerB",
- *   { main: import.meta.filename },
- * ) {}
+ * // src/WorkerB.ts — the tag carries the name + RPC shape; props live
+ * // on `.make()`.
+ * export class WorkerB extends Cloudflare.Worker<
+ *   WorkerB,
+ *   { greet: (name: string) => Effect.Effect<string> }
+ * >()("WorkerB") {}
  *
  * export default WorkerB.make(
+ *   { main: import.meta.url },
  *   Effect.gen(function* () {
  *     // init: bind resources
- *     const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *     const kv = yield* Cloudflare.KV.ReadWriteNamespace(MyKV);
  *
  *     return {
  *       // runtime: use them
@@ -479,16 +1689,16 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * );
  * ```
  *
- * @example Binding a Worker Layer from another Worker
+ * **Example:** Binding a Worker Layer from another Worker
  * ```typescript
  * // src/WorkerA.ts — imports WorkerB; bundler tree-shakes .make()
  * import WorkerB from "./WorkerB.ts";
  *
  * export default class WorkerA extends Cloudflare.Worker<WorkerA>()(
  *   "WorkerA",
- *   { main: import.meta.filename },
+ *   { main: import.meta.url },
  *   Effect.gen(function* () {
- *     const b = yield* Cloudflare.Worker.bind(WorkerB);
+ *     const b = yield* Cloudflare.Workers.bindWorker(WorkerB);
  *     return {
  *       fetch: Effect.gen(function* () {
  *         return yield* b.greet("world");
@@ -498,14 +1708,14 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * ) {}
  * ```
  *
- * @section Configuration
+ * ### Configuration
  * The props object controls compatibility flags, static assets, and
  * build options. These are evaluated at deploy time.
  *
- * @example Enabling Node.js compatibility
+ * **Example:** Enabling Node.js compatibility
  * ```typescript
  * {
- *   main: import.meta.filename,
+ *   main: import.meta.url,
  *   compatibility: {
  *     flags: ["nodejs_compat"],
  *     date: "2026-03-17",
@@ -513,15 +1723,262 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * }
  * ```
  *
- * @example Serving static assets
+ * **Example:** Serving static assets
  * ```typescript
  * {
- *   main: import.meta.filename,
+ *   main: import.meta.url,
  *   assets: "./public",
  * }
  * ```
  *
- * @section Observability
+ * **Example:** Assets-only Worker (static site)
+ * Omit `main` and `script` entirely to deploy a static site: no Worker
+ * code is uploaded — Cloudflare's asset layer serves every request and
+ * applies `htmlHandling` / `notFoundHandling` (including SPA fallback)
+ * itself, exactly like an assets-only `wrangler deploy`.
+ * ```typescript
+ * const site = yield* Cloudflare.Worker("Site", {
+ *   assets: {
+ *     directory: "./public",
+ *     htmlHandling: "drop-trailing-slash",
+ *     notFoundHandling: "404-page",
+ *   },
+ *   domain: "static.example.com",
+ * });
+ * ```
+ *
+ * **Example:** Zone routes
+ * ```typescript
+ * {
+ *   main: import.meta.filename,
+ *   routes: [
+ *     { pattern: "api.example.com/*", zoneName: "example.com" },
+ *     { pattern: "example.com/api/*", zoneId: "<YOUR_ZONE_ID>" },
+ *   ],
+ * }
+ * ```
+ *
+ * **Example:** Deploying a prebuilt Worker without bundling
+ * When `main` already points at a complete, runtime-ready ESM bundle
+ * produced by an external tool (e.g. OpenNext), set `bundle: false` to
+ * upload it byte-for-byte. The entry's directory is walked recursively
+ * and every file matching the module rules (by default `.js`, `.mjs`,
+ * `.wasm`, `.txt`, `.html`, `.sql`, and `.bin`) is uploaded as an
+ * additional module named by its path relative to that directory.
+ * ```typescript
+ * {
+ *   main: "./.open-next/worker.js",
+ *   bundle: false,
+ *   assets: "./.open-next/assets",
+ * }
+ * ```
+ *
+ * ### Bundling & Tree-shaking
+ * `main` is bundled with rolldown at deploy time. Top-level calls in the
+ * `effect`, `@effect/*`, `alchemy`, `@alchemy.run/*`, and
+ * `@distilled.cloud/*` packages receive `#__PURE__` annotations by
+ * default, so anything the Worker doesn't use from those packages is
+ * tree-shaken out of the bundle. Any other
+ * package — including your own app — is left untouched unless you list
+ * it explicitly.
+ *
+ * **Example:** Treat additional packages as pure
+ * Pass package names (or picomatch globs) via `build.pure.packages` to
+ * annotate them in addition to the defaults.
+ * ```typescript
+ * {
+ *   main: "./src/worker.ts",
+ *   build: {
+ *     pure: { packages: ["my-lib", "@my-scope/*"] },
+ *   },
+ * }
+ * ```
+ *
+ * Listing a package annotates calls whose result is bound (variable
+ * initializers, exports) — safe anywhere. If a listed package also
+ * declares `"sideEffects": false` (or `[]`) in its `package.json`, that
+ * combination opts it into full annotation: top-level calls whose result
+ * is discarded (e.g. `router.on("/path", handler)` registrations) are
+ * also marked pure and deleted under minification when unused. Only list
+ * a `sideEffects: false` package if its modules really are free of
+ * meaningful top-level side effects. The `effect`, `alchemy`, and
+ * `@distilled.cloud` defaults declare exactly that, on purpose — their
+ * modules are designed to be fully tree-shakeable.
+ *
+ * **Example:** Disable pure annotations
+ * ```typescript
+ * {
+ *   main: "./src/worker.ts",
+ *   build: { pure: false },
+ * }
+ * ```
+ *
+ * ### URLs & Domains
+ * Every URL that serves the Worker is collected in `worker.urls`, most
+ * significant first, and `worker.url` is always `urls[0]`. The ranking:
+ * the canonical custom domain (`domain.name`), then aliases in declared
+ * order, then the stable `workers.dev` URL, then version preview URLs.
+ * Under `alchemy dev`, `urls` is the local dev server's
+ * `[localhost, ...LAN]` addresses instead. Redirect hostnames never
+ * appear in `urls` — they serve no content.
+ *
+ * The `workersDev` prop controls the `workers.dev` surface (`true` by
+ * default = stable URL + version previews; `false` = neither; object form
+ * toggles independently), and the `domain` prop attaches custom domains —
+ * DNS records and edge certificates are managed automatically.
+ *
+ * **Example:** Custom domain with aliases and redirects
+ * ```typescript
+ * const worker = yield* Cloudflare.Worker("Api", {
+ *   main: "./src/api.ts",
+ *   domain: {
+ *     name: "example.com",
+ *     zoneId: "<YOUR_ZONE_ID>",
+ *     aliases: ["www.example.com"],
+ *     redirects: ["old.example.com"], // 301 → https://example.com
+ *   },
+ * });
+ * // worker.url  === "https://example.com"
+ * // worker.urls === ["https://example.com", "https://www.example.com",
+ * //                  "https://<name>.<account>.workers.dev"]
+ * ```
+ *
+ * **Example:** workers.dev toggles
+ * ```typescript
+ * // No workers.dev URLs at all:
+ * { main: "./src/api.ts", workersDev: false, domain: "api.example.com" }
+ *
+ * // Previews only — each deploy's version preview URL becomes worker.url:
+ * { main: "./src/api.ts", workersDev: { enabled: false, previewsEnabled: true } }
+ * ```
+ *
+ * **Example:** All URLs as a CORS allow-list
+ * ```typescript
+ * const site = yield* Cloudflare.Worker("Site", {
+ *   main: "./src/site.ts",
+ *   domain: { name: "example.com", aliases: ["www.example.com"] },
+ * });
+ * const api = yield* Cloudflare.Worker("Api", {
+ *   main: "./src/api.ts",
+ *   env: { ALLOWED_ORIGINS: site.urls },
+ * });
+ * ```
+ *
+ * ### Versions & Gradual Deployments
+ * The `version` prop maps Cloudflare's
+ * [versions and gradual deployments](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/)
+ * onto Alchemy stages. A Worker with `version.parent` set uploads an
+ * immutable *version* to the parent Worker's script instead of creating its
+ * own — by default with no traffic, reachable only at its preview URL
+ * (`worker.url`), which is the PR-preview workflow. Give it `traffic` to
+ * run it as a canary, or use `version.traffic` on a normal Worker to roll
+ * out its own deploys gradually.
+ *
+ * A version worker's `url` is its *aliased* preview URL
+ * (`<alias>-<name>.<subdomain>.workers.dev`) — the alias is derived from
+ * the stack, stage, and logical id (override with `version.alias`), so the
+ * URL is stable across deploys and always points at the latest uploaded
+ * version. The per-version URL (`<version-prefix>-...`) is also returned
+ * in `domains`. Because the aliased URL is known before the version
+ * exists, `Worker.URL` works on version workers and resolves to it.
+ *
+ * A version carries code, static assets, bindings, and compatibility
+ * settings. Script-level settings (routes, domains, crons, tags,
+ * observability, …) belong to the parent and are rejected on version workers,
+ * as are locally-hosted Durable Object or Workflow classes. Preview URLs
+ * require the parent's workers.dev subdomain to be enabled (the default).
+ *
+ * **Example:** PR preview: a version of another stage's Worker
+ * ```typescript
+ * // The staging stage deploys the real Worker; a PR stage uploads its
+ * // code as a zero-traffic version of staging's script and gets back a
+ * // stable preview URL.
+ * const parent = yield* Cloudflare.Worker.ref("MyWorker", {
+ *   stage: "staging",
+ * });
+ * const preview = yield* Cloudflare.Worker("MyWorker", {
+ *   main: "./src/worker.ts",
+ *   version: { parent, message: `PR #${process.env.PR_NUMBER}` },
+ * });
+ * // preview.url -> https://<alias>-<name>.<subdomain>.workers.dev
+ * // (stable across deploys; re-points at each newly uploaded version)
+ * ```
+ *
+ * **Example:** Canary: send 10% of the parent's traffic to a version
+ * ```typescript
+ * const parent = yield* Cloudflare.Worker.ref("MyWorker", { stage: "prod" });
+ * yield* Cloudflare.Worker("MyWorker", {
+ *   main: "./src/worker.ts",
+ *   version: { parent, traffic: 10 },
+ * });
+ * ```
+ *
+ * **Example:** Gradual rollout of a Worker's own deploy
+ * ```typescript
+ * // The new version takes 25% of traffic; the previously-live version
+ * // keeps 75%. Bump traffic (or remove the prop) and re-deploy to promote.
+ * yield* Cloudflare.Worker("MyWorker", {
+ *   main: "./src/worker.ts",
+ *   version: { traffic: 25 },
+ * });
+ * ```
+ *
+ * **Example:** Keep users on one version during the rollout
+ * ```typescript
+ * // Percentages route each request independently; affinity pins users by
+ * // filling the Cloudflare-Workers-Version-Key header on zone traffic —
+ * // here from the session cookie, falling back to the client IP. Requires
+ * // a `domain` or `routes` (with `parent`, the parent's).
+ * yield* Cloudflare.Worker("MyWorker", {
+ *   main: "./src/worker.ts",
+ *   domain: "api.example.com",
+ *   version: {
+ *     traffic: 25,
+ *     affinity: { cookie: "session_id", ip: true },
+ *   },
+ * });
+ * ```
+ *
+ * ### The Worker's own URL
+ * `Worker.URL` injects the URL a Worker is served at as a binding on that
+ * same Worker — the first custom `domain` if one is configured, otherwise
+ * its `workers.dev` URL, always equal to the resource's `url` attribute.
+ * Under `alchemy dev` it resolves to the local dev server's URL.
+ *
+ * **Example:** Read the Worker's own URL inside a handler
+ * ```typescript
+ * Cloudflare.Worker(
+ *   "Api",
+ *   { main: import.meta.url },
+ *   Effect.gen(function* () {
+ *     // Attaches the binding and returns a deferred accessor.
+ *     const url = yield* Cloudflare.Worker.URL;
+ *
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         const publicUrl = yield* url;
+ *         return Response.json({ url: publicUrl });
+ *       }),
+ *     };
+ *   }).pipe(Effect.provide(Cloudflare.Workers.URLBinding)),
+ * );
+ * ```
+ *
+ * **Example:** Inject the URL into an async Worker's env
+ * `InferEnv` types the entry as `string`. A `VITE_`-prefixed key on a
+ * vite-built Worker is additionally inlined into the client bundle as
+ * `import.meta.env.VITE_PUBLIC_URL` at build time.
+ * ```typescript
+ * export const Worker = Cloudflare.Worker("Worker", {
+ *   main: "./src/worker.ts",
+ *   env: { PUBLIC_URL: Cloudflare.Worker.URL },
+ * });
+ *
+ * export type WorkerEnv = Cloudflare.InferEnv<typeof Worker>;
+ * //   { PUBLIC_URL: string }
+ * ```
+ *
+ * ### Observability
  * Cloudflare Workers Observability is on by default — `logs.enabled` and
  * `logs.invocationLogs` are turned on if you don't pass an `observability`
  * prop. Pass the prop yourself to tune sampling, enable persistence, or
@@ -531,10 +1988,10 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * Field names match the Cloudflare API (camelCased): `headSamplingRate`,
  * `invocationLogs`, etc.
  *
- * @example Enabling logs and traces
+ * **Example:** Enabling logs and traces
  * ```typescript
  * {
- *   main: import.meta.filename,
+ *   main: import.meta.url,
  *   observability: {
  *     enabled: true,
  *     headSamplingRate: 1,
@@ -553,15 +2010,159 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * }
  * ```
  *
- * @section R2 Bucket
- * Bind an R2 bucket in the init phase with `Cloudflare.R2Bucket.bind`.
+ * ### Tail Workers
+ * A [Tail Worker](https://developers.cloudflare.com/workers/observability/logs/tail-workers/)
+ * receives execution traces (console logs, exceptions, event metadata) from
+ * other Workers. List it in a producer's `tailConsumers` and export a
+ * `tail()` handler from the consumer; Cloudflare delivers each invocation's
+ * trace events to every listed consumer after the invocation completes.
+ *
+ * **Example:** Sending a Worker's traces to a Tail Worker
+ * ```typescript
+ * const tailWorker = yield* Cloudflare.Worker("TailWorker", {
+ *   // exports: export default { async tail(events, env, ctx) { ... } }
+ *   main: "./src/tail.ts",
+ * });
+ *
+ * const api = yield* Cloudflare.Worker("Api", {
+ *   main: "./src/api.ts",
+ *   tailConsumers: [tailWorker],
+ * });
+ * ```
+ *
+ * A *streaming* Tail Worker receives the same invocation's events live,
+ * while the producer is still executing: list it in
+ * `streamingTailConsumers` and export a `tailStream()` handler that is
+ * invoked with the invocation's `onset` event and returns a handler for
+ * every subsequent event of the session, ending with the terminal
+ * `outcome`.
+ *
+ * **Example:** Streaming a Worker's events to a streaming Tail Worker
+ * ```typescript
+ * const streamTailWorker = yield* Cloudflare.Worker("StreamTailWorker", {
+ *   // exports: export default {
+ *   //   tailStream(onset, env, ctx) {
+ *   //     return (event) => { ... }; // log, spanOpen, ..., outcome
+ *   //   },
+ *   // }
+ *   main: "./src/stream-tail.ts",
+ * });
+ *
+ * const api = yield* Cloudflare.Worker("Api", {
+ *   main: "./src/api.ts",
+ *   streamingTailConsumers: [streamTailWorker],
+ * });
+ * ```
+ *
+ * ### Workers Cache
+ * Workers Cache puts a regionally tiered cache in front of the Worker —
+ * cache hits are served from the edge without invoking the Worker (and
+ * without billing CPU time). In an Effect-native Worker, enable it by
+ * yielding `Cloudflare.cache()` in the init phase, which also returns the
+ * runtime purge client; async Workers use the `cache` prop instead. Control
+ * what gets cached from your handlers via standard response headers:
+ * `Cache-Control` (including `stale-while-revalidate`), `Cache-Tag` for
+ * tag-based purging, and `Vary` for content negotiation.
+ *
+ * The cache is scoped to a single Worker version by default, so every
+ * deploy starts cold. Set `crossVersionCache: true` to share cached
+ * responses across versions.
+ *
+ * **Example:** Enabling and purging the cache in an Effect Worker
+ * ```typescript
+ * Effect.gen(function* () {
+ *   // init: enable Workers Cache on this Worker
+ *   const { purge } = yield* Cloudflare.cache({ crossVersionCache: true });
+ *
+ *   return {
+ *     fetch: Effect.gen(function* () {
+ *       const request = yield* HttpServerRequest;
+ *       if (request.url.startsWith("/invalidate")) {
+ *         yield* purge({ tags: ["products"] });
+ *         return HttpServerResponse.text("purged");
+ *       }
+ *       return HttpServerResponse.text("hello", {
+ *         headers: {
+ *           "Cache-Control": "public, max-age=300, stale-while-revalidate=3600",
+ *           "Cache-Tag": "products,product:123",
+ *         },
+ *       });
+ *     }),
+ *   };
+ * })
+ * ```
+ *
+ * **Example:** Enabling Workers Cache on an async Worker
+ * ```typescript
+ * {
+ *   main: "./src/worker.ts",
+ *   cache: {
+ *     enabled: true,
+ *     crossVersionCache: true,
+ *   },
+ * }
+ * ```
+ *
+ * ### Background Work & Scopes
+ * Each incoming event (fetch, RPC call, scheduled run) gets its own Effect
+ * `Scope`. When the handler finishes, the bridge closes that scope and
+ * registers the close promise with workerd's `ctx.waitUntil` — so
+ * finalizers added with `Effect.addFinalizer` inside a handler run *after*
+ * the response is sent, without blocking it, and the Worker stays alive
+ * until they settle. Streaming responses transfer the scope to the stream,
+ * so those finalizers run when the stream completes instead.
+ *
+ * For ad-hoc background work, `WorkerExecutionContext.waitUntil(effect)`
+ * forks an Effect with the caller's full context and keeps the invocation
+ * alive until it settles. The context can be yielded once in the init
+ * closure and used from any handler; its methods are `RuntimeContext`-
+ * colored, so they can only run inside a handler.
+ *
+ * The init closure is evaluated once per isolate: the bridge builds the
+ * Worker's layer stack on the first event and every later event reuses the
+ * built services. Resolve services, bind resources, build handlers there —
+ * one-shot I/O that caches a plain value (e.g. fetching a secret for a
+ * client) is fine, but nothing disposable: the build scope is never closed
+ * (workerd has no isolate-teardown hook), so a finalizer added in the init
+ * closure never runs, and I/O-backed objects (sockets, response bodies) are
+ * pinned to the request that created them. Anything that needs cleanup
+ * belongs in a handler, where `Effect.addFinalizer` attaches to the
+ * per-event scope.
+ *
+ * **Example:** Post-response cleanup with a scope finalizer
+ * ```typescript
+ * return {
+ *   fetch: Effect.gen(function* () {
+ *     // runs after this response is sent, kept alive by waitUntil
+ *     yield* Effect.addFinalizer(() => flushMetrics().pipe(Effect.ignore));
+ *     return HttpServerResponse.text("ok");
+ *   }),
+ * };
+ * ```
+ *
+ * **Example:** Background work with waitUntil
+ * ```typescript
+ * // init
+ * const exec = yield* Cloudflare.WorkerExecutionContext;
+ *
+ * return {
+ *   fetch: Effect.gen(function* () {
+ *     // respond now; the audit write completes in the background
+ *     yield* exec.waitUntil(writeAuditLog(event));
+ *     return HttpServerResponse.text("accepted", { status: 202 });
+ *   }),
+ * };
+ * ```
+ *
+ * ### R2 Bucket
+ * Bind an R2 bucket in the init phase with `Cloudflare.R2.ReadWriteBucket`.
  * The returned handle exposes `get`, `put`, `delete`, and `list`
  * methods you can call in your runtime handlers.
  *
- * @example Binding and using R2
+ * **Example:** Binding and using R2
  * ```typescript
  * // init
- * const bucket = yield* Cloudflare.R2Bucket.bind(MyBucket);
+ * const bucket = yield* Cloudflare.R2.ReadWriteBucket(MyBucket);
  *
  * return {
  *   fetch: Effect.gen(function* () {
@@ -581,15 +2182,15 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * };
  * ```
  *
- * @section KV Namespace
- * Bind a KV namespace with `Cloudflare.KVNamespace.bind`. KV provides
+ * ### KV Namespace
+ * Bind a KV namespace with `Cloudflare.KV.ReadWriteNamespace`. KV provides
  * eventually-consistent, low-latency key-value reads replicated
  * globally across Cloudflare's edge.
  *
- * @example Binding and using KV
+ * **Example:** Binding and using KV
  * ```typescript
  * // init
- * const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ * const kv = yield* Cloudflare.KV.ReadWriteNamespace(MyKV);
  *
  * return {
  *   fetch: Effect.gen(function* () {
@@ -599,15 +2200,15 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * };
  * ```
  *
- * @section D1 Database
- * Bind a D1 database with `Cloudflare.D1Connection.bind`. D1 is a
+ * ### D1 Database
+ * Bind a D1 database with `Cloudflare.D1.QueryDatabase`. D1 is a
  * serverless SQLite database — use `prepare` to build parameterized
  * queries and `all`, `first`, or `run` to execute them.
  *
- * @example Binding and querying D1
+ * **Example:** Binding and querying D1
  * ```typescript
  * // init
- * const db = yield* Cloudflare.D1Connection.bind(MyDB);
+ * const db = yield* Cloudflare.D1.QueryDatabase(MyDatabase);
  *
  * return {
  *   fetch: Effect.gen(function* () {
@@ -620,12 +2221,12 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * };
  * ```
  *
- * @section Durable Objects
- * Yield a `DurableObjectNamespace` class in the init phase to get a
+ * ### Durable Objects
+ * Yield a `DurableObject` class in the init phase to get a
  * namespace handle. Call `getByName` or `getById` to get a typed RPC
  * stub, then call its methods from your runtime handlers.
  *
- * @example Using a Durable Object
+ * **Example:** Using a Durable Object
  * ```typescript
  * // init
  * const counters = yield* Counter;
@@ -639,44 +2240,54 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  * };
  * ```
  *
- * @section Containers
- * Containers run long-lived processes alongside Durable Objects. Bind
- * one with `Cloudflare.Container.bind` and start it with
- * `Cloudflare.start`. You can call typed methods on the running
- * container or make HTTP requests to its exposed ports.
+ * ### Containers
+ * Containers run long-lived processes alongside Durable Objects.
+ * Provide `Cloudflare.Containers.layer(Sandbox, …)` on a DO's init to
+ * bind, start, and monitor the container; then `yield* Sandbox`
+ * resolves the **running** instance. Call its typed methods or use
+ * `getTcpPort` to make HTTP requests to its exposed ports.
  *
- * @example Binding and starting a Container
+ * **Example:** Running a Container from a Durable Object
  * ```typescript
- * // init (inside a DurableObjectNamespace)
- * const sandbox = yield* Cloudflare.Container.bind(Sandbox);
+ * export default class Agent extends Cloudflare.DurableObject<Agent>()(
+ *   "Agents",
+ *   Effect.gen(function* () {
+ *     const sandbox = yield* Sandbox;
  *
- * return Effect.gen(function* () {
- *   const container = yield* Cloudflare.start(sandbox, { enableInternet: true });
- *
- *   return {
- *     exec: (cmd: string) => container.exec(cmd),
- *     fetch: Effect.gen(function* () {
- *       const { fetch } = yield* container.getTcpPort(3000);
- *       const res = yield* fetch(HttpClientRequest.get("http://container/"));
- *       return HttpServerResponse.fromClientResponse(res);
- *     }),
- *   };
- * });
+ *     return Effect.gen(function* () {
+ *       return {
+ *         exec: (cmd: string) => sandbox.exec(cmd),
+ *         health: () =>
+ *           Effect.gen(function* () {
+ *             const { fetch } = yield* sandbox.getTcpPort(3000);
+ *             const res = yield* fetch(
+ *               HttpClientRequest.get("http://container/health"),
+ *             );
+ *             return yield* res.text;
+ *           }),
+ *       };
+ *     });
+ *   }).pipe(
+ *     Effect.provide(
+ *       Cloudflare.Containers.layer(Sandbox, { enableInternet: true }),
+ *     ),
+ *   ),
+ * ) {}
  * ```
  *
- * @section Dynamic Workers
- * `DynamicWorkerLoader` lets you spin up ephemeral Workers at runtime
+ * ### Dynamic Workers
+ * `WorkerLoader` lets you spin up ephemeral Workers at runtime
  * from inline JavaScript modules. This is useful for sandboxing
  * user-provided code or running untrusted scripts in isolation.
  *
- * @example Loading a dynamic Worker
+ * **Example:** Loading a dynamic Worker
  * ```typescript
  * // init
- * const loader = yield* Cloudflare.DynamicWorkerLoader("Loader");
+ * const loader = yield* Cloudflare.WorkerLoader("Loader");
  *
  * return {
  *   fetch: Effect.gen(function* () {
- *     const worker = loader.load({
+ *     const worker = yield* loader.load({
  *       compatibilityDate: "2026-01-28",
  *       mainModule: "worker.js",
  *       modules: {
@@ -693,1614 +2304,152 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
  *   }),
  * };
  * ```
+ *
+ * @resource
+ * @product Workers
+ * @category Workers & Compute
  */
-export const Worker: Platform<
-  Worker,
-  WorkerServices,
-  WorkerShape,
-  WorkerRuntimeContext
-> & {
-  <
-    const Bindings extends WorkerBindingProps = {},
-    const Assets extends WorkerAssetsConfig | undefined = undefined,
-    Req = never,
-  >(
-    id: string,
-    props:
-      | InputProps<WorkerProps<Bindings, Assets>>
-      | Effect.Effect<InputProps<WorkerProps<Bindings, Assets>>, never, Req>,
-  ): Effect.Effect<
-    Worker<{
-      [binding in keyof NormalizedBindings<
-        Bindings,
-        Assets
-      >]: NormalizedBindings<Bindings, Assets>[binding];
-    }>,
+export const Worker: ResourceClassLike<Worker> &
+  Effect.Effect<
+    Worker & WorkerRuntimeContext & RuntimeContext,
     never,
-    Req | Providers
-  >;
-} = Platform(WorkerTypeId, {
-  // Both hooks are wrapped in arrows so the imported references are resolved
-  // at call time rather than at module-load time. Worker.ts forms import
-  // cycles with both WorkerAsyncBindings.ts (which imports `isWorker` here)
-  // and WorkerRuntimeContext.ts (which imports `WorkerTypeId`/`WorkerEnvironment`
-  // here). Reading either binding eagerly here hits TDZ when Bun loads the
-  // package from node_modules in a different module-init order than the local
-  // workspace.
-  onCreate: (resource, props) =>
-    bindWorkerAsyncBindings(resource as Worker, props),
-  createRuntimeContext: (id) => makeWorkerRuntimeContext(id),
-});
-
-class MissingDurableObjectNamespaces extends Data.TaggedError(
-  "MissingDurableObjectNamespaces",
-)<{
-  scriptName: string;
-  expected: string[];
-}> {}
-
-const selectLayer = <
-  LayerLive extends Layer.Layer<any, any, any>,
-  LayerDev extends Layer.Layer<any, any, any>,
->(input: {
-  live: () => LayerLive;
-  dev: () => LayerDev;
-}): Layer.Layer<
-  Layer.Success<LayerLive | LayerDev>,
-  Layer.Error<LayerLive | LayerDev>,
-  Layer.Services<LayerLive | LayerDev> | AlchemyContext
-> =>
-  Layer.unwrap(
-    AlchemyContext.useSync((context) =>
-      context.dev ? input.dev() : input.live(),
-    ),
-  );
-
-export const WorkerProvider = () =>
-  selectLayer({
-    live: LiveWorkerProvider,
-    dev: () => Layer.provide(LocalWorkerProvider(), localRuntimeServices()),
-  });
-
-export const LiveWorkerProvider = () =>
-  Provider.effect(
-    Worker,
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-
-      const { accountId } = yield* CloudflareEnvironment;
-      const bundler = yield* WorkerBundle;
-      const stack = yield* Stack;
-
-      const createScriptSubdomain = yield* workers.createScriptSubdomain;
-      const deleteScript = yield* workers.deleteScript;
-      const getScriptSubdomain = yield* workers.getScriptSubdomain;
-      const getScriptSchedule = yield* workers.getScriptSchedule;
-      const getScriptSettings = yield* workers.getScriptScriptAndVersionSetting;
-      const getSubdomain = yield* workers.getSubdomain;
-      const putScript = yield* workers.putScript;
-      const putScriptSchedule = yield* workers.putScriptSchedule;
-      const putDomain = yield* workers.putDomain;
-      const listDomains = yield* workers.listDomains;
-      const deleteDomain = yield* workers.deleteDomain;
-      const listZones = yield* zones.listZones;
-      const telemetry = yield* CloudflareLogs;
-
-      const getAccountSubdomain = (accountId: string) =>
-        getSubdomain({
-          accountId,
-        }).pipe(Effect.map((result) => result.subdomain));
-
-      // Toggle the workers.dev subdomain via `POST /subdomain` with
-      // `enabled: true | false`. Mirrors the upstream Alchemy
-      // implementation in `.vendor/alchemy/.../worker-subdomain.ts`.
-      // When enabling we also set `previewsEnabled: true` so the
-      // script is reachable both at its stable workers.dev URL and at
-      // version-preview URLs; on disable we send just `enabled: false`.
-      const setWorkerSubdomain = (name: string, enabled: boolean) =>
-        createScriptSubdomain({
-          accountId,
-          scriptName: name,
-          enabled,
-          previewsEnabled: enabled ? true : undefined,
-        });
-
-      // Convert non-ASCII hostnames (emoji, IDN, etc.) to punycode so the
-      // Cloudflare API receives the form it stores domains in. `new URL(...)`
-      // does IDNA via WHATWG URL parsing — `📦.alchemy.run` → `xn--5z8h.alchemy.run`.
-      const toPunycode = (hostname: string): string => {
-        try {
-          return new URL(`https://${hostname}`).hostname;
-        } catch {
-          return hostname;
-        }
-      };
-
-      const normalizeDomains = (
-        domain: string | string[] | undefined,
-      ): string[] =>
-        domain === undefined
-          ? []
-          : Array.from(
-              new Set(
-                (Array.isArray(domain) ? domain : [domain]).map(toPunycode),
-              ),
-            );
-
-      const normalizeCrons = (crons: string[] | undefined): string[] =>
-        Array.from(new Set(crons ?? []));
-
-      const getWorkerCrons = (scriptName: string) =>
-        getScriptSchedule({
-          accountId,
-          scriptName,
-        }).pipe(
-          Effect.map((response) =>
-            normalizeCrons(response.schedules.map((schedule) => schedule.cron)),
-          ),
-          Effect.catchTag("WorkerNotFound", () => Effect.succeed([])),
-        );
-
-      const reconcileCrons = (
-        scriptName: string,
-        desired: string[],
-        previous: string[],
-        session: ScopedPlanStatusSession,
-      ) =>
-        Effect.gen(function* () {
-          const live = yield* getWorkerCrons(scriptName);
-          const desiredSorted = [...desired].sort();
-          const liveSorted = [...live].sort();
-          const changed =
-            desiredSorted.length !== liveSorted.length ||
-            desiredSorted.some((cron, index) => cron !== liveSorted[index]);
-
-          if (!changed) return live;
-
-          if (desired.length > 0 || previous.length > 0 || live.length > 0) {
-            yield* session.note(
-              `Reconciling Cron Triggers (${desired.length}) ...`,
-            );
-          }
-
-          const result = yield* putScriptSchedule({
-            accountId,
-            scriptName,
-            body: desired.map((cron) => ({ cron })),
-          }).pipe(
-            Effect.retry({
-              while: (error: { _tag?: string }) =>
-                error?._tag === "WorkerNotFound",
-              schedule: Schedule.exponential(200).pipe(
-                Schedule.both(Schedule.recurs(15)),
-              ),
-            }),
-          );
-          return normalizeCrons(
-            result.schedules.map((schedule) => schedule.cron),
-          );
-        });
-
+    Worker
+  > & {
+    <Self, Shape extends WorkerShape, Deps = never>(): {
+      <const Id extends string>(
+        id: Id,
+      ): Effect.Effect<
+        Worker & Rpc<Self> & Dependencies<Deps>,
+        never,
+        Self | Extract<Deps, Container.Application<any>> | Providers
+      > &
+        Named<Id> & {
+          new (
+            _: never,
+          ): MakeShape<Shape, WorkerShape> & Named<Id> & Tag<WorkerTypeId>;
+          of(shape: Shape & WorkerShape): MakeShape<Shape, WorkerShape>;
+          make<PropsReq = never, InitReq = never>(
+            props:
+              | InputProps<WorkerProps>
+              | Effect.Effect<InputProps<WorkerProps>, ConfigError, PropsReq>,
+            impl: Effect.Effect<Shape, ConfigError, InitReq>,
+          ): Layer.Layer<
+            Self,
+            never,
+            | Extract<Deps, Container.Application<any>>
+            | Providers
+            | Exclude<
+                PropsReq | InitReq,
+                Self | WorkerServices | Tag<WorkerTypeId>
+              >
+          >;
+        };
+    };
+    <Self>(): {
+      <
+        const Id extends string,
+        Shape extends WorkerShape,
+        Req extends
+          | WorkerServices
+          | Container.Application<any>
+          | PlatformServices
+          | Tag,
+        PropsReq = never,
+      >(
+        id: Id,
+        props:
+          | InputProps<WorkerProps>
+          | Effect.Effect<InputProps<WorkerProps>, ConfigError, PropsReq>,
+        impl: Effect.Effect<Shape, ConfigError, Req>,
+      ): Effect.Effect<
+        Worker & Rpc<Self>,
+        never,
+        Extract<Req, Container.Application<any>> | Providers | PropsReq
+      > &
+        Named<Id> & {
+          new (): MakeShape<Shape, WorkerShape> & Named<Id> & Tag<WorkerTypeId>;
+        };
       /**
-       * Infer the Cloudflare Zone ID for a given hostname by listing the
-       * account's zones and matching the hostname against each zone's name —
-       * walking up the DNS label hierarchy until a match is found.
+       * Class form without an implementation — an external Worker (a plain
+       * bundled `main`, a raw `script`, or an assets-only Worker with no
+       * script at all):
+       *
+       * ```typescript
+       * export class Site extends Cloudflare.Worker<Site>()("Site", {
+       *   assets: { directory: "./public" },
+       * }) {}
+       * ```
        */
-      const inferZoneIdForHostname = (
-        hostname: string,
-        zoneCache: Map<string, string>,
-      ) =>
-        Effect.gen(function* () {
-          const cached = zoneCache.get(hostname);
-          if (cached) return cached;
-
-          const zoneList = yield* listZones({}).pipe(
-            Effect.map((response) => response.result ?? []),
-          );
-          for (const zone of zoneList) {
-            zoneCache.set(zone.name, zone.id);
-          }
-
-          const parts = hostname.split(".");
-          for (let i = 0; i < parts.length - 1; i++) {
-            const candidate = parts.slice(i).join(".");
-            const match = zoneList.find((z) => z.name === candidate);
-            if (match) {
-              zoneCache.set(hostname, match.id);
-              return match.id;
-            }
-          }
-          return yield* Effect.die(
-            `Could not infer Cloudflare Zone for hostname "${hostname}". ` +
-              "Ensure the parent zone exists in this account.",
-          );
-        });
-
-      const reconcileDomains = (scriptName: string, desired: string[]) =>
-        Effect.gen(function* () {
-          // Always query the live state of domains attached to *this*
-          // Worker rather than trusting `_previous` from local state.
-          // State may have been wiped, populated by another machine, or
-          // simply be out of date. Without this we PUT domains that are
-          // already registered to this same Worker and Cloudflare
-          // returns a confusing "hostname already in use" error.
-          const liveAll = yield* listDomains({
-            accountId,
-            service: scriptName,
-          }).pipe(
-            Effect.map((r) =>
-              (r.result ?? []).flatMap((d) =>
-                d.id && d.hostname && d.zoneId
-                  ? [
-                      {
-                        id: d.id,
-                        hostname: d.hostname,
-                        zoneId: d.zoneId,
-                        service: d.service ?? undefined,
-                      },
-                    ]
-                  : [],
-              ),
-            ),
-            Effect.catch(() => Effect.succeed([])),
-          );
-
-          const desiredSet = new Set(desired);
-          const liveByHostname = new Map(liveAll.map((d) => [d.hostname, d]));
-
-          // Detach what's no longer wanted. Use the live list so we
-          // don't try to delete domains we no longer track.
-          const toRemove = liveAll.filter((d) => !desiredSet.has(d.hostname));
-          yield* Effect.all(
-            toRemove.map((d) =>
-              deleteDomain({ accountId, domainId: d.id }).pipe(
-                Effect.catchTag("DomainNotFound", () => Effect.void),
-              ),
-            ),
-            { concurrency: "unbounded" },
-          );
-
-          if (desired.length === 0) return [];
-
-          const zoneCache = new Map<string, string>();
-
-          // Attach `hostname` to this Worker. Skip the PUT entirely if
-          // the hostname is already attached to *this* Worker — that's a
-          // no-op for Cloudflare and avoids the "already in use" 409.
-          // If it's attached to a *different* Worker, refuse with a
-          // clear message rather than silently re-routing traffic.
-          const attachDomain = Effect.fnUntraced(function* (hostname: string) {
-            const live = liveByHostname.get(hostname);
-            if (live) {
-              return {
-                hostname: live.hostname,
-                id: live.id,
-                zoneId: live.zoneId,
-              };
-            }
-
-            // Not attached to this Worker — but it could still belong
-            // to another Worker. Check before we try to PUT so we can
-            // emit a helpful error instead of the raw 409.
-            const otherOwner = yield* listDomains({
-              accountId,
-              hostname,
-            }).pipe(
-              Effect.map((r) =>
-                (r.result ?? []).find(
-                  (d) => d.hostname === hostname && d.service !== scriptName,
-                ),
-              ),
-              Effect.catch(() => Effect.succeed(undefined)),
-            );
-            if (otherOwner?.id) {
-              return yield* Effect.die(
-                new Error(
-                  `Cannot attach hostname '${hostname}' to Worker '${scriptName}': ` +
-                    `it is already attached to Worker '${otherOwner.service ?? "<unknown>"}'. ` +
-                    `Detach it from that Worker first, or pick a different hostname.`,
-                ),
-              );
-            }
-
-            const zoneId = yield* inferZoneIdForHostname(hostname, zoneCache);
-            // Same eventual-consistency window as `setWorkerSubdomain`:
-            // PUT /accounts/.../workers/domains right after `putScript`
-            // can return `WorkerNotFound` until Cloudflare's script
-            // registry has propagated. Retry on that specific tag.
-            const res = yield* putDomain({
-              accountId,
-              hostname,
-              service: scriptName,
-              zoneId,
-            }).pipe(
-              Effect.retry({
-                while: (error: { _tag?: string }) =>
-                  error?._tag === "WorkerNotFound",
-                schedule: Schedule.exponential(200).pipe(
-                  Schedule.both(Schedule.recurs(15)),
-                ),
-              }),
-            );
-            return {
-              hostname,
-              id: res.id ?? "",
-              zoneId: res.zoneId ?? zoneId,
-            };
-          });
-
-          const applied = yield* Effect.all(desired.map(attachDomain), {
-            concurrency: "unbounded",
-          });
-          return applied;
-        });
-
-      const createAlchemyWorkerTags = (id: string) => [
-        `alchemy:stack:${stack.name}`,
-        `alchemy:stage:${stack.stage}`,
-        `alchemy:id:${id}`,
-      ];
-
-      const hasAlchemyWorkerTags = (
-        id: string,
-        tags: readonly string[] | undefined,
-      ) => {
-        const actualTags = new Set(tags ?? []);
-        return createAlchemyWorkerTags(id).every((tag) => actualTags.has(tag));
-      };
-
-      const getDurableObjectNamespaces = (
-        bindings: readonly WorkerSettingsBinding[] | null | undefined,
-      ) => {
-        const namespaces = Object.fromEntries(
-          (bindings ?? []).flatMap((binding) =>
-            binding.type === "durable_object_namespace" &&
-            binding.className &&
-            binding.namespaceId
-              ? [[binding.className, binding.namespaceId]]
-              : [],
-          ),
-        );
-        return namespaces;
-      };
-
-      const getExpectedDurableObjectClassNames = (
-        bindings: readonly WorkerBinding[] | undefined,
-        workerName: string,
-      ) =>
-        Array.from(
-          new Set(
-            bindings?.flatMap((binding) =>
-              binding.type === "durable_object_namespace" &&
-              binding.className &&
-              (binding.scriptName === undefined ||
-                binding.scriptName === workerName)
-                ? [binding.className]
-                : [],
-            ) ?? [],
-          ),
-        );
-
-      const getWorkerSettingsWithDurableObjects = Effect.fnUntraced(function* (
-        scriptName: string,
-        expectedClassNames: readonly string[],
-      ) {
-        return yield* getScriptSettings({
-          accountId,
-          scriptName,
-        }).pipe(
-          Effect.map((settings) => {
-            const namespaces = getDurableObjectNamespaces(settings.bindings);
-            const missing = expectedClassNames.filter(
-              (className) => !namespaces[className],
-            );
-            if (missing.length > 0) {
-              return Effect.fail(
-                new MissingDurableObjectNamespaces({
-                  scriptName,
-                  expected: missing,
-                }),
-              );
-            }
-            return Effect.succeed({
-              settings,
-              durableObjectNamespaces: namespaces,
-            });
-          }),
-          Effect.flatten,
-          Effect.retry({
-            while: (error) => error._tag === "MissingDurableObjectNamespaces",
-            schedule: Schedule.exponential(100).pipe(
-              Schedule.both(Schedule.recurs(20)),
-            ),
-          }),
-        );
-      });
-
-      const prepareAssets = Effect.fnUntraced(function* (
-        assets: WorkerProps["assets"],
-      ) {
-        if (!assets) {
-          return undefined;
-        }
-
-        if (
-          typeof assets === "object" &&
-          "path" in assets &&
-          "hash" in assets
-        ) {
-          return yield* readAssets({
-            directory: assets.path as string,
-            config: assets.config,
-          });
-        }
-
-        // Handle string path or AssetsProps
-        return yield* readAssets(
-          typeof assets === "string" ? { directory: assets } : assets,
-        );
-      });
-
-      const prepareBundle = (id: string, props: WorkerProps) =>
-        bundler
-          .build({
-            id,
-            main: props.main!,
-            compatibility: getCompatibility(props),
-            entry: props.isExternal
-              ? {
-                  kind: "external",
-                }
-              : {
-                  kind: "effect",
-                  exports: (props.exports ?? {}) as any,
-                },
-            stack: { name: stack.name, stage: stack.stage },
-            extraOptions: props.build,
-          })
-          .pipe(Artifacts.cached("build"));
-
-      const hashScript = (script: string) =>
-        Effect.sync(() =>
-          crypto.createHash("sha256").update(script).digest("hex"),
-        );
-
-      const viteBuild = Effect.fnUntraced(function* (props: WorkerProps) {
-        const compatibility = getCompatibility(props);
-        const { assetsDirectory, serverBundle } = yield* Vite.viteBuild(
-          props.vite?.rootDir,
-          Object.fromEntries(
-            (yield* Effect.all(
-              Object.entries(props.env ?? {}).map(
-                Effect.fnUntraced(function* ([key, value]) {
-                  return [
-                    key,
-                    typeof value === "string"
-                      ? value
-                      : Redacted.isRedacted(value) &&
-                          typeof Redacted.value(value) === "string"
-                        ? Redacted.value(value)
-                        : Config.isConfig(value) || Effect.isEffect(value)
-                          ? yield* value
-                          : undefined,
-                  ];
-                }),
-              ),
-            )).filter(([_, value]) => value !== undefined),
-          ),
-          {
-            compatibilityDate: compatibility.date,
-            compatibilityFlags: compatibility.flags,
-          },
-        );
-
-        if (!assetsDirectory && !serverBundle) {
-          return yield* Effect.die(
-            new Error("Vite build produced neither server nor client output"),
-          );
-        }
-        const [assets, bundle] = yield* Effect.all(
-          [
-            assetsDirectory
-              ? readAssets({
-                  directory: assetsDirectory,
-                  config:
-                    typeof props.assets === "object" && "config" in props.assets
-                      ? props.assets.config
-                      : undefined,
-                })
-              : Effect.succeed(undefined),
-            serverBundle
-              ? Bundle.bundleOutputFromRolldownOutputBundle(serverBundle)
-              : Effect.succeed(undefined),
-          ],
-          { concurrency: "unbounded" },
-        );
-        return { assets, bundle };
-      });
-
-      const prepareAssetsAndBundle = (
-        id: string,
-        props: WorkerProps,
-        opts: { skipAssetsRead?: boolean } = {},
-      ) =>
-        Effect.gen(function* () {
-          if (props.script !== undefined) {
-            const [assets, bundleHash] = yield* Effect.all(
-              [
-                opts.skipAssetsRead
-                  ? Effect.succeed(undefined)
-                  : prepareAssets(props.assets),
-                hashScript(props.script),
-              ],
-              { concurrency: "unbounded" },
-            );
-            return {
-              assets,
-              bundle: {
-                files: [{ path: "main.js", content: props.script }],
-                hash: bundleHash,
-              },
-            };
-          }
-          if (props.vite) {
-            const [{ assets, bundle }, input] = yield* Effect.all(
-              [
-                viteBuild(props),
-                // hashDirectory expects `{ cwd, memo }`. The vite props
-                // store the project root under `rootDir`, so map it
-                // here. Without this, `cwd` falls back to
-                // `process.cwd()` and the input hash is computed over
-                // the wrong directory tree (often the entire monorepo
-                // root), making it both slow and unable to detect
-                // changes scoped to the actual Vite project.
-                hashDirectory({
-                  cwd: props.vite.rootDir,
-                  memo: props.vite.memo,
-                }),
-              ],
-              { concurrency: "unbounded" },
-            );
-            return { assets, bundle, input };
-          }
-          const [assets, bundle] = yield* Effect.all(
-            [
-              opts.skipAssetsRead
-                ? Effect.succeed(undefined)
-                : prepareAssets(props.assets),
-              prepareBundle(id, props),
-            ],
-            { concurrency: "unbounded" },
-          );
-          return { assets, bundle };
-        }).pipe(
-          Effect.map(({ assets, bundle, input }) => ({
-            assets,
-            bundle: {
-              main: bundle?.files[0].path,
-              files: bundle?.files.map(
-                (file) =>
-                  new File([file.content as BlobPart], file.path, {
-                    type: contentTypeFromExtension(path.extname(file.path)),
-                  }),
-              ),
-            },
-            hash: {
-              assets: assets?.hash,
-              bundle: bundle?.hash,
-              input,
-            } satisfies Worker["Attributes"]["hash"],
-          })),
-        );
-
-      const putWorker = Effect.fnUntraced(function* (
-        id: string,
-        news: WorkerProps,
-        bindings: ResourceBinding<Worker["Binding"]>[],
-        olds: WorkerProps | undefined,
-        output: Worker["Attributes"] | undefined,
-        session: ScopedPlanStatusSession,
-        existingSettings?: workers.GetScriptScriptAndVersionSettingResponse,
-      ) {
-        const name = yield* createWorkerName(id, news.name);
-        yield* Effect.logInfo(
-          `Cloudflare Worker ${olds ? "update" : "create"}: preparing bundle for ${name}`,
-        );
-        // If the caller handed us a precomputed asset hash that matches
-        // what we previously stored, we can skip walking the directory
-        // entirely and tell Cloudflare to keep the assets it already
-        // has bound to this script. The disk read is the expensive
-        // part; the script PUT happens either way.
-        const previousAssetsHash = output?.hash?.assets;
-        const precomputedAssetsHash =
-          news.assets &&
-          typeof news.assets === "object" &&
-          "path" in news.assets &&
-          "hash" in news.assets
-            ? (news.assets.hash as string)
-            : undefined;
-        const assetsConfigFromProps =
-          news.assets &&
-          typeof news.assets === "object" &&
-          "config" in news.assets
-            ? news.assets.config
-            : undefined;
-        const skipAssetsRead =
-          precomputedAssetsHash !== undefined &&
-          precomputedAssetsHash === previousAssetsHash;
-        const {
-          assets,
-          bundle,
-          hash: preparedHash,
-        } = yield* prepareAssetsAndBundle(id, news, { skipAssetsRead });
-        // When the caller supplied a precomputed hash (e.g. via
-        // `Build.Command`), store *that* hash in output state so the
-        // next diff can short-circuit by comparing it directly. The
-        // hash that `readAssets` produces is the manifest-derived
-        // hash, which is shaped differently from any upstream
-        // build-input hash and will never match it on the next pass.
-        const hash = {
-          ...preparedHash,
-          assets: precomputedAssetsHash ?? preparedHash.assets,
-        } satisfies Worker["Attributes"]["hash"];
-        const metadataBindings = bindings.flatMap((b) => b.data.bindings ?? []);
-        const expectedDurableObjectClassNames =
-          getExpectedDurableObjectClassNames(metadataBindings, name);
-        let metadataAssets:
-          | workers.PutScriptRequest["metadata"]["assets"]
-          | undefined;
-        let keepAssets = false;
-        if (skipAssetsRead) {
-          // Hash matched what's already on Cloudflare: keep the
-          // existing asset manifest and skip the upload session.
-          yield* Effect.logInfo(
-            `Cloudflare Worker update: assets unchanged for ${name}, keeping existing`,
-          );
-          keepAssets = true;
-          metadataAssets = assetsConfigFromProps
-            ? { config: assetsConfigFromProps }
-            : undefined;
-          metadataBindings.push({
-            type: "assets",
-            name: "ASSETS",
-          });
-        } else if (assets) {
-          // We had to read the directory. Even after the read, the
-          // computed hash may match what's already deployed (e.g.
-          // legacy `string` / `AssetsProps` shapes that don't carry a
-          // precomputed hash, or a precomputed hash that disagreed with
-          // disk). In that case still keep the existing manifest and
-          // skip the upload session — Cloudflare's content-addressed
-          // session would no-op on every byte anyway.
-          if (assets.hash === previousAssetsHash) {
-            yield* Effect.logInfo(
-              `Cloudflare Worker update: assets unchanged for ${name}, keeping existing`,
-            );
-            keepAssets = true;
-            metadataAssets = { config: assets.config };
-          } else {
-            yield* Effect.logInfo(
-              `Cloudflare Worker ${olds ? "update" : "create"}: uploading assets for ${name}`,
-            );
-            const { jwt } = yield* uploadAssets(
-              accountId,
-              name,
-              assets,
-              session,
-            );
-            metadataAssets = {
-              jwt,
-              config: assets.config,
-            };
-          }
-          metadataBindings.push({
-            type: "assets",
-            name: "ASSETS",
-          });
-        }
-        metadataBindings.push(
-          {
-            type: "plain_text",
-            name: "ALCHEMY_PHASE",
-            text: "runtime",
-          },
-          {
-            type: "plain_text",
-            name: "ALCHEMY_STACK_NAME",
-            text: stack.name,
-          },
-          {
-            type: "plain_text",
-            name: "ALCHEMY_STAGE",
-            text: stack.stage,
-          },
-        );
-        // Add environment variables as metadata bindings
-        if (news.env) {
-          for (const [key, value] of Object.entries(news.env)) {
-            if (value === undefined) continue;
-            if (metadataBindings.some((b) => b.name === key)) continue;
-            if (Redacted.isRedacted(value)) {
-              const unredacted = Redacted.value(value);
-              metadataBindings.push({
-                type: "secret_text",
-                name: key,
-                text:
-                  typeof unredacted === "string"
-                    ? unredacted
-                    : JSON.stringify(unredacted),
-              });
-            } else if (typeof value === "string") {
-              metadataBindings.push({
-                type: "plain_text",
-                name: key,
-                text: value,
-              });
-            } else {
-              metadataBindings.push({
-                type: "json",
-                name: key,
-                json: value,
-              });
-            }
-          }
-        }
-        yield* Effect.logInfo(
-          `Cloudflare Worker ${olds ? "update" : "create"}: uploading script for ${name}`,
-        );
-        const size =
-          bundle.files
-            ?.filter((file) => !file.name.endsWith(".map"))
-            .reduce((acc, file) => acc + file.size, 0) ?? 0;
-        const sizeKB = size / 1024;
-        const sizeMB = sizeKB / 1024;
-        const bundleSize = `${sizeKB > 1024 ? `${sizeMB.toFixed(2)} MB` : `${sizeKB.toFixed(2)} KB`}`;
-        yield* session.note(`Uploading worker (${bundleSize}) ...`);
-
-        // Read existing worker settings for migration tracking
-        const oldSettings =
-          existingSettings ??
-          (yield* getScriptSettings({
-            accountId,
-            scriptName: name,
-          }).pipe(
-            Effect.map((s) => s as typeof s | undefined),
-            Effect.catch(() => Effect.succeed(undefined)),
-          ));
-
-        const oldTags = Array.from(new Set(oldSettings?.tags ?? []));
-        const oldBindings = oldSettings?.bindings ?? [];
-
-        // Parse alchemy:do:{logicalId}:{className} tags
-        const oldDoClassNameByLogicalId = getDurableObjectTagMap(oldTags);
-        const currentDoBindings = getDurableObjectBindings(bindings, name);
-        const currentDoClassNameByLogicalId = Object.fromEntries(
-          currentDoBindings.map((binding) => [
-            binding.logicalId,
-            binding.className,
-          ]),
-        );
-
-        // Parse alchemy:migration-tag:{version}
-        const oldMigrationTag = oldTags.flatMap((tag) =>
-          tag.startsWith("alchemy:migration-tag:")
-            ? [tag.slice("alchemy:migration-tag:".length)]
-            : [],
-        )[0];
-        const newMigrationTag = bumpMigrationTagVersion(oldMigrationTag);
-
-        // Compute deleted classes
-        const deletedClasses: string[] = [];
-        for (const [logicalId, className] of Object.entries(
-          oldDoClassNameByLogicalId,
-        )) {
-          if (!currentDoClassNameByLogicalId[logicalId]) {
-            deletedClasses.push(className);
-          }
-        }
-
-        // Backward compatibility for old workers that have DO bindings but no
-        // alchemy:do tags yet. Cross-script bindings (`scriptName` set to
-        // anything other than this worker) are NEVER candidates for
-        // delete-class migrations — the class lives on the foreign script
-        // and we don't own its lifecycle.
-        if (Object.keys(oldDoClassNameByLogicalId).length === 0) {
-          for (const oldBinding of oldBindings) {
-            const ownedLocally =
-              !("scriptName" in oldBinding) || oldBinding.scriptName === name;
-            if (
-              oldBinding.type === "durable_object_namespace" &&
-              "className" in oldBinding &&
-              oldBinding.className &&
-              ownedLocally &&
-              !currentDoBindings.some(
-                (binding) => binding.bindingName === oldBinding.name,
-              )
-            ) {
-              deletedClasses.push(oldBinding.className);
-            }
-          }
-        }
-
-        // Collect container-backed class names so we can send container metadata
-        const containerClassNames = new Set(
-          bindings.flatMap((b) =>
-            (b.data.containers ?? []).map((c) => c.className),
-          ),
-        );
-
-        // Compute new and renamed classes
-        const newClasses: string[] = [];
-        const newSqliteClasses: string[] = [];
-        const renamedClasses: { from: string; to: string }[] = [];
-        for (const binding of currentDoBindings) {
-          const previousClassName =
-            oldDoClassNameByLogicalId[binding.logicalId];
-          if (!previousClassName) {
-            // Default all new Durable Object classes to SQLite. Cloudflare
-            // recommends SQLite for new namespaces, and container-backed
-            // Durable Objects require it.
-            newSqliteClasses.push(binding.className);
-          } else if (previousClassName !== binding.className) {
-            renamedClasses.push({
-              from: previousClassName,
-              to: binding.className,
-            });
-          }
-        }
-
-        yield* Effect.logInfo(
-          `Cloudflare Worker put: durable object reconciliation ${JSON.stringify(
-            {
-              oldDoClassNameByLogicalId,
-              currentDoClassNameByLogicalId,
-              deletedClasses,
-              renamedClasses,
-              newSqliteClasses,
-            },
-          )}`,
-        );
-
-        // Build alchemy:do:{logicalId}:{className} tags for each DO binding
-        const alchemyDoTags: string[] = [];
-        for (const binding of currentDoBindings) {
-          alchemyDoTags.push(
-            `alchemy:do:${binding.logicalId}:${binding.className}`,
-          );
-        }
-
-        const metadataTags = Array.from(
-          new Set([
-            ...createAlchemyWorkerTags(id),
-            ...alchemyDoTags,
-            ...(newMigrationTag
-              ? [`alchemy:migration-tag:${newMigrationTag}`]
-              : []),
-            ...(news.tags ?? []),
-          ]),
-        );
-
-        const migrations = {
-          oldTag: oldMigrationTag,
-          newTag: newMigrationTag,
-          newClasses,
-          deletedClasses,
-          renamedClasses,
-          transferredClasses: [] as { from: string; to: string }[],
-          newSqliteClasses,
+      <const Id extends string, Req = never>(
+        id: Id,
+        props:
+          | InputProps<WorkerProps>
+          | Effect.Effect<InputProps<WorkerProps>, ConfigError, Req>,
+      ): Effect.Effect<Worker & Rpc<{}>, never, Req | Providers> &
+        Named<Id> & {
+          new (): Named<Id> & Tag<WorkerTypeId>;
         };
-
-        const metadataContainers = [...containerClassNames].map(
-          (className) => ({
-            className,
-          }),
-        );
-
-        const compatibility = getCompatibility(news);
-        const metadata: workers.PutScriptRequest["metadata"] = {
-          assets: metadataAssets,
-          bindings: metadataBindings,
-          bodyPart: undefined,
-          compatibilityDate: compatibility.date,
-          compatibilityFlags: compatibility.flags,
-          containers:
-            metadataContainers.length > 0 ? metadataContainers : undefined,
-          keepAssets,
-          keepBindings: undefined,
-          limits: news.limits,
-          logpush: news.logpush,
-          mainModule: bundle.main,
-          migrations,
-          observability: news.observability ?? {
-            enabled: true,
-            logs: {
-              enabled: true,
-              invocationLogs: true,
-            },
-          },
-          placement: news.placement,
-          tags: metadataTags,
-          tailConsumers: undefined,
-          usageModel: undefined,
-        };
-        const worker = yield* putScript({
-          accountId,
-          scriptName: name,
-          metadata,
-          files: bundle.files,
-        }).pipe(
-          Effect.catch((err) => {
-            // When adopting a Worker managed by Wrangler (or after a previous
-            // deploy with mismatched migrations), the old_tag precondition
-            // fails. The only way to discover the actual tag is through the
-            // error message — getScriptSettings is meant to return it but
-            // doesn't at runtime.
-            const msg = String(
-              typeof err === "object" && err !== null && "message" in err
-                ? err.message
-                : err,
-            );
-            const expectedTag = msg.match(
-              /when expected tag is ['"]?([^'"]+)['"]?/,
-            )?.[1];
-            if (expectedTag) {
-              return putScript({
-                accountId,
-                scriptName: name,
-                metadata: {
-                  ...metadata,
-                  migrations: {
-                    ...migrations,
-                    oldTag: expectedTag,
-                    newTag: bumpMigrationTagVersion(expectedTag),
-                  },
-                },
-                files: bundle.files,
-              });
-            }
-            return Effect.fail(err as any);
-          }),
-        );
-        const { settings, durableObjectNamespaces } =
-          yield* getWorkerSettingsWithDurableObjects(
-            name,
-            expectedDurableObjectClassNames,
-          );
-        // Reconcile workers.dev subdomain against observed cloud state.
-        // We can't diff `news.url` against `olds.url` here because both
-        // default to `undefined` (meaning "enable") — that comparison
-        // would skip the API call on every deploy where the user never
-        // explicitly set `url`, leaving the subdomain in whatever state
-        // Cloudflare currently has it (disabled by default, or whatever
-        // a previous failed/external action left it as).
-        const desiredSubdomainEnabled = news.url !== false;
-        const observedSubdomain = yield* getScriptSubdomain({
-          accountId,
-          scriptName: name,
-        }).pipe(
-          Effect.orElseSucceed<workers.GetScriptSubdomainResponse>(() => ({
-            enabled: false,
-            previewsEnabled: false,
-          })),
-        );
-        if (
-          desiredSubdomainEnabled !== observedSubdomain.enabled ||
-          desiredSubdomainEnabled !== observedSubdomain.previewsEnabled
-        ) {
-          yield* session.note(
-            `${desiredSubdomainEnabled ? "Enabling" : "Disabling"} workers.dev subdomain...`,
-          );
-          // Cloudflare's script registry is eventually consistent — for the
-          // first few hundred ms after `putScript` returns, POST /subdomain
-          // can still get back `WorkerNotFound` (a generic "unknown error"
-          // body), or a bare 500 surfaced as `InternalServerError` /
-          // `UnknownCloudflareError` (code 10013). Bigger uploads race harder.
-          // Retry the subdomain toggle on those transient tags with a short
-          // exponential backoff; same pattern we use elsewhere in this
-          // provider for DO-namespace propagation and for `putScript` itself.
-          yield* setWorkerSubdomain(name, desiredSubdomainEnabled).pipe(
-            Effect.retry({
-              while: (error: { _tag?: string }) =>
-                error?._tag === "WorkerNotFound" ||
-                error?._tag === "InternalServerError" ||
-                error?._tag === "UnknownCloudflareError",
-              schedule: Schedule.exponential(200).pipe(
-                Schedule.both(Schedule.recurs(15)),
-              ),
-            }),
-          );
-        }
-        const desiredDomains = normalizeDomains(news.domain);
-        const previousDomains = output?.domains ?? [];
-        if (desiredDomains.length > 0 || previousDomains.length > 0) {
-          yield* session.note(
-            `Reconciling custom domains (${desiredDomains.length}) ...`,
-          );
-        }
-        const reconciled = yield* reconcileDomains(name, desiredDomains);
-        const workersDevUrl =
-          news.url !== false
-            ? `https://${name}.${yield* getAccountSubdomain(accountId)}.workers.dev`
-            : undefined;
-        const domains = [
-          ...reconciled.map((d) => `https://${d.hostname}`),
-          ...(workersDevUrl ? [workersDevUrl] : []),
-        ];
-        const crons = yield* reconcileCrons(
-          name,
-          normalizeCrons([...getCronBindings(bindings), ...(news.crons ?? [])]),
-          output?.crons ?? [],
-          session,
-        );
-        return {
-          workerId: worker.id ?? name,
-          workerName: name,
-          logpush: worker.logpush ?? undefined,
-          url: domains[0],
-          tags: settings.tags ?? metadata.tags,
-          durableObjectNamespaces,
-          accountId,
-          domains,
-          crons,
-          hash,
-        } satisfies Worker["Attributes"];
-      });
-
-      const hasChanged = Effect.fnUntraced(function* (
-        id: string,
-        props: WorkerProps,
-        output: Worker["Attributes"],
-      ) {
-        if (props.script !== undefined) {
-          const scriptHash = yield* hashScript(props.script);
-          if (scriptHash !== output.hash?.bundle) {
-            return true;
-          }
-          if (!props.assets) {
-            return false;
-          }
-          const assetsHash =
-            typeof props.assets === "object" &&
-            "path" in props.assets &&
-            "hash" in props.assets
-              ? (props.assets.hash as string)
-              : undefined;
-          if (assetsHash === undefined) {
-            return true;
-          }
-          return assetsHash !== output.hash?.assets;
-        }
-        if (props.vite) {
-          const input = yield* hashDirectory({
-            cwd: props.vite.rootDir,
-            memo: props.vite.memo,
-          });
-          return input !== output.hash?.input;
-        }
-        const bundleHash = yield* prepareBundle(id, props).pipe(
-          Effect.map((b) => b.hash),
-        );
-        if (bundleHash !== output.hash?.bundle) {
-          return true;
-        }
-        if (!props.assets) {
-          return false;
-        }
-        // We deliberately don't read the assets directory during diff.
-        // For `AssetsWithHash` (the documented contract) the upstream
-        // `Build.Command` already gave us an authoritative hash — we
-        // just compare strings. Reading the directory here would
-        // (a) hash the same tree twice per apply (`putWorker` reads
-        // again when an upload is actually required), and (b) crash
-        // when the prior state was written on a different machine
-        // and `path` doesn't exist locally — blocking any local
-        // reapply even though the precomputed hash is right there
-        // in props.
-        //
-        // For the legacy `string` / `AssetsProps` shapes there's no
-        // hash in props to compare against, so we conservatively
-        // assume the assets changed; `putWorker` will read once,
-        // hash, and use `keepAssets` if it turns out nothing actually
-        // changed.
-        const assetsHash =
-          typeof props.assets === "object" &&
-          "path" in props.assets &&
-          "hash" in props.assets
-            ? (props.assets.hash as string)
-            : undefined;
-        if (assetsHash === undefined) {
-          return true;
-        }
-        return assetsHash !== output.hash?.assets;
-      });
-
-      return Worker.Provider.of({
-        stables: ["workerId", "workerName"],
-        diff: Effect.fnUntraced(function* ({
-          id,
-          news,
-          olds,
-          output,
-          newBindings,
-        }) {
-          if (!isResolved(news)) return undefined;
-          if ((output?.accountId ?? accountId) !== accountId) {
-            return { action: "replace" };
-          }
-          const workerName = yield* createWorkerName(id, news.name);
-          const oldWorkerName = output?.workerName
-            ? output.workerName
-            : yield* createWorkerName(id, olds?.name);
-          if (workerName !== oldWorkerName) {
-            return { action: "replace" };
-          }
-          if (!output) {
-            return;
-          }
-          const newDomains = normalizeDomains(news.domain)
-            .map((h) => `https://${h}`)
-            .sort();
-          const oldDomains = (output?.domains ?? [])
-            .filter((u) => !u.endsWith(".workers.dev"))
-            .sort();
-          const domainsChanged =
-            newDomains.length !== oldDomains.length ||
-            newDomains.some((d, i) => d !== oldDomains[i]);
-          const newCrons = normalizeCrons([
-            ...(Array.isArray(newBindings)
-              ? getCronBindings(
-                  newBindings as ResourceBinding<Worker["Binding"]>[],
-                )
-              : []),
-            ...(news.crons ?? []),
-          ]).sort();
-          const oldCrons = [...(output?.crons ?? [])].sort();
-          const cronsChanged =
-            newCrons.length !== oldCrons.length ||
-            newCrons.some((cron, index) => cron !== oldCrons[index]);
-          if (
-            domainsChanged ||
-            cronsChanged ||
-            (yield* hasChanged(id, news, output))
-          ) {
-            return {
-              action: "update",
-              stables:
-                oldWorkerName === workerName ? ["workerName"] : undefined,
-            };
-          }
-        }),
-        precreate: Effect.fnUntraced(function* ({ id, news, session }) {
-          const name = yield* createWorkerName(id, news.name);
-          const exportMap = (news.exports ?? {}) as Record<string, unknown>;
-          const durableObjects = Object.keys(exportMap)
-            .filter((logicalId) => isDurableObjectExport(exportMap[logicalId]))
-            .map((logicalId) => ({
-              logicalId,
-              className: logicalId,
-            }));
-          const doClasses = durableObjects.map((binding) => binding.className);
-          const containers = doClasses.map((className) => ({ className }));
-          const alchemyDoTags = durableObjects.map(
-            ({ logicalId, className }) =>
-              `alchemy:do:${logicalId}:${className}`,
-          );
-          const tags = Array.from(
-            new Set([
-              ...createAlchemyWorkerTags(id),
-              ...alchemyDoTags,
-              ...(news.tags ?? []),
-            ]),
-          );
-          yield* Effect.logInfo(
-            `Cloudflare Worker precreate: starting ${name}`,
-          );
-          yield* Effect.logInfo(
-            `Cloudflare Worker precreate: durable objects ${JSON.stringify(
-              durableObjects,
-            )}`,
-          );
-          const existingSettings = yield* getScriptSettings({
-            accountId,
-            scriptName: name,
-          }).pipe(
-            Effect.catchTag("WorkerNotFound", () => Effect.succeed(undefined)),
-          );
-          let durableObjectNamespaces = getDurableObjectNamespaces(
-            existingSettings?.bindings,
-          );
-
-          if (existingSettings) {
-            // Engine has already cleared this resource for write via
-            // `read` + AdoptPolicy. Either we own it (matching tags) or
-            // the user opted in to a takeover (`--adopt` / `adopt(true)`).
-            yield* Effect.logInfo(
-              `Cloudflare Worker precreate: reusing existing ${name}`,
-            );
-          } else {
-            yield* session.note("Pre-creating worker...");
-            const mainModule = "main.js";
-            const placeholderScript = `${doClasses.length > 0 ? 'import { DurableObject } from "cloudflare:workers";\n\n' : ""}export default { fetch() { return new Response("Alchemy worker is being deployed...") } };\n${doClasses
-              .map(
-                (className) =>
-                  `export class ${className} extends DurableObject {}`,
-              )
-              .join("\n")}`;
-            yield* putScript({
-              accountId,
-              scriptName: name,
-              metadata: {
-                mainModule,
-                bindings:
-                  doClasses.length > 0
-                    ? doClasses.map((className) => ({
-                        type: "durable_object_namespace" as const,
-                        name: className,
-                        className,
-                      }))
-                    : undefined,
-                ...getCompatibility(news),
-                containers,
-                migrations:
-                  doClasses.length > 0
-                    ? {
-                        oldTag: undefined,
-                        newTag: undefined,
-                        newClasses: [],
-                        deletedClasses: [],
-                        renamedClasses: [],
-                        transferredClasses: [],
-                        newSqliteClasses: doClasses,
-                      }
-                    : undefined,
-                observability: news.observability ?? {
-                  enabled: true,
-                  logs: {
-                    enabled: true,
-                    invocationLogs: true,
-                  },
-                },
-                tags,
-              },
-              files: [
-                new File([placeholderScript], mainModule, {
-                  type: "application/javascript+module",
-                }),
-              ],
-            }).pipe(
-              // Cloudflare's PUT /workers/scripts/{name} intermittently
-              // returns code 10002 / "An unknown error has occurred" on the
-              // first put for a fresh worker name. Surfaced as the shared
-              // `InternalServerError` upstream (alchemy-run/distilled#290).
-              // Also match `UnknownCloudflareError` for older
-              // @distilled.cloud/cloudflare versions that haven't picked
-              // up the patch yet.
-              Effect.retry({
-                while: (e: any) =>
-                  e._tag === "InternalServerError" ||
-                  e._tag === "UnknownCloudflareError",
-                schedule: Schedule.exponential(1000).pipe(
-                  Schedule.both(Schedule.recurs(5)),
-                ),
-              }),
-            );
-            if (doClasses.length > 0) {
-              ({ durableObjectNamespaces } =
-                yield* getWorkerSettingsWithDurableObjects(name, doClasses));
-            }
-          }
-
-          if (existingSettings && doClasses.length > 0) {
-            ({ durableObjectNamespaces } =
-              yield* getWorkerSettingsWithDurableObjects(name, doClasses));
-          }
-
-          return {
-            workerId: name,
-            workerName: name,
-            logpush: existingSettings?.logpush ?? undefined,
-            url: undefined,
-            tags: existingSettings?.tags ?? tags,
-            durableObjectNamespaces,
-            accountId,
-            domains: [],
-            crons: [],
-          } satisfies Worker["Attributes"];
-        }),
-        read: Effect.fnUntraced(
-          function* ({ id, output, olds }) {
-            const workerName =
-              output?.workerName ?? (yield* createWorkerName(id, olds?.name));
-            yield* Effect.logInfo(
-              `Cloudflare Worker read: checking ${workerName}`,
-            );
-            // We deliberately don't call `listScripts({ accountId })` here:
-            // it pulls every Worker on the account back through a strict
-            // schema decode, and a single existing Worker the schema doesn't
-            // know about (e.g. `placement_mode: "targeted"`) breaks the
-            // entire read. `getScriptSettings` already fails with
-            // `WorkerNotFound` if the script doesn't exist, which the
-            // surrounding `Effect.catchTag` turns into `undefined` — that's
-            // all the existence check we need.
-            const [subdomain, settings, domainsList] = yield* Effect.all([
-              getScriptSubdomain({
-                accountId,
-                scriptName: workerName,
-              }),
-              getScriptSettings({
-                accountId,
-                scriptName: workerName,
-              }),
-              listDomains({
-                accountId,
-                service: workerName,
-              }).pipe(Effect.map((r) => r.result ?? [])),
-            ]);
-            // Preserve the order the user provided in `olds.domain`. The
-            // Cloudflare API returns domains in non-deterministic order,
-            // which would cause downstream `worker.domains[0]` reads to flip
-            // between deploys. Drift (domains we don't know about) is
-            // appended after the user-ordered ones.
-            const userOrder = normalizeDomains(olds?.domain);
-            const orderedHostnames = [
-              ...userOrder.flatMap(
-                (h) =>
-                  domainsList.find((d) => d.hostname === h)?.hostname ?? [],
-              ),
-              ...domainsList.flatMap((d) =>
-                d.hostname && !userOrder.includes(d.hostname)
-                  ? [d.hostname]
-                  : [],
-              ),
-            ];
-            const workersDevUrl = subdomain.enabled
-              ? `https://${workerName}.${yield* getAccountSubdomain(accountId)}.workers.dev`
-              : undefined;
-            const domains = [
-              ...orderedHostnames.map((h) => `https://${h}`),
-              ...(workersDevUrl ? [workersDevUrl] : []),
-            ];
-            const crons = yield* getWorkerCrons(workerName);
-            yield* Effect.logInfo(
-              `Cloudflare Worker read: found ${workerName}`,
-            );
-            const attrs = {
-              accountId,
-              workerId: workerName,
-              workerName,
-              logpush: settings.logpush ?? undefined,
-              url: domains[0],
-              tags: settings.tags ?? undefined,
-              durableObjectNamespaces: getDurableObjectNamespaces(
-                settings.bindings,
-              ),
-              domains,
-              crons,
-            } satisfies Worker["Attributes"];
-
-            // Centralized ownership decision: the engine routes `read`'s
-            // return value based on `AdoptPolicy`. We hand it the attrs
-            // either as-is (owned: alchemy tags identify this stack/stage/id,
-            // safe to silently adopt even without `--adopt`) or branded with
-            // `Unowned` (caller must opt in via `--adopt` or the engine
-            // raises `OwnedBySomeoneElse`).
-            return hasAlchemyWorkerTags(id, settings.tags ?? [])
-              ? attrs
-              : Unowned(attrs);
-          },
-          (effect) =>
-            effect.pipe(
-              Effect.catchTag("WorkerNotFound", () =>
-                Effect.succeed(undefined),
-              ),
-            ),
-        ),
-        reconcile: Effect.fnUntraced(function* ({
-          id,
-          news,
-          olds,
-          bindings,
-          output,
-          session,
-        }) {
-          const name =
-            output?.workerName ?? (yield* createWorkerName(id, news.name));
-          const durableObjects = getDurableObjectBindings(bindings, name).map(
-            ({ logicalId, className }) => ({
-              logicalId,
-              className,
-            }),
-          );
-          yield* Effect.logInfo(
-            `Cloudflare Worker reconcile: starting ${name}`,
-          );
-          yield* Effect.logInfo(
-            `Cloudflare Worker reconcile: durable objects ${JSON.stringify(
-              durableObjects,
-            )}`,
-          );
-
-          // Observe — fetch the script's current settings if it already exists.
-          // `putWorker` is a true upsert against the Cloudflare API; the
-          // existing settings inform asset/migration decisions and let the
-          // reconciler converge whether the worker is brand-new, adopted, or
-          // an in-place update.
-          const existingSettings = yield* getScriptSettings({
-            accountId,
-            scriptName: name,
-          }).pipe(
-            Effect.catchTag("WorkerNotFound", () => Effect.succeed(undefined)),
-          );
-          yield* Effect.logInfo(
-            `Cloudflare Worker reconcile: existing durable object tags ${JSON.stringify(
-              (existingSettings?.tags ?? []).filter((tag) =>
-                tag.startsWith("alchemy:do:"),
-              ),
-            )}`,
-          );
-          yield* Effect.logInfo(
-            `Cloudflare Worker reconcile: previous durable object tags ${JSON.stringify(
-              (output?.tags ?? []).filter((tag) =>
-                tag.startsWith("alchemy:do:"),
-              ),
-            )}`,
-          );
-          return yield* putWorker(
-            id,
-            news,
-            bindings,
-            olds,
-            output,
-            session,
-            existingSettings,
-          );
-        }),
-        delete: Effect.fnUntraced(function* ({ output }) {
-          yield* Effect.logInfo(
-            `Cloudflare Worker delete: deleting ${output.workerName}`,
-          );
-          // Look up live domain IDs rather than trusting persisted state.
-          // We no longer track `{ id, zoneId }` on the output; fetching
-          // straight from Cloudflare handles both the normal case and
-          // adopted workers whose domains we never recorded.
-          const liveDomains = yield* listDomains({
-            accountId: output.accountId,
-            service: output.workerName,
-          }).pipe(
-            Effect.map((r) => r.result ?? []),
-            Effect.catch(() => Effect.succeed([])),
-          );
-          if (liveDomains.length) {
-            yield* Effect.all(
-              liveDomains.flatMap((d) =>
-                d.id
-                  ? [
-                      deleteDomain({
-                        accountId: output.accountId,
-                        domainId: d.id,
-                      }).pipe(
-                        Effect.catchTag("DomainNotFound", () => Effect.void),
-                      ),
-                    ]
-                  : [],
-              ),
-              { concurrency: "unbounded" },
-            );
-          }
-          yield* deleteScript({
-            accountId: output.accountId,
-            scriptName: output.workerName,
-            // Force teardown of queue consumers, durable object classes, and
-            // service bindings hanging off this worker. Without `force`, those
-            // conditions raise QueueConsumerConflict / ServiceBindingConflict
-            // and leave the script in CF. Alchemy is the source of truth for
-            // the worker, so we want a hard delete on teardown.
-            force: true,
-          }).pipe(Effect.catchTag("WorkerNotFound", () => Effect.void));
-        }),
-        tail: ({ output }) =>
-          telemetry.tailScript({
-            accountId: output.accountId,
-            scriptName: output.workerName,
-          }),
-        logs: ({ output, options }) =>
-          telemetry.queryLogs({
-            accountId: output.accountId,
-            filters: [
-              {
-                key: "$workers.scriptName",
-                operation: "eq",
-                type: "string",
-                value: output.workerName,
-              },
-            ],
-            options,
-          }),
-      });
-    }),
-  );
-
-const contentTypeFromExtension = (extension: string) => {
-  switch (extension) {
-    case ".wasm":
-      return "application/wasm";
-    case ".txt":
-    case ".html":
-    case ".sql":
-    case ".custom":
-      return "text/plain";
-    case ".bin":
-      return "application/octet-stream";
-    case ".mjs":
-    case ".js":
-      return "application/javascript+module";
-    case ".cjs":
-      return "application/javascript";
-    case ".map":
-      return "application/source-map";
-    default:
-      return "application/octet-stream";
-  }
-};
-
-function bumpMigrationTagVersion(
-  oldTag: string | undefined,
-): string | undefined {
-  if (!oldTag) return undefined;
-  const version = oldTag.match(/^(alchemy:)?v(\d+)$/)?.[2];
-  if (!version) return "alchemy:v1";
-  return `alchemy:v${parseInt(version, 10) + 1}`;
-}
-
-function getDurableObjectBindings(
-  bindings: ReadonlyArray<ResourceBinding>,
-  workerName: string,
-) {
-  // Resource authors (and the `make`/`yield* Tag`/plan-vs-apply machinery)
-  // can register the same DO binding multiple times under the same logical
-  // id — `binding()` is a plain `worker.bind` and intentionally has no
-  // dedup. Collapse duplicates here so each `(logicalId, bindingName,
-  // className)` tuple appears at most once. We also exclude cross-script
-  // references: a `scriptName` pointing to *another* worker means this
-  // worker just references a foreign class — ship the binding to
-  // Cloudflare, but don't drive class migrations for it.
-  const seen = new Set<string>();
-  return bindings.flatMap((binding) =>
-    (binding.data.bindings ?? []).flatMap((item: WorkerBinding) => {
-      if (
-        item.type !== "durable_object_namespace" ||
-        !("className" in item) ||
-        !item.className
-      ) {
-        return [];
-      }
-      if (item.scriptName !== undefined && item.scriptName !== workerName) {
-        return [];
-      }
-      const dedupKey = `${binding.sid}::${item.name}::${item.className}`;
-      if (seen.has(dedupKey)) return [];
-      seen.add(dedupKey);
-      return [
-        {
-          logicalId: binding.sid,
-          bindingName: item.name,
-          className: item.className,
-        },
-      ];
-    }),
-  );
-}
-
-function getDurableObjectTagMap(tags: ReadonlyArray<string>) {
-  return Object.fromEntries(
-    tags.flatMap((tag) => {
-      if (!tag.startsWith("alchemy:do:")) {
-        return [];
-      }
-      const parts = tag.split(":");
-      const logicalId = parts[2];
-      const className = parts.slice(3).join(":");
-      return logicalId && className ? [[logicalId, className]] : [];
-    }),
-  );
-}
+    };
+    <
+      const Bindings extends WorkerBindingProps = {},
+      const Assets extends WorkerAssetsConfig | undefined = undefined,
+      Req = never,
+    >(
+      id: string,
+      props:
+        | InputProps<WorkerProps<Bindings, Assets>>
+        | Effect.Effect<
+            InputProps<WorkerProps<Bindings, Assets>>,
+            ConfigError,
+            Req
+          >,
+    ): Effect.Effect<
+      Worker<{
+        [
+          binding in keyof NormalizedBindings<Bindings, Assets>
+        ]: NormalizedBindings<Bindings, Assets>[binding];
+      }> &
+        Rpc<{}>,
+      never,
+      Req | Providers
+    >;
+    <
+      const Id extends string,
+      Shape extends WorkerShape,
+      Req extends
+        | WorkerServices
+        | Container.Application<any>
+        | PlatformServices,
+    >(
+      id: string,
+      props: InputProps<WorkerProps>,
+      impl: Effect.Effect<Shape, ConfigError, Req>,
+    ): Effect.Effect<
+      Worker & Rpc<Shape>,
+      never,
+      Extract<Req, Container.Application<any>> | Providers
+    > &
+      Named<Id>;
+    /**
+     * The Worker's own public URL, injected as a binding on that same Worker.
+     * Declare it on `env` (`env: { VITE_PUBLIC_URL: Worker.URL }`) or
+     * `yield*` it inside an Effect-native Worker to obtain a deferred
+     * accessor. See {@link URLEffect}.
+     */
+    readonly URL: URLEffect;
+  } = Platform(
+  WorkerTypeId,
+  {
+    // Both hooks are wrapped in arrows so the imported references are resolved
+    // at call time rather than at module-load time. Worker.ts forms import
+    // cycles with both WorkerAsyncBindings.ts (which imports `isWorker` here)
+    // and WorkerRuntimeContext.ts (which imports `WorkerTypeId`/`WorkerEnvironment`
+    // here). Reading either binding eagerly here hits TDZ when Bun loads the
+    // package from node_modules in a different module-init order than the local
+    // workspace.
+    onCreate: (resource, props) =>
+      bindWorkerAsyncBindings(resource as Worker, props),
+    createRuntimeContext: (id) => makeWorkerRuntimeContext(id),
+  },
+  { URL },
+);

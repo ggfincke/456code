@@ -1,9 +1,8 @@
+import * as Config from "effect/Config";
 import * as Data from "effect/Data";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { pipe } from "effect/Function";
 import type { Pipeable } from "effect/Pipeable";
-import * as Redacted from "effect/Redacted";
 import { SingleShotGen } from "effect/Utils";
 import { getRefMetadata, isRef, type Ref } from "./Ref.ts";
 import { isResource, type Resource, type ResourceLike } from "./Resource.ts";
@@ -11,7 +10,7 @@ import { RuntimeContext, sanitizeKey } from "./RuntimeContext.ts";
 import { Stack } from "./Stack.ts";
 import { Stage } from "./Stage.ts";
 import * as State from "./State/State.ts";
-import { isPrimitive } from "./Util/data.ts";
+import { isPlainData, isPrimitive, type Primitive } from "./Util/data.ts";
 
 const inspect = Symbol.for("nodejs.util.inspect.custom");
 
@@ -22,7 +21,20 @@ export const of = <R extends ResourceLike>(
   : RefExpr<R["Attributes"]> => {
   if (isRef(resource)) {
     const metadata = getRefMetadata(resource);
-    return new RefExpr(metadata.stack, metadata.stage, metadata.id) as any;
+    return new RefExpr(
+      metadata.stack,
+      metadata.stage,
+      metadata.id,
+      // Surface the target's resource type and logical id as
+      // statically-known properties so duck-typing classifiers (Worker
+      // env bindings) and label/bind templates (`${resource.LogicalId}`,
+      // `host.bind\`...\``) identify the ref exactly like a
+      // locally-declared resource.
+      {
+        LogicalId: metadata.id,
+        ...(metadata.type !== undefined ? { Type: metadata.type } : {}),
+      },
+    ) as any;
   }
   return new ResourceExpr(resource) as any;
 };
@@ -33,6 +45,23 @@ export const asOutput = <T>(t: T | Output<T> | Effect.Effect<T>): Output<T> =>
     : Effect.isEffect(t)
       ? new EffectExpr(VoidExpr, () => t)
       : new LiteralExpr(t);
+
+/**
+ * Lift a plan-time Effect into an {@link Output}.
+ *
+ * The effect runs when the stack resolves the Output during plan/deploy —
+ * with the stack's services (cloud credentials, region, ...) provided — and
+ * never inside a deployed runtime: constructing the Output is inert, so
+ * helpers built on `fromEffect` (e.g. AMI lookups) are safe to call from
+ * composition code that is re-executed inside a Function/Worker/Instance
+ * bundle.
+ *
+ * The effect must not fail (`E = never`) — die with a descriptive error for
+ * unresolvable lookups.
+ */
+export const fromEffect = <A, Req = never>(
+  effect: Effect.Effect<A, never, Req>,
+): ToOutput<A, Req> => new EffectExpr(VoidExpr, () => effect) as any;
 
 export const isOutput = (value: any): value is Output<any> =>
   value &&
@@ -59,18 +88,28 @@ export interface Output<A = any, Req = any> extends Pipeable {
 
 export interface Accessor<A> extends Effect.Effect<A> {}
 
-export type ToOutput<A, Req = never> = [Extract<A, object>] extends [never]
-  ? Output<A, Req>
-  : [Extract<A, any[]>] extends [never]
-    ? ObjectExpr<
-        {
-          [attr in keyof A]: A[attr];
-        },
-        Req
-      >
-    : ArrayExpr<Extract<A, any[]>, Req>;
+export type ToOutput<A, Req = never> =
+  // Branded primitives (`string & Brand<"...">`) are assignable to `object`
+  // via the brand intersection, so they must short-circuit to a plain Output
+  // before the object check — otherwise they explode into an ObjectExpr
+  // mapped over every String/Number method. Date is opaque for the same
+  // reason (mirrors AttrOutput in Resource.ts).
+  [A] extends [Primitive | Date]
+    ? Output<A, Req>
+    : [Extract<A, object>] extends [never]
+      ? Output<A, Req>
+      : [Extract<A, any[]>] extends [never]
+        ? ObjectExpr<
+            {
+              [attr in keyof A]: A[attr];
+            },
+            Req
+          >
+        : ArrayExpr<Extract<A, any[]>, Req>;
 
 export const ExprSymbol = Symbol.for("alchemy/Expr");
+
+const exprKind = (node: any): unknown => node?.[ExprSymbol]?.kind ?? node?.kind;
 
 export const isExpr = (value: any): value is Expr<any> =>
   value &&
@@ -145,7 +184,7 @@ export type ArrayExpr<A extends any[], Req = any> = Output<A, Req> & {
 
 export const isResourceExpr = <Value = any, Req = any>(
   node: Expr<Value, Req> | any,
-): node is ResourceExpr<Value, Req> => node?.kind === "ResourceExpr";
+): node is ResourceExpr<Value, Req> => exprKind(node) === "ResourceExpr";
 
 export class ResourceExpr<Value, Req = never> extends BaseExpr<Value, Req> {
   readonly kind = "ResourceExpr";
@@ -163,7 +202,7 @@ export class ResourceExpr<Value, Req = never> extends BaseExpr<Value, Req> {
 
 export const isPropExpr = <A = any, Prop extends keyof A = keyof A, Req = any>(
   node: any,
-): node is PropExpr<A, Prop, Req> => node?.kind === "PropExpr";
+): node is PropExpr<A, Prop, Req> => exprKind(node) === "PropExpr";
 
 export class PropExpr<
   A = any,
@@ -186,7 +225,7 @@ export class PropExpr<
 export const literal = <A>(value: A) => new LiteralExpr(value);
 
 export const isLiteralExpr = <A = any>(node: any): node is LiteralExpr<A> =>
-  node?.kind === "LiteralExpr";
+  exprKind(node) === "LiteralExpr";
 
 export class LiteralExpr<A> extends BaseExpr<A, never> {
   readonly kind = "LiteralExpr";
@@ -217,7 +256,7 @@ export const map: {
 //Output.ApplyExpr<any, any, ResourceLike, any>
 export const isApplyExpr = <In = any, Out = any, Req = any>(
   node: Output<Out, Req>,
-): node is ApplyExpr<In, Out, Req> => node?.kind === "ApplyExpr";
+): node is ApplyExpr<In, Out, Req> => exprKind(node) === "ApplyExpr";
 
 export class ApplyExpr<A, B, Req = never> extends BaseExpr<B, Req> {
   readonly kind = "ApplyExpr";
@@ -259,7 +298,7 @@ export const flatMap: {
 
 export const isFlatMapExpr = <In = any, Out = any, Req = any, Req2 = any>(
   node: any,
-): node is FlatMapExpr<In, Out, Req, Req2> => node?.kind === "FlatMapExpr";
+): node is FlatMapExpr<In, Out, Req, Req2> => exprKind(node) === "FlatMapExpr";
 
 export class FlatMapExpr<A, B, Req = never, Req2 = never> extends BaseExpr<
   B,
@@ -280,7 +319,7 @@ export class FlatMapExpr<A, B, Req = never, Req2 = never> extends BaseExpr<
 
 export const isEffectExpr = <In = any, Out = any, Req = any, Req2 = any>(
   node: any,
-): node is EffectExpr<In, Out, Req, Req2> => node?.kind === "EffectExpr";
+): node is EffectExpr<In, Out, Req, Req2> => exprKind(node) === "EffectExpr";
 
 export class EffectExpr<A, B, Req = never, Req2 = never> extends BaseExpr<
   B,
@@ -301,7 +340,7 @@ export class EffectExpr<A, B, Req = never, Req2 = never> extends BaseExpr<
 
 export const isNamedExpr = <A = any, Req = any>(
   node: any,
-): node is NamedExpr<A, Req> => node?.kind === "NamedExpr";
+): node is NamedExpr<A, Req> => exprKind(node) === "NamedExpr";
 
 /**
  * Wraps another `Expr` and overrides its `toString()` / inspect output.
@@ -352,7 +391,7 @@ type Tuple<
 
 export const isAllExpr = <Outs extends Expr[] = Expr[]>(
   node: any,
-): node is AllExpr<Outs> => node?.kind === "AllExpr";
+): node is AllExpr<Outs> => exprKind(node) === "AllExpr";
 
 export class AllExpr<Outs extends Expr[]> extends BaseExpr<Outs> {
   readonly kind = "AllExpr";
@@ -366,7 +405,7 @@ export class AllExpr<Outs extends Expr[]> extends BaseExpr<Outs> {
 }
 
 export const isRefExpr = <A = any>(node: any): node is RefExpr<A> =>
-  node?.kind === "RefExpr";
+  exprKind(node) === "RefExpr";
 
 export class RefExpr<A> extends BaseExpr<A, never> {
   readonly kind = "RefExpr";
@@ -374,6 +413,12 @@ export class RefExpr<A> extends BaseExpr<A, never> {
     public readonly stack: string | undefined,
     public readonly stage: string | undefined,
     public readonly resourceId: string,
+    /**
+     * Statically-known properties of the ref's target (currently its
+     * resource `Type`), served as literals by the proxy instead of
+     * `PropExpr`s — mirrors {@link ResourceExpr}'s `stables`.
+     */
+    readonly stables?: Record<string, any>,
   ) {
     super();
     return proxy(this);
@@ -384,7 +429,7 @@ export class RefExpr<A> extends BaseExpr<A, never> {
 }
 
 export const isStackRefExpr = <A = any>(node: any): node is StackRefExpr<A> =>
-  node?.kind === "StackRefExpr";
+  exprKind(node) === "StackRefExpr";
 
 /**
  * A reference to the persisted output of a Stack at `(stack, stage)`.
@@ -466,7 +511,16 @@ function proxy(self: any): any {
   }
   const proxy = new Proxy(target, {
     has: (_, prop) =>
-      prop === ExprSymbol || prop === inspect ? true : prop in self,
+      prop === ExprSymbol || prop === inspect
+        ? true
+        : // Statically-known literal props (`Type`, `LogicalId` on
+          // resource/ref exprs) are visible to `in` checks so duck-typing
+          // code paths (e.g. `"LogicalId" in arg`) treat them like real
+          // properties, matching what `get` serves.
+          ((isResourceExpr(self) || isRefExpr(self)) &&
+            self.stables !== undefined &&
+            prop in self.stables) ||
+          prop in self,
     get: (target, prop) =>
       prop === Symbol.toPrimitive
         ? (hint: string) => {
@@ -499,7 +553,9 @@ function proxy(self: any): any {
           ? self
           : prop === inspect
             ? target[inspect]
-            : isResourceExpr(self) && self.stables && prop in self.stables
+            : (isResourceExpr(self) || isRefExpr(self)) &&
+                self.stables &&
+                prop in self.stables
               ? self.stables[prop as keyof typeof self.stables]
               : prop in self
                 ? typeof self[prop as keyof typeof self] === "function" &&
@@ -550,11 +606,16 @@ export const evaluate: <A, Req = never>(
   upstream: {
     [Id in string]: any;
   },
+  // Ancestor-path cycle guard — a plain-data value that appears on its own
+  // ancestor chain is cut to `undefined` (it could never serialize anyway).
+  // Immutable per-level so legitimately-shared diamond references survive
+  // (#1082).
+  ancestors?: ReadonlySet<object>,
 ) => Effect.Effect<
   A,
-  InvalidReferenceError | MissingSourceError,
+  InvalidReferenceError | MissingSourceError | Config.ConfigError,
   State.State | Req
-> = (expr, upstream) =>
+> = (expr, upstream, ancestors = new Set()) =>
   Effect.gen(function* () {
     if (isResource(expr)) {
       const srcId = expr.FQN;
@@ -640,53 +701,90 @@ export const evaluate: <A, Req = never>(
         return output;
       }
     }
-    if (Array.isArray(expr)) {
-      return yield* Effect.all(expr.map((item) => evaluate(item, upstream)));
-    } else if (Redacted.isRedacted(expr)) {
-      return expr;
-    } else if (Duration.isDuration(expr)) {
-      // Opaque value — see resolveInput in Plan.ts for rationale.
-      return expr;
-    } else if (typeof expr === "object" && expr !== null) {
+    if (Config.isConfig(expr)) {
+      // Resolve Config against the deploy environment — see resolveInput in
+      // Plan.ts for rationale. `Config.redacted` resolves to a `Redacted`,
+      // which stays opaque via the leaf fallthrough below.
+      return yield* evaluate(yield* expr, upstream, ancestors);
+    } else if (isPlainData(expr)) {
+      if (ancestors.has(expr)) {
+        return undefined;
+      }
+      const nested = new Set(ancestors).add(expr);
+      if (Array.isArray(expr)) {
+        return yield* Effect.all(
+          expr.map((item) => evaluate(item, upstream, nested)),
+        );
+      }
       return Object.fromEntries(
         yield* Effect.all(
           Object.entries(expr).map(([key, value]) =>
-            evaluate(value, upstream).pipe(Effect.map((value) => [key, value])),
+            evaluate(value, upstream, nested).pipe(
+              Effect.map((value) => [key, value]),
+            ),
           ),
         ),
       );
     }
+    // Everything else is a leaf returned by identity: Duration, Redacted,
+    // Date, and effect runtime values (a Worker's `exports` carries each
+    // DO's `constructor` Effect and captured `services` Context). Rebuilding
+    // a class instance entry-by-entry strips its prototype, and effect
+    // ≥4.0.0-beta.103's Context is cyclic (#1082). This sits after
+    // `Config.isConfig` on purpose — Configs are Effects but must resolve.
     return expr;
   }) as Effect.Effect<any>;
 
 export const hasOutputs = (value: any): value is Output<any, any> =>
   Object.keys(upstreamAny(value)).length > 0;
 
+/**
+ * Cycle guard shared by the upstream walkers. Marks `value` as visited in
+ * `seen`; returns true when it was already visited (the caller returns `{}`
+ * — the first visit already contributed the subtree's resources to the
+ * FQN-keyed union, so skipping repeats is lossless).
+ */
+const alreadySeen = (value: object, seen: WeakSet<object>): boolean => {
+  if (seen.has(value)) {
+    return true;
+  }
+  seen.add(value);
+  return false;
+};
+
+// The dependency rule (#1082): a Resource or Output IS a dependency; plain
+// data (arrays, plain objects) is traversed to find them; every other value
+// — class instances like effect's Effect/Layer/Context, Dates, SDK objects,
+// functions — is a leaf. See `isPlainData` in Util/data.ts for why leaves
+// must never be walked.
+
 export const upstreamAny = (
   value: any,
+  seen: WeakSet<object> = new WeakSet(),
 ): {
   [ID in string]: Resource;
 } => {
   if (isResource(value)) {
     return { [value.FQN]: value as Resource };
   } else if (isExpr(value)) {
-    return upstream(value);
-  } else if (Array.isArray(value)) {
-    return Object.assign({}, ...value.map(resolveUpstream));
-  } else if (
-    value &&
-    (typeof value === "object" || typeof value === "function")
-  ) {
+    return upstream(value, seen);
+  } else if (isPlainData(value)) {
+    if (alreadySeen(value, seen)) {
+      return {};
+    }
     return Object.assign(
       {},
-      ...Object.values(value).map((value) => resolveUpstream(value)),
+      ...Object.values(value).map((value) => resolveUpstream(value, seen)),
     );
   }
   return {};
 };
 
 // TODO(sam): add a type
-export const upstream = <E extends Output<any, any>>(expr: E): any => {
+export const upstream = <E extends Output<any, any>>(
+  expr: E,
+  seen: WeakSet<object> = new WeakSet(),
+): any => {
   if (isResource(expr)) {
     return {
       [(expr as unknown as Resource).FQN]: expr,
@@ -696,42 +794,45 @@ export const upstream = <E extends Output<any, any>>(expr: E): any => {
       [expr.src.FQN]: expr.src,
     };
   } else if (isPropExpr(expr)) {
-    return upstream(expr.expr);
+    return upstream(expr.expr, seen);
   } else if (isAllExpr(expr)) {
-    return Object.assign({}, ...expr.outs.map((out) => upstream(out)));
+    return Object.assign({}, ...expr.outs.map((out) => upstream(out, seen)));
   } else if (
     isEffectExpr(expr) ||
     isApplyExpr(expr) ||
     isFlatMapExpr(expr) ||
     isNamedExpr(expr)
   ) {
-    return upstream(expr.expr);
-  } else if (Array.isArray(expr)) {
-    return expr.map(upstream).reduce(toObject, {});
-  } else if (typeof expr === "object" && expr !== null) {
+    return upstream(expr.expr, seen);
+  } else if (isPlainData(expr)) {
+    if (alreadySeen(expr, seen)) {
+      return {};
+    }
     return Object.values(expr)
-      .map((v) => upstream(v))
+      .map((v) => upstream(v as any, seen))
       .reduce(toObject, {});
   }
   return {};
 };
 
 // TODO(sam): add a type
-export const resolveUpstream = <const A>(value: A): any => {
+export const resolveUpstream = <const A>(
+  value: A,
+  seen: WeakSet<object> = new WeakSet(),
+): any => {
   if (isPrimitive(value)) {
     return {} as any;
   } else if (isResource(value)) {
     return { [(value as unknown as Resource).FQN]: value } as any;
   } else if (isOutput(value)) {
-    return upstream(value) as any;
-  } else if (Array.isArray(value)) {
+    return upstream(value, seen) as any;
+  } else if (isPlainData(value)) {
+    if (alreadySeen(value, seen)) {
+      return {} as any;
+    }
     return Object.fromEntries(
-      value.map((v) => resolveUpstream(v)).flatMap(Object.entries),
-    ) as any;
-  } else if (typeof value === "object" || typeof value === "function") {
-    return Object.fromEntries(
-      Object.values(value as any)
-        .map(resolveUpstream)
+      Object.values(value)
+        .map((v) => resolveUpstream(v, seen))
         .flatMap(Object.entries),
     ) as any;
   }

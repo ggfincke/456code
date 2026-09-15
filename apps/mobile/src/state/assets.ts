@@ -1,118 +1,99 @@
-// apps/mobile/src/state/assets.ts
-// manage retryable asset URL state
+import { useAtomValue } from "@effect/atom-react";
+import {
+  type EnvironmentConnectionPhase,
+  presentConnectionState,
+} from "@t3tools/client-runtime/connection";
+import {
+  assetUrlStateFromResult,
+  createAssetEnvironmentAtoms,
+  createProjectFaviconUrlAtomFamily,
+  EMPTY_ASSET_URL_ATOM,
+} from "@t3tools/client-runtime/state/assets";
+import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { useCallback } from "react";
 
-import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
-import type { PreparedConnection } from '@t3tools/client-runtime/connection'
-import { createAssetEnvironmentAtoms, resolveAssetUrl } from '@t3tools/client-runtime/state/assets'
-import type { AssetCreateUrlResult, AssetResource, EnvironmentId } from '@t3tools/contracts'
-import * as Cause from 'effect/Cause'
-import * as Option from 'effect/Option'
-import { AsyncResult, Atom } from 'effect/unstable/reactivity'
-import { useCallback } from 'react'
+import { environmentCatalog } from "../connection/catalog";
+import { connectionAtomRuntime } from "../connection/runtime";
+import { projectFaviconCache } from "../lib/projectFaviconCache";
+import { type AssetUrlState, deriveAssetUrlState } from "./asset-url-state";
+import { environmentSession, usePreparedConnection } from "./session";
+import { useAtomQueryRunner } from "./use-atom-query-runner";
 
-import { connectionAtomRuntime } from '../connection/runtime'
-import { environmentSession } from './session'
+export type { AssetUrlFailureReason, AssetUrlState } from "./asset-url-state";
 
-export const assetEnvironment = createAssetEnvironmentAtoms(connectionAtomRuntime)
+export const assetEnvironment = createAssetEnvironmentAtoms(connectionAtomRuntime);
 
-const EMPTY_ASSET_URL_ATOM = Atom.make(
-  AsyncResult.initial<AssetCreateUrlResult, unknown>(false),
-).pipe(Atom.withLabel('mobile-asset-url:empty'))
-const EMPTY_PREPARED_CONNECTION_ATOM = Atom.make(
-  AsyncResult.initial<Option.Option<PreparedConnection>, unknown>(false),
-).pipe(Atom.withLabel('mobile-asset-prepared-connection:empty'))
+export const projectFaviconUrlAtom = createProjectFaviconUrlAtomFamily({
+  imageCache: projectFaviconCache,
+  createUrl: assetEnvironment.createUrl,
+  preparedConnection: environmentSession.preparedConnectionValueAtom,
+});
 
-export type AssetUrlState =
-  | { readonly _tag: 'Idle'; readonly retry: () => void }
-  | { readonly _tag: 'Loading'; readonly retry: () => void }
-  | {
-      readonly _tag: 'Failure'
-      readonly reason: 'disconnected' | 'failed'
-      readonly error: string
-      readonly retry: () => void
-    }
-  | {
-      readonly _tag: 'Success'
-      readonly url: string
-      readonly retry: () => void
-      readonly imageDimensions?: AssetCreateUrlResult['imageDimensions']
-    }
+const EMPTY_CONNECTION_STATE_ATOM = Atom.make(AsyncResult.initial<never, never>(false)).pipe(
+  Atom.withLabel("mobile-asset-connection-state:empty"),
+);
 
-function formatAssetUrlError(cause: Cause.Cause<unknown>): string
-{
-  const error = Cause.squash(cause)
-  return error instanceof Error && error.message.trim().length > 0
-    ? error.message
-    : 'The preview URL could not be created.'
+function useConnectionPhase(environmentId: EnvironmentId | null): EnvironmentConnectionPhase {
+  const state = useAtomValue(
+    environmentId === null
+      ? EMPTY_CONNECTION_STATE_ATOM
+      : environmentCatalog.stateAtom(environmentId),
+  );
+  const value = Option.getOrNull(AsyncResult.value(state));
+  return value === null ? "available" : presentConnectionState(value).phase;
+}
+
+export function useAssetUrlState(
+  environmentId: EnvironmentId | null,
+  resource: AssetResource | null,
+): AssetUrlState {
+  const preparedConnection = usePreparedConnection(environmentId);
+  const connectionPhase = useConnectionPhase(environmentId);
+  const result = useAtomValue(
+    environmentId === null || resource === null
+      ? EMPTY_ASSET_URL_ATOM
+      : assetEnvironment.createUrl({ environmentId, input: { resource } }),
+  );
+  const shared = assetUrlStateFromResult(
+    result,
+    preparedConnection._tag === "Some" ? preparedConnection.value.httpBaseUrl : null,
+  );
+  return deriveAssetUrlState({
+    connectionPhase,
+    // A failure left over from an outage is re-queried as soon as the
+    // connection returns. While that re-query is in flight it is not a verdict
+    // on the file, so it reads as loading rather than a false "unavailable".
+    shared: shared._tag === "Failure" && result.waiting ? { _tag: "Loading" } : shared,
+  });
 }
 
 export function useAssetUrl(
   environmentId: EnvironmentId | null,
   resource: AssetResource | null,
-): AssetUrlState
-{
-  const assetUrlAtom: Atom.Atom<AsyncResult.AsyncResult<AssetCreateUrlResult, unknown>> =
-    environmentId === null || resource === null
-      ? EMPTY_ASSET_URL_ATOM
-      : assetEnvironment.createUrl({ environmentId, input: { resource } })
-  const preparedConnectionAtom: Atom.Atom<
-    AsyncResult.AsyncResult<Option.Option<PreparedConnection>, unknown>
-  > =
-    environmentId === null
-      ? EMPTY_PREPARED_CONNECTION_ATOM
-      : environmentSession.preparedConnectionAtom(environmentId)
-  const result = useAtomValue(assetUrlAtom)
-  const preparedResult = useAtomValue(preparedConnectionAtom)
-  const refreshAssetUrl = useAtomRefresh(assetUrlAtom)
-  const refreshPreparedConnection = useAtomRefresh(preparedConnectionAtom)
-  const retry = useCallback(() =>
-  {
-    refreshPreparedConnection()
-    refreshAssetUrl()
-  }, [refreshAssetUrl, refreshPreparedConnection])
+): string | null {
+  const state = useAssetUrlState(environmentId, resource);
+  return state._tag === "Success" ? state.url : null;
+}
 
-  if (environmentId === null || resource === null)
-  {
-    return { _tag: 'Idle', retry }
-  }
-  if (preparedResult._tag === 'Failure')
-  {
-    return {
-      _tag: 'Failure',
-      reason: 'disconnected',
-      error: formatAssetUrlError(preparedResult.cause),
-      retry,
-    }
-  }
-  if (preparedResult._tag !== 'Success')
-  {
-    return { _tag: 'Loading', retry }
-  }
-  const preparedConnection = Option.getOrNull(preparedResult.value)
-  if (preparedConnection === null)
-  {
-    return {
-      _tag: 'Failure',
-      reason: 'disconnected',
-      error: 'The environment connection is unavailable. Reconnect and try again.',
-      retry,
-    }
-  }
-  if (result._tag === 'Failure')
-  {
-    return { _tag: 'Failure', reason: 'failed', error: formatAssetUrlError(result.cause), retry }
-  }
-  if (result._tag !== 'Success')
-  {
-    return { _tag: 'Loading', retry }
-  }
-  const url = resolveAssetUrl(preparedConnection.httpBaseUrl, result.value.relativeUrl)
-  return url === null
-    ? {
-        _tag: 'Failure',
-        reason: 'failed',
-        error: 'The preview URL returned by the environment is invalid.',
-        retry,
-      }
-    : { _tag: 'Success', url, retry, imageDimensions: result.value.imageDimensions }
+/** Explicit playback and sharing must reauthorize files that may have been replaced on disk. */
+export function useRefreshAssetUrl(
+  environmentId: EnvironmentId | null,
+  resource: AssetResource | null,
+): () => Promise<string | null> {
+  const connection = usePreparedConnection(environmentId);
+  const httpBaseUrl = connection._tag === "Some" ? connection.value.httpBaseUrl : null;
+  const createUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
+    refresh: true,
+    reportFailure: false,
+  });
+  return useCallback(async () => {
+    if (environmentId === null || resource === null || httpBaseUrl === null) return null;
+    const state = assetUrlStateFromResult(
+      await createUrl({ environmentId, input: { resource } }),
+      httpBaseUrl,
+    );
+    return state._tag === "Success" ? state.url : null;
+  }, [createUrl, environmentId, httpBaseUrl, resource]);
 }

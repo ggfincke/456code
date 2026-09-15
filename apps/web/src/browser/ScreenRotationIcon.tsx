@@ -1,8 +1,11 @@
-// apps/web/src/browser/ScreenRotationIcon.tsx
-// render the shared browser rotation glyph
-
-export function ScreenRotationIcon()
-{
+/**
+ * Screen-rotation glyph shared by the in-browser device toolbar and the
+ * default-viewport setting, so the orientation control reads the same in both
+ * places.
+ *
+ * @module ScreenRotationIcon
+ */
+export function ScreenRotationIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -19,5 +22,5 @@ export function ScreenRotationIcon()
       <path d="M11.5 22a10 10 0 0 1-8.4-5.4" />
       <path d="M3.2 20.5v-4h4" />
     </svg>
-  )
+  );
 }

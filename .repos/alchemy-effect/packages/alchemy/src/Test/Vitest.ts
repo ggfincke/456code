@@ -1,3 +1,4 @@
+/** @effect-diagnostics anyUnknownInErrorContext:off */
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -13,6 +14,17 @@ import type { AlchemyContext } from "../AlchemyContext.ts";
 import type { CompiledStack } from "../Stack.ts";
 import type { Stage } from "../Stage.ts";
 import * as Core from "./Core.ts";
+
+export {
+  executeWhenReady,
+  getWhenReady,
+  guardContentType,
+  guardedFetchLayer,
+  rpcClientLayer,
+  WorkerNotReady,
+  type EdgeGuardOptions,
+  type WhenReadyOptions,
+} from "./Http.ts";
 
 export type MakeOptions<ROut = any> = Core.MakeOptions<ROut>;
 export type ScratchStack = Core.ScratchStack;
@@ -101,9 +113,15 @@ export const make = <ROut = any>(options: MakeOptions<ROut>): TestApi => {
   // single `runPromise` boundary, so all hooks share one scope that's only
   // closed after `destroy(...)` runs.
   const sharedScope = Scope.makeUnsafe("sequential");
+  // In dev mode, run local providers behind one file-scoped RPC sidecar
+  // (the `alchemy dev` topology). Lives in its own scope — NOT sharedScope,
+  // which `destroy(Stack)` closes mid-file in self-contained tests — and is
+  // closed by the fallback afterAll below.
+  const sidecar = Core.makeSidecarHandle(options);
   const wrap = <A>(eff: TestEffect<A>) =>
-    Core.toEffect(eff, options, sharedScope);
-  const runEff = <A>(eff: TestEffect<A>) => Core.run(eff, options, sharedScope);
+    Core.toEffect(eff, options, sharedScope, sidecar);
+  const runEff = <A>(eff: TestEffect<A>) =>
+    Core.run(eff, options, sharedScope, sidecar);
 
   const test = ((name, eff, opts) => {
     it.live(name, () => wrap(eff), timeoutOf(opts));
@@ -131,10 +149,23 @@ export const make = <ROut = any>(options: MakeOptions<ROut>): TestApi => {
     fn: (stack: ScratchStack) => Effect.Effect<void, any, any>,
   ) => {
     const scratch = Core.scratchStack(options, name);
+    // Guarantee teardown. `test.provider` has no built-in cleanup, so a body
+    // that fails (assertion, API error like a 409/Unauthorized) or is
+    // interrupted (vitest timeout) BEFORE its trailing `stack.destroy()` would
+    // otherwise leak every cloud resource it deployed: the scratch's in-memory
+    // state is discarded with the process, so no later run can reclaim the
+    // orphan (only an account-wide `nuke` can). `scratch.destroy()` is
+    // idempotent (empty-plan apply against the shared scratch state) — a no-op
+    // when the body already destroyed, and it reclaims the orphans otherwise.
+    // `Effect.ensuring` runs the finalizer on success, failure, AND interruption.
+    const body = Core.withProviders(fn(scratch), options, scratch.name).pipe(
+      Effect.ensuring(scratch.destroy().pipe(Effect.ignore)),
+    );
     return Core.toEffect(
-      Core.withProviders(fn(scratch), options, scratch.name),
+      body,
       { ...options, state: scratch.state },
       sharedScope,
+      sidecar,
     );
   };
 
@@ -197,11 +228,16 @@ export const make = <ROut = any>(options: MakeOptions<ROut>): TestApi => {
   // Fallback cleanup: if the user never calls `destroy(Stack)` (e.g.
   // `NO_DESTROY=1`), nothing else closes the shared scope and the sidecar
   // child process leaks past the test process. Register an `afterAll` that
-  // closes it. We defer registration to a microtask so it runs AFTER any
-  // user-registered `afterAll` (including `destroy(Stack)`); vitest runs
-  // afterAll hooks in registration order.
+  // closes it (and the RPC sidecar, which lives in its own scope so that
+  // mid-file `destroy(Stack)` calls can't kill it for later tests). We defer
+  // registration to a microtask so it runs AFTER any user-registered
+  // `afterAll` (including `destroy(Stack)`); vitest runs afterAll hooks in
+  // registration order.
+  const closeAll = sidecar
+    ? Effect.andThen(closeScope, sidecar.close)
+    : closeScope;
   queueMicrotask(() => {
-    vitestAfterAll(() => Effect.runPromise(closeScope), DEFAULT_TIMEOUT);
+    vitestAfterAll(() => Effect.runPromise(closeAll), DEFAULT_TIMEOUT);
   });
 
   return {

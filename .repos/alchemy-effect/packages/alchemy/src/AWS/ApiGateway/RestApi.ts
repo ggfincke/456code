@@ -1,15 +1,21 @@
-import { Region } from "@distilled.cloud/aws/Region";
 import * as ag from "@distilled.cloud/aws/api-gateway";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import { deepEqual, isResolved } from "../../Diff.ts";
 import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
-import type { Providers } from "../Providers.ts";
 import { createInternalTags, tagRecord } from "../../Tags.ts";
+import type { Providers } from "../Providers.ts";
 
-import { restApiArn, retryOnApiStatusUpdating, syncTags } from "./common.ts";
+import { AWSEnvironment } from "../Environment.ts";
+import {
+  deleteRestApiAndWait,
+  restApiArn,
+  retryOnApiStatusUpdating,
+  syncTags,
+} from "./common.ts";
 
 export interface RestApiProps {
   /**
@@ -18,17 +24,33 @@ export interface RestApiProps {
    * If omitted, Alchemy generates a deterministic physical name.
    */
   name?: string;
+  /** Description of the REST API. */
   description?: string;
+  /** A version identifier for the API. */
   version?: string;
+  /** ID of an existing REST API to clone the new API from. */
   cloneFrom?: string;
+  /** Media types treated as binary (e.g. `image/png`; a star-slash-star entry covers all types). */
   binaryMediaTypes?: string[];
+  /** Minimum response size in bytes that triggers compression (0-10485760); unset disables compression. */
   minimumCompressionSize?: number;
+  /**
+   * Where API Gateway reads the API key on requests (`HEADER` or `AUTHORIZER`).
+   * @default "HEADER"
+   */
   apiKeySource?: ag.ApiKeySourceType;
+  /** Endpoint type for the API (EDGE, REGIONAL, or PRIVATE). */
   endpointConfiguration?: ag.EndpointConfiguration;
   /** Resource policy document as a JSON string. */
   policy?: string;
+  /**
+   * Disable the default `execute-api` endpoint (serve only via custom domains).
+   * @default false
+   */
   disableExecuteApiEndpoint?: boolean;
+  /** Minimum TLS version served by the API endpoint. */
   securityPolicy?: ag.SecurityPolicy;
+  /** Access mode of the API endpoint. */
   endpointAccessMode?: ag.EndpointAccessMode;
   /** User-defined tags (Alchemy internal tags are merged automatically). */
   tags?: Record<string, string>;
@@ -98,13 +120,12 @@ export interface RestApi extends Resource<
  * stack is the `RestApi` value itself: child resources accept `restApi: api`
  * and register themselves back onto the API so that deployments and stages
  * wait for them without any user-authored dependency lists.
- *
- * @section Getting started
+ * ### Getting started
  * A minimal API Gateway stack is four pieces: the `RestApi`, one or more
  * `Method`s, a `Deployment` that snapshots those methods, and a `Stage` that
  * exposes the deployment at a URL.
  *
- * @example Mock HTTP GET on the root path
+ * **Example:** Mock HTTP GET on the root path
  * ```typescript
  * import * as ApiGateway from "alchemy/AWS/ApiGateway";
  *
@@ -130,7 +151,7 @@ export interface RestApi extends Resource<
  * });
  * ```
  *
- * @section How dependencies flow
+ * ### How dependencies flow
  * Writing `restApi: api` on a child (rather than `restApiId: api.restApiId`)
  * does two things: it threads the restApi id through, and it registers a
  * `RestApiBinding` back onto the API. The Alchemy scheduler sees those
@@ -139,8 +160,8 @@ export interface RestApi extends Resource<
  * have to write a `DependsOn` list or a `triggers` hash — adding a new
  * `Method` automatically orders it before the next `Deployment`.
  *
- * @section Private REST APIs
- * @example Private REST API
+ * ### Private REST APIs
+ * **Example:** Private REST API
  * ```typescript
  * const api = yield* ApiGateway.RestApi("PrivateApi", {
  *   endpointConfiguration: {
@@ -159,8 +180,8 @@ export interface RestApi extends Resource<
  * });
  * ```
  *
- * @section Binary payloads
- * @example Enable binary media types
+ * ### Binary payloads
+ * **Example:** Enable binary media types
  * ```typescript
  * const api = yield* ApiGateway.RestApi("BinaryApi", {
  *   binaryMediaTypes: ["application/octet-stream", "image/png"],
@@ -168,14 +189,16 @@ export interface RestApi extends Resource<
  * });
  * ```
  *
- * @section Endpoint hardening
- * @example Disable the default execute-api endpoint
+ * ### Endpoint hardening
+ * **Example:** Disable the default execute-api endpoint
  * ```typescript
  * const api = yield* ApiGateway.RestApi("CustomDomainOnlyApi", {
  *   endpointConfiguration: { types: ["REGIONAL"] },
  *   disableExecuteApiEndpoint: true,
  * });
  * ```
+ *
+ * @resource
  */
 export const RestApi = Resource<RestApi>("AWS.ApiGateway.RestApi");
 
@@ -299,8 +322,6 @@ export const RestApiProvider = () =>
   Provider.effect(
     RestApi,
     Effect.gen(function* () {
-      const awsRegion = yield* Region;
-
       return {
         stables: ["restApiId", "rootResourceId"] as const,
         diff: Effect.fn(function* ({ news: newsIn, olds }) {
@@ -326,6 +347,23 @@ export const RestApiProvider = () =>
             return { action: "replace" } as const;
           }
         }),
+        // Enumerate every REST API in the account/region. `getRestApis` is a
+        // paginated collection op (items field "items"); collect every page and
+        // map each item through the same snapshot helper `read` uses so each
+        // element is a complete `Attributes` shape.
+        list: () =>
+          ag.getRestApis.pages({}).pipe(
+            Stream.runCollect,
+            Effect.map((chunk) =>
+              Array.from(chunk).flatMap((page) =>
+                (page.items ?? [])
+                  .filter(
+                    (api): api is ag.RestApi & { id: string } => api.id != null,
+                  )
+                  .map((api) => snapshotFromApi(api)),
+              ),
+            ),
+          ),
         read: Effect.fn(function* ({ output }) {
           if (!output?.restApiId) return undefined;
           const api = yield* ag
@@ -355,7 +393,7 @@ export const RestApiProvider = () =>
           const news = newsIn as RestApiProps;
           const name = yield* generatedName(id, news);
           const internalTags = yield* createInternalTags(id);
-          const allTags = { ...(news.tags ?? {}), ...internalTags };
+          const allTags = { ...news.tags, ...internalTags };
           const created = yield* retryOnApiStatusUpdating(
             ag.createRestApi({
               name,
@@ -383,6 +421,7 @@ export const RestApiProvider = () =>
           return snapshotFromApi(full);
         }),
         reconcile: Effect.fn(function* ({ id, news: newsIn, output, session }) {
+          const { region } = yield* AWSEnvironment.current;
           if (!isResolved(newsIn)) {
             return yield* Effect.die("RestApi props were not resolved");
           }
@@ -434,7 +473,7 @@ export const RestApiProvider = () =>
           const internalTags = yield* createInternalTags(id);
           const desiredTags = { ...news.tags, ...internalTags };
           if (!deepEqual(observedSnapshot.tags, desiredTags)) {
-            const arn = restApiArn(awsRegion, output.restApiId);
+            const arn = restApiArn(region, output.restApiId);
             yield* syncTags({
               resourceArn: arn,
               oldTags: observedSnapshot.tags,
@@ -453,11 +492,7 @@ export const RestApiProvider = () =>
           return snapshotFromApi(final);
         }),
         delete: Effect.fn(function* ({ output, session }) {
-          yield* retryOnApiStatusUpdating(
-            ag
-              .deleteRestApi({ restApiId: output.restApiId })
-              .pipe(Effect.catchTag("NotFoundException", () => Effect.void)),
-          );
+          yield* deleteRestApiAndWait(output.restApiId);
           yield* session.note(`Deleted REST API ${output.restApiId}`);
         }),
       };

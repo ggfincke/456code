@@ -7,12 +7,19 @@ import * as Stream from "effect/Stream";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import * as UrlParams from "effect/unstable/http/UrlParams";
+import * as Url from "effect/unstable/http/Url";
 import * as Binding from "../../Binding.ts";
+import type { RuntimeContext } from "../../RuntimeContext.ts";
 import { isWorker, type Worker, WorkerEnvironment } from "./Worker.ts";
 
-export class Fetch extends Binding.Service<
+/**
+ * @binding
+ * @product Workers
+ * @category Workers & Compute
+ */
+export interface Fetch extends Binding.Service<
   Fetch,
+  "Cloudflare.Workers.Fetch",
   (
     worker: Worker,
   ) => Effect.Effect<
@@ -20,25 +27,44 @@ export class Fetch extends Binding.Service<
       request: HttpClientRequest.HttpClientRequest,
     ) => Effect.Effect<
       HttpClientResponse.HttpClientResponse,
-      HttpClientError.RequestError
+      HttpClientError.RequestError,
+      RuntimeContext
     >
   >
->()("Cloudflare.Fetch") {}
+> {}
 
-export const FetchLive = Layer.effect(
+export const Fetch = Binding.Service<Fetch>("Cloudflare.Workers.Fetch");
+
+export const FetchBinding = Layer.effect(
   Fetch,
   Effect.gen(function* () {
-    const Policy = yield* FetchPolicy;
     const env = yield* WorkerEnvironment;
 
     return Effect.fn(function* (worker: Worker) {
-      yield* Policy(worker);
-      const fetcher = (env as Record<string, runtime.Fetcher>)[
-        worker.LogicalId
-      ];
+      if (!globalThis.__ALCHEMY_RUNTIME__) {
+        // Deploy-time only: register the service binding for the *target*
+        // worker on the host Worker.
+        const host = yield* Binding.Host;
+        if (isWorker(host)) {
+          yield* host.bind`${worker}`({
+            bindings: [
+              {
+                type: "service",
+                name: worker.LogicalId,
+                service: worker.workerName,
+              },
+            ],
+          });
+        }
+      }
+      // Lazy — the `WorkerEnvironment` bindings are only populated at exec
+      // phase, so the fetcher must be resolved per call, not at bind time.
+      const fetcher = Effect.sync(
+        () => (env as Record<string, runtime.Fetcher>)[worker.LogicalId]!,
+      ) as Effect.Effect<runtime.Fetcher, never, RuntimeContext>;
 
       return (request: HttpClientRequest.HttpClientRequest) =>
-        doFetch(fetcher, request);
+        Effect.flatMap(fetcher, (f) => doFetch(f, request));
     });
   }),
 );
@@ -50,7 +76,7 @@ const doFetch = (
   HttpClientResponse.HttpClientResponse,
   HttpClientError.RequestError
 > => {
-  const urlResult = UrlParams.makeUrl(
+  const urlResult = Url.make(
     request.url,
     request.urlParams,
     request.hash.pipe(Option.getOrUndefined),
@@ -115,28 +141,3 @@ const doFetch = (
       return send(undefined);
   }
 };
-
-export class FetchPolicy extends Binding.Policy<
-  FetchPolicy,
-  (worker: Worker) => Effect.Effect<void>
->()("Cloudflare.Fetch") {}
-
-export const FetchPolicyLive = FetchPolicy.layer.succeed(
-  Effect.fn(function* (host) {
-    if (isWorker(host)) {
-      yield* host.bind`${host}`({
-        bindings: [
-          {
-            type: "service",
-            name: host.LogicalId,
-            service: host.workerName,
-          },
-        ],
-      });
-    } else {
-      return yield* Effect.die(
-        new Error(`FetchPolicy does not support runtime '${host.Type}'`),
-      );
-    }
-  }),
-);

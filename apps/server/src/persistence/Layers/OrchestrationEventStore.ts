@@ -1,6 +1,3 @@
-// apps/server/src/persistence/Layers/OrchestrationEventStore.ts
-// manage orchestration event state
-
 import {
   CommandId,
   EventId,
@@ -11,31 +8,30 @@ import {
   OrchestrationEvent,
   OrchestrationEventMetadata,
   OrchestrationEventType,
-  UNKNOWN_ORCHESTRATION_EVENT_TYPE,
   ProjectId,
   ThreadId,
-} from '@t3tools/contracts'
-import * as SqlClient from 'effect/unstable/sql/SqlClient'
-import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
-import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as Option from 'effect/Option'
-import * as Schema from 'effect/Schema'
-import * as Stream from 'effect/Stream'
+} from "@t3tools/contracts";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
 import {
   toPersistenceDecodeError,
-  toPersistenceSqlOrDecodeError,
+  toPersistenceSqlError,
   type OrchestrationEventStoreError,
-} from '../Errors.ts'
+} from "../Errors.ts";
 import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
-} from '../Services/OrchestrationEventStore.ts'
+} from "../Services/OrchestrationEventStore.ts";
 
-const decodeEvent = Schema.decodeUnknownEffect(OrchestrationEvent)
-const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
-const EventMetadataFromJsonString = Schema.fromJsonString(OrchestrationEventMetadata)
+const decodeEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
+const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
+const EventMetadataFromJsonString = Schema.fromJsonString(OrchestrationEventMetadata);
 
 const AppendEventRequestSchema = Schema.Struct({
   eventId: EventId,
@@ -49,8 +45,7 @@ const AppendEventRequestSchema = Schema.Struct({
   commandId: Schema.NullOr(CommandId),
   payloadJson: UnknownFromJsonString,
   metadataJson: EventMetadataFromJsonString,
-})
-const AppendEventsRequestSchema = Schema.Array(AppendEventRequestSchema)
+});
 
 const OrchestrationEventPersistedRowSchema = Schema.Struct({
   sequence: NonNegativeInt,
@@ -64,117 +59,71 @@ const OrchestrationEventPersistedRowSchema = Schema.Struct({
   correlationId: Schema.NullOr(CommandId),
   payload: UnknownFromJsonString,
   metadata: EventMetadataFromJsonString,
-})
+});
+
+const HasEventAfterRequestSchema = Schema.Struct({
+  aggregateKind: Schema.String,
+  aggregateId: Schema.String,
+  type: Schema.optional(Schema.String),
+  sequenceExclusive: NonNegativeInt,
+});
 
 const ReadFromSequenceRequestSchema = Schema.Struct({
   sequenceExclusive: NonNegativeInt,
   limit: Schema.Number,
-})
+});
 const AggregateReplayRequestSchema = Schema.Struct({
   aggregateKind: OrchestrationAggregateKind,
   aggregateId: Schema.String,
   fromSequenceExclusive: NonNegativeInt,
   toSequenceInclusive: NonNegativeInt,
   limit: Schema.Number,
-})
+});
 const AggregateReplayStatsRowSchema = Schema.Struct({
   eventCount: Schema.Number,
   payloadBytes: Schema.Number,
   hasCreateEvent: Schema.Number,
-})
-const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000
-const READ_PAGE_SIZE = 500
+});
+const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000;
+const READ_PAGE_SIZE = 500;
 
 function inferActorKind(
-  event: Omit<OrchestrationEvent, 'sequence'>,
-): Schema.Schema.Type<typeof OrchestrationActorKind>
-{
-  if (event.commandId !== null && event.commandId.startsWith('provider:'))
-  {
-    return 'provider'
+  event: Omit<OrchestrationEvent, "sequence">,
+): Schema.Schema.Type<typeof OrchestrationActorKind> {
+  if (event.commandId !== null && event.commandId.startsWith("provider:")) {
+    return "provider";
   }
-  if (event.commandId !== null && event.commandId.startsWith('server:'))
-  {
-    return 'server'
+  if (event.commandId !== null && event.commandId.startsWith("server:")) {
+    return "server";
   }
   if (
     event.metadata.providerTurnId !== undefined ||
     event.metadata.providerItemId !== undefined ||
     event.metadata.adapterKey !== undefined
-  )
-  {
-    return 'provider'
+  ) {
+    return "provider";
   }
-  if (event.commandId === null)
-  {
-    return 'server'
+  if (event.commandId === null) {
+    return "server";
   }
-  return 'client'
+  return "client";
 }
 
-const makeEventStore = Effect.gen(function* ()
-{
-  const sql = yield* SqlClient.SqlClient
+function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
+  return (cause: unknown): OrchestrationEventStoreError =>
+    Schema.isSchemaError(cause)
+      ? toPersistenceDecodeError(decodeOperation)(cause)
+      : toPersistenceSqlError(sqlOperation)(cause);
+}
 
-  const appendEventRows = SqlSchema.findAll({
-    Request: AppendEventsRequestSchema,
+const makeEventStore = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  const appendEventRow = SqlSchema.findOne({
+    Request: AppendEventRequestSchema,
     Result: OrchestrationEventPersistedRowSchema,
-    execute: (requests) =>
+    execute: (request) =>
       sql`
-        WITH input_events (
-          ordinal,
-          event_id,
-          aggregate_kind,
-          stream_id,
-          event_type,
-          occurred_at,
-          command_id,
-          causation_event_id,
-          correlation_id,
-          actor_kind,
-          payload_json,
-          metadata_json
-        ) AS (
-          VALUES ${sql.join(
-            ',',
-            false,
-          )(
-            requests.map(
-              (request, index) =>
-                sql`(
-                ${index},
-                ${request.eventId},
-                ${request.aggregateKind},
-                ${request.streamId},
-                ${request.type},
-                ${request.occurredAt},
-                ${request.commandId},
-                ${request.causationEventId},
-                ${request.correlationId},
-                ${request.actorKind},
-                ${request.payloadJson},
-                ${request.metadataJson}
-              )`,
-            ),
-          )}
-        ),
-        versioned_events AS (
-          SELECT
-            input_events.*,
-            COALESCE(
-              (
-                SELECT MAX(existing.stream_version) + 1
-                FROM orchestration_events AS existing
-                WHERE existing.aggregate_kind = input_events.aggregate_kind
-                  AND existing.stream_id = input_events.stream_id
-              ),
-              0
-            ) + ROW_NUMBER() OVER (
-              PARTITION BY aggregate_kind, stream_id
-              ORDER BY ordinal
-            ) - 1 AS stream_version
-          FROM input_events
-        )
         INSERT INTO orchestration_events (
           event_id,
           aggregate_kind,
@@ -189,21 +138,30 @@ const makeEventStore = Effect.gen(function* ()
           payload_json,
           metadata_json
         )
-        SELECT
-          event_id,
-          aggregate_kind,
-          stream_id,
-          stream_version,
-          event_type,
-          occurred_at,
-          command_id,
-          causation_event_id,
-          correlation_id,
-          actor_kind,
-          payload_json,
-          metadata_json
-        FROM versioned_events
-        ORDER BY ordinal
+        VALUES (
+          ${request.eventId},
+          ${request.aggregateKind},
+          ${request.streamId},
+          COALESCE(
+            (
+              SELECT stream_version + 1
+              FROM orchestration_events
+              WHERE aggregate_kind = ${request.aggregateKind}
+                AND stream_id = ${request.streamId}
+              ORDER BY stream_version DESC
+              LIMIT 1
+            ),
+            0
+          ),
+          ${request.type},
+          ${request.occurredAt},
+          ${request.commandId},
+          ${request.causationEventId},
+          ${request.correlationId},
+          ${request.actorKind},
+          ${request.payloadJson},
+          ${request.metadataJson}
+        )
         RETURNING
           sequence,
           event_id AS "eventId",
@@ -217,7 +175,7 @@ const makeEventStore = Effect.gen(function* ()
           payload_json AS "payload",
           metadata_json AS "metadata"
       `,
-  })
+  });
 
   const readEventRowsFromSequence = SqlSchema.findAll({
     Request: ReadFromSequenceRequestSchema,
@@ -241,7 +199,7 @@ const makeEventStore = Effect.gen(function* ()
         ORDER BY sequence ASC
         LIMIT ${request.limit}
       `,
-  })
+  });
 
   const readAggregateEventRows = SqlSchema.findAll({
     Request: AggregateReplayRequestSchema,
@@ -268,7 +226,7 @@ const makeEventStore = Effect.gen(function* ()
         ORDER BY sequence ASC
         LIMIT ${request.limit}
       `,
-  })
+  });
 
   const readAggregateReplayStats = SqlSchema.findOne({
     Request: AggregateReplayRequestSchema,
@@ -292,77 +250,42 @@ const makeEventStore = Effect.gen(function* ()
           LIMIT ${request.limit}
         )
       `,
-  })
+  });
 
-  const appendEvents = (
-    events: ReadonlyArray<Omit<OrchestrationEvent, 'sequence'>>,
-    operation: 'append' | 'appendAll',
-  ): Effect.Effect<ReadonlyArray<OrchestrationEvent>, OrchestrationEventStoreError> =>
-  {
-    if (events.length === 0)
-    {
-      return Effect.succeed([])
-    }
-    return Effect.forEach(events, (event) =>
-    {
-      // the unknown-event sentinel exists for decode-side tolerance only; the
-      // server always constructs concrete events, so persisting one is a defect
-      if (event.type === UNKNOWN_ORCHESTRATION_EVENT_TYPE)
-      {
-        return Effect.die(
-          new Error('Unknown-event sentinels are decode-side only and cannot be appended.'),
-        )
-      }
-      return Effect.succeed({
-        eventId: event.eventId,
-        aggregateKind: event.aggregateKind,
-        streamId: event.aggregateId,
-        type: event.type,
-        causationEventId: event.causationEventId,
-        correlationId: event.correlationId,
-        actorKind: inferActorKind(event),
-        occurredAt: event.occurredAt,
-        commandId: event.commandId,
-        payloadJson: event.payload,
-        metadataJson: event.metadata,
-      })
+  const append: OrchestrationEventStoreShape["append"] = (event) =>
+    appendEventRow({
+      eventId: event.eventId,
+      aggregateKind: event.aggregateKind,
+      streamId: event.aggregateId,
+      type: event.type,
+      causationEventId: event.causationEventId,
+      correlationId: event.correlationId,
+      actorKind: inferActorKind(event),
+      occurredAt: event.occurredAt,
+      commandId: event.commandId,
+      payloadJson: event.payload,
+      metadataJson: event.metadata,
     }).pipe(
-      Effect.flatMap(appendEventRows),
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          `OrchestrationEventStore.${operation}:insert`,
-          `OrchestrationEventStore.${operation}:decodeRows`,
+          "OrchestrationEventStore.append:insert",
+          "OrchestrationEventStore.append:decodeRow",
         ),
       ),
-      Effect.flatMap((rows) =>
-        Effect.forEach(
-          [...rows].sort((left, right) => left.sequence - right.sequence),
-          (row) =>
-            decodeEvent(row).pipe(
-              Effect.mapError(
-                toPersistenceDecodeError(`OrchestrationEventStore.${operation}:rowToEvent`),
-              ),
-            ),
+      Effect.flatMap((row) =>
+        decodeEvent(row).pipe(
+          Effect.mapError(toPersistenceDecodeError("OrchestrationEventStore.append:rowToEvent")),
         ),
       ),
-    )
-  }
+    );
 
-  const append: OrchestrationEventStoreShape['append'] = (event) =>
-    appendEvents([event], 'append').pipe(Effect.map((events) => events[0]!))
-
-  const appendAll: OrchestrationEventStoreShape['appendAll'] = (events) =>
-    appendEvents(events, 'appendAll')
-
-  const readFromSequence: OrchestrationEventStoreShape['readFromSequence'] = (
+  const readFromSequence: OrchestrationEventStoreShape["readFromSequence"] = (
     sequenceExclusive,
     limit = DEFAULT_READ_FROM_SEQUENCE_LIMIT,
-  ) =>
-  {
-    const normalizedLimit = Math.max(0, Math.floor(limit))
-    if (normalizedLimit === 0)
-    {
-      return Stream.empty
+  ) => {
+    const normalizedLimit = Math.max(0, Math.floor(limit));
+    if (normalizedLimit === 0) {
+      return Stream.empty;
     }
     return Stream.paginate(
       { cursor: sequenceExclusive, remaining: normalizedLimit },
@@ -373,40 +296,64 @@ const makeEventStore = Effect.gen(function* ()
         }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
-              'OrchestrationEventStore.readFromSequence:query',
-              'OrchestrationEventStore.readFromSequence:decodeRows',
+              "OrchestrationEventStore.readFromSequence:query",
+              "OrchestrationEventStore.readFromSequence:decodeRows",
             ),
           ),
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>
               decodeEvent(row).pipe(
                 Effect.mapError(
-                  toPersistenceDecodeError('OrchestrationEventStore.readFromSequence:rowToEvent'),
+                  toPersistenceDecodeError("OrchestrationEventStore.readFromSequence:rowToEvent"),
                 ),
               ),
             ),
           ),
-          Effect.map((events) =>
-          {
-            const last = events.at(-1)
-            const nextRemaining = remaining - events.length
+          Effect.map((events) => {
+            const last = events.at(-1);
+            const nextRemaining = remaining - events.length;
             return [
               events,
               last === undefined || nextRemaining <= 0
                 ? Option.none()
                 : Option.some({ cursor: last.sequence, remaining: nextRemaining }),
-            ] as const
+            ] as const;
           }),
         ),
-    )
-  }
+    );
+  };
 
-  const readAggregateRange: OrchestrationEventStoreShape['readAggregateRange'] = (input) =>
-  {
-    const limit = Math.max(0, Math.floor(input.limit ?? DEFAULT_READ_FROM_SEQUENCE_LIMIT))
-    if (limit === 0 || input.fromSequenceExclusive >= input.toSequenceInclusive)
-    {
-      return Stream.empty
+  const findEventAfter = SqlSchema.findOneOption({
+    Request: HasEventAfterRequestSchema,
+    Result: Schema.Struct({ sequence: Schema.Number }),
+    execute: (request) => sql`
+          SELECT sequence
+          FROM orchestration_events
+          WHERE aggregate_kind = ${request.aggregateKind}
+            AND stream_id = ${request.aggregateId}
+            AND ${sql.and([
+              sql`sequence > ${request.sequenceExclusive}`,
+              ...(request.type === undefined ? [] : [sql`event_type = ${request.type}`]),
+            ])}
+          LIMIT 1
+        `,
+  });
+
+  const hasEventAfter: OrchestrationEventStoreShape["hasEventAfter"] = (input) =>
+    findEventAfter(input).pipe(
+      Effect.map(Option.isSome),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "OrchestrationEventStore.hasEventAfter:query",
+          "OrchestrationEventStore.hasEventAfter:decodeRow",
+        ),
+      ),
+    );
+
+  const readAggregateRange: OrchestrationEventStoreShape["readAggregateRange"] = (input) => {
+    const limit = Math.max(0, Math.floor(input.limit ?? DEFAULT_READ_FROM_SEQUENCE_LIMIT));
+    if (limit === 0 || input.fromSequenceExclusive >= input.toSequenceInclusive) {
+      return Stream.empty;
     }
     return Stream.paginate(
       { cursor: input.fromSequenceExclusive, remaining: limit },
@@ -418,23 +365,22 @@ const makeEventStore = Effect.gen(function* ()
         }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
-              'OrchestrationEventStore.readAggregateRange:query',
-              'OrchestrationEventStore.readAggregateRange:decodeRows',
+              "OrchestrationEventStore.readAggregateRange:query",
+              "OrchestrationEventStore.readAggregateRange:decodeRows",
             ),
           ),
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>
               decodeEvent(row).pipe(
                 Effect.mapError(
-                  toPersistenceDecodeError('OrchestrationEventStore.readAggregateRange:rowToEvent'),
+                  toPersistenceDecodeError("OrchestrationEventStore.readAggregateRange:rowToEvent"),
                 ),
               ),
             ),
           ),
-          Effect.map((events) =>
-          {
-            const last = events.at(-1)
-            const nextRemaining = remaining - events.length
+          Effect.map((events) => {
+            const last = events.at(-1);
+            const nextRemaining = remaining - events.length;
             return [
               events,
               last === undefined ||
@@ -443,13 +389,13 @@ const makeEventStore = Effect.gen(function* ()
               last.sequence >= input.toSequenceInclusive
                 ? Option.none()
                 : Option.some({ cursor: last.sequence, remaining: nextRemaining }),
-            ] as const
+            ] as const;
           }),
         ),
-    )
-  }
+    );
+  };
 
-  const getAggregateReplayStats: OrchestrationEventStoreShape['getAggregateReplayStats'] = (
+  const getAggregateReplayStats: OrchestrationEventStoreShape["getAggregateReplayStats"] = (
     input,
   ) =>
     readAggregateReplayStats({
@@ -458,21 +404,21 @@ const makeEventStore = Effect.gen(function* ()
     }).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          'OrchestrationEventStore.getAggregateReplayStats:query',
-          'OrchestrationEventStore.getAggregateReplayStats:decodeRow',
+          "OrchestrationEventStore.getAggregateReplayStats:query",
+          "OrchestrationEventStore.getAggregateReplayStats:decodeRow",
         ),
       ),
       Effect.map((row) => ({ ...row, hasCreateEvent: row.hasCreateEvent !== 0 })),
-    )
+    );
 
   return {
     append,
-    appendAll,
     readFromSequence,
     readAggregateRange,
     getAggregateReplayStats,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
-  } satisfies OrchestrationEventStoreShape
-})
+    hasEventAfter,
+  } satisfies OrchestrationEventStoreShape;
+});
 
-export const OrchestrationEventStoreLive = Layer.effect(OrchestrationEventStore, makeEventStore)
+export const OrchestrationEventStoreLive = Layer.effect(OrchestrationEventStore, makeEventStore);

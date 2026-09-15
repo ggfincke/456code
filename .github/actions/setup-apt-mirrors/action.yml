@@ -1,6 +1,3 @@
-# .github/actions/setup-apt-mirrors/action.yml
-# configures Ubuntu package downloads with automatic mirror failover
-
 name: Setup APT mirrors
 description: Configure Ubuntu package downloads with automatic mirror failover.
 runs:
@@ -8,18 +5,18 @@ runs:
   steps:
     - shell: bash
       run: |
-        # replace the existing Blacksmith mirror list as well as direct sources.
+        # Replace the existing Blacksmith mirror list as well as direct sources.
         printf '%s\tpriority:%s\n' \
           https://archive.ubuntu.com/ubuntu 1 \
           https://mirrors.edge.kernel.org/ubuntu 2 \
           https://mirror.math.princeton.edu/pub/ubuntu 3 \
           | sudo tee /etc/apt/blacksmith-ubuntu-mirrors.txt > /dev/null
 
-        # apt's mirror transport retries each file against the next server.
+        # APT's mirror transport retries each file against the next server.
         sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
           -exec sed -i -E \
           's#https?://(([^/]+\.)?archive|security)\.ubuntu\.com/ubuntu/?#mirror+file:/etc/apt/blacksmith-ubuntu-mirrors.txt#g' {} +
 
-        # move on to a fallback before an unreachable server exhausts the job.
+        # Move on to a fallback before an unreachable server exhausts the job.
         printf '%s\n' 'Acquire::http::Timeout "15";' 'Acquire::https::Timeout "15";' \
           | sudo tee /etc/apt/apt.conf.d/80-mirror-timeouts > /dev/null

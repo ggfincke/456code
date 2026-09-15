@@ -1,6 +1,3 @@
-# .gitignore
-# exclude generated, local, and private development artifacts
-
 node_modules
 .bun
 .turbo
@@ -8,6 +5,7 @@ node_modules
 *.log
 *.tsbuildinfo
 apps/*/dist
+apps/*/dist-exe
 infra/*/dist
 .astro
 packages/*/dist
@@ -17,7 +15,7 @@ build/
 .logs/
 release/
 release-mock/
-.456code
+.t3
 .idea/
 apps/web/.playwright
 apps/web/playwright-report
@@ -28,20 +26,21 @@ __screenshots__/
 squashfs-root/
 .vercel
 .gstack/
-dev-docs/
-# orchestrate run checkpoints are per-run scratch; tracking them would falsify
-# the .plans/README.md inventory of durable, numerically ordered design plans
-.plans/runs/
-tmp/
+.plans/
 dist-electron/
 .electron-runtime/
 .showcase/
 apps/mobile/.showcase/
+apps/mobile/.generated/
+/.generated/
 artifacts/app-store/screenshots/
-# pull request evidence belongs on GitHub, never in the repository
 .github/pr-assets/
+native/**/target/
 node_modules/
 .alchemy/
 *.log
 .env*
 !.env.example
+
+# pnpm content-addressable store; never belongs in the repo.
+.pnpm-store/

@@ -1,25 +1,33 @@
-// apps/mobile/src/components/SourceControlIcon.tsx
-// render source control icon
+import Svg, { Circle, Defs, G, LinearGradient, Path, Stop } from "react-native-svg";
+import { withUniwind } from "uniwind";
 
-import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg'
-import { withUniwind } from 'uniwind'
+const ThemedSvg = withUniwind(Svg);
 
-const ThemedSvg = withUniwind(Svg)
-
-export type SourceControlIconKind = 'github' | 'gitlab' | 'bitbucket' | 'azure-devops'
+export type SourceControlIconKind = "github" | "gitlab" | "forgejo" | "bitbucket" | "azure-devops";
 
 export function SourceControlIcon(props: {
-  readonly kind: SourceControlIconKind
-  readonly size?: number
-  readonly color?: string
-  readonly colorClassName?: string
-})
-{
-  const size = props.size ?? 18
+  readonly kind: SourceControlIconKind;
+  readonly size?: number;
+  readonly color?: string;
+  readonly colorClassName?: string;
+}) {
+  const size = props.size ?? 18;
 
-  switch (props.kind)
-  {
-    case 'github':
+  switch (props.kind) {
+    case "forgejo":
+      // Official two-color mark from https://forgejo.org/favicon.svg.
+      return (
+        <Svg width={size} height={size} viewBox="0 0 212 212">
+          <G transform="translate(6 6)" fill="none">
+            <Path d="M58 168 v-98 a50 50 0 0 1 50-50 h20" stroke="#ff6600" strokeWidth={25} />
+            <Path d="M58 168 v-30 a50 50 0 0 1 50-50 h20" stroke="#d40000" strokeWidth={25} />
+            <Circle cx={142} cy={20} r={18} stroke="#ff6600" strokeWidth={15} />
+            <Circle cx={142} cy={88} r={18} stroke="#d40000" strokeWidth={15} />
+            <Circle cx={58} cy={180} r={18} stroke="#d40000" strokeWidth={15} />
+          </G>
+        </Svg>
+      );
+    case "github":
       return (
         <ThemedSvg
           width={size}
@@ -36,8 +44,8 @@ export function SourceControlIcon(props: {
             fill="currentColor"
           />
         </ThemedSvg>
-      )
-    case 'gitlab':
+      );
+    case "gitlab":
       return (
         <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
           <Path
@@ -57,8 +65,8 @@ export function SourceControlIcon(props: {
             fill="#FC6D26"
           />
         </Svg>
-      )
-    case 'azure-devops':
+      );
+    case "azure-devops":
       return (
         <Svg width={size} height={size} viewBox="0 0 96 96">
           <Defs>
@@ -84,8 +92,8 @@ export function SourceControlIcon(props: {
             d="M66.6 9.36a4.14 4.14 0 0 0-3.93-2.82H33.65a4.15 4.15 0 0 1 3.93 2.82l25.18 74.62a4.15 4.15 0 0 1-3.93 5.48h29.02a4.15 4.15 0 0 0 3.93-5.48z"
           />
         </Svg>
-      )
-    case 'bitbucket':
+      );
+    case "bitbucket":
       return (
         <Svg width={size} height={size} viewBox="8.4 14.39 2481.29 2231.21">
           <Defs>
@@ -110,6 +118,6 @@ export function SourceControlIcon(props: {
             d="M2379.27,763.06h-745.5l-125.12,730.42H992.31l-609.67,723.67c19.32,16.71,43.96,26,69.5,26.21h1618.13 c39.35,0.51,73.14-27.88,79.44-66.72L2379.27,763.06z"
           />
         </Svg>
-      )
+      );
   }
 }

@@ -1,329 +1,198 @@
-// packages/shared/src/filePreview.ts
-// classifies preview files and resolves safe mdx targets
+import { videoMimeType } from "./video.ts";
 
-export const WORKSPACE_BROWSER_PREVIEW_EXTENSIONS = ['.htm', '.html', '.pdf'] as const
+export type FilePreviewKind =
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "html"
+  | "markdown"
+  | "text"
+  | "unsupported";
+
+/** Content classification is identical for captured attachments and workspace references. */
+export function filePreviewKind(file: {
+  readonly name: string;
+  readonly mimeType?: string;
+}): FilePreviewKind {
+  const mime = file.mimeType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const name = file.name.toLowerCase();
+  const extension = name.slice(name.lastIndexOf("."));
+  const generic = !mime || mime === "application/octet-stream" || mime === "text/plain";
+  if (mime === "application/pdf") return "pdf";
+  if (mime === "text/html") return "html";
+  if (mime === "text/markdown" || mime === "text/x-markdown") return "markdown";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  if (generic) {
+    if (extension === ".pdf") return "pdf";
+    if (/^\.html?$/.test(extension)) return "html";
+    if (/^\.(md|markdown|mdown|mkd|mdx)$/.test(extension)) return "markdown";
+    const media = mediaMimeTypeFromExtension(extension);
+    if (media?.startsWith("image/")) return "image";
+    if (media?.startsWith("video/")) return "video";
+    if (audioMimeTypeFromExtension(extension) !== null) return "audio";
+    if (
+      /^\.(txt|log|json|jsonc|jsonl|ndjson|yaml|yml|toml|ini|conf|config|env|csv|tsv|xml|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|mts|cts|py|pyi|rb|go|rs|swift|kt|kts|java|c|h|cc|cpp|hpp|cs|php|sh|bash|zsh|fish|sql|graphql|gql|vue|svelte|r|lua|ex|exs|erl|hs|clj|dart|diff|patch|lock|properties|gradle)$/.test(
+        extension,
+      ) ||
+      /^(dockerfile|makefile|gemfile|rakefile|license|readme|\.gitignore|\.gitattributes|\.editorconfig|\.env)(\.|$)/i.test(
+        name.split(/[\\/]/).at(-1) ?? "",
+      )
+    )
+      return "text";
+  }
+  if (
+    mime.startsWith("text/") ||
+    /^(application\/(json|.*\+json|xml|.*\+xml|javascript|x-javascript|yaml|x-yaml|toml|sql))$/.test(
+      mime,
+    )
+  )
+    return "text";
+  return "unsupported";
+}
+
+export const FILE_TEXT_PREVIEW_MAX_BYTES = 1024 * 1024;
+
+/** Reject binary data rather than displaying replacement characters as a document. */
+export function decodeFilePreviewText(bytes: Uint8Array, truncated = false) {
+  const bounded = bytes.subarray(0, FILE_TEXT_PREVIEW_MAX_BYTES);
+  if (bounded.some((byte) => byte === 0))
+    throw new Error("This file contains binary data and cannot be shown as text.");
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  try {
+    return {
+      text: decoder.decode(bounded, { stream: truncated || bytes.length > bounded.length }),
+      truncated: truncated || bytes.length > bounded.length,
+    };
+  } catch {
+    throw new Error("This file is not UTF-8 text. Open it in another app to view its contents.");
+  }
+}
+
+export const WORKSPACE_BROWSER_PREVIEW_EXTENSIONS = [".htm", ".html", ".pdf"] as const;
 
 export const WORKSPACE_IMAGE_PREVIEW_EXTENSIONS = [
-  '.avif',
-  '.gif',
-  '.ico',
-  '.jpeg',
-  '.jpg',
-  '.png',
-  '.svg',
-  '.webp',
-] as const
+  ".avif",
+  ".gif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".svg",
+  ".webp",
+] as const;
 
-function hasPreviewExtension(path: string, extensions: ReadonlyArray<string>): boolean
-{
-  const pathWithoutQuery = path.split(/[?#]/, 1)[0]?.toLowerCase() ?? ''
-  return extensions.some((extension) => pathWithoutQuery.endsWith(extension))
+const IMAGE_MIME_TYPE_BY_EXTENSION = new Map([
+  [".avif", "image/avif"],
+  [".gif", "image/gif"],
+  [".ico", "image/x-icon"],
+  [".jpeg", "image/jpeg"],
+  [".jpg", "image/jpeg"],
+  [".png", "image/png"],
+  [".svg", "image/svg+xml"],
+  [".webp", "image/webp"],
+]);
+
+const BROWSER_MIME_TYPE_BY_EXTENSION = new Map([
+  [".htm", "text/html"],
+  [".html", "text/html"],
+  [".pdf", "application/pdf"],
+]);
+
+const AUDIO_MIME_TYPE_BY_EXTENSION = new Map([
+  [".mp3", "audio/mpeg"],
+  [".wav", "audio/wav"],
+  [".ogg", "audio/ogg"],
+  [".oga", "audio/ogg"],
+  [".flac", "audio/flac"],
+  [".aac", "audio/aac"],
+  [".m4a", "audio/mp4"],
+  [".opus", "audio/ogg"],
+  [".aiff", "audio/aiff"],
+]);
+
+/** Audio a player can request inline; the server serves these with byte ranges like video. */
+export function audioMimeTypeFromExtension(extension: string): string | null {
+  if (!/^\.[a-z0-9]+$/i.test(extension)) return null;
+  return AUDIO_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ?? null;
 }
 
-export function isWorkspaceBrowserPreviewPath(path: string): boolean
-{
-  return hasPreviewExtension(path, WORKSPACE_BROWSER_PREVIEW_EXTENSIONS)
+/** Classifies a literal filesystem extension, without URL decoding or suffix removal. */
+export function mediaMimeTypeFromExtension(extension: string): string | null {
+  if (!/^\.[a-z0-9]+$/i.test(extension)) return null;
+  return (
+    IMAGE_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ??
+    videoMimeType({ name: `media${extension}`, mimeType: "" })
+  );
 }
 
-export function isWorkspaceImagePreviewPath(path: string): boolean
-{
-  return hasPreviewExtension(path, WORKSPACE_IMAGE_PREVIEW_EXTENSIONS)
+/** Files the server serves in place from anywhere on its host: media, audio and browser documents. */
+export function hostPreviewMimeTypeFromExtension(extension: string): string | null {
+  if (!/^\.[a-z0-9]+$/i.test(extension)) return null;
+  return (
+    mediaMimeTypeFromExtension(extension) ??
+    audioMimeTypeFromExtension(extension) ??
+    BROWSER_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ??
+    null
+  );
 }
 
-export function isWorkspacePreviewEntryPath(path: string): boolean
-{
-  return isWorkspaceBrowserPreviewPath(path) || isWorkspaceImagePreviewPath(path)
-}
+/** Classifies an authored media path or URL. Filesystem validation uses the literal extension. */
+export function mediaMimeType(path: string): string | null {
+  const trimmed = path.trim();
+  const source = trimmed.startsWith("<") && trimmed.endsWith(">") ? trimmed.slice(1, -1) : trimmed;
+  const dataMimeType = /^data:((?:image|video)\/[\w.+-]+)[;,]/i.exec(source)?.[1];
+  if (dataMimeType) return dataMimeType.toLowerCase();
 
-export type MdxTargetRejection =
-  | 'absolute_path'
-  | 'ambiguous_percent_encoding'
-  | 'backslash'
-  | 'control_character'
-  | 'empty'
-  | 'external_not_allowed'
-  | 'fragment_not_allowed'
-  | 'malformed_percent_encoding'
-  | 'query_not_allowed'
-  | 'unsupported_protocol'
-  | 'workspace_escape'
-
-export type MdxWorkspaceTarget = {
-  readonly kind: 'workspace'
-  readonly path: string
-  readonly fragment: string | null
-}
-
-export type MdxExternalTarget = {
-  readonly kind: 'external'
-  readonly href: string
-}
-
-export type MdxFragmentTarget = {
-  readonly kind: 'fragment'
-  readonly fragment: string
-}
-
-export type MdxRejectedTarget = {
-  readonly kind: 'rejected'
-  readonly reason: MdxTargetRejection
-}
-
-export type MdxTargetResolution = MdxWorkspaceTarget | MdxExternalTarget | MdxRejectedTarget
-
-export type MdxWorkspacePathResolution = MdxWorkspaceTarget | MdxRejectedTarget
-
-const BACKSLASH_PATTERN = /\\/u
-const EXTERNAL_SCHEME_PATTERN = /^([a-z][a-z\d+.-]*):/iu
-const WINDOWS_DRIVE_PATTERN = /^[a-z]:/iu
-const AMBIGUOUS_PERCENT_ENCODING_PATTERN = /%(?:0[\da-f]|1[\da-f]|23|25|2f|3f|5c|7f)/iu
-const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
-
-function rejected(reason: MdxTargetRejection): MdxRejectedTarget
-{
-  return { kind: 'rejected', reason }
-}
-
-function hasControlCharacter(value: string): boolean
-{
-  for (const character of value)
-  {
-    const codePoint = character.codePointAt(0)
-    if (codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f))
-    {
-      return true
+  let sourcePath = source.split(/[?#]/, 1)[0] ?? "";
+  if (/^(?:https?:|file:|\/\/)/i.test(source)) {
+    try {
+      sourcePath = new URL(source, "https://media.invalid").pathname;
+    } catch {
+      return null;
     }
   }
-  return false
+  try {
+    sourcePath = decodeURIComponent(sourcePath);
+  } catch {
+    // A literal percent character is valid in a filename.
+  }
+  const basename = sourcePath.split(/[\\/]/).at(-1) ?? "";
+  const extensionIndex = basename.lastIndexOf(".");
+  return extensionIndex < 0 ? null : mediaMimeTypeFromExtension(basename.slice(extensionIndex));
 }
 
-function validateMdxTargetText(target: string): MdxRejectedTarget | null
-{
-  if (hasControlCharacter(target))
-  {
-    return rejected('control_character')
-  }
-  if (BACKSLASH_PATTERN.test(target))
-  {
-    return rejected('backslash')
-  }
-
-  let encoded = target
-  while (encoded.includes('%'))
-  {
-    if (AMBIGUOUS_PERCENT_ENCODING_PATTERN.test(encoded))
-    {
-      return rejected('ambiguous_percent_encoding')
-    }
-
-    let decoded: string
-    try
-    {
-      decoded = decodeURIComponent(encoded)
-    }
-    catch
-    {
-      return rejected('malformed_percent_encoding')
-    }
-    if (decoded === encoded)
-    {
-      break
-    }
-    encoded = decoded
-  }
-
-  return null
+export function mediaKindFromPath(path: string): "image" | "video" | null {
+  const mimeType = mediaMimeType(path);
+  if (mimeType === null) return null;
+  return mimeType.startsWith("video/") ? "video" : "image";
 }
 
-function normalizeWorkspaceSegments(
-  baseSegments: ReadonlyArray<string>,
-  relativePath: string,
-  fragment: string | null,
-): MdxWorkspacePathResolution
-{
-  if (relativePath.length === 0)
-  {
-    return rejected('empty')
-  }
-  if (relativePath.startsWith('/') || WINDOWS_DRIVE_PATTERN.test(relativePath))
-  {
-    return rejected('absolute_path')
-  }
-  if (relativePath.includes('?'))
-  {
-    return rejected('query_not_allowed')
-  }
-  if (EXTERNAL_SCHEME_PATTERN.test(relativePath))
-  {
-    return rejected('unsupported_protocol')
-  }
-
-  const decodedPath = decodeURIComponent(relativePath)
-  if (hasControlCharacter(decodedPath))
-  {
-    return rejected('control_character')
-  }
-  if (BACKSLASH_PATTERN.test(decodedPath))
-  {
-    return rejected('backslash')
-  }
-  if (decodedPath.startsWith('/') || WINDOWS_DRIVE_PATTERN.test(decodedPath))
-  {
-    return rejected('absolute_path')
-  }
-  if (decodedPath.includes('?'))
-  {
-    return rejected('query_not_allowed')
-  }
-  if (EXTERNAL_SCHEME_PATTERN.test(decodedPath))
-  {
-    return rejected('unsupported_protocol')
-  }
-
-  const segments = [...baseSegments]
-  for (const segment of decodedPath.split('/'))
-  {
-    if (segment.length === 0 || segment === '.')
-    {
-      continue
-    }
-    if (segment === '..')
-    {
-      if (segments.length === 0)
-      {
-        return rejected('workspace_escape')
-      }
-      segments.pop()
-      continue
-    }
-    segments.push(segment)
-  }
-
-  if (segments.length === 0)
-  {
-    return rejected('empty')
-  }
-
-  return {
-    kind: 'workspace',
-    path: segments.join('/'),
-    fragment,
-  }
+function hasPreviewExtension(path: string, extensions: ReadonlyArray<string>): boolean {
+  const pathWithoutQuery = path.split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
+  return extensions.some((extension) => pathWithoutQuery.endsWith(extension));
 }
 
-function normalizeWorkspacePath(target: string): MdxWorkspacePathResolution
-{
-  const invalidText = validateMdxTargetText(target)
-  if (invalidText)
-  {
-    return invalidText
-  }
-  if (target.includes('#'))
-  {
-    return rejected('fragment_not_allowed')
-  }
-  return normalizeWorkspaceSegments([], target, null)
+export function isWorkspaceBrowserPreviewPath(path: string): boolean {
+  return hasPreviewExtension(path, WORKSPACE_BROWSER_PREVIEW_EXTENSIONS);
 }
 
-function resolveExternalAnchor(target: string): MdxExternalTarget | MdxRejectedTarget | null
-{
-  const scheme = EXTERNAL_SCHEME_PATTERN.exec(target)
-  if (!scheme)
-  {
-    return null
-  }
-
-  const protocol = `${scheme[1]?.toLowerCase()}:`
-  if (!ALLOWED_EXTERNAL_PROTOCOLS.has(protocol))
-  {
-    return rejected('unsupported_protocol')
-  }
-
-  try
-  {
-    const url = new URL(target)
-    if (url.protocol !== protocol)
-    {
-      return rejected('unsupported_protocol')
-    }
-    return { kind: 'external', href: url.href }
-  }
-  catch
-  {
-    return rejected('unsupported_protocol')
-  }
+export function isWorkspaceImagePreviewPath(path: string): boolean {
+  return hasPreviewExtension(path, WORKSPACE_IMAGE_PREVIEW_EXTENSIONS);
 }
 
-function resolveMdxWorkspaceTarget(
-  documentPath: string,
-  target: string,
-): MdxWorkspacePathResolution | MdxFragmentTarget
-{
-  if (target.startsWith('#'))
-  {
-    return { kind: 'fragment', fragment: target.slice(1) }
-  }
-
-  const document = normalizeWorkspacePath(documentPath)
-  if (document.kind === 'rejected')
-  {
-    return document
-  }
-
-  const fragmentIndex = target.indexOf('#')
-  const relativePath = fragmentIndex === -1 ? target : target.slice(0, fragmentIndex)
-  const fragment = fragmentIndex === -1 ? null : target.slice(fragmentIndex + 1)
-  const documentSegments = document.path.split('/')
-  documentSegments.pop()
-  return normalizeWorkspaceSegments(documentSegments, relativePath, fragment)
+/** File viewers receive literal filesystem paths, not Markdown URLs. */
+export function isWorkspaceVideoPreviewPath(path: string): boolean {
+  return videoMimeType({ name: path, mimeType: "" }) !== null;
 }
 
-export function normalizeMdxWorkspacePath(path: string): MdxWorkspacePathResolution
-{
-  return normalizeWorkspacePath(path)
+export function isWorkspaceAudioPreviewPath(path: string): boolean {
+  const extensionIndex = path.lastIndexOf(".");
+  return extensionIndex >= 0 && audioMimeTypeFromExtension(path.slice(extensionIndex)) !== null;
 }
 
-export function resolveMdxAnchorTarget(documentPath: string, target: string): MdxTargetResolution
-{
-  const invalidText = validateMdxTargetText(target)
-  if (invalidText)
-  {
-    return invalidText
-  }
-
-  const external = resolveExternalAnchor(target)
-  if (external)
-  {
-    return external
-  }
-  if (target.includes('#'))
-  {
-    return rejected('fragment_not_allowed')
-  }
-
-  const resolved = resolveMdxWorkspaceTarget(documentPath, target)
-  return resolved.kind === 'fragment' ? rejected('fragment_not_allowed') : resolved
-}
-
-export function resolveMdxImageTarget(
-  documentPath: string,
-  target: string,
-): MdxWorkspacePathResolution
-{
-  const invalidText = validateMdxTargetText(target)
-  if (invalidText)
-  {
-    return invalidText
-  }
-  if (EXTERNAL_SCHEME_PATTERN.test(target))
-  {
-    return rejected('external_not_allowed')
-  }
-
-  const resolved = resolveMdxWorkspaceTarget(documentPath, target)
-  if (resolved.kind === 'fragment')
-  {
-    return rejected('fragment_not_allowed')
-  }
-  return resolved
+export function isWorkspacePreviewEntryPath(path: string): boolean {
+  return isWorkspaceBrowserPreviewPath(path) || isWorkspaceImagePreviewPath(path);
 }

@@ -1,27 +1,33 @@
 #!/usr/bin/env node
-// apps/mobile/scripts/generate-uniwind-themes.mts
-// compile default mobile semantic tokens for Uniwind and native interop
 
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import tailwindColors from "tailwindcss/colors";
+import { BUILT_IN_THEME_IDS, type BuiltInThemeId } from "@t3tools/shared/themePalettes";
+
+import {
+  getMobileThemeVariables,
+  MOBILE_THEME_VARIABLE_NAMES,
+  type MobileThemeAppearance,
+  type MobileThemeVariables,
+} from "../src/lib/mobileTheme.ts";
 
 const APPEARANCES = ["light", "dark"] as const;
 const GLOBAL_CSS_PATH = NodePath.resolve(import.meta.dirname, "../global.css");
 const GENERATED_CSS_PATH = NodePath.resolve(import.meta.dirname, "../generated-uniwind-themes.css");
+const GENERATED_NAMES_PATH = NodePath.resolve(
+  import.meta.dirname,
+  "../generated-uniwind-theme-names.json",
+);
 const GENERATED_DEFAULT_VARIABLES_PATH = NodePath.resolve(
   import.meta.dirname,
   "../generated-uniwind-default-theme-variables.json",
 );
 
-export type MobileThemeAppearance = (typeof APPEARANCES)[number];
-export type MobileThemeVariable = `--color-${string}`;
-export type MobileThemeVariables = Readonly<Record<MobileThemeVariable, string>>;
-
 type TailwindColorFamily = keyof typeof tailwindColors;
 type TailwindColorShade = 50 | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 950;
 
-function color(family: TailwindColorFamily, shade?: TailwindColorShade, opacity = 1): string {
+const color = (family: TailwindColorFamily, shade?: TailwindColorShade, opacity = 1): string => {
   const familyColors = tailwindColors[family];
   const value =
     typeof familyColors === "string"
@@ -31,22 +37,23 @@ function color(family: TailwindColorFamily, shade?: TailwindColorShade, opacity 
       : shade === undefined
         ? undefined
         : familyColors[String(shade) as keyof typeof familyColors];
-
   if (value === undefined) {
     throw new Error(`Unknown Tailwind color ${family}${shade === undefined ? "" : `-${shade}`}.`);
   }
   if (opacity === 1) return value;
 
   const percentage = Number((opacity * 100).toFixed(4));
-  const oklch = /^oklch\((.*)\)$/u.exec(value);
+  const oklch = /^oklch\((.*)\)$/.exec(value);
   if (oklch) return `oklch(${oklch[1]} / ${percentage}%)`;
   if (value === "#fff") return `rgb(255 255 255 / ${percentage}%)`;
   if (value === "#000") return `rgb(0 0 0 / ${percentage}%)`;
   return `color-mix(in srgb, ${value} ${percentage}%, transparent)`;
-}
+};
 
-// these replace appearance variants so one semantic class follows the active default theme
-const ADAPTIVE_COLORS = {
+// These replace the remaining dark:* utility pairs. A registered palette theme is
+// neither literally `light` nor `dark`, so appearance-sensitive values must also be
+// represented as semantic variables for custom themes.
+const ADAPTIVE_COLORS: Readonly<Record<string, readonly [light: string, dark: string]>> = {
   "--color-adaptive-amber-50-950-a40": [color("amber", 50), color("amber", 950, 0.4)],
   "--color-adaptive-amber-200-900-a60": [color("amber", 200), color("amber", 900, 0.6)],
   "--color-adaptive-amber-500-a12-a16": [color("amber", 500, 0.12), color("amber", 500, 0.16)],
@@ -76,10 +83,6 @@ const ADAPTIVE_COLORS = {
   "--color-adaptive-indigo-600-300": [color("indigo", 600), color("indigo", 300)],
   "--color-adaptive-indigo-700-300": [color("indigo", 700), color("indigo", 300)],
   "--color-adaptive-neutral-100-900": [color("neutral", 100), color("neutral", 900)],
-  "--color-adaptive-neutral-100-a80-900-a80": [
-    color("neutral", 100, 0.8),
-    color("neutral", 900, 0.8),
-  ],
   "--color-adaptive-neutral-200-700-a60": [color("neutral", 200), color("neutral", 700, 0.6)],
   "--color-adaptive-neutral-200-800": [color("neutral", 200), color("neutral", 800)],
   "--color-adaptive-neutral-200-a70-white-a8": [
@@ -128,51 +131,58 @@ const ADAPTIVE_COLORS = {
   "--color-adaptive-violet-500-a12-a16": [color("violet", 500, 0.12), color("violet", 500, 0.16)],
   "--color-adaptive-violet-600-400": [color("violet", 600), color("violet", 400)],
   "--color-adaptive-violet-700-300": [color("violet", 700), color("violet", 300)],
-  "--color-adaptive-white-a90-neutral-900-a90": [
-    color("white", undefined, 0.9),
-    color("neutral", 900, 0.9),
-  ],
-  "--color-adaptive-white-a95-neutral-900-a95": [
-    color("white", undefined, 0.95),
-    color("neutral", 900, 0.95),
-  ],
   "--color-adaptive-white-neutral-950-a70": [color("white"), color("neutral", 950, 0.7)],
   "--color-adaptive-zinc-500-a12-a16": [color("zinc", 500, 0.12), color("zinc", 500, 0.16)],
   "--color-adaptive-zinc-500-400": [color("zinc", 500), color("zinc", 400)],
   "--color-adaptive-zinc-600-300": [color("zinc", 600), color("zinc", 300)],
-} as const satisfies Readonly<Record<MobileThemeVariable, readonly [string, string]>>;
+};
 
-function adaptiveVariablesFor(appearance: MobileThemeAppearance): MobileThemeVariables {
-  return Object.fromEntries(
-    Object.entries(ADAPTIVE_COLORS).map(([name, values]) => [
+export const customThemeNames = BUILT_IN_THEME_IDS.flatMap((themeId) =>
+  APPEARANCES.map((appearance) => `${themeId}-${appearance}`),
+);
+
+const adaptiveVariablesFor = (appearance: MobileThemeAppearance) =>
+  Object.fromEntries(
+    Object.entries(ADAPTIVE_COLORS).map(([name, [light, dark]]) => [
       name,
-      values[appearance === "light" ? 0 : 1],
+      appearance === "light" ? light : dark,
     ]),
-  ) as MobileThemeVariables;
-}
+  );
 
-function renderVariant(name: string, variables: MobileThemeVariables): string {
+const variablesFor = (themeId: BuiltInThemeId, appearance: MobileThemeAppearance) => ({
+  ...getMobileThemeVariables(themeId, appearance),
+  ...adaptiveVariablesFor(appearance),
+});
+
+const renderVariant = (name: string, variables: Readonly<Record<string, string>>) => {
   const declarations = Object.entries(variables)
     .map(([variable, value]) => `      ${variable}: ${value};`)
     .join("\n");
   return `    @variant ${name} {\n${declarations}\n    }`;
-}
+};
 
-export function renderUniwindThemesCSS(): string {
+export const renderUniwindThemesCSS = () => {
+  const variants = [
+    renderVariant("light", adaptiveVariablesFor("light")),
+    renderVariant("dark", adaptiveVariablesFor("dark")),
+    ...BUILT_IN_THEME_IDS.flatMap((themeId) =>
+      APPEARANCES.map((appearance) =>
+        renderVariant(`${themeId}-${appearance}`, variablesFor(themeId, appearance)),
+      ),
+    ),
+  ];
   return [
     "/* Generated by scripts/generate-uniwind-themes.mts. Do not edit manually. */",
     "@layer theme {",
     "  :root {",
-    APPEARANCES.map((appearance) =>
-      renderVariant(appearance, adaptiveVariablesFor(appearance)),
-    ).join("\n\n"),
+    variants.join("\n\n"),
     "  }",
     "}",
     "",
   ].join("\n");
-}
+};
 
-function readVariantBody(css: string, appearance: MobileThemeAppearance): string {
+const readVariantBody = (css: string, appearance: MobileThemeAppearance): string => {
   const marker = `@variant ${appearance} {`;
   const markerIndex = css.indexOf(marker);
   if (markerIndex === -1) throw new Error(`Could not find ${marker} in global.css.`);
@@ -186,51 +196,40 @@ function readVariantBody(css: string, appearance: MobileThemeAppearance): string
     if (depth === 0) return css.slice(openingBraceIndex + 1, index);
   }
   throw new Error(`Could not find the end of ${marker} in global.css.`);
-}
+};
 
-function readColorVariables(body: string): MobileThemeVariables {
-  const variables: Record<MobileThemeVariable, string> = {};
-  for (const match of body.matchAll(/^\s*(--color-[a-z0-9-]+):\s*([^;]+);/gmu)) {
-    const [, name, value] = match;
-    if (!name || !value) continue;
-    variables[name as MobileThemeVariable] = value.trim();
-  }
-  return variables;
-}
-
-export function readDefaultThemeVariables(
-  css: string,
-): Readonly<Record<MobileThemeAppearance, MobileThemeVariables>> {
-  const themes = Object.fromEntries(
-    APPEARANCES.map((appearance) => [
-      appearance,
-      readColorVariables(readVariantBody(css, appearance)),
-    ]),
+export const readDefaultThemeVariables = (css: string) =>
+  Object.fromEntries(
+    APPEARANCES.map((appearance) => {
+      const body = readVariantBody(css, appearance);
+      const variables = Object.fromEntries(
+        MOBILE_THEME_VARIABLE_NAMES.map((name) => {
+          const match = new RegExp(`^\\s*${name}:\\s*([^;]+);`, "mu").exec(body);
+          if (!match?.[1]) {
+            throw new Error(`Default ${appearance} theme is missing ${name}.`);
+          }
+          return [name, match[1].trim()];
+        }),
+      ) as MobileThemeVariables;
+      return [appearance, variables];
+    }),
   ) as Readonly<Record<MobileThemeAppearance, MobileThemeVariables>>;
-  const lightNames = Object.keys(themes.light);
-  const darkNames = Object.keys(themes.dark);
 
-  if (lightNames.length === 0) throw new Error("Default light theme has no color variables.");
-  if (lightNames.join("\n") !== darkNames.join("\n")) {
-    throw new Error("Default light and dark themes must define the same color variables in order.");
-  }
-  return themes;
-}
+export const renderDefaultThemeVariablesJSON = (css: string) =>
+  `${JSON.stringify(readDefaultThemeVariables(css), null, 2)}\n`;
 
-export function getGeneratedUniwindThemeOutputs(): ReadonlyArray<
+export const getGeneratedUniwindThemeOutputs = (): ReadonlyArray<
   readonly [filename: string, contents: string]
-> {
-  const css = NodeFS.readFileSync(GLOBAL_CSS_PATH, "utf8");
-  return [
-    [GENERATED_CSS_PATH, renderUniwindThemesCSS()],
-    [
-      GENERATED_DEFAULT_VARIABLES_PATH,
-      `${JSON.stringify(readDefaultThemeVariables(css), null, 2)}\n`,
-    ],
-  ];
-}
+> => [
+  [GENERATED_CSS_PATH, renderUniwindThemesCSS()],
+  [GENERATED_NAMES_PATH, `${JSON.stringify(customThemeNames, null, 2)}\n`],
+  [
+    GENERATED_DEFAULT_VARIABLES_PATH,
+    renderDefaultThemeVariablesJSON(NodeFS.readFileSync(GLOBAL_CSS_PATH, "utf8")),
+  ],
+];
 
-function writeFileAtomically(filename: string, contents: string) {
+const writeFileAtomically = (filename: string, contents: string) => {
   const current = NodeFS.existsSync(filename) ? NodeFS.readFileSync(filename, "utf8") : null;
   if (current === contents) return;
 
@@ -241,7 +240,7 @@ function writeFileAtomically(filename: string, contents: string) {
   } finally {
     if (NodeFS.existsSync(temporaryFilename)) NodeFS.unlinkSync(temporaryFilename);
   }
-}
+};
 
 if (import.meta.main) {
   const checkOnly = process.argv.includes("--check");
@@ -250,12 +249,14 @@ if (import.meta.main) {
       const current = NodeFS.existsSync(filename) ? NodeFS.readFileSync(filename, "utf8") : null;
       if (current !== contents) {
         console.error(
-          `${NodePath.relative(process.cwd(), filename)} is stale. Run pnpm --filter @t3tools/mobile generate.`,
+          `${NodePath.relative(process.cwd(), filename)} is stale. Run vp run --filter @t3tools/mobile generate.`,
         );
         process.exitCode = 1;
       }
       continue;
     }
+    // Metro watches the generated CSS. Replacing a complete temporary file keeps
+    // Tailwind from compiling a partially rewritten theme file.
     writeFileAtomically(filename, contents);
   }
 }

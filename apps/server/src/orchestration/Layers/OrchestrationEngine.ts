@@ -1,532 +1,296 @@
-// apps/server/src/orchestration/Layers/OrchestrationEngine.ts
-// assemble orchestration engine Effect layer
-
 import type {
+  OrchestrationClientOrigin,
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectId,
   ThreadId,
-} from '@t3tools/contracts'
-import { OrchestrationCommand } from '@t3tools/contracts'
-import { collectAssistantCitations } from '@t3tools/shared/assistantCitations'
-import * as Cause from 'effect/Cause'
-import * as Clock from 'effect/Clock'
-import * as Crypto from 'effect/Crypto'
-import * as DateTime from 'effect/DateTime'
-import * as Deferred from 'effect/Deferred'
-import * as Duration from 'effect/Duration'
-import * as Effect from 'effect/Effect'
-import * as Exit from 'effect/Exit'
-import * as Layer from 'effect/Layer'
-import * as Metric from 'effect/Metric'
-import * as Option from 'effect/Option'
-import * as PubSub from 'effect/PubSub'
-import * as Queue from 'effect/Queue'
-import * as Schema from 'effect/Schema'
-import * as Stream from 'effect/Stream'
-import * as SqlClient from 'effect/unstable/sql/SqlClient'
+} from "@t3tools/contracts";
+import { OrchestrationCommand } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Metric from "effect/Metric";
+import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
   metricAttributes,
   orchestrationCommandAckDuration,
   orchestrationCommandsTotal,
   orchestrationCommandDuration,
-} from '../../observability/Metrics.ts'
-import { toPersistenceSqlError } from '../../persistence/Errors.ts'
-import { AttachmentLifecycleRepository } from '../../persistence/Services/AttachmentLifecycle.ts'
-import { CheckpointRevertOperations } from '../../persistence/Services/CheckpointRevertOperations.ts'
-import { ProjectionTurnRepositoryLive } from '../../persistence/Layers/ProjectionTurns.ts'
-import { ProviderRuntimeInboxLive } from '../../persistence/Layers/ProviderRuntimeInbox.ts'
-import { OrchestrationEventStore } from '../../persistence/Services/OrchestrationEventStore.ts'
-import { OrchestrationCommandReceiptRepository } from '../../persistence/Services/OrchestrationCommandReceipts.ts'
-import { ProjectionTurnRepository } from '../../persistence/Services/ProjectionTurns.ts'
-import { ProviderRuntimeInbox } from '../../persistence/Services/ProviderRuntimeInbox.ts'
-import { ProviderBackgroundTaskRegistry } from '../../provider/Services/ProviderBackgroundTaskRegistry.ts'
-import { ProviderBackgroundTaskRegistryLive } from '../../provider/Layers/ProviderBackgroundTaskRegistry.ts'
-import { isAutoSettlementCandidate } from '../ThreadSettlementPolicy.ts'
-import { ServerSettingsService } from '../../serverSettings.ts'
-import { checkpointRefForThreadTurn } from '../../checkpointing/Utils.ts'
+} from "../../observability/Metrics.ts";
+import { toPersistenceSqlError } from "../../persistence/Errors.ts";
+import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
+import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import {
+  isOrchestrationCommandRejection,
   OrchestrationCommandIdConflictError,
   OrchestrationCommandInvariantError,
   OrchestrationCommandPreviouslyRejectedError,
   type OrchestrationDispatchError,
   type OrchestrationProjectorDecodeError,
-} from '../Errors.ts'
-import { decideOrchestrationCommand } from '../decider.ts'
-import { checkpointRevertOperationId } from './CheckpointRollbackJournal.ts'
-import { createEmptyReadModel, projectEvent } from '../projector.ts'
-import { OrchestrationProjectionPipeline } from '../Services/ProjectionPipeline.ts'
-import { ProjectionSnapshotQuery } from '../Services/ProjectionSnapshotQuery.ts'
+} from "../Errors.ts";
+import { decideOrchestrationCommand } from "../decider.ts";
+import { createEmptyReadModel, projectEvent } from "../projector.ts";
+import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import {
   OrchestrationEngineService,
-  type OrchestrationCausalSettlementAuthority,
-  type OrchestrationDomainEventAdmission,
   type OrchestrationEngineShape,
-} from '../Services/OrchestrationEngine.ts'
-import { ThreadArchiveLifecyclePermit } from '../Services/ThreadArchiveLifecyclePermit.ts'
-import { ThreadArchiveLifecyclePermitLive } from './ThreadArchiveLifecyclePermit.ts'
+} from "../Services/OrchestrationEngine.ts";
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
-)
-const isOrchestrationCommandIdConflictError = Schema.is(OrchestrationCommandIdConflictError)
-const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
-// external commands that can change the selected tree or provider lifecycle
-// stay fenced from request acceptance through cleanup/manual resolution.
-// internal projection and provider-settling commands remain allowed so the
-// request's persisted source/inbox barriers can actually drain.
-const checkpointRevertBlockedCommandTypes: ReadonlySet<OrchestrationCommand['type']> = new Set([
-  'project.delete',
-  'thread.delete',
-  'thread.archive',
-  'thread.unarchive',
-  'thread.meta.update',
-  'thread.runtime-mode.set',
-  'thread.interaction-mode.set',
-  'thread.worker-verdict.set',
-  'thread.provider.switch',
-  'thread.turn.start',
-  'thread.turn.interrupt',
-  'thread.approval.respond',
-  'thread.user-input.respond',
-  'thread.user-input.dismiss',
-  'thread.auto-settle',
-  'thread.orchestrate-plan.respond',
-  'thread.checkpoint.revert',
-  'thread.session.stop',
-  'thread.provider-continuation.clear',
-  'thread.orchestrate-run-execution.admit',
-  'thread.orchestrate-run-execution.update',
-  'thread.messages.import',
-])
+);
+const isOrchestrationCommandIdConflictError = Schema.is(OrchestrationCommandIdConflictError);
 
-interface CommandEnvelope
-{
-  command: OrchestrationCommand
-  causalSettlementAuthority: OrchestrationCausalSettlementAuthority | null
-  assistantCitationAccess: 'allow' | 'deny'
-  result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>
-  startedAtMs: number
+interface CommandEnvelope {
+  command: OrchestrationCommand;
+  origin: OrchestrationClientOrigin | undefined;
+  result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
+  startedAtMs: number;
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: 'project' | 'thread'
-  readonly aggregateId: ProjectId | ThreadId
-}
-{
-  switch (command.type)
-  {
-    case 'project.create':
-    case 'project.meta.update':
-    case 'project.delete':
+  readonly aggregateKind: "project" | "thread";
+  readonly aggregateId: ProjectId | ThreadId;
+} {
+  switch (command.type) {
+    case "project.create":
+    case "project.meta.update":
+    case "project.delete":
       return {
-        aggregateKind: 'project',
+        aggregateKind: "project",
         aggregateId: command.projectId,
-      }
+      };
     default:
       return {
-        aggregateKind: 'thread',
+        aggregateKind: "thread",
         aggregateId: command.threadId,
-      }
+      };
   }
 }
 
-function aggregateEventKey(
-  aggregateKind: OrchestrationEvent['aggregateKind'],
-  aggregateId: OrchestrationEvent['aggregateId'],
-): string
-{
-  return JSON.stringify([aggregateKind, aggregateId])
-}
+const makeOrchestrationEngine = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const eventStore = yield* OrchestrationEventStore;
+  const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
+  const projectionPipeline = yield* OrchestrationProjectionPipeline;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
+  const crypto = yield* Crypto.Crypto;
 
-function publishToAdmissions(
-  admissions: Set<OrchestrationDomainEventAdmission>,
-  event: OrchestrationEvent,
-): void
-{
-  for (const admission of admissions)
-  {
-    try
-    {
-      if (!admission(event))
-      {
-        admissions.delete(admission)
-      }
-    }
-    catch
-    {
-      // a failed client sink must not fail durable command dispatch
-      admissions.delete(admission)
-    }
-  }
-}
+  const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+  let commandReadModel = createEmptyReadModel(yield* nowIso);
 
-const makeOrchestrationEngine = Effect.gen(function* ()
-{
-  const sql = yield* SqlClient.SqlClient
-  const eventStore = yield* OrchestrationEventStore
-  const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository
-  const attachmentLifecycle = yield* AttachmentLifecycleRepository
-  const checkpointRevertOperations = yield* CheckpointRevertOperations
-  const projectionTurns = yield* ProjectionTurnRepository
-  const providerRuntimeInbox = yield* ProviderRuntimeInbox
-  const backgroundTasks = yield* ProviderBackgroundTaskRegistry
-  const settingsService = yield* ServerSettingsService
-  const projectionPipeline = yield* OrchestrationProjectionPipeline
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
-  const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
-  const crypto = yield* Crypto.Crypto
-
-  const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
-  let commandReadModel = createEmptyReadModel(yield* nowIso)
-
-  const commandQueue = yield* Queue.unbounded<CommandEnvelope>()
-  const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>()
-  const aggregateEventSubscribers = new Map<string, Set<Queue.Queue<OrchestrationEvent>>>()
-  const domainEventAdmissions = new Set<OrchestrationDomainEventAdmission>()
-
-  const publishEvent = Effect.fn('OrchestrationEngine.publishEvent')(function* (
-    event: OrchestrationEvent,
-  )
-  {
-    publishToAdmissions(domainEventAdmissions, event)
-    yield* PubSub.publish(eventPubSub, event)
-    const subscribers = aggregateEventSubscribers.get(
-      aggregateEventKey(event.aggregateKind, event.aggregateId),
-    )
-    if (subscribers === undefined)
-    {
-      return
-    }
-    yield* Effect.forEach(subscribers, (subscriber) => Queue.offer(subscriber, event), {
-      discard: true,
-    })
-  })
+  const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
     events: ReadonlyArray<OrchestrationEvent>,
   ): Effect.Effect<OrchestrationReadModel, OrchestrationProjectorDecodeError, never> =>
-    Effect.gen(function* ()
-    {
-      let nextReadModel = baseReadModel
-      for (const event of events)
-      {
-        nextReadModel = yield* projectEvent(nextReadModel, event)
+    Effect.gen(function* () {
+      let nextReadModel = baseReadModel;
+      for (const event of events) {
+        nextReadModel = yield* projectEvent(nextReadModel, event);
       }
-      return nextReadModel
-    })
+      return nextReadModel;
+    });
 
-  const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> =>
-  {
-    const dispatchStartSequence = commandReadModel.snapshotSequence
-    let processingStartedAtMs = 0
-    const aggregateRef = commandToAggregateRef(envelope.command)
+  const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
+    const dispatchStartSequence = commandReadModel.snapshotSequence;
+    let processingStartedAtMs = 0;
+    const aggregateRef = commandToAggregateRef(envelope.command);
     const baseMetricAttributes = {
       commandType: envelope.command.type,
       aggregateKind: aggregateRef.aggregateKind,
-    } as const
-    const reconcileReadModelAfterDispatchFailure = Effect.gen(function* ()
-    {
+    } as const;
+    const reconcileReadModelAfterDispatchFailure = Effect.gen(function* () {
       const persistedEvents = yield* Stream.runCollect(
         eventStore.readFromSequence(dispatchStartSequence),
-      ).pipe(Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)))
-      if (persistedEvents.length === 0)
-      {
-        return
+      ).pipe(Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)));
+      if (persistedEvents.length === 0) {
+        return;
       }
 
-      commandReadModel = yield* projectEventsOntoReadModel(commandReadModel, persistedEvents)
+      commandReadModel = yield* projectEventsOntoReadModel(commandReadModel, persistedEvents);
 
-      for (const persistedEvent of persistedEvents)
-      {
-        yield* publishEvent(persistedEvent)
+      for (const persistedEvent of persistedEvents) {
+        yield* PubSub.publish(eventPubSub, persistedEvent);
       }
-    })
+    });
 
     return Effect.exit(
-      Effect.gen(function* ()
-      {
-        processingStartedAtMs = yield* Clock.currentTimeMillis
+      Effect.gen(function* () {
+        processingStartedAtMs = yield* Clock.currentTimeMillis;
         yield* Effect.annotateCurrentSpan({
-          'orchestration.command_id': envelope.command.commandId,
-          'orchestration.command_type': envelope.command.type,
-          'orchestration.aggregate_kind': aggregateRef.aggregateKind,
-          'orchestration.aggregate_id': aggregateRef.aggregateId,
-        })
+          "orchestration.command_id": envelope.command.commandId,
+          "orchestration.command_type": envelope.command.type,
+          "orchestration.aggregate_kind": aggregateRef.aggregateKind,
+          "orchestration.aggregate_id": aggregateRef.aggregateId,
+        });
 
         const existingReceipt = yield* commandReceiptRepository.getByCommandId({
           commandId: envelope.command.commandId,
-        })
-        if (Option.isSome(existingReceipt))
-        {
-          // a receipt proves only the command accepted for this exact aggregate
+        });
+        if (Option.isSome(existingReceipt)) {
+          // A receipt only proves this exact command was handled. Replaying it
+          // for a command aimed at another aggregate would report success for
+          // work that never happened.
           if (
             existingReceipt.value.aggregateKind !== aggregateRef.aggregateKind ||
             existingReceipt.value.aggregateId !== aggregateRef.aggregateId
-          )
-          {
+          ) {
             return yield* new OrchestrationCommandIdConflictError({
               commandId: envelope.command.commandId,
               receiptAggregateKind: existingReceipt.value.aggregateKind,
               receiptAggregateId: existingReceipt.value.aggregateId,
               commandAggregateKind: aggregateRef.aggregateKind,
               commandAggregateId: aggregateRef.aggregateId,
-            })
+            });
           }
-          if (existingReceipt.value.status === 'accepted')
-          {
+          if (existingReceipt.value.status === "accepted") {
             return {
               sequence: existingReceipt.value.resultSequence,
-            }
+            };
           }
           return yield* new OrchestrationCommandPreviouslyRejectedError({
             commandId: envelope.command.commandId,
-            detail: existingReceipt.value.error ?? 'Previously rejected.',
-            ...(existingReceipt.value.errorCode === null
-              ? {}
-              : { code: existingReceipt.value.errorCode }),
-          })
+            detail: existingReceipt.value.error ?? "Previously rejected.",
+          });
         }
 
+        if (
+          envelope.command.type === "thread.auto-settle" &&
+          (yield* eventStore.hasEventAfter({
+            aggregateKind: "thread",
+            aggregateId: envelope.command.threadId,
+            sequenceExclusive: envelope.command.snapshotSequence,
+          }))
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: envelope.command.type,
+            detail: `thread ${envelope.command.threadId} changed before automatic settlement`,
+          });
+        }
+
+        // The decider compares the lookup inputs. Only recreation needs an
+        // event check, since it can reset a thread to the same field values.
+        if (
+          envelope.command.type === "thread.pull-request.sync" &&
+          (yield* eventStore.hasEventAfter({
+            aggregateKind: "thread",
+            aggregateId: envelope.command.threadId,
+            sequenceExclusive: envelope.command.snapshotSequence,
+            type: "thread.created",
+          }))
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: envelope.command.type,
+            detail: `thread ${envelope.command.threadId} was recreated before pull request discovery`,
+          });
+        }
+
+        if (
+          envelope.command.type === "thread.auto-settle" &&
+          threadBackgroundLiveness.getThreadBackgroundLiveness(envelope.command.threadId) !== null
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: envelope.command.type,
+            detail: `thread ${envelope.command.threadId} has live background work`,
+          });
+        }
+
+        // New and moved projects do not carry a resolved identity in the event-derived
+        // command model. Legacy PR edits need it to identify the link they replace.
+        if (
+          envelope.command.type === "thread.meta.update" &&
+          envelope.command.linkedPullRequest !== undefined
+        ) {
+          const threadId = envelope.command.threadId;
+          const thread = commandReadModel.threads.find((thread) => thread.id === threadId);
+          if (thread !== undefined) {
+            const project = yield* projectionSnapshotQuery.getProjectShellById(thread.projectId);
+            if (Option.isSome(project)) {
+              commandReadModel = {
+                ...commandReadModel,
+                projects: commandReadModel.projects.map((entry) =>
+                  entry.id === thread.projectId
+                    ? { ...entry, repositoryIdentity: project.value.repositoryIdentity }
+                    : entry,
+                ),
+              };
+            }
+          }
+        }
+
+        // Command snapshots omit activities at startup and cap them while running.
+        // Read this request's durable state before deciding how to send the answer.
+        const userInputActivity =
+          envelope.command.type === "thread.user-input.respond" ||
+          envelope.command.type === "thread.user-input.dismiss"
+            ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
+            : Option.none();
+        const eventBase = yield* decideOrchestrationCommand({
+          command: envelope.command,
+          readModel: commandReadModel,
+          ...(Option.isSome(userInputActivity)
+            ? { userInputActivity: userInputActivity.value }
+            : {}),
+        }).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+          Effect.mapError((cause) =>
+            isOrchestrationCommandRejection(cause)
+              ? cause
+              : new OrchestrationCommandInvariantError({
+                  commandType: envelope.command.type,
+                  detail: "Failed to generate an event identifier.",
+                  cause,
+                }),
+          ),
+        );
+        const plannedEvents = Array.isArray(eventBase) ? eventBase : [eventBase];
+        // Stamp the dispatching client's origin onto every event the command
+        // produced. The decider stays pure; attribution is an engine concern.
+        const eventBases =
+          envelope.origin === undefined
+            ? plannedEvents
+            : plannedEvents.map((planned) => ({
+                ...planned,
+                metadata: { ...planned.metadata, origin: envelope.origin },
+              }));
         const committedCommand = yield* sql
           .withTransaction(
-            Effect.gen(function* ()
-            {
-              if (checkpointRevertBlockedCommandTypes.has(envelope.command.type))
-              {
-                let affectedThreadIds: ReadonlyArray<ThreadId> = []
-                if (envelope.command.type === 'project.delete')
-                {
-                  const projectId = envelope.command.projectId
-                  affectedThreadIds = commandReadModel.threads
-                    .filter((thread) => thread.projectId === projectId)
-                    .map((thread) => thread.id)
-                }
-                else if ('threadId' in envelope.command)
-                {
-                  affectedThreadIds = [envelope.command.threadId]
-                }
-                for (const threadId of affectedThreadIds)
-                {
-                  const activeRevert = yield* checkpointRevertOperations.getActiveByThread(threadId)
-                  const authority = envelope.causalSettlementAuthority
-                  const isCausallyPriorInternalSettlement =
-                    envelope.command.type === 'thread.meta.update' &&
-                    authority !== null &&
-                    Option.isSome(activeRevert) &&
-                    (authority.sourceKind === 'domain-event'
-                      ? authority.sourceSequence < activeRevert.value.requestSourceSequence
-                      : authority.sourceSequence <= activeRevert.value.providerInboxHighWater)
-                  if (Option.isSome(activeRevert) && !isCausallyPriorInternalSettlement)
-                  {
-                    return yield* new OrchestrationCommandInvariantError({
-                      commandType: envelope.command.type,
-                      code: 'checkpoint-revert-in-progress',
-                      detail:
-                        `Checkpoint revert '${activeRevert.value.operationId}' is in progress ` +
-                        `for thread '${threadId}' (phase '${activeRevert.value.phase}').`,
-                    })
-                  }
-                }
+            Effect.gen(function* () {
+              const committedEvents: OrchestrationEvent[] = [];
+              const attachmentCleanups: Effect.Effect<void>[] = [];
+              let nextCommandReadModel = commandReadModel;
+
+              for (const nextEvent of eventBases) {
+                const savedEvent = yield* eventStore.append(nextEvent);
+                nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
+                const cleanup = yield* projectionPipeline.projectEventDeferred(savedEvent);
+                attachmentCleanups.push(cleanup);
+                committedEvents.push(savedEvent);
               }
 
-              if (envelope.command.type === 'thread.auto-settle')
-              {
-                const command = envelope.command
-                const settings = yield* settingsService.getSettings.pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationCommandInvariantError({
-                        commandType: command.type,
-                        detail: 'Automatic settlement policy could not be read.',
-                        cause,
-                      }),
-                  ),
-                )
-                if (
-                  settings.sidebarAutoSettleAfterDays !== command.autoSettleAfterDays ||
-                  settings.sidebarAutoSettleOnMerge !== command.autoSettleOnMerge
-                )
-                {
-                  return yield* new OrchestrationCommandInvariantError({
-                    commandType: command.type,
-                    detail: 'Automatic settlement policy changed after the sweep.',
-                  })
-                }
-                const changes = yield* eventStore.getAggregateReplayStats({
-                  aggregateKind: 'thread',
-                  aggregateId: command.threadId,
-                  fromSequenceExclusive: command.snapshotSequence,
-                  toSequenceInclusive: commandReadModel.snapshotSequence,
-                  maxEvents: 1,
-                })
-                const shell = yield* projectionSnapshotQuery.getThreadShellById(command.threadId)
-                const projectChanges = Option.isNone(shell)
-                  ? null
-                  : yield* eventStore.getAggregateReplayStats({
-                      aggregateKind: 'project',
-                      aggregateId: shell.value.projectId,
-                      fromSequenceExclusive: command.snapshotSequence,
-                      toSequenceInclusive: commandReadModel.snapshotSequence,
-                      maxEvents: 1,
-                    })
-                const queued = yield* projectionTurns.getPendingTurnStartByThreadId({
-                  threadId: command.threadId,
-                })
-                let liveBackground = false
-                for (const identity of yield* providerRuntimeInbox.listAllOpenSessions())
-                {
-                  if (
-                    identity.threadId === command.threadId &&
-                    (yield* backgroundTasks.hasLiveTasks(identity))
-                  )
-                  {
-                    liveBackground = true
-                    break
-                  }
-                }
-                if (
-                  command.snapshotSequence > commandReadModel.snapshotSequence ||
-                  changes.eventCount > 0 ||
-                  (projectChanges?.eventCount ?? 0) > 0 ||
-                  Option.isSome(queued) ||
-                  liveBackground ||
-                  Option.isNone(shell) ||
-                  !isAutoSettlementCandidate(shell.value, yield* nowIso)
-                )
-                {
-                  return yield* new OrchestrationCommandInvariantError({
-                    commandType: command.type,
-                    detail: 'Automatic settlement snapshot is stale or the thread has live work.',
-                  })
-                }
-              }
-
-              const userInputActivity =
-                envelope.command.type === 'thread.user-input.respond' ||
-                envelope.command.type === 'thread.user-input.dismiss'
-                  ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
-                  : Option.none()
-              const eventBase = yield* decideOrchestrationCommand({
-                command: envelope.command,
-                readModel: commandReadModel,
-                ...(Option.isSome(userInputActivity)
-                  ? { userInputActivity: userInputActivity.value }
-                  : {}),
-              }).pipe(
-                Effect.provideService(Crypto.Crypto, crypto),
-                Effect.mapError((cause) =>
-                  isOrchestrationCommandInvariantError(cause)
-                    ? cause
-                    : new OrchestrationCommandInvariantError({
-                        commandType: envelope.command.type,
-                        detail: 'Failed to generate an event identifier.',
-                        cause,
-                      }),
-                ),
-              )
-              const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
-              // async answers incorporate stored questions; authorize the exact derived prompt
-              // inside the serialized transaction before resolving the question or starting a turn
-              if (
-                envelope.assistantCitationAccess === 'deny' &&
-                eventBases.some(
-                  (event) =>
-                    event.type === 'thread.message-sent' &&
-                    event.payload.role === 'user' &&
-                    collectAssistantCitations(event.payload.text).length > 0,
-                )
-              )
-              {
+              const lastSavedEvent = committedEvents.at(-1) ?? null;
+              if (lastSavedEvent === null) {
                 return yield* new OrchestrationCommandInvariantError({
                   commandType: envelope.command.type,
-                  code: 'unauthorized-citation-source',
-                  detail: 'Assistant citations require orchestration read access to their sources.',
-                })
-              }
-              if (envelope.command.type === 'thread.checkpoint.revert')
-              {
-                const pendingTurn = yield* projectionTurns.getPendingTurnStartByThreadId({
-                  threadId: envelope.command.threadId,
-                })
-                if (Option.isSome(pendingTurn))
-                {
-                  return yield* new OrchestrationCommandInvariantError({
-                    commandType: envelope.command.type,
-                    code: 'checkpoint-revert-turn-in-progress',
-                    detail:
-                      `Thread '${envelope.command.threadId}' has a queued turn start ` +
-                      `for message '${pendingTurn.value.messageId}'.`,
-                  })
-                }
-              }
-              const savedEvents = yield* eventStore.appendAll(eventBases)
-              if (envelope.command.type === 'thread.checkpoint.revert')
-              {
-                const requestEvent = savedEvents.find(
-                  (event) => event.type === 'thread.checkpoint-revert-requested',
-                )
-                if (requestEvent === undefined)
-                {
-                  return yield* new OrchestrationCommandInvariantError({
-                    commandType: envelope.command.type,
-                    detail: 'Checkpoint revert command produced no request event.',
-                  })
-                }
-                const admissionState = yield* providerRuntimeInbox.getAdmissionState
-                yield* checkpointRevertOperations
-                  .reserve({
-                    operationId: checkpointRevertOperationId(envelope.command.commandId),
-                    threadId: envelope.command.threadId,
-                    targetRef: checkpointRefForThreadTurn(
-                      envelope.command.threadId,
-                      envelope.command.turnCount,
-                    ),
-                    targetTurnCount: envelope.command.turnCount,
-                    requestSourceSequence: requestEvent.sequence,
-                    providerInboxHighWater: Math.max(0, admissionState.nextSequence - 1),
-                    now: requestEvent.occurredAt,
-                  })
-                  .pipe(
-                    Effect.catchTag('CheckpointRevertOperationConflictError', (cause) =>
-                      Effect.fail(
-                        new OrchestrationCommandInvariantError({
-                          commandType: envelope.command.type,
-                          code: 'checkpoint-revert-in-progress',
-                          detail: cause.message,
-                        }),
-                      ),
-                    ),
-                  )
-              }
-              const committedEvents: OrchestrationEvent[] = []
-              let nextCommandReadModel = commandReadModel
-
-              for (const savedEvent of savedEvents)
-              {
-                nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent)
-                yield* projectionPipeline.projectEvent(savedEvent)
-                committedEvents.push(savedEvent)
-
-                if (savedEvent.type === 'thread.message-sent')
-                {
-                  yield* attachmentLifecycle.associateAccepted({
-                    commandId: envelope.command.commandId,
-                    ownerSequence: savedEvent.sequence,
-                    ownerEventType: savedEvent.type,
-                    now: savedEvent.occurredAt,
-                  })
-                }
-              }
-
-              const lastSavedEvent = committedEvents.at(-1) ?? null
-              if (lastSavedEvent === null)
-              {
-                return yield* new OrchestrationCommandInvariantError({
-                  commandType: envelope.command.type,
-                  detail: 'Command produced no events.',
-                })
+                  detail: "Command produced no events.",
+                });
               }
 
               yield* commandReceiptRepository.upsert({
@@ -535,32 +299,33 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 aggregateId: lastSavedEvent.aggregateId,
                 acceptedAt: lastSavedEvent.occurredAt,
                 resultSequence: lastSavedEvent.sequence,
-                status: 'accepted',
+                status: "accepted",
                 error: null,
-                errorCode: null,
-              })
+              });
 
               return {
                 committedEvents,
+                attachmentCleanups,
                 lastSequence: lastSavedEvent.sequence,
                 nextCommandReadModel,
-              } as const
+              } as const;
             }),
           )
           .pipe(
-            Effect.catchTag('SqlError', (sqlError) =>
+            Effect.catchTag("SqlError", (sqlError) =>
               Effect.fail(
-                toPersistenceSqlError('OrchestrationEngine.processEnvelope:transaction')(sqlError),
+                toPersistenceSqlError("OrchestrationEngine.processEnvelope:transaction")(sqlError),
               ),
             ),
-          )
+          );
 
-        commandReadModel = committedCommand.nextCommandReadModel
-        for (const [index, event] of committedCommand.committedEvents.entries())
-        {
-          yield* publishEvent(event)
-          if (index === 0)
-          {
+        commandReadModel = committedCommand.nextCommandReadModel;
+        for (const cleanup of committedCommand.attachmentCleanups) {
+          yield* cleanup;
+        }
+        for (const [index, event] of committedCommand.committedEvents.entries()) {
+          yield* PubSub.publish(eventPubSub, event);
+          if (index === 0) {
             yield* Metric.update(
               Metric.withAttributes(
                 orchestrationCommandAckDuration,
@@ -570,27 +335,26 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 }),
               ),
               Duration.millis(Math.max(0, (yield* Clock.currentTimeMillis) - envelope.startedAtMs)),
-            )
+            );
           }
         }
-        return { sequence: committedCommand.lastSequence }
+        return { sequence: committedCommand.lastSequence };
       }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
     ).pipe(
       Effect.flatMap((exit) =>
-        Effect.gen(function* ()
-        {
+        Effect.gen(function* () {
           const outcome = Exit.isSuccess(exit)
-            ? 'success'
+            ? "success"
             : Cause.hasInterruptsOnly(exit.cause)
-              ? 'interrupt'
-              : 'failure'
+              ? "interrupt"
+              : "failure";
           yield* Metric.update(
             Metric.withAttributes(
               orchestrationCommandDuration,
               metricAttributes(baseMetricAttributes),
             ),
             Duration.millis(Math.max(0, (yield* Clock.currentTimeMillis) - processingStartedAtMs)),
-          )
+          );
           yield* Metric.update(
             Metric.withAttributes(
               orchestrationCommandsTotal,
@@ -600,24 +364,22 @@ const makeOrchestrationEngine = Effect.gen(function* ()
               }),
             ),
             1,
-          )
+          );
 
-          if (Exit.isSuccess(exit))
-          {
-            yield* Deferred.succeed(envelope.result, exit.value)
-            return
+          if (Exit.isSuccess(exit)) {
+            yield* Deferred.succeed(envelope.result, exit.value);
+            return;
           }
 
-          const error = Cause.squash(exit.cause) as OrchestrationDispatchError
+          const error = Cause.squash(exit.cause) as OrchestrationDispatchError;
           if (
             !isOrchestrationCommandPreviouslyRejectedError(error) &&
             !isOrchestrationCommandIdConflictError(error)
-          )
-          {
+          ) {
             yield* reconcileReadModelAfterDispatchFailure.pipe(
               Effect.catch(() =>
                 Effect.logWarning(
-                  'failed to reconcile orchestration read model after dispatch failure',
+                  "failed to reconcile orchestration read model after dispatch failure",
                 ).pipe(
                   Effect.annotateLogs({
                     commandId: envelope.command.commandId,
@@ -625,10 +387,9 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                   }),
                 ),
               ),
-            )
+            );
 
-            if (isOrchestrationCommandInvariantError(error))
-            {
+            if (isOrchestrationCommandRejection(error)) {
               yield* commandReceiptRepository
                 .upsert({
                   commandId: envelope.command.commandId,
@@ -636,147 +397,77 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                   aggregateId: aggregateRef.aggregateId,
                   acceptedAt: yield* nowIso,
                   resultSequence: commandReadModel.snapshotSequence,
-                  status: 'rejected',
+                  status: "rejected",
                   error: error.message,
-                  errorCode: error.code ?? null,
                 })
-                .pipe(Effect.catch(() => Effect.void))
+                .pipe(Effect.catch(() => Effect.void));
             }
           }
 
-          yield* Deferred.fail(envelope.result, error)
+          yield* Deferred.fail(envelope.result, error);
         }),
       ),
-    )
-  }
+    );
+  };
 
-  yield* projectionPipeline.bootstrap
-  commandReadModel = yield* projectionSnapshotQuery.getCommandReadModel()
+  yield* projectionPipeline.bootstrap;
+  commandReadModel = yield* projectionSnapshotQuery.getCommandReadModel();
 
-  const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)))
-  yield* Effect.forkScoped(worker)
-  yield* Effect.logDebug('orchestration engine started').pipe(
+  const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
+  yield* Effect.forkScoped(worker);
+  yield* Effect.logDebug("orchestration engine started").pipe(
     Effect.annotateLogs({ sequence: commandReadModel.snapshotSequence }),
-  )
+  );
 
-  const readEvents: OrchestrationEngineShape['readEvents'] = (fromSequenceExclusive, limit) =>
-    eventStore.readFromSequence(fromSequenceExclusive, limit)
+  const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive, limit) =>
+    eventStore.readFromSequence(fromSequenceExclusive, limit);
 
-  const readThreadEvents: OrchestrationEngineShape['readThreadEvents'] = ({ threadId, ...range }) =>
-    eventStore.readAggregateRange({ ...range, aggregateKind: 'thread', aggregateId: threadId })
+  const readThreadEvents: OrchestrationEngineShape["readThreadEvents"] = ({ threadId, ...range }) =>
+    eventStore.readAggregateRange({ ...range, aggregateKind: "thread", aggregateId: threadId });
 
-  const getThreadReplayStats: OrchestrationEngineShape['getThreadReplayStats'] = ({
+  const getThreadReplayStats: OrchestrationEngineShape["getThreadReplayStats"] = ({
     threadId,
     ...range
   }) =>
     eventStore.getAggregateReplayStats({
       ...range,
-      aggregateKind: 'thread',
+      aggregateKind: "thread",
       aggregateId: threadId,
-    })
+    });
 
-  const dispatchCommand = (
-    command: OrchestrationCommand,
-    causalSettlementAuthority: OrchestrationCausalSettlementAuthority | null,
-    assistantCitationAccess: 'allow' | 'deny' = 'allow',
-  ) =>
-    Effect.gen(function* ()
-    {
-      const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>()
+  const dispatch: OrchestrationEngineShape["dispatch"] = (command, options) =>
+    Effect.gen(function* () {
+      const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
       yield* Queue.offer(commandQueue, {
         command,
-        causalSettlementAuthority,
-        assistantCitationAccess,
+        origin: options?.origin,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
-      })
-      return yield* Deferred.await(result)
-    })
-
-  const dispatch: OrchestrationEngineShape['dispatch'] = (command, options) =>
-    command.type === 'thread.archive' || command.type === 'thread.unarchive'
-      ? threadArchiveLifecyclePermit.withPermit(
-          command.threadId,
-          dispatchCommand(command, null, options?.assistantCitationAccess),
-        )
-      : dispatchCommand(command, null, options?.assistantCitationAccess)
-
-  const dispatchInternal: OrchestrationEngineShape['dispatchInternal'] = (command, authority) =>
-    dispatchCommand(command, authority)
-
-  const streamDomainEventsForAggregate: OrchestrationEngineShape['streamDomainEventsForAggregate'] =
-    (aggregateKind, aggregateId) =>
-    {
-      const key = aggregateEventKey(aggregateKind, aggregateId)
-      return Stream.unwrap(
-        Effect.acquireRelease(
-          Effect.gen(function* ()
-          {
-            const subscriber = yield* Queue.unbounded<OrchestrationEvent>()
-            const subscribers = aggregateEventSubscribers.get(key) ?? new Set()
-            subscribers.add(subscriber)
-            aggregateEventSubscribers.set(key, subscribers)
-            return subscriber
-          }),
-          (subscriber) =>
-            Effect.sync(() =>
-            {
-              const subscribers = aggregateEventSubscribers.get(key)
-              subscribers?.delete(subscriber)
-              if (subscribers?.size === 0)
-              {
-                aggregateEventSubscribers.delete(key)
-              }
-            }).pipe(Effect.andThen(Queue.shutdown(subscriber))),
-        ).pipe(Effect.map(Stream.fromQueue)),
-      )
-    }
-
-  const registerDomainEventAdmission: OrchestrationEngineShape['registerDomainEventAdmission'] = (
-    admission,
-  ) =>
-    Effect.acquireRelease(
-      Effect.sync(() =>
-      {
-        domainEventAdmissions.add(admission)
-      }),
-      () =>
-        Effect.sync(() =>
-        {
-          domainEventAdmissions.delete(admission)
-        }),
-    )
+      });
+      return yield* Deferred.await(result);
+    });
 
   return {
     readEvents,
     readThreadEvents,
     getThreadReplayStats,
     dispatch,
-    dispatchInternal,
-    // each access creates a fresh PubSub subscription so that multiple
+    subscribeDomainEvents: PubSub.subscribe(eventPubSub).pipe(Effect.map(Stream.fromSubscription)),
+    // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.
-    get streamDomainEvents(): OrchestrationEngineShape['streamDomainEvents']
-    {
-      return Stream.fromPubSub(eventPubSub)
+    get streamDomainEvents(): OrchestrationEngineShape["streamDomainEvents"] {
+      return Stream.fromPubSub(eventPubSub);
     },
-    streamDomainEventsForAggregate,
-    registerDomainEventAdmission,
-    // the command read model's snapshotSequence tracks the latest committed
+    // The command read model's snapshotSequence tracks the latest committed
     // event sequence (updated on the worker fiber). A plain property read is a
     // consistent, committed value — reassignment of `commandReadModel` is
     // atomic on the single-threaded event loop.
     latestSequence: Effect.sync(() => commandReadModel.snapshotSequence),
-  } satisfies OrchestrationEngineShape
-})
+  } satisfies OrchestrationEngineShape;
+});
 
-export const OrchestrationEngineWithArchivePermitLive = Layer.effect(
+export const OrchestrationEngineLive = Layer.effect(
   OrchestrationEngineService,
   makeOrchestrationEngine,
-).pipe(Layer.provide(ProviderBackgroundTaskRegistryLive))
-
-export const OrchestrationEngineLive = OrchestrationEngineWithArchivePermitLive.pipe(
-  Layer.provide(ThreadArchiveLifecyclePermitLive),
-  Layer.provide(ProjectionTurnRepositoryLive),
-  Layer.provide(ProviderRuntimeInboxLive),
-)
+);

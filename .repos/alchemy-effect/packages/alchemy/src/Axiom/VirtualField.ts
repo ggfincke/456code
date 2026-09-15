@@ -5,12 +5,12 @@ import * as Provider from "../Provider.ts";
 import { Resource } from "../Resource.ts";
 import type { Providers } from "./Providers.ts";
 
-export type VirtualFieldProps = Axiom.CreateVirtualFieldInput;
+export type VirtualFieldProps = Axiom.CreateVirtualFieldRequest;
 
 export type VirtualField = Resource<
   "Axiom.VirtualField",
   VirtualFieldProps,
-  Axiom.CreateVirtualFieldOutput,
+  Axiom.CreateVirtualFieldResponse,
   never,
   Providers
 >;
@@ -22,11 +22,10 @@ export type VirtualField = Resource<
  * dashboards and monitors don't have to redefine them.
  *
  * Bound to a single `dataset`; changing the dataset triggers a replacement.
- *
  * @see https://axiom.co/docs/query-data/virtual-fields
  *
- * @section Creating a Virtual Field
- * @example HTTP status class (e.g. 200 → "2xx")
+ * ### Creating a Virtual Field
+ * **Example:** HTTP status class (e.g. 200 → "2xx")
  * ```typescript
  * yield* Axiom.VirtualField("status-class", {
  *   dataset: "my-app-traces",
@@ -37,7 +36,7 @@ export type VirtualField = Resource<
  * });
  * ```
  *
- * @example Latency bucket in seconds
+ * **Example:** Latency bucket in seconds
  * ```typescript
  * yield* Axiom.VirtualField("latency-bucket", {
  *   dataset: "my-app-traces",
@@ -47,6 +46,8 @@ export type VirtualField = Resource<
  *   unit: "s",
  * });
  * ```
+ *
+ * @resource
  */
 export const VirtualField = Resource<VirtualField>("Axiom.VirtualField");
 
@@ -58,9 +59,27 @@ export const VirtualFieldProvider = () =>
       const update = yield* Axiom.updateVirtualField;
       const get = yield* Axiom.getVirtualField;
       const del = yield* Axiom.deleteVirtualField;
+      const listVirtualFields = yield* Axiom.getVirtualFields;
+      const listDatasets = yield* Axiom.getDatasets;
 
       return {
         stables: ["id"],
+        // Axiom only exposes a per-dataset virtual-field enumeration
+        // (`GET /v2/vfields?dataset=...`); there is no account-wide list. So
+        // enumerate every dataset (`GET /v2/datasets`), fan out the per-dataset
+        // vfields list with bounded concurrency, and flatten. Each row already
+        // matches the `read` Attributes shape (`CreateVirtualFieldOutput`), so
+        // it's directly usable by `delete` with no follow-up read.
+        list: () =>
+          Effect.gen(function* () {
+            const datasets = yield* listDatasets({});
+            const perDataset = yield* Effect.forEach(
+              datasets,
+              (ds) => listVirtualFields({ dataset: ds.name }),
+              { concurrency: 10 },
+            );
+            return perDataset.flat().map((vf) => ({ ...vf }));
+          }),
         diff: Effect.fn(function* ({ news, output }) {
           if (!isResolved(news)) return undefined;
           if (output && news.dataset !== output.dataset) {

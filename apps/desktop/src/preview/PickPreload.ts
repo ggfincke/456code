@@ -1,10 +1,6 @@
-// apps/desktop/src/preview/PickPreload.ts
-// runs the isolated in-page annotation picker for desktop previews
-
-// @effect-diagnostics globalDate:off - This isolated Electron preload does not run inside an Effect runtime.
-// @effect-diagnostics globalTimers:off - The picker bounds guest context inspection with a native timer.
-import { ipcRenderer } from 'electron'
-import { getElementContext } from 'react-grab/primitives'
+// @effect-diagnostics globalDate:off globalTimers:off - This isolated Electron preload does not run inside an Effect runtime.
+import { ipcRenderer } from "electron";
+import { getElementContext } from "react-grab/primitives";
 import type {
   DesktopPreviewAnnotationTheme,
   PickedElementPayload,
@@ -15,9 +11,11 @@ import type {
   PreviewAnnotationRegionTarget,
   PreviewAnnotationStrokeTarget,
   PreviewAnnotationStyleChange,
-} from '@t3tools/contracts'
+  PreviewAnnotationSubmission,
+} from "@t3tools/contracts";
 
-import { previewAnnotationStyles } from './AnnotationStyles.generated.ts'
+import { resolveAnnotationSubmission } from "./AnnotationKeyboard.ts";
+import { previewAnnotationStyles } from "./AnnotationStyles.generated.ts";
 import {
   ANNOTATION_CAPTURED_CHANNEL,
   ANNOTATION_THEME_CHANNEL,
@@ -26,670 +24,864 @@ import {
   HUMAN_INPUT_CHANNEL,
   MOUSE_NAVIGATE_CHANNEL,
   START_PICK_CHANNEL,
-} from './GuestProtocol.ts'
-import {
-  type AnnotationTool,
-  type AnnotationSession,
-  type SelectedElement,
-  PRIMARY,
-  PRIMARY_FILL,
-  MAX_MARQUEE_ELEMENTS,
-  CONTENT_LAYER_Z_INDEX,
-  CHROME_LAYER_Z_INDEX,
-  Z_INDEX_OVERLAY,
-  OVERLAY_ATTRIBUTE,
-  applyAnnotationTheme,
-  createBox,
-  createButton,
-  createField,
-  createLabel,
-  createStyleSection,
-  createUnitControl,
-  createUnitInput,
-  positionBox,
-  styleControl,
-  updateSelectedVisual,
-} from './PickChrome.ts'
-import {
-  isAnnotationNode,
-  isUsableRect,
-  normalizeRect,
-  pathFromPoints,
-  pickFromPoint,
-  rectFromDomRect,
-  strokeBounds,
-  unionRects,
-} from './PickGeometry.ts'
+} from "./GuestProtocol.ts";
+const OVERLAY_ATTRIBUTE = "data-t3code-annotation-ui";
+const Z_INDEX_OVERLAY = 2147483646;
+const PRIMARY = "var(--t3-primary)";
+const PRIMARY_FILL = "color-mix(in srgb, var(--t3-primary) 10%, transparent)";
+const MAX_MARQUEE_ELEMENTS = 20;
+/** Upper bound on one element's React context lookup during submit. */
+const ELEMENT_CONTEXT_TIMEOUT_MS = 5_000;
+const CONTENT_LAYER_Z_INDEX = 1;
+const CHROME_LAYER_Z_INDEX = 10;
 
-let activeSession: AnnotationSession | null = null
-let idSequence = 0
-let annotationTheme: DesktopPreviewAnnotationTheme | null = null
-const ELEMENT_CONTEXT_TIMEOUT_MS = 5_000
-const HTML_PREVIEW_MAX_CHARS = 500
+type AnnotationTool = "select" | "marquee" | "draw" | "erase";
 
-const reportHumanPointerInput = (event: PointerEvent): void =>
-{
-  if (!event.isTrusted) return
+interface SelectedElement {
+  id: string;
+  element: Element;
+  outline: HTMLDivElement;
+  label: HTMLDivElement;
+  baselineStyles: Map<string, string>;
+}
+
+interface AnnotationSession {
+  teardown: (notifyMain: boolean) => void;
+  applyTheme: (theme: DesktopPreviewAnnotationTheme) => void;
+}
+
+let activeSession: AnnotationSession | null = null;
+let idSequence = 0;
+let annotationTheme: DesktopPreviewAnnotationTheme | null = null;
+
+const applyAnnotationTheme = (
+  host: HTMLElement,
+  theme: DesktopPreviewAnnotationTheme | null,
+): void => {
+  if (!theme) return;
+  host.style.colorScheme = theme.colorScheme;
+  const variables = {
+    "--t3-radius": theme.radius,
+    "--t3-background": theme.background,
+    "--t3-foreground": theme.foreground,
+    "--t3-popover": theme.popover,
+    "--t3-popover-foreground": theme.popoverForeground,
+    "--t3-primary": theme.primary,
+    "--t3-primary-foreground": theme.primaryForeground,
+    "--t3-muted": theme.muted,
+    "--t3-muted-foreground": theme.mutedForeground,
+    "--t3-accent": theme.accent,
+    "--t3-accent-foreground": theme.accentForeground,
+    "--t3-border": theme.border,
+    "--t3-input": theme.input,
+    "--t3-ring": theme.ring,
+    "--t3-font-sans": theme.fontSans,
+    "--t3-font-mono": theme.fontMono,
+  };
+  for (const [name, value] of Object.entries(variables)) {
+    host.style.setProperty(name, value);
+  }
+};
+
+const reportHumanPointerInput = (event: PointerEvent): void => {
+  if (!event.isTrusted) return;
   ipcRenderer.send(HUMAN_INPUT_CHANNEL, {
-    kind: 'pointer',
+    kind: "pointer",
     x: event.clientX,
     y: event.clientY,
     button: event.button,
-  })
-}
+  });
+};
 
-const reportHumanKeyInput = (event: KeyboardEvent): void =>
-{
-  if (!event.isTrusted) return
+const reportHumanKeyInput = (event: KeyboardEvent): void => {
+  if (!event.isTrusted) return;
   ipcRenderer.send(HUMAN_INPUT_CHANNEL, {
-    kind: 'key',
+    kind: "key",
     key: event.key,
     code: event.code,
-  })
+  });
+};
+
+window.addEventListener("pointerdown", reportHumanPointerInput, true);
+window.addEventListener("keydown", reportHumanKeyInput, true);
+
+// Mouse thumb buttons: `button === 3` is Back, `button === 4` is Forward.
+const MOUSE_BUTTON_BACK = 3;
+const MOUSE_BUTTON_FORWARD = 4;
+
+const navigationDirectionForButton = (button: number): "back" | "forward" | null => {
+  if (button === MOUSE_BUTTON_BACK) return "back";
+  if (button === MOUSE_BUTTON_FORWARD) return "forward";
+  return null;
+};
+
+// Chromium routes thumb-button history navigation to the *focused* WebContents,
+// so hovering this guest without focusing it sends the host app's router back
+// instead of the preview. Suppress Chromium's default here and drive this tab's
+// history explicitly so the buttons always navigate the browser the pointer is
+// over — never the host app.
+const suppressNavigationButton = (event: MouseEvent): void => {
+  if (!event.isTrusted || navigationDirectionForButton(event.button) === null) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+};
+
+const requestNavigationForButton = (event: MouseEvent): void => {
+  if (!event.isTrusted) return;
+  const direction = navigationDirectionForButton(event.button);
+  if (direction === null) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  ipcRenderer.send(MOUSE_NAVIGATE_CHANNEL, { direction });
+};
+
+window.addEventListener("mousedown", suppressNavigationButton, true);
+window.addEventListener("mouseup", requestNavigationForButton, true);
+window.addEventListener("auxclick", suppressNavigationButton, true);
+
+const nextId = (prefix: string): string => {
+  idSequence += 1;
+  return `${prefix}_${idSequence.toString(36)}`;
+};
+
+const rectFromDomRect = (rect: DOMRect): PreviewAnnotationRect => ({
+  x: rect.left,
+  y: rect.top,
+  width: rect.width,
+  height: rect.height,
+});
+
+const normalizeRect = (
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): PreviewAnnotationRect => ({
+  x: Math.min(startX, endX),
+  y: Math.min(startY, endY),
+  width: Math.abs(endX - startX),
+  height: Math.abs(endY - startY),
+});
+
+const isUsableRect = (rect: PreviewAnnotationRect): boolean => rect.width >= 3 && rect.height >= 3;
+
+function unionRects(
+  rects: ReadonlyArray<PreviewAnnotationRect>,
+  padding = 20,
+): PreviewAnnotationRect | null {
+  if (rects.length === 0) return null;
+  const left = Math.min(...rects.map((rect) => rect.x));
+  const top = Math.min(...rects.map((rect) => rect.y));
+  const right = Math.max(...rects.map((rect) => rect.x + rect.width));
+  const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+  const x = Math.max(0, left - padding);
+  const y = Math.max(0, top - padding);
+  const maxWidth = Math.max(1, window.innerWidth - x);
+  const maxHeight = Math.max(1, window.innerHeight - y);
+  return {
+    x,
+    y,
+    width: Math.min(maxWidth, right - left + padding * 2),
+    height: Math.min(maxHeight, bottom - top + padding * 2),
+  };
 }
 
-window.addEventListener('pointerdown', reportHumanPointerInput, true)
-window.addEventListener('keydown', reportHumanKeyInput, true)
-
-const navigationDirectionForButton = (button: number): 'back' | 'forward' | null =>
-{
-  if (button === 3) return 'back'
-  if (button === 4) return 'forward'
-  return null
+function isAnnotationNode(element: Element): boolean {
+  return element instanceof Element && element.closest(`[${OVERLAY_ATTRIBUTE}]`) !== null;
 }
 
-// chromium sends thumb navigation to whichever contents has focus, which may
-// be the app instead of the preview under the pointer
-const suppressNavigationButton = (event: MouseEvent): void =>
-{
-  if (!event.isTrusted || navigationDirectionForButton(event.button) === null) return
-  event.preventDefault()
-  event.stopImmediatePropagation()
+function pickFromPoint(clientX: number, clientY: number): Element | null {
+  for (const candidate of document.elementsFromPoint(clientX, clientY)) {
+    if (!(candidate instanceof Element)) continue;
+    if (isAnnotationNode(candidate)) continue;
+    if (candidate === document.documentElement || candidate === document.body) continue;
+    return candidate;
+  }
+  return null;
 }
 
-const requestNavigationForButton = (event: MouseEvent): void =>
-{
-  if (!event.isTrusted) return
-  const direction = navigationDirectionForButton(event.button)
-  if (direction === null) return
-  event.preventDefault()
-  event.stopImmediatePropagation()
-  ipcRenderer.send(MOUSE_NAVIGATE_CHANNEL, { direction })
+function describeRawElement(element: Element): string {
+  const tag = element.tagName.toLowerCase();
+  const id = element.id ? `#${element.id}` : "";
+  const classes =
+    element instanceof HTMLElement && typeof element.className === "string"
+      ? element.className
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((name) => `.${name}`)
+          .join("")
+      : "";
+  return `${tag}${id}${classes}`;
 }
 
-window.addEventListener('mousedown', suppressNavigationButton, true)
-window.addEventListener('mouseup', requestNavigationForButton, true)
-window.addEventListener('auxclick', suppressNavigationButton, true)
+function createBox(color: string, fill: string): HTMLDivElement {
+  const node = document.createElement("div");
+  node.setAttribute(OVERLAY_ATTRIBUTE, "");
+  node.style.cssText = [
+    "position:fixed",
+    "pointer-events:none",
+    `border:2px solid ${color}`,
+    `background:${fill}`,
+    "border-radius:3px",
+    "box-sizing:border-box",
+    "display:none",
+    `z-index:${CONTENT_LAYER_Z_INDEX}`,
+  ].join(";");
+  return node;
+}
 
-const nextId = (prefix: string): string =>
-{
-  idSequence += 1
-  return `${prefix}_${idSequence.toString(36)}`
+function positionBox(node: HTMLElement, rect: PreviewAnnotationRect): void {
+  node.style.display = "block";
+  node.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
+  node.style.width = `${rect.width}px`;
+  node.style.height = `${rect.height}px`;
+}
+
+function createLabel(): HTMLDivElement {
+  const label = document.createElement("div");
+  label.setAttribute(OVERLAY_ATTRIBUTE, "");
+  label.className =
+    "fixed z-1 max-w-70 overflow-hidden rounded-md bg-primary px-2 py-1 font-sans text-xs font-semibold text-primary-foreground shadow-md";
+  label.style.cssText = [
+    "position:fixed",
+    "pointer-events:none",
+    "white-space:nowrap",
+    "text-overflow:ellipsis",
+    `z-index:${CONTENT_LAYER_Z_INDEX}`,
+  ].join(";");
+  return label;
+}
+
+function updateSelectedVisual(target: SelectedElement): void {
+  if (!target.element.isConnected) {
+    target.outline.style.display = "none";
+    target.label.style.display = "none";
+    return;
+  }
+  const rect = target.element.getBoundingClientRect();
+  positionBox(target.outline, rectFromDomRect(rect));
+  target.label.textContent = describeRawElement(target.element);
+  target.label.style.display = "block";
+  target.label.style.transform = `translate(${Math.max(4, rect.left)}px, ${Math.max(4, rect.top - 22)}px)`;
 }
 
 function toStackFrame(frame: {
-  functionName?: string
-  fileName?: string
-  lineNumber?: number
-  columnNumber?: number
-}): PickedElementStackFrame
-{
+  functionName?: string;
+  fileName?: string;
+  lineNumber?: number;
+  columnNumber?: number;
+}): PickedElementStackFrame {
   return {
     functionName: frame.functionName ?? null,
     fileName: frame.fileName ?? null,
     lineNumber: frame.lineNumber ?? null,
     columnNumber: frame.columnNumber ?? null,
-  }
+  };
 }
 
-// bound React inspection because some guest trees never settle
-export function withCaptureTimeout<A>(promise: Promise<A>, millis: number): Promise<A | null>
-{
-  let timer: ReturnType<typeof setTimeout> | undefined
+/**
+ * Resolves to `null` instead of hanging when `promise` outlives `millis`.
+ * `getElementContext` walks the inspected page's React internals, and some
+ * pages leave it pending forever. Without a bound, the whole submit chain
+ * stalls and the overlay sits on "Capturing…".
+ */
+function withCaptureTimeout<A>(promise: Promise<A>, millis: number): Promise<A | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     promise,
-    new Promise<null>((resolve) =>
-    {
-      timer = setTimeout(() => resolve(null), millis)
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), millis);
     }),
-  ]).finally(() => clearTimeout(timer))
+  ]).finally(() => clearTimeout(timer));
 }
 
-// retain DOM context when React inspection is unavailable or times out
-export async function captureElement(element: Element): Promise<PickedElementPayload>
-{
+/** Truncation for the DOM-only preview used when React context is unavailable. */
+const HTML_PREVIEW_MAX_CHARS = 500;
+
+/**
+ * Describes a picked element. The React context lookup can stall or throw on
+ * some pages, so the element is never dropped: without context it still
+ * carries its tag, a short HTML preview, and its rect so the crop stays on the
+ * pick instead of falling back to the whole viewport.
+ */
+async function captureElement(element: Element): Promise<PickedElementPayload> {
   const base = {
     pageUrl: location.href,
     pageTitle: document.title?.trim() || null,
     tagName: element.tagName.toLowerCase(),
     pickedAt: new Date().toISOString(),
-  }
-  const fallbackHtmlPreview = element.outerHTML.slice(0, HTML_PREVIEW_MAX_CHARS)
-  try
-  {
+  };
+  try {
     const context = await withCaptureTimeout(
       Promise.resolve(getElementContext(element)),
       ELEMENT_CONTEXT_TIMEOUT_MS,
-    )
-    if (context)
-    {
-      const stack = (context.stack ?? []).map(toStackFrame)
+    );
+    if (context) {
+      const stack = (context.stack ?? []).map(toStackFrame);
       return {
         ...base,
         selector: context.selector,
-        htmlPreview: context.htmlPreview ?? '',
+        htmlPreview: context.htmlPreview ?? "",
         componentName: context.componentName,
         source: stack[0] ?? null,
         stack,
-        styles: context.styles ?? '',
-      }
+        styles: context.styles ?? "",
+      };
     }
-  }
-  catch
-  {
-    // use the DOM-only payload below
+  } catch {
+    // Fall through to the DOM-only payload.
   }
   return {
     ...base,
     selector: null,
-    htmlPreview: fallbackHtmlPreview,
+    htmlPreview: element.outerHTML.slice(0, HTML_PREVIEW_MAX_CHARS),
     componentName: null,
     source: null,
     stack: [],
-    styles: '',
-  }
+    styles: "",
+  };
 }
 
-function startAnnotation(sessionId: string): void
-{
-  activeSession?.teardown(false)
-  let finished = false
-  const host = document.createElement('div')
-  host.setAttribute(OVERLAY_ATTRIBUTE, '')
-  host.style.cssText = `position:fixed;inset:0;z-index:${Z_INDEX_OVERLAY};pointer-events:none`
-  applyAnnotationTheme(host, annotationTheme)
-  const shadowRoot = host.attachShadow({ mode: 'closed' })
-  const themeStyle = document.createElement('style')
-  themeStyle.textContent = previewAnnotationStyles
-  shadowRoot.appendChild(themeStyle)
+function createButton(label: string, title: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.title = title;
+  button.className =
+    "inline-flex h-7 cursor-pointer items-center justify-center rounded-md border border-transparent px-2 font-sans text-xs font-medium text-foreground outline-none hover:bg-accent disabled:pointer-events-none disabled:opacity-60";
+  return button;
+}
 
-  const root = document.createElement('div')
-  root.setAttribute(OVERLAY_ATTRIBUTE, '')
-  root.className = 'fixed inset-0 font-sans text-foreground'
-  root.style.cssText = 'pointer-events:none'
-  const cursorStyle = document.createElement('style')
-  cursorStyle.setAttribute(OVERLAY_ATTRIBUTE, '')
-  cursorStyle.textContent = `html[data-code456-annotation-tool] body, html[data-code456-annotation-tool] body * { cursor: crosshair !important; } [${OVERLAY_ATTRIBUTE}], [${OVERLAY_ATTRIBUTE}] * { cursor: default !important; } [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-inner-spin-button, [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-outer-spin-button { appearance:none; margin:0; }`
-  document.documentElement.appendChild(cursorStyle)
-  shadowRoot.appendChild(root)
+function styleControl(input: HTMLInputElement | HTMLSelectElement): void {
+  input.setAttribute("aria-label", input.getAttribute("aria-label") ?? "Style value");
+  input.className =
+    "h-7 min-w-0 w-full appearance-none rounded-md border border-input bg-background px-2 font-mono text-xs text-foreground shadow-xs outline-none";
+}
 
-  const hoverOutline = createBox(PRIMARY, PRIMARY_FILL)
-  const marqueeBox = createBox(PRIMARY, PRIMARY_FILL)
-  root.append(hoverOutline, marqueeBox)
+function createUnitControl(input: HTMLInputElement): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = "position:relative;min-width:0";
+  const unit = document.createElement("span");
+  unit.textContent = input.dataset.unit ?? "";
+  unit.className =
+    "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 font-mono text-xs text-muted-foreground";
+  wrapper.append(input, unit);
+  return wrapper;
+}
 
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  svg.setAttribute(OVERLAY_ATTRIBUTE, '')
-  svg.setAttribute('width', '100%')
-  svg.setAttribute('height', '100%')
-  svg.setAttribute('viewBox', `0 0 ${window.innerWidth} ${window.innerHeight}`)
-  svg.style.cssText = 'position:fixed;inset:0;overflow:visible;pointer-events:none'
-  svg.style.zIndex = String(CONTENT_LAYER_Z_INDEX)
-  root.appendChild(svg)
+function createField(
+  labelText: string,
+  input: HTMLInputElement | HTMLSelectElement,
+): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className =
+    "grid min-h-7 grid-cols-[82px_minmax(0,1fr)] items-center gap-2 font-sans text-xs font-medium text-muted-foreground";
+  const text = document.createElement("span");
+  text.textContent = labelText;
+  styleControl(input);
+  label.append(
+    text,
+    input instanceof HTMLInputElement && input.dataset.unit ? createUnitControl(input) : input,
+  );
+  return label;
+}
 
-  const toolbar = document.createElement('div')
-  toolbar.setAttribute(OVERLAY_ATTRIBUTE, '')
+function createStyleSection(): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "grid gap-1 border-t border-border py-2";
+  return section;
+}
+
+function createUnitInput(unit: string, placeholder = "0"): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.placeholder = placeholder;
+  input.style.paddingRight = "30px";
+  input.dataset.unit = unit;
+  return input;
+}
+
+function pathFromPoints(points: ReadonlyArray<PreviewAnnotationPoint>): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0]!.x} ${points[0]!.y} l 0.01 0.01`;
+  let path = `M ${points[0]!.x} ${points[0]!.y}`;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index]!;
+    const next = points[index + 1]!;
+    path += ` Q ${current.x} ${current.y} ${(current.x + next.x) / 2} ${(current.y + next.y) / 2}`;
+  }
+  const last = points[points.length - 1]!;
+  path += ` L ${last.x} ${last.y}`;
+  return path;
+}
+
+function strokeBounds(
+  points: ReadonlyArray<PreviewAnnotationPoint>,
+  width: number,
+): PreviewAnnotationRect {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const padding = width + 3;
+  const left = Math.min(...xs) - padding;
+  const top = Math.min(...ys) - padding;
+  const right = Math.max(...xs) + padding;
+  const bottom = Math.max(...ys) + padding;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function startAnnotation(): void {
+  activeSession?.teardown(false);
+  let finished = false;
+  const host = document.createElement("div");
+  host.setAttribute(OVERLAY_ATTRIBUTE, "");
+  host.style.cssText = `position:fixed;inset:0;z-index:${Z_INDEX_OVERLAY};pointer-events:none`;
+  applyAnnotationTheme(host, annotationTheme);
+  const shadowRoot = host.attachShadow({ mode: "closed" });
+  const themeStyle = document.createElement("style");
+  themeStyle.textContent = previewAnnotationStyles;
+  shadowRoot.appendChild(themeStyle);
+
+  const root = document.createElement("div");
+  root.setAttribute(OVERLAY_ATTRIBUTE, "");
+  root.className = "fixed inset-0 font-sans text-foreground";
+  root.style.cssText = "pointer-events:none";
+  const cursorStyle = document.createElement("style");
+  cursorStyle.setAttribute(OVERLAY_ATTRIBUTE, "");
+  cursorStyle.textContent = `html[data-t3code-annotation-tool] body, html[data-t3code-annotation-tool] body * { cursor: crosshair !important; } [${OVERLAY_ATTRIBUTE}], [${OVERLAY_ATTRIBUTE}] * { cursor: default !important; } [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-inner-spin-button, [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-outer-spin-button { appearance:none; margin:0; }`;
+  document.documentElement.appendChild(cursorStyle);
+  shadowRoot.appendChild(root);
+
+  const hoverOutline = createBox(PRIMARY, PRIMARY_FILL);
+  const marqueeBox = createBox(PRIMARY, PRIMARY_FILL);
+  root.append(hoverOutline, marqueeBox);
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute(OVERLAY_ATTRIBUTE, "");
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "100%");
+  svg.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
+  svg.style.cssText = "position:fixed;inset:0;overflow:visible;pointer-events:none";
+  svg.style.zIndex = String(CONTENT_LAYER_Z_INDEX);
+  root.appendChild(svg);
+
+  const toolbar = document.createElement("div");
+  toolbar.setAttribute(OVERLAY_ATTRIBUTE, "");
   toolbar.className =
-    'pointer-events-auto fixed top-2.5 left-1/2 flex -translate-x-1/2 gap-0.5 rounded-lg border border-border bg-popover/95 p-1 text-popover-foreground shadow-lg backdrop-blur-xl'
-  toolbar.style.zIndex = String(CHROME_LAYER_Z_INDEX)
-  root.appendChild(toolbar)
+    "pointer-events-auto fixed top-2.5 left-1/2 flex -translate-x-1/2 gap-0.5 rounded-lg border border-border bg-popover/95 p-1 text-popover-foreground shadow-lg backdrop-blur-xl";
+  toolbar.style.zIndex = String(CHROME_LAYER_Z_INDEX);
+  root.appendChild(toolbar);
 
-  const editor = document.createElement('div')
-  editor.setAttribute(OVERLAY_ATTRIBUTE, '')
+  const editor = document.createElement("div");
+  editor.setAttribute(OVERLAY_ATTRIBUTE, "");
   editor.className =
-    'pointer-events-auto fixed hidden max-h-[calc(100vh-16px)] w-[min(360px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl border border-border bg-popover/96 text-popover-foreground shadow-2xl backdrop-blur-xl'
-  editor.style.zIndex = String(CHROME_LAYER_Z_INDEX)
-  root.appendChild(editor)
+    "pointer-events-auto fixed hidden max-h-[calc(100vh-16px)] w-[min(360px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl border border-border bg-popover/96 text-popover-foreground shadow-2xl backdrop-blur-xl";
+  editor.style.zIndex = String(CHROME_LAYER_Z_INDEX);
+  root.appendChild(editor);
 
-  const composerRow = document.createElement('div')
-  composerRow.className = 'flex items-start gap-2 p-2'
+  const composerRow = document.createElement("div");
+  composerRow.className = "flex items-start gap-2 p-2";
 
-  const adjust = createButton('', 'Expand annotation editor')
-  adjust.setAttribute('aria-label', 'Expand annotation editor')
-  adjust.setAttribute('aria-expanded', 'false')
+  const adjust = createButton("", "Expand annotation editor");
+  adjust.setAttribute("aria-label", "Expand annotation editor");
+  adjust.setAttribute("aria-expanded", "false");
   adjust.className +=
-    ' h-8 w-8 shrink-0 bg-muted p-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+    " h-8 w-8 shrink-0 bg-muted p-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground";
   adjust.innerHTML =
-    '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h12M7 3v4M13 8v4M9 13v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
-  composerRow.appendChild(adjust)
+    '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h12M7 3v4M13 8v4M9 13v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  composerRow.appendChild(adjust);
 
-  const comment = document.createElement('textarea')
-  comment.placeholder = 'Describe the change…'
-  comment.rows = 1
+  const comment = document.createElement("textarea");
+  comment.placeholder = "Describe the change…";
+  comment.rows = 1;
   comment.className =
-    'min-h-8 max-h-24 min-w-0 flex-1 resize-none overflow-y-hidden border-0 border-b border-b-transparent bg-transparent px-0 py-1.5 font-sans text-sm leading-5 text-foreground outline-none ring-0 placeholder:text-muted-foreground focus:border-b-primary focus:outline-none focus:ring-0'
-  composerRow.appendChild(comment)
+    "min-h-8 max-h-24 min-w-0 flex-1 resize-none overflow-y-hidden border-0 border-b border-b-transparent bg-transparent px-0 py-1.5 font-sans text-sm leading-5 text-foreground outline-none ring-0 placeholder:text-muted-foreground focus:border-b-primary focus:outline-none focus:ring-0";
+  composerRow.appendChild(comment);
 
-  const dragHandle = document.createElement('button')
-  dragHandle.type = 'button'
-  dragHandle.textContent = '⠿'
-  dragHandle.title = 'Drag annotation editor'
+  const dragHandle = document.createElement("button");
+  dragHandle.type = "button";
+  dragHandle.textContent = "⠿";
+  dragHandle.title = "Drag annotation editor";
   dragHandle.className =
-    'hidden h-8 w-6 shrink-0 cursor-grab select-none border-0 bg-transparent p-0 font-sans text-lg font-bold leading-5 text-muted-foreground'
-  composerRow.appendChild(dragHandle)
+    "hidden h-8 w-6 shrink-0 cursor-grab select-none border-0 bg-transparent p-0 font-sans text-lg font-bold leading-5 text-muted-foreground";
+  composerRow.appendChild(dragHandle);
 
-  const submit = createButton('Attach', 'Attach annotation and screenshot')
+  const submit = createButton("Attach", "Attach annotation and screenshot (Enter)");
   submit.className +=
-    ' h-8 shrink-0 border-primary bg-primary px-3 text-primary-foreground shadow-sm hover:bg-primary/90'
-  composerRow.appendChild(submit)
-  editor.appendChild(composerRow)
+    " h-8 shrink-0 border-primary bg-primary px-3 text-primary-foreground shadow-sm hover:bg-primary/90";
+  composerRow.appendChild(submit);
+  editor.appendChild(composerRow);
 
-  const stylePanel = document.createElement('div')
+  const stylePanel = document.createElement("div");
   stylePanel.className =
-    'hidden max-h-[min(176px,calc(100vh-180px))] overflow-auto border-t border-border bg-muted/40 px-3'
-  editor.appendChild(stylePanel)
+    "hidden max-h-[min(176px,calc(100vh-180px))] overflow-auto border-t border-border bg-muted/40 px-3";
+  editor.appendChild(stylePanel);
 
-  const selected = new Map<Element, SelectedElement>()
-  const regions: PreviewAnnotationRegionTarget[] = []
-  const strokes: PreviewAnnotationStrokeTarget[] = []
-  const styleChanges = new Map<string, PreviewAnnotationStyleChange>()
-  const toolButtons = new Map<AnnotationTool, HTMLButtonElement>()
-  let tool: AnnotationTool = 'select'
-  let dragStart: PreviewAnnotationPoint | null = null
-  let activeStroke: { target: PreviewAnnotationStrokeTarget; path: SVGPathElement } | null = null
-  let pendingCapture = false
-  let editorExpanded = false
-  let editorWasShown = false
-  let editorPosition: { left: number; top: number } | null = null
-  let editorDrag: { pointerId: number; offsetX: number; offsetY: number } | null = null
-  let editorLayoutFrame: number | null = null
+  const selected = new Map<Element, SelectedElement>();
+  const regions: PreviewAnnotationRegionTarget[] = [];
+  const strokes: PreviewAnnotationStrokeTarget[] = [];
+  const styleChanges = new Map<string, PreviewAnnotationStyleChange>();
+  const toolButtons = new Map<AnnotationTool, HTMLButtonElement>();
+  let tool: AnnotationTool = "select";
+  let dragStart: PreviewAnnotationPoint | null = null;
+  let activeStroke: { target: PreviewAnnotationStrokeTarget; path: SVGPathElement } | null = null;
+  let pendingCapture = false;
+  let editorExpanded = false;
+  let editorWasShown = false;
+  let editorPosition: { left: number; top: number } | null = null;
+  let editorDrag: { pointerId: number; offsetX: number; offsetY: number } | null = null;
+  let editorLayoutFrame: number | null = null;
 
-  const resizeComment = (): void =>
-  {
-    const maxHeight = 96
-    comment.style.height = 'auto'
-    const nextHeight = Math.min(comment.scrollHeight, maxHeight)
-    comment.style.height = `${nextHeight}px`
-    comment.style.overflowY = comment.scrollHeight > maxHeight ? 'auto' : 'hidden'
-    queueEditorLayout()
-  }
-  comment.addEventListener('input', resizeComment)
+  const resizeComment = (): void => {
+    const maxHeight = 96;
+    comment.style.height = "auto";
+    const nextHeight = Math.min(comment.scrollHeight, maxHeight);
+    comment.style.height = `${nextHeight}px`;
+    comment.style.overflowY = comment.scrollHeight > maxHeight ? "auto" : "hidden";
+    queueEditorLayout();
+  };
+  comment.addEventListener("input", resizeComment);
 
-  const updateStatus = (): void =>
-  {
-    const hasTargets = selected.size > 0 || regions.length > 0 || strokes.length > 0
-    editor.style.display = hasTargets ? 'flex' : 'none'
-    submit.disabled = !hasTargets
-    submit.style.opacity = hasTargets ? '1' : '0.45'
-    adjust.disabled = !hasTargets
-    stylePanel.style.display = editorExpanded && selected.size > 0 ? 'grid' : 'none'
-    queueEditorLayout()
-    if (hasTargets && !editorWasShown)
-    {
-      editorWasShown = true
-      window.setTimeout(() => comment.focus({ preventScroll: true }), 0)
+  const updateStatus = (): void => {
+    const hasTargets = selected.size > 0 || regions.length > 0 || strokes.length > 0;
+    editor.style.display = hasTargets ? "flex" : "none";
+    submit.disabled = !hasTargets;
+    submit.style.opacity = hasTargets ? "1" : "0.45";
+    adjust.disabled = !hasTargets;
+    stylePanel.style.display = editorExpanded && selected.size > 0 ? "grid" : "none";
+    queueEditorLayout();
+    if (hasTargets && !editorWasShown) {
+      editorWasShown = true;
+      window.setTimeout(() => comment.focus({ preventScroll: true }), 0);
     }
-  }
+  };
 
-  const refreshToolButtons = (): void =>
-  {
-    for (const [candidate, button] of toolButtons)
-    {
-      const active = candidate === tool
-      button.classList.toggle('bg-primary/10', active)
-      button.classList.toggle('text-primary', active)
-      button.classList.toggle('text-foreground', !active)
+  const refreshToolButtons = (): void => {
+    for (const [candidate, button] of toolButtons) {
+      const active = candidate === tool;
+      button.classList.toggle("bg-primary/10", active);
+      button.classList.toggle("text-primary", active);
+      button.classList.toggle("text-foreground", !active);
     }
-    if (tool !== 'select') hoverOutline.style.display = 'none'
-    if (tool !== 'marquee') marqueeBox.style.display = 'none'
-    document.documentElement.setAttribute('data-code456-annotation-tool', tool)
-  }
+    if (tool !== "select") hoverOutline.style.display = "none";
+    if (tool !== "marquee") marqueeBox.style.display = "none";
+    document.documentElement.setAttribute("data-t3code-annotation-tool", tool);
+  };
 
-  const removeSelected = (target: SelectedElement): void =>
-  {
-    if (target.element instanceof HTMLElement || target.element instanceof SVGElement)
-    {
-      for (const [property, baseline] of target.baselineStyles)
-      {
-        if (baseline) target.element.style.setProperty(property, baseline)
-        else target.element.style.removeProperty(property)
+  const removeSelected = (target: SelectedElement): void => {
+    if (target.element instanceof HTMLElement || target.element instanceof SVGElement) {
+      for (const [property, baseline] of target.baselineStyles) {
+        if (baseline) target.element.style.setProperty(property, baseline);
+        else target.element.style.removeProperty(property);
       }
     }
-    selected.delete(target.element)
-    target.outline.remove()
-    target.label.remove()
-    for (const [key, change] of styleChanges)
-    {
-      if (change.targetId === target.id) styleChanges.delete(key)
+    selected.delete(target.element);
+    target.outline.remove();
+    target.label.remove();
+    for (const [key, change] of styleChanges) {
+      if (change.targetId === target.id) styleChanges.delete(key);
     }
-    updateStatus()
-  }
+    updateStatus();
+  };
 
-  const addSelected = (element: Element): void =>
-  {
-    if (selected.has(element)) return
+  const addSelected = (element: Element): void => {
+    if (selected.has(element)) return;
     const target: SelectedElement = {
-      id: nextId('element'),
+      id: nextId("element"),
       element,
       outline: createBox(PRIMARY, PRIMARY_FILL),
       label: createLabel(),
       baselineStyles: new Map(),
+    };
+    selected.set(element, target);
+    root.append(target.outline, target.label);
+    updateSelectedVisual(target);
+    updateStatus();
+    if (editorExpanded) {
+      stylePanel.style.display = "grid";
+      syncStyleControls();
     }
-    selected.set(element, target)
-    root.append(target.outline, target.label)
-    updateSelectedVisual(target)
-    updateStatus()
-    if (editorExpanded)
-    {
-      stylePanel.style.display = 'grid'
-      syncStyleControls()
-    }
-  }
+  };
 
-  const toggleSelected = (element: Element, additive: boolean): void =>
-  {
-    const existing = selected.get(element)
-    if (existing)
-    {
-      removeSelected(existing)
-      return
+  const toggleSelected = (element: Element, additive: boolean): void => {
+    const existing = selected.get(element);
+    if (existing) {
+      removeSelected(existing);
+      return;
     }
-    if (!additive)
-    {
-      for (const target of Array.from(selected.values())) removeSelected(target)
+    if (!additive) {
+      for (const target of Array.from(selected.values())) removeSelected(target);
     }
-    addSelected(element)
-  }
+    addSelected(element);
+  };
 
-  const setStyleForSelected = (property: string, value: string): void =>
-  {
-    for (const target of selected.values())
-    {
-      if (!(target.element instanceof HTMLElement || target.element instanceof SVGElement)) continue
-      if (!target.baselineStyles.has(property))
-      {
-        target.baselineStyles.set(property, target.element.style.getPropertyValue(property))
+  const setStyleForSelected = (property: string, value: string): void => {
+    for (const target of selected.values()) {
+      if (!(target.element instanceof HTMLElement || target.element instanceof SVGElement))
+        continue;
+      if (!target.baselineStyles.has(property)) {
+        target.baselineStyles.set(property, target.element.style.getPropertyValue(property));
       }
-      const key = `${target.id}:${property}`
+      const key = `${target.id}:${property}`;
       const previousValue =
         styleChanges.get(key)?.previousValue ??
-        getComputedStyle(target.element).getPropertyValue(property).trim()
-      target.element.style.setProperty(property, value, 'important')
+        getComputedStyle(target.element).getPropertyValue(property).trim();
+      target.element.style.setProperty(property, value, "important");
       styleChanges.set(key, {
         targetId: target.id,
         selector: null,
         property,
         previousValue,
         value,
-      })
-      updateSelectedVisual(target)
+      });
+      updateSelectedVisual(target);
     }
+  };
+
+  const textSection = createStyleSection();
+  const colorsSection = createStyleSection();
+  const bordersSection = createStyleSection();
+  const sizingSection = createStyleSection();
+  stylePanel.append(textSection, colorsSection, bordersSection, sizingSection);
+
+  const fontFamily = document.createElement("select");
+  for (const value of ["inherit", "system-ui", "sans-serif", "serif", "monospace"]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    fontFamily.appendChild(option);
   }
+  fontFamily.addEventListener("change", () => setStyleForSelected("font-family", fontFamily.value));
+  textSection.appendChild(createField("Font", fontFamily));
 
-  const textSection = createStyleSection()
-  const colorsSection = createStyleSection()
-  const bordersSection = createStyleSection()
-  const sizingSection = createStyleSection()
-  stylePanel.append(textSection, colorsSection, bordersSection, sizingSection)
+  const fontSize = createUnitInput("px", "16");
+  fontSize.min = "1";
+  fontSize.max = "300";
+  fontSize.addEventListener("input", () => {
+    if (fontSize.value) setStyleForSelected("font-size", `${fontSize.value}px`);
+  });
+  textSection.appendChild(createField("Font size", fontSize));
 
-  const fontFamily = document.createElement('select')
-  for (const value of ['inherit', 'system-ui', 'sans-serif', 'serif', 'monospace'])
-  {
-    const option = document.createElement('option')
-    option.value = value
-    option.textContent = value
-    fontFamily.appendChild(option)
+  const fontWeight = document.createElement("select");
+  for (const value of ["300", "400", "500", "600", "700", "800", "900"]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    fontWeight.appendChild(option);
   }
-  fontFamily.addEventListener('change', () => setStyleForSelected('font-family', fontFamily.value))
-  textSection.appendChild(createField('Font', fontFamily))
+  fontWeight.addEventListener("change", () => setStyleForSelected("font-weight", fontWeight.value));
+  textSection.appendChild(createField("Font weight", fontWeight));
 
-  const fontSize = createUnitInput('px', '16')
-  fontSize.min = '1'
-  fontSize.max = '300'
-  fontSize.addEventListener('input', () =>
-  {
-    if (fontSize.value) setStyleForSelected('font-size', `${fontSize.value}px`)
-  })
-  textSection.appendChild(createField('Font size', fontSize))
-
-  const fontWeight = document.createElement('select')
-  for (const value of ['300', '400', '500', '600', '700', '800', '900'])
-  {
-    const option = document.createElement('option')
-    option.value = value
-    option.textContent = value
-    fontWeight.appendChild(option)
-  }
-  fontWeight.addEventListener('change', () => setStyleForSelected('font-weight', fontWeight.value))
-  textSection.appendChild(createField('Font weight', fontWeight))
-
-  const lineHeight = document.createElement('input')
-  lineHeight.type = 'text'
-  lineHeight.placeholder = 'normal / 1.4'
-  lineHeight.addEventListener('change', () =>
-  {
-    if (lineHeight.value.trim()) setStyleForSelected('line-height', lineHeight.value.trim())
-  })
-  textSection.appendChild(createField('Line height', lineHeight))
+  const lineHeight = document.createElement("input");
+  lineHeight.type = "text";
+  lineHeight.placeholder = "normal / 1.4";
+  lineHeight.addEventListener("change", () => {
+    if (lineHeight.value.trim()) setStyleForSelected("line-height", lineHeight.value.trim());
+  });
+  textSection.appendChild(createField("Line height", lineHeight));
 
   const createColorRow = (
     labelText: string,
     property: string,
     section: HTMLElement,
-  ): { row: HTMLLabelElement; color: HTMLInputElement; text: HTMLInputElement } =>
-  {
-    const row = document.createElement('label')
+  ): { row: HTMLLabelElement; color: HTMLInputElement; text: HTMLInputElement } => {
+    const row = document.createElement("label");
     row.className =
-      'grid min-h-7 grid-cols-[82px_minmax(0,1fr)] items-center gap-2 font-sans text-xs font-medium text-muted-foreground'
-    const label = document.createElement('span')
-    label.textContent = labelText
-    const control = document.createElement('div')
+      "grid min-h-7 grid-cols-[82px_minmax(0,1fr)] items-center gap-2 font-sans text-xs font-medium text-muted-foreground";
+    const label = document.createElement("span");
+    label.textContent = labelText;
+    const control = document.createElement("div");
     control.className =
-      'grid h-7 grid-cols-[22px_minmax(0,1fr)] items-center gap-1 rounded-md border border-input bg-background px-1 shadow-xs'
-    const color = document.createElement('input')
-    color.type = 'color'
-    color.setAttribute('aria-label', labelText)
+      "grid h-7 grid-cols-[22px_minmax(0,1fr)] items-center gap-1 rounded-md border border-input bg-background px-1 shadow-xs";
+    const color = document.createElement("input");
+    color.type = "color";
+    color.setAttribute("aria-label", labelText);
     color.style.cssText =
-      'width:20px;height:20px;padding:0;border:0;border-radius:5px;overflow:hidden;background:transparent;cursor:pointer'
-    const text = document.createElement('input')
-    text.type = 'text'
-    text.setAttribute('aria-label', `${labelText} value`)
+      "width:20px;height:20px;padding:0;border:0;border-radius:5px;overflow:hidden;background:transparent;cursor:pointer";
+    const text = document.createElement("input");
+    text.type = "text";
+    text.setAttribute("aria-label", `${labelText} value`);
     text.className =
-      'min-w-0 w-full border-0 bg-transparent font-mono text-xs text-foreground outline-none'
-    color.addEventListener('input', () =>
-    {
-      text.value = color.value
-      setStyleForSelected(property, color.value)
-    })
-    text.addEventListener('change', () =>
-    {
-      const value = text.value.trim()
-      if (!value) return
-      setStyleForSelected(property, value)
-      if (/^#[0-9a-f]{6}$/i.test(value)) color.value = value
-    })
-    control.append(color, text)
-    row.append(label, control)
-    section.appendChild(row)
-    return { row, color, text }
-  }
+      "min-w-0 w-full border-0 bg-transparent font-mono text-xs text-foreground outline-none";
+    color.addEventListener("input", () => {
+      text.value = color.value;
+      setStyleForSelected(property, color.value);
+    });
+    text.addEventListener("change", () => {
+      const value = text.value.trim();
+      if (!value) return;
+      setStyleForSelected(property, value);
+      if (/^#[0-9a-f]{6}$/i.test(value)) color.value = value;
+    });
+    control.append(color, text);
+    row.append(label, control);
+    section.appendChild(row);
+    return { row, color, text };
+  };
 
-  const textColor = createColorRow('Text color', 'color', colorsSection)
-  const backgroundColor = createColorRow('Background', 'background-color', colorsSection)
+  const textColor = createColorRow("Text color", "color", colorsSection);
+  const backgroundColor = createColorRow("Background", "background-color", colorsSection);
 
-  const opacity = document.createElement('input')
-  opacity.type = 'range'
-  opacity.min = '0'
-  opacity.max = '1'
-  opacity.step = '0.05'
-  opacity.value = '1'
-  opacity.style.accentColor = PRIMARY
-  opacity.addEventListener('input', () => setStyleForSelected('opacity', opacity.value))
-  colorsSection.appendChild(createField('Opacity', opacity))
+  const opacity = document.createElement("input");
+  opacity.type = "range";
+  opacity.min = "0";
+  opacity.max = "1";
+  opacity.step = "0.05";
+  opacity.value = "1";
+  opacity.style.accentColor = PRIMARY;
+  opacity.addEventListener("input", () => setStyleForSelected("opacity", opacity.value));
+  colorsSection.appendChild(createField("Opacity", opacity));
 
-  const radius = createUnitInput('px', '0')
-  radius.min = '0'
-  radius.max = '300'
-  radius.addEventListener('input', () =>
-  {
-    if (radius.value) setStyleForSelected('border-radius', `${radius.value}px`)
-  })
-  bordersSection.appendChild(createField('Radius', radius))
+  const radius = createUnitInput("px", "0");
+  radius.min = "0";
+  radius.max = "300";
+  radius.addEventListener("input", () => {
+    if (radius.value) setStyleForSelected("border-radius", `${radius.value}px`);
+  });
+  bordersSection.appendChild(createField("Radius", radius));
 
-  const borderColor = createColorRow('Border color', 'border-color', bordersSection)
+  const borderColor = createColorRow("Border color", "border-color", bordersSection);
 
-  const borderWidth = createUnitInput('px', '0')
-  borderWidth.min = '0'
-  borderWidth.max = '100'
-  borderWidth.addEventListener('input', () =>
-  {
-    if (borderWidth.value)
-    {
-      setStyleForSelected('border-style', 'solid')
-      setStyleForSelected('border-width', `${borderWidth.value}px`)
+  const borderWidth = createUnitInput("px", "0");
+  borderWidth.min = "0";
+  borderWidth.max = "100";
+  borderWidth.addEventListener("input", () => {
+    if (borderWidth.value) {
+      setStyleForSelected("border-style", "solid");
+      setStyleForSelected("border-width", `${borderWidth.value}px`);
     }
-  })
-  bordersSection.appendChild(createField('Border width', borderWidth))
+  });
+  bordersSection.appendChild(createField("Border width", borderWidth));
 
-  const dimensions = document.createElement('div')
+  const dimensions = document.createElement("div");
   dimensions.style.cssText =
-    'display:grid;grid-template-columns:82px minmax(0,1fr);gap:8px;align-items:center'
-  const dimensionLabel = document.createElement('div')
-  dimensionLabel.className = 'grid gap-2 font-sans text-xs font-medium text-muted-foreground'
-  dimensionLabel.innerHTML = '<span>Width</span><span>Height</span>'
-  const dimensionControls = document.createElement('div')
-  dimensionControls.style.cssText = 'position:relative;display:grid;gap:3px;padding-left:22px'
-  const widthInput = createUnitInput('px', 'auto')
-  const heightInput = createUnitInput('px', 'auto')
-  styleControl(widthInput)
-  styleControl(heightInput)
-  const aspectLock = createButton('', 'Lock aspect ratio')
-  aspectLock.setAttribute('aria-pressed', 'true')
+    "display:grid;grid-template-columns:82px minmax(0,1fr);gap:8px;align-items:center";
+  const dimensionLabel = document.createElement("div");
+  dimensionLabel.className = "grid gap-2 font-sans text-xs font-medium text-muted-foreground";
+  dimensionLabel.innerHTML = "<span>Width</span><span>Height</span>";
+  const dimensionControls = document.createElement("div");
+  dimensionControls.style.cssText = "position:relative;display:grid;gap:3px;padding-left:22px";
+  const widthInput = createUnitInput("px", "auto");
+  const heightInput = createUnitInput("px", "auto");
+  styleControl(widthInput);
+  styleControl(heightInput);
+  const aspectLock = createButton("", "Lock aspect ratio");
+  aspectLock.setAttribute("aria-pressed", "true");
   aspectLock.style.cssText +=
-    ';position:absolute;left:0;top:50%;transform:translateY(-50%);width:18px;height:38px;padding:0'
-  aspectLock.className += ' bg-primary/10 text-primary'
+    ";position:absolute;left:0;top:50%;transform:translateY(-50%);width:18px;height:38px;padding:0";
+  aspectLock.className += " bg-primary/10 text-primary";
   dimensionControls.append(
     createUnitControl(widthInput),
     createUnitControl(heightInput),
     aspectLock,
-  )
-  dimensions.append(dimensionLabel, dimensionControls)
-  sizingSection.appendChild(dimensions)
+  );
+  dimensions.append(dimensionLabel, dimensionControls);
+  sizingSection.appendChild(dimensions);
 
-  let aspectLocked = true
-  let aspectRatio = 1
-  const refreshAspectButton = (): void =>
-  {
+  let aspectLocked = true;
+  let aspectRatio = 1;
+  const refreshAspectButton = (): void => {
     aspectLock.innerHTML = aspectLocked
       ? '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M8 6.5 9.5 5A3.5 3.5 0 0 1 14.5 10l-1.5 1.5M12 13.5 10.5 15A3.5 3.5 0 0 1 5.5 10L7 8.5M7.5 12.5l5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>'
-      : '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="m6 6 8 8M8 6.5 9.5 5A3.5 3.5 0 0 1 14 9M12 13.5 10.5 15A3.5 3.5 0 0 1 6 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>'
-    aspectLock.setAttribute('aria-pressed', String(aspectLocked))
-    aspectLock.classList.toggle('bg-primary/10', aspectLocked)
-    aspectLock.classList.toggle('text-primary', aspectLocked)
-    aspectLock.classList.toggle('bg-muted', !aspectLocked)
-    aspectLock.classList.toggle('text-muted-foreground', !aspectLocked)
-  }
-  aspectLock.addEventListener('click', () =>
-  {
-    aspectLocked = !aspectLocked
-    refreshAspectButton()
-  })
-  widthInput.addEventListener('input', () =>
-  {
-    const width = Number(widthInput.value)
-    if (!Number.isFinite(width) || width <= 0) return
-    setStyleForSelected('width', `${width}px`)
-    if (aspectLocked && aspectRatio > 0)
-    {
-      const height = Math.max(1, Math.round(width / aspectRatio))
-      heightInput.value = String(height)
-      setStyleForSelected('height', `${height}px`)
+      : '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="m6 6 8 8M8 6.5 9.5 5A3.5 3.5 0 0 1 14 9M12 13.5 10.5 15A3.5 3.5 0 0 1 6 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+    aspectLock.setAttribute("aria-pressed", String(aspectLocked));
+    aspectLock.classList.toggle("bg-primary/10", aspectLocked);
+    aspectLock.classList.toggle("text-primary", aspectLocked);
+    aspectLock.classList.toggle("bg-muted", !aspectLocked);
+    aspectLock.classList.toggle("text-muted-foreground", !aspectLocked);
+  };
+  aspectLock.addEventListener("click", () => {
+    aspectLocked = !aspectLocked;
+    refreshAspectButton();
+  });
+  widthInput.addEventListener("input", () => {
+    const width = Number(widthInput.value);
+    if (!Number.isFinite(width) || width <= 0) return;
+    setStyleForSelected("width", `${width}px`);
+    if (aspectLocked && aspectRatio > 0) {
+      const height = Math.max(1, Math.round(width / aspectRatio));
+      heightInput.value = String(height);
+      setStyleForSelected("height", `${height}px`);
     }
-  })
-  heightInput.addEventListener('input', () =>
-  {
-    const height = Number(heightInput.value)
-    if (!Number.isFinite(height) || height <= 0) return
-    setStyleForSelected('height', `${height}px`)
-    if (aspectLocked && aspectRatio > 0)
-    {
-      const width = Math.max(1, Math.round(height * aspectRatio))
-      widthInput.value = String(width)
-      setStyleForSelected('width', `${width}px`)
+  });
+  heightInput.addEventListener("input", () => {
+    const height = Number(heightInput.value);
+    if (!Number.isFinite(height) || height <= 0) return;
+    setStyleForSelected("height", `${height}px`);
+    if (aspectLocked && aspectRatio > 0) {
+      const width = Math.max(1, Math.round(height * aspectRatio));
+      widthInput.value = String(width);
+      setStyleForSelected("width", `${width}px`);
     }
-  })
-  refreshAspectButton()
+  });
+  refreshAspectButton();
 
   const addSpacingField = (
     label: string,
     property: string,
     placeholder: string,
-  ): HTMLInputElement =>
-  {
-    const input = document.createElement('input')
-    input.type = 'text'
-    input.placeholder = placeholder
-    input.addEventListener('change', () =>
-    {
-      if (input.value.trim()) setStyleForSelected(property, input.value.trim())
-    })
-    sizingSection.appendChild(createField(label, input))
-    return input
-  }
-  const padding = addSpacingField('Padding', 'padding', '0 0 0 0')
-  const margin = addSpacingField('Margin', 'margin', '0 0 0 0')
-  const gap = addSpacingField('Gap', 'gap', '0px')
+  ): HTMLInputElement => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = placeholder;
+    input.addEventListener("change", () => {
+      if (input.value.trim()) setStyleForSelected(property, input.value.trim());
+    });
+    sizingSection.appendChild(createField(label, input));
+    return input;
+  };
+  const padding = addSpacingField("Padding", "padding", "0 0 0 0");
+  const margin = addSpacingField("Margin", "margin", "0 0 0 0");
+  const gap = addSpacingField("Gap", "gap", "0px");
 
-  const syncStyleControls = (): void =>
-  {
-    const first = selected.values().next().value as SelectedElement | undefined
-    if (!first) return
-    const computed = getComputedStyle(first.element)
-    const rect = first.element.getBoundingClientRect()
-    aspectRatio = rect.height > 0 ? rect.width / rect.height : 1
-    widthInput.value = String(Math.round(rect.width))
-    heightInput.value = String(Math.round(rect.height))
-    fontSize.value = String(Math.round(Number.parseFloat(computed.fontSize) || 16))
-    fontWeight.value = computed.fontWeight.match(/^[0-9]+$/) ? computed.fontWeight : '400'
-    lineHeight.value = computed.lineHeight
+  const syncStyleControls = (): void => {
+    const first = selected.values().next().value as SelectedElement | undefined;
+    if (!first) return;
+    const computed = getComputedStyle(first.element);
+    const rect = first.element.getBoundingClientRect();
+    aspectRatio = rect.height > 0 ? rect.width / rect.height : 1;
+    widthInput.value = String(Math.round(rect.width));
+    heightInput.value = String(Math.round(rect.height));
+    fontSize.value = String(Math.round(Number.parseFloat(computed.fontSize) || 16));
+    fontWeight.value = computed.fontWeight.match(/^[0-9]+$/) ? computed.fontWeight : "400";
+    lineHeight.value = computed.lineHeight;
     fontFamily.value = Array.from(fontFamily.options).some(
       (option) => option.value === computed.fontFamily,
     )
       ? computed.fontFamily
-      : 'inherit'
-    textColor.text.value = computed.color
-    backgroundColor.text.value = computed.backgroundColor
-    borderColor.text.value = computed.borderColor
-    opacity.value = computed.opacity
-    radius.value = String(Math.round(Number.parseFloat(computed.borderRadius) || 0))
-    borderWidth.value = String(Math.round(Number.parseFloat(computed.borderWidth) || 0))
-    padding.value = computed.padding
-    margin.value = computed.margin
-    gap.value = computed.gap === 'normal' ? '0px' : computed.gap
-  }
+      : "inherit";
+    textColor.text.value = computed.color;
+    backgroundColor.text.value = computed.backgroundColor;
+    borderColor.text.value = computed.borderColor;
+    opacity.value = computed.opacity;
+    radius.value = String(Math.round(Number.parseFloat(computed.borderRadius) || 0));
+    borderWidth.value = String(Math.round(Number.parseFloat(computed.borderWidth) || 0));
+    padding.value = computed.padding;
+    margin.value = computed.margin;
+    gap.value = computed.gap === "normal" ? "0px" : computed.gap;
+  };
 
   const tools: ReadonlyArray<[AnnotationTool, string, string]> = [
-    ['select', 'Select', 'Select elements (V)'],
-    ['marquee', 'Region', 'Draw a region or marquee-select elements (R)'],
-    ['draw', 'Draw', 'Draw freehand (D)'],
-    ['erase', 'Erase', 'Remove an annotation target (E)'],
-  ]
-  for (const [candidate, label, title] of tools)
-  {
-    const button = createButton(label, title)
-    button.className += ' h-8 px-2.5 text-sm'
-    button.addEventListener('click', () =>
-    {
-      tool = candidate
-      refreshToolButtons()
-    })
-    toolButtons.set(candidate, button)
-    toolbar.appendChild(button)
+    ["select", "Select", "Select elements (V)"],
+    ["marquee", "Region", "Draw a region or marquee-select elements (R)"],
+    ["draw", "Draw", "Draw freehand (D)"],
+    ["erase", "Erase", "Remove an annotation target (E)"],
+  ];
+  for (const [candidate, label, title] of tools) {
+    const button = createButton(label, title);
+    button.className += " h-8 px-2.5 text-sm";
+    button.addEventListener("click", () => {
+      tool = candidate;
+      refreshToolButtons();
+    });
+    toolButtons.set(candidate, button);
+    toolbar.appendChild(button);
   }
 
-  const clampEditorPosition = (left: number, top: number): { left: number; top: number } =>
-  {
-    const margin = 8
-    const rect = editor.getBoundingClientRect()
+  const clampEditorPosition = (left: number, top: number): { left: number; top: number } => {
+    const margin = 8;
+    const rect = editor.getBoundingClientRect();
     return {
       left: Math.min(
         Math.max(margin, left),
@@ -699,18 +891,17 @@ function startAnnotation(sessionId: string): void
         Math.max(margin, top),
         Math.max(margin, window.innerHeight - rect.height - margin),
       ),
-    }
-  }
+    };
+  };
 
-  const applyEditorPosition = (position: { left: number; top: number }): void =>
-  {
-    const clamped = clampEditorPosition(position.left, position.top)
-    editor.style.left = `${clamped.left}px`
-    editor.style.top = `${clamped.top}px`
-    editor.style.right = 'auto'
-    editor.style.bottom = 'auto'
-    if (editorExpanded) editorPosition = clamped
-  }
+  const applyEditorPosition = (position: { left: number; top: number }): void => {
+    const clamped = clampEditorPosition(position.left, position.top);
+    editor.style.left = `${clamped.left}px`;
+    editor.style.top = `${clamped.top}px`;
+    editor.style.right = "auto";
+    editor.style.bottom = "auto";
+    if (editorExpanded) editorPosition = clamped;
+  };
 
   const getAnnotationBounds = (): PreviewAnnotationRect | null =>
     unionRects(
@@ -722,14 +913,13 @@ function startAnnotation(sessionId: string): void
         ...strokes.map((stroke) => stroke.bounds),
       ],
       0,
-    )
+    );
 
-  const positionCompactEditor = (): void =>
-  {
-    const bounds = getAnnotationBounds()
-    if (!bounds) return
-    const editorRect = editor.getBoundingClientRect()
-    const gap = 8
+  const positionCompactEditor = (): void => {
+    const bounds = getAnnotationBounds();
+    if (!bounds) return;
+    const editorRect = editor.getBoundingClientRect();
+    const gap = 8;
     const candidates = [
       { left: bounds.x + bounds.width + gap, top: bounds.y },
       { left: bounds.x - editorRect.width - gap, top: bounds.y },
@@ -741,115 +931,101 @@ function startAnnotation(sessionId: string): void
         left: bounds.x + bounds.width - editorRect.width,
         top: bounds.y - editorRect.height - gap,
       },
-    ]
+    ];
     const overflow = (position: { left: number; top: number }): number =>
       Math.max(0, -position.left) +
       Math.max(0, -position.top) +
       Math.max(0, position.left + editorRect.width - window.innerWidth) +
-      Math.max(0, position.top + editorRect.height - window.innerHeight)
+      Math.max(0, position.top + editorRect.height - window.innerHeight);
     const best = candidates.reduce((current, candidate) =>
       overflow(candidate) < overflow(current) ? candidate : current,
-    )
-    applyEditorPosition(best)
+    );
+    applyEditorPosition(best);
+  };
+
+  function queueEditorLayout(): void {
+    if (editorLayoutFrame !== null) window.cancelAnimationFrame(editorLayoutFrame);
+    editorLayoutFrame = window.requestAnimationFrame(() => {
+      editorLayoutFrame = null;
+      if (editor.style.display === "none") return;
+      if (editorExpanded && editorPosition) applyEditorPosition(editorPosition);
+      else positionCompactEditor();
+    });
   }
 
-  function queueEditorLayout(): void
-  {
-    if (editorLayoutFrame !== null) window.cancelAnimationFrame(editorLayoutFrame)
-    editorLayoutFrame = window.requestAnimationFrame(() =>
-    {
-      editorLayoutFrame = null
-      if (editor.style.display === 'none') return
-      if (editorExpanded && editorPosition) applyEditorPosition(editorPosition)
-      else positionCompactEditor()
-    })
-  }
-
-  adjust.addEventListener('click', () =>
-  {
-    if (selected.size === 0) return
-    if (!editorExpanded)
-    {
-      const rect = editor.getBoundingClientRect()
-      editorExpanded = true
-      editorPosition = { left: rect.left, top: rect.top }
-      stylePanel.style.display = selected.size > 0 ? 'grid' : 'none'
-      dragHandle.style.display = 'block'
-      adjust.setAttribute('aria-expanded', 'true')
-      adjust.title = 'Collapse annotation editor'
-      adjust.setAttribute('aria-label', 'Collapse annotation editor')
-      if (selected.size > 0) syncStyleControls()
+  adjust.addEventListener("click", () => {
+    if (selected.size === 0) return;
+    if (!editorExpanded) {
+      const rect = editor.getBoundingClientRect();
+      editorExpanded = true;
+      editorPosition = { left: rect.left, top: rect.top };
+      stylePanel.style.display = selected.size > 0 ? "grid" : "none";
+      dragHandle.style.display = "block";
+      adjust.setAttribute("aria-expanded", "true");
+      adjust.title = "Collapse annotation editor";
+      adjust.setAttribute("aria-label", "Collapse annotation editor");
+      if (selected.size > 0) syncStyleControls();
+    } else {
+      editorExpanded = false;
+      editorPosition = null;
+      stylePanel.style.display = "none";
+      dragHandle.style.display = "none";
+      adjust.setAttribute("aria-expanded", "false");
+      adjust.title = "Expand annotation editor";
+      adjust.setAttribute("aria-label", "Expand annotation editor");
     }
-    else
-    {
-      editorExpanded = false
-      editorPosition = null
-      stylePanel.style.display = 'none'
-      dragHandle.style.display = 'none'
-      adjust.setAttribute('aria-expanded', 'false')
-      adjust.title = 'Expand annotation editor'
-      adjust.setAttribute('aria-label', 'Expand annotation editor')
-    }
-    queueEditorLayout()
-  })
+    queueEditorLayout();
+  });
 
-  const onEditorPointerDown = (event: PointerEvent): void =>
-  {
-    if (event.button !== 0 || !editorExpanded) return
-    const rect = editor.getBoundingClientRect()
+  const onEditorPointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0 || !editorExpanded) return;
+    const rect = editor.getBoundingClientRect();
     editorDrag = {
       pointerId: event.pointerId,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
-    }
-    dragHandle.setPointerCapture(event.pointerId)
-    dragHandle.style.cursor = 'grabbing'
-    event.preventDefault()
-    event.stopPropagation()
-  }
+    };
+    dragHandle.setPointerCapture(event.pointerId);
+    dragHandle.style.cursor = "grabbing";
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
-  const onEditorPointerMove = (event: PointerEvent): void =>
-  {
-    if (!editorDrag || editorDrag.pointerId !== event.pointerId) return
+  const onEditorPointerMove = (event: PointerEvent): void => {
+    if (!editorDrag || editorDrag.pointerId !== event.pointerId) return;
     applyEditorPosition({
       left: event.clientX - editorDrag.offsetX,
       top: event.clientY - editorDrag.offsetY,
-    })
-    event.preventDefault()
-    event.stopPropagation()
-  }
+    });
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
-  const onEditorPointerUp = (event: PointerEvent): void =>
-  {
-    if (!editorDrag || editorDrag.pointerId !== event.pointerId) return
-    editorDrag = null
-    dragHandle.style.cursor = 'grab'
+  const onEditorPointerUp = (event: PointerEvent): void => {
+    if (!editorDrag || editorDrag.pointerId !== event.pointerId) return;
+    editorDrag = null;
+    dragHandle.style.cursor = "grab";
     if (dragHandle.hasPointerCapture(event.pointerId))
-      dragHandle.releasePointerCapture(event.pointerId)
-    event.preventDefault()
-    event.stopPropagation()
-  }
-  dragHandle.addEventListener('pointerdown', onEditorPointerDown)
-  dragHandle.addEventListener('pointermove', onEditorPointerMove)
-  dragHandle.addEventListener('pointerup', onEditorPointerUp)
-  dragHandle.addEventListener('pointercancel', onEditorPointerUp)
+      dragHandle.releasePointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  dragHandle.addEventListener("pointerdown", onEditorPointerDown);
+  dragHandle.addEventListener("pointermove", onEditorPointerMove);
+  dragHandle.addEventListener("pointerup", onEditorPointerUp);
+  dragHandle.addEventListener("pointercancel", onEditorPointerUp);
 
-  const repaint = (): void =>
-  {
-    svg.setAttribute('viewBox', `0 0 ${window.innerWidth} ${window.innerHeight}`)
-    for (const target of selected.values()) updateSelectedVisual(target)
-    queueEditorLayout()
-  }
+  const repaint = (): void => {
+    for (const target of selected.values()) updateSelectedVisual(target);
+    queueEditorLayout();
+  };
 
-  const removeTargetAtPoint = (x: number, y: number): boolean =>
-  {
-    for (const target of Array.from(selected.values()).toReversed())
-    {
-      const rect = target.element.getBoundingClientRect()
-      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom)
-      {
-        removeSelected(target)
-        return true
+  const removeTargetAtPoint = (x: number, y: number): boolean => {
+    for (const target of Array.from(selected.values()).toReversed()) {
+      const rect = target.element.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        removeSelected(target);
+        return true;
       }
     }
     const regionIndex = regions.findIndex(
@@ -858,13 +1034,12 @@ function startAnnotation(sessionId: string): void
         x <= region.rect.x + region.rect.width &&
         y >= region.rect.y &&
         y <= region.rect.y + region.rect.height,
-    )
-    if (regionIndex >= 0)
-    {
-      const [removed] = regions.splice(regionIndex, 1)
-      root.querySelector(`[data-region-id="${removed?.id}"]`)?.remove()
-      updateStatus()
-      return true
+    );
+    if (regionIndex >= 0) {
+      const [removed] = regions.splice(regionIndex, 1);
+      root.querySelector(`[data-region-id="${removed?.id}"]`)?.remove();
+      updateStatus();
+      return true;
     }
     const strokeIndex = strokes.findIndex(
       (stroke) =>
@@ -872,36 +1047,32 @@ function startAnnotation(sessionId: string): void
         x <= stroke.bounds.x + stroke.bounds.width &&
         y >= stroke.bounds.y &&
         y <= stroke.bounds.y + stroke.bounds.height,
-    )
-    if (strokeIndex >= 0)
-    {
-      const [removed] = strokes.splice(strokeIndex, 1)
-      svg.querySelector(`[data-stroke-id="${removed?.id}"]`)?.remove()
-      updateStatus()
-      return true
+    );
+    if (strokeIndex >= 0) {
+      const [removed] = strokes.splice(strokeIndex, 1);
+      svg.querySelector(`[data-stroke-id="${removed?.id}"]`)?.remove();
+      updateStatus();
+      return true;
     }
-    return false
-  }
+    return false;
+  };
 
-  const selectElementsInRect = (rect: PreviewAnnotationRect): number =>
-  {
-    const candidates = Array.from(document.querySelectorAll('body *'))
+  const selectElementsInRect = (rect: PreviewAnnotationRect): number => {
+    const candidates = Array.from(document.querySelectorAll("body *"))
       .filter((element) => !isAnnotationNode(element))
       .map((element) => ({ element, rect: element.getBoundingClientRect() }))
-      .filter(({ rect: candidate }) =>
-      {
-        if (candidate.width < 2 || candidate.height < 2) return false
+      .filter(({ rect: candidate }) => {
+        if (candidate.width < 2 || candidate.height < 2) return false;
         return !(
           candidate.right < rect.x ||
           candidate.left > rect.x + rect.width ||
           candidate.bottom < rect.y ||
           candidate.top > rect.y + rect.height
-        )
+        );
       })
-      .filter(({ element, rect: candidate }) =>
-      {
-        const centerX = candidate.left + candidate.width / 2
-        const centerY = candidate.top + candidate.height / 2
+      .filter(({ element, rect: candidate }) => {
+        const centerX = candidate.left + candidate.width / 2;
+        const centerY = candidate.top + candidate.height / 2;
         return (
           centerX >= rect.x &&
           centerX <= rect.x + rect.width &&
@@ -910,326 +1081,286 @@ function startAnnotation(sessionId: string): void
           (element.children.length === 0 ||
             element instanceof HTMLButtonElement ||
             element instanceof HTMLAnchorElement ||
-            element.getAttribute('role') === 'button')
-        )
+            element.getAttribute("role") === "button")
+        );
       })
       .sort(
         (left, right) => left.rect.width * left.rect.height - right.rect.width * right.rect.height,
       )
-      .slice(0, MAX_MARQUEE_ELEMENTS)
-    for (const candidate of candidates) addSelected(candidate.element)
-    return candidates.length
-  }
+      .slice(0, MAX_MARQUEE_ELEMENTS);
+    for (const candidate of candidates) addSelected(candidate.element);
+    return candidates.length;
+  };
 
-  const clearHoverOutline = (): void =>
-  {
-    hoverOutline.style.display = 'none'
-  }
+  const clearHoverOutline = (): void => {
+    hoverOutline.style.display = "none";
+  };
 
-  const onPointerMove = (event: PointerEvent): void =>
-  {
-    if (isAnnotationNode(event.target as Element))
-    {
-      clearHoverOutline()
-      return
+  const onPointerMove = (event: PointerEvent): void => {
+    if (isAnnotationNode(event.target as Element)) {
+      clearHoverOutline();
+      return;
     }
-    if (tool === 'select' && dragStart === null)
-    {
-      const target = pickFromPoint(event.clientX, event.clientY)
-      if (target) positionBox(hoverOutline, rectFromDomRect(target.getBoundingClientRect()))
-      else clearHoverOutline()
-      return
+    if (tool === "select" && dragStart === null) {
+      const target = pickFromPoint(event.clientX, event.clientY);
+      if (target) positionBox(hoverOutline, rectFromDomRect(target.getBoundingClientRect()));
+      else clearHoverOutline();
+      return;
     }
-    clearHoverOutline()
-    if (tool === 'marquee' && dragStart)
-    {
-      positionBox(marqueeBox, normalizeRect(dragStart.x, dragStart.y, event.clientX, event.clientY))
-      return
+    clearHoverOutline();
+    if (tool === "marquee" && dragStart) {
+      positionBox(
+        marqueeBox,
+        normalizeRect(dragStart.x, dragStart.y, event.clientX, event.clientY),
+      );
+      return;
     }
-    if (tool === 'draw' && activeStroke)
-    {
+    if (tool === "draw" && activeStroke) {
       activeStroke.target.points = [
         ...activeStroke.target.points,
         { x: event.clientX, y: event.clientY },
-      ]
+      ];
       activeStroke.target.bounds = strokeBounds(
         activeStroke.target.points,
         activeStroke.target.width,
-      )
-      activeStroke.path.setAttribute('d', pathFromPoints(activeStroke.target.points))
+      );
+      activeStroke.path.setAttribute("d", pathFromPoints(activeStroke.target.points));
     }
-  }
+  };
 
-  const onPointerDown = (event: PointerEvent): void =>
-  {
-    if (event.button !== 0 || isAnnotationNode(event.target as Element)) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (tool === 'select')
-    {
-      const target = pickFromPoint(event.clientX, event.clientY)
-      if (target) toggleSelected(target, event.shiftKey)
-      return
+  const onPointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0 || isAnnotationNode(event.target as Element)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (tool === "select") {
+      const target = pickFromPoint(event.clientX, event.clientY);
+      if (target) toggleSelected(target, event.shiftKey);
+      return;
     }
-    if (tool === 'erase')
-    {
-      removeTargetAtPoint(event.clientX, event.clientY)
-      return
+    if (tool === "erase") {
+      removeTargetAtPoint(event.clientX, event.clientY);
+      return;
     }
-    dragStart = { x: event.clientX, y: event.clientY }
-    if (tool === 'draw')
-    {
+    dragStart = { x: event.clientX, y: event.clientY };
+    if (tool === "draw") {
       const stroke: PreviewAnnotationStrokeTarget = {
-        id: nextId('stroke'),
-        color: annotationTheme?.primary ?? '#2563eb',
+        id: nextId("stroke"),
+        color: annotationTheme?.primary ?? "#2563eb",
         width: 4,
         points: [dragStart],
         bounds: { x: dragStart.x, y: dragStart.y, width: 1, height: 1 },
-      }
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      path.setAttribute(OVERLAY_ATTRIBUTE, '')
-      path.setAttribute('data-stroke-id', stroke.id)
-      path.setAttribute('fill', 'none')
-      path.setAttribute('stroke', stroke.color)
-      path.setAttribute('stroke-width', String(stroke.width))
-      path.setAttribute('stroke-linecap', 'round')
-      path.setAttribute('stroke-linejoin', 'round')
-      svg.appendChild(path)
-      activeStroke = { target: stroke, path }
+      };
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute(OVERLAY_ATTRIBUTE, "");
+      path.setAttribute("data-stroke-id", stroke.id);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", stroke.color);
+      path.setAttribute("stroke-width", String(stroke.width));
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(path);
+      activeStroke = { target: stroke, path };
     }
-  }
+  };
 
-  const onPointerUp = (event: PointerEvent): void =>
-  {
-    if (!dragStart) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (tool === 'marquee')
-    {
-      const rect = normalizeRect(dragStart.x, dragStart.y, event.clientX, event.clientY)
-      marqueeBox.style.display = 'none'
-      if (isUsableRect(rect))
-      {
-        const found = selectElementsInRect(rect)
-        if (found === 0)
-        {
-          const region: PreviewAnnotationRegionTarget = { id: nextId('region'), rect }
-          regions.push(region)
+  const onPointerUp = (event: PointerEvent): void => {
+    if (!dragStart) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (tool === "marquee") {
+      const rect = normalizeRect(dragStart.x, dragStart.y, event.clientX, event.clientY);
+      marqueeBox.style.display = "none";
+      if (isUsableRect(rect)) {
+        const found = selectElementsInRect(rect);
+        if (found === 0) {
+          const region: PreviewAnnotationRegionTarget = { id: nextId("region"), rect };
+          regions.push(region);
           const regionBox = createBox(
             PRIMARY,
-            'color-mix(in srgb, var(--t3-primary) 6%, transparent)',
-          )
-          regionBox.setAttribute('data-region-id', region.id)
-          positionBox(regionBox, rect)
-          root.appendChild(regionBox)
+            "color-mix(in srgb, var(--t3-primary) 6%, transparent)",
+          );
+          regionBox.setAttribute("data-region-id", region.id);
+          positionBox(regionBox, rect);
+          root.appendChild(regionBox);
         }
       }
+    } else if (tool === "draw" && activeStroke) {
+      if (activeStroke.target.points.length > 1) strokes.push(activeStroke.target);
+      else activeStroke.path.remove();
+      activeStroke = null;
     }
-    else if (tool === 'draw' && activeStroke)
-    {
-      if (activeStroke.target.points.length > 1) strokes.push(activeStroke.target)
-      else activeStroke.path.remove()
-      activeStroke = null
-    }
-    dragStart = null
-    updateStatus()
-  }
+    dragStart = null;
+    updateStatus();
+  };
 
-  const onClick = (event: MouseEvent): void =>
-  {
-    if (isAnnotationNode(event.target as Element)) return
-    event.preventDefault()
-    event.stopPropagation()
-  }
+  const onClick = (event: MouseEvent): void => {
+    if (isAnnotationNode(event.target as Element)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
-  const onPointerOut = (event: PointerEvent): void =>
-  {
-    if (event.relatedTarget === null) clearHoverOutline()
-  }
+  const onPointerOut = (event: PointerEvent): void => {
+    if (event.relatedTarget === null) clearHoverOutline();
+  };
 
-  const onWindowBlur = (): void =>
-  {
-    clearHoverOutline()
-  }
+  const onWindowBlur = (): void => {
+    clearHoverOutline();
+  };
 
-  const restoreStyles = (): void =>
-  {
-    for (const target of selected.values())
-    {
-      if (!(target.element instanceof HTMLElement || target.element instanceof SVGElement)) continue
-      for (const [property, baseline] of target.baselineStyles)
-      {
-        if (baseline) target.element.style.setProperty(property, baseline)
-        else target.element.style.removeProperty(property)
+  const restoreStyles = (): void => {
+    for (const target of selected.values()) {
+      if (!(target.element instanceof HTMLElement || target.element instanceof SVGElement))
+        continue;
+      for (const [property, baseline] of target.baselineStyles) {
+        if (baseline) target.element.style.setProperty(property, baseline);
+        else target.element.style.removeProperty(property);
       }
     }
-  }
+  };
 
-  const teardown = (notifyMain: boolean): void =>
-  {
-    if (finished) return
-    finished = true
-    restoreStyles()
-    window.removeEventListener('pointermove', onPointerMove, true)
-    window.removeEventListener('pointerdown', onPointerDown, true)
-    window.removeEventListener('pointerup', onPointerUp, true)
-    window.removeEventListener('pointerout', onPointerOut, true)
-    window.removeEventListener('click', onClick, true)
-    window.removeEventListener('blur', onWindowBlur)
-    window.removeEventListener('keydown', onKeyDown, true)
-    window.removeEventListener('scroll', repaint, true)
-    window.removeEventListener('resize', repaint)
-    dragHandle.removeEventListener('pointerdown', onEditorPointerDown)
-    dragHandle.removeEventListener('pointermove', onEditorPointerMove)
-    dragHandle.removeEventListener('pointerup', onEditorPointerUp)
-    dragHandle.removeEventListener('pointercancel', onEditorPointerUp)
-    if (editorLayoutFrame !== null) window.cancelAnimationFrame(editorLayoutFrame)
-    ipcRenderer.off(CANCEL_PICK_CHANNEL, onCancel)
-    ipcRenderer.off(ANNOTATION_CAPTURED_CHANNEL, onCaptured)
-    document.documentElement.removeAttribute('data-code456-annotation-tool')
-    cursorStyle.remove()
-    host.remove()
-    if (activeSession?.id === sessionId) activeSession = null
-    if (notifyMain) ipcRenderer.send(ELEMENT_PICKED_CHANNEL, sessionId, null)
-  }
+  const teardown = (notifyMain: boolean): void => {
+    if (finished) return;
+    finished = true;
+    restoreStyles();
+    window.removeEventListener("pointermove", onPointerMove, true);
+    window.removeEventListener("pointerdown", onPointerDown, true);
+    window.removeEventListener("pointerup", onPointerUp, true);
+    window.removeEventListener("pointerout", onPointerOut, true);
+    window.removeEventListener("click", onClick, true);
+    window.removeEventListener("blur", onWindowBlur);
+    window.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("scroll", repaint, true);
+    window.removeEventListener("resize", repaint);
+    dragHandle.removeEventListener("pointerdown", onEditorPointerDown);
+    dragHandle.removeEventListener("pointermove", onEditorPointerMove);
+    dragHandle.removeEventListener("pointerup", onEditorPointerUp);
+    dragHandle.removeEventListener("pointercancel", onEditorPointerUp);
+    if (editorLayoutFrame !== null) window.cancelAnimationFrame(editorLayoutFrame);
+    ipcRenderer.off(CANCEL_PICK_CHANNEL, onCancel);
+    ipcRenderer.off(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
+    document.documentElement.removeAttribute("data-t3code-annotation-tool");
+    cursorStyle.remove();
+    host.remove();
+    activeSession = null;
+    if (notifyMain) ipcRenderer.send(ELEMENT_PICKED_CHANNEL, null);
+  };
 
-  const onCancel = (_event: unknown, cancelledSessionId: unknown): void =>
-  {
-    if (cancelledSessionId === sessionId) teardown(false)
-  }
-  const onCaptured = (_event: unknown, capturedSessionId: unknown): void =>
-  {
-    if (capturedSessionId === sessionId) teardown(false)
-  }
-  const onKeyDown = (event: KeyboardEvent): void =>
-  {
-    if (isAnnotationNode(event.target as Element) && event.key !== 'Escape') return
-    if (event.key === 'Escape')
-    {
-      event.preventDefault()
-      event.stopPropagation()
-      teardown(true)
-      return
+  const onCancel = (): void => teardown(false);
+  const onCaptured = (): void => teardown(false);
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (isAnnotationNode(event.target as Element) && event.key !== "Escape") return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      teardown(true);
+      return;
     }
-    if (event.key === 'v') tool = 'select'
-    else if (event.key === 'r') tool = 'marquee'
-    else if (event.key === 'd') tool = 'draw'
-    else if (event.key === 'e') tool = 'erase'
-    else return
-    refreshToolButtons()
-  }
+    if (event.key === "v") tool = "select";
+    else if (event.key === "r") tool = "marquee";
+    else if (event.key === "d") tool = "draw";
+    else if (event.key === "e") tool = "erase";
+    else return;
+    refreshToolButtons();
+  };
 
-  submit.addEventListener('click', () =>
-  {
+  const submitAnnotation = (submission: PreviewAnnotationSubmission): void => {
     if (pendingCapture || (selected.size === 0 && regions.length === 0 && strokes.length === 0))
-      return
-    pendingCapture = true
-    submit.disabled = true
-    submit.textContent = 'Capturing…'
-    const submittedPageUrl = location.href
-    const submittedPageTitle = document.title?.trim() || null
-    const submittedAt = new Date().toISOString()
-    const submittedComment = comment.value.trim()
-    const submittedElements = Array.from(selected.values(), (target) => ({
-      id: target.id,
-      element: target.element,
-      rect: rectFromDomRect(target.element.getBoundingClientRect()),
-    }))
-    const submittedRegions = [...regions]
-    const submittedStrokes = [...strokes]
-    const submittedStyleChanges = Array.from(styleChanges.values(), (change) => ({ ...change }))
+      return;
+    pendingCapture = true;
+    submit.disabled = true;
+    submit.textContent = "Capturing…";
+    // Snapshot everything the annotation will carry before the capture runs.
+    // The element context lookup can take up to its timeout, and the user can
+    // keep editing meanwhile; the annotation must describe what they submitted.
+    const submittedComment = comment.value.trim();
+    const submittedRegions = [...regions];
+    const submittedStrokes = [...strokes];
+    const submittedStyleChanges = Array.from(styleChanges.values(), (change) => ({ ...change }));
     void Promise.all(
-      submittedElements.map(async (target) =>
-      {
-        const element = await captureElement(target.element)
-        for (const change of submittedStyleChanges)
-        {
-          if (change.targetId === target.id && element.selector !== null)
-          {
-            change.selector = element.selector
+      Array.from(selected.values()).map(async (target) => {
+        const element = await captureElement(target.element);
+        for (const change of submittedStyleChanges) {
+          if (change.targetId === target.id && element.selector !== null) {
+            change.selector = element.selector;
           }
         }
         return {
           id: target.id,
           element,
-          rect: target.rect,
-        }
+          rect: rectFromDomRect(target.element.getBoundingClientRect()),
+        };
       }),
     )
-      .then((elements) =>
-      {
-        if (activeSession?.id !== sessionId) return
+      .then((elements) => {
+        // The overlay may have been cancelled or replaced while the capture
+        // ran. A late submit must not deliver into the next pick's listener.
+        if (finished) return;
         const annotation: PreviewAnnotationPayload = {
-          id: nextId('annotation'),
-          pageUrl: submittedPageUrl,
-          pageTitle: submittedPageTitle,
+          id: nextId("annotation"),
+          pageUrl: location.href,
+          pageTitle: document.title?.trim() || null,
           comment: submittedComment,
           elements,
           regions: submittedRegions,
           strokes: submittedStrokes,
           styleChanges: submittedStyleChanges,
           screenshot: null,
-          createdAt: submittedAt,
-        }
-        editor.style.display = 'none'
-        toolbar.style.display = 'none'
-        hoverOutline.style.display = 'none'
+          createdAt: new Date().toISOString(),
+        };
+        editor.style.display = "none";
+        toolbar.style.display = "none";
+        hoverOutline.style.display = "none";
         const screenshotRect = unionRects([
           ...elements.map((target) => target.rect),
           ...submittedRegions.map((region) => region.rect),
           ...submittedStrokes.map((stroke) => stroke.bounds),
-        ])
-        ipcRenderer.send(ELEMENT_PICKED_CHANNEL, sessionId, annotation, screenshotRect)
+        ]);
+        ipcRenderer.send(ELEMENT_PICKED_CHANNEL, annotation, screenshotRect, submission);
       })
-      .catch(() =>
-      {
-        if (activeSession?.id === sessionId) teardown(true)
-      })
-  })
-  comment.addEventListener('keydown', (event) =>
-  {
-    if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
-    event.preventDefault()
-    submit.click()
-  })
+      .catch(() => {
+        // Last resort. Main is waiting on this message, so hand it an empty
+        // pick rather than leaving the button stuck on "Capturing…" and the
+        // renderer's pick promise pending. teardown is a no-op once finished.
+        teardown(true);
+      });
+  };
+  submit.addEventListener("click", () => submitAnnotation("attach"));
+  root.addEventListener("keydown", (event) => {
+    const submission = event.target === comment ? resolveAnnotationSubmission(event) : null;
+    // Keep this in the bubble phase so editor inputs receive the event before
+    // it is isolated from listeners installed by the inspected page.
+    event.stopImmediatePropagation();
+    if (!submission) return;
+    event.preventDefault();
+    submitAnnotation(submission);
+  });
 
-  window.addEventListener('pointermove', onPointerMove, { capture: true, passive: false })
-  window.addEventListener('pointerdown', onPointerDown, { capture: true, passive: false })
-  window.addEventListener('pointerup', onPointerUp, { capture: true, passive: false })
-  window.addEventListener('pointerout', onPointerOut, { capture: true, passive: true })
-  window.addEventListener('click', onClick, { capture: true, passive: false })
-  window.addEventListener('blur', onWindowBlur)
-  window.addEventListener('keydown', onKeyDown, { capture: true })
-  window.addEventListener('scroll', repaint, { capture: true, passive: true })
-  window.addEventListener('resize', repaint, { passive: true })
-  ipcRenderer.on(CANCEL_PICK_CHANNEL, onCancel)
-  ipcRenderer.on(ANNOTATION_CAPTURED_CHANNEL, onCaptured)
-  document.documentElement.appendChild(host)
-  refreshToolButtons()
-  updateStatus()
+  window.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
+  window.addEventListener("pointerdown", onPointerDown, { capture: true, passive: false });
+  window.addEventListener("pointerup", onPointerUp, { capture: true, passive: false });
+  window.addEventListener("pointerout", onPointerOut, { capture: true, passive: true });
+  window.addEventListener("click", onClick, { capture: true, passive: false });
+  window.addEventListener("blur", onWindowBlur);
+  window.addEventListener("keydown", onKeyDown, { capture: true });
+  window.addEventListener("scroll", repaint, { capture: true, passive: true });
+  window.addEventListener("resize", repaint, { passive: true });
+  ipcRenderer.on(CANCEL_PICK_CHANNEL, onCancel);
+  ipcRenderer.on(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
+  document.documentElement.appendChild(host);
+  refreshToolButtons();
+  updateStatus();
   activeSession = {
-    id: sessionId,
     teardown,
     applyTheme: (theme) => applyAnnotationTheme(host, theme),
-  }
+  };
 }
 
-ipcRenderer.on(
-  START_PICK_CHANNEL,
-  (_event, sessionId: unknown, theme: DesktopPreviewAnnotationTheme | undefined) =>
-  {
-    if (typeof sessionId !== 'string') return
-    if (theme) annotationTheme = theme
-    startAnnotation(sessionId)
-  },
-)
-ipcRenderer.on(ANNOTATION_THEME_CHANNEL, (_event, theme: DesktopPreviewAnnotationTheme) =>
-{
-  annotationTheme = theme
-  activeSession?.applyTheme(theme)
-})
-ipcRenderer.on(CANCEL_PICK_CHANNEL, (_event, sessionId: unknown) =>
-{
-  const session = activeSession
-  if (session !== null && session.id === sessionId) session.teardown(false)
-})
+ipcRenderer.on(START_PICK_CHANNEL, (_event, theme: DesktopPreviewAnnotationTheme | undefined) => {
+  if (theme) annotationTheme = theme;
+  startAnnotation();
+});
+ipcRenderer.on(ANNOTATION_THEME_CHANNEL, (_event, theme: DesktopPreviewAnnotationTheme) => {
+  annotationTheme = theme;
+  activeSession?.applyTheme(theme);
+});
+ipcRenderer.on(CANCEL_PICK_CHANNEL, () => activeSession?.teardown(false));

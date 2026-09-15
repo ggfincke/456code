@@ -1,53 +1,46 @@
-// apps/desktop/src/electron/ElectronSafeStorage.ts
-// persist electron safe storage data
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
-import * as Context from 'effect/Context'
-import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as Schema from 'effect/Schema'
-
-import * as Electron from 'electron'
+import * as Electron from "electron";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 const electronSafeStorageErrorFields = {
   cause: Schema.Defect(),
-}
+};
 
 export class ElectronSafeStorageAvailabilityError extends Schema.TaggedError<ElectronSafeStorageAvailabilityError>()(
-  'ElectronSafeStorageAvailabilityError',
+  "ElectronSafeStorageAvailabilityError",
   {
     ...electronSafeStorageErrorFields,
   },
-)
-{
-  override get message(): string
-  {
-    return 'Electron safe storage failed to check encryption availability.'
+) {
+  override get message(): string {
+    return "Electron safe storage failed to check encryption availability.";
   }
 }
 
 export class ElectronSafeStorageEncryptError extends Schema.TaggedError<ElectronSafeStorageEncryptError>()(
-  'ElectronSafeStorageEncryptError',
+  "ElectronSafeStorageEncryptError",
   {
     ...electronSafeStorageErrorFields,
   },
-)
-{
-  override get message(): string
-  {
-    return 'Electron safe storage failed to encrypt a string.'
+) {
+  override get message(): string {
+    return "Electron safe storage failed to encrypt a string.";
   }
 }
 
 export class ElectronSafeStorageDecryptError extends Schema.TaggedError<ElectronSafeStorageDecryptError>()(
-  'ElectronSafeStorageDecryptError',
+  "ElectronSafeStorageDecryptError",
   {
     ...electronSafeStorageErrorFields,
   },
-)
-{
-  override get message(): string
-  {
-    return 'Electron safe storage failed to decrypt a string.'
+) {
+  override get message(): string {
+    return "Electron safe storage failed to decrypt a string.";
   }
 }
 
@@ -55,38 +48,53 @@ export const ElectronSafeStorageError = Schema.Union([
   ElectronSafeStorageAvailabilityError,
   ElectronSafeStorageEncryptError,
   ElectronSafeStorageDecryptError,
-])
-export type ElectronSafeStorageError = typeof ElectronSafeStorageError.Type
+]);
+export type ElectronSafeStorageError = typeof ElectronSafeStorageError.Type;
 
 export class ElectronSafeStorage extends Context.Service<
   ElectronSafeStorage,
   {
-    readonly isEncryptionAvailable: Effect.Effect<boolean, ElectronSafeStorageAvailabilityError>
+    readonly isEncryptionAvailable: Effect.Effect<boolean, ElectronSafeStorageAvailabilityError>;
     readonly encryptString: (
       value: string,
-    ) => Effect.Effect<Uint8Array, ElectronSafeStorageEncryptError>
+    ) => Effect.Effect<Uint8Array, ElectronSafeStorageEncryptError>;
     readonly decryptString: (
       value: Uint8Array,
-    ) => Effect.Effect<string, ElectronSafeStorageDecryptError>
+    ) => Effect.Effect<string, ElectronSafeStorageDecryptError>;
+    readonly selectedStorageBackend: Effect.Effect<Option.Option<string>>;
   }
->()('@t3tools/desktop/electron/ElectronSafeStorage')
-{}
+>()("@t3tools/desktop/electron/ElectronSafeStorage") {}
 
-export const make = ElectronSafeStorage.of({
-  isEncryptionAvailable: Effect.try({
-    try: () => Electron.safeStorage.isEncryptionAvailable(),
-    catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
-  }),
-  encryptString: (value) =>
-    Effect.try({
-      try: () => Electron.safeStorage.encryptString(value),
-      catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
-    }),
-  decryptString: (value) =>
-    Effect.try({
-      try: () => Electron.safeStorage.decryptString(Buffer.from(value)),
-      catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
-    }),
-})
+/** @public Service construction is part of the canonical Effect module API. */
+export const make = Effect.gen(function* () {
+  const platform = yield* HostProcessPlatform;
 
-export const layer = Layer.succeed(ElectronSafeStorage, make)
+  return ElectronSafeStorage.of({
+    isEncryptionAvailable: Effect.try({
+      try: () => Electron.safeStorage.isEncryptionAvailable(),
+      catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
+    }),
+    encryptString: (value) =>
+      Effect.try({
+        try: () => Electron.safeStorage.encryptString(value),
+        catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
+      }),
+    decryptString: (value) =>
+      Effect.try({
+        try: () => Electron.safeStorage.decryptString(Buffer.from(value)),
+        catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
+      }),
+    selectedStorageBackend: Effect.sync(() => {
+      if (platform !== "linux") {
+        return Option.none();
+      }
+      try {
+        return Option.fromNullishOr(Electron.safeStorage.getSelectedStorageBackend());
+      } catch {
+        return Option.none();
+      }
+    }),
+  });
+});
+
+export const layer = Layer.effect(ElectronSafeStorage, make);

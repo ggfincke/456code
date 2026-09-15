@@ -1,8 +1,19 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["scripts/**/*.ts"],
+  "include": [
+    "scripts/**/*.ts",
+    "scripts/nuke.sh"
+  ],
   "compilerOptions": {
     "noEmit": true,
-    "types": ["bun", "node"]
-  }
+    "types": [
+      "bun",
+      "node"
+    ]
+  },
+  "references": [
+    {
+      "path": "../../distilled/packages/aws/tsconfig.json"
+    },
+  ]
 }

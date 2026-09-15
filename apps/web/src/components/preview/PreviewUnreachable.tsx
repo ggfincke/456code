@@ -1,29 +1,24 @@
-// apps/web/src/components/preview/PreviewUnreachable.tsx
-// render preview unreachable
+import { useState } from "react";
 
-import { useState } from 'react'
+import { Button } from "~/components/ui/button";
 
-import { Button } from '~/components/ui/button'
+import { describePreviewError } from "./errorCodeMessages";
 
-import { describePreviewError } from './errorCodeMessages'
-
-interface Props
-{
-  url: string
-  // chromium net error code, e.g. -105.
-  code: number
-  // stringified Chromium error, e.g. "ERR_NAME_NOT_RESOLVED".
-  description: string
-  onReload: () => void
+interface Props {
+  url: string;
+  /** Chromium net error code, e.g. -105. */
+  code: number;
+  /** Stringified Chromium error, e.g. "ERR_NAME_NOT_RESOLVED". */
+  description: string;
+  onReload: () => void;
 }
 
-// theme-aware tailwind port of Chromium's "This site can't be reached" page.
-export function PreviewUnreachable({ url, code, description, onReload }: Props)
-{
-  const [showDetails, setShowDetails] = useState(false)
-  const host = safeHost(url) ?? url
-  const friendly = describePreviewError(description)
-  const errorLabel = description.length > 0 ? description : `ERR_${Math.abs(code) || 'FAILED'}`
+/** Theme-aware tailwind port of Chromium's "This site can't be reached" page. */
+export function PreviewUnreachable({ url, code, description, onReload }: Props) {
+  const [showDetails, setShowDetails] = useState(false);
+  const host = safeHost(url) ?? url;
+  const friendly = describePreviewError(description);
+  const errorLabel = description.length > 0 ? description : `ERR_${Math.abs(code) || "FAILED"}`;
 
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-y-auto bg-background">
@@ -58,7 +53,7 @@ export function PreviewUnreachable({ url, code, description, onReload }: Props)
             size="sm"
             onClick={() => setShowDetails((value) => !value)}
           >
-            {showDetails ? 'Hide details' : 'Details'}
+            {showDetails ? "Hide details" : "Details"}
           </Button>
           <div className="flex-1" />
           <Button type="button" size="sm" onClick={onReload}>
@@ -67,11 +62,10 @@ export function PreviewUnreachable({ url, code, description, onReload }: Props)
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-function ErrorIcon({ className }: { className?: string })
-{
+function ErrorIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 64 64"
@@ -84,17 +78,13 @@ function ErrorIcon({ className }: { className?: string })
       <path d="M22 22 L42 22 M22 30 L36 30 M22 38 L40 38" strokeLinecap="round" />
       <path d="M52 8 L12 56" strokeLinecap="round" />
     </svg>
-  )
+  );
 }
 
-function safeHost(url: string): string | null
-{
-  try
-  {
-    return new URL(url).host
-  }
-  catch
-  {
-    return null
+function safeHost(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
   }
 }

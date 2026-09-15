@@ -1,379 +1,250 @@
 #!/usr/bin/env node
-// apps/server/scripts/cli.ts
-// run the cli repository workflow
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Logger from "effect/Logger";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import { Command, Flag } from "effect/unstable/cli";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
-import * as NodeServices from '@effect/platform-node/NodeServices'
-import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Logger from 'effect/Logger'
-import * as Option from 'effect/Option'
-import * as Path from 'effect/Path'
-import * as Schema from 'effect/Schema'
-import { Command, Flag } from 'effect/unstable/cli'
-import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
-
-import cartographerCorePackageJson from '../../../packages/cartographer-core/package.json' with { type: 'json' }
-import {
-  DEVELOPMENT_ICON_OVERRIDES,
-  resolveWebAssetBrandForPackageVersion,
-  resolveWebIconOverrides,
-} from '../../../scripts/lib/brand-assets.ts'
-import {
-  assertPackedServerArchive,
-  prepareCartographerDependencyWorkspace,
-  stageServerPublishPackage,
-} from '../../../scripts/lib/server-publish-package.ts'
-import { fromYaml } from '@t3tools/shared/schemaYaml'
-import { resolveSpawnCommand } from '@t3tools/shared/shell'
-import serverPackageJson from '../package.json' with { type: 'json' }
+import packageJson from "../package.json" with { type: "json" };
+import { disabled as releaseUpdatesDisabled } from "../src/fincke/ReleaseUpdates.ts";
+import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
+import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-external-packages.ts";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   ServerCliBuildAssetMissingError,
   ServerCliCommandExitError,
   ServerCliDevelopmentIconSourceMissingError,
   ServerCliDevelopmentIconTargetMissingError,
-  ServerCliPackOutputError,
-  ServerCliPublishIconSourceMissingError,
-  ServerCliPublishIconTargetMissingError,
-} from './cliErrors.ts'
-
-const WorkspaceConfig = Schema.Struct({
-  catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-})
-type WorkspaceConfig = typeof WorkspaceConfig.Type
-const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig))
+  ServerCliExecutableImportError,
+} from "./cliErrors.ts";
 
 const RepoRoot = Effect.service(Path.Path).pipe(
-  Effect.flatMap((path) => path.fromFileUrl(new URL('../../..', import.meta.url))),
-)
+  Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
+);
 
-const readWorkspaceConfig = Effect.fn('readWorkspaceConfig')(function* ()
-{
-  const path = yield* Path.Path
-  const fs = yield* FileSystem.FileSystem
-  const repoRoot = yield* RepoRoot
-  const workspaceYaml = yield* fs.readFileString(path.join(repoRoot, 'pnpm-workspace.yaml'))
-  return yield* decodeWorkspaceConfig(workspaceYaml)
-})
+const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.StandardCommand) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner.spawn(command);
+  const exitCode = yield* child.exitCode;
 
-const runCommand = Effect.fn('runCommand')(function* (command: ChildProcess.StandardCommand)
-{
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const child = yield* spawner.spawn(command)
-  const exitCode = yield* child.exitCode
-
-  if (exitCode !== 0)
-  {
+  if (exitCode !== 0) {
     return yield* new ServerCliCommandExitError({
       command: command.command,
       args: command.args,
       cwd: command.options.cwd,
       exitCode,
-    })
+    });
   }
-})
+});
 
-const preparePublishIcons = Effect.fn('preparePublishIcons')(function* (
+const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")(function* (
   repoRoot: string,
   serverDir: string,
-  version: string,
-)
-{
-  const path = yield* Path.Path
-  const fs = yield* FileSystem.FileSystem
-  const brand = resolveWebAssetBrandForPackageVersion(version)
-  const icons = resolveWebIconOverrides(brand, 'dist/client').map((override) => ({
-    sourcePath: path.join(repoRoot, override.sourceRelativePath),
-    targetPath: path.join(serverDir, override.targetRelativePath),
-    targetRelativePath: override.targetRelativePath,
-  }))
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
 
-  for (const icon of icons)
-  {
-    if (!(yield* fs.exists(icon.sourcePath)))
-    {
-      return yield* new ServerCliPublishIconSourceMissingError({ sourcePath: icon.sourcePath })
+  for (const override of DEVELOPMENT_ICON_OVERRIDES) {
+    const sourcePath = path.join(repoRoot, override.sourceRelativePath);
+    const targetPath = path.join(serverDir, override.targetRelativePath);
+
+    if (!(yield* fs.exists(sourcePath))) {
+      return yield* new ServerCliDevelopmentIconSourceMissingError({ sourcePath });
     }
-    if (!(yield* fs.exists(icon.targetPath)))
-    {
-      return yield* new ServerCliPublishIconTargetMissingError({ targetPath: icon.targetPath })
+    if (!(yield* fs.exists(targetPath))) {
+      return yield* new ServerCliDevelopmentIconTargetMissingError({ targetPath });
     }
+
+    yield* fs.copyFile(sourcePath, targetPath);
   }
 
-  return yield* Effect.forEach(icons, (icon) =>
-    fs.readFile(icon.sourcePath).pipe(Effect.map((publish) => ({ ...icon, publish }))),
-  )
-})
+  yield* Effect.log("[cli] Applied development icon overrides to dist/client");
+});
 
-const applyDevelopmentIconOverrides = Effect.fn('applyDevelopmentIconOverrides')(function* (
-  repoRoot: string,
-  serverDir: string,
-)
-{
-  const path = yield* Path.Path
-  const fs = yield* FileSystem.FileSystem
-
-  for (const override of DEVELOPMENT_ICON_OVERRIDES)
-  {
-    const sourcePath = path.join(repoRoot, override.sourceRelativePath)
-    const targetPath = path.join(serverDir, override.targetRelativePath)
-
-    if (!(yield* fs.exists(sourcePath)))
-    {
-      return yield* new ServerCliDevelopmentIconSourceMissingError({ sourcePath })
-    }
-    if (!(yield* fs.exists(targetPath)))
-    {
-      return yield* new ServerCliDevelopmentIconTargetMissingError({ targetPath })
-    }
-
-    yield* fs.copyFile(sourcePath, targetPath)
-  }
-
-  yield* Effect.log('[cli] Applied development icon overrides to dist/client')
-})
-
+// ---------------------------------------------------------------------------
 // build subcommand
+// ---------------------------------------------------------------------------
 
 const buildCmd = Command.make(
-  'build',
+  "build",
   {
-    verbose: Flag.boolean('verbose').pipe(Flag.withDefault(false)),
+    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
   },
   (config) =>
-    Effect.gen(function* ()
-    {
-      const path = yield* Path.Path
-      const fs = yield* FileSystem.FileSystem
-      const repoRoot = yield* RepoRoot
-      const serverDir = path.join(repoRoot, 'apps/server')
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      const repoRoot = yield* RepoRoot;
+      const serverDir = path.join(repoRoot, "apps/server");
 
-      yield* Effect.log('[cli] Running tsdown...')
+      yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
-        ChildProcess.make(process.execPath, ['--run', 'build:bundle'], {
+        ChildProcess.make(process.execPath, ["--run", "build:bundle"], {
           cwd: serverDir,
-          stdout: config.verbose ? 'inherit' : 'ignore',
-          stderr: 'inherit',
+          stdout: config.verbose ? "inherit" : "ignore",
+          stderr: "inherit",
           shell: false,
         }),
-      )
+      );
 
-      const webDist = path.join(repoRoot, 'apps/web/dist')
-      const clientTarget = path.join(serverDir, 'dist/client')
+      const webDist = path.join(repoRoot, "apps/web/dist");
+      const clientTarget = path.join(serverDir, "dist/client");
 
-      if (yield* fs.exists(webDist))
-      {
-        yield* fs.copy(webDist, clientTarget)
-        yield* applyDevelopmentIconOverrides(repoRoot, serverDir)
-        yield* Effect.log('[cli] Bundled web app into dist/client')
-      }
-      else
-      {
-        yield* Effect.logWarning('[cli] Web dist not found — skipping client bundle.')
+      if (yield* fs.exists(webDist)) {
+        yield* fs.copy(webDist, clientTarget);
+        yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
+        yield* Effect.log("[cli] Bundled web app into dist/client");
+      } else {
+        yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
       }
     }),
-).pipe(Command.withDescription('Build the server package (tsdown + bundle web client).'))
+).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
 
-// publish subcommand
+// ---------------------------------------------------------------------------
+// build-exe subcommand
+// ---------------------------------------------------------------------------
 
-interface PublishCommandConfig
-{
-  readonly access: string
-  readonly tag: string
-  readonly provenance: boolean
-  readonly dryRun: boolean
-  readonly verbose: boolean
-}
-
-const createNpmPublishArgs = (
-  config: PublishCommandConfig,
-  archivePath: string,
-): ReadonlyArray<string> =>
-{
-  const args = ['publish', archivePath, '--access', config.access, '--tag', config.tag]
-
-  if (config.provenance) args.push('--provenance')
-  if (config.dryRun) args.push('--dry-run')
-  if (!config.verbose) args.push('--loglevel', 'error')
-
-  return args
-}
-
-const publishCmd = Command.make(
-  'publish',
+const buildExeCmd = Command.make(
+  "build-exe",
   {
-    tag: Flag.string('tag').pipe(Flag.withDefault('latest')),
-    access: Flag.string('access').pipe(Flag.withDefault('public')),
-    appVersion: Flag.string('app-version').pipe(Flag.optional),
-    provenance: Flag.boolean('provenance').pipe(Flag.withDefault(false)),
-    dryRun: Flag.boolean('dry-run').pipe(Flag.withDefault(false)),
-    verbose: Flag.boolean('verbose').pipe(Flag.withDefault(false)),
+    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+    target: Flag.string("target").pipe(
+      Flag.withDescription(
+        "Cross-build for <platform>-<arch> in nodejs.org naming (for example darwin-x64); defaults to the host.",
+      ),
+      Flag.optional,
+    ),
   },
   (config) =>
-    Effect.gen(function* ()
-    {
-      const path = yield* Path.Path
-      const fs = yield* FileSystem.FileSystem
-      const repoRoot = yield* RepoRoot
-      const serverDir = path.join(repoRoot, 'apps/server')
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      const repoRoot = yield* RepoRoot;
+      const serverDir = path.join(repoRoot, "apps/server");
 
-      // assert build assets exist
-      for (const relPath of [
-        'apps/server/dist/bin.mjs',
-        'apps/server/dist/client/index.html',
-        'packages/cartographer-core/dist/index.js',
-        'packages/cartographer-core/dist/contracts/index.js',
-        'packages/cartographer-core/dist/server.js',
-        'packages/cartographer-core/dist/cli/index.js',
-        'packages/cartographer-core/dist/mcp/bin.js',
-        'packages/cartographer-core/dist/mcp/server.js',
-      ])
-      {
-        const abs = path.join(repoRoot, relPath)
-        if (!(yield* fs.exists(abs)))
-        {
-          return yield* new ServerCliBuildAssetMissingError({ assetPath: abs })
-        }
+      yield* Effect.log("[cli] Building single-executable...");
+      const spawnCommand = yield* resolveSpawnCommand("vp", ["pack"]);
+      yield* runCommand(
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          cwd: serverDir,
+          env: {
+            ...process.env,
+            T3CODE_PACK_EXE: "1",
+            ...Option.match(config.target, {
+              onNone: () => ({}),
+              onSome: (target) => ({ T3CODE_PACK_EXE_TARGET: target }),
+            }),
+          },
+          stdout: config.verbose ? "inherit" : "ignore",
+          stderr: "inherit",
+          shell: spawnCommand.shell,
+        }),
+      );
+
+      // The executable can only `import` built-ins. A file-backed import
+      // passes the bundler and `node dist/bin.mjs`, then throws inside the
+      // binary, so read the emitted module graph rather than trusting config.
+      const bundlePath = path.join(serverDir, "dist-exe/bin.mjs");
+      const specifiers = findEsmImportsOfExternalPackages(yield* fs.readFileString(bundlePath));
+      if (specifiers.length > 0) {
+        return yield* new ServerCliExecutableImportError({ bundlePath, specifiers });
       }
-
-      const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version)
-      const workspaceConfig = yield* readWorkspaceConfig()
-      const publishRoot = yield* fs.makeTempDirectoryScoped({ prefix: '456code-npm-publish-' })
-      const stageDirectory = path.join(publishRoot, 'package')
-      const packDirectory = path.join(publishRoot, 'packed')
-      const cartographerDeployDirectory = path.join(publishRoot, 'cartographer-core-deploy')
-      const icons = yield* preparePublishIcons(repoRoot, serverDir, version)
-
-      const deployArgs = [
-        '--node-linker=isolated',
-        '--config.allow-unused-patches=true',
-        '--ignore-scripts',
-        '--frozen-lockfile',
-        '--filter',
-        cartographerCorePackageJson.name,
-        'deploy',
-        '--prod',
-        '--legacy',
-        cartographerDeployDirectory,
-      ]
-      const deployCommand = yield* resolveSpawnCommand('pnpm', deployArgs)
-      yield* Effect.log('[cli] Staging the lockfile-backed Cartographer dependency closure')
-      yield* runCommand(
-        ChildProcess.make(deployCommand.command, deployCommand.args, {
-          cwd: repoRoot,
-          stdout: config.verbose ? 'inherit' : 'ignore',
-          stderr: 'inherit',
-          shell: deployCommand.shell,
-        }),
-      )
-
-      const dependencyWorkspace = path.join(publishRoot, 'cartographer-core-dependencies')
-      prepareCartographerDependencyWorkspace(
-        repoRoot,
-        cartographerDeployDirectory,
-        dependencyWorkspace,
-      )
-      const installCommand = yield* resolveSpawnCommand('pnpm', [
-        '--dir',
-        dependencyWorkspace,
-        'install',
-        '--prod',
-        '--ignore-scripts',
-        '--frozen-lockfile',
-        '--config.allow-unused-patches=true',
-        '--node-linker=hoisted',
-      ])
-      yield* Effect.log('[cli] Materializing the frozen Cartographer dependency closure')
-      yield* runCommand(
-        ChildProcess.make(installCommand.command, installCommand.args, {
-          cwd: repoRoot,
-          stdout: config.verbose ? 'inherit' : 'ignore',
-          stderr: 'inherit',
-          shell: installCommand.shell,
-        }),
-      )
-
-      stageServerPublishPackage({
-        repoRoot,
-        stageDirectory,
-        version,
-        serverManifest: serverPackageJson,
-        cartographerCoreManifest: cartographerCorePackageJson,
-        workspaceCatalog: workspaceConfig.catalog ?? {},
-        cartographerDependencyClosureDirectory: path.join(dependencyWorkspace, 'node_modules'),
-      })
-      for (const icon of icons)
-      {
-        yield* fs.writeFile(path.join(stageDirectory, icon.targetRelativePath), icon.publish)
-      }
-      yield* Effect.log('[cli] Staged package metadata, Cartographer runtime, and publish icons')
-
-      yield* fs.makeDirectory(packDirectory, { recursive: true })
-      const packArgs = [
-        'pack',
-        '--pack-destination',
-        packDirectory,
-        ...(config.verbose ? [] : ['--loglevel', 'error']),
-      ]
-      const packCommand = yield* resolveSpawnCommand('npm', packArgs)
-      yield* Effect.log(`[cli] Running: npm ${packArgs.join(' ')}`)
-      yield* runCommand(
-        ChildProcess.make(packCommand.command, packCommand.args, {
-          cwd: stageDirectory,
-          stdout: config.verbose ? 'inherit' : 'ignore',
-          stderr: 'inherit',
-          shell: packCommand.shell,
-        }),
-      )
-
-      const archiveFiles = (yield* fs.readDirectory(packDirectory)).filter((entry) =>
-        entry.endsWith('.tgz'),
-      )
-      if (archiveFiles.length !== 1)
-      {
-        return yield* new ServerCliPackOutputError({ packDirectory, archiveFiles })
-      }
-      const archivePath = path.join(packDirectory, archiveFiles[0]!)
-      assertPackedServerArchive(archivePath)
-
-      const smokeScript = path.join(repoRoot, 'scripts/smoke-packed-cli.ts')
-      yield* Effect.log('[cli] Validating the exact packed archive in clean npm and pnpm consumers')
-      yield* runCommand(
-        ChildProcess.make(process.execPath, [smokeScript, '--archive', archivePath], {
-          cwd: repoRoot,
-          stdout: config.verbose ? 'inherit' : 'ignore',
-          stderr: 'inherit',
-          shell: false,
-        }),
-      )
-      yield* Effect.log('[cli] Exact packed archive validation passed')
-
-      const publishArgs = createNpmPublishArgs(config, archivePath)
-      const publishCommand = yield* resolveSpawnCommand('npm', publishArgs)
-      yield* Effect.log(`[cli] Running: npm ${publishArgs.join(' ')}`)
-      yield* runCommand(
-        ChildProcess.make(publishCommand.command, publishCommand.args, {
-          cwd: publishRoot,
-          stdout: config.verbose ? 'inherit' : 'ignore',
-          stderr: 'inherit',
-          shell: publishCommand.shell,
-        }),
-      )
       yield* Effect.log(
-        config.dryRun ? '[cli] npm publish dry run passed' : '[cli] npm publish passed',
-      )
+        "[cli] Built dist-exe/t3 (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
+      );
     }),
-).pipe(Command.withDescription('Publish the server package to npm.'))
+).pipe(
+  Command.withDescription(
+    "Build the server as a Node single-executable (needs a Node 25.7+ host for --build-sea). The binary still resolves native packages from a node_modules tree beside it.",
+  ),
+);
 
+// ---------------------------------------------------------------------------
+// publish subcommand
+// ---------------------------------------------------------------------------
+
+/**
+ * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
+ * every `@t3code/t3-<platform>.tgz` first, `t3.tgz` (the launcher) last, so
+ * the launcher is never installable before the executables it depends on.
+ * Tarballs rather than directories because `npm publish <dir>` strips the
+ * `node_modules/` the executable loads its native addons from.
+ */
+const publishCmd = Command.make(
+  "publish",
+  {
+    packagesDir: Flag.string("packages-dir").pipe(
+      Flag.withDescription("Output dir of scripts/build-npm-platform-packages.ts."),
+    ),
+    tag: Flag.string("tag").pipe(Flag.withDefault("latest")),
+    access: Flag.string("access").pipe(Flag.withDefault("public")),
+    provenance: Flag.boolean("provenance").pipe(Flag.withDefault(false)),
+    dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+  },
+  (config) =>
+    Effect.gen(function* () {
+      if (packageJson.private) return yield* releaseUpdatesDisabled();
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      // npm runs with cwd set to the packages dir below, so tarball paths are
+      // resolved once here rather than joined twice.
+      const packagesDir = path.resolve(config.packagesDir);
+      const scopeDir = path.join(packagesDir, "@t3code");
+      const launcherTarball = path.join(packagesDir, "t3.tgz");
+      const platformTarballs = (yield* fs
+        .readDirectory(scopeDir)
+        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => [])))
+        .filter((entry) => entry.startsWith("t3-") && entry.endsWith(".tgz"))
+        .sort()
+        .map((entry) => path.join(scopeDir, entry));
+      if (platformTarballs.length === 0) {
+        return yield* new ServerCliBuildAssetMissingError({
+          assetPath: path.join(scopeDir, "t3-<platform>.tgz"),
+        });
+      }
+      if (!(yield* fs.exists(launcherTarball))) {
+        return yield* new ServerCliBuildAssetMissingError({ assetPath: launcherTarball });
+      }
+
+      const args = ["publish", "--access", config.access, "--tag", config.tag];
+      if (config.provenance) args.push("--provenance");
+      if (config.dryRun) args.push("--dry-run");
+
+      for (const tarball of [...platformTarballs, launcherTarball]) {
+        const spawnCommand = yield* resolveSpawnCommand("npm", [...args, tarball]);
+        yield* Effect.log(`[cli] npm ${args.join(" ")} ${path.basename(tarball)}`);
+        yield* runCommand(
+          ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+            cwd: packagesDir,
+            stdout: config.verbose ? "inherit" : "ignore",
+            stderr: "inherit",
+            shell: spawnCommand.shell,
+          }),
+        );
+      }
+    }),
+).pipe(
+  Command.withDescription(
+    "Publish the @t3code/t3-<platform> tarballs and then the t3 launcher to npm.",
+  ),
+);
+
+// ---------------------------------------------------------------------------
 // root command
+// ---------------------------------------------------------------------------
 
-const cli = Command.make('cli').pipe(
-  Command.withDescription('T3 server build & publish CLI.'),
-  Command.withSubcommands([buildCmd, publishCmd]),
-)
+const cli = Command.make("cli").pipe(
+  Command.withDescription("T3 server build & publish CLI."),
+  Command.withSubcommands([buildCmd, buildExeCmd, publishCmd]),
+);
 
-Command.run(cli, { version: '0.0.0' }).pipe(
+Command.run(cli, { version: "0.0.0" }).pipe(
   Effect.scoped,
   Effect.provide([Logger.layer([Logger.consolePretty()]), NodeServices.layer]),
   NodeRuntime.runMain,
-)
+);

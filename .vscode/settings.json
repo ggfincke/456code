@@ -5,10 +5,7 @@
     "source.fixAll.oxc": "always"
   },
   "oxc.unusedDisableDirectives": "warn",
-  "js/ts.experimental.useTsgo": true,
-  "js/ts.tsdk.path": "./node_modules/@typescript/native/bin",
-  "js/ts.tsdk.promptToUseWorkspaceVersion": true,
-  "js/ts.tsdk.additionalLocations": ["./node_modules/@typescript/native/bin"],
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
   "typescript.preferences.autoImportFileExcludePatterns": [".repos/**"],
   "javascript.preferences.autoImportFileExcludePatterns": [".repos/**"],
   "files.watcherExclude": {

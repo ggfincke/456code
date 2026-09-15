@@ -1,111 +1,103 @@
-// apps/server/src/orchestration/Services/OrchestrationEngine.ts
-// define orchestration engine service contract
-
-// owns command validation/dispatch and in-memory read-model updates backed by
-// `OrchestrationEventStore` persistence. It does not own provider process
-// management or transport concerns (e.g. websocket request parsing).
-//
-// uses Effect `Context.Service` for dependency injection. Command dispatch,
-// replay, and unknown-input decoding all return typed domain errors.
-//
-// @module OrchestrationEngineService
-import type { OrchestrationCommand, OrchestrationEvent, ThreadId } from '@t3tools/contracts'
-import * as Context from 'effect/Context'
-import type * as Effect from 'effect/Effect'
-import type * as Scope from 'effect/Scope'
-import type * as Stream from 'effect/Stream'
-
-import type { OrchestrationDispatchError } from '../Errors.ts'
-import type { OrchestrationEventStoreError } from '../../persistence/Errors.ts'
-import type { OrchestrationAggregateReplayStats } from '../../persistence/Services/OrchestrationEventStore.ts'
-
-export interface OrchestrationThreadReplayRange
-{
-  readonly threadId: ThreadId
-  readonly fromSequenceExclusive: number
-  readonly toSequenceInclusive: number
-}
-
-export type OrchestrationCausalSettlementCommand = Extract<
+/**
+ * OrchestrationEngineService - Service interface for orchestration command handling.
+ *
+ * Owns command validation/dispatch and in-memory read-model updates backed by
+ * `OrchestrationEventStore` persistence. It does not own provider process
+ * management or transport concerns (e.g. websocket request parsing).
+ *
+ * Uses Effect `Context.Service` for dependency injection. Command dispatch,
+ * replay, and unknown-input decoding all return typed domain errors.
+ *
+ * @module OrchestrationEngineService
+ */
+import type {
+  OrchestrationClientOrigin,
   OrchestrationCommand,
-  { readonly type: 'thread.meta.update' }
->
+  OrchestrationEvent,
+  ThreadId,
+} from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
+import type * as Scope from "effect/Scope";
+import type * as Stream from "effect/Stream";
 
-export interface OrchestrationCausalSettlementAuthority
-{
-  readonly sourceKind: 'domain-event' | 'provider-runtime'
-  readonly sourceSequence: number
+import type { OrchestrationDispatchError } from "../Errors.ts";
+import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
+import type { OrchestrationAggregateReplayStats } from "../../persistence/Services/OrchestrationEventStore.ts";
+
+export interface OrchestrationThreadReplayRange {
+  readonly threadId: ThreadId;
+  readonly fromSequenceExclusive: number;
+  readonly toSequenceInclusive: number;
 }
-
-export type OrchestrationDomainEventAdmission = (event: OrchestrationEvent) => boolean
 
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
-export interface OrchestrationEngineShape
-{
-  // replay persisted orchestration events from an exclusive sequence cursor.
-  //
-  // @param fromSequenceExclusive - Sequence cursor (exclusive).
-  // @param limit - Maximum number of events to read. Defaults to the event
-  //   store's page-bounded default; pass a higher value when the caller must
-  //   read every event after the cursor (e.g. per-thread catch-up that filters
-  //   a small subset out of a potentially larger global range).
-  // @returns Stream containing ordered events.
+export interface OrchestrationEngineShape {
+  /**
+   * Replay persisted orchestration events from an exclusive sequence cursor.
+   *
+   * @param fromSequenceExclusive - Sequence cursor (exclusive).
+   * @param limit - Maximum number of events to read. Defaults to the event
+   *   store's page-bounded default; pass a higher value when the caller must
+   *   read a wider global range. Thread subscriptions use readThreadEvents.
+   * @returns Stream containing ordered events.
+   */
   readonly readEvents: (
     fromSequenceExclusive: number,
     limit?: number,
-  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
 
-  // replay only this thread through a captured authoritative head
+  /** Read only this thread's events through a captured authoritative head. */
   readonly readThreadEvents: (
     input: OrchestrationThreadReplayRange & { readonly limit?: number },
-  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
 
-  // measure a bounded thread replay without decoding its payload bodies
+  /** Measure a bounded thread replay without decoding its event bodies. */
   readonly getThreadReplayStats: (
     input: OrchestrationThreadReplayRange & { readonly maxEvents: number },
-  ) => Effect.Effect<OrchestrationAggregateReplayStats, OrchestrationEventStoreError>
+  ) => Effect.Effect<OrchestrationAggregateReplayStats, OrchestrationEventStoreError>;
 
-  // dispatch a validated orchestration command.
-  //
-  // @param command - Valid orchestration command.
-  // @returns Effect containing the sequence of the persisted event.
-  //
-  // dispatch is serialized through an internal queue and deduplicated via
-  // command receipts.
+  /**
+   * Dispatch a validated orchestration command.
+   *
+   * @param command - Valid orchestration command.
+   * @param options - Optional client origin (surface/app version) stamped into
+   *   the metadata of every event the command produces.
+   * @returns Effect containing the sequence of the persisted event.
+   *
+   * Dispatch is serialized through an internal queue and deduplicated via
+   * command receipts.
+   */
   readonly dispatch: (
     command: OrchestrationCommand,
-    options?: { readonly assistantCitationAccess: 'allow' | 'deny' },
-  ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>
+    options?: { readonly origin?: OrchestrationClientOrigin },
+  ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>;
 
-  // dispatch owner-internal metadata settlement that is causally older than a
-  // checkpoint revert fence. This is not part of any transport contract.
-  readonly dispatchInternal: (
-    command: OrchestrationCausalSettlementCommand,
-    authority: OrchestrationCausalSettlementAuthority,
-  ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>
+  /**
+   * Stream persisted domain events in dispatch order.
+   *
+   * This is a hot runtime stream (new events only), not a historical replay.
+   */
+  readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>;
 
-  // stream persisted domain events in dispatch order.
-  //
-  // this is a hot runtime stream (new events only), not a historical replay.
-  readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>
+  /**
+   * Acquire a domain-event subscription before starting a consumer.
+   * The subscription is ready when this effect returns and closes with the scope.
+   */
+  readonly subscribeDomainEvents: Effect.Effect<
+    Stream.Stream<OrchestrationEvent>,
+    never,
+    Scope.Scope
+  >;
 
-  // stream live events for one aggregate without global PubSub fan-out.
-  readonly streamDomainEventsForAggregate: (
-    aggregateKind: OrchestrationEvent['aggregateKind'],
-    aggregateId: OrchestrationEvent['aggregateId'],
-  ) => Stream.Stream<OrchestrationEvent>
-
-  // register one synchronous live-event sink before snapshot or replay work
-  readonly registerDomainEventAdmission: (
-    admission: OrchestrationDomainEventAdmission,
-  ) => Effect.Effect<void, never, Scope.Scope>
-
-  // the latest sequence reflected in the engine's authoritative command read
-  // model (0 if none). Used to gauge how far behind a resuming client is before
-  // choosing between an incremental replay and a fresh projected snapshot.
-  readonly latestSequence: Effect.Effect<number, never, never>
+  /**
+   * The latest sequence reflected in the engine's authoritative command read
+   * model (0 if none). Used to gauge how far behind a resuming client is before
+   * choosing between an incremental replay and a fresh projected snapshot.
+   */
+  readonly latestSequence: Effect.Effect<number, never, never>;
 }
 
 /**
@@ -122,5 +114,4 @@ export interface OrchestrationEngineShape
 export class OrchestrationEngineService extends Context.Service<
   OrchestrationEngineService,
   OrchestrationEngineShape
->()('456code/orchestration/Services/OrchestrationEngine/OrchestrationEngineService')
-{}
+>()("t3/orchestration/Services/OrchestrationEngine/OrchestrationEngineService") {}

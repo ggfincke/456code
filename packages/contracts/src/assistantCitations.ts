@@ -1,17 +1,15 @@
-// packages/contracts/src/assistantCitations.ts
-// define provenance-bound assistant citation payloads
+import * as Schema from "effect/Schema";
+import { EnvironmentId, MessageId, NonNegativeInt, ThreadId } from "./baseSchemas.ts";
 
-import * as Schema from 'effect/Schema'
+export const ASSISTANT_CITATION_MAX_TEXT_LENGTH = 8_000;
+export const ASSISTANT_CITATION_MAX_COMMENT_LENGTH = 8_000;
+export const ASSISTANT_CITATION_CONTEXT_LENGTH = 32;
 
-import { EnvironmentId, MessageId, NonNegativeInt, ThreadId } from './baseSchemas.ts'
-
-export const ASSISTANT_CITATION_MAX_TEXT_LENGTH = 8_000
-export const ASSISTANT_CITATION_MAX_COMMENT_LENGTH = 8_000
-export const ASSISTANT_CITATION_CONTEXT_LENGTH = 32
-
-// quote rendered assistant text with an optional user comment
-// positions are UTF-16 offsets, not Markdown offsets
-export const AssistantCitationV1 = Schema.Struct({
+/**
+ * A quote of rendered assistant text with an optional user comment.
+ * Positions are UTF-16 offsets, not Markdown offsets.
+ */
+export const AssistantCitation = Schema.Struct({
   version: Schema.Literal(1),
   environmentId: EnvironmentId.check(Schema.isMaxLength(512)),
   threadId: ThreadId.check(Schema.isMaxLength(512)),
@@ -29,9 +27,5 @@ export const AssistantCitationV1 = Schema.Struct({
   suffix: Schema.String.check(Schema.isMaxLength(ASSISTANT_CITATION_CONTEXT_LENGTH)),
 }).check(
   Schema.makeFilter((citation) => citation.end > citation.start && citation.text.trim().length > 0),
-)
-export type AssistantCitationV1 = typeof AssistantCitationV1.Type
-
-// retain the concise source name for callers while version ownership stays explicit.
-export const AssistantCitation = AssistantCitationV1
-export type AssistantCitation = AssistantCitationV1
+);
+export type AssistantCitation = typeof AssistantCitation.Type;

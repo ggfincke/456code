@@ -1,53 +1,45 @@
-// apps/server/src/orchestration/Services/ProjectionPipeline.ts
-// defines projection execution and attachment ownership operations
+/**
+ * OrchestrationProjectionPipeline - Event projection pipeline service interface.
+ *
+ * Coordinates projection bootstrap/replay and per-event projection updates for
+ * orchestration read models.
+ *
+ * @module OrchestrationProjectionPipeline
+ */
+import type { OrchestrationEvent } from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
-// OrchestrationProjectionPipeline - Event projection pipeline service interface.
-//
-// coordinates projection bootstrap/replay and per-event projection updates for
-// orchestration read models.
-//
-// @module OrchestrationProjectionPipeline
-import type { OrchestrationEvent } from '@t3tools/contracts'
-import * as Context from 'effect/Context'
-import type * as Effect from 'effect/Effect'
-
-import type { ProjectionRepositoryError } from '../../persistence/Errors.ts'
+import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 
 /**
  * OrchestrationProjectionPipelineShape - Service API for projection execution.
  */
-export interface OrchestrationProjectionPipelineShape
-{
-  readonly verifyThreadAttachmentSet?: (input: {
-    readonly threadId: string
-    readonly expectedRelativePaths: ReadonlyArray<string>
-  }) => Effect.Effect<
-    {
-      readonly complete: boolean
-      readonly actualRelativePaths: ReadonlyArray<string>
-    },
-    Error
-  >
+export interface OrchestrationProjectionPipelineShape {
+  /**
+   * Bootstrap projections by replaying persisted events.
+   *
+   * Resumes each projector from its stored projection-state cursor.
+   */
+  readonly bootstrap: Effect.Effect<void, ProjectionRepositoryError>;
 
-  readonly cleanupDeletedThreadAttachments?: (threadId: string) => Effect.Effect<
-    {
-      readonly complete: boolean
-      readonly remainingRelativePaths: ReadonlyArray<string>
-    },
-    Error
-  >
-
-  // bootstrap projections by replaying persisted events.
-  //
-  // resumes each projector from its stored projection-state cursor.
-  readonly bootstrap: Effect.Effect<void, ProjectionRepositoryError>
-
-  // project a single orchestration event into projection repositories.
-  //
-  // projectors are executed sequentially to preserve deterministic ordering.
+  /**
+   * Project a single orchestration event into projection repositories.
+   *
+   * Projectors run sequentially in one transaction. Attachment cleanup runs
+   * after that transaction commits.
+   */
   readonly projectEvent: (
     event: OrchestrationEvent,
-  ) => Effect.Effect<void, ProjectionRepositoryError>
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Project an event inside a caller's transaction and return its attachment
+   * cleanup. Run the returned effect only after the outer transaction commits.
+   */
+  readonly projectEventDeferred: (
+    event: OrchestrationEvent,
+  ) => Effect.Effect<Effect.Effect<void>, ProjectionRepositoryError>;
 }
 
 /**
@@ -56,5 +48,4 @@ export interface OrchestrationProjectionPipelineShape
 export class OrchestrationProjectionPipeline extends Context.Service<
   OrchestrationProjectionPipeline,
   OrchestrationProjectionPipelineShape
->()('456code/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline')
-{}
+>()("t3/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}

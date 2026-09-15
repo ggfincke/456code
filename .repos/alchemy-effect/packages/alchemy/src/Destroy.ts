@@ -1,3 +1,4 @@
+import type { ConfigError } from "effect/Config";
 import { Effect } from "effect";
 import type * as Scope from "effect/Scope";
 import type { AlchemyContext } from "./AlchemyContext.ts";
@@ -13,7 +14,7 @@ export const destroy = ({
   dev,
   scope,
 }: {
-  stack: StackEffect<CompiledStack, Stage | AlchemyContext>;
+  stack: StackEffect<CompiledStack, ConfigError, Stage | AlchemyContext>;
   stage: string;
   dev?: boolean;
   /** See {@link evalStack} — when set, scoped resources outlive `destroy`. */
@@ -21,15 +22,6 @@ export const destroy = ({
 }) =>
   evalStack(
     stack,
-    (stack) =>
-      Plan.make({
-        ...stack,
-        // zero these out (destroy will treat all as orphans)
-        // TODO(sam): probably better to have Plan.destroy and Plan.update
-        resources: {},
-        bindings: {},
-        actions: {},
-        output: {},
-      }).pipe(Effect.flatMap(Apply.apply)),
+    (stack) => Plan.destroy(stack).pipe(Effect.flatMap(Apply.apply)),
     { stage, dev, scope },
   );

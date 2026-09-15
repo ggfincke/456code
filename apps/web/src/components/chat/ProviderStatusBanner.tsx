@@ -1,131 +1,96 @@
-// apps/web/src/components/chat/ProviderStatusBanner.tsx
-// render provider status banner
+import { type ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import { memo } from "react";
+import { InfoIcon, XIcon } from "lucide-react";
+import { cn } from "~/lib/utils";
+import { Button } from "../ui/button";
+import { formatProviderDriverKindLabel } from "../../providerModels";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-import { type ServerProvider } from '@t3tools/contracts'
-import { memo } from 'react'
-import { InfoIcon, XIcon } from 'lucide-react'
-import { cn } from '~/lib/utils'
-import { formatProviderDriverKindLabel } from '../../providerModels'
-import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
-
-// a token that expires mid-thread never reaches the server's provider probe:
-// the CLI is still installed and its cached auth status stays `authenticated`,
-// so the only client-visible signal is the session's `lastError` text. Match
-// conservatively — a false positive swaps a precise error for generic re-auth
-// guidance, so only phrasings that are unambiguously about authentication
-// promote to the re-auth banner.
-const PROVIDER_AUTH_ERROR_PATTERNS: ReadonlyArray<RegExp> = [
-  /\b401\b/u,
-  /\bunauthenticated\b/iu,
-  /\bunauthorized\b/iu,
-  /\bre-?authenticat/iu,
-  /\bauthentication (?:failed|expired|error|required)\b/iu,
-  /\bnot authenticated\b/iu,
-  /\b(?:credentials|api key|token|session|login) (?:has |have )?expired\b/iu,
-  /\binvalid api key\b/iu,
-  /\b(?:log|sign) ?in again\b/iu,
-]
-
-// whether a session/turn error reads as a provider authentication failure.
-export function isProviderAuthFailureMessage(message: string | null | undefined): boolean
-{
-  return message ? PROVIDER_AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(message)) : false
-}
-
-export function shouldPromoteThreadErrorToProviderReAuth(
-  status: ServerProvider | null,
-  visibleThreadError: string | null,
-): boolean
-{
-  return status !== null && isProviderAuthFailureMessage(visibleThreadError)
-}
-
-export function getProviderStatusBannerKey(
-  status: ServerProvider | null,
-  reAuthRequired = false,
-): string | null
-{
-  if (!status || (!reAuthRequired && (status.status === 'ready' || status.status === 'disabled')))
-  {
-    return null
-  }
-  // saved google credentials are checked when a session starts; keep other diagnostics visible.
+export function getProviderStatusBannerKey(status: ServerProvider | null): string | null {
+  if (!status || status.status === "ready" || status.status === "disabled") return null;
+  // Antigravity checks saved credentials when a session starts. Its local
+  // health check leaves auth unknown after a restart, which is not a failure.
   if (
-    !reAuthRequired &&
-    status.driver === 'antigravity' &&
+    status.driver === "antigravity" &&
     status.installed &&
-    status.status === 'warning' &&
-    status.auth.status === 'unknown' &&
-    status.message === 'Antigravity is installed. Google account access is not checked yet.'
-  )
-  {
-    return null
+    status.status === "warning" &&
+    status.auth.status === "unknown"
+  ) {
+    return null;
   }
-  return [
-    status.instanceId,
-    status.status,
-    status.auth.status,
-    status.message ?? '',
-    reAuthRequired ? 'reauth' : '',
-  ].join('\u0000')
+  return [status.instanceId, status.status, status.auth.status, status.message ?? ""].join(
+    "\u0000",
+  );
 }
 
 export function shouldShowProviderStatusBanner(
   status: ServerProvider | null,
   dismissedBannerKey: string | null,
-  reAuthRequired = false,
-): boolean
-{
-  const bannerKey = getProviderStatusBannerKey(status, reAuthRequired)
-  return bannerKey !== null && bannerKey !== dismissedBannerKey
+): boolean {
+  const bannerKey = getProviderStatusBannerKey(status);
+  return bannerKey !== null && bannerKey !== dismissedBannerKey;
+}
+
+export function hasProviderSetup(status: ServerProvider): boolean {
+  return (
+    status.driver === "antigravity" ||
+    status.setup?.canAuthenticate === true ||
+    status.setup?.canInstall === true
+  );
+}
+
+/** Keep the environment's error intact in both the banner and model picker. */
+export function getProviderStatusMessage(status: ServerProvider): string {
+  if (status.message) return status.message;
+  const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
+  if (!status.installed && hasProviderSetup(status)) {
+    return `Open provider setup to install ${formatProviderDriverKindLabel(status.driver)} on this environment.`;
+  }
+  if (status.auth.status === "unauthenticated") {
+    if (hasProviderSetup(status)) {
+      return status.driver === "antigravity"
+        ? "Open provider setup to sign in with Google."
+        : "Open provider setup to sign in.";
+    }
+    return "Sign in via the CLI to authenticate again.";
+  }
+  return status.status === "ready"
+    ? "No models are available for this provider."
+    : status.status === "error"
+      ? `${providerName} provider is unavailable.`
+      : `${providerName} provider has limited availability.`;
 }
 
 export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   onDismiss,
-  reAuthDetail = null,
-  reAuthRequired = false,
+  onOpenProviderSetup,
   status,
 }: {
-  onDismiss: () => void
-  // raw session error promoted into this banner; kept in the message so the
-  // provider's own wording is not lost behind the generic guidance.
-  reAuthDetail?: string | null
-  // forces the re-auth treatment for a provider the server still reports as
-  // healthy — see `isProviderAuthFailureMessage`.
-  reAuthRequired?: boolean
-  status: ServerProvider | null
-})
-{
-  if (!status || getProviderStatusBannerKey(status, reAuthRequired) === null)
-  {
-    return null
+  onDismiss: () => void;
+  onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
+  status: ServerProvider | null;
+}) {
+  if (!status || getProviderStatusBannerKey(status) === null) {
+    return null;
   }
 
-  const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver)
-  const isUnauthenticated =
-    reAuthRequired || (status.status === 'error' && status.auth.status === 'unauthenticated')
+  const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
+  const isUnauthenticated = status.status === "error" && status.auth.status === "unauthenticated";
   const title = isUnauthenticated
     ? `${providerName} is unauthenticated`
-    : `${providerName} provider status`
-  const reAuthGuidance = 'Sign in via the CLI to authenticate again.'
-  const message = isUnauthenticated
-    ? reAuthDetail
-      ? `${reAuthGuidance}\n\n${reAuthDetail}`
-      : reAuthGuidance
-    : (status.message ??
-      (status.status === 'error'
-        ? `${providerName} provider is unavailable.`
-        : `${providerName} provider has limited availability.`))
+    : `${providerName} provider status`;
+  const message = getProviderStatusMessage(status);
 
   return (
     <div className="pointer-events-auto mx-auto w-fit max-w-[calc(100%-2rem)] pt-3">
       <div
         className={cn(
-          'relative inline-flex items-center gap-3 rounded-xl border py-3 ps-3.5 pe-10 text-card-foreground text-sm',
-          status.status === 'warning' && !reAuthRequired
-            ? 'border-warning/32 bg-warning/4 [&_svg]:text-warning'
-            : 'border-destructive/32 bg-destructive/4 text-destructive-foreground [&_svg]:text-destructive',
+          "alert-glass relative inline-flex items-center gap-3 rounded-xl border py-3 ps-3.5 pe-10 text-card-foreground text-sm",
+          status.status === "warning"
+            ? "border-warning/32 [&_svg]:text-warning"
+            : "border-destructive/32 text-destructive-foreground [&_svg]:text-destructive",
         )}
+        data-variant={status.status === "warning" ? "warning" : "error"}
         role="alert"
       >
         <InfoIcon className="size-4 shrink-0" aria-hidden />
@@ -139,16 +104,27 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
               {message}
             </TooltipPopup>
           </Tooltip>
+          {onOpenProviderSetup && hasProviderSetup(status) ? (
+            <Button
+              className="self-start px-0 text-foreground"
+              onClick={() => onOpenProviderSetup(status.instanceId)}
+              size="xs"
+              variant="link"
+            >
+              Open provider setup
+            </Button>
+          ) : null}
         </div>
-        <button
-          type="button"
-          aria-label={`Dismiss ${providerName} provider ${reAuthRequired ? 'authentication' : status.status}`}
-          className="absolute top-2 right-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-foreground/8 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        <Button
+          aria-label={`Dismiss ${providerName} provider ${status.status}`}
+          className="absolute top-2 right-2 size-6 text-muted-foreground hover:text-foreground"
           onClick={onDismiss}
+          size="icon-xs"
+          variant="ghost"
         >
           <XIcon aria-hidden className="size-3.5" />
-        </button>
+        </Button>
       </div>
     </div>
-  )
-})
+  );
+});

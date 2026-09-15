@@ -1,8 +1,7 @@
-# 456code Mobile
+# T3 Code Mobile
 
 > [!WARNING]
-> 456code Mobile is an iPhone and iPad app currently in development and is not distributed yet. If
-> you want to try it out, you can build it from source.
+> T3 Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
 
 ## Quickstart
 
@@ -11,13 +10,13 @@
 
 This app has three variants:
 
-- `development`: Expo dev client, installable side-by-side as `456code Dev`
-- `preview`: persistent internal preview build, installable side-by-side as `456code Preview`
-- `production`: store/release build as `456code`
+- `development`: Expo dev client, installable side-by-side as `T3 Code Dev`
+- `preview`: persistent internal preview build, installable side-by-side as `T3 Code Preview`
+- `production`: store/release build as `T3 Code`
 
 Run commands from `apps/mobile`.
 
-Cloud relay access is optional and disabled in a fresh clone. Public configuration belongs in the
+T3 Connect is optional and disabled in a fresh clone. Public configuration belongs in the
 repository-root `.env` or `.env.local`, not an `apps/mobile/.env` file. See
 [`../../.env.example`](../../.env.example).
 
@@ -29,11 +28,28 @@ Start Metro for the dev client:
 vp run dev:client
 ```
 
+Metro keeps its transform cache between ordinary starts. If the cache itself is causing stale or
+invalid output, clear it for one development-client start:
+
+```bash
+vp run dev:client:reset
+```
+
+Run that reset once after installing or changing the Uniwind dependency patch. Cached transforms
+can otherwise reference its previous pnpm package path. Ordinary Metro starts still keep the cache.
+
+Component edits use Fast Refresh. See [mobile development lifecycle](../../docs/internals/mobile-development.md)
+before changing runtime ownership or refresh behavior.
+
 Build and run the local iOS dev client:
 
 ```bash
 vp run ios:dev
 ```
+
+After changing a native dependency patch, rerun CocoaPods before rebuilding an existing iOS
+project. pnpm gives each patch hash a new package path; Pods can otherwise keep compiling the
+previous directory.
 
 If your Xcode account only has a Personal Team, use a bundle identifier you control and opt into the
 reduced-capability local build. Personal Team builds omit the widget and share extensions, push
@@ -86,14 +102,13 @@ Run static checks for mobile native code:
 node ../../scripts/mobile-native-static-check.ts
 ```
 
-The native composer supports hardware submit with Command-Return. Touch Send remains available.
-
-The native lint task runs SwiftLint. A missing local installation is reported as a warning and
-skipped. CI installs the tool from `apps/mobile/Brewfile` before running the native checks.
+The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin. Missing native tools are reported as warnings and skipped locally. CI installs the default toolset from `apps/mobile/Brewfile` before running the native checks.
 
 ## EAS Builds
 
-CI uses Expo fingerprinting with the `preview:dev` profile to reuse an existing compatible build when possible, or start a new internal EAS build when native runtime inputs change. Production and default local builds continue to use the `appVersion` runtime policy.
+Preview and production variants use Expo fingerprinting so OTA updates only reach binaries with matching native dependencies, config plugins, and patches. CI uses the `preview:dev` profile to reuse a compatible native build when possible.
+
+The development variant uses `appVersion` to avoid recalculating the native fingerprint for each Metro launch manifest. `MOBILE_VERSION_POLICY` can override either default. If you distribute a custom Release build with the development identity and publish OTA updates to it, set `MOBILE_VERSION_POLICY=fingerprint` for both its build and updates. Changing the runtime policy requires a native rebuild for OTA matching; an existing dev client can still load local Metro bundles.
 
 For preview or production EAS environments, set `T3CODE_CLERK_PUBLISHABLE_KEY`,
 `T3CODE_CLERK_JWT_TEMPLATE`, and `T3CODE_RELAY_URL`
@@ -115,4 +130,12 @@ Create a persistent preview build:
 
 ```bash
 vp run eas:ios:preview
+```
+
+Android equivalents:
+
+```bash
+vp run eas:android:dev
+vp run eas:android:preview:dev
+vp run eas:android:preview
 ```

@@ -1,13 +1,15 @@
 import * as sns from "@distilled.cloud/aws/sns";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import { Unowned } from "../../AdoptPolicy.ts";
 import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
-import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags, hasAlchemyTags } from "../../Tags.ts";
 import type { AccountID } from "../Environment.ts";
+import type { Providers } from "../Providers.ts";
 import type { RegionID } from "../Region.ts";
 
 export type TopicName = string;
@@ -64,16 +66,15 @@ export interface Topic extends Resource<
  * available through the `attributes` prop so the full core pub/sub surface can
  * be configured without waiting on additional typed wrappers. A topic name is
  * auto-generated unless you provide one explicitly.
- *
- * @section Creating Topics
- * @example Standard Topic
+ * ### Creating Topics
+ * **Example:** Standard Topic
  * ```typescript
  * import * as SNS from "alchemy/AWS/SNS";
  *
  * const topic = yield* SNS.Topic("OrdersTopic");
  * ```
  *
- * @example Topic with Display Name
+ * **Example:** Topic with Display Name
  * ```typescript
  * const topic = yield* SNS.Topic("NotificationsTopic", {
  *   attributes: {
@@ -82,7 +83,7 @@ export interface Topic extends Resource<
  * });
  * ```
  *
- * @example FIFO Topic
+ * **Example:** FIFO Topic
  * ```typescript
  * const topic = yield* SNS.Topic("OrdersFifoTopic", {
  *   fifo: true,
@@ -92,14 +93,14 @@ export interface Topic extends Resource<
  * });
  * ```
  *
- * @section Runtime Publishing
+ * ### Runtime Publishing
  * Bind publish operations in the init phase and use them in runtime
  * handlers.
  *
- * @example Publish from a handler
+ * **Example:** Publish from a handler
  * ```typescript
  * // init
- * const publish = yield* SNS.Publish.bind(topic);
+ * const publish = yield* SNS.Publish(topic);
  *
  * return {
  *   fetch: Effect.gen(function* () {
@@ -113,15 +114,15 @@ export interface Topic extends Resource<
  * };
  * ```
  *
- * @section Subscriptions
+ * ### Subscriptions
  * Subscribe a Lambda function to process messages published to the
  * topic. The subscription and invoke permissions are created
  * automatically.
  *
- * @example Process topic notifications
+ * **Example:** Process topic notifications
  * ```typescript
  * // init
- * yield* SNS.notifications(topic).subscribe((stream) =>
+ * yield* SNS.consumeTopicNotifications(topic, (stream) =>
  *   stream.pipe(
  *     Stream.runForEach((message) =>
  *       Effect.log(`Received: ${message.Message}`),
@@ -129,11 +130,46 @@ export interface Topic extends Resource<
  *   ),
  * );
  * ```
+ *
+ * @resource
  */
 export const Topic = Resource<Topic>("AWS.SNS.Topic");
 
 export const TopicProvider = () =>
   Provider.succeed(Topic, {
+    // AWS account/region collection: `listTopics` enumerates every topic ARN
+    // in the ambient account+region (paginated, ARN-only), then each ARN is
+    // hydrated via `readTopic` into the exact `read` Attributes shape
+    // (attributes + tags + data protection policy). Per-item not-found is
+    // handled inside `readTopic` (returns undefined) for topics deleted
+    // between enumeration and hydration.
+    list: Effect.fn(function* () {
+      const topicArns = yield* sns.listTopics.pages({}).pipe(
+        Stream.runCollect,
+        Effect.map((chunk) =>
+          Array.from(chunk).flatMap((page) =>
+            (page.Topics ?? [])
+              .map((topic) => topic.TopicArn)
+              .filter((arn): arn is string => typeof arn === "string"),
+          ),
+        ),
+      );
+
+      const rows = yield* Effect.forEach(
+        topicArns,
+        (topicArn) =>
+          readTopic({
+            id: "",
+            topicArn,
+            topicName: topicArn.split(":").at(-1) ?? topicArn,
+          }),
+        { concurrency: 10 },
+      );
+
+      return rows.filter(
+        (row): row is NonNullable<typeof row> => row !== undefined,
+      );
+    }),
     read: Effect.fn(function* ({ id, olds, output }) {
       const topicName =
         output?.topicName ?? (yield* toTopicName(id, olds ?? {}));
@@ -339,27 +375,12 @@ const toAttributeMap = (
   );
 
 const findTopicArnByName = Effect.fn(function* (topicName: string) {
-  let nextToken: string | undefined;
-
-  while (true) {
-    const response = yield* sns.listTopics({
-      NextToken: nextToken,
-    });
-
-    const match = response.Topics?.find(
-      (topic) => topic.TopicArn?.split(":").at(-1) === topicName,
-    )?.TopicArn;
-
-    if (match) {
-      return match;
-    }
-
-    if (!response.NextToken) {
-      return undefined;
-    }
-
-    nextToken = response.NextToken;
-  }
+  const match = yield* sns.listTopics.items({}).pipe(
+    Stream.filter((topic) => topic.TopicArn?.split(":").at(-1) === topicName),
+    Stream.runHead,
+    Effect.map(Option.getOrUndefined),
+  );
+  return match?.TopicArn;
 });
 
 const readTopic = Effect.fn(function* ({
@@ -398,6 +419,13 @@ const readTopic = Effect.fn(function* ({
   ).pipe(
     Effect.catchTag("NotFoundException", () => Effect.succeed(undefined)),
     Effect.catchTag("InvalidParameterException", () =>
+      Effect.succeed(undefined),
+    ),
+    // `list()` hydrates every topic in the account, so a topic deleted by a
+    // parallel test between enumeration and hydration surfaces here —
+    // `listTagsForResource` reports it as `ResourceNotFoundException`. Treat a
+    // vanished topic as "not present" rather than failing the whole listing.
+    Effect.catchTag("ResourceNotFoundException", () =>
       Effect.succeed(undefined),
     ),
   );

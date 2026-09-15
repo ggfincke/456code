@@ -1,5 +1,5 @@
 import * as Cloudflare from "alchemy/Cloudflare";
-import * as Drizzle from "alchemy/Drizzle";
+import * as Drizzle from "alchemy/Drizzle/Postgres";
 import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import * as Effect from "effect/Effect";
@@ -11,11 +11,11 @@ import { relations, Users } from "./schema.ts";
 export default class Api extends Cloudflare.Worker<Api>()(
   "Api",
   {
-    main: import.meta.filename,
+    main: import.meta.url,
   },
   Effect.gen(function* () {
-    const conn = yield* Cloudflare.Hyperdrive.bind(Hyperdrive);
-    const db = yield* Drizzle.postgres(conn.connectionString, {
+    const conn = yield* Cloudflare.Hyperdrive.Connect(Hyperdrive);
+    const db = yield* Drizzle.Postgres(conn.connectionString, {
       relations,
     });
 
@@ -88,5 +88,5 @@ export default class Api extends Cloudflare.Worker<Api>()(
         }),
       ),
     };
-  }).pipe(Effect.provide(Layer.mergeAll(Cloudflare.HyperdriveBindingLive))),
+  }).pipe(Effect.provide(Layer.mergeAll(Cloudflare.Hyperdrive.ConnectBinding))),
 ) {}

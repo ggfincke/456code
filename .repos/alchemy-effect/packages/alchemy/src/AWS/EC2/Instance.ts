@@ -4,10 +4,8 @@ import { Region } from "@distilled.cloud/aws/Region";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import type * as rolldown from "rolldown";
 import * as Bundle from "../../Bundle/Bundle.ts";
 import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
 import { deepEqual, isResolved } from "../../Diff.ts";
@@ -23,13 +21,13 @@ import {
   createInternalTags,
   diffTags,
 } from "../../Tags.ts";
-import { Assets } from "../Assets.ts";
 import type { AccountID } from "../Environment.ts";
 import { AWSEnvironment } from "../Environment.ts";
 import type { PolicyStatement } from "../IAM/Policy.ts";
 import type { Providers } from "../Providers.ts";
 import type { RegionID } from "../Region.ts";
 import {
+  type Ec2HostedProps,
   createEc2HostRuntimeContext,
   createEc2HostedSupport,
   type Ec2HostRuntimeContext,
@@ -72,9 +70,10 @@ export interface InstanceProps extends PlatformProps {
    */
   securityGroupIds?: Input<SecurityGroupId>[];
   /**
-   * Optional EC2 key pair name for SSH access.
+   * Optional EC2 key pair name for SSH access. Accepts a reference such as
+   * `AWS.EC2.KeyPair(...).keyName`.
    */
-  keyName?: string;
+  keyName?: Input<string>;
   /**
    * Optional IAM instance profile name to attach at launch.
    */
@@ -124,12 +123,14 @@ export interface InstanceProps extends PlatformProps {
    */
   env?: Record<string, any>;
   /**
-   * Bundler configuration for the hosted process entrypoint.
+   * Bundler configuration for the hosted process entrypoint: rolldown
+   * `input`/`output` overrides plus pure-annotation options (`pure`).
+   * `effect`, `@effect/*`, `alchemy`, `@alchemy.run/*`, and
+   * `@distilled.cloud/*` are annotated as pure by default so unused code
+   * from those packages is tree-shaken; list additional packages via
+   * `pure.packages`, or disable with `pure: false`.
    */
-  build?: {
-    input?: Partial<rolldown.InputOptions>;
-    output?: Partial<rolldown.OutputOptions>;
-  };
+  build?: Bundle.BundleConfig;
   /**
    * Additional managed policy ARNs for the managed instance role.
    * This can only be used when Alchemy manages the instance profile.
@@ -253,13 +254,19 @@ export interface Instance extends Resource<
     };
   },
   {
+    /** Environment variables injected into the hosted instance runtime. */
     env?: Record<string, any>;
+    /** IAM policy statements attached to the instance profile role. */
     policyStatements?: PolicyStatement[];
   },
   Providers
 > {}
 
-export type InstanceServices = ServerHost | Credentials | Region;
+export type InstanceServices =
+  | ServerHost
+  | Credentials
+  | Region
+  | AWSEnvironment;
 
 export type InstanceShape = Main<InstanceServices>;
 
@@ -268,19 +275,18 @@ export type InstanceRuntimeContext = Ec2HostRuntimeContext;
 /**
  * An EC2 instance that can either act as a low-level compute primitive or run
  * a bundled long-lived Effect program directly on the machine.
- *
- * @section Launching Instances
- * @example Basic Instance
+ * ### Launching Instances
+ * **Example:** Basic Instance
  * ```typescript
  * const instance = yield* AWS.EC2.Instance("AppInstance", {
- *   imageId,
+ *   imageId: AWS.EC2.amazonLinux2023(),
  *   instanceType: "t3.micro",
  *   subnetId: subnet.subnetId,
  * });
  * ```
  *
- * @section Hosting Processes
- * @example HTTP Server on an Instance
+ * ### Hosting Processes
+ * **Example:** HTTP Server on an Instance
  * ```typescript
  * const api = yield* Effect.gen(function* () {
  *   yield* Http.serve(
@@ -288,8 +294,8 @@ export type InstanceRuntimeContext = Ec2HostRuntimeContext;
  *   );
  *
  *   return {
- *     main: import.meta.filename,
- *     imageId,
+ *     main: import.meta.url,
+ *     imageId: AWS.EC2.amazonLinux2023(),
  *     instanceType: "t3.small",
  *     subnetId: subnet.subnetId,
  *     securityGroupIds: [securityGroup.groupId],
@@ -301,6 +307,47 @@ export type InstanceRuntimeContext = Ec2HostRuntimeContext;
  *   AWS.EC2.Instance("ApiInstance"),
  * );
  * ```
+ *
+ * ### Bundling & Tree-shaking
+ * `main` is bundled with rolldown at deploy time. Top-level calls in the
+ * `effect`, `@effect/*`, `alchemy`, `@alchemy.run/*`, and
+ * `@distilled.cloud/*` packages receive `#__PURE__` annotations by
+ * default, so anything the hosted program doesn't use from those packages is
+ * tree-shaken out of the bundle. Any other package — including your own
+ * app — is left untouched unless you list it explicitly.
+ *
+ * **Example:** Treat additional packages as pure
+ * Pass package names (or picomatch globs) via `build.pure.packages` to
+ * annotate them in addition to the defaults.
+ * ```typescript
+ * {
+ *   main: import.meta.url,
+ *   build: {
+ *     pure: { packages: ["my-lib", "@my-scope/*"] },
+ *   },
+ * }
+ * ```
+ *
+ * Listing a package annotates calls whose result is bound (variable
+ * initializers, exports) — safe anywhere. If a listed package also
+ * declares `"sideEffects": false` (or `[]`) in its `package.json`, that
+ * combination opts it into full annotation: top-level calls whose result
+ * is discarded (e.g. `router.on("/path", handler)` registrations) are
+ * also marked pure and deleted under minification when unused. Only list
+ * a `sideEffects: false` package if its modules really are free of
+ * meaningful top-level side effects. The `effect`, `alchemy`, and
+ * `@distilled.cloud` defaults declare exactly that, on purpose — their
+ * modules are designed to be fully tree-shakeable.
+ *
+ * **Example:** Disable pure annotations
+ * ```typescript
+ * {
+ *   main: import.meta.url,
+ *   build: { pure: false },
+ * }
+ * ```
+ *
+ * @resource
  */
 export const Instance: Platform<
   Instance,
@@ -315,27 +362,24 @@ export const InstanceProvider = () =>
   Provider.effect(
     Instance,
     Effect.gen(function* () {
-      const region = yield* Region;
-      const { accountId } = yield* AWSEnvironment;
       const stack = yield* Stack;
       const stage = yield* Stage;
       const fs = yield* FileSystem.FileSystem;
       const virtualEntryPlugin = yield* Bundle.virtualEntryPlugin;
-      const assets = (yield* Effect.serviceOption(Assets)).pipe(
-        Option.getOrUndefined,
-      );
 
       const toInstanceArn = (instanceId: InstanceId) =>
-        `arn:aws:ec2:${region}:${accountId}:instance/${instanceId}` as InstanceArn;
+        AWSEnvironment.current.pipe(
+          Effect.map(
+            (env) =>
+              `arn:aws:ec2:${env.region}:${env.accountId}:instance/${instanceId}` as InstanceArn,
+          ),
+        );
 
       const hosted = createEc2HostedSupport({
-        accountId,
-        region,
         stackName: stack.name,
         stage,
         fs,
         virtualEntryPlugin,
-        assets,
         resourceType: "EC2.Instance",
       });
 
@@ -387,34 +431,34 @@ export const InstanceProvider = () =>
             .map((tag) => [tag.Key, tag.Value]),
         );
 
-      const toAttributes = (
-        instance: ec2.Instance,
-      ): Instance["Attributes"] => ({
-        instanceId: instance.InstanceId as InstanceId,
-        instanceArn: toInstanceArn(instance.InstanceId as InstanceId),
-        imageId: instance.ImageId!,
-        instanceType: String(instance.InstanceType ?? ""),
-        state: instance.State?.Name ?? "unknown",
-        vpcId: instance.VpcId as VpcId | undefined,
-        subnetId: instance.SubnetId as SubnetId | undefined,
-        availabilityZone: instance.Placement?.AvailabilityZone,
-        securityGroupIds: (instance.SecurityGroups ?? [])
-          .map((group) => group.GroupId)
-          .filter((value): value is string => Boolean(value)),
-        privateIpAddress: instance.PrivateIpAddress,
-        publicIpAddress: instance.PublicIpAddress,
-        privateDnsName: instance.PrivateDnsName,
-        publicDnsName: instance.PublicDnsName,
-        keyName: instance.KeyName,
-        instanceProfileArn: instance.IamInstanceProfile?.Arn,
-        instanceProfileId: instance.IamInstanceProfile?.Id,
-        instanceProfileName: undefined,
-        sourceDestCheck: instance.SourceDestCheck,
-        launchTime:
-          instance.LaunchTime instanceof Date
-            ? instance.LaunchTime.toISOString()
-            : (instance.LaunchTime as string | undefined),
-        tags: toTagRecord(instance.Tags),
+      const toAttributes = Effect.fn(function* (instance: ec2.Instance) {
+        return {
+          instanceId: instance.InstanceId as InstanceId,
+          instanceArn: yield* toInstanceArn(instance.InstanceId as InstanceId),
+          imageId: instance.ImageId!,
+          instanceType: String(instance.InstanceType ?? ""),
+          state: instance.State?.Name ?? "unknown",
+          vpcId: instance.VpcId as VpcId | undefined,
+          subnetId: instance.SubnetId as SubnetId | undefined,
+          availabilityZone: instance.Placement?.AvailabilityZone,
+          securityGroupIds: (instance.SecurityGroups ?? [])
+            .map((group) => group.GroupId)
+            .filter((value): value is string => Boolean(value)),
+          privateIpAddress: instance.PrivateIpAddress,
+          publicIpAddress: instance.PublicIpAddress,
+          privateDnsName: instance.PrivateDnsName,
+          publicDnsName: instance.PublicDnsName,
+          keyName: instance.KeyName,
+          instanceProfileArn: instance.IamInstanceProfile?.Arn,
+          instanceProfileId: instance.IamInstanceProfile?.Id,
+          instanceProfileName: undefined,
+          sourceDestCheck: instance.SourceDestCheck,
+          launchTime:
+            instance.LaunchTime instanceof Date
+              ? instance.LaunchTime.toISOString()
+              : (instance.LaunchTime as string | undefined),
+          tags: toTagRecord(instance.Tags),
+        } satisfies Instance["Attributes"];
       });
 
       const describeInstance = (instanceId: string) =>
@@ -436,8 +480,21 @@ export const InstanceProvider = () =>
             ),
           );
 
-      const findInstanceByTags = Effect.fn(function* (id: string) {
-        const filters = yield* createAlchemyTagFilters(id);
+      // Generation-scoped recovery lookup: instances are branded with the
+      // engine's per-generation instance id (`alchemy::instance`) on top of
+      // the stack/stage/id ownership tags. An interrupted create resumes with
+      // the same generation id, so it still recovers its own orphan — while a
+      // replacement's create phase runs under a freshly minted generation id
+      // and can never re-adopt the old generation's live instance that the
+      // cleanup phase is about to terminate.
+      const findInstanceByTags = Effect.fn(function* (
+        id: string,
+        generation: string,
+      ) {
+        const filters = [
+          ...(yield* createAlchemyTagFilters(id)),
+          { Name: "tag:alchemy::instance", Values: [generation] },
+        ];
         return yield* ec2.describeInstances
           .items({
             Filters: filters,
@@ -501,9 +558,10 @@ export const InstanceProvider = () =>
             while: (error) =>
               error instanceof InstanceStateMismatch ||
               isPendingInstanceLookupError(error),
-            schedule: Schedule.exponential("250 millis").pipe(
-              Schedule.both(Schedule.recurs(8)),
-            ),
+            schedule: Schedule.max([
+              Schedule.exponential("250 millis"),
+              Schedule.recurs(8),
+            ]),
           }),
         );
       });
@@ -528,9 +586,12 @@ export const InstanceProvider = () =>
           ),
           Effect.retry({
             while: (error) => error instanceof InstanceStillExists,
-            schedule: Schedule.exponential("250 millis").pipe(
-              Schedule.both(Schedule.recurs(8)),
-            ),
+            // Termination (shutting-down -> terminated) can take a couple of
+            // minutes; the prior ~64s budget timed out intermittently.
+            schedule: Schedule.max([
+              Schedule.spaced("5 seconds"),
+              Schedule.recurs(48),
+            ]),
           }),
           Effect.catchTag("InvalidInstanceID.NotFound", () => Effect.void),
           Effect.catchTag("InstanceNotFound", () => Effect.void),
@@ -554,7 +615,7 @@ export const InstanceProvider = () =>
             {
               imageId: news.imageId,
               instanceType: news.instanceType,
-              keyName: news.keyName,
+              keyName: news.keyName as string | undefined,
               subnetId: news.subnetId as string | undefined,
               securityGroupIds: news.securityGroupIds as string[] | undefined,
               associatePublicIpAddress: news.associatePublicIpAddress,
@@ -571,7 +632,64 @@ export const InstanceProvider = () =>
 
       return {
         stables: ["instanceId", "instanceArn", "vpcId", "subnetId"],
-        diff: Effect.fn(function* ({ news, olds }) {
+        list: () =>
+          Effect.gen(function* () {
+            // describeInstances paginates; each page nests instances under
+            // Reservations[].Instances[]. Enumerate every non-terminated
+            // instance in the ambient account/region.
+            const instances = yield* ec2.describeInstances.pages({}).pipe(
+              Stream.runCollect,
+              Effect.map((chunk) =>
+                Array.from(chunk).flatMap((page) =>
+                  (page.Reservations ?? []).flatMap(
+                    (reservation) => reservation.Instances ?? [],
+                  ),
+                ),
+              ),
+            );
+            return yield* Effect.forEach(
+              instances.filter(
+                (instance) => instance.State?.Name !== "terminated",
+              ),
+              (instance) => toAttributes(instance),
+            );
+          }),
+        diff: Effect.fn(function* ({ id, news, olds, output }) {
+          // The hosted bundle hash must participate in planning even while
+          // OTHER props are unresolved Outputs (an `imageId` AMI lookup, a
+          // subnet reference): a content-only edit changes no prop at all,
+          // so bailing on full resolution silently no-ops the update. The
+          // content inputs are plain — gate on THEM, not on the whole bag
+          // (the same isResolved-defeats-content-diff bug the MicroVM image
+          // diff had).
+          const raw = news as unknown as Record<string, unknown>;
+          const contentInputs = {
+            main: raw.main,
+            handler: raw.handler,
+            build: raw.build,
+            port: raw.port,
+            // `isExternal` chooses the bundler entry (raw file vs virtual
+            // `export default` wrapper). Omitting it here re-bundles an
+            // external program as an Effect entrypoint and fails the plan
+            // with MISSING_EXPORT when the source has no default export.
+            isExternal: raw.isExternal,
+          };
+          if (
+            isResolved(contentInputs) &&
+            contentInputs.main !== undefined &&
+            output?.code?.hash
+          ) {
+            const { hash } = yield* hosted.bundleProgram(
+              id,
+              contentInputs as unknown as Ec2HostedProps,
+            );
+            if (hash !== output.code.hash) {
+              return {
+                action: "update",
+                stables: ["instanceId", "instanceArn", "vpcId", "subnetId"],
+              } as const;
+            }
+          }
           if (!isResolved(news)) return;
           const hostModeChanged = Boolean(olds.main) !== Boolean(news.main);
           if (
@@ -611,8 +729,11 @@ export const InstanceProvider = () =>
               stables: ["instanceId", "instanceArn", "vpcId", "subnetId"],
             } as const;
           }
+
+          // Content-only changes were already handled by the resolved-subset
+          // bundle-hash check above.
         }),
-        read: Effect.fn(function* ({ id, output }) {
+        read: Effect.fn(function* ({ id, instanceId, output }) {
           const instance = output?.instanceId
             ? yield* describeInstance(output.instanceId).pipe(
                 Effect.catchTag("InvalidInstanceID.NotFound", () =>
@@ -622,10 +743,10 @@ export const InstanceProvider = () =>
                   Effect.succeed(undefined),
                 ),
               )
-            : yield* findInstanceByTags(id);
+            : yield* findInstanceByTags(id, instanceId);
           return instance
             ? {
-                ...toAttributes(instance),
+                ...(yield* toAttributes(instance)),
                 instanceProfileName: output?.instanceProfileName,
                 roleArn: output?.roleArn,
                 roleName: output?.roleName,
@@ -639,6 +760,7 @@ export const InstanceProvider = () =>
         }),
         reconcile: Effect.fn(function* ({
           id,
+          instanceId: generation,
           news,
           output,
           bindings,
@@ -646,6 +768,8 @@ export const InstanceProvider = () =>
         }) {
           const desiredTags = {
             ...(yield* createInternalTags(id)),
+            // Generation brand consumed by the recovery lookup above.
+            "alchemy::instance": generation,
             ...news.tags,
           };
           const runtime = yield* hosted.resolveHostedRuntime({
@@ -668,7 +792,7 @@ export const InstanceProvider = () =>
                   Effect.succeed(undefined),
                 ),
               )
-            : yield* findInstanceByTags(id);
+            : yield* findInstanceByTags(id, generation);
 
           // A terminated instance is a tombstone; treat as missing so we
           // launch a fresh one.
@@ -687,9 +811,10 @@ export const InstanceProvider = () =>
               .pipe(
                 Effect.retry({
                   while: isPendingInstanceProfileError,
-                  schedule: Schedule.exponential("500 millis").pipe(
-                    Schedule.both(Schedule.recurs(8)),
-                  ),
+                  schedule: Schedule.max([
+                    Schedule.exponential("500 millis"),
+                    Schedule.recurs(8),
+                  ]),
                 }),
               );
             const newInstanceId = created.Instances?.[0]?.InstanceId as
@@ -726,6 +851,7 @@ export const InstanceProvider = () =>
           );
           if (
             desiredSecurityGroups &&
+            desiredSecurityGroups.length > 0 &&
             JSON.stringify([...observedSecurityGroups].sort()) !==
               JSON.stringify([...desiredSecurityGroups].sort())
           ) {
@@ -813,7 +939,7 @@ export const InstanceProvider = () =>
           // Re-read final state so attributes reflect the post-sync cloud.
           const final = yield* describeInstance(instanceId);
           return {
-            ...toAttributes(final),
+            ...(yield* toAttributes(final)),
             instanceProfileName:
               runtime.instanceProfileName ?? output?.instanceProfileName,
             roleArn: runtime.roleArn ?? output?.roleArn,

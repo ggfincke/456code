@@ -82,9 +82,8 @@ export interface Function extends Resource<
  *
  * CloudFront Functions are lightweight JavaScript handlers that run at the
  * edge and can be attached to distribution cache behaviors.
- *
- * @section Creating Functions
- * @example Viewer Request Function
+ * ### Creating Functions
+ * **Example:** Viewer Request Function
  * ```typescript
  * const fn = yield* Function("RouterRequestFunction", {
  *   code: `
@@ -97,6 +96,8 @@ export interface Function extends Resource<
  * `,
  * });
  * ```
+ *
+ * @resource
  */
 export const Function = Resource<Function>("AWS.CloudFront.Function");
 
@@ -153,6 +154,24 @@ export const FunctionProvider = () =>
 
       return {
         stables: ["functionArn", "functionName"],
+        // CloudFront is global; listFunctions enumerates every function in the
+        // account. It is non-paginated in distilled but uses Marker/NextMarker,
+        // so we page manually until NextMarker is absent. All CloudFront
+        // functions are custom (no AWS-managed ones), so every item is ours.
+        list: () =>
+          Effect.gen(function* () {
+            const items: Function["Attributes"][] = [];
+            let marker: string | undefined = undefined;
+            do {
+              const listed: cloudfront.ListFunctionsResult =
+                yield* cloudfront.listFunctions({ Marker: marker });
+              for (const summary of listed.FunctionList?.Items ?? []) {
+                items.push(toAttrs(summary, undefined, summary.Name ?? ""));
+              }
+              marker = listed.FunctionList?.NextMarker;
+            } while (marker);
+            return items;
+          }),
         diff: Effect.fn(function* ({ id, olds, news: _news }) {
           if (!isResolved(_news)) return undefined;
           const news = _news as typeof olds;
@@ -215,9 +234,7 @@ export const FunctionProvider = () =>
                     Effect.retry({
                       while: (error) =>
                         error._tag === "InvalidArgument" &&
-                        isKeyValueStoreAssociationPending(
-                          error as { Message?: string },
-                        ),
+                        isKeyValueStoreAssociationPending(error),
                       schedule: cappedCloudFrontRetrySchedule,
                     }),
                   );
@@ -250,9 +267,7 @@ export const FunctionProvider = () =>
                 Effect.retry({
                   while: (error) =>
                     error._tag === "InvalidArgument" &&
-                    isKeyValueStoreAssociationPending(
-                      error as { Message?: string },
-                    ),
+                    isKeyValueStoreAssociationPending(error),
                   schedule: cappedCloudFrontRetrySchedule,
                 }),
               );
@@ -315,20 +330,24 @@ const isFunctionDeletePending = (error: {
 }): error is cloudfront.FunctionInUse | cloudfront.PreconditionFailed =>
   error._tag === "FunctionInUse" || error._tag === "PreconditionFailed";
 
-const isKeyValueStoreAssociationPending = (error: { Message?: string }) => {
-  const message = error.Message ?? "";
+const isKeyValueStoreAssociationPending = (error: { message?: string }) => {
+  const message = error.message ?? "";
   return (
     message.includes("KeyValueStoreAssociationArn") &&
     message.includes("cannot be associated before the resource is provisioned")
   );
 };
 
-const cappedCloudFrontRetrySchedule = Schedule.exponential("100 millis").pipe(
-  Schedule.both(Schedule.recurs(24)),
-  Schedule.map(([duration]) =>
-    Duration.isGreaterThan(duration, Duration.seconds(2))
-      ? Duration.seconds(2)
-      : duration,
+const cappedCloudFrontRetrySchedule = Schedule.max([
+  Schedule.exponential("100 millis"),
+  Schedule.recurs(24),
+]).pipe(
+  Schedule.modifyDelay(({ duration }) =>
+    Effect.succeed(
+      Duration.isGreaterThan(duration, Duration.seconds(2))
+        ? Duration.seconds(2)
+        : duration,
+    ),
   ),
 );
 
@@ -359,7 +378,7 @@ const toAttrs = (
   functionArn: summary.FunctionMetadata.FunctionARN,
   functionName: summary.Name || fallbackName,
   runtime: summary.FunctionConfig.Runtime,
-  comment: summary.FunctionConfig.Comment,
+  comment: summary.FunctionConfig.Comment ?? "",
   stage: summary.FunctionMetadata.Stage ?? "DEVELOPMENT",
   status: summary.Status ?? "UNKNOWN",
   lastModifiedTime: summary.FunctionMetadata.LastModifiedTime,

@@ -1,18 +1,16 @@
-import * as ops from "@distilled.cloud/planetscale/Operations";
+import * as ps from "@distilled.cloud/planetscale";
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import type { ScopedPlanStatusSession } from "../Cli/Cli.ts";
 
-export const DEFAULT_MIGRATIONS_TABLE = "__alchemy_migrations";
-
 /**
  * Tagged error raised when polling for a state predicate that has not yet
  * been reached. Used internally with `Effect.retry` to drive long-running
  * status waits.
  */
-class NotReady extends Data.TaggedError("Planetscale::NotReady")<{
+export class NotReady extends Data.TaggedError("Planetscale::NotReady")<{
   description: string;
 }> {}
 
@@ -29,13 +27,16 @@ export class PlanetscaleConflict extends Data.TaggedError(
 }> {}
 
 /**
- * Default polling schedule: 5s spaced retries with a 10-minute total
- * budget (120 × 5s). Avoids the exponential-blowup trap where later
- * iterations would wait hours, indistinguishable from a hang.
+ * Default polling schedule: 5s spaced retries with a 30-minute total
+ * budget (360 × 5s). Avoids the exponential-blowup trap where later
+ * iterations would wait hours, indistinguishable from a hang. Postgres
+ * database creates routinely run 10-12 minutes, so a 10-minute budget
+ * regularly false-positives as "stuck".
  */
-const defaultSchedule = Schedule.spaced("5 seconds").pipe(
-  Schedule.both(Schedule.recurs(120)),
-);
+const defaultSchedule = Schedule.max([
+  Schedule.spaced("5 seconds"),
+  Schedule.recurs(360),
+]);
 
 /**
  * Generic polling helper that retries until `predicate(value)` returns true
@@ -87,7 +88,7 @@ export const waitForBranchReady = Effect.fn(function* (
           `Waiting for branch to be ready... (${seconds} seconds elapsed; this can take a few minutes)`,
         );
       }
-      return yield* ops.getBranch({ organization, database, branch });
+      return yield* ps.getBranch({ organization, database, branch });
     }).pipe(
       Effect.catchTag("NotFound", () =>
         Effect.fail(
@@ -124,7 +125,7 @@ export const waitForDatabaseReady = Effect.fn(function* (
           `Waiting for database to be ready... (${seconds} seconds elapsed; this can take a few minutes)`,
         );
       }
-      return yield* ops.getDatabase({ organization, database });
+      return yield* ps.getDatabase({ organization, database });
     }).pipe(
       Effect.catchTag("NotFound", () =>
         Effect.fail(
@@ -144,17 +145,3 @@ export const isKnownError =
     error !== null &&
     (error as { readonly _tag?: unknown })._tag === tag &&
     (error as { readonly message?: unknown }).message === message;
-
-// todo: this repeats across Neon, D1, and PlanetScale resources so maybe we should move it to Diff? or Util?
-export const recordsEqual = (
-  a: Record<string, string>,
-  b: Record<string, string>,
-): boolean => {
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  for (const k of aKeys) {
-    if (a[k] !== b[k]) return false;
-  }
-  return true;
-};

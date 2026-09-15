@@ -1,12 +1,8 @@
-// apps/server/src/persistence/Migrations/020_AuthAccessManagement.ts
-// apply persistence migration 020 auth access management
+import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import * as Effect from 'effect/Effect'
-import * as SqlClient from 'effect/unstable/sql/SqlClient'
-
-export default Effect.gen(function* ()
-{
-  const sql = yield* SqlClient.SqlClient
+export default Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS auth_pairing_links (
@@ -20,12 +16,12 @@ export default Effect.gen(function* ()
       consumed_at TEXT,
       revoked_at TEXT
     )
-  `
+  `;
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_auth_pairing_links_active
     ON auth_pairing_links(revoked_at, consumed_at, expires_at)
-  `
+  `;
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -37,10 +33,10 @@ export default Effect.gen(function* ()
       expires_at TEXT NOT NULL,
       revoked_at TEXT
     )
-  `
+  `;
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_active
     ON auth_sessions(revoked_at, expires_at, issued_at)
-  `
-})
+  `;
+});

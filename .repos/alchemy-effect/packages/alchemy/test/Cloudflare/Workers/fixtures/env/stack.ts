@@ -1,5 +1,6 @@
-import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@/Cloudflare";
+import * as Alchemy from "@/index";
+import * as Output from "@/Output";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
@@ -10,7 +11,7 @@ export type AsyncWorkerEnv = Cloudflare.InferEnv<typeof AsyncWorker>;
 
 export const AsyncWorker = Cloudflare.Worker("EnvAsyncWorker", {
   main: path.resolve(import.meta.dirname, "async.ts"),
-  url: true,
+  workersDev: true,
   env: {
     STR: "hello",
     NUM: 42,
@@ -18,6 +19,8 @@ export const AsyncWorker = Cloudflare.Worker("EnvAsyncWorker", {
     NULL: null,
     OBJ: { nested: { value: "ok" }, count: 7 },
     ARR: [1, 2, 3],
+    OUTPUT_STR: Output.literal("output-str"),
+    RANDOM: Alchemy.makeRandom("WorkerEnvRandom"),
     SECRET_STR: Redacted.make("shh"),
     SECRET_JSON: Redacted.make({
       token: "abc",
@@ -26,6 +29,7 @@ export const AsyncWorker = Cloudflare.Worker("EnvAsyncWorker", {
     CONFIG_STR: Config.string("CONFIG_STR"),
     CONFIG_NUM: Config.number("CONFIG_NUM"),
     CONFIG_REDACTED: Config.redacted("CONFIG_REDACTED"),
+    CF_VERSION_METADATA: Cloudflare.Workers.VersionMetadata(),
   },
 });
 
@@ -41,6 +45,7 @@ export default Alchemy.Stack(
 
     return {
       asyncUrl: asyncWorker.url.as<string>(),
+      asyncWorkerName: asyncWorker.workerName,
       effectUrl: effectWorker.url.as<string>(),
     };
   }),

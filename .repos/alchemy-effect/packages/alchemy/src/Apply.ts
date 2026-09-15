@@ -1,8 +1,21 @@
 import * as Cause from "effect/Cause";
+import type { ConfigError } from "effect/Config";
+import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import type { PlatformError } from "effect/PlatformError";
 import type { Simplify } from "effect/Types";
+import type { ActionLike } from "./Action.ts";
+import { makeResolveContext } from "./ActionRuntimeContext.ts";
+import { stripUnowned, Unowned } from "./AdoptPolicy.ts";
+import { AlchemyContext } from "./AlchemyContext.ts";
+import type { AuthError } from "./Auth/AuthProvider.ts";
+import {
+  type CredentialsRequired,
+  demandPlanCredentials,
+} from "./Auth/Demand.ts";
+import { RuntimeContext } from "./RuntimeContext.ts";
 import {
   Artifacts,
   ArtifactStore,
@@ -16,8 +29,7 @@ import {
   Cli,
 } from "./Cli/Cli.ts";
 import type { ApplyStatus } from "./Cli/Event.ts";
-import { havePropsChanged } from "./Diff.ts";
-import { toFqn } from "./FQN.ts";
+import { havePropsChanged, stripUnresolved } from "./Diff.ts";
 import type { Input } from "./Input.ts";
 import { generateInstanceId, InstanceId } from "./InstanceId.ts";
 import * as Output from "./Output.ts";
@@ -27,7 +39,12 @@ import {
   type Delete,
   type Plan,
 } from "./Plan.ts";
-import { findProviderByType } from "./Provider.ts";
+import {
+  findProviderByType,
+  missingProviderError,
+  tryFindProviderByType,
+} from "./Provider.ts";
+import { stampedMode, type ProviderMode } from "./ProviderMode.ts";
 import type { ResourceBinding } from "./Resource.ts";
 import { Stack } from "./Stack.ts";
 import { Stage } from "./Stage.ts";
@@ -39,6 +56,7 @@ import {
   type PersistedState,
   type RanActionState,
   type ReplacedResourceState,
+  type ReplacementOldResourceState,
   type ReplacingResourceState,
   type ResourceState,
   type RunningActionState,
@@ -48,7 +66,7 @@ import {
   StateStoreError,
 } from "./State/index.ts";
 import { type ResourceOp, recordResourceOp } from "./Telemetry/Metrics.ts";
-import { hashInput } from "./Util/hash.ts";
+import { hashInput } from "./Util/sha256.ts";
 
 export type ApplyEffect<
   P extends Plan,
@@ -132,10 +150,31 @@ export const apply = <P extends Plan>(
   plan: P,
 ): Effect.Effect<
   Input.Resolve<P["output"]>,
-  Output.InvalidReferenceError | Output.MissingSourceError | StateStoreError,
+  | Output.InvalidReferenceError
+  | Output.MissingSourceError
+  | StateStoreError
+  | DestroyError
+  | CredentialsRequired
+  | AuthError
+  | PlatformError
+  | ConfigError,
   Cli | State | Stack | Stage
 > =>
   Effect.gen(function* () {
+    // Credential-free dev: a dev-mode plan that needs the real cloud
+    // (`Alchemy.remote()` rows, remote-proxied bindings, deletions of rows
+    // stamped `providerMode: "live"`) demands cloud credentials exactly
+    // once, up front, BEFORE any lifecycle operation runs — a fully-local
+    // dev plan demands nothing. Non-dev runs never enter the seam: live
+    // providers keep the pre-existing lazy credential flow. Wired here (not
+    // in Deploy/Destroy) because `apply` is the single choke point every
+    // path shares — CLI deploy/destroy, `Test.make` deploys, and
+    // `test.provider` scratch stacks. See `Auth/Demand.ts`.
+    const alchemy = yield* Effect.serviceOption(AlchemyContext);
+    if (Option.isSome(alchemy) && alchemy.value.dev) {
+      yield* demandPlanCredentials(plan);
+    }
+
     const cli = yield* Cli;
     const session = yield* cli.startApplySession(plan);
     const state = yield* yield* State;
@@ -150,8 +189,56 @@ export const apply = <P extends Plan>(
         id: string;
         type: string;
         status: Extract<ApplyStatus, "created" | "updated" | "ran" | "skipped">;
+        providerMode?: ProviderMode;
       }
     >();
+
+    // ── FQN migrations (renamedFrom) ──
+    // Persist renames before any lifecycle operation runs: a node whose row
+    // was found under a former FQN carries that row pre-remapped in
+    // `node.state` (see Plan's rename resolution). Commit it at the current
+    // FQN FIRST, then drop the former row — in that order, so an
+    // interruption leaves rows at both FQNs with the same instanceId, which
+    // the next plan recognizes as an in-flight migration (and never as an
+    // orphan to delete).
+    //
+    // In a same-deploy shift (A→B while B→C), C's former FQN `B` is
+    // simultaneously B's migration TARGET. C must NOT delete it: B's own
+    // `state.set` supersedes the stale copy, and the migrations run
+    // concurrently — the delete could land after B's write and destroy the
+    // freshly migrated row.
+    const migrationTargets = new Set(
+      Object.values(plan.resources)
+        .filter((node) => node.renamedFrom?.length && node.state !== undefined)
+        .map((node) => node.resource.FQN),
+    );
+    yield* Effect.forEach(
+      Object.values(plan.resources),
+      (node) => {
+        const { renamedFrom, state: row } = node;
+        return renamedFrom === undefined ||
+          renamedFrom.length === 0 ||
+          row === undefined
+          ? Effect.void
+          : Effect.gen(function* () {
+              yield* state.set({
+                stack: stackName,
+                stage,
+                fqn: node.resource.FQN,
+                value: row,
+              });
+              yield* Effect.forEach(
+                renamedFrom.filter(
+                  (formerFqn) => !migrationTargets.has(formerFqn),
+                ),
+                (formerFqn) =>
+                  state.delete({ stack: stackName, stage, fqn: formerFqn }),
+                { concurrency: "unbounded" },
+              );
+            });
+      },
+      { concurrency: "unbounded" },
+    );
 
     yield* executePlan(
       plan,
@@ -181,12 +268,39 @@ export const apply = <P extends Plan>(
 
     yield* Effect.forEach(
       Array.from(terminalStatuses.values()),
-      ({ id, type, status }) =>
-        session.emit({ kind: "status-change", id, type, status }),
+      ({ id, type, status, providerMode }) =>
+        session.emit({ kind: "status-change", id, type, status, providerMode }),
       { concurrency: "unbounded" },
     );
 
     yield* session.done();
+
+    if (plan.destroy) {
+      // The destroy converged: every resource row was deleted above. Drop
+      // the rest of the stage's persisted state — notably the stack output
+      // record written by the last deploy — so `getOutput` returns
+      // undefined and `listStages` no longer reports the stage.
+      // https://github.com/alchemy-run/alchemy/issues/961
+      yield* state.deleteStack({ stack: stackName, stage });
+      // Invariant: a successful destroy leaves the stage EMPTY. If rows
+      // survive, this destroy session could not actually see (or delete)
+      // the stack's state — e.g. its plan listed an empty store while
+      // committed rows existed — and reporting success here would silently
+      // leak every cloud resource those rows track. Fail loudly instead so
+      // the leak surfaces in the run that caused it.
+      const remaining = yield* state.list({ stack: stackName, stage });
+      if (remaining.length > 0) {
+        return yield* Effect.fail(
+          new StateStoreError({
+            message:
+              `destroy of ${stackName}/${stage} reported success but ${remaining.length} ` +
+              `state row(s) remain (${remaining.join(", ")}) — the destroy session could ` +
+              `not see the stack's persisted state, so its cloud resources were NOT deleted`,
+          }),
+        );
+      }
+      return undefined;
+    }
 
     if (!plan.output) {
       return undefined;
@@ -220,7 +334,7 @@ export const apply = <P extends Plan>(
 // downstream resources can resolve stable identifiers without deadlocking.
 // The actual output lives in the mutable `tracker` map, not in the Deferred.
 
-const executePlan = Effect.fnUntraced(function* (
+const executePlan = Effect.fn(function* (
   plan: Plan,
   tracker: Record<string, ResourceTracker>,
   terminalStatuses: Map<
@@ -229,6 +343,7 @@ const executePlan = Effect.fnUntraced(function* (
       id: string;
       type: string;
       status: Extract<ApplyStatus, "created" | "updated" | "ran" | "skipped">;
+      providerMode?: ProviderMode;
     }
   >,
   session: PlanStatusSession,
@@ -353,7 +468,9 @@ const executePlan = Effect.fnUntraced(function* (
     // Aggregate every collected lifecycle failure into a single parallel Cause
     // so the apply ends with one combined error containing every distinct
     // failure / defect that occurred across the concurrent fibers.
-    yield* Effect.failCause(failures.map((f) => f.cause).reduce(Cause.combine));
+    return yield* Effect.failCause(
+      failures.map((f) => f.cause).reduce(Cause.combine),
+    );
   }
 });
 
@@ -376,6 +493,7 @@ const executeNode = (
       id: string;
       type: string;
       status: Extract<ApplyStatus, "created" | "updated">;
+      providerMode?: ProviderMode;
     }
   >,
   session: PlanStatusSession,
@@ -403,7 +521,25 @@ const executeNode = (
         stack: stackName,
         stage,
         fqn,
-        value: { ...value, namespace } as S,
+        // Early commits (`creating`/`replacing`) persist plan props that may
+        // still hold unresolved Output exprs; strip them so state stores only
+        // plain data (see stripUnresolved in Diff.ts).
+        //
+        // Binding rows follow the same rule. Even the RESOLVED binding
+        // payload can carry Effect leaves — a tagged Worker/Function class in
+        // `env` (the circular-bindings pattern) is a function-typed Effect
+        // that `Output.evaluate` passes through untouched. A JSON state store
+        // would persist it via its `toJSON` as an `{"_id":"Effect",...}`
+        // relic, which the next plan's `diffBindings` compares against the
+        // live class stripped to `undefined` — a phantom binding "update" on
+        // every deploy, forever. Stripping at the commit boundary keeps both
+        // store kinds consistent with the comparison in `havePropsChanged`.
+        value: {
+          ...value,
+          props: stripUnresolved(value.props),
+          bindings: stripUnresolved(value.bindings),
+          namespace,
+        } as S,
       });
 
     const scopedSession = {
@@ -412,12 +548,24 @@ const executeNode = (
         session.emit({ id: logicalId, kind: "annotate", message: note }),
     } satisfies ScopedPlanStatusSession;
 
+    // On a mode-switch replacement (local ⇄ live) surface the transition:
+    // the old generation's stamped mode → the mode resolved for this run.
+    const fromProviderMode =
+      node.action === "replace" &&
+      node.mode !== undefined &&
+      node.state.providerMode !== undefined &&
+      node.state.providerMode !== node.mode
+        ? node.state.providerMode
+        : undefined;
+
     const report = (status: ApplyStatus) =>
       session.emit({
         kind: "status-change",
         id: logicalId,
         type: node.resource.Type,
         status,
+        providerMode: node.mode,
+        fromProviderMode,
       });
 
     const markTerminal = (status: "created" | "updated") =>
@@ -426,7 +574,18 @@ const executeNode = (
           id: logicalId,
           type: node.resource.Type,
           status,
+          providerMode: node.mode,
         });
+        // A local dev instance announces where it's serving: any
+        // local-mode row whose fresh Attributes carry a string `url`
+        // (Workers expose their dev-proxy URL this way) gets a
+        // `[id] ready at http://localhost:1337` line.
+        if (node.mode === "local") {
+          const url = (tracker[fqn]?.output as { url?: unknown })?.url;
+          if (typeof url === "string" && url.length > 0) {
+            yield* scopedSession.note(`ready at ${url}`);
+          }
+        }
         // Emit immediately so the CLI surfaces the terminal status as soon
         // as the resource is actually done — instead of batching every
         // resource's "created"/"updated" event to the end of apply(), which
@@ -445,6 +604,7 @@ const executeNode = (
           id: logicalId,
           type: node.resource.Type,
           status,
+          providerMode: node.mode,
         });
       });
 
@@ -463,7 +623,37 @@ const executeNode = (
     // ── noop ──
 
     if (node.action === "noop") {
-      // No work to do — the persisted attr is already stable.
+      // No work to do on the cloud resource — the persisted attr is already
+      // stable. Two pieces of row METADATA can still have drifted from the
+      // declaration, and this is the only pass that will ever see them:
+      //
+      // 1. `resourceType` — the row was persisted under a legacy type name
+      //    (the type was since renamed and carries the old name as an
+      //    alias); migrate it so the state stops depending on the alias.
+      // 2. `removalPolicy` — `RemovalPolicy.retain()` / `.destroy()` is a
+      //    decoration on the declaration, not a prop, so changing it never
+      //    produces a diff. Without this commit the new policy would never
+      //    reach state, and the orphan delete (which reads the policy from
+      //    the persisted row, see `Plan.ts`'s delete node) would act on the
+      //    stale one — destroying a resource the user had marked `retain`.
+      //    See https://github.com/alchemy-run/alchemy/issues/1248.
+      const policyChanged =
+        node.state.removalPolicy !== node.resource.RemovalPolicy;
+      if (node.state.resourceType !== node.resource.Type || policyChanged) {
+        yield* commit({
+          ...node.state,
+          resourceType: node.resource.Type,
+          removalPolicy: node.resource.RemovalPolicy,
+        });
+      }
+      // A policy flip is otherwise invisible (the row is a noop), and it is
+      // exactly the change a user wants confirmation of. Legacy rows with no
+      // persisted policy normalize silently — there is nothing to report.
+      if (policyChanged && node.state.removalPolicy !== undefined) {
+        yield* scopedSession.note(
+          `removal policy ${node.state.removalPolicy} → ${node.resource.RemovalPolicy}`,
+        );
+      }
       yield* signalReadyStable;
       yield* storeAndSignal({
         output: node.state.attr,
@@ -496,6 +686,7 @@ const executeNode = (
           resourceType: node.resource.Type,
           bindings: excludeDeletedBindings(node.bindings),
           removalPolicy: node.resource.RemovalPolicy,
+          providerMode: node.mode,
         });
         return id;
       } else if (node.action === "replace") {
@@ -522,6 +713,7 @@ const executeNode = (
           old: node.state,
           deleteFirst: node.deleteFirst,
           removalPolicy: node.resource.RemovalPolicy,
+          providerMode: node.mode,
         });
         return id;
       } else if (node.state?.instanceId) {
@@ -553,6 +745,7 @@ const executeNode = (
             bindings: excludeDeletedBindings(node.bindings),
             downstream: node.downstream,
             removalPolicy: node.resource.RemovalPolicy,
+            providerMode: node.mode,
           });
         }
 
@@ -576,6 +769,7 @@ const executeNode = (
           attr = yield* node.provider
             .precreate({
               id: logicalId,
+              fqn,
               news: node.props,
               session: scopedSession,
               instanceId,
@@ -602,6 +796,7 @@ const executeNode = (
             bindings: excludeDeletedBindings(node.bindings),
             downstream: node.downstream,
             removalPolicy: node.resource.RemovalPolicy,
+            providerMode: node.mode,
           });
           yield* storeAndSignal({
             output: attr,
@@ -635,6 +830,7 @@ const executeNode = (
         attr = yield* node.provider
           .reconcile({
             id: logicalId,
+            fqn,
             news,
             instanceId,
             bindings: bindingOutputs,
@@ -660,10 +856,18 @@ const executeNode = (
           resourceType: node.resource.Type,
           props: news,
           attr,
-          bindings: excludeDeletedBindings(node.bindings),
+          // Terminal commits persist the RESOLVED binding payload the
+          // provider actually reconciled with, not the raw plan-time
+          // expressions. Raw `node.bindings` may hold unresolved Outputs
+          // (silently dropped by JSON state stores), so persisting them
+          // makes the next plan's `diffBindings` compare a lossy stored
+          // shape against fully-resolved data — a phantom binding update
+          // on every plan (#874).
+          bindings: bindingOutputs,
           providerVersion: node.provider.version ?? 0,
           downstream: node.downstream,
           removalPolicy: node.resource.RemovalPolicy,
+          providerMode: node.mode,
         });
 
         tracker[fqn] = {
@@ -712,6 +916,9 @@ const executeNode = (
           string,
           any
         >;
+        const adopting =
+          node.adopting === true ||
+          (node.state.status === "updating" && node.state.adopting === true);
 
         yield* node.state.status === "replaced"
           ? commit<ReplacedResourceState>({
@@ -720,6 +927,7 @@ const executeNode = (
               ...node.state,
               attr: node.state.attr,
               props: news,
+              providerMode: node.mode,
             })
           : commit<UpdatingReourceState>({
               // For ordinary updates we snapshot the previously stable props/attrs
@@ -736,15 +944,18 @@ const executeNode = (
               downstream: node.downstream,
               old:
                 node.state.status === "updating" ? node.state.old : node.state,
+              adopting: adopting ? true : undefined,
               removalPolicy: node.resource.RemovalPolicy,
+              providerMode: node.mode,
             });
 
         yield* report("updating");
 
-        const previousProps =
-          node.state.status === "created" ||
-          node.state.status === "updated" ||
-          node.state.status === "replaced"
+        const previousProps = adopting
+          ? undefined
+          : node.state.status === "created" ||
+              node.state.status === "updated" ||
+              node.state.status === "replaced"
             ? node.state.props
             : node.state.old.props;
 
@@ -757,6 +968,7 @@ const executeNode = (
         const attr = yield* node.provider
           .reconcile({
             id: logicalId,
+            fqn,
             news,
             instanceId,
             bindings: bindingOutputs,
@@ -781,6 +993,9 @@ const executeNode = (
             ...node.state,
             attr,
             props: news,
+            // Resolved payload, not raw `node.bindings` — see create commit.
+            bindings: bindingOutputs,
+            providerMode: node.mode,
           });
         } else {
           yield* commit<UpdatedResourceState>({
@@ -791,10 +1006,12 @@ const executeNode = (
             resourceType: node.resource.Type,
             props: news,
             attr,
-            bindings: excludeDeletedBindings(node.bindings),
+            // Resolved payload, not raw `node.bindings` — see create commit.
+            bindings: bindingOutputs,
             providerVersion: node.provider.version ?? 0,
             downstream: node.downstream,
             removalPolicy: node.resource.RemovalPolicy,
+            providerMode: node.mode,
           });
         }
 
@@ -849,10 +1066,74 @@ const executeNode = (
             old: node.state,
             downstream: node.downstream,
             removalPolicy: node.resource.RemovalPolicy,
+            providerMode: node.mode,
           });
         } else {
           // Resume the same replacement generation after an interrupted apply.
           replState = node.state;
+        }
+
+        // ── delete-first replacements ──
+        //
+        // By default a replacement is create-first: the new generation is
+        // created here and the old generation(s) are reclaimed afterwards by
+        // `collectGarbage` (Phase 2). That ordering keeps the old resource
+        // alive if the create fails, but it is wrong for resources whose
+        // replacement cannot coexist with the original — a fixed physical
+        // name, a singleton, etc. Those providers return
+        // `{ action: "replace", deleteFirst: true }`.
+        //
+        // When `deleteFirst` is set we tear the previous generation(s) down
+        // BEFORE creating the new one, and commit the result as a terminal
+        // `created` state (rather than `replaced`) so Phase 2 has no old chain
+        // left to drain. `delete` is required to be idempotent, so a re-run
+        // after an interrupted apply simply re-converges.
+        const deleteOldGenerations = (
+          old: ReplacementOldResourceState,
+        ): Effect.Effect<void, any, any> =>
+          Effect.gen(function* () {
+            const retain = node.resource.RemovalPolicy === "retain";
+            if (old.attr !== undefined && !retain) {
+              // Delete each old generation with the provider variant of the
+              // mode that created it — after a local ⇄ live switch,
+              // `node.provider` (the new mode) cannot tear down the other
+              // runtime's instance. Unstamped rows (legacy or written by a
+              // mode-agnostic provider) are physically live, unless their
+              // attrs carry the `dev:` identity marker — see stampedMode.
+              const oldProvider = yield* findProviderByType(
+                node.resource.Type,
+                stampedMode(old),
+              );
+              yield* oldProvider
+                .delete({
+                  id: logicalId,
+                  fqn,
+                  instanceId: old.instanceId,
+                  olds: old.props as never,
+                  output: old.attr,
+                  session: scopedSession,
+                  bindings: [],
+                })
+                .pipe(
+                  instrumentLifecycle(
+                    "delete",
+                    fqn,
+                    node.resource.Type,
+                    logicalId,
+                    old.instanceId,
+                  ),
+                );
+            }
+            if (old.status === "replacing" || old.status === "replaced") {
+              yield* deleteOldGenerations(old.old);
+            }
+          });
+
+        if (node.deleteFirst) {
+          yield* scopedSession.note(
+            "Deleting previous resource before creating its replacement (deleteFirst)...",
+          );
+          yield* deleteOldGenerations(replState.old);
         }
 
         let attr: any = replState.attr;
@@ -873,6 +1154,7 @@ const executeNode = (
           attr = yield* node.provider
             .precreate({
               id: logicalId,
+              fqn,
               news: node.props,
               session: scopedSession,
               instanceId,
@@ -901,6 +1183,7 @@ const executeNode = (
             old: replState.old,
             deleteFirst: node.deleteFirst,
             removalPolicy: node.resource.RemovalPolicy,
+            providerMode: node.mode,
           });
           yield* storeAndSignal({
             output: attr,
@@ -933,6 +1216,7 @@ const executeNode = (
         attr = yield* node.provider
           .reconcile({
             id: logicalId,
+            fqn,
             news,
             instanceId,
             bindings: bindingOutputs,
@@ -950,25 +1234,48 @@ const executeNode = (
             ),
           );
 
-        yield* commit<ReplacedResourceState>({
-          // Creation of the new generation succeeded; from here on the only remaining
-          // work is draining the old chain via garbage collection.
-          status: "replaced",
-          fqn,
-          logicalId,
-          instanceId,
-          resourceType: node.resource.Type,
-          props: news,
-          attr,
-          providerVersion: node.provider.version ?? 0,
-          bindings: excludeDeletedBindings(node.bindings),
-          downstream: node.downstream,
-          // Preserve the remaining backlog exactly as-is. GC is responsible for
-          // popping one generation at a time until the chain is exhausted.
-          old: replState.old,
-          deleteFirst: node.deleteFirst,
-          removalPolicy: node.resource.RemovalPolicy,
-        });
+        if (node.deleteFirst) {
+          // The old generation(s) were already torn down above, so there is
+          // nothing left for `collectGarbage` to drain — collapse straight to
+          // the terminal `created` state.
+          yield* commit<CreatedResourceState>({
+            status: "created",
+            fqn,
+            logicalId,
+            instanceId,
+            resourceType: node.resource.Type,
+            props: news,
+            attr,
+            providerVersion: node.provider.version ?? 0,
+            // Resolved payload, not raw `node.bindings` — see create commit.
+            bindings: bindingOutputs,
+            downstream: node.downstream,
+            removalPolicy: node.resource.RemovalPolicy,
+            providerMode: node.mode,
+          });
+        } else {
+          yield* commit<ReplacedResourceState>({
+            // Creation of the new generation succeeded; from here on the only remaining
+            // work is draining the old chain via garbage collection.
+            status: "replaced",
+            fqn,
+            logicalId,
+            instanceId,
+            resourceType: node.resource.Type,
+            props: news,
+            attr,
+            providerVersion: node.provider.version ?? 0,
+            // Resolved payload, not raw `node.bindings` — see create commit.
+            bindings: bindingOutputs,
+            downstream: node.downstream,
+            // Preserve the remaining backlog exactly as-is. GC is responsible for
+            // popping one generation at a time until the chain is exhausted.
+            old: replState.old,
+            deleteFirst: node.deleteFirst,
+            removalPolicy: node.resource.RemovalPolicy,
+            providerMode: node.mode,
+          });
+        }
 
         tracker[fqn] = {
           output: attr,
@@ -1012,6 +1319,7 @@ const executeNode = (
           id: node.resource.LogicalId,
           type: node.resource.Type,
           status: "fail",
+          providerMode: node.mode,
         });
       }),
     ),
@@ -1032,6 +1340,25 @@ const executeNode = (
 // `--force` is set). The output value is written to `tracker[fqn].output`
 // so downstream Output evaluation works identically to resource attrs.
 
+/**
+ * Run an Action body, resolving any Outputs it captured via `yield* output`
+ * during init against the current tracker and exposing them to the body through
+ * the resolve {@link RuntimeContext}. See {@link makeCaptureContext}.
+ */
+const runAction = Effect.fn("apply.runAction")(function* (
+  task: ActionLike,
+  input: any,
+  outputs: Record<string, any>,
+) {
+  const resolved: Record<string, unknown> = {};
+  for (const [key, output] of Object.entries(task.Captures)) {
+    resolved[key] = yield* Output.evaluate(output, outputs);
+  }
+  return yield* task
+    .Run(input)
+    .pipe(Effect.provideService(RuntimeContext, makeResolveContext(resolved)));
+});
+
 const executeActionNode = (
   fqn: string,
   node: ActionApply,
@@ -1044,6 +1371,7 @@ const executeActionNode = (
       id: string;
       type: string;
       status: Extract<ApplyStatus, "created" | "updated" | "ran" | "skipped">;
+      providerMode?: ProviderMode;
     }
   >,
   session: PlanStatusSession,
@@ -1110,9 +1438,12 @@ const executeActionNode = (
     // until its run actually starts.
     yield* report("pending");
     yield* waitForDeps(
-      Object.keys(Output.resolveUpstream(node.input)).filter(
-        (f) => f in readyStable,
-      ),
+      [
+        ...new Set([
+          ...Object.keys(Output.resolveUpstream(node.input)),
+          ...Object.keys(Output.upstreamAny(task.Captures)),
+        ]),
+      ].filter((f) => f in readyStable),
     );
 
     const outputs = getOutputs();
@@ -1131,7 +1462,7 @@ const executeActionNode = (
     });
     yield* report("running");
 
-    const result = yield* task.Run(resolvedInput);
+    const result = yield* runAction(task, resolvedInput, outputs);
 
     yield* commit<RanActionState>({
       kind: "action",
@@ -1200,7 +1531,7 @@ const executeActionNode = (
 // resource whose resolved inputs differ from what it was last applied with.
 // Repeat until no resource needs updating.
 
-const converge = Effect.fnUntraced(function* (
+const converge = Effect.fn(function* (
   plan: Plan,
   tracker: Record<string, ResourceTracker>,
   terminalStatuses: Map<
@@ -1209,6 +1540,7 @@ const converge = Effect.fnUntraced(function* (
       id: string;
       type: string;
       status: Extract<ApplyStatus, "created" | "updated" | "ran" | "skipped">;
+      providerMode?: ProviderMode;
     }
   >,
   session: PlanStatusSession,
@@ -1267,6 +1599,7 @@ const converge = Effect.fnUntraced(function* (
       const attr = yield* node.provider
         .reconcile({
           id: logicalId,
+          fqn,
           news: newProps,
           instanceId,
           bindings: newBindings,
@@ -1301,13 +1634,21 @@ const converge = Effect.fnUntraced(function* (
           logicalId,
           instanceId,
           resourceType: node.resource.Type,
-          props: newProps,
+          // This site bypasses the `commit` helper, so strip unresolved
+          // leaves (Effect-valued env entries survive `Output.evaluate`)
+          // the same way `commit` does — state only ever holds plain data.
+          props: stripUnresolved(newProps),
           attr,
           providerVersion: node.provider.version ?? 0,
-          bindings: excludeDeletedBindings(node.bindings),
+          // Resolved payload, not raw `node.bindings` — see the create
+          // commit in applyResource. Stripped like the commit helper so
+          // Effect leaves (e.g. tagged Worker classes in `env`) never reach
+          // the state store.
+          bindings: stripUnresolved(newBindings),
           downstream: node.downstream,
           namespace,
           removalPolicy: node.resource.RemovalPolicy,
+          providerMode: node.mode,
         } as UpdatedResourceState,
       });
 
@@ -1315,6 +1656,7 @@ const converge = Effect.fnUntraced(function* (
         id: logicalId,
         type: node.resource.Type,
         status: "updated",
+        providerMode: node.mode,
       });
     }
 
@@ -1354,7 +1696,7 @@ const converge = Effect.fnUntraced(function* (
         } satisfies RunningActionState,
       });
 
-      const result = yield* node.def.Run(newInput);
+      const result = yield* runAction(node.def, newInput, outputs);
 
       yield* state.set({
         stack: stackName,
@@ -1393,7 +1735,56 @@ const converge = Effect.fnUntraced(function* (
 
 // ── Phase 2: delete orphans and old replaced resources ─────────────────────
 
-const collectGarbage = Effect.fnUntraced(function* (
+/** A provider delete (or its attr-recovery read / state commit) that failed. */
+export interface DeleteFailure {
+  fqn: string;
+  logicalId: string;
+  resourceType: string;
+  cause: Cause.Cause<unknown>;
+}
+
+/**
+ * A delete that was never attempted because a dependent's delete failed (or
+ * was itself blocked). The resource may legitimately be undeletable while its
+ * dependents still exist, so skipping is not an error in its own right.
+ */
+export interface BlockedDelete {
+  fqn: string;
+  logicalId: string;
+  resourceType: string;
+  /** FQNs of the dependents whose failed/blocked deletes block this one. */
+  blockedBy: string[];
+}
+
+/**
+ * Aggregate raised at the end of the deletion phase when one or more
+ * resource deletes failed. Every resource whose delete did not depend on a
+ * failed one was still attempted — a single failure no longer strands
+ * unrelated siblings.
+ */
+export class DestroyError extends Data.TaggedError("DestroyError")<{
+  failures: ReadonlyArray<DeleteFailure>;
+  blocked: ReadonlyArray<BlockedDelete>;
+}> {
+  override get message(): string {
+    return [
+      `Failed to delete ${this.failures.length} resource(s)` +
+        (this.blocked.length > 0
+          ? ` (${this.blocked.length} more skipped because a dependent's delete failed)`
+          : "") +
+        ":",
+      ...this.failures.map(
+        (f) => `  ✗ ${f.fqn} (${f.resourceType}): ${Cause.pretty(f.cause)}`,
+      ),
+      ...this.blocked.map(
+        (b) =>
+          `  ⊘ ${b.fqn} (${b.resourceType}): skipped — blocked by failed delete of ${b.blockedBy.join(", ")}`,
+      ),
+    ].join("\n");
+  }
+}
+
+const collectGarbage = Effect.fn(function* (
   plan: Plan,
   session: PlanStatusSession,
 ) {
@@ -1428,33 +1819,53 @@ const collectGarbage = Effect.fnUntraced(function* (
     { concurrency: "unbounded" },
   );
 
-  const deleteGraph = Effect.fnUntraced(function* (
+  // Failures are collected — not propagated — so one bad delete never
+  // strands unrelated siblings. `unresolved` tracks every FQN whose delete
+  // failed or was blocked this run: later passes must not retry them (a
+  // still-`replaced` row would otherwise spin the drain loop forever) and
+  // dependencies scheduled in later passes must observe them as blocking.
+  const failures: DeleteFailure[] = [];
+  const blockedDeletes: BlockedDelete[] = [];
+  const unresolved = new Set<string>();
+
+  type DeleteOutcome = "deleted" | "failed" | "blocked";
+
+  const deleteGraph = Effect.fn(function* (
     deletionGraph: Record<string, Delete | ReplacedResourceState | undefined>,
   ) {
     const deletions: {
-      [fqn in string]: Effect.Effect<void, StateStoreError, ArtifactStore>;
+      [fqn in string]: Effect.Effect<DeleteOutcome, never, ArtifactStore>;
     } = {};
 
     const deleteResource = (
       node: Delete | ReplacedResourceState,
       ancestors: ReadonlySet<string> = new Set(),
-    ): Effect.Effect<void, StateStoreError, ArtifactStore> =>
+    ): Effect.Effect<DeleteOutcome, never, ArtifactStore> =>
       Effect.gen(function* () {
         const isDeleteNode = (
           node: Delete | ReplacedResourceState,
         ): node is Delete => "action" in node;
 
         const {
+          fqn,
           logicalId,
           namespace,
           resourceType,
           instanceId,
           downstream,
           props,
-          attr,
+          attr: persistedAttr,
           provider,
+          providerMode,
         } = isDeleteNode(node)
           ? {
+              // Use the persisted FQN verbatim — never recompute it from
+              // `toFqn(namespace, logicalId)`. A logical ID may legitimately
+              // contain the FQN separator (`/`), in which case `parseFqn`
+              // truncated it and a recomputed key would miss the real state
+              // row (the row would then resurface as an orphan on every
+              // subsequent destroy, never getting deleted).
+              fqn: node.resource.FQN,
               logicalId: node.resource.LogicalId,
               namespace: node.resource.Namespace,
               resourceType: node.resource.Type,
@@ -1462,9 +1873,14 @@ const collectGarbage = Effect.fnUntraced(function* (
               downstream: node.downstream,
               props: node.state.props,
               attr: node.state.attr,
+              // Plan resolved this provider for the row's persisted (or
+              // marker-inferred) `providerMode` (see the deletions builder
+              // in Plan.ts).
               provider: node.provider,
+              providerMode: node.state.providerMode,
             }
           : {
+              fqn: node.fqn,
               logicalId: node.logicalId,
               namespace: node.namespace,
               resourceType: node.old.resourceType,
@@ -1472,10 +1888,34 @@ const collectGarbage = Effect.fnUntraced(function* (
               downstream: node.old.downstream,
               props: node.old.props,
               attr: node.old.attr,
-              provider: yield* findProviderByType(node.old.resourceType),
+              // A missing provider is fatal — plan already dies on zombie
+              // rows (see the deletions builder in Plan.ts); this guards
+              // the replaced-chain generations that bypass plan. The old
+              // generation is torn down with the provider variant of the
+              // mode that created it (local ⇄ live replacements);
+              // unstamped rows are physically live unless their attrs
+              // carry the `dev:` identity marker (see stampedMode).
+              provider: yield* tryFindProviderByType(
+                node.old.resourceType,
+                stampedMode(node.old),
+              ).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.die(
+                        missingProviderError(node.old.resourceType, node.fqn),
+                      ),
+                    onSome: Effect.succeed,
+                  }),
+                ),
+              ),
+              providerMode: node.old.providerMode,
             };
 
-        const fqn = toFqn(namespace, logicalId);
+        // Mutable: an attr-less row (interrupted create) may recover its
+        // attributes from `provider.read` below, right before deletion.
+        let attr = persistedAttr;
+
         const nextAncestors = new Set(ancestors).add(fqn);
 
         const commit = <S extends ResourceState>(value: Omit<S, "namespace">) =>
@@ -1483,7 +1923,14 @@ const collectGarbage = Effect.fnUntraced(function* (
             stack: stackName,
             stage,
             fqn,
-            value: { ...value, namespace } as S,
+            // Same rule as the lifecycle commit above: state only stores
+            // plain data, never unresolved Output exprs or Effect leaves.
+            value: {
+              ...value,
+              props: stripUnresolved(value.props),
+              bindings: stripUnresolved(value.bindings),
+              namespace,
+            } as S,
           });
 
         const report = (status: ApplyStatus) =>
@@ -1492,6 +1939,7 @@ const collectGarbage = Effect.fnUntraced(function* (
             id: logicalId,
             type: resourceType,
             status,
+            providerMode,
           });
 
         const scopedSession = {
@@ -1506,18 +1954,66 @@ const collectGarbage = Effect.fnUntraced(function* (
 
         return yield* (deletions[fqn] ??= yield* Effect.cached(
           Effect.gen(function* () {
-            yield* Effect.all(
+            // Dependents (`downstream`) are deleted before this resource. A
+            // dependent whose delete failed (or was itself blocked) may make
+            // this resource legitimately undeletable (dependency violation),
+            // so it is skipped with a "blocked by" note instead of surfacing
+            // a spurious second error.
+            const dependents = yield* Effect.all(
               downstream.map((dep) =>
-                dep !== fqn && dep in deletionGraph && !ancestors.has(dep)
-                  ? deleteResource(
-                      deletionGraph[dep] as Delete | ReplacedResourceState,
-                      nextAncestors,
-                    )
-                  : Effect.void,
+                dep !== fqn && !ancestors.has(dep)
+                  ? dep in deletionGraph
+                    ? deleteResource(
+                        deletionGraph[dep] as Delete | ReplacedResourceState,
+                        nextAncestors,
+                      ).pipe(Effect.map((outcome) => ({ dep, outcome })))
+                    : // Not in this pass's graph — but it may have failed in
+                      // an earlier drain pass of the same destroy.
+                      Effect.sync(() => ({
+                        dep,
+                        outcome: unresolved.has(dep)
+                          ? ("failed" as const)
+                          : ("deleted" as const),
+                      }))
+                  : Effect.succeed({ dep, outcome: "deleted" as const }),
               ),
               { concurrency: "unbounded" },
             );
 
+            const blockedBy = dependents
+              .filter(({ outcome }) => outcome !== "deleted")
+              .map(({ dep }) => dep);
+
+            if (blockedBy.length > 0) {
+              unresolved.add(fqn);
+              blockedDeletes.push({
+                fqn,
+                logicalId,
+                resourceType,
+                blockedBy,
+              });
+              yield* scopedSession.note(
+                `Skipping delete — blocked by failed delete of ${blockedBy.join(", ")}.`,
+              );
+              yield* report("skipped");
+              return "blocked" as const;
+            }
+
+            return yield* deleteResourceBody().pipe(
+              Effect.catchCause((cause) =>
+                Effect.gen(function* () {
+                  unresolved.add(fqn);
+                  failures.push({ fqn, logicalId, resourceType, cause });
+                  yield* report("fail");
+                  return "failed" as const;
+                }),
+              ),
+            );
+          }),
+        ));
+
+        function deleteResourceBody() {
+          return Effect.gen(function* () {
             if (isDeleteNode(node)) {
               yield* report("deleting");
               if (node.resource.RemovalPolicy === "retain") {
@@ -1526,9 +2022,99 @@ const collectGarbage = Effect.fnUntraced(function* (
                   stage,
                   fqn,
                 });
-                yield* report("deleted");
-                return;
+                yield* report("retained");
+                // Retention is intentional — it never blocks dependencies.
+                return "deleted" as const;
               }
+            }
+
+            // Honor `retain` for the old generation of a replacement, mirroring
+            // the orphan-delete path above. Delete-node retain is already
+            // handled with an early return; this guards the replaced
+            // old-generation physical delete.
+            const retainOldGeneration =
+              !isDeleteNode(node) && node.removalPolicy === "retain";
+
+            if (retainOldGeneration) {
+              yield* scopedSession.note(
+                "Retaining replaced resource (removal policy: retain)...",
+              );
+            }
+
+            // A row can reach deletion with `attr === undefined` when a create
+            // was interrupted after the cloud-side call succeeded but before
+            // `reconcile` returned Attributes (a `creating` row — or the old
+            // generation of a replacement chain in the same predicament).
+            // Skipping the provider's delete outright would silently orphan
+            // the physical resource, so ask `read` to look it up from the
+            // persisted props (providers derive the deterministic physical
+            // name from id/props):
+            //   - plain attrs    → exists and is ours; proceed to delete
+            //   - Unowned(attrs) → exists but is NOT ours (e.g. our create
+            //                      actually lost a name race, or died before
+            //                      stamping ownership) — never delete a
+            //                      foreign resource; drop our state and say so
+            //   - undefined      → nothing exists; dropping state is safe
+            if (attr === undefined && !retainOldGeneration) {
+              if (provider.read) {
+                const recovered = yield* provider
+                  .read({
+                    id: logicalId,
+                    fqn,
+                    instanceId,
+                    olds: props as never,
+                    output: undefined,
+                  })
+                  .pipe(
+                    instrumentLifecycle(
+                      "read",
+                      fqn,
+                      resourceType,
+                      logicalId,
+                      instanceId,
+                    ),
+                    // The persisted props of an interrupted create can carry
+                    // holes where unresolved Outputs were stripped at commit
+                    // time (see stripUnresolved) — e.g. a parent reference
+                    // persisted as `{}`. A provider that dereferences one
+                    // crashes deep inside its SDK client (a SchemaError
+                    // defect), which would make the stage impossible to
+                    // destroy. Recovery is best-effort: degrade the defect
+                    // to "nothing recovered", surface a note, and let the
+                    // row be dropped (#995).
+                    Effect.catchDefect((defect) =>
+                      scopedSession
+                        .note(
+                          "Recovery read crashed while looking up this " +
+                            "resource's interrupted create " +
+                            `(${String(defect)}) — if a physical resource ` +
+                            "was created, it must be cleaned up manually.",
+                        )
+                        .pipe(Effect.as(undefined)),
+                    ),
+                  );
+                if (recovered !== undefined) {
+                  if (Unowned.is(recovered)) {
+                    yield* scopedSession.note(
+                      "Resource exists in the cloud but is not owned by this " +
+                        "stack — leaving it in place (re-deploy with --adopt " +
+                        "to take ownership, then destroy).",
+                    );
+                  } else {
+                    attr = stripUnowned(recovered as Record<string, any>);
+                  }
+                }
+              } else {
+                yield* scopedSession.note(
+                  "No attributes were recorded for this resource (its create " +
+                    "was interrupted) and the provider does not implement " +
+                    "`read` — if a physical resource was created, it must be " +
+                    "cleaned up manually.",
+                );
+              }
+            }
+
+            if (isDeleteNode(node)) {
               yield* commit<DeletingResourceState>({
                 status: "deleting",
                 fqn,
@@ -1541,13 +2127,15 @@ const collectGarbage = Effect.fnUntraced(function* (
                 providerVersion: provider.version ?? 0,
                 bindings: excludeDeletedBindings(node.bindings),
                 removalPolicy: node.resource.RemovalPolicy,
+                providerMode,
               });
             }
 
-            if (attr !== undefined) {
+            if (attr !== undefined && !retainOldGeneration) {
               yield* provider
                 .delete({
                   id: logicalId,
+                  fqn,
                   instanceId,
                   olds: props as never,
                   output: attr,
@@ -1573,7 +2161,9 @@ const collectGarbage = Effect.fnUntraced(function* (
               });
               yield* report("deleted");
             } else {
-              yield* scopedSession.note("Cleaning up replaced resource...");
+              if (!retainOldGeneration) {
+                yield* scopedSession.note("Cleaning up replaced resource...");
+              }
               if (
                 node.old.status === "replacing" ||
                 node.old.status === "replaced"
@@ -1595,6 +2185,7 @@ const collectGarbage = Effect.fnUntraced(function* (
                   old: node.old.old,
                   deleteFirst: node.deleteFirst,
                   removalPolicy: node.removalPolicy,
+                  providerMode: node.providerMode,
                 });
               } else {
                 // The old chain is fully drained, so the current replacement is now
@@ -1611,14 +2202,24 @@ const collectGarbage = Effect.fnUntraced(function* (
                   downstream: node.downstream,
                   bindings: excludeDeletedBindings(node.bindings),
                   removalPolicy: node.removalPolicy,
+                  providerMode: node.providerMode,
                 });
               }
-              yield* scopedSession.note("Replaced resource cleanup complete.");
+              yield* scopedSession.note(
+                retainOldGeneration
+                  ? "Replaced resource retained."
+                  : "Replaced resource cleanup complete.",
+              );
             }
-          }),
-        ));
+            return "deleted" as const;
+          });
+        }
       });
 
+    // Attempt every root. Per-node failures were recorded (and their state
+    // retained) inside each node's delete effect — the effects resolve to
+    // outcomes and never fail, so one bad resource never interrupts sibling
+    // deletions mid-flight.
     yield* Effect.all(
       Object.values(deletionGraph)
         .filter((node) => node !== undefined)
@@ -1632,10 +2233,15 @@ const collectGarbage = Effect.fnUntraced(function* (
   // chains that were re-committed as `replaced` while deleting older generations.
   let first = true;
   while (true) {
-    const remainingReplacedResources = yield* state.getReplacedResources({
+    const remainingReplacedResources = (yield* state.getReplacedResources({
       stack: stackName,
       stage,
-    });
+    }))
+      // A row whose drain already failed (or was blocked) this run stays
+      // `replaced` in state — retrying it in a later pass would loop forever.
+      // It stays behind for the next destroy; the aggregate error below
+      // reports it.
+      .filter((replaced) => !unresolved.has(replaced.fqn));
     if (!first && remainingReplacedResources.length === 0) {
       break;
     }
@@ -1644,12 +2250,23 @@ const collectGarbage = Effect.fnUntraced(function* (
       ...(first ? plan.deletions : {}),
       ...Object.fromEntries(
         remainingReplacedResources.map((replaced) => [
-          toFqn(replaced.namespace, replaced.logicalId),
+          // Key by the persisted FQN (not a recomputed one) so logical IDs
+          // containing the FQN separator round-trip correctly.
+          replaced.fqn,
           replaced,
         ]),
       ),
     });
     first = false;
+  }
+
+  if (failures.length > 0) {
+    // Every independent delete was still attempted; now surface everything
+    // that went wrong (and everything skipped as a consequence) as one
+    // typed aggregate. The destroy as a whole still fails.
+    return yield* Effect.fail(
+      new DestroyError({ failures, blocked: blockedDeletes }),
+    );
   }
 });
 

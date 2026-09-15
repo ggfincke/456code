@@ -1,43 +1,83 @@
-// apps/server/src/bin.ts
-// run the 456code server CLI
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { Argument, Command } from "effect/unstable/cli";
+import * as CliError from "effect/unstable/cli/CliError";
 
-import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
-import * as NodeServices from '@effect/platform-node/NodeServices'
-import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import { Command } from 'effect/unstable/cli'
+import * as NetService from "@t3tools/shared/Net";
+import packageJson from "../package.json" with { type: "json" };
+import { authCommand } from "./cli/auth.ts";
+import { appCommand } from "./cli/app.ts";
+import { connectCommand } from "./cli/connect.ts";
+import { pairCommand } from "./cli/pair.ts";
+import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
+import { sharedServerCommandFlags } from "./cli/config.ts";
+import { isEntrypoint } from "./entrypoint.ts";
+import { projectCommand } from "./cli/project.ts";
+import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
+import { serviceCommand } from "./cli/service.ts";
+import { uninstallCommand } from "./cli/uninstall.ts";
+import { updateCommand } from "./cli/update.ts";
+import { disabled as releaseUpdatesDisabled } from "./fincke/ReleaseUpdates.ts";
+import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
+import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
+import { servicePreflightCommand } from "./cli/servicePreflight.ts";
+import { sshHelperCommand } from "./cli/sshHelper.ts";
+import { themeCommand } from "./cli/theme.ts";
+import { triageCommand } from "./cli/triage.ts";
 
-import * as NetService from '@t3tools/shared/Net'
-import packageJson from '../package.json' with { type: 'json' }
-import { authCommand } from './cli/auth.ts'
-import { sharedServerCommandFlags } from './cli/config.ts'
-import { isEntrypoint } from './entrypoint.ts'
-import { projectCommand } from './cli/project.ts'
-import { pairCommand } from './cli/pair.ts'
-import { runServerCommand, serveCommand, startCommand } from './cli/server.ts'
-import { serviceCommand } from './cli/service.ts'
-import { themeCommand } from './cli/theme.ts'
+const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
-export { createCartographerAnalyzerIdentifier } from './cartographer/CartographerAnalyzer.ts'
+const connectPublicConfigMissingMessage =
+  "T3 Connect commands are unavailable: this build is missing T3 Connect public configuration.";
 
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer)
+class ConnectPublicConfigMissingError extends CliError.UserError {
+  override get message() {
+    return connectPublicConfigMissingMessage;
+  }
+}
 
-export const makeCli = () =>
-  Command.make('456code', { ...sharedServerCommandFlags }).pipe(
-    Command.withDescription('Run the 456code server.'),
+const connectUnavailableCommand = Command.make("connect", {
+  command: Argument.string("command").pipe(Argument.variadic),
+}).pipe(
+  Command.withDescription("T3 Connect is unavailable in builds without public configuration."),
+  Command.unlisted,
+  Command.withHandler(() =>
+    Effect.fail(
+      new CliError.ShowHelp({
+        commandPath: ["t3", "connect"],
+        errors: [new ConnectPublicConfigMissingError({ cause: connectPublicConfigMissingMessage })],
+      }),
+    ),
+  ),
+);
+
+export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
+  Command.make("t3", { ...sharedServerCommandFlags }).pipe(
+    Command.withDescription("Run the T3 Code server."),
     Command.withHandler((flags) => runServerCommand(flags)),
     Command.withSubcommands([
       startCommand,
       serveCommand,
-      authCommand,
+      appCommand,
       pairCommand,
+      authCommand,
       projectCommand,
       serviceCommand,
+      updateCommand.pipe(Command.withHandler(releaseUpdatesDisabled)),
+      uninstallCommand,
+      serviceLauncherCommand,
+      claudeHistoryCommand,
+      servicePreflightCommand,
+      sshHelperCommand,
       themeCommand,
+      triageCommand,
+      cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
-  )
+  );
 
-export const cli = makeCli()
+export const cli = makeCli();
 
 if (
   isEntrypoint({
@@ -45,11 +85,10 @@ if (
     entryPath: process.argv[1],
     runtimeMain: import.meta.main,
   })
-)
-{
+) {
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),
     NodeRuntime.runMain,
-  )
+  );
 }

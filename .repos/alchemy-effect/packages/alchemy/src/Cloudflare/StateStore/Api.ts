@@ -8,13 +8,14 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApiError from "effect/unstable/httpapi/HttpApiError";
 import crypto from "node:crypto";
+import { RuntimeContext } from "../../RuntimeContext.ts";
 import {
   BearerTokenValidator,
   StateApi,
   StateAuthLive,
 } from "../../State/HttpStateApi.ts";
-import { Secret } from "../SecretsStore/Secret.ts";
-import { SecretBindingLive } from "../SecretsStore/SecretBinding.ts";
+import { ReadSecret } from "../SecretsStore/ReadSecret.ts";
+import { ReadSecretBinding } from "../SecretsStore/ReadSecretBinding.ts";
 import { Worker } from "../Workers/Worker.ts";
 import Store from "./Store.ts";
 import { AuthToken } from "./Token.ts";
@@ -101,27 +102,28 @@ export default Worker(
   "Api",
   {
     name: STATE_STORE_SCRIPT_NAME,
-    main: import.meta.filename,
-    url: true,
+    main: import.meta.url,
+    workersDev: true,
     compatibility: {
       flags: ["nodejs_compat"],
       date: "2026-03-17",
     },
   },
   Effect.gen(function* () {
-    const remoteSecret = yield* Secret.bind(AuthToken);
+    const remoteSecret = yield* ReadSecret(AuthToken);
     const store = yield* Store;
 
     const bearerTokenValidator = Layer.succeed(
       BearerTokenValidator,
       BearerTokenValidator.of({
-        // @ts-expect-error - TODO(sam): fix RuntimeContext color here
-        validate: Effect.fnUntraced(function* (token) {
-          const expected = yield* remoteSecret.get();
+        validate: Effect.fn(function* (token) {
+          const expected = yield* remoteSecret
+            .get()
+            .pipe(Effect.orDie, Effect.provide(RuntimeContext.phantom));
           return !!expected &&
             timingSafeEqual(token.trim(), Redacted.value(expected).trim())
             ? yield* Effect.void
-            : yield* Effect.fail(new HttpApiError.Unauthorized());
+            : yield* new HttpApiError.Unauthorized();
         }),
       }),
     );
@@ -319,7 +321,7 @@ export default Worker(
         // Effect.provide(TelemetryLive),
       ),
     };
-  }).pipe(Effect.provide(Layer.mergeAll(SecretBindingLive))),
+  }).pipe(Effect.provide(Layer.mergeAll(ReadSecretBinding))),
 );
 
 /**
@@ -329,6 +331,13 @@ export default Worker(
  * have.
  */
 const HttpPlatformStub = Layer.succeed(HttpPlatform.HttpPlatform, {
+  platform: "web",
+  // Advertises no algorithms, so the compression middleware never engages
+  // and compressResponse is never called.
+  compression: {
+    algorithms: new Set<HttpPlatform.CompressionAlgorithm>(),
+    compressResponse: (response) => Effect.succeed(response),
+  },
   fileResponse: () => Effect.die("HttpPlatform.fileResponse not supported"),
   fileWebResponse: () =>
     Effect.die("HttpPlatform.fileWebResponse not supported"),

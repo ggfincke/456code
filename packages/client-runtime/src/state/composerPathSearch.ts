@@ -1,4 +1,19 @@
-// packages/client-runtime/src/state/composerPathSearch.ts
-// re-export composerPathSearch from nested state owner
+import type { EnvironmentId } from "@t3tools/contracts";
 
-export * from './workspace/composerPathSearch.ts'
+export interface ComposerPathSearchEntry {
+  readonly path: string;
+  readonly kind: "file" | "directory";
+  readonly parentPath?: string;
+}
+
+export interface ComposerPathSearchState {
+  readonly entries: ReadonlyArray<ComposerPathSearchEntry>;
+  readonly isPending: boolean;
+  readonly error: string | null;
+}
+
+export interface ComposerPathSearchTarget {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly query: string | null;
+}

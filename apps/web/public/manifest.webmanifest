@@ -1,6 +1,4 @@
 {
-  "name": "456code",
-  "short_name": "456code",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -9,13 +7,13 @@
   "theme_color": "#161616",
   "icons": [
     {
-      "src": "/icon-192x192.png",
-      "sizes": "192x192",
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
       "type": "image/png"
     },
     {
-      "src": "/icon-512x512.png",
-      "sizes": "512x512",
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
       "type": "image/png"
     }
   ]

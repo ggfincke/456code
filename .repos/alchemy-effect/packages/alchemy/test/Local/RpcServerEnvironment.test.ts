@@ -8,13 +8,12 @@ import {
 import { Stack } from "@/Stack.ts";
 import { Stage } from "@/Stage.ts";
 import { PlatformServices } from "@/Util/PlatformServices.ts";
-import { describe, expect, it } from "@effect/vitest";
+import { describe, expect, it } from "alchemy-test";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-const sampleEnv: RpcServerEnvironment = {
-  profile: undefined,
-  envFile: undefined,
+const sessionEnv = {
   alchemyContext: {
     dotAlchemy: "/tmp/.alchemy",
     dev: true,
@@ -26,6 +25,12 @@ const sampleEnv: RpcServerEnvironment = {
   },
 };
 
+const sampleEnv: RpcServerEnvironment = {
+  profile: undefined,
+  envFile: undefined,
+  ...sessionEnv,
+};
+
 describe("Local.RpcServerEnvironment", () => {
   it.effect("layer() provides Stack, Stage, and AlchemyContext", () =>
     Effect.gen(function* () {
@@ -35,7 +40,12 @@ describe("Local.RpcServerEnvironment", () => {
         const ctx = yield* AlchemyContext;
         return { stack, stage, ctx };
       }).pipe(
-        Effect.provide(Layer.provide(layer(sampleEnv), PlatformServices)),
+        Effect.provide(
+          Layer.provide(
+            layer({ profile: undefined, envFile: undefined, ...sessionEnv }),
+            PlatformServices,
+          ),
+        ),
       );
 
       expect(observed.stack.name).toBe("my-stack");
@@ -48,20 +58,23 @@ describe("Local.RpcServerEnvironment", () => {
 
   it.effect("fromEnv() roundtrips a serialized RpcServerEnvironment", () =>
     Effect.gen(function* () {
-      // We can't safely mutate `process.env[RPC_SERVER_ENVIRONMENT_KEY]`
-      // from inside a concurrent test, so we install a private layer in
-      // front of `fromEnv()` instead and verify it produces the same
-      // Stack service that `layer()` does.
-      process.env[RPC_SERVER_ENVIRONMENT_KEY] = JSON.stringify(sampleEnv);
-      try {
-        const stack = yield* Stack.pipe(
-          Effect.provide(Layer.provide(fromEnv(), PlatformServices)),
-        );
-        expect(stack.name).toBe(sampleEnv.stack.name);
-        expect(stack.stage).toBe(sampleEnv.stack.stage);
-      } finally {
-        delete process.env[RPC_SERVER_ENVIRONMENT_KEY];
-      }
+      const environment = ConfigProvider.layer(
+        ConfigProvider.fromEnv({
+          env: {
+            [RPC_SERVER_ENVIRONMENT_KEY]: JSON.stringify(sampleEnv),
+          },
+        }),
+      );
+      const stack = yield* Stack.pipe(
+        Effect.provide(
+          Layer.provide(
+            fromEnv(),
+            Layer.mergeAll(PlatformServices, environment),
+          ),
+        ),
+      );
+      expect(stack.name).toBe(sessionEnv.stack.name);
+      expect(stack.stage).toBe(sessionEnv.stack.stage);
     }),
   );
 

@@ -1,63 +1,70 @@
-// apps/server/src/provider/acp/AntigravityAcpSupport.ts
-// adapt the official Antigravity ACP protocol to provider runtime semantics
-
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
+  type AntigravityAuthMethod,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ProviderSendTurnInput,
   type RuntimeMode,
-} from '@t3tools/contracts'
-import * as Crypto from 'effect/Crypto'
-import * as Effect from 'effect/Effect'
-import * as FileSystem from 'effect/FileSystem'
-import * as Layer from 'effect/Layer'
-import * as Path from 'effect/Path'
-import * as Scope from 'effect/Scope'
-import * as Stream from 'effect/Stream'
-import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
-import * as EffectAcpErrors from 'effect-acp/errors'
-import type * as EffectAcpSchema from 'effect-acp/schema'
+} from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as EffectAcpErrors from "effect-acp/errors";
+import type * as EffectAcpSchema from "effect-acp/schema";
 
-import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
+import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import {
-  buildAntigravityAcpSpawnInput,
   makeAntigravityStderrHandler,
   makeAntigravityStdoutTransform,
-  prepareAntigravityProfile,
-} from '../antigravityAuthSupport.ts'
-import type { AntigravityExecutable } from '../AntigravityInstallation.ts'
-import * as AcpSessionRuntime from './AcpSessionRuntime.ts'
-import { normalizeAntigravitySessionUpdate } from './AntigravityProtocol.ts'
+} from "../antigravityAuthSupport.ts";
+import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import { normalizeAntigravitySessionUpdate } from "./AntigravityProtocol.ts";
 
 export interface AntigravityAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
-  'authMethodId' | 'clientCapabilities' | 'onStderr' | 'transformSessionUpdate' | 'transformStdout'
->
-{
-  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner['Service']
-  readonly onAuthorizationUrl?: (url: string) => Effect.Effect<void, EffectAcpErrors.AcpError>
-  // advertise `fs.readTextFile` and `fs.writeTextFile`. The agent then routes
-  // workspace reads and writes through T3, which turns each edit into a
-  // `session/request_permission` with the file content, instead of writing
-  // through its own tools. Chat sessions turn this on. Setup, probe, and text
-  // generation helpers leave it off so they never touch a workspace.
-  readonly clientFileSystem?: boolean
+  | "authMethodId"
+  | "cancelBehavior"
+  | "clientCapabilities"
+  | "onStderr"
+  | "resumeMethod"
+  | "transformSessionUpdate"
+  | "transformStdout"
+> {
+  /** Device CLI environment supplied for this provider session. */
+  readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
+  readonly onAuthorizationUrl?: (url: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
+  /**
+   * Advertise `fs.readTextFile` and `fs.writeTextFile`. The agent then routes
+   * workspace reads and writes through T3, which turns each edit into a
+   * `session/request_permission` with the file content, instead of writing
+   * through its own tools. Chat sessions turn this on. Setup, probe, and text
+   * generation helpers leave it off so they never touch a workspace.
+   */
+  readonly clientFileSystem?: boolean;
+  /** ACP `authenticate` method id. Defaults to the personal Google account flow. */
+  readonly authMethod?: AntigravityAuthMethod;
 }
 
-// normal launches reject browser login; only the auth flow supplies `onAuthorizationUrl`.
-export const makeAntigravityAcpRuntime = Effect.fn('makeAntigravityAcpRuntime')(function* (
+/** Normal launches reject browser login; only the auth flow supplies `onAuthorizationUrl`. */
+export const makeAntigravityAcpRuntime = Effect.fn("makeAntigravityAcpRuntime")(function* (
   input: AntigravityAcpRuntimeInput,
 ): Effect.fn.Return<
-  AcpSessionRuntime.AcpSessionRuntime['Service'],
+  AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
   Crypto.Crypto | Scope.Scope
->
-{
+> {
   const context = yield* Layer.build(
     AcpSessionRuntime.layer({
       ...input,
-      authMethodId: 'oauth-personal',
+      authMethodId: input.authMethod ?? "oauth-personal",
+      resumeMethod: "resume",
+      cancelBehavior: "wait-for-prompt",
       clientCapabilities: {
         fs: {
           readTextFile: input.clientFileSystem === true,
@@ -77,267 +84,215 @@ export const makeAntigravityAcpRuntime = Effect.fn('makeAntigravityAcpRuntime')(
         Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
       ),
     ),
-  )
-  return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(Effect.provide(context))
-})
+  );
+  return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(Effect.provide(context));
+});
 
-export const validateAntigravityAcpInstallation = Effect.fn('validateAntigravityAcpInstallation')(
-  function* (input: {
-    readonly executable: AntigravityExecutable
-    readonly expectedVersion: string
-  })
-  {
-    const fs = yield* FileSystem.FileSystem
-    const profileDirectory = yield* fs
-      .makeTempDirectoryScoped({
-        prefix: 't3-antigravity-validate-',
-      })
-      .pipe(
-        Effect.mapError(
-          () =>
-            new EffectAcpErrors.AcpTransportError({
-              detail: 'Could not create the Antigravity validation profile.',
-              cause: undefined,
-            }),
-        ),
-      )
-    const profile = yield* prepareAntigravityProfile({ profileDirectory })
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const runtime = yield* makeAntigravityAcpRuntime({
-      spawn: buildAntigravityAcpSpawnInput({
-        installation: input.executable,
-        profile,
-        cwd: profileDirectory,
-      }),
-      cwd: profileDirectory,
-      childProcessSpawner: spawner,
-      clientInfo: { name: '456code-provider-validation', version: '0.0.0' },
-    })
-    const initialized = yield* runtime.initialize()
-    if (
-      initialized.agentInfo?.name !== 'antigravity-acp' ||
-      initialized.agentInfo.version !== input.expectedVersion ||
-      initialized.protocolVersion !== 1 ||
-      initialized.agentCapabilities?.loadSession !== true ||
-      !initialized.agentCapabilities.sessionCapabilities?.resume ||
-      !initialized.agentCapabilities.auth?.logout ||
-      !initialized.authMethods?.some((method) => method.id === 'oauth-personal')
-    )
-    {
-      return yield* new EffectAcpErrors.AcpTransportError({
-        detail: 'The runtime did not identify as the expected Google Antigravity release.',
-        cause: undefined,
-      })
-    }
-  },
-)
-
-export function antigravityPermissionMode(runtimeMode: RuntimeMode): string
-{
-  switch (runtimeMode)
-  {
-    case 'full-access':
-      return 'yolo'
-    case 'auto-accept-edits':
-      return 'auto_edit'
-    case 'auto':
-    case 'approval-required':
-      return 'default'
+export function antigravityPermissionMode(runtimeMode: RuntimeMode): string {
+  switch (runtimeMode) {
+    case "full-access":
+      return "yolo";
+    case "auto-accept-edits":
+      return "auto_edit";
+    case "auto":
+    case "approval-required":
+      return "default";
   }
 }
 
 export function antigravityModelOptions(
   configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
-)
-{
-  const model = configOptions.find((option) => option.id === 'model')
-  if (model?.type !== 'select') return []
-  return model.options.flatMap((entry) => ('value' in entry ? [entry] : entry.options))
+) {
+  const model = configOptions.find((option) => option.id === "model");
+  if (model?.type !== "select") return [];
+  return model.options.flatMap((entry) => ("value" in entry ? [entry] : entry.options));
 }
 
-// resolves the model a turn should run on. A saved selection is reapplied
-// as-is. The provider default alias resolves to `defaultModel` when the
-// account offers it, so T3 can pick a newer model than the one Google marks
-// current. Otherwise the agent's current selection stands.
+/**
+ * Resolves the model a turn should run on. A saved selection is reapplied
+ * as-is. The provider default alias resolves to `defaultModel` when the
+ * account offers it, so T3 can pick a newer model than the one Google marks
+ * current. Otherwise the agent's current selection stands.
+ */
 export function resolveAntigravityModel(input: {
-  readonly configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>
-  readonly model: string | null | undefined
-  readonly defaultModel?: string | undefined
-}): string | undefined
-{
-  const modelConfig = input.configOptions.find((option) => option.id === 'model')
-  const current = modelConfig?.type === 'select' ? modelConfig.currentValue : undefined
-  if (input.model && input.model !== ANTIGRAVITY_DEFAULT_MODEL) return input.model
-  const options = antigravityModelOptions(input.configOptions)
+  readonly configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
+  readonly model: string | null | undefined;
+  readonly defaultModel?: string | undefined;
+}): string | undefined {
+  const modelConfig = input.configOptions.find((option) => option.id === "model");
+  const current = modelConfig?.type === "select" ? modelConfig.currentValue : undefined;
+  if (input.model && input.model !== ANTIGRAVITY_DEFAULT_MODEL) return input.model;
+  const options = antigravityModelOptions(input.configOptions);
   return input.defaultModel && options.some((option) => option.value === input.defaultModel)
     ? input.defaultModel
-    : current
+    : current;
 }
 
-// never replace a saved selection with the default returned by a cold resume.
-export const applyAntigravityAcpModelSelection = Effect.fn('applyAntigravityAcpModelSelection')(
+/** Never replace a saved selection with the default returned by a cold resume. */
+export const applyAntigravityAcpModelSelection = Effect.fn("applyAntigravityAcpModelSelection")(
   function* <E>(input: {
     readonly runtime: Pick<
-      AcpSessionRuntime.AcpSessionRuntime['Service'],
-      'getConfigOptions' | 'setModel'
-    >
-    readonly model: string | null | undefined
-    // model to select for the provider default alias. See `resolveAntigravityModel`.
-    readonly defaultModel?: string | undefined
-    readonly mapError: (cause: EffectAcpErrors.AcpError) => E
-  }): Effect.fn.Return<string | undefined, E>
-  {
-    const configOptions = yield* input.runtime.getConfigOptions
-    const modelConfig = configOptions.find((option) => option.id === 'model')
-    const current = modelConfig?.type === 'select' ? modelConfig.currentValue : undefined
+      AcpSessionRuntime.AcpSessionRuntime["Service"],
+      "getConfigOptions" | "setModel"
+    >;
+    readonly model: string | null | undefined;
+    /** Model to select for the provider default alias. See `resolveAntigravityModel`. */
+    readonly defaultModel?: string | undefined;
+    readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
+  }): Effect.fn.Return<string | undefined, E> {
+    const configOptions = yield* input.runtime.getConfigOptions;
+    const modelConfig = configOptions.find((option) => option.id === "model");
+    const current = modelConfig?.type === "select" ? modelConfig.currentValue : undefined;
     const resolved = resolveAntigravityModel({
       configOptions,
       model: input.model,
       defaultModel: input.defaultModel,
-    })
-    // the default alias never sends an internal ID. It selects the manifest
+    });
+    // The default alias never sends an internal ID. It selects the manifest
     // default when that differs from the agent's current model, and otherwise
     // leaves the agent's choice alone.
-    const explicit = Boolean(input.model) && input.model !== ANTIGRAVITY_DEFAULT_MODEL
-    if (resolved === undefined || (!explicit && resolved === current)) return current
-    const options = antigravityModelOptions(configOptions)
-    if (!options.some((option) => option.value === resolved))
-    {
+    const explicit = Boolean(input.model) && input.model !== ANTIGRAVITY_DEFAULT_MODEL;
+    if (resolved === undefined || (!explicit && resolved === current)) return current;
+    const options = antigravityModelOptions(configOptions);
+    if (!options.some((option) => option.value === resolved)) {
       return yield* Effect.fail(
         input.mapError(
           EffectAcpErrors.AcpRequestError.invalidParams(
             `Antigravity model '${resolved}' is unavailable for this Google account. Select an available model.`,
           ),
         ),
-      )
+      );
     }
-    yield* input.runtime.setModel(resolved).pipe(Effect.mapError(input.mapError))
-    return resolved
+    yield* input.runtime.setModel(resolved).pipe(Effect.mapError(input.mapError));
+    return resolved;
   },
-)
+);
 
-const IMAGE_MIME_TYPES = new Set(['image/bmp', 'image/jpeg', 'image/png', 'image/webp'])
-// formats the bundled SDK's Audio type accepts. Anything else is rejected up front.
+const IMAGE_MIME_TYPES = new Set(["image/bmp", "image/jpeg", "image/png", "image/webp"]);
+// Formats the bundled SDK's Audio type accepts. Anything else is rejected up front.
 const AUDIO_MIME_TYPES = new Set([
-  'audio/aac',
-  'audio/flac',
-  'audio/mp3',
-  'audio/mpeg',
-  'audio/mp4',
-  'audio/m4a',
-  'audio/x-m4a',
-  'audio/ogg',
-  'audio/wav',
-  'audio/x-wav',
-  'audio/webm',
-])
-export const ANTIGRAVITY_MAX_AUDIO_ATTACHMENT_BYTES = 20 * 1024 * 1024
+  "audio/aac",
+  "audio/flac",
+  "audio/mp3",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/m4a",
+  "audio/x-m4a",
+  "audio/ogg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/webm",
+]);
+const ANTIGRAVITY_MAX_AUDIO_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const TEXT_MIME_TYPES = new Set([
-  'application/json',
-  'application/ld+json',
-  'application/javascript',
-  'application/typescript',
-  'application/xml',
-  'application/yaml',
-  'application/x-yaml',
-  'application/x-sh',
-])
+  "application/json",
+  "application/ld+json",
+  "application/javascript",
+  "application/typescript",
+  "application/xml",
+  "application/yaml",
+  "application/x-yaml",
+  "application/x-sh",
+]);
 const TEXT_FILE_EXTENSIONS = new Set([
-  '.txt',
-  '.md',
-  '.mdx',
-  '.json',
-  '.jsonl',
-  '.yaml',
-  '.yml',
-  '.toml',
-  '.xml',
-  '.csv',
-  '.tsv',
-  '.js',
-  '.jsx',
-  '.mjs',
-  '.cjs',
-  '.ts',
-  '.tsx',
-  '.html',
-  '.css',
-  '.scss',
-  '.less',
-  '.py',
-  '.rs',
-  '.go',
-  '.java',
-  '.kt',
-  '.swift',
-  '.c',
-  '.h',
-  '.cc',
-  '.cpp',
-  '.hpp',
-  '.cs',
-  '.rb',
-  '.php',
-  '.sh',
-  '.bash',
-  '.zsh',
-  '.sql',
-  '.graphql',
-  '.svelte',
-  '.vue',
-  '.log',
-  '.diff',
-  '.patch',
-  '.ini',
-  '.conf',
-])
-export const ANTIGRAVITY_MAX_TEXT_ATTACHMENT_BYTES = 1024 * 1024
-const MAX_TOTAL_ATTACHMENT_BYTES = PROVIDER_SEND_TURN_MAX_FILE_BYTES
+  ".txt",
+  ".md",
+  ".mdx",
+  ".json",
+  ".jsonl",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".xml",
+  ".csv",
+  ".tsv",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".html",
+  ".css",
+  ".scss",
+  ".less",
+  ".py",
+  ".rs",
+  ".go",
+  ".java",
+  ".kt",
+  ".swift",
+  ".c",
+  ".h",
+  ".cc",
+  ".cpp",
+  ".hpp",
+  ".cs",
+  ".rb",
+  ".php",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".sql",
+  ".graphql",
+  ".svelte",
+  ".vue",
+  ".log",
+  ".diff",
+  ".patch",
+  ".ini",
+  ".conf",
+]);
+export const ANTIGRAVITY_MAX_TEXT_ATTACHMENT_BYTES = 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = PROVIDER_SEND_TURN_MAX_FILE_BYTES;
 
-// sends uploads as native ACP content instead of workspace path hints.
-export const buildAntigravityPrompt = Effect.fn('buildAntigravityPrompt')(function* (input: {
-  readonly input: ProviderSendTurnInput['input']
-  readonly attachments: ProviderSendTurnInput['attachments']
-  readonly attachmentsDir: string
+/** Sends uploads as native ACP content instead of workspace path hints. */
+export const buildAntigravityPrompt = Effect.fn("buildAntigravityPrompt")(function* (input: {
+  readonly input: ProviderSendTurnInput["input"];
+  readonly attachments: ProviderSendTurnInput["attachments"];
+  readonly attachmentsDir: string;
 }): Effect.fn.Return<
   ReadonlyArray<EffectAcpSchema.ContentBlock>,
   EffectAcpErrors.AcpError,
   FileSystem.FileSystem | Path.Path
->
-{
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const blocks: Array<EffectAcpSchema.ContentBlock> = []
-  const text = input.input?.trim()
-  if (text) blocks.push({ type: 'text', text })
-  let totalBytes = 0
+> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const blocks: Array<EffectAcpSchema.ContentBlock> = [];
+  const text = input.input?.trim();
+  if (text) blocks.push({ type: "text", text });
+  let totalBytes = 0;
 
-  for (const attachment of input.attachments ?? [])
-  {
-    const mimeType = attachment.mimeType.toLowerCase().split(';', 1)[0] ?? ''
-    const image = attachment.type === 'image' && IMAGE_MIME_TYPES.has(mimeType)
-    const audio = attachment.type === 'file' && AUDIO_MIME_TYPES.has(mimeType)
-    const pdf = attachment.type === 'file' && mimeType === 'application/pdf'
+  for (const attachment of input.attachments ?? []) {
+    const isPastedText =
+      attachment.type === "file" &&
+      "source" in attachment &&
+      attachment.source?._tag === "pasted-text";
+    // ProviderService has already put the file path in the text block. Keep a
+    // folded clipboard paste lazy so the agent can search or sample it rather
+    // than paying to embed the entire resource in context immediately.
+    const mimeType = attachment.mimeType.toLowerCase().split(";", 1)[0] ?? "";
+    const image = attachment.type === "image" && IMAGE_MIME_TYPES.has(mimeType);
+    const audio = attachment.type === "file" && AUDIO_MIME_TYPES.has(mimeType);
+    const pdf = attachment.type === "file" && mimeType === "application/pdf";
     const textFile =
-      attachment.type === 'file' &&
-      (mimeType.startsWith('text/') ||
+      attachment.type === "file" &&
+      (mimeType.startsWith("text/") ||
         TEXT_MIME_TYPES.has(mimeType) ||
-        TEXT_FILE_EXTENSIONS.has(path.extname(attachment.name).toLowerCase()))
-    if (!image && !audio && !pdf && !textFile)
-    {
+        TEXT_FILE_EXTENSIONS.has(path.extname(attachment.name).toLowerCase()));
+    if (!image && !audio && !pdf && !textFile) {
       return yield* EffectAcpErrors.AcpRequestError.invalidParams(
         `Antigravity does not support '${attachment.name}' (${attachment.mimeType}). Attach a BMP, JPEG, PNG, WebP, PDF, audio, or text file.`,
-      )
+      );
     }
     const attachmentPath = resolveAttachmentPath({
       attachmentsDir: input.attachmentsDir,
       attachment,
-    })
-    if (!attachmentPath)
-    {
+    });
+    if (!attachmentPath) {
       return yield* EffectAcpErrors.AcpRequestError.invalidParams(
         `Invalid attachment '${attachment.name}'.`,
-      )
+      );
     }
     const info = yield* fileSystem
       .stat(attachmentPath)
@@ -347,32 +302,38 @@ export const buildAntigravityPrompt = Effect.fn('buildAntigravityPrompt')(functi
             `Could not read attachment '${attachment.name}'.`,
           ),
         ),
-      )
-    const size = Number(info.size)
+      );
+    if (isPastedText) {
+      if (info.type !== "File") {
+        return yield* EffectAcpErrors.AcpRequestError.invalidParams(
+          `Could not read attachment '${attachment.name}'.`,
+        );
+      }
+      continue;
+    }
+    const size = Number(info.size);
     const limit = image
       ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
       : audio
         ? ANTIGRAVITY_MAX_AUDIO_ATTACHMENT_BYTES
         : pdf
           ? PROVIDER_SEND_TURN_MAX_FILE_BYTES
-          : ANTIGRAVITY_MAX_TEXT_ATTACHMENT_BYTES
-    totalBytes += size
-    if (info.type !== 'File' || size > limit || totalBytes > MAX_TOTAL_ATTACHMENT_BYTES)
-    {
+          : ANTIGRAVITY_MAX_TEXT_ATTACHMENT_BYTES;
+    totalBytes += size;
+    if (info.type !== "File" || size > limit || totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
       return yield* EffectAcpErrors.AcpRequestError.invalidParams(
         `Attachment '${attachment.name}' is too large. Antigravity accepts text files up to 1 MiB, images up to 10 MiB, audio up to 20 MiB, and 50 MiB total attachments.`,
-      )
+      );
     }
     const uri = yield* path.toFileUrl(attachmentPath).pipe(
       Effect.map((url) => url.href),
       Effect.mapError(() =>
         EffectAcpErrors.AcpRequestError.invalidParams(`Invalid attachment '${attachment.name}'.`),
       ),
-    )
-    if (pdf)
-    {
-      blocks.push({ type: 'resource_link', uri, name: attachment.name, mimeType })
-      continue
+    );
+    if (pdf) {
+      blocks.push({ type: "resource_link", uri, name: attachment.name, mimeType });
+      continue;
     }
     const bytes = yield* fileSystem.stream(attachmentPath, { bytesToRead: limit + 1 }).pipe(
       Stream.runCollect,
@@ -382,45 +343,37 @@ export const buildAntigravityPrompt = Effect.fn('buildAntigravityPrompt')(functi
           `Could not read attachment '${attachment.name}'.`,
         ),
       ),
-    )
-    totalBytes += bytes.length - size
-    if (bytes.length > limit || totalBytes > MAX_TOTAL_ATTACHMENT_BYTES)
-    {
+    );
+    totalBytes += bytes.length - size;
+    if (bytes.length > limit || totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
       return yield* EffectAcpErrors.AcpRequestError.invalidParams(
         `Attachment '${attachment.name}' changed while being read and is too large.`,
-      )
+      );
     }
-    if (image)
-    {
-      blocks.push({ type: 'image', data: Buffer.from(bytes).toString('base64'), mimeType })
-    }
-    else if (audio)
-    {
-      blocks.push({ type: 'audio', data: Buffer.from(bytes).toString('base64'), mimeType })
-    }
-    else
-    {
+    if (image) {
+      blocks.push({ type: "image", data: Buffer.from(bytes).toString("base64"), mimeType });
+    } else if (audio) {
+      blocks.push({ type: "audio", data: Buffer.from(bytes).toString("base64"), mimeType });
+    } else {
       const decoded = yield* Effect.try({
-        try: () => new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+        try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
         catch: () =>
           EffectAcpErrors.AcpRequestError.invalidParams(
             `Attachment '${attachment.name}' is not a UTF-8 text file.`,
           ),
-      })
-      if (decoded.includes('\0'))
-      {
+      });
+      if (decoded.includes("\0")) {
         return yield* EffectAcpErrors.AcpRequestError.invalidParams(
           `Attachment '${attachment.name}' contains binary data.`,
-        )
+        );
       }
-      blocks.push({ type: 'resource', resource: { uri, mimeType, text: decoded } })
+      blocks.push({ type: "resource", resource: { uri, mimeType, text: decoded } });
     }
   }
-  if (blocks.length === 0)
-  {
+  if (blocks.length === 0) {
     return yield* EffectAcpErrors.AcpRequestError.invalidParams(
-      'A turn requires text or supported attachments.',
-    )
+      "A turn requires text or supported attachments.",
+    );
   }
-  return blocks
-})
+  return blocks;
+});

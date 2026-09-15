@@ -16,7 +16,9 @@ export const normalizeTags = (tags: Tags) =>
       )
     : tags;
 
-export const tagRecord = (tags: Tags | undefined): Record<string, string> =>
+export const tagRecord = (
+  tags: Tags | null | undefined,
+): Record<string, string> =>
   Object.fromEntries(
     Object.entries(normalizeTags(tags ?? {})).filter(
       (entry): entry is [string, string] => entry[1] !== undefined,
@@ -38,7 +40,7 @@ export const createTagsList = (tags: Tags) =>
       Value,
     }));
 
-export const createInternalTags = Effect.fnUntraced(function* (id: string) {
+export const createInternalTags = Effect.fn(function* (id: string) {
   const stack = yield* Stack;
   const stage = yield* Stage;
   return {
@@ -49,12 +51,22 @@ export const createInternalTags = Effect.fnUntraced(function* (id: string) {
 });
 
 /**
+ * Strips the internal `alchemy::*` ownership tags from a tag/label map, leaving
+ * only the user-facing entries. Useful when diffing observed cloud state (which
+ * carries the internal branding) against the user's desired tags.
+ */
+export const stripInternalTags = (
+  tags: Record<string, string> | null | undefined,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(tags ?? {}).filter(([key]) => !key.startsWith("alchemy::")),
+  );
+
+/**
  * Creates AWS-compatible tag filters for finding resources by alchemy tags.
  * Use with AWS describe APIs that accept Filter parameters.
  */
-export const createAlchemyTagFilters = Effect.fnUntraced(function* (
-  id: string,
-) {
+export const createAlchemyTagFilters = Effect.fn(function* (id: string) {
   const stack = yield* Stack;
   const stage = yield* Stage;
   return [
@@ -67,7 +79,7 @@ export const createAlchemyTagFilters = Effect.fnUntraced(function* (
 /**
  * Checks if a resource has the expected alchemy tags for this app/stage/id.
  */
-export const hasAlchemyTags = Effect.fnUntraced(function* (
+export const hasAlchemyTags = Effect.fn(function* (
   id: string,
   tags: Tags | undefined,
 ) {

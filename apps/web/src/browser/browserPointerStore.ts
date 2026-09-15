@@ -1,14 +1,10 @@
-// apps/web/src/browser/browserPointerStore.ts
-// manage browser pointer store through a React hook
+import type { DesktopPreviewPointerEvent } from "@t3tools/contracts";
+import { create } from "zustand";
 
-import type { DesktopPreviewPointerEvent } from '@t3tools/contracts'
-import { create } from 'zustand'
-
-interface BrowserPointerStoreState
-{
-  readonly byTabId: Record<string, DesktopPreviewPointerEvent>
-  readonly apply: (event: DesktopPreviewPointerEvent) => void
-  readonly clear: (tabId: string) => void
+interface BrowserPointerStoreState {
+  readonly byTabId: Record<string, DesktopPreviewPointerEvent>;
+  readonly apply: (event: DesktopPreviewPointerEvent) => void;
+  readonly clear: (tabId: string) => void;
 }
 
 export const useBrowserPointerStore = create<BrowserPointerStoreState>()((set) => ({
@@ -21,10 +17,9 @@ export const useBrowserPointerStore = create<BrowserPointerStoreState>()((set) =
       },
     })),
   clear: (tabId) =>
-    set((state) =>
-    {
-      if (!(tabId in state.byTabId)) return state
-      const { [tabId]: _removed, ...byTabId } = state.byTabId
-      return { byTabId }
+    set((state) => {
+      if (!(tabId in state.byTabId)) return state;
+      const { [tabId]: _removed, ...byTabId } = state.byTabId;
+      return { byTabId };
     }),
-}))
+}));

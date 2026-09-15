@@ -5,36 +5,43 @@
   "scripts": {
     "prepare": "effect-tsgo patch && vp config --no-agent",
     "dev": "node scripts/dev-runner.ts dev",
+    "dev:share": "node scripts/dev-runner.ts dev --share",
     "dev:server": "node scripts/dev-runner.ts dev:server",
     "dev:web": "node scripts/dev-runner.ts dev:web",
+    "dev:marketing": "vp run --filter @t3tools/marketing dev",
     "dev:desktop": "node scripts/dev-runner.ts dev:desktop",
-    "start": "vp run --filter 456code start",
+    "migrate-dev-db": "node apps/server/scripts/migrate-dev-db.ts",
+    "start": "vp run --filter t3 start",
     "start:desktop": "vp run --filter @t3tools/desktop start",
+    "start:marketing": "vp run --filter @t3tools/marketing preview",
     "start:mock-update-server": "node scripts/mock-update-server.ts",
     "screenshots:mobile": "node scripts/mobile-showcase.ts",
     "icons:export": "node scripts/export-brand-icons.ts",
     "icons:check": "node scripts/export-brand-icons.ts --check",
-    "build": "vp run --filter './apps/*' --filter './packages/*' --filter './oxlint-plugin-456code' --filter './scripts' build",
-    "build:desktop": "vp run --filter @t3tools/desktop --filter 456code build",
+    "licenses:sync": "node scripts/sync-third-party-license-notices.ts",
+    "icons:export:android": "node scripts/export-android-icons.ts",
+    "build": "vp run --filter './apps/*' build",
+    "build:marketing": "vp run --filter @t3tools/marketing build",
+    "build:desktop": "vp run --filter @t3tools/desktop --filter t3 build",
+    "build:resource-monitor": "cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml",
     "typecheck": "vp run -r --concurrency-limit 2 typecheck",
     "tc": "vp run -r --concurrency-limit 2 typecheck",
     "lint": "vp lint --report-unused-disable-directives",
+    "knip": "knip --preprocessor ./scripts/knip-schemas.ts",
+    "knip:check": "knip --include files,dependencies --no-config-hints && knip --workspace apps/server --workspace apps/desktop --workspace apps/web --workspace packages/client-runtime --workspace packages/contracts --workspace packages/effect-acp --workspace packages/effect-codex-app-server --workspace packages/shared --workspace packages/ssh --workspace packages/tailscale --exports --preprocessor ./scripts/knip-schemas.ts --no-config-hints",
+    "knip:production": "knip --production --preprocessor ./scripts/knip-schemas.ts",
     "lint:mobile": "node scripts/mobile-native-static-check.ts",
     "test": "vp run -r test",
+    "test:resource-monitor": "cargo test --locked --manifest-path native/resource-monitor/Cargo.toml",
     "test:desktop-smoke": "vp run --filter @t3tools/desktop smoke-test",
-    "fmt": "node scripts/format-repository.ts",
-    "fmt:check": "node scripts/format-repository.ts --check",
-    "fmt:prettier:check": "node scripts/format-repository.ts --check --prettier-only",
-    "comments:check": "node scripts/check-js-comments.ts",
-    "comments:all:check": "node scripts/check-js-comments.ts apps packages scripts tests oxlint-plugin-456code vite.config.ts && pnpm run comments:native:check",
-    "comments:native:check": "python3 scripts/check_comment_style.py --check --headers apps packages scripts tests experiments .github .vite-hooks",
-    "comments:native:fix": "python3 scripts/check_comment_style.py --fix --headers apps packages scripts tests experiments .github .vite-hooks",
-    "build:contracts": "vp run --filter @t3tools/contracts build",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
     "dist:desktop:artifact": "node scripts/build-desktop-artifact.ts",
     "dist:desktop:dmg": "node scripts/build-desktop-artifact.ts --platform mac --target dmg",
     "dist:desktop:dmg:arm64": "node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64",
     "dist:desktop:dmg:x64": "node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64",
     "dist:desktop:linux": "node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64",
+    "dist:gnome-extension": "gnome-extensions pack apps/desktop/gnome-extension --extra-source=captureService.js --extra-source=captureFeedback.js --extra-source=feedbackGeometry.js --out-dir=release --force",
     "dist:desktop:win": "node scripts/build-desktop-artifact.ts --platform win --target nsis",
     "dist:desktop:win:arm64": "node scripts/build-desktop-artifact.ts --platform win --target nsis --arch arm64",
     "dist:desktop:win:x64": "node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64",
@@ -43,24 +50,14 @@
     "sync:repos": "node scripts/sync-reference-repos.ts"
   },
   "devDependencies": {
-    "@babel/plugin-transform-react-jsx": "7.29.7",
     "@effect/tsgo": "catalog:",
-    "@oxlint/plugins": "^1.81.0",
     "@types/node": "catalog:",
-    "@typescript/native": "catalog:",
-    "node-gyp": "13.0.2",
-    "prettier": "3.9.6",
-    "prettier-plugin-brace-style": "0.10.3",
+    "knip": "6.34.0",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
   },
   "engines": {
-    "node": "^24.20.0"
+    "node": "^24.13.1"
   },
-  "packageManager": "pnpm@12.3.4",
-  "msw": {
-    "workerDirectory": [
-      "apps/web/public"
-    ]
-  }
+  "packageManager": "pnpm@11.10.0"
 }

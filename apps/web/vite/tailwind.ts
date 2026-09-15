@@ -1,18 +1,15 @@
-// apps/web/vite/tailwind.ts
-// adapt Tailwind dev hooks to Vite's experimental bundled mode
+import tailwindcss from "@tailwindcss/vite";
 
-import tailwindcss from '@tailwindcss/vite'
-
-export function tailwindPlugins(bundledDev: boolean)
-{
-  const plugins = tailwindcss()
-  if (bundledDev)
-  {
-    for (const plugin of plugins)
-    {
-      // bundled dev tracks watched dependencies without this incompatible module-node hook
-      delete plugin.hotUpdate
+/** Adapts Tailwind's dev hooks to Vite's experimental bundled mode. */
+export function tailwindPlugins(bundledDev: boolean) {
+  const plugins = tailwindcss();
+  if (bundledDev) {
+    for (const plugin of plugins) {
+      // This hook expects Vite ModuleNodes and a server, which Rolldown does
+      // not supply. Bundled dev tracks Tailwind's addWatchFile dependencies
+      // and rebuilds CSS when those files change without this hook.
+      delete plugin.hotUpdate;
     }
   }
-  return plugins
+  return plugins;
 }

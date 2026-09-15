@@ -1,3 +1,5 @@
+import type { MigrationsInput } from "../SQL/Migrations/index.ts";
+
 /**
  * Region selector for a PlanetScale Database.
  */
@@ -29,7 +31,8 @@ export interface BaseDatabaseProps {
 
   /**
    * Number of replicas for the database. `0` for non-HA, `2+` for HA.
-   * Create-only.
+   * Create-only for PostgreSQL databases; MySQL databases reconcile
+   * changes in place ({@link MySQLDatabaseProps.replicas}).
    */
   replicas?: number;
 
@@ -57,17 +60,16 @@ export interface BaseDatabaseProps {
   defaultBranch?: string;
 
   /**
-   * Directory containing `.sql` migration files. Files are sorted by numeric
-   * prefix (for example `0001_init.sql`) and applied in order against the
-   * default branch.
+   * SQL migrations to apply against the default branch. Accepts a directory
+   * path, a `Drizzle.Schema` resource, or `{ dir, table? }`.
+   *
+   * Bookkeeping always lives in Alchemy's `__alchemy_migrations` table. A
+   * database previously migrated by drizzle-kit or Prisma is adopted by a
+   * one-way conversion on first deploy: the old tool's applied history is
+   * copied into Alchemy's table and the old table is left frozen. No
+   * baselining required.
    */
-  migrationsDir?: string;
-
-  /**
-   * Name of the table used to track applied migrations.
-   * @default "planetscale_migrations"
-   */
-  migrationsTable?: string;
+  migrations?: MigrationsInput;
 
   /**
    * Paths to additional `.sql` files to apply after migrations. Each file is

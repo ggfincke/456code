@@ -1,11 +1,17 @@
+import { Unowned } from "@/AdoptPolicy";
+import { AlchemyContext } from "@/AlchemyContext.ts";
 import { Artifacts } from "@/Artifacts";
+import * as Binding from "@/Binding.ts";
 import { isResolved } from "@/Diff.ts";
+import * as ProviderLayer from "@/Local/ProviderLayer.ts";
 import * as Provider from "@/Provider.ts";
+import { LOCAL_ID_PREFIX, type ProviderMode } from "@/ProviderMode.ts";
 import { Resource, type ResourceBinding } from "@/Resource";
+import { Stack } from "@/Stack";
 import * as State from "@/State/index";
 import { isUnknown } from "@/Util/unknown";
-import * as Context from "effect/Context";
 import { Data } from "effect";
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,6 +36,7 @@ export const Bucket = Resource<Bucket>("Test.Bucket");
 
 const bucketProvider = () =>
   Provider.succeed(Bucket, {
+    list: () => Effect.succeed([]),
     diff: Effect.fn(function* ({ id, news, output }) {
       if (!isResolved(news)) return undefined;
     }),
@@ -46,13 +53,13 @@ const bucketProvider = () =>
   });
 
 // Queue
-export type QueueProps = {
+export type Props = {
   name?: string;
 };
 
 export interface Queue extends Resource<
   "Test.Queue",
-  QueueProps,
+  Props,
   {
     name: string;
     queueUrl: string;
@@ -63,6 +70,7 @@ export const Queue = Resource<Queue>("Test.Queue");
 
 export const queueProvider = () =>
   Provider.succeed(Queue, {
+    list: () => Effect.succeed([]),
     diff: Effect.fn(function* ({ id, news = {}, output }) {
       if (!isResolved(news)) return undefined;
     }),
@@ -95,6 +103,7 @@ export const Function = Resource<Function>("Test.Function");
 
 export const functionProvider = () =>
   Provider.succeed(Function, {
+    list: () => Effect.succeed([]),
     diff: Effect.fn(function* ({ id, news, output }) {
       if (!isResolved(news)) return undefined;
     }),
@@ -135,6 +144,7 @@ export const bindingTargetProvider = () =>
     BindingTarget,
     Effect.gen(function* () {
       return {
+        list: () => Effect.succeed([]),
         diff: Effect.fn(function* ({ id, news = {}, olds = {}, newBindings }) {
           if (!isResolved(news)) return undefined;
           const hooks = Option.getOrUndefined(
@@ -232,6 +242,7 @@ export const DeletedBindingRegressionTarget =
 
 export const deletedBindingRegressionProvider = () =>
   Provider.succeed(DeletedBindingRegressionTarget, {
+    list: () => Effect.succeed([]),
     diff: Effect.fn(function* () {}),
     precreate: Effect.fn(function* ({ id, news = {} }) {
       return {
@@ -270,6 +281,7 @@ export const ArtifactProbe = Resource<ArtifactProbe>("Test.ArtifactProbe");
 
 export const artifactProbeProvider = () =>
   Provider.succeed(ArtifactProbe, {
+    list: () => Effect.succeed([]),
     diff: Effect.fn(function* ({ news, olds }) {
       const next = news as ArtifactProbeProps;
       const prev = olds as ArtifactProbeProps | undefined;
@@ -361,6 +373,7 @@ export const testResourceProvider = () =>
     TestResource,
     Effect.gen(function* () {
       return {
+        list: () => Effect.succeed([]),
         read: Effect.fn(function* ({ id, output }) {
           const hooks = Option.getOrUndefined(
             yield* Effect.serviceOption(TestResourceHooks),
@@ -487,6 +500,7 @@ export const StaticStablesResource = Resource<StaticStablesResource>(
 
 export const staticStablesResourceProvider = () =>
   Provider.succeed(StaticStablesResource, {
+    list: () => Effect.succeed([]),
     // KEY DIFFERENCE: Static stables defined on the provider itself
     // These are always stable regardless of what diff() returns
     stables: ["stableId", "stableArn"],
@@ -553,6 +567,109 @@ export const staticStablesResourceProvider = () =>
     }),
   });
 
+// KindStablesResource - reproduces providers whose stable output attributes
+// include a `kind` field, such as PlanetScale databases.
+
+export type KindStablesResourceProps = {
+  value: string;
+  upstream?: KindStablesResource;
+};
+
+export interface KindStablesResource extends Resource<
+  "Test.KindStablesResource",
+  KindStablesResourceProps,
+  {
+    kind: "postgresql";
+    value: string;
+    upstreamKind: "postgresql" | undefined;
+  }
+> {}
+
+export const KindStablesResource = Resource<KindStablesResource>(
+  "Test.KindStablesResource",
+);
+
+export const kindStablesResourceProvider = () =>
+  Provider.succeed(KindStablesResource, {
+    list: () => Effect.succeed([]),
+    stables: ["kind"],
+    diff: Effect.fn(function* ({ news, olds }) {
+      if (!isResolved(news)) return undefined;
+      if (news.value !== olds?.value) {
+        return { action: "update" };
+      }
+      return undefined;
+    }),
+    reconcile: Effect.fn(function* ({ news }) {
+      const upstream = news.upstream as
+        | KindStablesResource["Attributes"]
+        | undefined;
+      return {
+        kind: "postgresql",
+        value: news.value,
+        upstreamKind: upstream?.kind,
+      };
+    }),
+    delete: Effect.fn(function* () {}),
+  });
+
+// OverrideStablesResource — declares BOTH a provider-level `stables` list AND
+// a `diff` that returns its own `stables` list that DISAGREES with it. Used to
+// assert that a present `diff.stables` OVERRIDES `provider.stables` during plan
+// (rather than being merged with it):
+//   - `providerStable` is only in `provider.stables` (omitted by `diff.stables`)
+//   - `diffStable`     is only in `diff.stables`     (omitted by `provider.stables`)
+//   - `sharedStable`   is in both
+// Under override semantics, on a `string` change `providerStable` must be
+// treated as CHANGED (downstream re-plans) while `diffStable`/`sharedStable`
+// stay stable. Under the old merge, `providerStable` would wrongly stay stable.
+
+export type OverrideStablesResourceProps = {
+  string?: string;
+};
+
+export interface OverrideStablesResource extends Resource<
+  "Test.OverrideStablesResource",
+  OverrideStablesResourceProps,
+  {
+    string: string;
+    providerStable: string;
+    diffStable: string;
+    sharedStable: string;
+  }
+> {}
+
+export const OverrideStablesResource = Resource<OverrideStablesResource>(
+  "Test.OverrideStablesResource",
+);
+
+export const overrideStablesResourceProvider = () =>
+  Provider.succeed(OverrideStablesResource, {
+    list: () => Effect.succeed([]),
+    stables: ["providerStable", "sharedStable"],
+    diff: Effect.fn(function* ({ news = {}, olds = {} }) {
+      if (!isResolved(news)) return undefined;
+      const n = news as OverrideStablesResourceProps;
+      const o = olds as OverrideStablesResourceProps;
+      if (n.string !== o.string) {
+        return {
+          action: "update",
+          stables: ["diffStable", "sharedStable"],
+        } as const;
+      }
+      return undefined;
+    }),
+    reconcile: Effect.fn(function* ({ id, news = {} }) {
+      return {
+        string: news.string ?? id,
+        providerStable: `provider-${id}`,
+        diffStable: `diff-${id}`,
+        sharedStable: `shared-${id}`,
+      };
+    }),
+    delete: Effect.fn(function* () {}),
+  });
+
 export type PhasedTargetProps = {
   desired: string;
   replaceKey?: string;
@@ -588,6 +705,7 @@ export const phasedTargetProvider = () =>
     PhasedTarget,
     Effect.gen(function* () {
       return {
+        list: () => Effect.succeed([]),
         diff: Effect.fn(function* ({ news, olds }) {
           if (!isResolved(news)) return undefined;
           const n = news as PhasedTargetProps;
@@ -672,6 +790,7 @@ export const NoPrecreateBindingTarget = Resource<NoPrecreateBindingTarget>(
 
 export const noPrecreateBindingTargetProvider = () =>
   Provider.succeed(NoPrecreateBindingTarget, {
+    list: () => Effect.succeed([]),
     diff: Effect.fn(function* () {}),
     reconcile: Effect.fn(function* ({ id, news = {}, bindings }) {
       return {
@@ -713,6 +832,7 @@ export const DurationResource = Resource<DurationResource>(
 
 export const durationResourceProvider = () =>
   Provider.succeed(DurationResource, {
+    list: () => Effect.succeed([]),
     diff: Effect.fn(function* ({ news }) {
       if (!isResolved(news)) return undefined;
       return undefined;
@@ -731,10 +851,488 @@ export const durationResourceProvider = () =>
     delete: Effect.fn(function* () {}),
   });
 
+// DeleteFirstResource — exercises `{ action: "replace", deleteFirst: true }`.
+//
+// Models a resource whose replacement cannot coexist with the original (a
+// fixed physical name / singleton). When `replaceString` changes it asks the
+// engine to tear the old generation down BEFORE creating the new one.
+//
+// Two test affordances:
+//   - create/update/delete route through `TestResourceHooks` so a test can
+//     record the order the engine invokes them in.
+//   - if a `CollisionRegistry` is in context, create fails when an instance
+//     with the same physical `name` is still live. Under create-first ordering
+//     a same-name replacement would collide here (reproducing the real Docker
+//     "network already exists" / no-op `volume create` bug); under delete-first
+//     it succeeds.
+
+export class CollisionRegistry extends Context.Service<
+  CollisionRegistry,
+  { readonly live: Set<string> }
+>()("CollisionRegistry") {}
+
+export class CollisionError extends Data.TaggedError("CollisionError")<{
+  name: string;
+}> {}
+
+export type DeleteFirstResourceProps = {
+  string?: string;
+  replaceString?: string;
+  name?: string;
+};
+
+export interface DeleteFirstResource extends Resource<
+  "Test.DeleteFirstResource",
+  DeleteFirstResourceProps,
+  {
+    name: string;
+    string: string;
+    replaceString: DeleteFirstResourceProps["replaceString"];
+  }
+> {}
+
+export const DeleteFirstResource = Resource<DeleteFirstResource>(
+  "Test.DeleteFirstResource",
+);
+
+export const deleteFirstResourceProvider = () =>
+  Provider.succeed(DeleteFirstResource, {
+    list: () => Effect.succeed([]),
+    diff: Effect.fn(function* ({ news = {}, olds = {} }) {
+      if (!isResolved(news)) return undefined;
+      const n = news as DeleteFirstResourceProps;
+      const o = olds as DeleteFirstResourceProps;
+      if (n.replaceString !== o.replaceString) {
+        return { action: "replace", deleteFirst: true } as const;
+      }
+      if (n.string !== o.string) {
+        return { action: "update" } as const;
+      }
+      return undefined;
+    }),
+    reconcile: Effect.fn(function* ({ id, news = {}, olds }) {
+      const name = news.name ?? id;
+      const hooks = Option.getOrUndefined(
+        yield* Effect.serviceOption(TestResourceHooks),
+      );
+      const registry = Option.getOrUndefined(
+        yield* Effect.serviceOption(CollisionRegistry),
+      );
+      // `olds === undefined` ⇒ create (greenfield OR replacement-create); the
+      // engine clears `olds` when minting the new replacement generation.
+      if (olds === undefined) {
+        if (registry?.live.has(name)) {
+          return yield* Effect.fail(new CollisionError({ name }));
+        }
+        registry?.live.add(name);
+        if (hooks?.create) {
+          yield* hooks.create(id, {
+            string: news.string,
+            replaceString: news.replaceString,
+          });
+        }
+      } else if (hooks?.update) {
+        yield* hooks.update(id, {
+          string: news.string,
+          replaceString: news.replaceString,
+        });
+      }
+      return {
+        name,
+        string: news.string ?? id,
+        replaceString: news.replaceString,
+      };
+    }),
+    delete: Effect.fn(function* ({ id, output }) {
+      const hooks = Option.getOrUndefined(
+        yield* Effect.serviceOption(TestResourceHooks),
+      );
+      const registry = Option.getOrUndefined(
+        yield* Effect.serviceOption(CollisionRegistry),
+      );
+      registry?.live.delete(output.name);
+      if (hooks?.delete) {
+        yield* hooks.delete(id);
+      }
+    }),
+  });
+
+// ── DriftResource — exercises `alchemy sync` (read + reconcile drift repair).
+//
+// Models a cloud with an inspectable, mutable backing store (`TestCloud`):
+// `reconcile` upserts the resource into the cloud map, `read` observes it,
+// `delete` removes it. Tests mutate the map out-of-band to simulate drift
+// (or delete entries to simulate out-of-band deletion) and assert that
+// `sync` converges the cloud back to the last-deployed desired state.
+//
+// The map stores deep copies — the in-memory state store keeps references,
+// so aliasing the persisted `attr` would make out-of-band mutations
+// invisible to drift detection.
+
+export interface TestCloudService {
+  /** Live cloud state keyed by logical id. Mutate/delete to simulate drift. */
+  readonly resources: Map<string, Record<string, any>>;
+  /** Ids whose `read` result is branded {@link Unowned} (foreign tags). */
+  readonly unowned: Set<string>;
+  /** Lifecycle invocations, in order. Clear between phases to scope asserts. */
+  readonly calls: { op: "read" | "reconcile" | "delete"; id: string }[];
+}
+
+export class TestCloud extends Context.Service<TestCloud, TestCloudService>()(
+  "TestCloud",
+) {}
+
+export const makeTestCloud = (): TestCloudService => ({
+  resources: new Map(),
+  unowned: new Set(),
+  calls: [],
+});
+
+export type DriftResourceProps = {
+  value?: string;
+  tags?: Record<string, string>;
+};
+
+export interface DriftResource extends Resource<
+  "Test.DriftResource",
+  DriftResourceProps,
+  {
+    id: string;
+    value: string;
+    tags: Record<string, string>;
+    env: Record<string, string>;
+  },
+  {
+    env?: Record<string, string>;
+  }
+> {}
+
+export const DriftResource = Resource<DriftResource>("Test.DriftResource");
+
+export const driftResourceProvider = () =>
+  Provider.effect(
+    DriftResource,
+    Effect.gen(function* () {
+      const cloudOf = Effect.serviceOption(TestCloud).pipe(
+        Effect.map(Option.getOrUndefined),
+      );
+      const copy = (attrs: Record<string, any>) =>
+        JSON.parse(JSON.stringify(attrs)) as DriftResource["Attributes"];
+      return {
+        list: () => Effect.succeed([]),
+        read: Effect.fn(function* ({ id, output }) {
+          const cloud = yield* cloudOf;
+          // Without a TestCloud in context the resource behaves like
+          // TestResource: read reflects the persisted output back.
+          if (!cloud) return output;
+          cloud.calls.push({ op: "read", id });
+          const live = cloud.resources.get(id);
+          if (live === undefined) return undefined;
+          const attrs = copy(live);
+          return cloud.unowned.has(id) ? Unowned(attrs) : attrs;
+        }),
+        reconcile: Effect.fn(function* ({ id, news = {}, olds, bindings }) {
+          const cloud = yield* cloudOf;
+          cloud?.calls.push({ op: "reconcile", id });
+          const hooks = Option.getOrUndefined(
+            yield* Effect.serviceOption(TestResourceHooks),
+          );
+          if (olds === undefined) {
+            if (hooks?.create) {
+              yield* hooks.create(id, { string: news.value });
+            }
+          } else if (hooks?.update) {
+            yield* hooks.update(id, { string: news.value });
+          }
+          const attrs = {
+            id,
+            value: news.value ?? id,
+            tags: news.tags ?? {},
+            env: Object.assign(
+              {},
+              ...bindings.map(
+                (binding: any) => binding.env ?? binding.data?.env ?? {},
+              ),
+            ),
+          };
+          cloud?.resources.set(id, copy(attrs));
+          return attrs;
+        }),
+        delete: Effect.fn(function* ({ id }) {
+          const cloud = yield* cloudOf;
+          cloud?.calls.push({ op: "delete", id });
+          cloud?.resources.delete(id);
+        }),
+      };
+    }),
+  );
+
+// AliasedWidget — a resource whose type was "renamed" from `Test.Widget` to
+// `Test.Widgets.Widget`. The legacy name is carried as an alias so state
+// persisted under the old type still resolves to this provider. Its provider
+// is intentionally NOT part of `TestLayers` — alias tests provide it as a
+// bare layer or wrapped in a `ProviderCollection` to exercise both lookup
+// paths in isolation.
+export interface AliasedWidget extends Resource<
+  "Test.Widgets.Widget",
+  { name?: string },
+  {
+    name: string;
+  }
+> {}
+
+export const AliasedWidget = Resource<AliasedWidget>("Test.Widgets.Widget", {
+  aliases: ["Test.Widget"],
+});
+
+/** Logical IDs whose provider `delete` ran — proves deletion went through the provider. */
+export const aliasedWidgetDeletes: string[] = [];
+
+export const aliasedWidgetProvider = () =>
+  Provider.succeed(AliasedWidget, {
+    list: () => Effect.succeed([]),
+    reconcile: Effect.fn(function* ({ id, news }) {
+      return { name: news?.name ?? id };
+    }),
+    delete: Effect.fn(function* ({ id }) {
+      aliasedWidgetDeletes.push(id);
+    }),
+  });
+
+// FqnProbe — echoes the identity the engine threads into each handler input
+// (`id` and `fqn`) back out as attributes. Lets a test assert that the engine
+// passes the resource's real fully-qualified name — namespace path + logical
+// id — which differs from the bare logical `id` for namespaced resources.
+
+export interface FqnProbe extends Resource<
+  "Test.FqnProbe",
+  {},
+  {
+    id: string;
+    fqn: string;
+  }
+> {}
+
+export const FqnProbe = Resource<FqnProbe>("Test.FqnProbe");
+
+export const fqnProbeProvider = () =>
+  Provider.succeed(FqnProbe, {
+    list: () => Effect.succeed([]),
+    diff: Effect.fn(function* ({ news }) {
+      if (!isResolved(news)) return undefined;
+      return undefined;
+    }),
+    reconcile: Effect.fn(function* ({ id, fqn }) {
+      return { id, fqn };
+    }),
+    delete: Effect.fn(function* () {}),
+  });
+
+/**
+ * Run `eff` as if under `alchemy dev`: overrides `AlchemyContext.dev` so
+ * plans and applies inside resolve the LOCAL provider mode by default —
+ * exactly what the `alchemy dev` command does for a whole run.
+ */
+export const inDev = <A, E, R>(
+  eff: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | AlchemyContext> =>
+  AlchemyContext.pipe(
+    Effect.flatMap((ctx) =>
+      eff.pipe(Effect.provideService(AlchemyContext, { ...ctx, dev: true })),
+    ),
+  );
+
+// ModalResource — a resource registered via `ProviderLayer.dual` with
+// distinct live and local implementations. Used by provider-mode tests to
+// assert: mode stamping in state, replace-on-mode-switch, mode-correct
+// deletes of old generations/orphans, and lazy non-default-variant builds.
+//
+// Both recorders are module-level (like `aliasedWidgetDeletes`) and tag
+// every entry with the scratch stack name so concurrent tests in the same
+// file can filter to their own activity.
+
+export type ModalResourceProps = {
+  value?: string;
+  /**
+   * Changing this forces an ordinary (same-mode) replacement — used to
+   * assert that `providerMode` survives provider-diff replacements and
+   * that old generations are deleted with their own stamped mode.
+   */
+  replaceValue?: string;
+  /**
+   * Changing this forces a `deleteFirst` replacement — used to assert that
+   * `deleteOldGenerations` (the pre-create teardown) resolves each old
+   * generation's provider by ITS stamped mode.
+   */
+  deleteFirstValue?: string;
+};
+
+export interface ModalResource extends Resource<
+  "Test.ModalResource",
+  ModalResourceProps,
+  {
+    value: string;
+    /** Which provider variant reconciled this instance. */
+    runtime: ProviderMode;
+    /**
+     * Physical identity marker, mirroring real local providers: the local
+     * variant fabricates a `dev:`-prefixed id, the live variant a plain
+     * one. Legacy-row tests rely on this to exercise the marker-inferred
+     * mode fallback for unstamped rows.
+     */
+    instance: string;
+    /**
+     * Local dev URL — returned by the LOCAL variant only, mirroring how a
+     * local Worker's attrs carry its dev-proxy URL. Apply announces it as
+     * a `ready at <url>` note on local-mode rows.
+     */
+    url?: string;
+  }
+> {}
+
+export const ModalResource = Resource<ModalResource>("Test.ModalResource");
+
+/** Variant layer constructions, in order. */
+export const modalBuilds: { stack: string; mode: ProviderMode }[] = [];
+/** Lifecycle calls dispatched to each variant, in order. */
+export const modalCalls: {
+  stack: string;
+  mode: ProviderMode;
+  op: "reconcile" | "delete";
+  id: string;
+}[] = [];
+
+// Some plan-level test harnesses build `TestLayers()` without a `Stack`
+// service in context, so the discriminator is resolved as an option with a
+// fallback rather than required at layer build.
+const modalStackName = Effect.serviceOption(Stack).pipe(
+  Effect.map(Option.match({ onNone: () => "unknown", onSome: (s) => s.name })),
+);
+
+const modalVariant = (mode: ProviderMode) =>
+  Provider.effect(
+    ModalResource,
+    Effect.gen(function* () {
+      modalBuilds.push({ stack: yield* modalStackName, mode });
+      return {
+        list: () => Effect.succeed([]),
+        read: Effect.fn(function* ({ output }) {
+          // Echo persisted attrs (the TestResource default): no cloud to
+          // observe, and a cold-start probe (output undefined) finds nothing.
+          return output;
+        }),
+        diff: Effect.fn(function* ({ news, olds }) {
+          if (!isResolved(news)) return undefined;
+          const n = news as ModalResourceProps;
+          const o = olds as ModalResourceProps | undefined;
+          if (n.deleteFirstValue !== o?.deleteFirstValue) {
+            return { action: "replace", deleteFirst: true } as const;
+          }
+          if (n.replaceValue !== o?.replaceValue) {
+            return { action: "replace" } as const;
+          }
+          return n.value !== o?.value
+            ? ({ action: "update" } as const)
+            : ({ action: "noop" } as const);
+        }),
+        reconcile: Effect.fn(function* ({ id, news = {}, olds }) {
+          // Failure injection via the shared TestResourceHooks (same pattern
+          // as bindingTargetProvider): `olds === undefined` is the engine's
+          // create intent — greenfield or replacement-create.
+          const hooks = Option.getOrUndefined(
+            yield* Effect.serviceOption(TestResourceHooks),
+          );
+          if (olds === undefined) {
+            if (hooks?.create) {
+              yield* hooks.create(id, {
+                string: (news as ModalResourceProps).value,
+              });
+            }
+          } else if (hooks?.update) {
+            yield* hooks.update(id, {
+              string: (news as ModalResourceProps).value,
+            });
+          }
+          modalCalls.push({
+            stack: yield* modalStackName,
+            mode,
+            op: "reconcile",
+            id,
+          });
+          return {
+            value: (news as ModalResourceProps).value ?? id,
+            runtime: mode,
+            instance: mode === "local" ? `${LOCAL_ID_PREFIX}${id}` : id,
+            ...(mode === "local" ? { url: "http://localhost:1337" } : {}),
+          };
+        }),
+        delete: Effect.fn(function* ({ id }) {
+          const hooks = Option.getOrUndefined(
+            yield* Effect.serviceOption(TestResourceHooks),
+          );
+          if (hooks?.delete) {
+            yield* hooks.delete(id);
+          }
+          modalCalls.push({
+            stack: yield* modalStackName,
+            mode,
+            op: "delete",
+            id,
+          });
+        }),
+      };
+    }),
+  );
+
+export const modalResourceProvider = () =>
+  ProviderLayer.dual(ModalResource, {
+    live: () => modalVariant("live"),
+    local: () => modalVariant("local"),
+    dataPlane: () => modalLocalDataPlane,
+    liveDataPlane: () => modalLiveDataPlane,
+  });
+
+/**
+ * Which data-plane override a deploy-time binding client ran under.
+ * The local/live layers below stamp this; ambient (no wrap) is `"ambient"`.
+ */
+export class DataPlaneTag extends Context.Service<
+  DataPlaneTag,
+  "local" | "live"
+>()("Test.DataPlaneTag") {}
+
+export const modalLocalDataPlane = Layer.succeed(DataPlaneTag, "local");
+export const modalLiveDataPlane = Layer.succeed(DataPlaneTag, "live");
+
+/**
+ * Deploy-time binding used to pin Binding client routing: the returned
+ * client reads {@link DataPlaneTag}, which is only in context when the wrap
+ * provided the matching plane layer closest.
+ */
+export interface ProbeBinding extends Binding.Service<
+  ProbeBinding,
+  "Test.ProbeBinding",
+  (
+    resource: ModalResource | readonly ModalResource[],
+  ) => Effect.Effect<() => Effect.Effect<"local" | "live" | "ambient">>
+> {}
+export const ProbeBinding = Binding.Service<ProbeBinding>("Test.ProbeBinding");
+
+export const ProbeBindingLive = Layer.succeed(
+  ProbeBinding,
+  Effect.fn(function* (_resource: ModalResource | readonly ModalResource[]) {
+    return () =>
+      Effect.serviceOption(DataPlaneTag).pipe(
+        Effect.map((opt) => (Option.isSome(opt) ? opt.value : "ambient")),
+      );
+  }),
+);
+
 // Layers
 export const TestLayers = () =>
   Layer.mergeAll(
     bucketProvider(),
+    fqnProbeProvider(),
     queueProvider(),
     functionProvider(),
     bindingTargetProvider(),
@@ -742,9 +1340,15 @@ export const TestLayers = () =>
     artifactProbeProvider(),
     testResourceProvider(),
     staticStablesResourceProvider(),
+    kindStablesResourceProvider(),
+    overrideStablesResourceProvider(),
     phasedTargetProvider(),
     noPrecreateBindingTargetProvider(),
     durationResourceProvider(),
+    deleteFirstResourceProvider(),
+    driftResourceProvider(),
+    modalResourceProvider(),
+    ProbeBindingLive,
   );
 
 export const InMemoryTestLayers = () =>

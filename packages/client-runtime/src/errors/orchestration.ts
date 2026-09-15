@@ -1,14 +1,10 @@
-// packages/client-runtime/src/errors/orchestration.ts
-// detect bootstrap threads the server already rolled back
+import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 
-import { OrchestrationDispatchCommandError } from '@t3tools/contracts'
-import * as Schema from 'effect/Schema'
+const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
-const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError)
-
-export function wasBootstrapThreadDeleted(error: unknown): boolean
-{
+export function wasBootstrapThreadDeleted(error: unknown): boolean {
   return (
-    isOrchestrationDispatchCommandError(error) && error.bootstrapThreadDisposition === 'deleted'
-  )
+    isOrchestrationDispatchCommandError(error) && error.bootstrapThreadDisposition === "deleted"
+  );
 }

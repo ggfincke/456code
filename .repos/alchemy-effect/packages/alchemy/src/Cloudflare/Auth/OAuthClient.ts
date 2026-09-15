@@ -2,9 +2,11 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import crypto from "node:crypto";
 import http from "node:http";
+import { AUTH_ERROR_URL, AUTH_SUCCESS_URL } from "../../Auth/AuthProvider.ts";
 import {
   OAUTH_CLIENT_ID,
   OAUTH_ENDPOINTS,
+  OAUTH_LOCAL_CALLBACK_URI,
   OAUTH_REDIRECT_URI,
 } from "./AuthProvider.ts";
 
@@ -28,14 +30,16 @@ export interface Authorization {
 }
 
 function generateState(length = 32): string {
-  return crypto.randomBytes(length).toString("base64url");
+  return Buffer.from(crypto.randomBytes(length)).toString("base64url");
 }
 
 function generatePKCE(length = 96): {
   verifier: string;
   challenge: string;
 } {
-  const verifier = crypto.randomBytes(length).toString("base64url");
+  const verifier = Buffer.from(crypto.randomBytes(length)).toString(
+    "base64url",
+  );
   const challenge = crypto
     .createHash("sha256")
     .update(verifier)
@@ -187,6 +191,46 @@ export const revoke = (
   });
 
 /**
+ * Exchange a code copied from the hosted relay page, or extract the code from
+ * either the hosted or loopback callback URL.
+ */
+export const exchangeCallbackInput = (
+  input: string,
+  authorization: Authorization,
+): Effect.Effect<OAuthCredentials, OAuthError> =>
+  Effect.gen(function* () {
+    const value = input.trim();
+    let code = value;
+    let state: string | null = null;
+
+    try {
+      const url = new URL(value);
+      code = url.searchParams.get("code") ?? "";
+      state = url.searchParams.get("state");
+    } catch {
+      const separator = value.lastIndexOf("#");
+      if (separator >= 0) {
+        code = value.slice(0, separator);
+        state = value.slice(separator + 1);
+      }
+    }
+
+    if (!code) {
+      return yield* new OAuthError({
+        error: "invalid_request",
+        errorDescription: "The authorization code is missing.",
+      });
+    }
+    if (state !== null && state !== authorization.state) {
+      return yield* new OAuthError({
+        error: "invalid_request",
+        errorDescription: "The authorization state does not match.",
+      });
+    }
+    return yield* exchange(code, authorization.verifier);
+  });
+
+/**
  * Start a local HTTP server to listen for the OAuth callback, exchange
  * the authorization code, and return the credentials.
  *
@@ -196,7 +240,7 @@ export const callback = (
   authorization: Authorization,
 ): Effect.Effect<OAuthCredentials, OAuthError> =>
   Effect.tryPromise({
-    try: () => callbackPromise(authorization),
+    try: (signal) => callbackPromise(authorization, signal),
     catch: (err) => {
       if (err instanceof OAuthError) return err;
       return new OAuthError({
@@ -208,12 +252,24 @@ export const callback = (
 
 function callbackPromise(
   authorization: Authorization,
+  signal: AbortSignal,
 ): Promise<OAuthCredentials> {
-  const { pathname, port } = new URL(OAUTH_REDIRECT_URI);
+  const { pathname, port } = new URL(OAUTH_LOCAL_CALLBACK_URI);
 
   return new Promise<OAuthCredentials>((resolve, reject) => {
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+
+      if (url.pathname === "/auth/ping") {
+        res.writeHead(req.method === "OPTIONS" ? 204 : 200, {
+          "Access-Control-Allow-Origin": new URL(OAUTH_REDIRECT_URI).origin,
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Private-Network": "true",
+          "Cache-Control": "no-store",
+        });
+        res.end();
+        return;
+      }
 
       if (url.pathname !== pathname) {
         res.statusCode = 404;
@@ -224,7 +280,7 @@ function callbackPromise(
       const error = url.searchParams.get("error");
       const errorDescription = url.searchParams.get("error_description");
       if (error) {
-        res.writeHead(302, { Location: "https://alchemy.run/auth/error" });
+        res.writeHead(302, { Location: AUTH_ERROR_URL });
         res.end();
         cleanup();
         reject(
@@ -239,7 +295,7 @@ function callbackPromise(
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
       if (!code || !state) {
-        res.writeHead(302, { Location: "https://alchemy.run/auth/error" });
+        res.writeHead(302, { Location: AUTH_ERROR_URL });
         res.end();
         cleanup();
         reject(
@@ -252,7 +308,7 @@ function callbackPromise(
       }
 
       if (state !== authorization.state) {
-        res.writeHead(302, { Location: "https://alchemy.run/auth/error" });
+        res.writeHead(302, { Location: AUTH_ERROR_URL });
         res.end();
         cleanup();
         reject(
@@ -268,14 +324,12 @@ function callbackPromise(
         const credentials = await Effect.runPromise(
           exchange(code, authorization.verifier),
         );
-        res.writeHead(302, {
-          Location: "https://alchemy.run/auth/success",
-        });
+        res.writeHead(302, { Location: AUTH_SUCCESS_URL });
         res.end();
         cleanup();
         resolve(credentials);
       } catch (err) {
-        res.writeHead(302, { Location: "https://alchemy.run/auth/error" });
+        res.writeHead(302, { Location: AUTH_ERROR_URL });
         res.end();
         cleanup();
         reject(err);
@@ -297,8 +351,11 @@ function callbackPromise(
 
     function cleanup() {
       clearTimeout(timeout);
+      signal.removeEventListener("abort", cleanup);
       server.close();
     }
+
+    signal.addEventListener("abort", cleanup, { once: true });
 
     server.on("error", (err) => {
       cleanup();
