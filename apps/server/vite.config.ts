@@ -86,6 +86,9 @@ export default mergeConfig(
         ? ["src/bin.ts"]
         : ["src/bin.ts", "src/claude-history-worker.ts", "src/cartographerWorker.ts"],
       outDir: packExecutable ? "dist-exe" : "dist",
+      // Cartographer's bundled TypeScript parser reads CommonJS file globals.
+      // Use the bundler's ESM shims for the Node/desktop worker output.
+      shims: !packExecutable,
       sourcemap: !packExecutable,
       clean: true,
       ...(packExecutable
