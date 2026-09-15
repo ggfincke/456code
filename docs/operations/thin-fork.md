@@ -1,6 +1,6 @@
 # 456code thin fork: ownership and update record
 
-This replacement is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. It lives on `codex/t3-thin-fork`. Main, the installed application, old databases, and the reconciliation, Cartographer-review and selective-port worktrees were not replaced or migrated.
+This replacement is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. Its rebase stack lives on `codex/t3-thin-fork`; PR #111 installs that tree on remote main through the reviewed replacement merge described below. The dirty local main checkout, installed application, old databases, and reconciliation, Cartographer-review and selective-port worktrees remain preserved.
 
 ## Base and local change groups
 
@@ -14,7 +14,7 @@ This replacement is T3 Code plus personal appearance, desktop isolation, Coral, 
 - Initial recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-The runtime patch inventory below contains **61 modified upstream paths**. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
+The patch inventory below contains **62 modified upstream paths**, including the PR size workflow fix. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
 
 ## Product and ownership boundaries
 
@@ -290,24 +290,54 @@ files were unchanged.
 The test-owned desktop and Ollama processes were stopped and the fixture's
 previous Coral-disabled settings restored. Native leases are empty and ports
 3773, 6110 and 14150 have no listeners. The verification-owned Ollama server
-exited; a later unrelated Ollama process was left untouched. Main branches, other worktrees,
+exited; a later unrelated Ollama process was left untouched. During this verification pass, main branches, other worktrees,
 old application data,
 installed apps and the Coral repository remain untouched.
 
-PR #111 still targets legacy fork main; its conflict remains the separate
-replacement/cutover decision. Its base-owned size-label action fails with
-`spawnSync git ENOBUFS` on the replacement diff. That metadata failure cannot be
-repaired from this PR's head workflow. Do not merge legacy main into the thin
-stack merely to clear the badge.
+## Authorized remote-main replacement (2026-09-14)
+
+After full verification, the user authorized fixing the remaining size-label
+failure and merging PR #111 despite its legacy-main conflict. The replacement
+merge uses legacy main `9719218c1cec0a594c0b9f022c12e7593f8e569d` as its first
+parent and the final PR head as its second parent. Its tree is exactly the PR
+head's tree. Both histories and all existing co-author trailers survive; new
+commits include `Co-authored-by: Codex <codex@openai.com>`. Publishing the merge
+advances remote main with an explicit lease against the recorded legacy head.
+It does not force-rewrite main or bring legacy commits into the thin-fork branch.
+
+Recovery refs, preserved locally and on origin:
+
+- `codex/backup-legacy-main-before-thin-cutover-20260914` retains legacy main at
+  `9719218c1cec0a594c0b9f022c12e7593f8e569d`.
+- `codex/backup-thin-fork-before-main-cutover-20260914` retains the verified PR
+  head at `53783448c9c349ed41a37cdd1aadbdf0a49b76c2` before the workflow fix.
+
+The PR size action exceeded Node's default 1 MiB synchronous output buffer.
+Both numstat reads now allow a bounded 16 MiB. Running the actual inline script
+against the failing comparison reproduced `ENOBUFS` without the fix, then read
+1,617,685 bytes across 21,171 rows successfully with it. The filtered comparison
+also passed (1,236,473 bytes); the script selected `size:XXL`. Label API calls
+were stubbed during this local check. Targeted formatting passed. The action
+still treats PR commits as passive Git data and executes no code from them.
+Because `pull_request_target` reads the base workflow, its historical failed
+run uses the old code; the fix becomes active when remote main advances.
+
+The application tree is unchanged from the fully verified head; only this
+workflow and the operations record changed. Mobile still matches upstream
+`5ea6439816470288d3f2b6b43635fea41fbbb101` exactly. The 25 dirty paths in the
+local main checkout are preserved with their existing bytes and index state.
+Local checkout cutover, installed applications, old data, Coral and deletion
+of recovery work remain outside this merge. To inspect or recover the old tree,
+create a separate worktree from its backup ref; do not reset the dirty checkout.
 
 ## Routine future update
 
 1. Record the current upstream SHA and local HEAD. Preserve dirty state and create a backup branch before rewriting this replacement stack.
-2. Fetch upstream into an explicit ref, inspect the new range, and replay only the thin-fork commits. Do not merge the old fork or its selective-port batch.
+2. Fetch upstream into an explicit ref, inspect the new range, and rebase `codex/t3-thin-fork` from its recorded upstream base. This branch retains only the upstream-based extension stack. Do not rebase main or merge main's legacy ancestry into the thin-fork branch.
 3. Keep upstream changes in orchestration, provider lifecycle, persistence, mobile, Git, tooling and layout. Adapt the named extension modules or their narrow registration points instead.
 4. Review every path from `git diff --name-status <new-upstream> HEAD`. Update this inventory for any modified upstream file; do not count locally owned extension files as upstream patches.
 5. Run the affected package's colocated tests, package type checks and targeted formatting/lint/builds. Recheck real Coral resume, theme persistence, actual worktree scope and displayed-diff identity when the relevant seams change. Use one isolated app environment; stop it afterward.
-6. Keep main cutover, release publication, signing, installed-app replacement and deletion of recovery work as explicit separate decisions.
+6. Review any main-only changes before publishing another replacement merge; preserve and port wanted fixes first. Keep the rebase branch separate from main's merge history. Release publication, signing, local checkout/installed-app replacement and deletion of recovery work remain explicit separate decisions.
 
 For an isolated web development session, run `vp run dev --home-dir /absolute/path/to/new-state`. For the desktop, run its existing start command with `T3CODE_HOME` pointing to a disposable parent; the personal build adds its suffix. Never point a standalone server at the old app's database.
 
@@ -320,6 +350,7 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `.github/workflows/desktop-macos-preview-publish.yml`          | Release isolation                | Gate the new trusted preview publisher and cleanup on the upstream repository; keep signing/publication unconfigured for the fork.             |
 | `.github/workflows/mobile-eas-preview.yml`                     | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/mobile-eas-production.yml`                  | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
+| `.github/workflows/pr-size.yml`                                | PR metadata                      | Allow bounded 16 MiB numstat output for the replacement diff; retain base-owned passive Git inspection and existing labels.                    |
 | `.github/workflows/publish-aur.yml`                            | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/release.yml`                                | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
 | `.github/workflows/web-preview.yml`                            | Release isolation                | Keep the upstream workflow source but restrict deployment/publication jobs to the upstream repository until a fork destination is established. |
