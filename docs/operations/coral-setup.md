@@ -4,7 +4,7 @@ Validated on 2026-09-12. These changes finish local Coral usage on
 `codex/t3-thin-fork`; they do not merge either main, publish a release, replace
 the installed 456code application, or import old sessions.
 
-The 2026-09-14 T3 rebase is recorded in [the thin-fork update record](thin-fork.md#rebase-onto-9375c779-2026-09-14). Its remaining live acceptance checks were stopped at the user's battery request. Do not run Coral inference or load models again without renewed permission. The validation below remains the original finishing-pass record.
+The September 14 update through upstream `5ea6439816470288d3f2b6b43635fea41fbbb101` is recorded in [the thin-fork update record](thin-fork.md#september-14-follow-up-26-more-commits). Current mock ACP checks passed, while real Coral resume/model-change acceptance remains deferred at the user's battery request. The disposable rebase fixture has Coral disabled and uses Codex for titles. Do not run Coral inference or load models again without renewed permission. The validation below remains the original finishing-pass record; the Coral build and normal launcher are unchanged.
 
 ## Build provenance
 
