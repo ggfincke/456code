@@ -25,6 +25,7 @@ const workspaceFiles = [
   "infra/relay/package.json",
   "oxlint-plugin-t3code/package.json",
   "packages/client-runtime/package.json",
+  "packages/cartographer-core/package.json",
   "packages/contracts/package.json",
   "packages/shared/package.json",
   "packages/ssh/package.json",

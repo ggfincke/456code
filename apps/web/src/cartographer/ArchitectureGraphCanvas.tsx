@@ -253,12 +253,6 @@ function createArchitectureGraphCanvasLayout(
   };
 }
 
-export function architectureGraphCanvasPoints(
-  nodes: readonly ArchitectureGraphCanvasNode[],
-): readonly ArchitectureGraphCanvasPoint[] {
-  return createArchitectureGraphCanvasLayout(nodes).points;
-}
-
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
