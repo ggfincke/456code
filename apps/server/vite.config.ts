@@ -72,6 +72,11 @@ export default mergeConfig(
           dependsOn: ["@t3tools/cartographer-core#build"],
           cache: false,
         },
+        test: {
+          command: "vp test run",
+          dependsOn: ["@t3tools/cartographer-core#build"],
+          cache: false,
+        },
         build: {
           command: "node scripts/cli.ts build",
           dependsOn: ["@t3tools/cartographer-core#build", "@t3tools/web#build"],
