@@ -1,3 +1,5 @@
+// apps/server/vite.config.ts
+// configures the server build and its focused tests
 import "vite-plus/test/config";
 import { defineConfig, mergeConfig } from "vite-plus";
 
@@ -145,6 +147,12 @@ export default mergeConfig(
       },
     },
     test: {
+      dir: "../..",
+      include: [
+        "apps/server/**/*.{test,spec}.?(c|m)[jt]s?(x)",
+        "tests/apps/server/**/*.{test,spec}.?(c|m)[jt]s?(x)",
+      ],
+
       // The server suite exercises sqlite, git, temp worktrees, and orchestration
       // runtimes heavily. Running files in parallel introduces load-sensitive flakes.
       fileParallelism: false,

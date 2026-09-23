@@ -1,3 +1,5 @@
+// apps/web/vite.config.ts
+// configures web development, builds, and client tests
 import * as NodeZlib from "node:zlib";
 
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -75,7 +77,8 @@ const unitTestProject = {
   extends: true,
   test: {
     name: "unit",
-    include: ["src/**/*.test.{ts,tsx}"],
+    dir: "../..",
+    include: ["apps/web/src/**/*.test.{ts,tsx}", "tests/apps/web/**/*.test.{ts,tsx}"],
     // The web runtime suite exercises auth bootstrap, saved environments,
     // and websocket subscription lifecycles. Under the full monorepo test
     // run, those async tests can exceed Vitest's default 5s budget.
