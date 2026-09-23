@@ -27,6 +27,7 @@
   },
   "include": [
     "src",
+    "../../tests/apps/web",
     "vite",
     "vite.config.ts",
     "vercel.ts",
