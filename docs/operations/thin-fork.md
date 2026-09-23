@@ -1,20 +1,22 @@
 # 456code thin fork: ownership and update record
 
-This replacement is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. Its rebase stack lives on `codex/t3-thin-fork`; PR #111 installs that tree on remote main through the reviewed replacement merge described below. The dirty local main checkout, installed application, old databases, and reconciliation, Cartographer-review and selective-port worktrees remain preserved.
+This replacement is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The preserved published stack lives on `codex/t3-thin-fork`. The September 23 local update candidate lives on `chore/t3-upstream-20260923`; it has not replaced either main branch, the published thin-fork branch, or the installed application. PR #111 records the earlier replacement merge described below. The dirty local main checkout, installed application, old databases, and reconciliation, Cartographer-review and selective-port worktrees remain preserved.
 
 ## Base and local change groups
 
 - Starting upstream base: `e816064945144957b6eb9b268912a98b0555644b`.
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
 - Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
-- Current upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101` (26 additional commits from September 14).
+- September 14 upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101`.
+- Current local candidate base: `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc` (361 upstream commits, pinned to the September 23 audit).
+- Current recovery branch: `codex/backup-thin-fork-20260923` at `61313f6f045363d317c6930e9cc543c975a690a2`.
 - Previous recovery branch: `codex/backup-thin-fork-before-9375c779` at `2f634894544b4ccb02638d60e2b6d624e3617975`.
-- Current recovery branch: `codex/backup-thin-fork-before-6dbea7ed` at `158ba6655cf62df4c16e2428af06adc78f63bdcf`; it preserves the published stack before this update.
+- September 14 recovery branch: `codex/backup-thin-fork-before-6dbea7ed` at `158ba6655cf62df4c16e2428af06adc78f63bdcf`; it preserves the published stack before this update.
 - Intermediate recovery refs: `codex/backup-thin-fork-before-5ea64398` and `codex/backup-thin-fork-before-coauthors-20260914`.
 - Initial recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-The patch inventory below contains **62 modified upstream paths**, including the PR size workflow fix. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Tests stay in upstream locations. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
+The historical September 14 patch inventory below contains **62 modified upstream paths**, including the PR size workflow fix. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
 
 ## Product and ownership boundaries
 
@@ -33,6 +35,37 @@ Coral now runs from the current-main ACP finish worktree through the repaired no
 Analysis captures the selected task's actual worktree, resolves comparison commit identities first, and checks the displayed diff hash/root before and after analysis. Source reads come exclusively from the captured base/target. Failed refreshes leave the previous complete capture accessible. Returning to the app checks freshness; explicit Refresh rebuilds. Existing results retain their capture identity and visible stale state.
 
 The extension cache is `userdata/cartographer` beneath that backend home. Work is limited to 8,000 source/config files, 2 MiB/file, 64 MiB/capture, two concurrent analyses and a 90-second worker deadline. Responses cap graph, edge, dependency and source sizes. Captured source is project data. Generations remain for immutable navigation; the cache is rebuildable and may be removed while the app is stopped. There is no periodic analysis or automatic turn-completion analysis.
+
+## September 23 local candidate
+
+**Status:** implementation and focused checks passed; native client interaction acceptance is incomplete because host automation is unavailable. This branch is not a fully verified release or a replacement for either main branch.
+
+The local branch is `chore/t3-upstream-20260923`, in `/Users/ggfincke/.codex/worktrees/t3-upstream-20260923/456code`. The 24 commits from `5ea643981..61313f6f0` were replayed onto exactly `f5ef0ddb9`; the replay ends at `b2ef3073b`. Order, author identities, author dates, and subjects match all 24 originals. The complete range-diff has 14 equivalent patches and 10 changed patches, with none dropped. Resolutions retain upstream client/title/migration interfaces, current composer primitives, workflow guards and dependency versions while preserving personal identity, artwork, Coral, Cartographer, private metadata and disabled publication/update paths. Four follow-up groups cover Coral server compatibility, composer behavior, graph control styling, and verification/documentation. The subsequently requested logo correction is a separate appearance commit: `CoralIcon.tsx` reproduces Coral’s full pixel grid from `src/tui/shell/welcome.ts` and the Kelp Forest colors in `src/tui/themes.ts`, replacing the placeholder branch drawing. It changes the shared web/desktop provider icon; mobile remains upstream-owned.
+
+Coral uses `ByteSize.bytes(1_048_576)` for metadata response bounds. Title generation forwards linked context and the previous title and retains `needsRefinement`. Coral queued messages dispatch only when ready; active-turn manual actions and the queue shortcut cannot steer them. Normal follow-ups queue regardless of the saved global steering preference, which remains unchanged. Stop behavior remains upstream-owned. Multi-model targets normalize only Coral to supervised/default mode. Any batch containing Coral rejects attachments before send-side uploads or thread/worktree creation. The composer also suppresses background uploads while Coral is in that batch; an upload already staged before adding Coral remains in the draft. Graph controls own their native button styling. Truncated diff analysis remains blocked. No new wire protocol or extension RPC was added.
+
+Node 24.20.0 and project-local pnpm 11.10.0 were used without changing host defaults. The lockfile was regenerated from pinned upstream rather than retaining duplicate keys from the replay merge. All 2,086 upstream package resolution records match; extension dependencies and the private test workspace remain. Frozen installation passed. `apps/mobile`, shared client runtime, orchestration, persistence and ProviderService still match upstream.
+
+Focused checks passed:
+
+- Cartographer built before server checks. The three new regression files cover real fake-CLI title context/refinement, Zustand queue eligibility/one-time take/held messages, and mixed-target preflight/permission normalization/send eligibility. Existing colocated suites remain intact.
+- 50 existing server checks plus the corrected title regression; a final title pass ran 37 tests across title context, links, prompts and the Coral regression. The first regression run exposed a test-only branded-ID constructor typo, corrected before the passing rerun.
+- 276 web tests across queue, keybindings, composer logic and the new regressions; 32 final upload/policy/queue tests; 31 engine tests; 41 desktop isolation/protocol checks; and 91 packaging tests. Counts overlap across focused reruns and must not be summed.
+- Scoped server, web, desktop and scripts typechecks, targeted formatting/lint, and the desktop build passed. Existing lint warnings and Effect suggestions remain. The desktop build was repeated after the background-upload fix. Full workspace checks remain assigned to CI.
+- Migrations 052 and 053 ran against a disposable database seeded through migration 051. Existing thread fields and message history remained readable, title state defaulted to null, viewed-file records round-tripped, and a second migration run applied nothing.
+
+Live acceptance used `.t3/upstream-20260923/`, the normal Coral launcher, a separate Coral home, and only installed `qwen3.8:27b-mlx` on confirmed AC power. No model was downloaded. The web client generated a title and returned `CORAL_WEB_OK`. During that turn, a follow-up stayed queued, Send now was disabled, and the queue shortcut had no effect. It dispatched once after readiness and returned `QUEUE_ONCE_OK`. File approval acceptance changed fixture value `1 -> 42`; rejection left `rejected.txt` absent. Stop cancelled a fresh long-response request. After replacing the dev backend with the built desktop backend, the same native session returned `RESUME_AFTER_CANCEL_OK`: all 21 prior native messages were unchanged and exactly two new messages were appended, without replay.
+
+The mixed Codex/Coral attachment draft was rejected intact. Adding a fresh second attachment while Coral was selected created no additional upload, thread or worktree; keyboard submission remained blocked. Unit checks establish per-target permission normalization without invoking an additional model. Map navigation opened captured import source. Edits `42 -> 43 -> 44` each made the last map stale; refresh produced a new capture. Actual turn Diff Impact retained base `1` and target `42` while the live file held `43`. The built worker subsequently refreshed and returned captured value `44`, exercising its packaged parser and worker code.
+
+Native acceptance limits are explicit:
+
+- Upstream's native-client helper built and installed **T3 Code Dev** (`com.t3tools.t3code.dev`) on the initially empty **iPhone 17 / iOS 26.5**, UDID `7F92110A-77CC-4D40-9D04-456166120FA5`, and returned compatible with fingerprint `df5dad9b1179d90de887ed9e84cab6d3b3e11091`. The actual `t3code-dev` scheme opened the development client and serve-sim displayed live frames. XcodeBuildMCP 2.6.2 could neither inspect nor type because Xcode 27 lacks its expected `SimulatorKit.framework` path. The system open confirmation therefore blocked Metro loading and pairing. Connection, transcript, approval, reconnect and diff interactions on mobile are **not verified**. The unused mobile pairing credential was revoked. No coordinate workaround or host-tool modification was used.
+- The built desktop rendered personal artwork at `code456-thin://app/` with the fixture profile and database. Native input reported `noWindowsAvailable`; startup/profile evidence is valid, but native interactive flows are **not verified**. A separately paired controlled browser against its bundled backend performed the resume and bundled-worker checks above. This is backend/browser evidence, not a claim that native mouse interaction passed.
+
+The original HEAD, index bytes, status and all 26 dirty paths match the initial preservation receipt. Original local main, remote main, and both thin-fork refs remain at their original OIDs. Owned backend, desktop, Metro, stream and simulator processes were stopped; the orphaned desktop backend was identified by PID and fixture database before termination. Useful isolated data and build artifacts remain, with Coral disabled in fixture settings. No push, PR, installed-app replacement, or live database access occurred. Ignored raw evidence is under the original checkout's `dev-docs/t3-upstream-implementation-20260923/`; this maintained record contains the acceptance decisions needed without those logs.
+
+The remaining acceptance action is to rerun the bounded mobile and native desktop interaction checks when supported input tooling is available. Do not promote this local candidate as fully verified until those checks pass.
 
 ## Verification record
 

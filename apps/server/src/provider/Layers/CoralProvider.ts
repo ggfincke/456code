@@ -1,3 +1,5 @@
+// apps/server/src/provider/Layers/CoralProvider.ts
+// probes coral readiness and discovers installed models
 import type {
   CoralSettings,
   ModelCapabilities,
@@ -7,7 +9,7 @@ import type {
 import { causeErrorTag } from "@t3tools/shared/observability";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import * as Schema from "effect/Schema";
-import * as FileSystem from "effect/FileSystem";
+import * as ByteSize from "effect/ByteSize";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -191,7 +193,7 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
       .pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
     return yield* HttpClientResponse.schemaBodyJson(OllamaModels)(response);
   }).pipe(
-    Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(1_048_576)),
+    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(1_048_576)),
     Effect.timeoutOption(CORAL_PROBE_TIMEOUT_MS),
     Effect.result,
   );

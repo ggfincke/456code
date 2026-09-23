@@ -6,6 +6,8 @@ the installed 456code application, or import old sessions.
 
 The September 14 update through upstream `5ea6439816470288d3f2b6b43635fea41fbbb101` completed its deferred live checks after the user renewed permission to run models. The built desktop backend used the normal launcher: Muse resumed the existing native session, switching to Qwen completed a turn, a fresh Coral task generated its title, and a clean restart preserved the same session without replay. See [the final acceptance record](thin-fork.md#final-acceptance-on-september-14). The retained fixture has Coral disabled again after testing. The Coral build and normal launcher are unchanged; the validation below records their original finishing pass.
 
+The September 23 local candidate uses the same launcher and installed `qwen3.8:27b-mlx` with a separate `.t3/upstream-20260923/coral-home`. Live title, queue, approvals, cancellation and restart/resume passed on AC power; the retained fixture has Coral disabled after teardown. Mobile and native desktop interaction checks remain limited by host input tooling. See [the September 23 acceptance record](thin-fork.md#september-23-local-candidate) before treating the candidate as fully verified.
+
 ## Build provenance
 
 | Item                | Value                                                                                               |

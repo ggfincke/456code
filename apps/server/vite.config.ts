@@ -1,3 +1,5 @@
+// apps/server/vite.config.ts
+// configures the server build and its focused tests
 import "vite-plus/test/config";
 import { defineConfig, mergeConfig } from "vite-plus";
 
@@ -115,8 +117,8 @@ export default mergeConfig(
         // (declared deps are external by default, which is what this change is
         // undoing). `neverBundle` forces the native packages out: returning
         // false from `alwaysBundle` only means "no opinion", so a transitive
-        // dependency would still be bundled — which silently inlined
-        // msgpackr-extract and its loader, losing native acceleration.
+        // dependency would still be bundled — which silently inlined native
+        // loaders such as node-gyp-build, losing native acceleration.
         alwaysBundle: (id: string) => id !== "dependency-cruiser" && shouldBundleCliDependency(id),
         neverBundle: (id: string) => id === "dependency-cruiser" || isExternalCliDependency(id),
         onlyBundle: false,
@@ -145,6 +147,12 @@ export default mergeConfig(
       },
     },
     test: {
+      dir: "../..",
+      include: [
+        "apps/server/**/*.{test,spec}.?(c|m)[jt]s?(x)",
+        "tests/apps/server/**/*.{test,spec}.?(c|m)[jt]s?(x)",
+      ],
+
       // The server suite exercises sqlite, git, temp worktrees, and orchestration
       // runtimes heavily. Running files in parallel introduces load-sensitive flakes.
       fileParallelism: false,

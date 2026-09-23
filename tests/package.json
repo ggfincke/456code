@@ -1,0 +1,12 @@
+{
+  "name": "@t3tools/fork-tests",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@t3tools/contracts": "workspace:*",
+    "effect": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

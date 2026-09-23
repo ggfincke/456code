@@ -1,5 +1,5 @@
-// provides graph camera, geometry, minimap, and accessible selection mechanics
-
+// apps/web/src/cartographer/ArchitectureGraphCanvas.tsx
+// provides graph navigation, geometry, and accessible selection
 import { Maximize2Icon, MinusIcon, PlusIcon } from "lucide-react";
 import {
   useCallback,
@@ -9,13 +9,27 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ComponentProps,
   type KeyboardEvent,
   type PointerEvent,
   type WheelEvent,
 } from "react";
 
-import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
+
+// graph controls own their appearance instead of restyling shared UI primitives
+function CanvasControl({ className, ...props }: ComponentProps<"button">) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className={cn(
+        "inline-flex h-6 items-center justify-center rounded-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-3.5",
+        className,
+      )}
+    />
+  );
+}
 
 export type ArchitectureGraphCanvasTone = "identity" | "added" | "removed" | "affected" | "context";
 
@@ -1180,49 +1194,41 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
         aria-label="Canvas navigation"
         className="absolute bottom-3 start-3 z-40 flex items-center gap-0.5 rounded-[11px] border border-[var(--architecture-border)] bg-[var(--architecture-overlay)]/90 p-0.5 shadow-[var(--architecture-shadow-node)] backdrop-blur-md"
       >
-        <Button
+        <CanvasControl
           aria-label="Zoom out"
-          className="text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
+          className="w-6 text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
           disabled={camera.scale <= ARCHITECTURE_CAMERA_MIN_SCALE}
-          size="icon-xs"
           title="Zoom out"
-          variant="ghost"
           onClick={() => zoomAt(camera.scale - ARCHITECTURE_CAMERA_ZOOM_STEP)}
         >
           <MinusIcon />
-        </Button>
-        <Button
+        </CanvasControl>
+        <CanvasControl
           aria-label={`Zoom level ${Math.round(camera.scale * 100)} percent. Reset to 100 percent.`}
           className="min-w-12 px-1 font-mono text-[10px] tabular-nums text-[var(--architecture-text-secondary)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
-          size="xs"
           title="Reset zoom to 100%"
-          variant="ghost"
           onClick={() => zoomAt(1)}
         >
           {Math.round(camera.scale * 100)}%
-        </Button>
-        <Button
+        </CanvasControl>
+        <CanvasControl
           aria-label="Zoom in"
-          className="text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
+          className="w-6 text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
           disabled={camera.scale >= ARCHITECTURE_CAMERA_MAX_SCALE}
-          size="icon-xs"
           title="Zoom in"
-          variant="ghost"
           onClick={() => zoomAt(camera.scale + ARCHITECTURE_CAMERA_ZOOM_STEP)}
         >
           <PlusIcon />
-        </Button>
+        </CanvasControl>
         <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[var(--architecture-border-soft)]" />
-        <Button
+        <CanvasControl
           aria-label="Fit architecture to view"
-          className="text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
-          size="icon-xs"
+          className="w-6 text-[var(--architecture-text-muted)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
           title="Fit to view"
-          variant="ghost"
           onClick={fitCanvas}
         >
           <Maximize2Icon />
-        </Button>
+        </CanvasControl>
       </fieldset>
       {outsidePageEdgeCount > 0 ? (
         <p className="absolute bottom-3 end-3 z-30 rounded-md border border-[var(--architecture-border)] bg-[var(--architecture-overlay)] px-2 py-1 text-[10px] text-[var(--architecture-text-muted)] shadow-[var(--architecture-shadow-node)]">

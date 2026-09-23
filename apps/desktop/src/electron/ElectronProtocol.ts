@@ -1,11 +1,12 @@
-import Mime from "@effect/platform-node/Mime";
 import { finckeDesktop, isFinckeDesktop } from "../fincke/build.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as NodeTimersPromises from "node:timers/promises";
 import * as Path from "effect/Path";
+import * as Mime from "effect/unstable/http/Mime";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -228,7 +229,9 @@ const serveDesktopAsset = Effect.fn("desktop.protocol.serveAsset")(function* (
   const contents = yield* fileSystem.readFile(filePath).pipe(Effect.orElseSucceed(() => null));
   if (contents === null) return new Response(null, { status: 404 });
   return new Response(request.method === "HEAD" ? null : new Uint8Array(contents), {
-    headers: { "content-type": Mime.getType(filePath) ?? "application/octet-stream" },
+    headers: {
+      "content-type": Option.getOrElse(Mime.getType(filePath), () => "application/octet-stream"),
+    },
   });
 });
 

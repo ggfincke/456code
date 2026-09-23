@@ -1,3 +1,5 @@
+// apps/server/src/textGeneration/CoralTextGeneration.ts
+// generates structured text through isolated coral commands
 import type { CoralSettings, ModelSelection } from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
@@ -283,6 +285,8 @@ export const makeCoralTextGeneration = Effect.fn("makeCoralTextGeneration")(func
       const { prompt, outputSchema } = buildThreadTitlePrompt({
         message: input.message,
         attachments: input.attachments,
+        linkedContext: input.linkedContext,
+        previousTitle: input.previousTitle,
       });
       const generated = yield* runCoralJson({
         operation: "generateThreadTitle",
@@ -292,7 +296,10 @@ export const makeCoralTextGeneration = Effect.fn("makeCoralTextGeneration")(func
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
       });
-      return { title: sanitizeThreadTitle(generated.title) };
+      return {
+        title: sanitizeThreadTitle(generated.title),
+        needsRefinement: generated.needsRefinement,
+      };
     });
 
   return {
