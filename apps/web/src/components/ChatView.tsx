@@ -1,3 +1,6 @@
+// apps/web/src/components/ChatView.tsx
+// coordinates task conversations, composer submissions, and review panels
+import { canSendToProvider, prepareComposerTargets } from "../fincke/coralSendPolicy";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -7423,6 +7426,10 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode: sendInteractionMode,
       interactionModeEnabled: sendInteractionModeEnabled,
     } = sendCtx;
+    if ((queuedMessage || directAnnotation) && !canSendToProvider(ctxSelectedProvider, phase)) {
+      notifyDirectAnnotationAttached();
+      return;
+    }
     const annotationImageAlreadyAttached =
       directAnnotation?.image !== undefined &&
       sendContextImages.some((image) => image.id === directAnnotation.image?.id);
@@ -7651,7 +7658,8 @@ export default function ChatView(props: ChatViewProps) {
       !directAnnotation &&
       phase === "running" &&
       activeThreadKey &&
-      (settings.followUpBehavior === "queue") !== (submissionIntent === "alternate")
+      (ctxSelectedProvider === "coral" ||
+        (settings.followUpBehavior === "queue") !== (submissionIntent === "alternate"))
     ) {
       if (composerRef.current?.validateProviderInput(promptForSend) === false) {
         return;
@@ -7757,7 +7765,7 @@ export default function ChatView(props: ChatViewProps) {
       };
     };
 
-    const multipleTargets = [];
+    const requestedTargets = [];
     for (const selection of multipleModelSelections ?? []) {
       const provider = providerInstanceEntries.find(
         (entry) => entry.instanceId === selection.instanceId,
@@ -7787,7 +7795,8 @@ export default function ChatView(props: ChatViewProps) {
         text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
       });
       if (composerRef.current?.validateProviderInput(text) === false) return;
-      multipleTargets.push({
+      requestedTargets.push({
+        provider: provider.driverKind,
         selection: createModelSelection(
           selection.instanceId,
           selection.model,
@@ -7801,6 +7810,17 @@ export default function ChatView(props: ChatViewProps) {
         }).interactionMode,
       });
     }
+
+    const preparedTargets = prepareComposerTargets(
+      requestedTargets,
+      requestedRuntimeMode,
+      composerAttachmentsSnapshot.length,
+    );
+    if (preparedTargets.error !== null) {
+      setThreadError(threadIdForSend, preparedTargets.error);
+      return;
+    }
+    const multipleTargets = preparedTargets.targets;
 
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
@@ -8027,14 +8047,14 @@ export default function ChatView(props: ChatViewProps) {
                   },
                   modelSelection: target.selection,
                   titleSeed: title,
-                  runtimeMode,
+                  runtimeMode: target.runtimeMode,
                   interactionMode: target.interactionMode,
                   bootstrap: {
                     createThread: {
                       projectId: activeProject.id,
                       title,
                       modelSelection: target.selection,
-                      runtimeMode,
+                      runtimeMode: target.runtimeMode,
                       interactionMode: target.interactionMode,
                       branch: activeThreadBranch,
                       worktreePath: null,
@@ -8656,13 +8676,22 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!nextQueuedMessage || isSendBusy || queueBlockedByPendingRequest || queueSendGate) return;
     if (sendInFlightRef.current) return;
-    if (!isQueuedMessageDue({ message: nextQueuedMessage, phase, latestToolActivityId })) return;
+    if (
+      !isQueuedMessageDue({
+        message: nextQueuedMessage,
+        phase,
+        latestToolActivityId,
+        provider: selectedProvider,
+      })
+    )
+      return;
     sendQueuedMessage(nextQueuedMessage);
   }, [
     isSendBusy,
     latestToolActivityId,
     nextQueuedMessage,
     phase,
+    selectedProvider,
     queueBlockedByPendingRequest,
     queueSendGate,
   ]);
@@ -8676,7 +8705,13 @@ export default function ChatView(props: ChatViewProps) {
   queuedMessageActionsRef.current = {
     steer: (id) => {
       const message = queuedMessages.find((entry) => entry.id === id);
-      if (!message || sendInFlightRef.current || queueBlockedByPendingRequest) return;
+      if (
+        !message ||
+        sendInFlightRef.current ||
+        queueBlockedByPendingRequest ||
+        !canSendToProvider(selectedProvider, phase)
+      )
+        return;
       void onSend(undefined, message.submissionIntent, undefined, message);
     },
     remove: (id) => {
@@ -9989,6 +10024,7 @@ export default function ChatView(props: ChatViewProps) {
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={paintOnlyDisplayedTimeline ? null : loadEarlierTurns}
                 queuedMessages={paintOnlyDisplayedTimeline ? EMPTY_QUEUED_MESSAGES : queuedMessages}
+                canSteerQueuedMessage={canSendToProvider(selectedProvider, phase)}
                 onSteerQueuedMessage={onSteerQueuedMessage}
                 steerQueuedMessageShortcutLabel={shortcutLabelForCommand(
                   keybindings,

@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/MessagesTimeline.tsx
+// renders conversation history and queued-message actions
 import { ArrowUpIcon, ClockIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -295,6 +297,7 @@ interface TimelineRowSharedState {
   onCancelWorktreeSetup: (() => void) | null;
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
+  canSteerQueuedMessage: boolean;
   onSteerQueuedMessage: (id: string) => void;
   steerQueuedMessageShortcutLabel: string | null;
   onRemoveQueuedMessage: (id: string) => void;
@@ -460,6 +463,7 @@ interface MessagesTimelineProps {
   loadEarlier?: CitationHistoryPage | null;
   /** Messages sent during the running turn. They render as ghost bubbles after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
+  canSteerQueuedMessage?: boolean;
   onSteerQueuedMessage?: (id: string) => void;
   steerQueuedMessageShortcutLabel?: string | null;
   onRemoveQueuedMessage?: (id: string) => void;
@@ -517,6 +521,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   loadEarlier = null,
   queuedMessages = EMPTY_QUEUED_MESSAGES,
+  canSteerQueuedMessage = true,
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   steerQueuedMessageShortcutLabel = null,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
@@ -1156,6 +1161,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
+      canSteerQueuedMessage,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
       onRemoveQueuedMessage,
@@ -1191,6 +1197,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onCancelWorktreeSetup,
       onWorktreeSetupWorkLocally,
       onOpenWorktreeSetupTerminal,
+      canSteerQueuedMessage,
       onSteerQueuedMessage,
       steerQueuedMessageShortcutLabel,
       onRemoveQueuedMessage,
@@ -1765,7 +1772,9 @@ function QueuedMessageTimelineRow({
   const statusLabel = queuedMessage.holdUntilUserAction
     ? "Waits for Send now"
     : row.isNext
-      ? "Sends after the next tool call or when the turn ends"
+      ? ctx.canSteerQueuedMessage
+        ? "Sends after the next tool call or when the turn ends"
+        : "Waits until the provider is ready"
       : "Sends after the messages above it";
   return (
     <div className="flex flex-col items-end" data-queued-message-id={queuedMessage.id}>
@@ -1812,6 +1821,7 @@ function QueuedMessageTimelineRow({
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => ctx.onSteerQueuedMessage(queuedMessage.id)}
                     aria-label="Send now"
+                    disabled={!ctx.canSteerQueuedMessage}
                   />
                 }
               >

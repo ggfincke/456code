@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/ChatComposer.tsx
+// edits task drafts and presents provider-aware composer controls
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -1773,8 +1775,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
 
+  // keep background uploads behind the same provider boundary as send preflight
+  const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
+    () =>
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
+      ),
+    [providerStatuses, settings],
+  );
+  const mixedBatchIncludesCoral =
+    multipleModelSelections?.some((selection) =>
+      providerInstanceEntries.some(
+        (entry) => entry.instanceId === selection.instanceId && entry.driverKind === "coral",
+      ),
+    ) ?? false;
+
   useEffect(() => {
-    if (!attachmentUploadsCapabilityKnown) {
+    if (mixedBatchIncludesCoral || !attachmentUploadsCapabilityKnown) {
       return;
     }
     if (!supportsAttachmentUploads) {
@@ -1813,6 +1830,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
     }
   }, [
+    mixedBatchIncludesCoral,
     attachmentUploadsCapabilityKnown,
     attachmentDraftTarget,
     composerFiles,
@@ -1856,16 +1874,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Model state
   // ------------------------------------------------------------------
-  // Instance-aware projection of the wire provider list. One entry per
-  // configured instance (default built-in + any custom `providerInstances.*`),
-  // sorted default-first per driver kind for a stable picker order.
-  const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
-      ),
-    [providerStatuses, settings],
-  );
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const {
     selectedProviderEntry,
@@ -1919,9 +1927,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProvider: ProviderDriverKind =
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const attachmentBlockReason =
-    selectedProvider === "coral" &&
+    (selectedProvider === "coral" || mixedBatchIncludesCoral) &&
     (composerImages.length > 0 || composerFiles.length > 0 || composerVideos.length > 0)
-      ? "Coral supports text only. Remove attachments to continue."
+      ? "Coral supports text only. Remove attachments or deselect Coral before sending."
       : upstreamAttachmentBlockReason;
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
