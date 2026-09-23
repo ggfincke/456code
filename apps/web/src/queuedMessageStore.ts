@@ -1,6 +1,10 @@
+// apps/web/src/queuedMessageStore.ts
+// holds composer messages until the provider can receive them
+import { canSendToProvider } from "./fincke/coralSendPolicy";
 import type {
   ModelSelection,
   PreviewAnnotationPayload,
+  ProviderDriverKind,
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
@@ -251,11 +255,13 @@ export function latestCompletedToolActivityId(
  * between a send and the provider picking it up, so nothing is due there.
  */
 export function isQueuedMessageDue(input: {
+  provider?: ProviderDriverKind | undefined;
   message: Pick<QueuedComposerMessage, "queuedAfterToolActivityId" | "holdUntilUserAction">;
   phase: "connecting" | "running" | "ready" | "disconnected";
   latestToolActivityId: string | null;
 }): boolean {
   if (input.message.holdUntilUserAction) return false;
+  if (!canSendToProvider(input.provider, input.phase)) return false;
   if (input.phase === "connecting") return false;
   if (input.phase !== "running") return true;
   return input.latestToolActivityId !== input.message.queuedAfterToolActivityId;

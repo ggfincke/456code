@@ -1,3 +1,5 @@
+// apps/web/src/components/QueuedMessageSender.tsx
+// sends due queued messages for every thread, on screen or not
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import { useEffect, useMemo } from "react";
@@ -87,10 +89,19 @@ function ThreadQueueSender({ threadKey }: { threadKey: string }) {
     waitingForServer ||
     pendingRequests.approvals.length > 0 ||
     pendingRequests.userInputs.length > 0;
+  // coral only receives a queued message once its supervised turn is idle
+  const provider =
+    next === undefined || environmentId === null
+      ? undefined
+      : serverConfigs
+          .get(environmentId)
+          ?.providers?.find(
+            (entry) => entry.instanceId === next.sendSettings.modelSelection.instanceId,
+          )?.driver;
   const due =
     next !== undefined &&
     !blocked &&
-    isQueuedMessageDue({ message: next, phase, latestToolActivityId });
+    isQueuedMessageDue({ message: next, phase, latestToolActivityId, provider });
   const nextId = next?.id;
   useEffect(() => {
     if (!due || !threadRef || nextId === undefined) return;
