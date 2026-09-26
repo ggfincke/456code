@@ -1,6 +1,6 @@
 # 456code thin fork: ownership and update record
 
-This replacement is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The preserved published stack lives on `codex/t3-thin-fork`. The September 23 local update candidate lives on `chore/t3-upstream-20260923`; it has not replaced either main branch, the published thin-fork branch, or the installed application. PR #111 records the earlier replacement merge described below. The dirty local main checkout, installed application, old databases, and reconciliation, Cartographer-review and selective-port worktrees remain preserved.
+This replacement is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The preserved published stack lives on `codex/t3-thin-fork`. The September 26 update lives on `chore/t3-upstream-20260926`; the September 23 update it replaces was merged to main through PR #112 and remains on `chore/t3-upstream-20260923`. PR #111 records the earlier replacement merge described below. The dirty local main checkout, installed application, old databases, and reconciliation, Cartographer-review and selective-port worktrees remain preserved.
 
 ## Base and local change groups
 
@@ -8,7 +8,8 @@ This replacement is T3 Code plus personal appearance, desktop isolation, Coral, 
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
 - Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
 - September 14 upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101`.
-- Current local candidate base: `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc` (361 upstream commits, pinned to the September 23 audit).
+- Current base: `679c34c096193446ceed62e633387d91fe2cfff8` (138 further upstream commits, September 26).
+- September 23 base: `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc` (361 upstream commits, pinned to the September 23 audit).
 - Current recovery branch: `codex/backup-thin-fork-20260923` at `61313f6f045363d317c6930e9cc543c975a690a2`.
 - Previous recovery branch: `codex/backup-thin-fork-before-9375c779` at `2f634894544b4ccb02638d60e2b6d624e3617975`.
 - September 14 recovery branch: `codex/backup-thin-fork-before-6dbea7ed` at `158ba6655cf62df4c16e2428af06adc78f63bdcf`; it preserves the published stack before this update.
@@ -16,7 +17,7 @@ This replacement is T3 Code plus personal appearance, desktop isolation, Coral, 
 - Initial recovery branch: `codex/backup-t3-thin-fork-before-rehearsal` retains the exact pre-rebase implementation.
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-The historical September 14 patch inventory below contains **62 modified upstream paths**, including the PR size workflow fix. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
+The patch inventory below lists **68 modified upstream paths** as of September 26 (62 in the September 14 inventory), including the PR size workflow fix. In addition, 101 files are locally owned extension modules/assets/tests (excluding operations documents). This is still a substantial engine/provider port, but upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file are unchanged. Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned.
 
 ## Product and ownership boundaries
 
@@ -35,6 +36,18 @@ Coral now runs from the current-main ACP finish worktree through the repaired no
 Analysis captures the selected task's actual worktree, resolves comparison commit identities first, and checks the displayed diff hash/root before and after analysis. Source reads come exclusively from the captured base/target. Failed refreshes leave the previous complete capture accessible. Returning to the app checks freshness; explicit Refresh rebuilds. Existing results retain their capture identity and visible stale state.
 
 The extension cache is `userdata/cartographer` beneath that backend home. Work is limited to 8,000 source/config files, 2 MiB/file, 64 MiB/capture, two concurrent analyses and a 90-second worker deadline. Responses cap graph, edge, dependency and source sizes. Captured source is project data. Generations remain for immutable navigation; the cache is rebuildable and may be removed while the app is stopped. There is no periodic analysis or automatic turn-completion analysis.
+
+## September 26 update
+
+The 30 commits from `f5ef0ddb9..423380775` were rebased onto `679c34c09`. Range-diff: 21 equal, 9 changed, none dropped. Resolutions:
+
+- Upstream's self-updating Linux .deb keeps its `isDebPackage` check; the personal build still sets `disabledByEnv`, which is evaluated first.
+- Upstream removed `resolveSidebarStageFocusRingOffsetClass`; the Fincke branch of it was dropped with it.
+- Upstream moved queued-message sending out of ChatView into the root-mounted `QueuedMessageSender`. The Coral guard now lives there: it resolves the queued message's target driver from the environment's server config and passes it to `isQueuedMessageDue`, so Coral messages still wait for a ready session whether or not the thread is open. Send now keeps the `canSendToProvider` check; the `onSend` guard only covers direct annotations, since queued messages no longer pass through it.
+- `deploy-relay.yml` gained a manual dispatch with its own `if`; the repository gate is combined into that single condition.
+- The lockfile was regenerated from upstream's. Package versions are unchanged; as in the September 23 lockfile, pnpm dedupes the `zod` used by `@tanstack/router-generator` and drizzle's optional peer to the engine's 4.4.3.
+
+Frozen install, scoped web/server/desktop/scripts/engine typechecks, targeted formatting and lint (existing warnings only) passed. Focused tests: 295 web (queue store, root sender, timeline, ChatView logic, backdrop, branding and the root regressions), 484 server (Coral, ACP, MCP, text generation, fork update rejection), 169 desktop (updates, isolation, app and protocol) and 31 engine. `apps/mobile`, shared client runtime, orchestration, persistence and ProviderService still match upstream. No live Coral, desktop or mobile session was run for this update.
 
 ## September 23 local candidate
 
@@ -412,6 +425,7 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `apps/server/src/provider/builtInDrivers.ts`                   | Coral                            | Register one driver through the upstream driver registry.                                                                                      |
 | `apps/server/src/server.ts`                                    | Cartographer / isolation         | Provide the extension service and replacement update policy at the composition root.                                                           |
 | `apps/server/src/ws.ts`                                        | Cartographer                     | Wire namespaced RPC handlers through the existing authenticated RPC path.                                                                      |
+| `apps/server/tsconfig.json`                                    | Extension verification           | Include the root `tests/apps/server` regressions in the server type check.                                                                     |
 | `apps/server/vite.config.ts`                                   | Cartographer                     | Build the analysis worker, supply ESM shims for its bundled parser, and require engine compilation before server dev/test/build.               |
 | `apps/web/public/apple-touch-icon.png`                         | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
 | `apps/web/public/favicon-16x16.png`                            | Appearance                       | Use the existing personal icon at the standard web favicon/touch-icon path.                                                                    |
@@ -421,15 +435,20 @@ For an isolated web development session, run `vp run dev --home-dir /absolute/pa
 | `apps/web/src/branding.ts`                                     | Appearance                       | Set the personal display-name constants.                                                                                                       |
 | `apps/web/src/components/ChatView.tsx`                         | Cartographer                     | Mount lazy map/impact panels and expose Map only for capable environments and Git-backed tasks.                                                |
 | `apps/web/src/components/DiffPanel.tsx`                        | Cartographer                     | Send the displayed comparison identities, cwd and diff hash to Analyze Impact.                                                                 |
+| `apps/web/src/components/QueuedMessageSender.tsx`              | Coral                            | Pass the queued message's target driver to the due check so Coral waits for a ready session.                                                   |
 | `apps/web/src/components/RightPanelTabs.tsx`                   | Cartographer                     | Add Map/Impact descriptors and a Map launcher to upstream panel controls.                                                                      |
 | `apps/web/src/components/SidebarStageBackdrop.tsx`             | Appearance                       | Add Fincke wave artwork through the existing backdrop hook.                                                                                    |
 | `apps/web/src/components/chat/ChatComposer.tsx`                | Coral                            | Reject attachments consistently and show only Coral-supported permission modes.                                                                |
 | `apps/web/src/components/chat/CompactComposerControlsMenu.tsx` | Coral                            | Disable unsupported permission options in compact controls.                                                                                    |
+| `apps/web/src/components/chat/MessagesTimeline.tsx`            | Coral                            | Disable Send now and show the waiting label while Coral cannot be steered.                                                                     |
 | `apps/web/src/components/chat/providerIconUtils.ts`            | Coral                            | Resolve the Coral icon through upstream provider presentation.                                                                                 |
 | `apps/web/src/components/settings/providerDriverMeta.ts`       | Coral                            | Expose the driver in the standard Add provider instance flow.                                                                                  |
 | `apps/web/src/components/sidebar/SidebarChrome.tsx`            | Appearance                       | Use the existing header branding/artwork entry point; retain the upstream sidebar layout.                                                      |
+| `apps/web/src/queuedMessageStore.ts`                           | Coral                            | Hold due queued messages for Coral until its session is ready.                                                                                 |
 | `apps/web/src/rightPanelStore.ts`                              | Cartographer                     | Add two singleton panel kinds to upstream panel state.                                                                                         |
 | `apps/web/src/themePalette.ts`                                 | Appearance                       | Recognize the personal artwork identifier while preserving T3 theme storage and rendering.                                                     |
+| `apps/web/tsconfig.json`                                       | Extension verification           | Include the root `tests/apps/web` regressions in the web type check.                                                                           |
+| `apps/web/vite.config.ts`                                      | Extension verification           | Discover root `tests/apps/web` regressions alongside colocated tests.                                                                          |
 | `packages/contracts/src/environment.ts`                        | Cartographer                     | Add an optional availability capability for version-skew tolerance.                                                                            |
 | `packages/contracts/src/index.ts`                              | Cartographer                     | Export the new schema-only contract module.                                                                                                    |
 | `packages/contracts/src/model.ts`                              | Coral                            | Supply the initial default model slug; metadata probes and native setup supply available models.                                               |
