@@ -1,3 +1,5 @@
+// apps/server/src/server.test.ts
+// verifies server transports, authorization, and thread behavior
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -220,7 +222,6 @@ import {
 } from "../integration/TransferBudgetScenario.integration.ts";
 import {
   formatTransferBudgetReport,
-  formatTransferBudgetResult,
   type TransferBudgetRun,
   transferBudgetViolations,
 } from "../integration/TransferBudgetReport.integration.ts";
@@ -13158,13 +13159,6 @@ it.live(
       if (Option.isSome(reportPath)) {
         const fileSystem = yield* FileSystem.FileSystem;
         yield* fileSystem.writeFileString(reportPath.value, report);
-      }
-      const resultPath = yield* Config.String("T3CODE_TRANSFER_BUDGET_RESULT_PATH").pipe(
-        Config.option,
-      );
-      if (Option.isSome(resultPath)) {
-        const fileSystem = yield* FileSystem.FileSystem;
-        yield* fileSystem.writeFileString(resultPath.value, formatTransferBudgetResult(runs));
       }
       assert.deepEqual(transferBudgetViolations(runs), []);
     }).pipe(Effect.provide(NodeServices.layer)),

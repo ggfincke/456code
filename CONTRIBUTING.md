@@ -103,13 +103,11 @@ scope is coherent, and the evidence is adequate. It inspects enough code to supp
 Passing triage does not approve correctness, security, performance, or merging. Those need deeper review.
 Updates to the PR can change its eligibility and require reassessment.
 
-PRs receive `vouch:*` contributor-status labels and `size:*` diff-size labels. These are context, not
-eligibility rules. Vouching through [.github/VOUCHED.td](.github/VOUCHED.td) is separate from permission
-to bypass triage. Only the GitHub logins explicitly listed in
-[.github/TRIAGE_EXEMPTIONS.td](.github/TRIAGE_EXEMPTIONS.td) bypass triage. Organization membership,
-vouching, collaborator or bot status, repository write access, and previous successful PRs do not
-establish an exemption. Other contributors, including vouched contributors, go through triage.
-Passing once does not grant permanent trust.
+This fork keeps quality checks and does not automatically assign contributor-status or diff-size labels.
+The retained upstream contribution-triage reference uses the explicit logins in
+[.github/TRIAGE_EXEMPTIONS.td](.github/TRIAGE_EXEMPTIONS.td). Organization membership, collaborator or
+bot status, repository write access, and previous successful PRs do not establish an exemption.
+Passing triage once does not grant permanent trust.
 
 Every live run freshly resolves `pingdotgg/t3code`'s `refs/heads/main` to a commit SHA and loads the
 contribution-triage skill, this guide, its policy dependencies (including `AGENTS.md` documentation

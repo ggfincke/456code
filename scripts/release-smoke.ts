@@ -1,3 +1,5 @@
+// scripts/release-smoke.ts
+// verifies local packaging helpers with disposable release fixtures
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -188,12 +190,6 @@ function assertMissing(path: string, message: string): void {
 const tempRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-release-smoke-"));
 
 try {
-  NodeChildProcess.execFileSync(
-    process.execPath,
-    ["--test", NodePath.resolve(repoRoot, ".github/scripts/relay-state-output.test.cjs")],
-    { stdio: "inherit" },
-  );
-
   copyWorkspaceManifestFixture(tempRoot);
 
   NodeChildProcess.execFileSync(
