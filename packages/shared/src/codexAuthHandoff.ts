@@ -1,3 +1,5 @@
+// packages/shared/src/codexAuthHandoff.ts
+// validate codex sign-in handoffs & deliver one-time codes between clients
 import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { providerAuthReturnUrl } from "./providerAuthReturnUrl.ts";
@@ -85,7 +87,7 @@ export function codexCallbackUrl(value: string, redirectUri: string, state: stri
 }
 
 export function codexAuthHandoffUrl(input: CodexAuthHandoff, development = false) {
-  const url = new URL(`${development ? "t3code-dev" : "t3code"}://auth/codex`);
+  const url = new URL(`${development ? "code456-thin-dev" : "code456-thin"}://auth/codex`);
   url.searchParams.set("request", encodeHandoff(input));
   return url.toString();
 }
@@ -95,7 +97,9 @@ export function readCodexAuthHandoff(value: string, development: boolean) {
     const url = new URL(value);
     if (
       value.length > 32_768 ||
-      url.protocol !== (development ? "t3code-dev:" : "t3code:") ||
+      !(development ? ["t3code-dev:", "code456-thin-dev:"] : ["t3code:", "code456-thin:"]).includes(
+        url.protocol,
+      ) ||
       url.host !== "auth" ||
       url.pathname !== "/codex" ||
       url.username ||

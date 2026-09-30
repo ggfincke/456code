@@ -1,3 +1,5 @@
+// packages/shared/src/providerAuthReturnUrl.ts
+// constrain provider sign-in returns to supported client destinations
 import { isLoopbackHost } from "./preview.ts";
 
 /** Only return to a local client or the hosted T3 client, never an arbitrary OAuth-supplied URL. */
@@ -5,7 +7,9 @@ export function providerAuthReturnUrl(value: string | undefined): string | undef
   if (!value) return undefined;
   try {
     const url = new URL(value);
-    const desktop = ["t3code:", "t3code-dev:"].includes(url.protocol) && url.host === "app";
+    const desktop =
+      ["t3code:", "t3code-dev:", "code456-thin:", "code456-thin-dev:"].includes(url.protocol) &&
+      url.host === "app";
     const web =
       ["http:", "https:"].includes(url.protocol) &&
       (isLoopbackHost(url.hostname) || url.origin === "https://app.t3.codes");
