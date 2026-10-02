@@ -1,3 +1,5 @@
+// scripts/mobile-showcase.config.ts
+// configures local mobile screenshot devices, themes, and output
 import {
   MOBILE_DEFAULT_THEME_ID,
   MOBILE_THEME_IDS,
@@ -161,8 +163,7 @@ const config: ShowcaseConfig = {
       id: "pixel",
       platform: "android",
       avd: "Pixel_10_Pro",
-      // Apple Silicon uses ARM64 locally; CI overrides this with x86_64 so its
-      // Blacksmith Linux runner can use KVM acceleration.
+      // arm64 suits apple silicon; override the abi to match other emulator hosts
       abi: resolveShowcaseAndroidAbi(process.env.T3_SHOWCASE_ANDROID_ABI),
       appearance: "dark",
       theme: DEFAULT_SHOWCASE_THEME,

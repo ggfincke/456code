@@ -115,28 +115,26 @@ deployed relay URL and tracing configuration into the repository-root `.env`, so
 builds point at the relay that was just deployed without copying values manually. It runs only when
 one of those outputs changed, and `T3CODE_RELAY_CLIENT_CONFIG_ENV` redirects it to another file.
 
-### Deployment CI
+### Local deployment configuration
 
-The relay is versioned separately from client releases. `.github/workflows/deploy-relay.yml` deploys
-the shared Alchemy `prod` stage on every push to `main`. Stable and nightly release builds both
-resolve their static public config from the same
-`production` GitHub environment. Pull requests do not deploy relay stages. Developers can
-deploy personal non-production stages locally with any stage name other than `prod`.
+This fork's quality CI does not deploy the relay. Use the local Alchemy commands above with
+deployment-specific configuration. The relay is versioned separately from client artifacts;
+personal non-production stages use a stage name other than `prod`.
 
-The repository must define these Actions variables shared by relay deployments:
+Alchemy needs these account-scoped environment variables:
 
 - `CLOUDFLARE_ACCOUNT_ID`
 - `PLANETSCALE_ORGANIZATION`
 - `AXIOM_ORG_ID`
 
-The repository must define these Actions secrets shared by relay deployments:
+Alchemy needs these account-scoped credentials:
 
 - `CLOUDFLARE_API_TOKEN`
 - `PLANETSCALE_API_TOKEN_ID`
 - `PLANETSCALE_API_TOKEN`
 - `AXIOM_TOKEN`
 
-The `production` GitHub environment must define these Actions variables:
+Configure these stage-specific values in the relay environment file:
 
 - `RELAY_API_ZONE_NAME`
 - `RELAY_TUNNEL_ZONE_NAME`
@@ -149,17 +147,16 @@ The `production` GitHub environment must define these Actions variables:
 - `APNS_KEY_ID`
 - `APNS_BUNDLE_ID`
 
-The `production` GitHub environment must define these Actions secrets:
+Configure these stage-specific credentials in the relay environment file:
 
 - `CLERK_SECRET_KEY`
 - `APNS_PRIVATE_KEY`
 - `FCM_SERVICE_ACCOUNT` when Android push is enabled
 
-The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
+The account-scoped credentials are consumed by Alchemy while provisioning relay stages; they
 are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
-so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. The release workflow reads the production relay's
-derived public URL and Clerk publishable key from the same environment for downstream desktop, CLI,
-and hosted web builds.
+so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. Local client builds use the public configuration
+written by `PublishClientConfig` as described above.
 
 See:
 

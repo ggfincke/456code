@@ -6,10 +6,12 @@ repackage the official x86_64 AppImage from GitHub Releases.
 
 ## Publishing
 
-The release workflow calls `.github/workflows/publish-aur.yml` after publishing a GitHub release;
-the workflow can also be run manually for a specific tag. It selects the stable or nightly
-package, then updates its version and checksums, builds it, regenerates `.SRCINFO`, and pushes it
-to the AUR.
+These recipes target upstream T3 Code releases. This fork does not publish AUR packages through
+GitHub Actions; see [local packaging](../../docs/operations/release.md) for fork artifacts.
+
+The retained `packaging/aur/scripts/release.sh` selects the stable or nightly upstream package,
+updates its version and checksums, builds it, and regenerates `.SRCINFO`. It pushes to the AUR only
+when `AUR_SSH_PRIVATE_KEY` is configured.
 
 To validate a release on Arch Linux:
 
