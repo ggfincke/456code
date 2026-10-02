@@ -1,6 +1,8 @@
+// apps/web/src/fincke/FinckeWaveArt.tsx
+// renders fincke's ribbon geometry with the active theme
 import { useId } from "react";
 
-// Original fincke.dev ribbon geometry, cropped to the opening S.
+// original fincke.dev ribbon geometry, cropped to the opening S
 const FINCKE_WAVE_FIELD = { x: 0, y: -26, width: 470, height: 150 } as const;
 
 // same opening S, cropped tighter for the ~40px composer button, which has no text to clear.
@@ -26,7 +28,7 @@ export function FinckeWaveArt({ compact = false }: { compact?: boolean }) {
 
   return (
     <svg
-      className="stage-wave h-full w-full"
+      className="h-full w-full"
       fill="none"
       preserveAspectRatio="none"
       viewBox={waveViewBox(field)}

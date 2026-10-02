@@ -1,3 +1,5 @@
+// vite.config.ts
+// configures workspace quality checks and shared test defaults
 import "vite-plus/test/config";
 import { defineConfig } from "vite-plus";
 import * as NodeURL from "node:url";
@@ -212,7 +214,11 @@ export default defineConfig({
       {
         // Third-party marks (brand logos, the macOS permission panes, Codex's Computer Use
         // mark) must keep their exact colors, so the files that hold them are exempt.
-        files: ["apps/web/src/components/Icons.tsx", "apps/web/src/components/JetBrainsIcons.tsx"],
+        files: [
+          "apps/web/src/components/Icons.tsx",
+          "apps/web/src/components/JetBrainsIcons.tsx",
+          "apps/web/src/fincke/CoralIcon.tsx",
+        ],
         rules: { "shadcn/no-raw-colors": "off" },
       },
       {
@@ -281,6 +287,42 @@ export default defineConfig({
         // The sign-in masthead is T3 brand artwork: fixed gradients, not theme surfaces.
         files: ["apps/web/src/components/auth/AuthSurfaceShell.tsx"],
         rules: { "shadcn/no-arbitrary-values": "off" },
+      },
+      {
+        // the graph owns its theme aliases and fixed geometry; other appearance values
+        // still use the shared scales, and arbitrary colors remain prohibited
+        files: ["apps/web/src/cartographer/ArchitectureGraphCanvas.tsx"],
+        rules: {
+          "shadcn/no-arbitrary-values": [
+            "error",
+            {
+              allow: [
+                "layout",
+                "transition",
+                "*-[var(--architecture-*)]",
+                "bg-[radial-gradient(circle_at_center,var(--architecture-grid-dot)_1px,transparent_1px)]",
+                "bg-[length:16px_16px]",
+                "rounded-[11px]",
+                "text-[9px]",
+                "text-[10.5px]",
+                "text-[13px]",
+                "leading-[1.35]",
+                "leading-[inherit]",
+                "shadow-[0_0_0_3px_color-mix(in_srgb,var(--architecture-accent)_20%,transparent),var(--architecture-shadow-node-hover)]",
+                "shadow-[0_0_0_3px_color-mix(in_srgb,var(--architecture-amber)_18%,transparent),var(--architecture-shadow-node)]",
+                "shadow-[0_0_0_2px_color-mix(in_srgb,var(--architecture-accent)_16%,transparent),var(--architecture-shadow-node)]",
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // panel.css declares this feature scope; small labels retain the inherited line height
+        files: ["apps/web/src/cartographer/CartographerPanel.tsx"],
+        rules: {
+          "shadcn/no-unknown-classes": ["error", { allow: ["cartographer-panel"] }],
+          "shadcn/no-arbitrary-values": ["error", { allow: ["layout", "leading-[inherit]"] }],
+        },
       },
       {
         // Shared client code must not call APIs missing from Hermes. Our ESNext

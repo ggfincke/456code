@@ -845,7 +845,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
 
   if (props.nodes.length === 0) {
     return (
-      <div className="architecture-surface flex min-h-64 items-center justify-center text-sm text-[var(--architecture-text-muted)]">
+      <div className="flex min-h-64 items-center justify-center text-sm text-[var(--architecture-text-muted)]">
         {props.emptyLabel}
       </div>
     );
@@ -856,7 +856,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
       ref={viewportRef}
       aria-label={props.ariaLabel}
       className={cn(
-        "architecture-surface relative size-full min-h-0 touch-none overflow-hidden overscroll-contain bg-[var(--architecture-page)]",
+        "relative size-full min-h-0 touch-none overflow-hidden overscroll-contain bg-[var(--architecture-page)]",
         panning ? "cursor-grabbing" : "cursor-grab",
       )}
       data-architecture-canvas
@@ -1053,7 +1053,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
               aria-label={point.node.ariaLabel}
               aria-pressed={selected}
               className={cn(
-                "absolute z-20 flex h-24 w-[236px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[11px] border px-[15px] pb-3 pt-[11px] text-left text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-[border-color,box-shadow,opacity] hover:border-[var(--architecture-accent)] hover:shadow-[var(--architecture-shadow-node-hover)] focus-visible:border-[var(--architecture-accent)] focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--architecture-page)]",
+                "absolute z-20 flex h-24 w-[236px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[11px] border px-3.75 pb-3 pt-2.75 text-left text-[var(--architecture-text)] shadow-[var(--architecture-shadow-node)] outline-none transition-[border-color,box-shadow,opacity] hover:border-[var(--architecture-accent)] hover:shadow-[var(--architecture-shadow-node-hover)] focus-visible:border-[var(--architecture-accent)] focus-visible:ring-2 focus-visible:ring-[var(--architecture-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--architecture-page)]",
                 "border-[var(--architecture-node-edge)] bg-[var(--architecture-node-fill)]",
                 nodeStrokeClass(point.node.stroke),
                 selected &&
@@ -1134,7 +1134,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
             viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`}
           >
             <rect
-              fill="color-mix(in srgb, var(--architecture-page) 72%, transparent)"
+              fill="var(--architecture-minimap-page)"
               height={bounds.height}
               rx="18"
               stroke="var(--architecture-border-soft)"
@@ -1177,7 +1177,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
               />
             ))}
             <rect
-              fill="color-mix(in srgb, var(--architecture-accent) 12%, transparent)"
+              fill="var(--architecture-minimap-viewport)"
               height={Math.max(0, visibleWorld.bottom - visibleWorld.y)}
               rx="8"
               stroke="var(--architecture-accent)"
@@ -1205,7 +1205,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
         </CanvasControl>
         <CanvasControl
           aria-label={`Zoom level ${Math.round(camera.scale * 100)} percent. Reset to 100 percent.`}
-          className="min-w-12 px-1 font-mono text-[10px] tabular-nums text-[var(--architecture-text-secondary)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
+          className="min-w-12 px-1 font-mono text-3xs leading-[inherit] tabular-nums text-[var(--architecture-text-secondary)] hover:bg-[var(--architecture-hover)] hover:text-[var(--architecture-text)]"
           title="Reset zoom to 100%"
           onClick={() => zoomAt(1)}
         >
@@ -1231,7 +1231,7 @@ export function ArchitectureGraphCanvas(props: ArchitectureGraphCanvasProps) {
         </CanvasControl>
       </fieldset>
       {outsidePageEdgeCount > 0 ? (
-        <p className="absolute bottom-3 end-3 z-30 rounded-md border border-[var(--architecture-border)] bg-[var(--architecture-overlay)] px-2 py-1 text-[10px] text-[var(--architecture-text-muted)] shadow-[var(--architecture-shadow-node)]">
+        <p className="absolute bottom-3 end-3 z-30 rounded-md border border-[var(--architecture-border)] bg-[var(--architecture-overlay)] px-2 py-1 text-3xs leading-[inherit] text-[var(--architecture-text-muted)] shadow-[var(--architecture-shadow-node)]">
           {outsidePageEdgeCount} returned{" "}
           {outsidePageEdgeCount === 1 ? "dependency connects" : "dependencies connect"} units
           outside this page.
