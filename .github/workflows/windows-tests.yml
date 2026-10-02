@@ -1,6 +1,7 @@
-# On-demand Windows test lane. Manual only: nothing in the suite passes on
-# Windows yet, so this exists to give contributors (and agents) a cloud Windows
-# box to iterate against. Once the suite is green here, fold it into ci.yml.
+# .github/workflows/windows-tests.yml
+# runs manual windows compatibility checks
+
+# select a package or files to investigate platform-specific failures
 #
 #   gh workflow run windows-tests.yml --ref <branch> -f package=packages/shared
 #   gh workflow run windows-tests.yml --ref <branch> -f package=apps/server \
@@ -26,7 +27,7 @@ permissions:
 jobs:
   test:
     name: Test (${{ inputs.package || 'all non-server' }})
-    runs-on: blacksmith-8vcpu-windows-2025
+    runs-on: windows-2025
     timeout-minutes: 45
     steps:
       - name: Checkout

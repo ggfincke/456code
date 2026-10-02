@@ -1,14 +1,16 @@
 // tests/apps/web/queuedMessageStore.test.ts
 // keeps coral queues behind completed turns without changing other providers
 
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { beforeEach, expect, it } from "vite-plus/test";
 import {
   isQueuedMessageDue,
   useQueuedMessageStore,
 } from "../../../apps/web/src/queuedMessageStore";
 
-beforeEach(() => useQueuedMessageStore.setState({ queuesByThreadKey: {}, drainGeneration: 0 }));
+beforeEach(() =>
+  useQueuedMessageStore.setState({ queuesByThreadKey: {}, lastDispatchByThreadKey: {} }),
+);
 
 it("holds Coral through tool boundaries and disconnects, then hands off once when ready", () => {
   const store = useQueuedMessageStore.getState();
@@ -19,7 +21,12 @@ it("holds Coral through tool boundaries and disconnects, then hands off once whe
     terminalContexts: [],
     previewAnnotations: [],
     reviewComments: [],
-    submissionIntent: "foreground",
+    sendSettings: {
+      modelSelection: { instanceId: ProviderInstanceId.make("coral"), model: "qwen3.8:27b-mlx" },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      promptEffort: null,
+    },
     queuedAfterToolActivityId: "tool-1",
     createdAt: "2026-09-23T00:00:00Z",
   });
@@ -42,8 +49,8 @@ it("holds Coral through tool boundaries and disconnects, then hands off once whe
       provider: ProviderDriverKind.make("coral"),
     }),
   ).toBe(true);
-  expect(store.take("coral-thread", message.id, "tool-2")).toEqual(message);
-  expect(store.take("coral-thread", message.id, "tool-2")).toBeNull();
+  expect(store.beginSend("coral-thread", message.id, "tool-2")).toEqual(message);
+  expect(store.beginSend("coral-thread", message.id, "tool-2")).toBeNull();
 });
 
 it("retains supported mid-turn sends and explicit holds", () => {

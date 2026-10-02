@@ -1,20 +1,11 @@
+# .github/workflows/mobile-fingerprint-check.yml
+# reports native fingerprint differences for pull requests
 name: Mobile Fingerprint Check
 
-# Detects whether a PR changes the native fingerprint — i.e. whether merging
-# it would leave main un-OTA-able until a new store build ships. Native-change
-# PRs get the "📱 Native Change" label so they can be held and merged as a
-# batch right before the next store submission, keeping main OTA-able for
-# everything else in between. (Once one native PR merges, every later merge
-# inherits the drifted fingerprint and loses OTA reach too — that is why the
-# signal has to fire before merge, not after.)
-#
-# The check is advisory: it always passes, the label is the signal. Both
-# fingerprints are computed in this one job (same OS, same corepack-pinned
-# pnpm), so the comparison is self-consistent; no EXPO_TOKEN needed.
+# compare both sides on one runner with the same pnpm; differences stay advisory
 on:
   pull_request:
-    # Run even when a rebase or base change removes every native input from the
-    # diff, so the label can be cleared without installing Expo dependencies.
+    # recheck when rebases or base edits remove native inputs
     types: [opened, synchronize, reopened, edited]
 
 concurrency:
@@ -24,11 +15,10 @@ concurrency:
 jobs:
   fingerprint:
     name: Native fingerprint diff
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
-      issues: write
-      pull-requests: write
     env:
       APP_VARIANT: production
       NODE_OPTIONS: --max-old-space-size=8192
@@ -54,7 +44,7 @@ jobs:
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "No native fingerprint inputs changed; clearing any stale native change label." >> "$GITHUB_STEP_SUMMARY"
+            echo "No native fingerprint inputs changed." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Setup Vite+
@@ -99,11 +89,9 @@ jobs:
             npx expo-updates fingerprint:generate --platform "$platform" > "$RUNNER_TEMP/fp/base/$platform.json"
           done
 
-      - id: compare
-        name: Compare fingerprints
+      - name: Compare fingerprints
         if: steps.changes.outputs.relevant == 'true'
         run: |
-          changed=""
           {
             echo "## Native fingerprint diff"
             echo
@@ -114,7 +102,6 @@ jobs:
                 echo "- ✅ **$platform**: unchanged (\`$head_hash\`) — OTA-compatible"
                 continue
               fi
-              changed="$changed $platform"
               echo "- 📱 **$platform**: \`$base_hash\` → \`$head_hash\` — merging requires a new native build before OTAs work again"
               jq -r -n \
                 --slurpfile h "$RUNNER_TEMP/fp/head/$platform.json" \
@@ -125,96 +112,3 @@ jobs:
                   | "  - \(.type): `\(.filePath // .id)`"'
             done
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "changed_platforms=${changed# }" >> "$GITHUB_OUTPUT"
-
-      - name: Sync native change label
-        # Fork PRs get a read-only token under pull_request; the check stays
-        # advisory there (summary only). This workflow must not move to
-        # pull_request_target — it installs and runs PR code.
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@v8
-        env:
-          CHANGED_PLATFORMS: ${{ steps.compare.outputs.changed_platforms }}
-        with:
-          script: |
-            const managedLabel = {
-              name: "📱 Native Change",
-              color: "d93f0b",
-              description:
-                "Changes the native fingerprint; merging blocks production OTAs until a new store build ships.",
-            };
-            const nativeChanged = (process.env.CHANGED_PLATFORMS ?? "").trim() !== "";
-            const issueNumber = context.payload.pull_request.number;
-
-            try {
-              const { data: existing } = await github.rest.issues.getLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                name: managedLabel.name,
-              });
-
-              if (
-                existing.color !== managedLabel.color ||
-                (existing.description ?? "") !== managedLabel.description
-              ) {
-                await github.rest.issues.updateLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: managedLabel.name,
-                  color: managedLabel.color,
-                  description: managedLabel.description,
-                });
-              }
-            } catch (error) {
-              if (error.status !== 404) {
-                throw error;
-              }
-
-              try {
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: managedLabel.name,
-                  color: managedLabel.color,
-                  description: managedLabel.description,
-                });
-              } catch (createError) {
-                if (createError.status !== 422) {
-                  throw createError;
-                }
-              }
-            }
-
-            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              per_page: 100,
-            });
-            const hasLabel = currentLabels.some((label) => label.name === managedLabel.name);
-
-            if (nativeChanged && !hasLabel) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                labels: [managedLabel.name],
-              });
-            } else if (!nativeChanged && hasLabel) {
-              try {
-                await github.rest.issues.removeLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issueNumber,
-                  name: managedLabel.name,
-                });
-              } catch (removeError) {
-                if (removeError.status !== 404) {
-                  throw removeError;
-                }
-              }
-            }
-
-            core.info(
-              `PR #${issueNumber}: native fingerprint ${nativeChanged ? `changed (${process.env.CHANGED_PLATFORMS})` : "unchanged"}`,
-            );

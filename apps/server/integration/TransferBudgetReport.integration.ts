@@ -1,3 +1,5 @@
+// apps/server/integration/TransferBudgetReport.integration.ts
+// formats transfer measurements and enforces thread traffic budgets
 import type { ProviderDriverKind } from "@t3tools/contracts";
 
 import type {
@@ -83,33 +85,6 @@ function observedTransfer(run: TransferBudgetRun) {
     measuredTurnWebSocketDecodedBytes: run.measuredTurnWebSocket.decodedBytes,
     measuredTurnWebSocketMessages: run.measuredTurnWebSocket.messages,
   };
-}
-
-/** Machine-readable input for the trusted PR comment publisher. */
-export function formatTransferBudgetResult(runs: ReadonlyArray<TransferBudgetRun>): string {
-  const providers = Object.fromEntries(
-    runs.flatMap((run) => {
-      const ceiling = TRANSFER_BUDGETS[run.provider];
-      return ceiling ? [[run.provider, { observed: observedTransfer(run), ceiling }]] : [];
-    }),
-  );
-
-  return `${JSON.stringify(
-    {
-      schemaVersion: 1,
-      scenario: {
-        id: "thread-transfer-v1",
-        historyTurns: TRANSFER_HISTORY_TURN_COUNT,
-        historyCommandToolsPerTurn: TRANSFER_HISTORY_TOOLS_PER_TURN,
-        historyMcpResultBytes: TRANSFER_HISTORY_MCP_RESULT_BYTES,
-        measuredCommandTools: TRANSFER_MEASURED_TOOLS,
-        measuredMcpResultBytes: TRANSFER_MEASURED_MCP_RESULT_BYTES,
-      },
-      providers,
-    },
-    null,
-    2,
-  )}\n`;
 }
 
 function formatBytes(bytes: number): string {

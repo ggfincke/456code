@@ -1,3 +1,5 @@
+// knip.jsonc
+// defines workspace entry points and unused-code exceptions
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // Exported types are part of our contracts even before they have consumers.
@@ -7,14 +9,18 @@
   "workspaces": {
     ".": {
       // Keep vendored reference repositories outside the root project.
-      "project": ["*.{js,mjs,cjs,ts,mts,cts}", ".github/**/*.cjs"],
-      "entry": [".github/scripts/thread-transfer-report.cjs"],
-      "vite": { "entry": [".github/**/*.test.cjs"] },
-      "vitest": { "entry": [".github/**/*.test.cjs"] },
+      "project": ["*.{js,mjs,cjs,ts,mts,cts}"],
     },
     "scripts": {
-      // retain direct native verification and branding entry points
-      "entry": ["knip-schemas.ts", "mobile-native-client.ts", "apply-web-brand-assets.ts"],
+      // knip loads its preprocessor through a cli option; these other helpers
+      // run directly for native checks, worktree setup, branding, and local packaging
+      "entry": [
+        "knip-schemas.ts",
+        "mobile-native-client.ts",
+        "setup-worktree.ts",
+        "apply-web-brand-assets.ts",
+        "smoke-cli-archive.ts",
+      ],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
@@ -30,11 +36,7 @@
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // the Vite+ web build prerequisite
       // The Cartographer worker bundles its engine but resolves this parser at runtime.
-      "ignoreDependencies": [
-        "@effect/platform-node-shared",
-        "@t3tools/web",
-        "dependency-cruiser",
-      ],
+      "ignoreDependencies": ["@effect/platform-node-shared", "@t3tools/web", "dependency-cruiser"],
       // Keep upstream self-update source intact while fork updates are disabled.
       "ignoreIssues": { "src/cloud/selfUpdate.ts": ["exports"] },
     },
@@ -46,6 +48,8 @@
         "src/snapShot/GlobalShiftShortcutWorker.ts!",
         "src/snapShot/RegionSnapShotWorker.ts!",
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
+        "src/boot.ts!",
+        "src/compileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",
@@ -58,7 +62,9 @@
       "ignoreDependencies": ["playwright-core", "electron-builder"],
     },
     "apps/web": {
-      // Worktree setup invokes this directly from t3.json.
+      // Vitest loads this through the per-file @vitest-environment directive.
+      "ignoreDependencies": ["jsdom"],
+      // Worktree setup (scripts/setup-worktree.ts) runs this directly.
       "entry": ["scripts/warm-dep-cache.ts"],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still

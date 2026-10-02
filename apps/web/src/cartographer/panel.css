@@ -1,3 +1,5 @@
+/* apps/web/src/cartographer/panel.css */
+/* maps graph surfaces and minimap tones to the active theme */
 .cartographer-panel {
   --architecture-page: var(--background);
   --architecture-text: var(--foreground);
@@ -10,6 +12,8 @@
   --architecture-edge: var(--muted-foreground);
   --architecture-grid-dot: color-mix(in srgb, var(--foreground) 12%, transparent);
   --architecture-overlay: var(--popover);
+  --architecture-minimap-page: color-mix(in srgb, var(--architecture-page) 72%, transparent);
+  --architecture-minimap-viewport: color-mix(in srgb, var(--architecture-accent) 12%, transparent);
   --architecture-hover: var(--accent);
   --architecture-node-neutral: var(--card);
   --architecture-node-analyze: var(--card);

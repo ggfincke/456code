@@ -191,7 +191,7 @@ export default function CartographerPanel({
         {view && (
           <>
             <p className="w-full break-all text-muted-foreground">{view.root}</p>
-            <p className="w-full font-mono text-[10px]">
+            <p className="w-full font-mono text-3xs leading-[inherit]">
               {view.base ? `${view.base.slice(0, 12)} → ` : ""}
               {view.identity.slice(0, 12)} · {new Date(view.createdAt).toLocaleTimeString()}
             </p>
@@ -270,7 +270,7 @@ export default function CartographerPanel({
                 />
               </div>
               {(view.omittedNodes > 0 || view.omittedEdges > 0) && (
-                <p className="px-3 py-1 text-[10px] text-muted-foreground">
+                <p className="px-3 py-1 text-3xs leading-[inherit] text-muted-foreground">
                   Showing {view.nodes.length} of {view.nodeCount} files and {view.edges.length} of{" "}
                   {view.edgeCount} imports. Search narrows the view; dependency queries use the full
                   analysis.
