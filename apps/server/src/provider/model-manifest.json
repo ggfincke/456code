@@ -51,6 +51,11 @@
       ]
     },
     {
+      "driver": "coral",
+      "t3CodeRange": ">=0.0.42",
+      "ranges": []
+    },
+    {
       "driver": "opencode",
       "t3CodeRange": ">=0.0.42",
       "recommendedRange": ">=1.14.19 <2.0.0",
