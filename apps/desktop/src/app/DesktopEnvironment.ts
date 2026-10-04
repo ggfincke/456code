@@ -1,3 +1,5 @@
+// apps/desktop/src/app/DesktopEnvironment.ts
+// resolves desktop paths and fork branding
 import { finckeDesktop, isFinckeDesktop } from "../fincke/build.ts";
 import type {
   DesktopAppBranding,
@@ -87,8 +89,6 @@ export class DesktopEnvironment extends Context.Service<
     readonly linuxWmClass: string;
     readonly linuxApplicationsDir: string;
     readonly appImagePath: Option.Option<string>;
-    readonly userDataDirName: string;
-    readonly legacyUserDataDirName: string;
     readonly defaultDesktopSettings: DesktopAppSettings.DesktopSettings;
     readonly runtimeInfo: DesktopRuntimeInfo;
     readonly resolvePickFolderDefaultPath: (rawOptions: unknown) => Option.Option<string>;
@@ -189,16 +189,6 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isFinckeDesktop
-    ? `${finckeDesktop.profile}${isDevelopment ? "-dev" : ""}`
-    : isDevelopment
-      ? "t3code-dev"
-      : "t3code";
-  const legacyUserDataDirName = isFinckeDesktop
-    ? userDataDirName
-    : isDevelopment
-      ? "T3 Code (Dev)"
-      : "T3 Code (Alpha)";
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",
@@ -261,8 +251,6 @@ const make = Effect.fn("desktop.environment.make")(function* (
         : "t3code",
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
-    userDataDirName,
-    legacyUserDataDirName,
     defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),
     runtimeInfo: resolveDesktopRuntimeInfo({
       platform: input.platform,

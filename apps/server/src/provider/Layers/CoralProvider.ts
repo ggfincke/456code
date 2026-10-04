@@ -173,7 +173,10 @@ export const checkCoralProviderStatus = Effect.fn("checkCoralProviderStatus")(fu
     });
   const init = initialized.success.value;
   const version = init.agentInfo?.version ?? null;
-  if (init.protocolVersion !== 1 || !init.agentCapabilities?.sessionCapabilities?.resume)
+  if (
+    (init.protocolVersion !== 1 && init.protocolVersion !== 2) ||
+    !init.agentCapabilities?.sessionCapabilities?.resume
+  )
     return snapshot({
       version,
       message:

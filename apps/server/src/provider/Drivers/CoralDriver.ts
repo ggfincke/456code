@@ -1,3 +1,7 @@
+// apps/server/src/provider/Drivers/CoralDriver.ts
+// registers isolated coral snapshots and v2 orchestration
+import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import {
   CoralSettings,
@@ -55,6 +59,7 @@ export type CoralDriverEnv =
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
+  | IdAllocator.IdAllocatorV2
   | Path.Path
   | ServerConfig
   | ServerSettingsService;
@@ -91,6 +96,10 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverConfig = yield* ServerConfig;
+      const selfInvocation = yield* resolveSelfInvocation();
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const effectiveConfig = { ...config, enabled } satisfies CoralSettings;
       const processEnv = buildCoralAcpEnvironment(
         effectiveConfig,
@@ -112,7 +121,13 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
         readonly getSnapshot: Effect.Effect<ServerProvider>;
         readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
       } | null>(null);
-      const adapter = yield* makeCoralAdapter(effectiveConfig, {
+      const orchestrationAdapter = makeCoralAdapter(effectiveConfig, {
+        crypto,
+        childProcessSpawner: spawner,
+        fileSystem,
+        serverConfig,
+        selfInvocation,
+        idAllocator,
         environment: processEnv,
         instanceId,
         onSessionSetup: (sessionSetupResult) =>
@@ -192,7 +207,7 @@ export const CoralDriver: ProviderDriver<CoralSettings, CoralDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

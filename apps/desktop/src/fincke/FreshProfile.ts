@@ -1,3 +1,5 @@
+// apps/desktop/src/fincke/FreshProfile.ts
+// seeds appearance only when no settings or conversation history exist
 import { EnvironmentThemeFile } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
@@ -24,8 +26,12 @@ export const seedFreshProfile = Effect.fn("fincke.seedFreshProfile")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const settings = path.join(stateDir, "settings.json");
-  // Existing settings or conversations make this an established profile, even if it has no theme.
-  if ((yield* fs.exists(settings)) || (yield* fs.exists(path.join(stateDir, "state.sqlite"))))
+  // existing settings or either conversation database make this an established profile
+  if (
+    (yield* fs.exists(settings)) ||
+    (yield* fs.exists(path.join(stateDir, "state.sqlite"))) ||
+    (yield* fs.exists(path.join(stateDir, "statev2.sqlite")))
+  )
     return;
   const themes = path.join(stateDir, "themes");
   yield* fs.makeDirectory(themes, { recursive: true });

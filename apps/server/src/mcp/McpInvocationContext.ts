@@ -1,3 +1,5 @@
+// apps/server/src/mcp/McpInvocationContext.ts
+// scopes agent tools to their authorized capabilities
 import {
   type EnvironmentId,
   McpCapabilityUnavailableError,
@@ -8,7 +10,15 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-export type McpCapability = "preview" | "device" | "pull-requests" | "cartographer";
+const ALL_MCP_CAPABILITIES = [
+  "preview",
+  "orchestration",
+  "worktree",
+  "device",
+  "pull-requests",
+  "cartographer",
+] as const;
+export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;

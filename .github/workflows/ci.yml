@@ -16,8 +16,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
-    name: Check
+  # Lint, typecheck, and the desktop build each get a runner so they run side by
+  # side instead of one after another. The `Check` job at the end of this file
+  # passes only when every other job does.
+  lint:
+    name: Lint
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -54,24 +57,8 @@ jobs:
       - name: Check
         run: vp check
 
-      - name: Typecheck
-        run: vpr typecheck
-
-      - name: Install browser secret helper build libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsecret-1-dev pkg-config
-
-      - name: Build desktop pipeline
-        run: vp run build:desktop
-
-      - name: Verify preload bundle output
-        run: node apps/desktop/scripts/verify-preload-bundle.mjs
-
-  # run four non-server packages together; tests resolve workspace deps from source
-  # use one vitest worker per package to avoid multiplying workers on standard runners
-  test:
-    name: Test
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -93,18 +80,144 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @t3tools/desktop ensure:electron
 
-      - name: Install browser secret helper build libraries
+      - name: Typecheck
+        run: vpr typecheck
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      # Runs in the background while Vite+ installs; the step before the build waits for it.
+      - name: Start installing browser secret helper build libraries
+        run: |
+          (
+            set +e
+            sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+            echo "$?" > "$RUNNER_TEMP/apt-status"
+          ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Finish installing browser secret helper build libraries
+        timeout-minutes: 5
+        run: |
+          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
+          cat "$RUNNER_TEMP/apt.log"
+          exit "$(cat "$RUNNER_TEMP/apt-status")"
+
+      - name: Build desktop pipeline
+        run: vp run build:desktop
+
+      - name: Verify preload bundle output
+        run: node apps/desktop/scripts/verify-preload-bundle.mjs
+
+  # Everything except `t3` (apps/server) and the web app, which has its own job
+  # below. `--parallel` drops the package dependency ordering that `vp run`
+  # applies by default: these `test` tasks declare no `dependsOn` and resolve
+  # workspace deps from source, so ordering only bought us idle runners between
+  # dependency layers. The concurrency limit stays at the default 4 so peak load
+  # per runner is unchanged.
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      # the standard ubuntu runner usually includes gcc
+      # but ACP process-tree live tests compile a small pthread fixture with `cc`
+      # and soft-skip when it is missing. Install build-essential so that path
+      # always runs in CI instead of silently no-oping.
+      - name: Install C toolchain for process-tree fixtures
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsecret-1-dev pkg-config
+          sudo apt-get install -y --no-install-recommends build-essential
+          command -v cc
+
+      # The desktop tests compile the browser secret helper. The install runs in
+      # the background while Vite+ installs; the step before the tests waits for it.
+      - name: Start installing browser secret helper build libraries
+        run: |
+          (
+            set +e
+            sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+            echo "$?" > "$RUNNER_TEMP/apt-status"
+          ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Finish installing browser secret helper build libraries
+        timeout-minutes: 5
+        run: |
+          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
+          cat "$RUNNER_TEMP/apt.log"
+          exit "$(cat "$RUNNER_TEMP/apt-status")"
 
       - name: Test
-        run: vp run --parallel --concurrency-limit 4 --filter '!t3' --filter '!@t3tools/monorepo' test --maxWorkers 1
+        run: vp run --parallel --concurrency-limit 4 --filter '!t3' --filter '!@t3tools/monorepo' --filter '!@t3tools/web' test --maxWorkers 1
 
-  # apps/server sets `fileParallelism: false`, so its 239 files run strictly
+  # The web suite is the largest outside the server. In the shared Test job it
+  # started last and ran alone for about 40s after everything else finished.
+  test_web:
+    name: Test Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Test
+        run: vp run --filter @t3tools/web test --maxWorkers 1
+
+  # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
   # separate workers, so no two server test files ever share a machine and the
-  # isolation that flag buys is preserved exactly.
+  # isolation that flag buys is preserved exactly. One file at a time keeps
+  # about 1.5 cores busy, so 4 vCPU runners lose nothing against 8. The shards
+  # split files by recorded duration (apps/server/src/testUtils/weightedShardSequencer.ts).
   test_server:
     name: Test Server ${{ matrix.shard }}
     runs-on: ubuntu-24.04
@@ -137,8 +250,8 @@ jobs:
           T3CODE_TRANSFER_BUDGET_REPORT_PATH: ${{ runner.temp }}/t3code-transfer-budget.md
         run: vp run --filter t3 test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
-      # apps/server/src/server.test.ts writes markdown on one shard
-      # summarize only that shard's report when it exists
+      # the v2 transfer budget suite writes markdown on one shard
+      # summarize that report when it exists
       - name: Detect transfer budget report
         id: transfer_budget
         if: always()
@@ -149,7 +262,7 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Summarize transfer budget report
+      - name: Publish transfer budget report
         if: always() && steps.transfer_budget.outputs.present == 'true'
         run: |
           if test -f "${{ runner.temp }}/t3code-transfer-budget.md"; then
@@ -158,12 +271,31 @@ jobs:
             echo "Transfer budget report was not produced." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # Split out of Check and Test: both paid ~7-9s to install a Rust toolchain
-  # for checks that take under 3s, on the critical path of every PR.
+      - name: Upload transfer budget measurements
+        if: always() && steps.transfer_budget.outputs.present == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: transfer-budget-report
+          path: ${{ runner.temp }}/t3code-transfer-budget.md
+          if-no-files-found: error
+          retention-days: 7
+
+  transfer_report:
+    name: Transfer Budget Measurements
+    needs: test_server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Require transfer budget measurements
+        uses: actions/download-artifact@v8
+        with:
+          name: transfer-budget-report
+          path: ${{ runner.temp }}/transfer-budget
+
   rust:
     name: Rust
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -299,3 +431,32 @@ jobs:
 
       - name: Lint mobile native sources
         run: vp run lint:mobile
+
+  check:
+    name: Check
+    if: ${{ always() }}
+    needs:
+      [
+        lint,
+        typecheck,
+        build,
+        test,
+        test_web,
+        test_server,
+        transfer_report,
+        rust,
+        mobile_native_changes,
+        mobile_native_static_analysis,
+      ]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # Only the macOS lint skips on purpose, when no native mobile code changed.
+          echo "$RESULTS" | jq -e 'all(to_entries[];
+            .value.result == "success"
+            or (.key == "mobile_native_static_analysis" and .value.result == "skipped"))' > /dev/null

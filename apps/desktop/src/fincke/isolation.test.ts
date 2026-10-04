@@ -1,3 +1,5 @@
+// apps/desktop/src/fincke/isolation.test.ts
+// verifies isolated backend and electron identities agree at startup
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -12,6 +14,7 @@ vi.mock("./build.ts", async (importOriginal) => ({
 }));
 
 import { DesktopEnvironment, layer } from "../app/DesktopEnvironment.ts";
+import { resolveUserDataPath } from "../app/DesktopUserData.ts";
 import { layerTest } from "../app/DesktopConfig.ts";
 import { resolveDesktopBaseDir } from "../app/DesktopStatePaths.ts";
 import { resolveEarlyLinuxElectronOptions } from "../app/DesktopEarlyElectronStartup.ts";
@@ -74,8 +77,12 @@ describe("personal desktop isolation", () => {
       );
       expect(reads).toEqual([runtime.desktopSettingsPath]);
       expect(runtime.stateDir).toBe("/old/home/456code-thin/userdata");
-      expect(runtime.userDataDirName).toBe("456code-thin-dev");
-      expect(runtime.legacyUserDataDirName).toBe(runtime.userDataDirName);
+      const userDataPath = yield* resolveUserDataPath({
+        appDataDirectory: runtime.appDataDirectory,
+        isDevelopment: runtime.isDevelopment,
+        platform: runtime.platform,
+      });
+      expect(userDataPath).toBe(path.join(runtime.appDataDirectory, "456code-thin-dev"));
       expect(runtime.appUserModelId).toBe("com.ggfincke.456code.thin.dev");
       expect(early.linuxDesktopEntryName).toBe(runtime.linuxDesktopEntryName);
       expect(early.linuxWmClass).toBe(runtime.linuxWmClass);
