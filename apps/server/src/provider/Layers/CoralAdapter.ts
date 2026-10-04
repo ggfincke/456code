@@ -76,6 +76,7 @@ export function makeCoralAdapter(
       runtimeHarness: "Coral",
       capabilities: CAPABILITIES,
       preferResumeSession: true,
+      sessionModeForPolicy: () => "default",
       makeRuntime: (input) =>
         makeCoralAcpRuntime({
           ...input,

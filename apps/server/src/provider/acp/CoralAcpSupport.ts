@@ -1,6 +1,6 @@
 // apps/server/src/provider/acp/CoralAcpSupport.ts
 // configures coral native sessions and supervised model selection
-import type { CoralSettings, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { CoralSettings, RuntimeMode } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,11 +17,6 @@ export const DEFAULT_CORAL_MODEL = "qwen3.8:27b-mlx";
 const CORAL_RUNTIME_MODE_CONFIG_ID = "coral.runtime-mode";
 
 export type CoralRuntimeMode = Extract<RuntimeMode, "approval-required">;
-export type CoralInteractionMode = Extract<ProviderInteractionMode, "default">;
-
-export function isCoralRuntimeMode(value: RuntimeMode): value is CoralRuntimeMode {
-  return value === "approval-required";
-}
 
 type CoralAcpRuntimeSettings = Pick<CoralSettings, "binaryPath" | "homePath" | "ollamaHost">;
 
@@ -93,16 +88,6 @@ export function applyCoralAcpRuntimeMode<E>(input: {
 }): Effect.Effect<void, E> {
   return input.runtime
     .setConfigOption(CORAL_RUNTIME_MODE_CONFIG_ID, input.runtimeMode)
-    .pipe(Effect.mapError(input.mapError), Effect.asVoid);
-}
-
-export function applyCoralAcpInteractionMode<E>(input: {
-  readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setMode">;
-  readonly interactionMode: CoralInteractionMode;
-  readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
-}): Effect.Effect<void, E> {
-  return input.runtime
-    .setMode(input.interactionMode)
     .pipe(Effect.mapError(input.mapError), Effect.asVoid);
 }
 
