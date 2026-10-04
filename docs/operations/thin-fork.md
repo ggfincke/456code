@@ -1,6 +1,6 @@
 # 456code thin fork: ownership and update record
 
-456code is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The September 30 update incorporates upstream `bd89c1302026255c62cc09278207bfaf2664da4a` while preserving both histories. It retains quality CI and local packaging. The installed application and existing runtime data remain separate from this source update.
+456code is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The October 4 integration pins upstream `efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448` while preserving both histories. It retains quality CI and local packaging. The installed application and existing runtime data remain separate from this source update.
 
 ## Base and local change groups
 
@@ -8,20 +8,21 @@
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
 - Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
 - September 14 upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101`.
-- Current local upstream base: `bd89c1302026255c62cc09278207bfaf2664da4a` (44 further commits after September 26).
+- Pinned upstream target: `efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448` (191 further commits after September 30).
+- September 30 base: `bd89c1302026255c62cc09278207bfaf2664da4a` (44 further commits after September 26).
 - September 26 base: `679c34c096193446ceed62e633387d91fe2cfff8` (138 further upstream commits after September 23).
 - September 23 base: `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc` (361 upstream commits, pinned to the September 23 audit).
 - Keep separate commits for desktop isolation, appearance, Coral, the engine, and application integration. Follow-up fixes belong to their corresponding concern.
 
-Upstream conversation orchestration, ProviderService, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file remain upstream-owned. Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned. CI retains code/build checks, Windows tests and advisory mobile fingerprints on standard GitHub runners; automated releases, deployments, previews and upstream administration workflows have been removed.
+Upstream V2 conversation orchestration, provider lifecycle, persistence/migrations, Git implementations, shared client runtime and every `apps/mobile` file remain upstream-owned. Existing upstream tests stay in their original locations. The three September 23 regressions use the root `tests/` tree, with dual discovery in server/web, scoped TypeScript includes, and a private resolution-only workspace package. Root formatting, package names, Effect, TypeScript and Vite+ versions remain upstream-owned. CI retains code/build checks, Windows tests and advisory mobile fingerprints on standard GitHub runners; automated releases, deployments, previews and upstream administration workflows have been removed.
 
 ## Product and ownership boundaries
 
 **Appearance:** `assets/fincke`, web `src/fincke`, and desktop `src/fincke/FreshProfile.ts`. Fincke Ocean is an imported environment theme with ID `fincke-ocean`; it does not replace T3's built-in Ocean. Only a profile with neither settings nor a conversation database is seeded. Later starts respect its existing selection. The icon and wave use T3's standard asset/backdrop entry points. Setup and other upstream product copy remains T3-owned.
 
-**Desktop:** explicit build identity `com.ggfincke.456code.thin`, profile `456code-thin`, default backend home `~/.456code-thin`, protocol `code456-thin` (development variants append `-dev`). An explicit `T3CODE_HOME` is treated as a parent and receives a `456code-thin` suffix; the original environment value is removed from the backend child so it cannot override that bootstrap identity. Managed Codex sign-in returns and desktop handoffs use those personal protocols; callback readers also accept the corresponding upstream schemes. Native and server self-updates are disabled; publication metadata is private and artifact publishing is null. Local artifact builds remain available through the [packaging runbook](release.md). No signing, release destination or deployment is configured for this fork.
+**Desktop:** explicit build identity `com.ggfincke.456code.thin`, production Chromium profile `456code-thin-v2` and development profile `456code-thin-dev`, default backend home `~/.456code-thin`, protocol `code456-thin` (development identity, home and protocol variants append `-dev`). An explicit `T3CODE_HOME` is treated as a parent and receives a `456code-thin` suffix; the original environment value is removed from the backend child so it cannot override that bootstrap identity. Managed Codex sign-in returns and desktop handoffs use those personal protocols; callback readers also accept the corresponding upstream schemes. Native and server self-updates are disabled; publication metadata is private and artifact publishing is null. Local artifact builds remain available through the [packaging runbook](release.md). No signing, release destination or deployment is configured for this fork.
 
-**Coral:** one driver, adapter, settings/probe module, text-generation adapter and ACP support module under existing provider/text-generation directories. Coral uses supervised text turns, native approvals, cancellation, model changes and `session/resume`. Attachments, rollback, provider replacement/import, and app-MCP access are not advertised. The only shared ACP behavior patch is optional authentication when no auth method is advertised. Other drivers retain their existing authentication path.
+**Coral:** one driver, adapter, settings/probe module, text-generation adapter and ACP support module under existing provider/text-generation directories. Coral uses the shared ACP V2 adapter with supervised text turns, explicit native default mode, approvals, cancellation, model changes and `session/resume`. The V2 server owns queued follow-ups; Coral waits for readiness and never uses active steering or interrupt/restart steering. Structured elicitation remains unsupported. Attachments, rollback, provider replacement/import, and app-MCP access are not advertised. The only shared ACP behavior patch is optional authentication when no auth method is advertised. Other drivers retain their existing authentication path.
 
 Coral now runs from the current-main ACP finish worktree through the repaired normal launcher. A four-second initialization-only probe checks protocol compatibility, native resume and authentication requirements, then closes its process without creating or resuming a session. A separate four-second, 1 MiB metadata-only Ollama request populates the initial picker with exact model names (up to 512 entries). Transient failures retain the last known inventory; an empty server reports an error and clears it. Native setup can also update that inventory. See [Coral local setup and validation](coral-setup.md) for the exact build, isolated homes and launcher recovery.
 
@@ -375,13 +376,16 @@ create a separate worktree from its backup ref; do not reset the dirty checkout.
 ## Routine future update
 
 1. Record local HEAD, the incorporated upstream base and the exact new upstream target. Preserve dirty state and existing worktrees before changing either checkout.
-2. Start an isolated integration branch from current local main, fetch the pinned upstream target and merge it normally. Preserve both histories and resolve the extension hooks against the current upstream interfaces.
+2. Fetch origin and upstream, start an isolated integration branch from current `origin/main`, and merge one pinned upstream target normally. Preserve both histories and resolve the extension hooks against the current upstream interfaces.
 3. Keep upstream changes in orchestration, provider lifecycle, persistence, mobile, Git, tooling and layout. Adapt the named extension modules or their narrow registration points instead.
 4. Review every path differing from the new upstream target. Keep upstream dependency resolutions and patches, with extension dependencies added through their existing owners.
 5. Run focused existing tests, affected package typechecks and targeted formatting/lint/builds. When interactive acceptance is requested, use an isolated app environment to recheck Coral resume, theme persistence, worktree scope and displayed-diff identity.
-6. Keep quality CI on standard GitHub runners and retain disabled publication/self-update behavior. Fast-forward the intended local checkout only after verification; publishing requires its own authorization.
+6. Keep quality CI on standard GitHub runners and retain disabled publication/self-update behavior. Authorized scheduled syncs push coherent integration commits and open one draft PR; each merge requires a fresh human decision.
+7. Package only approved merged `origin/main` with passing quality CI on that exact commit. Install only while the app and its helpers are confirmed closed, preserving a verified recovery bundle and all profile data. Keep shared build/install receipts, defer while the app is running, and leave it closed after installation.
 
-## Modified upstream files
+## Historical modified-file inventory (September 30)
+
+This snapshot predates V2. Its client queue modules and V1 provider/checkpoint interfaces have since been replaced; use the ownership boundaries above and the current upstream diff for new integrations.
 
 | Path                                                           | Group                            | Why this patch is necessary                                                                                                       |
 | -------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |

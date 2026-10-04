@@ -93,14 +93,14 @@ T3CODE_HOME=/Users/ggfincke/Projects/Worktrees/456code/456code-t3-thin-fork/.t3/
   node apps/desktop/scripts/start-electron.mjs
 ```
 
-Desktop identity remains `com.ggfincke.456code.thin`, profile
-`456code-thin`, and protocol `code456-thin`. Automatic app updates/publication
+Desktop identity remains `com.ggfincke.456code.thin`, production Chromium profile
+`456code-thin-v2` (development: `456code-thin-dev`), and protocol `code456-thin`. Automatic app updates/publication
 remain disabled. Never point these clients at the old 456code database.
 
 ## Provider behavior and limits
 
 Readiness starts an ACP subprocess with a four-second deadline, initializes
-protocol v1, requires native resume, refuses advertised authentication, and
+protocol v1 or v2, requires native resume, refuses advertised authentication, and
 closes the process. It never creates/resumes a session or authenticates.
 A separate bounded `GET /api/tags` discovers exact Ollama names without loading
 a model or running inference. The inventory is capped at 512 models and 1 MiB;
