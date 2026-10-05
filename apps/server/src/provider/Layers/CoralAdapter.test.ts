@@ -1,25 +1,52 @@
+// apps/server/src/provider/Layers/CoralAdapter.test.ts
+// verifies supervised coral sessions at the v2 adapter boundary
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
-  ApprovalRequestId,
   CoralSettings,
-  ProviderDriverKind,
+  MessageId,
+  NodeId,
+  ProjectId,
   ProviderInstanceId,
+  ProviderSessionId,
+  RunAttemptId,
+  RunId,
   ThreadId,
-  type ProviderRuntimeEvent,
+  type ModelSelection,
+  type OrchestrationV2ProviderThread,
 } from "@t3tools/contracts";
+import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import * as ServerConfig from "../../config.ts";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import type {
+  ProviderAdapterV2Event,
+  ProviderAdapterV2RuntimePolicy,
+  ProviderAdapterV2TurnInput,
+} from "../../orchestration-v2/ProviderAdapter.ts";
 import { makeCoralAdapter } from "./CoralAdapter.ts";
 
 const decodeSettings = Schema.decodeSync(CoralSettings);
-const driver = ProviderDriverKind.make("coral");
 const instanceId = ProviderInstanceId.make("coral-fixture");
+const testLayer = Layer.mergeAll(
+  NodeServices.layer,
+  IdAllocator.layer,
+  ServerConfig.layerTest(process.cwd(), { prefix: "t3-coral-config-" }).pipe(
+    Layer.provide(NodeServices.layer),
+  ),
+);
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const fixture = Effect.fn("coral.test.fixture")(function* (
   environment: Record<string, string> = {},
@@ -39,8 +66,14 @@ const fixture = Effect.fn("coral.test.fixture")(function* (
   );
   yield* fs.chmod(binaryPath, 0o755);
   const settings = decodeSettings({ enabled: true, binaryPath });
-  const adapter = yield* makeCoralAdapter(settings, {
+  const adapter = makeCoralAdapter(settings, {
     instanceId,
+    crypto: yield* Crypto.Crypto,
+    childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+    fileSystem: fs,
+    idAllocator: yield* IdAllocator.IdAllocatorV2,
+    serverConfig: yield* ServerConfig.ServerConfig,
+    selfInvocation: yield* resolveSelfInvocation(),
     environment: {
       ...process.env,
       T3_ACP_CORAL_MODES: "1",
@@ -48,58 +81,147 @@ const fixture = Effect.fn("coral.test.fixture")(function* (
       ...environment,
     },
   });
-  const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
-  yield* Stream.runForEach(adapter.streamEvents, (event) => Queue.offer(events, event)).pipe(
-    Effect.forkChild({ startImmediately: true }),
-  );
-  const waitFor = Effect.fn("coral.test.waitFor")(function* (type: ProviderRuntimeEvent["type"]) {
-    while (true) {
-      const event = yield* Queue.take(events);
-      if (event.type === type) return event;
-    }
+  const runtimePolicy: ProviderAdapterV2RuntimePolicy = {
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    cwd,
+  };
+  const open = Effect.fn("coral.test.open")(function* (
+    threadId: ThreadId,
+    existingProviderThread?: OrchestrationV2ProviderThread,
+  ) {
+    const scope = yield* Scope.make();
+    yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+    const modelSelection = { instanceId, model: "default" } as const;
+    const session = yield* adapter
+      .openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make(`session:${threadId}`),
+        modelSelection,
+        runtimePolicy,
+        ...(existingProviderThread?.nativeThreadRef?.nativeId
+          ? { initialNativeThreadId: existingProviderThread.nativeThreadRef.nativeId }
+          : {}),
+      })
+      .pipe(Effect.provideService(Scope.Scope, scope));
+    const events = yield* Queue.unbounded<ProviderAdapterV2Event>();
+    yield* Stream.runForEach(session.events, (event) => Queue.offer(events, event)).pipe(
+      Effect.forkIn(scope, { startImmediately: true }),
+    );
+    const providerThread = yield* session.ensureThread({
+      threadId,
+      modelSelection,
+      runtimePolicy,
+      ...(existingProviderThread ? { existingProviderThread } : {}),
+    });
+    const waitFor = Effect.fn("coral.test.waitFor")(function* (
+      predicate: (event: ProviderAdapterV2Event) => boolean,
+    ) {
+      while (true) {
+        const event = yield* Queue.take(events);
+        if (predicate(event)) return event;
+      }
+    });
+    const turn = Effect.fn("coral.test.turn")(function* (
+      ordinal: number,
+      text: string,
+      model: string = "default",
+    ) {
+      return makeTurnInput({
+        threadId,
+        providerThread,
+        runtimePolicy,
+        now: yield* DateTime.now,
+        ordinal,
+        modelSelection: { instanceId, model },
+        text,
+      });
+    });
+    return { session, providerThread, waitFor, turn, close: Scope.close(scope, Exit.void) };
   });
-  return { adapter, cwd, settings, log: fs.readFileString(logPath), waitFor };
+  return { adapter, open, log: fs.readFileString(logPath) };
 });
+
+function makeTurnInput(input: {
+  readonly threadId: ThreadId;
+  readonly providerThread: OrchestrationV2ProviderThread;
+  readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
+  readonly now: DateTime.Utc;
+  readonly ordinal: number;
+  readonly modelSelection: ModelSelection;
+  readonly text: string;
+}): ProviderAdapterV2TurnInput {
+  const suffix = `${input.threadId}:${input.ordinal}`;
+  return {
+    appThread: {
+      createdBy: "user",
+      creationSource: "web",
+      id: input.threadId,
+      projectId: ProjectId.make(`project:${input.threadId}`),
+      title: "Coral adapter test",
+      providerInstanceId: instanceId,
+      modelSelection: input.modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: input.providerThread.id,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: input.threadId },
+      forkedFrom: null,
+      createdAt: input.now,
+      updatedAt: input.now,
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      lastVisitedAt: null,
+      deletedAt: null,
+    },
+    threadId: input.threadId,
+    runId: RunId.make(`run:${suffix}`),
+    runOrdinal: input.ordinal,
+    providerTurnOrdinal: input.ordinal,
+    attemptId: RunAttemptId.make(`attempt:${suffix}`),
+    rootNodeId: NodeId.make(`node:${suffix}`),
+    providerThread: input.providerThread,
+    message: {
+      createdBy: "user",
+      creationSource: "web",
+      messageId: MessageId.make(`message:${suffix}`),
+      text: input.text,
+      attachments: [],
+    },
+    modelSelection: input.modelSelection,
+    runtimePolicy: input.runtimePolicy,
+  };
+}
+
+const terminal = (event: ProviderAdapterV2Event) => event.type === "turn.terminal";
 
 it.effect("uses multi-turn ACP, model selection, native resume, and isolated sessions", () =>
   Effect.gen(function* () {
     const f = yield* fixture();
     const threadId = ThreadId.make("coral-turns");
-    const session = yield* f.adapter.startSession({
-      threadId,
-      provider: driver,
-      cwd: f.cwd,
-      runtimeMode: "approval-required",
-      modelSelection: { instanceId, model: "default" },
-    });
-    for (const model of ["default", "coral-alt"]) {
-      yield* f.adapter.sendTurn({
-        threadId,
-        input: "Hello",
-        modelSelection: { instanceId, model },
-      });
-      const completed = yield* f.waitFor("turn.completed");
-      expect(completed.payload).toMatchObject({ state: "completed" });
+    const active = yield* f.open(threadId);
+    for (const [index, model] of ["default", "coral-alt"].entries()) {
+      yield* active.session.startTurn(yield* active.turn(index + 1, "Hello", model));
+      expect(yield* active.waitFor(terminal)).toMatchObject({ status: "completed" });
     }
-    expect((yield* f.adapter.readThread(threadId)).turns).toHaveLength(2);
-    expect((yield* f.adapter.listSessions())[0]?.model).toBe("coral-alt");
-    yield* f.adapter.stopSession(threadId);
-    expect(yield* f.adapter.hasSession(threadId)).toBe(false);
-    yield* f.adapter.startSession({
-      threadId,
-      provider: driver,
-      cwd: f.cwd,
-      runtimeMode: "approval-required",
-      resumeCursor: session.resumeCursor,
-    });
-    yield* f.adapter.sendTurn({ threadId, input: "Continue" });
-    expect((yield* f.waitFor("turn.completed")).payload).toMatchObject({ state: "completed" });
+    expect(
+      (yield* active.session.readThreadSnapshot({ providerThread: active.providerThread }))
+        .providerTurns,
+    ).toHaveLength(2);
+    expect(yield* f.log).toContain('"value":"coral-alt"');
+    yield* active.close;
+    const resumed = yield* f.open(threadId, active.providerThread);
+    yield* resumed.session.startTurn(yield* resumed.turn(3, "Continue"));
+    expect(yield* resumed.waitFor(terminal)).toMatchObject({ status: "completed" });
     const log = yield* f.log;
     expect(log).toContain('"method":"session/resume"');
     expect(log).not.toContain('"method":"authenticate"');
+    expect(log).not.toContain('"method":"auth/login"');
     expect(log.match(/"method":"session\/new"/g)).toHaveLength(1);
     expect(log).not.toContain('"method":"session/load"');
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+  }).pipe(Effect.scoped, Effect.provide(testLayer), TestClock.withLive),
 );
 
 it.effect("round-trips an opaque permission option through ACP", () =>
@@ -108,48 +230,52 @@ it.effect("round-trips an opaque permission option through ACP", () =>
       T3_ACP_EMIT_TOOL_CALLS: "1",
       T3_ACP_ALLOW_ONCE_OPTION_ID: "opaque-permission-choice",
     });
-    const threadId = ThreadId.make("coral-approval");
-    yield* f.adapter.startSession({ threadId, cwd: f.cwd, runtimeMode: "approval-required" });
-    yield* f.adapter.sendTurn({ threadId, input: "Run the tool" });
-    const request = yield* f.waitFor("request.opened");
-    if (request.type !== "request.opened") return yield* Effect.die("Expected approval");
-    yield* f.adapter.respondToRequest(
-      threadId,
-      ApprovalRequestId.make(request.requestId!),
-      "accept",
+    const active = yield* f.open(ThreadId.make("coral-approval"));
+    yield* active.session.startTurn(yield* active.turn(1, "Run the tool"));
+    const request = yield* active.waitFor(
+      (event) =>
+        event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending",
     );
-    expect((yield* f.waitFor("turn.completed")).payload).toMatchObject({ state: "completed" });
+    if (request.type !== "runtime_request.updated") return yield* Effect.die("Expected approval");
+    yield* active.session.respondToRuntimeRequest({
+      requestId: request.runtimeRequest.id,
+      decision: "accept",
+    });
+    expect(yield* active.waitFor(terminal)).toMatchObject({ status: "completed" });
     expect(yield* f.log).toContain("opaque-permission-choice");
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+  }).pipe(Effect.scoped, Effect.provide(testLayer), TestClock.withLive),
 );
 
 it.effect("cancels a dispatched native prompt and accepts the next turn", () =>
   Effect.gen(function* () {
     const f = yield* fixture({ T3_ACP_COMPLETE_FIRST_PROMPT_ON_CANCEL: "1" });
-    const threadId = ThreadId.make("coral-cancel");
-    yield* f.adapter.startSession({ threadId, cwd: f.cwd, runtimeMode: "approval-required" });
-    const turn = yield* f.adapter.sendTurn({ threadId, input: "Run until cancelled" });
-    yield* f.adapter.interruptTurn(threadId, turn.turnId);
-    expect((yield* f.waitFor("turn.completed")).payload).toMatchObject({ state: "cancelled" });
-    yield* f.adapter.sendTurn({ threadId, input: "Next turn" });
-    expect((yield* f.waitFor("turn.completed")).payload).toMatchObject({ state: "completed" });
+    const active = yield* f.open(ThreadId.make("coral-cancel"));
+    yield* active.session.startTurn(yield* active.turn(1, "Run until cancelled"));
+    const dispatched = yield* active.waitFor(
+      (event) => event.type === "turn_item.updated" && event.turnItem.status === "running",
+    );
+    if (dispatched.type !== "turn_item.updated" || dispatched.turnItem.providerTurnId === null)
+      return yield* Effect.die("Expected dispatched prompt");
+    yield* active.session.interruptTurn({
+      providerThread: active.providerThread,
+      providerTurnId: dispatched.turnItem.providerTurnId,
+    });
+    expect(yield* active.waitFor(terminal)).toMatchObject({ status: "interrupted" });
+    yield* active.session.startTurn(yield* active.turn(2, "Next turn"));
+    expect(yield* active.waitFor(terminal)).toMatchObject({ status: "completed" });
     expect(yield* f.log).toContain('"method":"session/cancel"');
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+  }).pipe(Effect.scoped, Effect.provide(testLayer), TestClock.withLive),
 );
 
 it.effect("fails required authentication before creating a session", () =>
   Effect.gen(function* () {
     const f = yield* fixture({ T3_ACP_CORAL_REQUIRE_AUTH: "1" });
-    const error = yield* f.adapter
-      .startSession({
-        threadId: ThreadId.make("coral-auth"),
-        cwd: f.cwd,
-        runtimeMode: "approval-required",
-      })
-      .pipe(Effect.flip);
-    expect(error.message).toContain("requires authentication");
+    const error = yield* f.open(ThreadId.make("coral-auth")).pipe(Effect.flip);
+    if (error._tag !== "ProviderAdapterOpenSessionError")
+      return yield* Effect.die("Expected session initialization error");
+    expect(String(error.cause)).toContain("requires authentication");
     expect(yield* f.log).not.toContain('"method":"session/new"');
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+  }).pipe(Effect.scoped, Effect.provide(testLayer), TestClock.withLive),
 );
 
 it.effect("rejects attachments before sending and keeps provider instances independent", () =>
@@ -157,28 +283,39 @@ it.effect("rejects attachments before sending and keeps provider instances indep
     const first = yield* fixture();
     const second = yield* fixture();
     const threadId = ThreadId.make("coral-isolation");
-    for (const f of [first, second])
-      yield* f.adapter.startSession({ threadId, cwd: f.cwd, runtimeMode: "approval-required" });
-    const error = yield* first.adapter
-      .sendTurn({
-        threadId,
-        input: "An image",
-        attachments: [
-          {
-            type: "image",
-            id: "coral-image",
-            name: "image.png",
-            mimeType: "image/png",
-            sizeBytes: 1,
-          },
-        ],
+    const firstActive = yield* first.open(threadId);
+    const secondActive = yield* second.open(threadId);
+    const capabilities = yield* first.adapter.getCapabilities();
+    expect(capabilities.turns).toMatchObject({
+      supportsQueuedMessages: true,
+      supportsActiveSteering: false,
+      supportsSteeringByInterruptRestart: false,
+      supportsInterrupt: true,
+    });
+    const turn = yield* firstActive.turn(1, "An image");
+    const error = yield* firstActive.session
+      .startTurn({
+        ...turn,
+        message: {
+          ...turn.message,
+          attachments: [
+            {
+              type: "image",
+              id: "coral-image",
+              name: "image.png",
+              mimeType: "image/png",
+              sizeBytes: 1,
+            },
+          ],
+        },
       })
       .pipe(Effect.flip);
-    expect(error.message).toContain("text only");
+    expect(error.message).toContain("attachments");
     expect(yield* first.log).not.toContain('"method":"session/prompt"');
-    yield* first.adapter.stopAll();
-    expect(yield* second.adapter.hasSession(threadId)).toBe(true);
-    yield* second.adapter.sendTurn({ threadId, input: "Still running independently" });
-    expect((yield* second.waitFor("turn.completed")).payload).toMatchObject({ state: "completed" });
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), TestClock.withLive),
+    yield* firstActive.close;
+    yield* secondActive.session.startTurn(
+      yield* secondActive.turn(1, "Still running independently"),
+    );
+    expect(yield* secondActive.waitFor(terminal)).toMatchObject({ status: "completed" });
+  }).pipe(Effect.scoped, Effect.provide(testLayer), TestClock.withLive),
 );

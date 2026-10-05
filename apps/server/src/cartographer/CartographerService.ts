@@ -1,3 +1,5 @@
+// apps/server/src/cartographer/CartographerService.ts
+// analyzes repository maps and authoritative checkpoint comparisons
 import {
   CartographerError,
   type CartographerAnalyzeInput,
@@ -17,11 +19,12 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../config.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ReviewService from "../review/ReviewService.ts";
 import * as CheckpointDiffQuery from "../checkpointing/CheckpointDiffQuery.ts";
-import { checkpointRefForThreadTurn } from "../checkpointing/Utils.ts";
+import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
 
 export class CartographerService extends Context.Service<
   CartographerService,
@@ -47,7 +50,8 @@ const failure = (cause: unknown): CartographerError =>
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
-  const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  const projects = yield* ProjectService.ProjectService;
   const runner = yield* ProcessRunner.ProcessRunner;
   const review = yield* ReviewService.ReviewService;
   const checkpointDiff = yield* CheckpointDiffQuery.CheckpointDiffQuery;
@@ -96,11 +100,16 @@ export const make = Effect.gen(function* () {
     },
   );
   const context = Effect.fn("Cartographer.context")(function* (threadId: ThreadId) {
-    const result = yield* projections.getThreadCheckpointContext(threadId);
-    if (Option.isNone(result))
+    const thread = yield* threads.getThreadShell(threadId);
+    if (thread === null || thread.deletedAt !== null)
       return yield* new CartographerError({ detail: "The selected task is unavailable." });
-    const root = yield* fs.realPath(result.value.worktreePath ?? result.value.workspaceRoot);
-    return { ...result.value, root };
+    const project = yield* projects.getById(thread.projectId);
+    if (Option.isNone(project) || project.value.deletedAt !== null)
+      return yield* new CartographerError({
+        detail: "The selected task's project is unavailable.",
+      });
+    const root = yield* fs.realPath(thread.worktreePath ?? project.value.workspaceRoot);
+    return { root, historyOrigin: thread.historyOrigin };
   });
   const attempt = <A>(work: () => Promise<A>) => Effect.tryPromise({ try: work, catch: failure });
 
@@ -116,23 +125,50 @@ export const make = Effect.gen(function* () {
     let comparison: Comparison | undefined;
     let validateCapture: (() => Promise<void>) | undefined;
     if (selected?.kind === "turn") {
-      yield* checkpointDiff.getTurnDiff({
-        threadId: input.threadId,
-        fromTurnCount: selected.fromTurnCount,
-        toTurnCount: selected.toTurnCount,
-      });
+      const context = yield* threads.getCheckpointContext(input.threadId);
+      const completedRuns = new Set(
+        context.runs.filter((run) => run.status === "completed").map((run) => run.id),
+      );
+      const checkpoints = context.checkpoints.filter(
+        (checkpoint) =>
+          checkpoint.status === "ready" &&
+          checkpoint.appRunOrdinal !== null &&
+          checkpoint.runId !== null &&
+          completedRuns.has(checkpoint.runId),
+      );
+      const rootScope = context.checkpointScopes.find((scope) => scope.kind === "root_run");
       const ref = (count: number) =>
         count === 0
-          ? checkpointRefForThreadTurn(input.threadId, 0)
-          : task.checkpoints.find((checkpoint) => checkpoint.checkpointTurnCount === count)
-              ?.checkpointRef;
+          ? rootScope === undefined
+            ? undefined
+            : checkpointRefForScopeOrdinal({ scopeId: rootScope.id, ordinalWithinScope: 0 })
+          : checkpoints.find((checkpoint) => checkpoint.appRunOrdinal === count)?.ref;
       const baseRef = ref(selected.fromTurnCount);
       const headRef = ref(selected.toTurnCount);
       if (!baseRef || !headRef)
         return yield* new CartographerError({
           detail:
-            "The selected turn's checkpoints are unavailable. Current files cannot replace them.",
+            task.historyOrigin === "v1_import"
+              ? "Historical checkpoints from before the V2 upgrade are unavailable. Analyze current files or choose a new run."
+              : "The selected turn's checkpoints are unavailable. Current files cannot replace them.",
         });
+      const checkpoint = checkpoints.find(
+        (candidate) => candidate.appRunOrdinal === selected.toTurnCount,
+      );
+      const scope =
+        selected.toTurnCount === 0
+          ? rootScope
+          : context.checkpointScopes.find((candidate) => candidate.id === checkpoint?.scopeId);
+      if (!scope || (yield* fs.realPath(scope.cwd)) !== task.root) {
+        return yield* new CartographerError({
+          detail: "The selected checkpoints belong to a different workspace.",
+        });
+      }
+      yield* checkpointDiff.getTurnDiff({
+        threadId: input.threadId,
+        fromTurnCount: selected.fromTurnCount,
+        toTurnCount: selected.toTurnCount,
+      });
       comparison = { kind: "refs", baseRef, headRef };
     } else if (selected) {
       if ((yield* fs.realPath(selected.cwd)) !== task.root) {

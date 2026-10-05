@@ -1,3 +1,5 @@
+// apps/desktop/src/fincke/FreshProfile.test.ts
+// verifies fresh appearance seeding preserves established profiles
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -18,7 +20,7 @@ it.effect("seeds only a fresh profile and preserves subsequent user choices", ()
     yield* seedFreshProfile(dir);
     expect(yield* fs.readFileString(settings)).toBe('{"defaultTheme":"grove"}');
     yield* fs.remove(settings);
-    yield* fs.writeFileString(path.join(dir, "state.sqlite"), "existing");
+    yield* fs.writeFileString(path.join(dir, "statev2.sqlite"), "existing");
     yield* seedFreshProfile(dir);
     expect(yield* fs.exists(settings)).toBe(false);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
