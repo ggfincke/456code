@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// scripts/build-desktop-artifact.ts
+// builds self-contained desktop artifacts for each platform
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
 import { finckeDesktop } from "./lib/fincke-desktop.ts";
@@ -2815,11 +2817,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       },
     };
+    const appStreamId = personalBuild ? finckeDesktop.appId : DESKTOP_APP_ID;
     buildConfig.deb = {
-      // FPM runs outside the staged app directory, so source paths must be absolute.
-      // AppStream consumers associate this metadata with our t3code.desktop entry.
+      // fpm runs outside the staged app directory, so source paths must be absolute
+      // select metadata for the same identity as the packaged desktop entry
       fpm: [
-        `${path.join(repoRoot, "apps/desktop/resources/linux/com.t3tools.t3code.metainfo.xml")}=/usr/share/metainfo/com.t3tools.t3code.metainfo.xml`,
+        `${path.join(repoRoot, "apps/desktop/resources/linux", `${appStreamId}.metainfo.xml`)}=/usr/share/metainfo/${appStreamId}.metainfo.xml`,
         `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/t3code/copyright`,
       ],
       // Electron's runtime libraries. Debian 13 and Ubuntu 24.04 renamed some

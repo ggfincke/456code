@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- apps/desktop/resources/linux/com.ggfincke.456code.thin.metainfo.xml -->
+<!-- identifies the fork in linux app catalogs -->
+<component type="desktop-application">
+  <id>com.ggfincke.456code.thin</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>456code</name>
+  <summary>Desktop GUI for coding agents</summary>
+  <developer id="com.ggfincke">
+    <name>ggfincke</name>
+  </developer>
+  <description>
+    <p>
+      456code is an open-source desktop app for coding agents based on T3 Code.
+      Work with your existing agent subscriptions, review code changes, and
+      run commands in your projects.
+    </p>
+    <p>
+      Connect from desktop, web, or mobile to continue working remotely.
+    </p>
+  </description>
+  <launchable type="desktop-id">456code-thin.desktop</launchable>
+  <icon type="stock">456code-thin</icon>
+  <provides>
+    <binary>456code-thin</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <url type="homepage">https://github.com/ggfincke/456code</url>
+  <url type="bugtracker">https://github.com/ggfincke/456code/issues</url>
+  <url type="vcs-browser">https://github.com/ggfincke/456code</url>
+</component>
