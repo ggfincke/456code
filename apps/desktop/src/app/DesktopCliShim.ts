@@ -1,3 +1,5 @@
+// apps/desktop/src/app/DesktopCliShim.ts
+// writes the bundled cli launcher with its owning desktop identity
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -5,6 +7,7 @@ import * as Option from "effect/Option";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
+import { finckeDesktop, isFinckeDesktop } from "../fincke/build.ts";
 
 // A desktop install puts no `t3` on PATH, so commands the server asks a person
 // to run (`sudo t3 browser setup`) had nothing to call. The app keeps a small
@@ -14,7 +17,10 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // so its launcher mounts the AppImage itself instead of pointing into it.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
-export const MARKER = "Written by T3 Code: runs the desktop app's bundled t3 CLI.";
+// keep install and remove from claiming another desktop build's launcher
+export const MARKER = isFinckeDesktop
+  ? `Written by ${finckeDesktop.name} (${finckeDesktop.appId}): runs the desktop app's bundled t3 CLI.`
+  : "Written by T3 Code: runs the desktop app's bundled t3 CLI.";
 
 /** Server entry inside the app, relative to its server root (an asar archive when packaged). */
 const SERVER_ENTRY = "apps/server/dist/bin.mjs";
