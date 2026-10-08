@@ -1,6 +1,6 @@
 # 456code thin fork: ownership and update record
 
-456code is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The October 4 integration pins upstream `efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448` while preserving both histories. It retains quality CI and local packaging. The installed application and existing runtime data remain separate from this source update.
+456code is T3 Code plus personal appearance, desktop isolation, Coral, and Cartographer. The October 8 integration pins upstream `a4c9494b0e3606775cc5fc929fc138399288bd43` while preserving both histories. It retains quality CI and local packaging. The installed application and existing runtime data remain separate from this source update.
 
 ## Base and local change groups
 
@@ -8,7 +8,8 @@
 - First rehearsed upstream base: `d1d15c67f4a5fb82fd8d5e01e5e3b288296789c3`.
 - Previous upstream base: `9375c779707fb95c06670db6da87441720b2d2e2` (83 further commits).
 - September 14 upstream base: `5ea6439816470288d3f2b6b43635fea41fbbb101`.
-- Pinned upstream target: `efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448` (191 further commits after September 30).
+- Pinned upstream target: `a4c9494b0e3606775cc5fc929fc138399288bd43` (303 further commits after October 4).
+- October 4 base: `efecd3cf8bcec3d1891b5f5a27dc2f6d797c6448` (191 further commits after September 30).
 - September 30 base: `bd89c1302026255c62cc09278207bfaf2664da4a` (44 further commits after September 26).
 - September 26 base: `679c34c096193446ceed62e633387d91fe2cfff8` (138 further upstream commits after September 23).
 - September 23 base: `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc` (361 upstream commits, pinned to the September 23 audit).
